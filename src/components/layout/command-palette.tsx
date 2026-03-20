@@ -10,6 +10,9 @@ import {
   Bot,
   PanelLeft,
   Moon,
+  FolderKanban,
+  FolderOpen,
+  Brain,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -73,9 +76,21 @@ export function CommandPalette() {
         </CommandGroup>
 
         <CommandGroup heading="Navigation">
+          <CommandItem onSelect={() => run(() => router.push("/projects"))}>
+            <FolderKanban className="mr-2 h-4 w-4" />
+            Projects
+          </CommandItem>
+          <CommandItem onSelect={() => run(() => router.push("/files"))}>
+            <FolderOpen className="mr-2 h-4 w-4" />
+            Files
+          </CommandItem>
           <CommandItem onSelect={() => run(() => router.push("/settings"))}>
             <Settings className="mr-2 h-4 w-4" />
             Settings
+          </CommandItem>
+          <CommandItem onSelect={() => run(() => router.push("/settings/memory"))}>
+            <Brain className="mr-2 h-4 w-4" />
+            Memory
           </CommandItem>
           <CommandItem onSelect={() => run(() => router.push("/settings/connections"))}>
             <Plug className="mr-2 h-4 w-4" />

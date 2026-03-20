@@ -70,11 +70,17 @@ export const providerConfigs = pgTable("provider_configs", {
 export const chats = pgTable("chats", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id"),
   title: text("title"),
   model: text("model"),
+  pinned: boolean("pinned").default(false),
+  archived: boolean("archived").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [index("idx_chats_user_id").on(table.userId)]);
+}, (table) => [
+  index("idx_chats_user_id").on(table.userId),
+  index("idx_chats_project_id").on(table.projectId),
+]);
 
 export const messages = pgTable("messages", {
   id: text("id").primaryKey(),
@@ -103,3 +109,28 @@ export const linkCodes = pgTable("link_codes", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   expiresAt: timestamp("expires_at").notNull(),
 });
+
+// ── Phase 1: Professional Workspace ──────────────────────────
+
+export const projects = pgTable("projects", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  systemPrompt: text("system_prompt"),
+  defaultModel: text("default_model"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [index("idx_projects_user_id").on(table.userId)]);
+
+export const memories = pgTable("memories", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  type: text("type").notNull().default("fact"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_memories_user_id").on(table.userId),
+  index("idx_memories_project_id").on(table.projectId),
+]);

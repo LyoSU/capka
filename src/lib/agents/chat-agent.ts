@@ -24,7 +24,7 @@ export const chatAgentMemory = new Memory({
 });
 
 export function createChatAgent(
-  model: Parameters<typeof Agent>[0]["model"],
+  model: ConstructorParameters<typeof Agent>[0]["model"],
   tools: Record<string, ToolAction<any, any, any, any, any, any>>,
 ) {
   return new Agent({

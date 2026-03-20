@@ -1,6 +1,7 @@
+import { generateText, stepCountIs } from "ai";
 import { resolveUserModel } from "@/lib/providers/resolve";
 import { loadMCPTools } from "@/lib/mcp/config";
-import { createChatAgent } from "@/lib/agents/chat-agent";
+import { SYSTEM_PROMPT } from "@/lib/agents/chat-agent";
 
 export async function processMessageForTelegram(
   userId: string,
@@ -10,11 +11,16 @@ export async function processMessageForTelegram(
   const model = await resolveUserModel(userId);
   const { tools, close } = await loadMCPTools(userId);
 
-  const agent = createChatAgent(model, tools);
-  const response = await agent.generate(userMessage, {
-    memory: { thread: chatId, resource: userId },
-  });
-
-  await close();
-  return response.text;
+  try {
+    const hasTools = Object.keys(tools).length > 0;
+    const { text } = await generateText({
+      model,
+      system: SYSTEM_PROMPT,
+      ...(hasTools ? { tools, stopWhen: stepCountIs(25) } : {}),
+      messages: [{ role: "user", content: userMessage }],
+    });
+    return text;
+  } finally {
+    await close();
+  }
 }

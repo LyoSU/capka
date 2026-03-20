@@ -1,48 +1,55 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { getAuth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { chats, messages } from "@/lib/db/schema";
+import { chats, messages, projects, memories } from "@/lib/db/schema";
 import { resolveUserModel } from "@/lib/providers/resolve";
 import { loadMCPTools } from "@/lib/mcp/config";
 import { SYSTEM_PROMPT } from "@/lib/agents/chat-agent";
+import { extractMemories } from "@/lib/memory/extract";
 
 export async function POST(req: Request) {
   let mcpClose: (() => Promise<void>) | undefined;
 
   try {
-    const auth = await getAuth();
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return Response.json({ error: "Not authenticated. Please sign in." }, { status: 401 });
-    }
-
-    const userId = session.user.id;
+    const { userId } = await requireSession();
     const body = await req.json();
-    const { chatId: requestChatId, model: requestModel } = body;
+    const { chatId: requestChatId, model: requestModel, projectId } = body;
     const chatId = requestChatId || nanoid();
 
-    // Parallel: check chat ownership, resolve model, load MCP tools
-    const [existingChat, model, mcp] = await Promise.all([
-      db.select().from(chats).where(and(eq(chats.id, chatId), eq(chats.userId, userId))).limit(1).then((r) => r[0]),
+    // Parallel: check chat existence, resolve model, load MCP tools, load project, load memories
+    const [chatRow, model, mcp, project, userMemories] = await Promise.all([
+      requestChatId
+        ? db.select({ id: chats.id, userId: chats.userId, title: chats.title }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
+        : undefined,
       resolveUserModel(userId, requestModel),
       loadMCPTools(userId),
+      projectId
+        ? db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
+        : Promise.resolve(undefined),
+      db.select().from(memories).where(eq(memories.userId, userId)).orderBy(desc(memories.createdAt)).limit(50),
     ]);
     mcpClose = mcp.close;
     const { tools } = mcp;
 
-    // If chatId was provided but doesn't belong to this user, reject
-    if (requestChatId && !existingChat) {
+    // IDOR: chat exists but belongs to another user
+    if (chatRow && chatRow.userId !== userId) {
       await mcpClose();
       return Response.json({ error: "Chat not found" }, { status: 404 });
     }
+    const existingChat = chatRow?.userId === userId ? chatRow : undefined;
 
     if (!existingChat) {
-      await db.insert(chats).values({ id: chatId, userId, title: "New Chat", model: requestModel });
+      await db.insert(chats).values({
+        id: chatId,
+        userId,
+        title: "New Chat",
+        model: requestModel,
+        projectId: project?.id ?? null,
+      });
     }
 
     // Save user message + update chat title
@@ -71,11 +78,21 @@ export async function POST(req: Request) {
       }
     }
 
+    // Build system prompt: base + project instructions + user memories
+    let systemPrompt = SYSTEM_PROMPT;
+    if (project?.systemPrompt) {
+      systemPrompt += `\n\n--- Project Instructions ---\n${project.systemPrompt}`;
+    }
+    if (userMemories.length > 0) {
+      const memoryLines = userMemories.map((m) => `- ${m.content}`).join("\n");
+      systemPrompt += `\n\n## Things you know about the user:\n${memoryLines}`;
+    }
+
     const hasTools = Object.keys(tools).length > 0;
     const result = streamText({
       model,
       ...(hasTools ? { tools, stopWhen: stepCountIs(25) } : {}),
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: await convertToModelMessages(body.messages),
       onError: async () => { await mcpClose?.(); },
       async onFinish({ text, steps }) {
@@ -104,6 +121,25 @@ export async function POST(req: Request) {
             metadata: toolCalls.length > 0 ? { toolCalls, toolResults } : undefined,
           });
         }
+
+        // Extract and save new memories (fire-and-forget)
+        if (text) {
+          extractMemories(model, text, userMemories.map((m) => m.content))
+            .then(async (newFacts) => {
+              if (newFacts.length > 0) {
+                await db.insert(memories).values(
+                  newFacts.map((content) => ({
+                    id: nanoid(),
+                    userId,
+                    content,
+                    type: "fact",
+                  })),
+                );
+              }
+            })
+            .catch((e) => console.error("[memory] save failed:", e));
+        }
+
         await mcpClose?.();
       },
     });
@@ -119,17 +155,14 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  const { userId } = await requireSession();
 
   const { searchParams } = new URL(req.url);
   const chatId = searchParams.get("chatId");
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
 
-  // Verify chat belongs to user
   const [chat] = await db.select({ id: chats.id }).from(chats)
-    .where(and(eq(chats.id, chatId), eq(chats.userId, session.user.id)))
+    .where(and(eq(chats.id, chatId), eq(chats.userId, userId)))
     .limit(1);
   if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
 

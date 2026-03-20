@@ -13,19 +13,20 @@ import { ModelSelector } from "@/components/chat/model-selector";
 interface ChatPanelProps {
   chatId: string;
   defaultModel: string;
+  projectId?: string;
 }
 
 function fetchMessages(chatId: string) {
   return fetch(`/api/chat?chatId=${chatId}`).then((r) => (r.ok ? r.json() : []));
 }
 
-export function ChatPanel({ chatId, defaultModel }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const transport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { chatId } }),
-    [chatId],
+    () => new DefaultChatTransport({ api: "/api/chat", body: { chatId, projectId } }),
+    [chatId, projectId],
   );
 
   const { messages, setMessages, sendMessage, status, stop, error } = useChat({
@@ -44,11 +45,7 @@ export function ChatPanel({ chatId, defaultModel }: ChatPanelProps) {
       .catch(() => {});
   }, [chatId, setMessages]);
 
-  useEffect(() => {
-    if (error) {
-      toast.error(error.message || "Chat error");
-    }
-  }, [error]);
+  // Error already handled by onError callback — no duplicate toast
 
   // SSE: listen for real-time events (e.g. Telegram messages)
   useEffect(() => {
@@ -61,7 +58,6 @@ export function ChatPanel({ chatId, defaultModel }: ChatPanelProps) {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "new_message" && data.chatId === chatId) {
-            // Refetch messages and title
             fetchMessages(chatId)
               .then((msgs) => { if (msgs?.length) setMessages(msgs); })
               .catch(() => {});

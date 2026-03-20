@@ -1,5 +1,4 @@
-import { headers } from "next/headers";
-import { getAuth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
 import { getSetting, setSetting } from "@/lib/settings";
 
 const READABLE_KEYS = ["platform_name", "telegram_bot_token"];
@@ -7,10 +6,7 @@ const WRITABLE_KEYS = ["platform_name", "telegram_bot_token"];
 const BLOCKED_KEYS = ["auth_secret", "setup_complete", "admin_email"];
 
 export async function GET(req: Request) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
-
+  await requireSession();
   const { searchParams } = new URL(req.url);
   const key = searchParams.get("key");
   if (!key) return Response.json({ error: "Missing key" }, { status: 400 });
@@ -24,10 +20,7 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
-
+  await requireSession();
   const { key, value, encrypted } = await req.json();
   if (!key || value === undefined) {
     return Response.json({ error: "Missing key or value" }, { status: 400 });

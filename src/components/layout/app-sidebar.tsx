@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-import { MessageSquare, Plus, Settings } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { MessageSquare, Plus, Settings, FolderKanban, FolderOpen, Archive } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -20,11 +20,17 @@ import {
 } from "@/components/ui/sidebar";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
+import { ProjectSelector } from "@/components/projects/project-selector";
+import { ChatSearch } from "@/components/chat/chat-search";
+import { ChatContextMenu } from "@/components/chat/chat-context-menu";
 import { cn } from "@/lib/utils";
 
 type ChatItem = {
   id: string;
   title: string | null;
+  projectId: string | null;
+  pinned: boolean | null;
+  archived: boolean | null;
   updatedAt: string | null;
 };
 
@@ -55,16 +61,39 @@ function groupByDate(chats: ChatItem[]) {
 export function AppSidebar() {
   const pathname = usePathname();
   const [chats, setChats] = useState<ChatItem[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
+  // Debounce search by 300ms
   useEffect(() => {
-    fetch("/api/chats")
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const fetchChats = useCallback(() => {
+    const params = new URLSearchParams();
+    if (selectedProject) params.set("projectId", selectedProject);
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    const url = `/api/chats${params.size ? `?${params}` : ""}`;
+    fetch(url)
       .then((r) => (r.ok ? r.json() : []))
       .then(setChats)
       .catch(() => {});
-  }, [pathname]); // refresh on navigation
+  }, [selectedProject, debouncedSearch]);
 
-  const groups = groupByDate(chats);
+  useEffect(() => {
+    fetchChats();
+  }, [fetchChats, pathname]);
+
+  const pinnedChats = chats.filter((c) => c.pinned && !c.archived);
+  const regularChats = chats.filter((c) => !c.pinned && !c.archived);
+  const groups = groupByDate(regularChats);
   const activeChatId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
+
+  const newChatHref = selectedProject
+    ? `/chat?projectId=${selectedProject}`
+    : "/chat";
 
   return (
     <Sidebar>
@@ -78,16 +107,59 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
+            <div className="px-2 pb-1">
+              <ProjectSelector
+                value={selectedProject}
+                onChange={setSelectedProject}
+              />
+            </div>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/chat" />}>
+                <SidebarMenuButton render={<Link href={newChatHref} />}>
                   <Plus className="h-4 w-4" />
                   <span>New Chat</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/files" />}
+                  data-active={pathname === "/files" || undefined}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  <span>Files</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <ChatSearch value={search} onChange={setSearch} />
+
+        {pinnedChats.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Pinned</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {pinnedChats.map((chat) => (
+                  <SidebarMenuItem key={chat.id}>
+                    <ChatContextMenu chat={chat} onUpdate={fetchChats}>
+                      <SidebarMenuButton
+                        render={<Link href={`/chat/${chat.id}`} />}
+                        data-active={activeChatId === chat.id || undefined}
+                      >
+                        <MessageSquare className="h-4 w-4 shrink-0" />
+                        <span className="truncate">
+                          {chat.title || "New Chat"}
+                        </span>
+                      </SidebarMenuButton>
+                    </ChatContextMenu>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
         {groups.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
@@ -95,15 +167,17 @@ export function AppSidebar() {
               <SidebarMenu>
                 {group.chats.map((chat) => (
                   <SidebarMenuItem key={chat.id}>
-                    <SidebarMenuButton
-                      render={<Link href={`/chat/${chat.id}`} />}
-                      data-active={activeChatId === chat.id || undefined}
-                    >
-                      <MessageSquare className="h-4 w-4 shrink-0" />
-                      <span className="truncate">
-                        {chat.title || "New Chat"}
-                      </span>
-                    </SidebarMenuButton>
+                    <ChatContextMenu chat={chat} onUpdate={fetchChats}>
+                      <SidebarMenuButton
+                        render={<Link href={`/chat/${chat.id}`} />}
+                        data-active={activeChatId === chat.id || undefined}
+                      >
+                        <MessageSquare className="h-4 w-4 shrink-0" />
+                        <span className="truncate">
+                          {chat.title || "New Chat"}
+                        </span>
+                      </SidebarMenuButton>
+                    </ChatContextMenu>
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>
@@ -113,7 +187,7 @@ export function AppSidebar() {
 
         {chats.length === 0 && (
           <div className="px-4 py-6 text-center text-xs text-muted-foreground">
-            No chats yet
+            {search ? "No chats found" : "No chats yet"}
           </div>
         )}
       </SidebarContent>
@@ -122,13 +196,29 @@ export function AppSidebar() {
         <SidebarSeparator />
         <div className="flex items-center justify-between pt-2">
           <ThemeSwitcher />
-          <Link
-            href="/settings"
-            className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-          >
-            <Settings className="h-4 w-4" />
-            <span>Settings</span>
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link
+              href="/chat/archived"
+              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              title="Archived"
+            >
+              <Archive className="h-4 w-4" />
+            </Link>
+            <Link
+              href="/projects"
+              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              title="Projects"
+            >
+              <FolderKanban className="h-4 w-4" />
+            </Link>
+            <Link
+              href="/settings"
+              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              title="Settings"
+            >
+              <Settings className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
       </SidebarFooter>
     </Sidebar>

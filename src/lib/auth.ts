@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { headers } from "next/headers";
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { getMasterKey } from "./settings";
@@ -28,4 +29,12 @@ export async function getAuth() {
     plugins: [nextCookies()],
   });
   return _auth as ReturnType<typeof betterAuth>;
+}
+
+/** Require authenticated session — returns userId or throws 401 Response */
+export async function requireSession(): Promise<{ userId: string; session: Awaited<ReturnType<Awaited<ReturnType<typeof getAuth>>["api"]["getSession"]>> }> {
+  const auth = await getAuth();
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) throw Response.json({ error: "Unauthorized" }, { status: 401 });
+  return { userId: session.user.id, session };
 }
