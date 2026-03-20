@@ -1,15 +1,19 @@
+import { mkdirSync } from "fs";
+import { resolve } from "path";
 import { MCPClient } from "@mastra/mcp";
 
 /**
  * Creates an MCP client with a filesystem server scoped to the user's storage path.
  */
 export function createMCPClient(storagePath: string) {
+  const absPath = resolve(storagePath);
+  mkdirSync(absPath, { recursive: true });
   return new MCPClient({
-    id: `mcp-${storagePath}`,
+    id: `mcp-${absPath}`,
     servers: {
       filesystem: {
         command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-filesystem", storagePath],
+        args: ["-y", "@modelcontextprotocol/server-filesystem", absPath],
       },
     },
     timeout: 30_000,
