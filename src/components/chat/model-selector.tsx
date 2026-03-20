@@ -49,7 +49,7 @@ function ModelList({
   activeIndex,
   onActiveIndex,
   listRef,
-  onKeyDown,
+  onClose,
 }: {
   models: ModelInfo[];
   search: string;
@@ -59,7 +59,7 @@ function ModelList({
   activeIndex: number;
   onActiveIndex: (i: number) => void;
   listRef: React.RefObject<HTMLDivElement | null>;
-  onKeyDown: (e: React.KeyboardEvent) => void;
+  onClose: () => void;
 }) {
   const filtered = useMemo(() => {
     if (!search) return models;
@@ -68,6 +68,8 @@ function ModelList({
       (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q),
     );
   }, [models, search]);
+
+  const indexMap = useMemo(() => new Map(filtered.map((m, i) => [m.id, i])), [filtered]);
 
   const groups = useMemo(() => {
     const map = new Map<string, ModelInfo[]>();
@@ -95,7 +97,12 @@ function ModelList({
         <input
           value={search}
           onChange={(e) => { onSearch(e.target.value); onActiveIndex(0); }}
-          onKeyDown={onKeyDown}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") { e.preventDefault(); onActiveIndex(Math.min(activeIndex + 1, filtered.length - 1)); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); onActiveIndex(Math.max(activeIndex - 1, 0)); }
+            else if (e.key === "Enter" && filtered[activeIndex]) { e.preventDefault(); onSelect(filtered[activeIndex]); }
+            else if (e.key === "Escape") { onClose(); }
+          }}
           placeholder="Search models..."
           autoFocus
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
@@ -132,7 +139,7 @@ function ModelList({
               </div>
 
               {providerModels.map((model) => {
-                const globalIdx = filtered.indexOf(model);
+                const globalIdx = indexMap.get(model.id) ?? -1;
                 const isActive = globalIdx === activeIndex;
                 const isCurrent = model.id === currentModelId;
 
@@ -252,12 +259,6 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     }
   }, [open, isMobile]);
 
-  const filtered = useMemo(() => {
-    if (!search) return models;
-    const q = search.toLowerCase();
-    return models.filter((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
-  }, [models, search]);
-
   const select = useCallback(
     (model: ModelInfo) => {
       onChange(`openrouter:${model.id}`);
@@ -265,13 +266,6 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     },
     [onChange],
   );
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, filtered.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)); }
-    else if (e.key === "Enter" && filtered[activeIndex]) { e.preventDefault(); select(filtered[activeIndex]); }
-    else if (e.key === "Escape") { setOpen(false); }
-  };
 
   // Scroll active into view
   useEffect(() => {
@@ -307,7 +301,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
               activeIndex={activeIndex}
               onActiveIndex={setActiveIndex}
               listRef={listRef}
-              onKeyDown={handleKeyDown}
+              onClose={() => setOpen(false)}
             />
           )}
         </div>
@@ -338,7 +332,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
                 activeIndex={activeIndex}
                 onActiveIndex={setActiveIndex}
                 listRef={listRef}
-                onKeyDown={handleKeyDown}
+                onClose={() => setOpen(false)}
               />
             </div>
           )}

@@ -37,6 +37,7 @@ export async function PUT(req: Request) {
     return Response.json({ error: "Access denied" }, { status: 403 });
   }
 
-  await setSetting(key, value, encrypted ?? false);
+  const ENCRYPT_KEYS = ["telegram_bot_token"];
+  await setSetting(key, value, ENCRYPT_KEYS.includes(key) || (encrypted ?? false));
   return Response.json({ ok: true });
 }

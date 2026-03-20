@@ -16,8 +16,8 @@ export interface ModelInfo {
   pricing: { prompt: number; completion: number };
 }
 
-// Cache models for 10 minutes
-let cache: { models: ModelInfo[]; ts: number } | null = null;
+// Cache models per user for 10 minutes
+const cacheMap = new Map<string, { models: ModelInfo[]; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
 
 export async function GET() {
@@ -35,8 +35,9 @@ export async function GET() {
 
   // For OpenRouter — fetch live model list
   if (config.provider === "openrouter") {
-    if (cache && Date.now() - cache.ts < CACHE_TTL) {
-      return NextResponse.json({ models: cache.models, provider: "openrouter" });
+    const cached = cacheMap.get(session.user.id);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      return NextResponse.json({ models: cached.models, provider: "openrouter" });
     }
 
     let apiKey = config.apiKey;
@@ -66,7 +67,7 @@ export async function GET() {
         }))
         .sort((a: ModelInfo, b: ModelInfo) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
 
-      cache = { models, ts: Date.now() };
+      cacheMap.set(session.user.id, { models, ts: Date.now() });
       return NextResponse.json({ models, provider: "openrouter" });
     } catch {
       return NextResponse.json({ models: [], provider: "openrouter" });

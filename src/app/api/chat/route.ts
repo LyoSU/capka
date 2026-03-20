@@ -1,5 +1,5 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
-import { eq, asc } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
@@ -12,6 +12,8 @@ import { loadMCPTools } from "@/lib/mcp/config";
 import { SYSTEM_PROMPT } from "@/lib/agents/chat-agent";
 
 export async function POST(req: Request) {
+  let mcpClose: (() => Promise<void>) | undefined;
+
   try {
     const auth = await getAuth();
     const session = await auth.api.getSession({ headers: await headers() });
@@ -21,24 +23,29 @@ export async function POST(req: Request) {
 
     const userId = session.user.id;
     const body = await req.json();
-    console.log("[chat] body keys:", Object.keys(body), "model:", body.model, "chatId:", body.chatId);
     const { chatId: requestChatId, model: requestModel } = body;
     const chatId = requestChatId || nanoid();
 
-    // Parallel: check chat existence, resolve model, load MCP tools
-    const [existingChat, model, { tools, close }] = await Promise.all([
-      db.select().from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
-      resolveUserModel(userId, requestModel).catch((e: Error) =>
-        Promise.reject(Response.json({ error: e.message }, { status: 400 })),
-      ),
+    // Parallel: check chat ownership, resolve model, load MCP tools
+    const [existingChat, model, mcp] = await Promise.all([
+      db.select().from(chats).where(and(eq(chats.id, chatId), eq(chats.userId, userId))).limit(1).then((r) => r[0]),
+      resolveUserModel(userId, requestModel),
       loadMCPTools(userId),
     ]);
+    mcpClose = mcp.close;
+    const { tools } = mcp;
+
+    // If chatId was provided but doesn't belong to this user, reject
+    if (requestChatId && !existingChat) {
+      await mcpClose();
+      return Response.json({ error: "Chat not found" }, { status: 404 });
+    }
 
     if (!existingChat) {
       await db.insert(chats).values({ id: chatId, userId, title: "New Chat", model: requestModel });
     }
 
-    // Save the latest user message
+    // Save user message + update chat title
     const lastUserMsg = body.messages?.filter((m: { role: string }) => m.role === "user").pop();
     if (lastUserMsg) {
       const text = lastUserMsg.parts
@@ -47,19 +54,20 @@ export async function POST(req: Request) {
         .join("") || lastUserMsg.content || "";
 
       if (text) {
-        await db.insert(messages).values({
-          id: lastUserMsg.id || nanoid(),
-          chatId,
-          role: "user",
-          content: text,
-          platform: "web",
-        });
-
         const isNewChat = !existingChat || existingChat.title === "New Chat";
-        await db.update(chats).set({
-          ...(isNewChat ? { title: text.slice(0, 100) } : {}),
-          updatedAt: new Date(),
-        }).where(eq(chats.id, chatId));
+        await Promise.all([
+          db.insert(messages).values({
+            id: lastUserMsg.id || nanoid(),
+            chatId,
+            role: "user",
+            content: text,
+            platform: "web",
+          }),
+          db.update(chats).set({
+            ...(isNewChat ? { title: text.slice(0, 100) } : {}),
+            updatedAt: new Date(),
+          }).where(eq(chats.id, chatId)),
+        ]);
       }
     }
 
@@ -69,7 +77,7 @@ export async function POST(req: Request) {
       ...(hasTools ? { tools, stopWhen: stepCountIs(25) } : {}),
       system: SYSTEM_PROMPT,
       messages: await convertToModelMessages(body.messages),
-      onError: (error) => console.error("[chat] Stream error:", error),
+      onError: async () => { await mcpClose?.(); },
       async onFinish({ text, steps }) {
         const toolCalls = steps.flatMap((step) =>
           (step.toolCalls ?? []).map((tc) => ({
@@ -96,12 +104,13 @@ export async function POST(req: Request) {
             metadata: toolCalls.length > 0 ? { toolCalls, toolResults } : undefined,
           });
         }
-        await close();
+        await mcpClose?.();
       },
     });
 
     return result.toUIMessageStreamResponse();
   } catch (e: unknown) {
+    await mcpClose?.();
     if (e instanceof Response) return e;
     console.error("[chat] Unexpected error:", e);
     const msg = e instanceof Error ? e.message : "An unexpected error occurred";
@@ -118,6 +127,12 @@ export async function GET(req: Request) {
   const chatId = searchParams.get("chatId");
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
 
+  // Verify chat belongs to user
+  const [chat] = await db.select({ id: chats.id }).from(chats)
+    .where(and(eq(chats.id, chatId), eq(chats.userId, session.user.id)))
+    .limit(1);
+  if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+
   const rows = await db
     .select()
     .from(messages)
@@ -125,11 +140,12 @@ export async function GET(req: Request) {
     .orderBy(asc(messages.createdAt))
     .limit(100);
 
+  type ToolMeta = { toolCalls?: { id: string; name: string; input: unknown }[]; toolResults?: { id: string; name: string; output: unknown }[] };
+
   const uiMessages = rows.map((m) => {
-    const meta = m.metadata as { toolCalls?: { id: string; name: string; input: unknown }[]; toolResults?: { id: string; name: string; output: unknown }[] } | null;
+    const meta = m.metadata as ToolMeta | null;
     const parts: unknown[] = [];
 
-    // Rebuild tool parts from metadata
     if (meta?.toolCalls) {
       const resultMap = new Map(meta.toolResults?.map((tr) => [tr.id, tr]) ?? []);
       for (const tc of meta.toolCalls) {
