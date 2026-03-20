@@ -5,7 +5,6 @@ import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel } from "@/lib/providers";
 import { createChatAgent } from "@/lib/agents/chat-agent";
-import { mastra } from "@/lib/agents";
 import { createMCPClient } from "@/lib/mcp/config";
 
 export async function processMessageForTelegram(
@@ -16,14 +15,14 @@ export async function processMessageForTelegram(
   const [config] = await db
     .select()
     .from(providerConfigs)
-    .where(
-      and(
-        eq(providerConfigs.userId, userId),
-        eq(providerConfigs.isActive, true),
-      ),
-    )
+    .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
     .limit(1);
-  if (!config) throw new Error("No LLM provider configured");
+
+  if (!config) throw new Error("No LLM provider configured. Set one up in Settings.");
+
+  if (!config.defaultModel) {
+    throw new Error("No default model set. Configure one in Settings → Connections.");
+  }
 
   let apiKey = config.apiKey;
   if (apiKey) {
@@ -31,21 +30,25 @@ export async function processMessageForTelegram(
     apiKey = decrypt(apiKey, mk);
   }
 
-  const model = getModel(config.provider, config.defaultModel || "gpt-5.2", {
+  const model = getModel(config.provider, config.defaultModel, {
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
   });
 
   const mcpClient = createMCPClient(`./data/storage/${userId}`);
-  const tools = await mcpClient.listTools();
+  let tools;
+  try {
+    tools = await mcpClient.listTools();
+  } catch {
+    tools = {}; // MCP may not be available — proceed without tools
+  }
 
   const agent = createChatAgent(model, tools);
-  mastra.addAgent(agent);
 
   const response = await agent.generate(userMessage, {
     memory: { thread: chatId, resource: userId },
   });
 
-  await mcpClient.disconnect();
+  try { await mcpClient.disconnect(); } catch { /* ignore */ }
   return response.text;
 }

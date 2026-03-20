@@ -23,16 +23,18 @@ export function ModelSelector({ providers, value, onChange }: ModelSelectorProps
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {Object.entries(providers).map(([provider, models]) => (
-          <SelectGroup key={provider}>
-            <SelectLabel>{provider}</SelectLabel>
-            {models.map((model) => (
-              <SelectItem key={`${provider}:${model}`} value={`${provider}:${model}`}>
-                {model}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        ))}
+        {Object.entries(providers)
+          .filter(([, models]) => models.length > 0)
+          .map(([provider, models]) => (
+            <SelectGroup key={provider}>
+              <SelectLabel className="capitalize">{provider}</SelectLabel>
+              {models.map((model) => (
+                <SelectItem key={`${provider}:${model}`} value={`${provider}:${model}`}>
+                  {model}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          ))}
       </SelectContent>
     </Select>
   );

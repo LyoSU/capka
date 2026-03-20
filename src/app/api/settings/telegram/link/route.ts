@@ -11,8 +11,9 @@ export async function POST() {
 
   const userId = session.user.id;
 
-  // Generate a 6-digit code
-  const code = Math.random().toString(10).slice(2, 8).padStart(6, "0");
+  // Generate a cryptographically secure 6-digit code
+  const { randomInt } = await import("crypto");
+  const code = String(randomInt(100000, 999999));
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
   // Delete any existing codes for this user

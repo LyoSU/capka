@@ -2,13 +2,11 @@ import { Agent } from "@mastra/core/agent";
 import { Memory } from "@mastra/memory";
 import { PostgresStore } from "@mastra/pg";
 import type { ToolAction } from "@mastra/core/tools";
-
-const connectionString =
-  process.env.DATABASE_URL || "postgresql://anticlaw:anticlaw@localhost:5432/anticlaw";
+import { DATABASE_URL } from "@/lib/db";
 
 const storage = new PostgresStore({
-  id: "anticlaw-memory",
-  connectionString,
+  id: "anticlaw-store",
+  connectionString: DATABASE_URL,
 });
 
 export const chatAgentMemory = new Memory({
@@ -23,8 +21,7 @@ export const chatAgentMemory = new Memory({
 });
 
 export function createChatAgent(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  model: any,
+  model: Parameters<typeof Agent>[0]["model"],
   tools: Record<string, ToolAction<any, any, any, any, any, any>>,
 ) {
   return new Agent({
@@ -32,7 +29,7 @@ export function createChatAgent(
     name: "AntiClaw Assistant",
     instructions:
       "You are a helpful personal AI assistant. Be concise and direct. Confirm before executing actions with side effects.",
-    model: model as any,
+    model,
     tools,
     memory: chatAgentMemory,
   });
