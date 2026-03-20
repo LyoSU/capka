@@ -36,6 +36,7 @@ export async function resolveUserModel(userId: string, requestModel?: string) {
     modelId = requestModel;
   }
 
+  console.log("[resolve] provider:", provider, "modelId:", modelId);
   return getModel(provider, modelId, {
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,

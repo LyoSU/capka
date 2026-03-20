@@ -12,7 +12,6 @@ import { ModelSelector } from "@/components/chat/model-selector";
 
 interface ChatPanelProps {
   chatId: string;
-  providers: Record<string, string[]>;
   defaultModel: string;
 }
 
@@ -20,17 +19,13 @@ function fetchMessages(chatId: string) {
   return fetch(`/api/chat?chatId=${chatId}`).then((r) => (r.ok ? r.json() : []));
 }
 
-export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel }: ChatPanelProps) {
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const transport = useMemo(
-    () =>
-      new DefaultChatTransport({
-        api: "/api/chat",
-        body: { chatId, model },
-      }),
-    [chatId, model],
+    () => new DefaultChatTransport({ api: "/api/chat", body: { chatId } }),
+    [chatId],
   );
 
   const { messages, setMessages, sendMessage, status, stop, error } = useChat({
@@ -102,7 +97,7 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
     if (!text) return;
     setInput("");
     try {
-      await sendMessage({ text });
+      await sendMessage({ text }, { body: { model } });
     } catch (err) {
       console.error("[chat] sendMessage error:", err);
       toast.error("Failed to send message");
@@ -114,7 +109,10 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
   return (
     <div className="flex h-full flex-col">
       {isEmpty ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4">
+        <div className="relative flex flex-1 flex-col items-center justify-center gap-4">
+          <div className="inline-flex rounded-full border bg-background/80 px-1 shadow-sm backdrop-blur-sm">
+            <ModelSelector value={model} onChange={setModel} />
+          </div>
           <MessageSquare className="h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">Start a conversation</p>
           <div className="w-full max-w-xl px-4">
@@ -129,13 +127,13 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
         </div>
       ) : (
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center px-4 py-2">
-            <div className="pointer-events-auto inline-flex rounded-full border bg-background/80 px-1 shadow-sm backdrop-blur-sm">
-              <ModelSelector providers={providers} value={model} onChange={setModel} />
+          <div className="flex items-center px-4 py-2">
+            <div className="inline-flex rounded-full border bg-background/80 px-1 shadow-sm backdrop-blur-sm">
+              <ModelSelector value={model} onChange={setModel} />
             </div>
           </div>
 
-          <div ref={scrollRef} className="flex-1 overflow-y-auto pt-12 pb-24">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto pb-24">
             <div className="mx-auto max-w-3xl">
               {messages.map((message, i) => (
                 <ChatMessage
@@ -156,7 +154,7 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
             </div>
           </div>
 
-          <div className="absolute inset-x-0 bottom-0 z-10">
+          <div className="absolute inset-x-0 bottom-0">
             <ChatInput
               value={input}
               onChange={setInput}

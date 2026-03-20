@@ -5,7 +5,6 @@ import { eq, and } from "drizzle-orm";
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
-import { PROVIDER_MODELS } from "@/lib/providers";
 import { ChatPanel } from "@/components/chat/chat-panel";
 
 export default async function ChatIdPage({
@@ -30,14 +29,13 @@ export default async function ChatIdPage({
     )
     .limit(1);
 
-  const defaultModel = config
-    ? `${config.provider}:${config.defaultModel || PROVIDER_MODELS[config.provider]?.[0] || "gpt-5.2"}`
-    : "openai:gpt-5.2";
+  const defaultModel = config?.defaultModel
+    ? `${config.provider}:${config.defaultModel}`
+    : "";
 
   return (
     <ChatPanel
       chatId={chatId}
-      providers={PROVIDER_MODELS}
       defaultModel={defaultModel}
     />
   );

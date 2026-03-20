@@ -1,4 +1,4 @@
-import { streamText, convertToModelMessages, type ToolSet } from "ai";
+import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { eq, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { headers } from "next/headers";
@@ -21,11 +21,12 @@ export async function POST(req: Request) {
 
     const userId = session.user.id;
     const body = await req.json();
+    console.log("[chat] body keys:", Object.keys(body), "model:", body.model, "chatId:", body.chatId);
     const { chatId: requestChatId, model: requestModel } = body;
     const chatId = requestChatId || nanoid();
 
     // Parallel: check chat existence, resolve model, load MCP tools
-    const [existingChat, model, { tools, disconnect }] = await Promise.all([
+    const [existingChat, model, { tools, close }] = await Promise.all([
       db.select().from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
       resolveUserModel(userId, requestModel).catch((e: Error) =>
         Promise.reject(Response.json({ error: e.message }, { status: 400 })),
@@ -54,7 +55,6 @@ export async function POST(req: Request) {
           platform: "web",
         });
 
-        // Auto-generate title from first message, or just bump updatedAt
         const isNewChat = !existingChat || existingChat.title === "New Chat";
         await db.update(chats).set({
           ...(isNewChat ? { title: text.slice(0, 100) } : {}),
@@ -63,29 +63,45 @@ export async function POST(req: Request) {
       }
     }
 
+    const hasTools = Object.keys(tools).length > 0;
     const result = streamText({
       model,
-      tools: tools as ToolSet,
+      ...(hasTools ? { tools, stopWhen: stepCountIs(25) } : {}),
       system: SYSTEM_PROMPT,
       messages: await convertToModelMessages(body.messages),
       onError: (error) => console.error("[chat] Stream error:", error),
-      async onFinish({ text }) {
-        if (text) {
+      async onFinish({ text, steps }) {
+        const toolCalls = steps.flatMap((step) =>
+          (step.toolCalls ?? []).map((tc) => ({
+            id: tc.toolCallId,
+            name: tc.toolName,
+            input: tc.input,
+          })),
+        );
+        const toolResults = steps.flatMap((step) =>
+          (step.toolResults ?? []).map((tr) => ({
+            id: tr.toolCallId,
+            name: tr.toolName,
+            output: tr.output,
+          })),
+        );
+
+        if (text || toolCalls.length > 0) {
           await db.insert(messages).values({
             id: nanoid(),
             chatId,
             role: "assistant",
-            content: text,
+            content: text || "",
             platform: "web",
+            metadata: toolCalls.length > 0 ? { toolCalls, toolResults } : undefined,
           });
         }
-        await disconnect();
+        await close();
       },
     });
 
     return result.toUIMessageStreamResponse();
   } catch (e: unknown) {
-    // If it's already a Response (from resolveUserModel rejection), return it
     if (e instanceof Response) return e;
     console.error("[chat] Unexpected error:", e);
     const msg = e instanceof Error ? e.message : "An unexpected error occurred";
@@ -109,15 +125,38 @@ export async function GET(req: Request) {
     .orderBy(asc(messages.createdAt))
     .limit(100);
 
-  const uiMessages = rows.map((m) => ({
-    id: m.id,
-    role: m.role,
-    parts: [{ type: "text" as const, text: m.content }],
-    metadata: {
-      createdAt: m.createdAt?.toISOString() ?? null,
-      platform: m.platform ?? "web",
-    },
-  }));
+  const uiMessages = rows.map((m) => {
+    const meta = m.metadata as { toolCalls?: { id: string; name: string; input: unknown }[]; toolResults?: { id: string; name: string; output: unknown }[] } | null;
+    const parts: unknown[] = [];
+
+    // Rebuild tool parts from metadata
+    if (meta?.toolCalls) {
+      const resultMap = new Map(meta.toolResults?.map((tr) => [tr.id, tr]) ?? []);
+      for (const tc of meta.toolCalls) {
+        const tr = resultMap.get(tc.id);
+        parts.push({
+          type: "dynamic-tool",
+          toolCallId: tc.id,
+          toolName: tc.name,
+          state: tr ? "output-available" : "output-error",
+          input: tc.input,
+          output: tr?.output,
+        });
+      }
+    }
+
+    if (m.content) parts.push({ type: "text" as const, text: m.content });
+
+    return {
+      id: m.id,
+      role: m.role,
+      parts,
+      metadata: {
+        createdAt: m.createdAt?.toISOString() ?? null,
+        platform: m.platform ?? "web",
+      },
+    };
+  });
 
   return NextResponse.json(uiMessages);
 }

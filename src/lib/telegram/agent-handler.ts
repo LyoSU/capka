@@ -8,13 +8,13 @@ export async function processMessageForTelegram(
   userMessage: string,
 ): Promise<string> {
   const model = await resolveUserModel(userId);
-  const { tools, disconnect } = await loadMCPTools(userId);
+  const { tools, close } = await loadMCPTools(userId);
 
   const agent = createChatAgent(model, tools);
   const response = await agent.generate(userMessage, {
     memory: { thread: chatId, resource: userId },
   });
 
-  await disconnect();
+  await close();
   return response.text;
 }

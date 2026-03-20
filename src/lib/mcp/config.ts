@@ -1,38 +1,33 @@
 import { mkdirSync } from "fs";
 import { resolve } from "path";
-import { MCPClient } from "@mastra/mcp";
+import { createMCPClient } from "@ai-sdk/mcp";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 /**
- * Creates an MCP client with a filesystem server scoped to the user's storage path.
- */
-export function createMCPClient(storagePath: string) {
-  const absPath = resolve(storagePath);
-  mkdirSync(absPath, { recursive: true });
-  return new MCPClient({
-    id: `mcp-${absPath}`,
-    servers: {
-      filesystem: {
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-filesystem", absPath],
-      },
-    },
-    timeout: 30_000,
-  });
-}
-
-/**
- * Load MCP tools for a user. Returns tools and a disconnect function.
+ * Load MCP tools for a user, compatible with AI SDK streamText.
+ * Returns tools and a close function.
  */
 export async function loadMCPTools(userId: string) {
-  const client = createMCPClient(`./data/storage/${userId}`);
+  const absPath = resolve(`./data/storage/${userId}`);
+  mkdirSync(absPath, { recursive: true });
+
+  const client = await createMCPClient({
+    transport: new StdioClientTransport({
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", absPath],
+      stderr: "ignore",
+    }),
+  });
+
   let tools;
   try {
-    tools = await client.listTools();
+    tools = await client.tools();
   } catch {
     tools = {};
   }
+
   return {
     tools,
-    disconnect: () => client.disconnect().catch(() => {}),
+    close: () => client.close().catch(() => {}),
   };
 }
