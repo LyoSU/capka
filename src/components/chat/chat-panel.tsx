@@ -84,17 +84,7 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
             {messages.map((message) => (
               <ChatMessage key={message.id} message={message} />
             ))}
-            {isLoading &&
-              messages[messages.length - 1]?.role !== "assistant" && (
-                <div className="flex gap-3 px-4 py-4">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
-                    <MessageSquare className="h-4 w-4" />
-                  </div>
-                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                    <span className="animate-pulse">...</span>
-                  </div>
-                </div>
-              )}
+            {/* Streaming indicator handled by message component showing "..." for empty text */}
           </div>
         )}
       </div>
