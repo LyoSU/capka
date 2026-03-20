@@ -15,7 +15,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 
-import { MEMORY_TYPES, type MemoryType } from "@/app/api/memories/route";
+import { MEMORY_TYPES, type MemoryType } from "@/lib/constants";
 
 interface Memory {
   id: string;

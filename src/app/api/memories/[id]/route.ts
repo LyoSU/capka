@@ -2,7 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memories } from "@/lib/db/schema";
-import { MEMORY_TYPES } from "@/app/api/memories/route";
+import { MEMORY_TYPES } from "@/lib/constants";
 
 async function findMemory(id: string, userId: string) {
   const [memory] = await db

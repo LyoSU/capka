@@ -4,8 +4,7 @@ import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memories } from "@/lib/db/schema";
 
-export const MEMORY_TYPES = ["fact", "preference", "context"] as const;
-export type MemoryType = (typeof MEMORY_TYPES)[number];
+import { MEMORY_TYPES } from "@/lib/constants";
 
 export async function GET(req: Request) {
   const { userId } = await requireSession();
