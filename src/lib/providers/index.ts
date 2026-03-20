@@ -4,10 +4,10 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
 
 export const PROVIDER_MODELS: Record<string, string[]> = {
-  openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini", "o3", "o3-mini", "o4-mini"],
+  openai: ["gpt-5.2", "gpt-5.2-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o4-mini"],
   anthropic: ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-20250506"],
-  openrouter: [], // dynamic — user types any model ID from openrouter.ai
-  ollama: [], // dynamic — depends on what's installed locally
+  openrouter: [], // dynamic — user types any model ID
+  ollama: [], // dynamic — depends on locally installed models
 };
 
 export function getModel(

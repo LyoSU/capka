@@ -1,11 +1,12 @@
 import { streamText, convertToModelMessages } from "ai";
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { headers } from "next/headers";
+import { NextResponse } from "next/server";
 
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { providerConfigs, chats } from "@/lib/db/schema";
+import { providerConfigs, chats, messages } from "@/lib/db/schema";
 import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel } from "@/lib/providers";
@@ -54,9 +55,9 @@ export async function POST(req: Request) {
       apiKey = decrypt(apiKey, mk);
     }
 
-    // Parse "provider:modelId" from client, or use DB defaults
+    // Resolve model: client selection > user's DB default > provider's first model
     let provider = config.provider;
-    let modelId = config.defaultModel || "gpt-4.1";
+    let modelId = config.defaultModel || "";
 
     if (requestModel && requestModel.includes(":")) {
       const [p, ...rest] = requestModel.split(":");
@@ -64,6 +65,13 @@ export async function POST(req: Request) {
       modelId = rest.join(":");
     } else if (requestModel) {
       modelId = requestModel;
+    }
+
+    if (!modelId) {
+      return Response.json(
+        { error: "No default model configured. Go to Settings → Connections to set one." },
+        { status: 400 },
+      );
     }
 
     let model;
@@ -80,6 +88,36 @@ export async function POST(req: Request) {
       );
     }
 
+    // Save the latest user message to DB
+    const lastUserMsg = body.messages?.filter((m: { role: string }) => m.role === "user").pop();
+    if (lastUserMsg) {
+      const text = lastUserMsg.parts
+        ?.filter((p: { type: string }) => p.type === "text")
+        .map((p: { text: string }) => p.text)
+        .join("") || lastUserMsg.content || "";
+
+      if (text) {
+        await db.insert(messages).values({
+          id: lastUserMsg.id || nanoid(),
+          chatId,
+          role: "user",
+          content: text,
+          platform: "web",
+        });
+
+        // Auto-generate chat title from first message
+        const [chat] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
+        if (chat?.title === "New Chat") {
+          await db.update(chats).set({
+            title: text.slice(0, 100),
+            updatedAt: new Date(),
+          }).where(eq(chats.id, chatId));
+        } else {
+          await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
+        }
+      }
+    }
+
     // Stream via AI SDK
     const result = streamText({
       model,
@@ -89,6 +127,18 @@ export async function POST(req: Request) {
       onError: (error) => {
         console.error("[chat] Stream error:", error);
       },
+      async onFinish({ text }) {
+        // Save assistant response to DB
+        if (text) {
+          await db.insert(messages).values({
+            id: nanoid(),
+            chatId,
+            role: "assistant",
+            content: text,
+            platform: "web",
+          });
+        }
+      },
     });
 
     return result.toUIMessageStreamResponse();
@@ -97,4 +147,31 @@ export async function POST(req: Request) {
     const msg = e instanceof Error ? e.message : "An unexpected error occurred";
     return Response.json({ error: msg }, { status: 500 });
   }
+}
+
+export async function GET(req: Request) {
+  const auth = await getAuth();
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return new Response("Unauthorized", { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const chatId = searchParams.get("chatId");
+  if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
+
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.chatId, chatId))
+    .orderBy(asc(messages.createdAt))
+    .limit(100);
+
+  // Convert to UIMessage format for useChat
+  const uiMessages = rows.map((m) => ({
+    id: m.id,
+    role: m.role,
+    parts: [{ type: "text" as const, text: m.content }],
+    createdAt: m.createdAt,
+  }));
+
+  return NextResponse.json(uiMessages);
 }

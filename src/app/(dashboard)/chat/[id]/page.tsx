@@ -32,8 +32,8 @@ export default async function ChatIdPage({
     .limit(1);
 
   const defaultModel = config
-    ? `${config.provider}:${config.defaultModel || PROVIDER_MODELS[config.provider]?.[0] || "gpt-4.1"}`
-    : "openai:gpt-4.1";
+    ? `${config.provider}:${config.defaultModel || PROVIDER_MODELS[config.provider]?.[0] || "gpt-5.2"}`
+    : "openai:gpt-5.2";
 
   return (
     <ChatPanel

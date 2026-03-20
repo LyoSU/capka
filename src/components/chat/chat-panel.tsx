@@ -30,7 +30,7 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
     [chatId, model],
   );
 
-  const { messages, sendMessage, status, stop, error } = useChat({
+  const { messages, setMessages, sendMessage, status, stop, error } = useChat({
     id: chatId,
     transport,
     onError: (err) => {
@@ -38,6 +38,16 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
       toast.error(err.message || "Failed to send message");
     },
   });
+
+  // Load chat history from DB on mount
+  useEffect(() => {
+    fetch(`/api/chat?chatId=${chatId}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((history) => {
+        if (history.length > 0) setMessages(history);
+      })
+      .catch(() => {});
+  }, [chatId, setMessages]);
 
   useEffect(() => {
     if (error) {

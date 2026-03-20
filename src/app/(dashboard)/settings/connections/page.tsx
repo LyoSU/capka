@@ -208,7 +208,7 @@ export default function ConnectionsPage() {
             <Input
               value={defaultModel}
               onChange={(e) => setDefaultModel(e.target.value)}
-              placeholder="e.g. gpt-4o"
+              placeholder="e.g. gpt-5.2"
             />
           </div>
 

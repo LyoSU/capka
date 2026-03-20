@@ -307,12 +307,12 @@ export function SetupWizard() {
               onChange={(e) => setDefaultModel(e.target.value)}
               placeholder={
                 provider === "openai"
-                  ? "gpt-4o"
+                  ? "gpt-5.2"
                   : provider === "anthropic"
                     ? "claude-sonnet-4-20250514"
                     : provider === "openrouter"
-                      ? "openai/gpt-4o"
-                      : "llama3"
+                      ? "openai/gpt-5.2"
+                      : "llama3.3"
               }
             />
           </div>
