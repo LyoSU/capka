@@ -15,7 +15,7 @@ export default async function ChatIdPage({
 }) {
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/sign-in");
+  if (!session) redirect("/login");
 
   const { id: chatId } = await params;
 
@@ -32,8 +32,8 @@ export default async function ChatIdPage({
     .limit(1);
 
   const defaultModel = config
-    ? `${config.provider}:${config.defaultModel || PROVIDER_MODELS[config.provider]?.[0] || "gpt-4o"}`
-    : "openai:gpt-4o";
+    ? `${config.provider}:${config.defaultModel || PROVIDER_MODELS[config.provider]?.[0] || "gpt-4.1"}`
+    : "openai:gpt-4.1";
 
   return (
     <ChatPanel

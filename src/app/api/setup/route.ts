@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { setSetting, isSetupComplete, getMasterKey } from "@/lib/settings";
+import { getAuth } from "@/lib/auth";
 
 export async function POST(req: Request) {
   const complete = await isSetupComplete();
@@ -25,23 +27,29 @@ export async function POST(req: Request) {
   }
 
   if (step === "provider") {
-    const { userId, provider, apiKey, baseUrl, defaultModel } = body;
-    if (!userId || !provider) {
-      return NextResponse.json({ error: "Missing userId or provider" }, { status: 400 });
+    // Validate userId from session — don't trust client
+    const auth = await getAuth();
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const userId = session.user.id;
+    const { provider, apiKey, baseUrl, defaultModel } = body;
+    if (!provider) {
+      return NextResponse.json({ error: "Missing provider" }, { status: 400 });
     }
 
     const masterKey = await getMasterKey();
     const encryptedKey = apiKey ? encrypt(apiKey, masterKey) : null;
 
-    // Deactivate existing configs for this user
     await db
       .update(providerConfigs)
       .set({ isActive: false })
       .where(eq(providerConfigs.userId, userId));
 
-    const id = nanoid();
     await db.insert(providerConfigs).values({
-      id,
+      id: nanoid(),
       userId,
       provider,
       apiKey: encryptedKey,

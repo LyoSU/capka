@@ -8,7 +8,6 @@ const PUBLIC_PATHS = [
   "/api/auth",
   "/api/webhook",
   "/api/setup",
-  "/api/settings/providers/test",
 ];
 
 export async function middleware(request: NextRequest) {
