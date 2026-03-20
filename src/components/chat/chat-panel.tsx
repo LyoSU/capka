@@ -30,10 +30,20 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
     [chatId, model],
   );
 
-  const { messages, sendMessage, status, stop } = useChat({
+  const { messages, sendMessage, status, stop, error } = useChat({
     id: chatId,
     transport,
+    onError: (err) => {
+      console.error("[chat] useChat error:", err);
+      toast.error(err.message || "Failed to send message");
+    },
   });
+
+  useEffect(() => {
+    if (error) {
+      toast.error(error.message || "Chat error");
+    }
+  }, [error]);
 
   const isLoading = status === "streaming" || status === "submitted";
   const [input, setInput] = useState("");
@@ -45,11 +55,16 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
     }
   }, [messages]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const text = input.trim();
     if (!text) return;
     setInput("");
-    sendMessage({ text });
+    try {
+      await sendMessage({ text });
+    } catch (err) {
+      console.error("[chat] sendMessage error:", err);
+      toast.error("Failed to send message");
+    }
   };
 
   return (
