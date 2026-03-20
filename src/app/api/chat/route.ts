@@ -85,7 +85,7 @@ export async function POST(req: Request) {
       model,
       system:
         "You are a helpful personal AI assistant called AntiClaw. Be concise and direct. Confirm before executing actions with side effects.",
-      messages: convertToModelMessages(body.messages),
+      messages: await convertToModelMessages(body.messages),
       onError: (error) => {
         console.error("[chat] Stream error:", error);
       },
