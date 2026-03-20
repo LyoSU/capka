@@ -11,7 +11,7 @@ export function ThemeSwitcher() {
     <ToggleGroup
       value={theme ? [theme] : ["system"]}
       onValueChange={(values) => {
-        if (values.length > 0) setTheme(values[0]);
+        if (values.length > 0) setTheme(values[0] as "light" | "dark" | "system");
       }}
       variant="outline"
       size="sm"
