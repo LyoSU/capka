@@ -31,7 +31,7 @@ export async function processMessageForTelegram(
     apiKey = decrypt(apiKey, mk);
   }
 
-  const model = getModel(config.provider, config.defaultModel || "gpt-4o", {
+  const model = getModel(config.provider, config.defaultModel || "gpt-4.1", {
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
   });

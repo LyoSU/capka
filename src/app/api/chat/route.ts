@@ -1,5 +1,4 @@
-import { createUIMessageStreamResponse } from "ai";
-import { handleChatStream } from "@mastra/ai-sdk";
+import { streamText, convertToModelMessages } from "ai";
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { headers } from "next/headers";
@@ -10,76 +9,92 @@ import { providerConfigs, chats } from "@/lib/db/schema";
 import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel } from "@/lib/providers";
-import { createChatAgent } from "@/lib/agents/chat-agent";
-import { mastra } from "@/lib/agents";
-import { createMCPClient } from "@/lib/mcp/config";
 
 export async function POST(req: Request) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  try {
+    const auth = await getAuth();
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return Response.json({ error: "Not authenticated. Please sign in." }, { status: 401 });
+    }
 
-  const userId = session.user.id;
-  const body = await req.json();
-  const { chatId: requestChatId, model: requestModel } = body;
+    const userId = session.user.id;
+    const body = await req.json();
+    const { chatId: requestChatId, model: requestModel } = body;
 
-  // Ensure or create chat
-  const chatId = requestChatId || nanoid();
-  if (!requestChatId) {
-    await db.insert(chats).values({
-      id: chatId,
-      userId,
-      title: "New Chat",
-      model: requestModel,
+    // Ensure or create chat
+    const chatId = requestChatId || nanoid();
+    if (!requestChatId) {
+      await db.insert(chats).values({
+        id: chatId,
+        userId,
+        title: "New Chat",
+        model: requestModel,
+      });
+    }
+
+    // Load active provider config
+    const [config] = await db
+      .select()
+      .from(providerConfigs)
+      .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
+      .limit(1);
+
+    if (!config) {
+      return Response.json(
+        { error: "No LLM provider configured. Go to Settings → Connections to add one." },
+        { status: 400 },
+      );
+    }
+
+    // Decrypt API key
+    let apiKey = config.apiKey;
+    if (apiKey) {
+      const mk = await getMasterKey();
+      apiKey = decrypt(apiKey, mk);
+    }
+
+    // Parse "provider:modelId" from client, or use DB defaults
+    let provider = config.provider;
+    let modelId = config.defaultModel || "gpt-4.1";
+
+    if (requestModel && requestModel.includes(":")) {
+      const [p, ...rest] = requestModel.split(":");
+      provider = p;
+      modelId = rest.join(":");
+    } else if (requestModel) {
+      modelId = requestModel;
+    }
+
+    let model;
+    try {
+      model = getModel(provider, modelId, {
+        apiKey: apiKey || undefined,
+        baseUrl: config.baseUrl || undefined,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      return Response.json(
+        { error: `Failed to initialize model "${provider}/${modelId}": ${msg}` },
+        { status: 400 },
+      );
+    }
+
+    // Stream via AI SDK
+    const result = streamText({
+      model,
+      system:
+        "You are a helpful personal AI assistant called AntiClaw. Be concise and direct. Confirm before executing actions with side effects.",
+      messages: convertToModelMessages(body.messages),
+      onError: (error) => {
+        console.error("[chat] Stream error:", error);
+      },
     });
+
+    return result.toUIMessageStreamResponse();
+  } catch (e: unknown) {
+    console.error("[chat] Unexpected error:", e);
+    const msg = e instanceof Error ? e.message : "An unexpected error occurred";
+    return Response.json({ error: msg }, { status: 500 });
   }
-
-  // Load active provider config
-  const [config] = await db
-    .select()
-    .from(providerConfigs)
-    .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
-    .limit(1);
-
-  if (!config) {
-    return new Response("No LLM provider configured", { status: 400 });
-  }
-
-  // Decrypt API key if present
-  let apiKey = config.apiKey;
-  if (apiKey) {
-    const mk = await getMasterKey();
-    apiKey = decrypt(apiKey, mk);
-  }
-
-  // Resolve model
-  const modelId = requestModel || config.defaultModel || "gpt-4o";
-  const model = getModel(config.provider, modelId, {
-    apiKey: apiKey || undefined,
-    baseUrl: config.baseUrl || undefined,
-  });
-
-  // Create MCP client for filesystem tools
-  const mcpClient = createMCPClient(`./data/storage/${userId}`);
-  const tools = await mcpClient.listTools();
-
-  // Register a dynamic agent with the resolved model + tools
-  const agent = createChatAgent(model, tools);
-  mastra.addAgent(agent);
-
-  // Stream the response
-  const stream = await handleChatStream({
-    mastra,
-    agentId: "chat-agent",
-    params: {
-      ...body,
-      messages: body.messages,
-      memory: { thread: chatId, resource: userId },
-    },
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return createUIMessageStreamResponse({ stream: stream as any });
 }

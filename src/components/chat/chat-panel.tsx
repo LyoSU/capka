@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useMemo } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { MessageSquare } from "lucide-react";
+import { toast } from "sonner";
 
 import { Header } from "@/components/layout/header";
 import { ChatMessage } from "@/components/chat/message";
