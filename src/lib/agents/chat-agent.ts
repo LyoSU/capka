@@ -4,6 +4,9 @@ import { PostgresStore } from "@mastra/pg";
 import type { ToolAction } from "@mastra/core/tools";
 import { DATABASE_URL } from "@/lib/db";
 
+export const SYSTEM_PROMPT =
+  "You are a helpful personal AI assistant called AntiClaw. Be concise and direct. Confirm before executing actions with side effects.";
+
 const storage = new PostgresStore({
   id: "anticlaw-store",
   connectionString: DATABASE_URL,
@@ -27,8 +30,7 @@ export function createChatAgent(
   return new Agent({
     id: "chat-agent",
     name: "AntiClaw Assistant",
-    instructions:
-      "You are a helpful personal AI assistant. Be concise and direct. Confirm before executing actions with side effects.",
+    instructions: SYSTEM_PROMPT,
     model,
     tools,
     memory: chatAgentMemory,

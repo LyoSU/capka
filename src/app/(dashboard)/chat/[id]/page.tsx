@@ -19,7 +19,6 @@ export default async function ChatIdPage({
 
   const { id: chatId } = await params;
 
-  // Load user's active provider config to determine default model
   const [config] = await db
     .select()
     .from(providerConfigs)

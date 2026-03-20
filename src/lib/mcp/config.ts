@@ -15,3 +15,20 @@ export function createMCPClient(storagePath: string) {
     timeout: 30_000,
   });
 }
+
+/**
+ * Load MCP tools for a user. Returns tools and a disconnect function.
+ */
+export async function loadMCPTools(userId: string) {
+  const client = createMCPClient(`./data/storage/${userId}`);
+  let tools;
+  try {
+    tools = await client.listTools();
+  } catch {
+    tools = {};
+  }
+  return {
+    tools,
+    disconnect: () => client.disconnect().catch(() => {}),
+  };
+}

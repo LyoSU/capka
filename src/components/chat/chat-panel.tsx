@@ -6,8 +6,7 @@ import { DefaultChatTransport } from "ai";
 import { MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
-import { Header } from "@/components/layout/header";
-import { ChatMessage } from "@/components/chat/message";
+import { ChatMessage, ThinkingIndicator } from "@/components/chat/message";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ModelSelector } from "@/components/chat/model-selector";
 
@@ -15,6 +14,10 @@ interface ChatPanelProps {
   chatId: string;
   providers: Record<string, string[]>;
   defaultModel: string;
+}
+
+function fetchMessages(chatId: string) {
+  return fetch(`/api/chat?chatId=${chatId}`).then((r) => (r.ok ? r.json() : []));
 }
 
 export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
@@ -41,11 +44,8 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
 
   // Load chat history from DB on mount
   useEffect(() => {
-    fetch(`/api/chat?chatId=${chatId}`)
-      .then((r) => r.ok ? r.json() : [])
-      .then((history) => {
-        if (history.length > 0) setMessages(history);
-      })
+    fetchMessages(chatId)
+      .then((history) => { if (history.length > 0) setMessages(history); })
       .catch(() => {});
   }, [chatId, setMessages]);
 
@@ -54,6 +54,38 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
       toast.error(error.message || "Chat error");
     }
   }, [error]);
+
+  // SSE: listen for real-time events (e.g. Telegram messages)
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      es = new EventSource("/api/events");
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "new_message" && data.chatId === chatId) {
+            // Refetch messages and title
+            fetchMessages(chatId)
+              .then((msgs) => { if (msgs?.length) setMessages(msgs); })
+              .catch(() => {});
+          }
+        } catch { /* ignore parse errors */ }
+      };
+      es.onerror = () => {
+        es?.close();
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, 5000);
+      };
+    };
+
+    connect();
+    return () => {
+      clearTimeout(reconnectTimer);
+      es?.close();
+    };
+  }, [chatId, setMessages]);
 
   const isLoading = status === "streaming" || status === "submitted";
   const [input, setInput] = useState("");
@@ -77,35 +109,64 @@ export function ChatPanel({ chatId, providers, defaultModel }: ChatPanelProps) {
     }
   };
 
+  const isEmpty = messages.length === 0;
+
   return (
     <div className="flex h-full flex-col">
-      <Header title="Chat">
-        <ModelSelector providers={providers} value={model} onChange={setModel} />
-      </Header>
-
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-            <MessageSquare className="h-8 w-8" />
-            <p className="text-sm">Start a conversation</p>
+      {isEmpty ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4">
+          <MessageSquare className="h-8 w-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Start a conversation</p>
+          <div className="w-full max-w-xl px-4">
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSubmit}
+              onStop={stop}
+              isLoading={isLoading}
+            />
           </div>
-        ) : (
-          <div className="divide-y">
-            {messages.map((message) => (
-              <ChatMessage key={message.id} message={message} />
-            ))}
-            {/* Streaming indicator handled by message component showing "..." for empty text */}
+        </div>
+      ) : (
+        <div className="relative flex flex-1 flex-col overflow-hidden">
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center px-4 py-2">
+            <div className="pointer-events-auto inline-flex rounded-full border bg-background/80 px-1 shadow-sm backdrop-blur-sm">
+              <ModelSelector providers={providers} value={model} onChange={setModel} />
+            </div>
           </div>
-        )}
-      </div>
 
-      <ChatInput
-        value={input}
-        onChange={setInput}
-        onSubmit={handleSubmit}
-        onStop={stop}
-        isLoading={isLoading}
-      />
+          <div ref={scrollRef} className="flex-1 overflow-y-auto pt-12 pb-24">
+            <div className="mx-auto max-w-3xl">
+              {messages.map((message, i) => (
+                <ChatMessage
+                  key={message.id}
+                  message={message}
+                  isStreaming={
+                    isLoading &&
+                    i === messages.length - 1 &&
+                    message.role === "assistant"
+                  }
+                />
+              ))}
+              {isLoading && messages.length > 0 && messages[messages.length - 1].role === "user" && (
+                <div className="px-4 py-3">
+                  <ThinkingIndicator />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="absolute inset-x-0 bottom-0 z-10">
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSubmit}
+              onStop={stop}
+              isLoading={isLoading}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

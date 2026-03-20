@@ -1,15 +1,15 @@
-import { streamText, convertToModelMessages } from "ai";
-import { eq, and, asc } from "drizzle-orm";
+import { streamText, convertToModelMessages, type ToolSet } from "ai";
+import { eq, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { providerConfigs, chats, messages } from "@/lib/db/schema";
-import { getMasterKey } from "@/lib/settings";
-import { decrypt } from "@/lib/crypto";
-import { getModel } from "@/lib/providers";
+import { chats, messages } from "@/lib/db/schema";
+import { resolveUserModel } from "@/lib/providers/resolve";
+import { loadMCPTools } from "@/lib/mcp/config";
+import { SYSTEM_PROMPT } from "@/lib/agents/chat-agent";
 
 export async function POST(req: Request) {
   try {
@@ -22,73 +22,22 @@ export async function POST(req: Request) {
     const userId = session.user.id;
     const body = await req.json();
     const { chatId: requestChatId, model: requestModel } = body;
-
-    // Ensure or create chat
     const chatId = requestChatId || nanoid();
-    if (!requestChatId) {
-      await db.insert(chats).values({
-        id: chatId,
-        userId,
-        title: "New Chat",
-        model: requestModel,
-      });
+
+    // Parallel: check chat existence, resolve model, load MCP tools
+    const [existingChat, model, { tools, disconnect }] = await Promise.all([
+      db.select().from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
+      resolveUserModel(userId, requestModel).catch((e: Error) =>
+        Promise.reject(Response.json({ error: e.message }, { status: 400 })),
+      ),
+      loadMCPTools(userId),
+    ]);
+
+    if (!existingChat) {
+      await db.insert(chats).values({ id: chatId, userId, title: "New Chat", model: requestModel });
     }
 
-    // Load active provider config
-    const [config] = await db
-      .select()
-      .from(providerConfigs)
-      .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
-      .limit(1);
-
-    if (!config) {
-      return Response.json(
-        { error: "No LLM provider configured. Go to Settings → Connections to add one." },
-        { status: 400 },
-      );
-    }
-
-    // Decrypt API key
-    let apiKey = config.apiKey;
-    if (apiKey) {
-      const mk = await getMasterKey();
-      apiKey = decrypt(apiKey, mk);
-    }
-
-    // Resolve model: client selection > user's DB default > provider's first model
-    let provider = config.provider;
-    let modelId = config.defaultModel || "";
-
-    if (requestModel && requestModel.includes(":")) {
-      const [p, ...rest] = requestModel.split(":");
-      provider = p;
-      modelId = rest.join(":");
-    } else if (requestModel) {
-      modelId = requestModel;
-    }
-
-    if (!modelId) {
-      return Response.json(
-        { error: "No default model configured. Go to Settings → Connections to set one." },
-        { status: 400 },
-      );
-    }
-
-    let model;
-    try {
-      model = getModel(provider, modelId, {
-        apiKey: apiKey || undefined,
-        baseUrl: config.baseUrl || undefined,
-      });
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      return Response.json(
-        { error: `Failed to initialize model "${provider}/${modelId}": ${msg}` },
-        { status: 400 },
-      );
-    }
-
-    // Save the latest user message to DB
+    // Save the latest user message
     const lastUserMsg = body.messages?.filter((m: { role: string }) => m.role === "user").pop();
     if (lastUserMsg) {
       const text = lastUserMsg.parts
@@ -105,30 +54,22 @@ export async function POST(req: Request) {
           platform: "web",
         });
 
-        // Auto-generate chat title from first message
-        const [chat] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
-        if (chat?.title === "New Chat") {
-          await db.update(chats).set({
-            title: text.slice(0, 100),
-            updatedAt: new Date(),
-          }).where(eq(chats.id, chatId));
-        } else {
-          await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
-        }
+        // Auto-generate title from first message, or just bump updatedAt
+        const isNewChat = !existingChat || existingChat.title === "New Chat";
+        await db.update(chats).set({
+          ...(isNewChat ? { title: text.slice(0, 100) } : {}),
+          updatedAt: new Date(),
+        }).where(eq(chats.id, chatId));
       }
     }
 
-    // Stream via AI SDK
     const result = streamText({
       model,
-      system:
-        "You are a helpful personal AI assistant called AntiClaw. Be concise and direct. Confirm before executing actions with side effects.",
+      tools: tools as ToolSet,
+      system: SYSTEM_PROMPT,
       messages: await convertToModelMessages(body.messages),
-      onError: (error) => {
-        console.error("[chat] Stream error:", error);
-      },
+      onError: (error) => console.error("[chat] Stream error:", error),
       async onFinish({ text }) {
-        // Save assistant response to DB
         if (text) {
           await db.insert(messages).values({
             id: nanoid(),
@@ -138,11 +79,14 @@ export async function POST(req: Request) {
             platform: "web",
           });
         }
+        await disconnect();
       },
     });
 
     return result.toUIMessageStreamResponse();
   } catch (e: unknown) {
+    // If it's already a Response (from resolveUserModel rejection), return it
+    if (e instanceof Response) return e;
     console.error("[chat] Unexpected error:", e);
     const msg = e instanceof Error ? e.message : "An unexpected error occurred";
     return Response.json({ error: msg }, { status: 500 });
@@ -165,12 +109,14 @@ export async function GET(req: Request) {
     .orderBy(asc(messages.createdAt))
     .limit(100);
 
-  // Convert to UIMessage format for useChat
   const uiMessages = rows.map((m) => ({
     id: m.id,
     role: m.role,
     parts: [{ type: "text" as const, text: m.content }],
-    createdAt: m.createdAt,
+    metadata: {
+      createdAt: m.createdAt?.toISOString() ?? null,
+      platform: m.platform ?? "web",
+    },
   }));
 
   return NextResponse.json(uiMessages);

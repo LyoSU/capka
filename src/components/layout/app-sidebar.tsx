@@ -16,6 +16,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
@@ -70,17 +71,23 @@ export function AppSidebar() {
       <SidebarHeader className="p-3">
         <div className="flex items-center justify-between">
           <span className="text-base font-medium">AntiClaw</span>
-          <Link
-            href="/chat"
-            className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-          >
-            <Plus className="h-4 w-4" />
-            <span>New</span>
-          </Link>
+          <SidebarTrigger />
         </div>
       </SidebarHeader>
 
       <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton render={<Link href="/chat" />}>
+                  <Plus className="h-4 w-4" />
+                  <span>New Chat</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
         {groups.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
