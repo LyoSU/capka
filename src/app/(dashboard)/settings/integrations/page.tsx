@@ -56,21 +56,18 @@ export default function IntegrationsPage() {
     }
     setTokenSaving(true);
     try {
-      const res = await fetch("/api/settings", {
-        method: "PUT",
+      const res = await fetch("/api/settings/telegram", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          key: "telegram_bot_token",
-          value: botToken.trim(),
-          encrypted: true,
-        }),
+        body: JSON.stringify({ botToken: botToken.trim() }),
       });
+      const data = await res.json();
       if (res.ok) {
-        toast.success("Bot token saved");
+        toast.success(`Bot @${data.botUsername} connected! Webhook registered.`);
         setHasToken(true);
         setBotToken("");
       } else {
-        toast.error("Failed to save token");
+        toast.error(data.error || "Failed to save token");
       }
     } finally {
       setTokenSaving(false);
