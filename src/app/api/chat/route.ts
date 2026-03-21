@@ -1,8 +1,6 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { eq, and, asc, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { NextResponse } from "next/server";
-
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages, projects, memories } from "@/lib/db/schema";
@@ -207,5 +205,5 @@ export async function GET(req: Request) {
     };
   });
 
-  return NextResponse.json(uiMessages);
+  return Response.json(uiMessages);
 }

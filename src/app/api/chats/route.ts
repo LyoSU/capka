@@ -1,17 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
 import { eq, desc, and, ilike, isNull, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   const { userId } = await requireSession();
-  const params = req.nextUrl.searchParams;
-  const search = params.get("search");
-  const archived = params.get("archived");
-  const pinned = params.get("pinned");
-  const projectId = params.get("projectId");
+  const { searchParams } = new URL(req.url);
+  const search = searchParams.get("search");
+  const archived = searchParams.get("archived");
+  const pinned = searchParams.get("pinned");
+  const projectId = searchParams.get("projectId");
 
   const conditions: SQL[] = [eq(chats.userId, userId)];
 
@@ -37,20 +36,21 @@ export async function GET(req: NextRequest) {
     .orderBy(desc(chats.pinned), desc(chats.updatedAt))
     .limit(100);
 
-  return NextResponse.json(rows);
+  return Response.json(rows);
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const { userId } = await requireSession();
   const body = await req.json();
 
+  const id = body.id || nanoid();
   await db.insert(chats).values({
-    id: body.id || nanoid(),
+    id,
     userId,
     title: body.title || "New Chat",
     model: body.model,
     projectId: body.projectId,
   });
 
-  return NextResponse.json({ id: body.id }, { status: 201 });
+  return Response.json({ id }, { status: 201 });
 }

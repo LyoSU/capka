@@ -117,16 +117,18 @@ export default function ProjectsPage() {
                   </CardDescription>
                 )}
               </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  {project.defaultModel && (
-                    <span className="truncate max-w-[140px]">{project.defaultModel}</span>
-                  )}
-                  {project.systemPrompt && (
-                    <span>Custom prompt</span>
-                  )}
-                </div>
-              </CardContent>
+              {(project.defaultModel || project.systemPrompt) && (
+                <CardContent>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    {project.defaultModel && (
+                      <span className="truncate max-w-[140px]">{project.defaultModel}</span>
+                    )}
+                    {project.systemPrompt && (
+                      <span>Custom prompt</span>
+                    )}
+                  </div>
+                </CardContent>
+              )}
               <CardFooter className="justify-between">
                 <span className="text-xs text-muted-foreground">
                   {formatDate(project.updatedAt)}

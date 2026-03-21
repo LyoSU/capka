@@ -47,17 +47,17 @@ export function ProjectSelector({ value, onChange }: ProjectSelectorProps) {
           <ChevronDown className="ml-auto h-3 w-3 opacity-50" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuItem onSelect={() => onChange(null)}>
+          <DropdownMenuItem onClick={() => onChange(null)}>
             All Chats
           </DropdownMenuItem>
           {projects.length > 0 && <DropdownMenuSeparator />}
           {projects.map((p) => (
-            <DropdownMenuItem key={p.id} onSelect={() => onChange(p.id)}>
+            <DropdownMenuItem key={p.id} onClick={() => onChange(p.id)}>
               {p.name}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setDialogOpen(true)}>
+          <DropdownMenuItem onClick={() => setDialogOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
             New Project
           </DropdownMenuItem>

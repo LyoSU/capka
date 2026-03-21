@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { readdir, stat, unlink, mkdir } from "fs/promises";
 import { join } from "path";
 import { requireSession } from "@/lib/auth";
@@ -38,9 +37,9 @@ export async function GET(req: Request) {
       return a.name.localeCompare(b.name);
     });
 
-    return NextResponse.json(items);
+    return Response.json(items);
   } catch {
-    return NextResponse.json([]);
+    return Response.json([]);
   }
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Pin,
@@ -49,14 +49,6 @@ export function ChatContextMenu({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
-  const renameRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (renaming) {
-      // Small delay to ensure input is rendered
-      setTimeout(() => renameRef.current?.focus(), 50);
-    }
-  }, [renaming]);
 
   async function patchChat(data: Record<string, unknown>) {
     await fetch(`/api/chats/${chat.id}`, {
@@ -96,7 +88,6 @@ export function ChatContextMenu({
         className="flex-1 px-1"
       >
         <Input
-          ref={renameRef}
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           onBlur={submitRename}
@@ -104,6 +95,7 @@ export function ChatContextMenu({
             if (e.key === "Escape") setRenaming(false);
           }}
           className="h-6 text-sm px-1.5"
+          autoFocus
         />
       </form>
     );
@@ -120,12 +112,12 @@ export function ChatContextMenu({
             <MoreHorizontal className="h-4 w-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="start" sideOffset={8}>
-            <DropdownMenuItem onSelect={startRename}>
+            <DropdownMenuItem onClick={startRename}>
               <Pencil className="h-4 w-4" />
               Rename
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => patchChat({ pinned: !chat.pinned })}
+              onClick={() => patchChat({ pinned: !chat.pinned })}
             >
               {chat.pinned ? (
                 <>
@@ -140,13 +132,13 @@ export function ChatContextMenu({
               )}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => patchChat({ archived: !chat.archived })}
+              onClick={() => patchChat({ archived: !chat.archived })}
             >
               <Archive className="h-4 w-4" />
               {chat.archived ? "Unarchive" : "Archive"}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => {
+              onClick={() => {
                 window.open(`/api/chats/${chat.id}/export?format=markdown`, "_blank");
               }}
             >
@@ -156,7 +148,7 @@ export function ChatContextMenu({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => setDeleteOpen(true)}
+              onClick={() => setDeleteOpen(true)}
             >
               <Trash2 className="h-4 w-4" />
               Delete

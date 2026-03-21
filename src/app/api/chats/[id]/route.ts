@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -14,12 +13,12 @@ async function findChat(id: string, userId: string) {
 }
 
 export async function PATCH(
-  req: NextRequest,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { userId } = await requireSession();
   const { id } = await params;
-  if (!await findChat(id, userId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
   const allowed = ["title", "pinned", "archived", "projectId"] as const;
@@ -29,17 +28,17 @@ export async function PATCH(
   }
 
   await db.update(chats).set(updates).where(eq(chats.id, id));
-  return NextResponse.json({ ok: true });
+  return Response.json({ ok: true });
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { userId } = await requireSession();
   const { id } = await params;
-  if (!await findChat(id, userId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
 
   await db.delete(chats).where(eq(chats.id, id));
-  return NextResponse.json({ ok: true });
+  return new Response(null, { status: 204 });
 }

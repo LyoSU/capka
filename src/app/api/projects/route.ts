@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireSession } from "@/lib/auth";
@@ -13,7 +12,7 @@ export async function GET() {
     .where(eq(projects.userId, userId))
     .orderBy(desc(projects.updatedAt));
 
-  return NextResponse.json(rows);
+  return Response.json(rows);
 }
 
 export async function POST(req: Request) {
@@ -38,5 +37,5 @@ export async function POST(req: Request) {
     })
     .returning();
 
-  return NextResponse.json(project, { status: 201 });
+  return Response.json(project, { status: 201 });
 }

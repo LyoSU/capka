@@ -29,7 +29,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
     [chatId, projectId],
   );
 
-  const { messages, setMessages, sendMessage, status, stop, error } = useChat({
+  const { messages, setMessages, sendMessage, status, stop } = useChat({
     id: chatId,
     transport,
     onError: (err) => {
@@ -44,8 +44,6 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
       .then((history) => { if (history.length > 0) setMessages(history); })
       .catch(() => {});
   }, [chatId, setMessages]);
-
-  // Error already handled by onError callback — no duplicate toast
 
   // SSE: listen for real-time events (e.g. Telegram messages)
   useEffect(() => {
@@ -92,12 +90,9 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
     const text = input.trim();
     if (!text) return;
     setInput("");
-    try {
-      await sendMessage({ text }, { body: { model } });
-    } catch (err) {
-      console.error("[chat] sendMessage error:", err);
-      toast.error("Failed to send message");
-    }
+    // onError callback handles stream errors via toast — catch only silences
+    // unhandled rejections from sendMessage itself (e.g. network failure before stream)
+    await sendMessage({ text }, { body: { model } }).catch(() => {});
   };
 
   const isEmpty = messages.length === 0;

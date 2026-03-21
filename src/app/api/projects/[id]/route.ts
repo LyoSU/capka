@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -21,7 +20,7 @@ export async function GET(
   const { id } = await params;
   const project = await findProject(id, userId);
   if (!project) return Response.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(project);
+  return Response.json(project);
 }
 
 export async function PUT(
@@ -47,7 +46,7 @@ export async function PUT(
     .where(eq(projects.id, id))
     .returning();
 
-  return NextResponse.json(updated);
+  return Response.json(updated);
 }
 
 export async function DELETE(

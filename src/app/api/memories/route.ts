@@ -3,7 +3,6 @@ import { nanoid } from "nanoid";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memories } from "@/lib/db/schema";
-
 import { MEMORY_TYPES } from "@/lib/constants";
 
 export async function GET(req: Request) {

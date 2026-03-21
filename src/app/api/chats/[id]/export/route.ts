@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { eq, and, asc } from "drizzle-orm";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -6,7 +5,7 @@ import { chats, messages } from "@/lib/db/schema";
 import { sanitizeFilename } from "@/lib/files";
 
 export async function GET(
-  req: NextRequest,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { userId } = await requireSession();
@@ -17,7 +16,7 @@ export async function GET(
     .from(chats)
     .where(and(eq(chats.id, id), eq(chats.userId, userId)))
     .limit(1);
-  if (!chat) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
 
   const rows = await db
     .select()
@@ -26,7 +25,8 @@ export async function GET(
     .orderBy(asc(messages.createdAt))
     .limit(5000);
 
-  const format = req.nextUrl.searchParams.get("format") || "json";
+  const { searchParams } = new URL(req.url);
+  const format = searchParams.get("format") || "json";
   const safeName = sanitizeFilename(chat.title || "chat");
 
   if (format === "markdown") {
@@ -46,7 +46,7 @@ export async function GET(
     });
   }
 
-  return NextResponse.json({
+  return Response.json({
     chat: { id: chat.id, title: chat.title, model: chat.model, createdAt: chat.createdAt, updatedAt: chat.updatedAt },
     messages: rows.map((m) => ({ id: m.id, role: m.role, content: m.content, platform: m.platform, metadata: m.metadata, createdAt: m.createdAt })),
   }, {
