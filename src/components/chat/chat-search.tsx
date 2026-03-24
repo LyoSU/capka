@@ -25,15 +25,17 @@ export function ChatSearch({
   }, []);
 
   return (
-    <div className="relative px-3 pb-1">
-      <Search className="absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-      <Input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Search chats..."
-        className="pl-7 h-7 text-sm"
-      />
+    <div className="px-3 pb-1">
+      <div className="relative">
+        <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        <Input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Search chats..."
+          className="pl-7 h-7 text-sm"
+        />
+      </div>
     </div>
   );
 }

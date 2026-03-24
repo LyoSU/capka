@@ -9,6 +9,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "AntiClaw",
   description: "Personal AI Platform",
+  icons: {
+    icon: [
+      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({
