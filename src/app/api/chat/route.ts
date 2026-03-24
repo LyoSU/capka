@@ -6,7 +6,9 @@ import { db } from "@/lib/db";
 import { chats, messages, projects, memories } from "@/lib/db/schema";
 import { resolveUserModel } from "@/lib/providers/resolve";
 import { loadMCPTools } from "@/lib/mcp/config";
-import { SYSTEM_PROMPT } from "@/lib/agents/chat-agent";
+import { loadSandboxTools } from "@/lib/sandbox/tools";
+import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
+import { getSetting } from "@/lib/settings";
 import { extractMemories } from "@/lib/memory/extract";
 
 export async function POST(req: Request) {
@@ -18,13 +20,27 @@ export async function POST(req: Request) {
     const { chatId: requestChatId, model: requestModel, projectId } = body;
     const chatId = requestChatId || nanoid();
 
-    // Parallel: check chat existence, resolve model, load MCP tools, load project, load memories
+    // Parallel: check chat existence, resolve model, load tools, load project, load memories
+    // Sandbox enabled by default — only disable explicitly
+    const sandboxEnabled = (await getSetting("sandbox_enabled")) !== "false";
+
+    async function loadTools() {
+      if (sandboxEnabled) {
+        try {
+          return await loadSandboxTools(userId, chatId);
+        } catch {
+          // Sandbox controller unavailable — fallback to MCP
+        }
+      }
+      return loadMCPTools(userId);
+    }
+
     const [chatRow, model, mcp, project, userMemories] = await Promise.all([
       requestChatId
         ? db.select({ id: chats.id, userId: chats.userId, title: chats.title }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
         : undefined,
       resolveUserModel(userId, requestModel),
-      loadMCPTools(userId),
+      loadTools(),
       projectId
         ? db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
         : Promise.resolve(undefined),
@@ -76,8 +92,9 @@ export async function POST(req: Request) {
       }
     }
 
-    // Build system prompt: base + project instructions + user memories
-    let systemPrompt = SYSTEM_PROMPT;
+    // Build system prompt: base + sandbox + project + memories
+    const hasSandbox = "sandbox_exec" in tools;
+    let systemPrompt = SYSTEM_PROMPT + (hasSandbox ? `\n\n${SANDBOX_PROMPT}` : "");
     if (project?.systemPrompt) {
       systemPrompt += `\n\n--- Project Instructions ---\n${project.systemPrompt}`;
     }

@@ -1,0 +1,30 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV NODE_VERSION=22
+
+# System tools + LibreOffice for office docs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash curl wget git jq ripgrep tree unzip ca-certificates \
+    python3 python3-pip python3-venv \
+    libreoffice-calc libreoffice-writer libreoffice-impress --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Playwright + Chromium (for browser automation)
+RUN npx playwright install --with-deps chromium 2>/dev/null || true
+
+# Python common packages
+RUN pip3 install --no-cache-dir --break-system-packages \
+    requests beautifulsoup4 pandas numpy matplotlib
+
+# Non-root user
+RUN useradd -m -u 1000 -s /bin/bash sandbox
+USER sandbox
+WORKDIR /workspace
+
+CMD ["sleep", "infinity"]
