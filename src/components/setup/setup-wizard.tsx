@@ -96,7 +96,7 @@ export function SetupWizard() {
 
       setStep(1);
     } catch (err) {
-      toast.error("Something went wrong");
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -156,7 +156,7 @@ export function SetupWizard() {
 
       setStep(2);
     } catch (err) {
-      toast.error("Something went wrong");
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -165,20 +165,20 @@ export function SetupWizard() {
   async function handleFinish(skip: boolean) {
     setLoading(true);
     try {
-      // Save telegram token if provided
+      // Save telegram token + register webhook
       if (!skip && botToken) {
-        const res = await fetch("/api/settings", {
-          method: "PUT",
+        const res = await fetch("/api/settings/telegram", {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            key: "telegram_bot_token",
-            value: botToken,
-            encrypted: true,
-          }),
+          body: JSON.stringify({ botToken }),
         });
-        if (!res.ok) {
-          toast.error("Failed to save Telegram token");
+        const data = await res.json();
+        if (!res.ok && res.status !== 207) {
+          toast.error(data.error || "Failed to save Telegram token");
           return;
+        }
+        if (res.status === 207) {
+          toast.warning(data.error);
         }
       }
 
@@ -196,7 +196,7 @@ export function SetupWizard() {
 
       router.push("/chat");
     } catch (err) {
-      toast.error("Something went wrong");
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
