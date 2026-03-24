@@ -1,7 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Search, ChevronDown, Zap, Brain, Sparkles, X } from "lucide-react";
+import { useState, useEffect, useRef, useMemo, useCallback, type ComponentType } from "react";
+import { Search, ChevronDown, X, Sparkles } from "lucide-react";
+import OpenAI from "@lobehub/icons/es/OpenAI";
+import Anthropic from "@lobehub/icons/es/Anthropic";
+import Gemini from "@lobehub/icons/es/Gemini";
+import Meta from "@lobehub/icons/es/Meta";
+import Mistral from "@lobehub/icons/es/Mistral";
+import DeepSeek from "@lobehub/icons/es/DeepSeek";
+import XAI from "@lobehub/icons/es/XAI";
+import Qwen from "@lobehub/icons/es/Qwen";
+import Minimax from "@lobehub/icons/es/Minimax";
+import XiaomiMiMo from "@lobehub/icons/es/XiaomiMiMo";
+import Nvidia from "@lobehub/icons/es/Nvidia";
 import type { ModelInfo } from "@/app/api/models/route";
 
 interface ModelSelectorProps {
@@ -9,17 +20,20 @@ interface ModelSelectorProps {
   onChange: (value: string) => void;
 }
 
-const PROVIDER_META: Record<string, { label: string; icon: typeof Brain }> = {
-  openai: { label: "OpenAI", icon: Zap },
-  anthropic: { label: "Anthropic", icon: Brain },
-  google: { label: "Google", icon: Sparkles },
-  "meta-llama": { label: "Meta", icon: Zap },
-  mistralai: { label: "Mistral", icon: Sparkles },
-  deepseek: { label: "DeepSeek", icon: Brain },
-  "x-ai": { label: "xAI", icon: Zap },
-  xiaomi: { label: "Xiaomi", icon: Sparkles },
-  qwen: { label: "Qwen", icon: Sparkles },
-  minimax: { label: "MiniMax", icon: Brain },
+type IconComponent = ComponentType<{ size?: number; className?: string }>;
+
+const PROVIDER_META: Record<string, { label: string; icon: IconComponent }> = {
+  openai: { label: "OpenAI", icon: OpenAI },
+  anthropic: { label: "Anthropic", icon: Anthropic },
+  google: { label: "Google", icon: Gemini },
+  "meta-llama": { label: "Meta", icon: Meta },
+  mistralai: { label: "Mistral", icon: Mistral },
+  deepseek: { label: "DeepSeek", icon: DeepSeek },
+  "x-ai": { label: "xAI", icon: XAI },
+  qwen: { label: "Qwen", icon: Qwen },
+  minimax: { label: "MiniMax", icon: Minimax },
+  xiaomi: { label: "Xiaomi", icon: XiaomiMiMo },
+  nvidia: { label: "NVIDIA", icon: Nvidia },
 };
 
 function formatContext(ctx: number): string {
@@ -131,7 +145,7 @@ function ModelList({
           return (
             <div key={provider}>
               <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border/50">
-                <Icon className="h-3 w-3 text-muted-foreground" />
+                <Icon size={12} />
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   {meta?.label ?? provider}
                 </span>
