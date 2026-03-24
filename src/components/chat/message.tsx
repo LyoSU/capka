@@ -43,10 +43,14 @@ function formatValue(value: unknown): string {
 
   const obj = value as Record<string, unknown>;
 
-  // MCP format: { structuredContent: { content: "..." } }
+  // MCP format: { structuredContent: { content: "..." } } or { structuredContent: { ... } }
   if (obj.structuredContent && typeof obj.structuredContent === "object") {
     const sc = obj.structuredContent as Record<string, unknown>;
     if (typeof sc.content === "string" && sc.content.trim()) return sc.content;
+    if (typeof sc.text === "string" && sc.text.trim()) return sc.text;
+    // structuredContent without content/text — stringify the whole thing
+    const scStr = JSON.stringify(sc, null, 2);
+    if (scStr !== "{}") return scStr;
   }
   // MCP format: { content: [{ text: "...", type: "text" }] }
   if (Array.isArray(obj.content)) {
@@ -273,28 +277,37 @@ function ToolCard({ part }: { part: ToolPart }) {
       <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground/70">
         <Loader2 className="h-3 w-3 animate-spin" />
         <span className="text-xs">{activeLabel}</span>
+        {summary && <span className="truncate max-w-40 text-xs text-muted-foreground/40">{summary}</span>}
       </div>
     );
   }
 
-  // Error — show inline
+  // Error — expandable with real error text
   if (isError) {
     return (
-      <div className="my-1 flex items-center gap-2 py-0.5 text-destructive/70">
-        <AlertCircle className="h-3 w-3" />
-        <span className="text-xs">Something went wrong</span>
-      </div>
+      <Collapsible defaultOpen={!!part.errorText}>
+        <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-destructive/70 hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span className="flex-1 text-left">{label} failed</span>
+          <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="mt-1 mb-2 ml-5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive/80">
+            {part.errorText || "Unknown error"}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     );
   }
 
-  // Done — single line, expandable on click
+  // Done — full-width row, expandable
   return (
     <Collapsible defaultOpen={false}>
-      <CollapsibleTrigger className="my-0.5 flex items-center gap-1.5 py-0.5 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors group/tool [&[data-state=open]>.chevron]:rotate-90">
+      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
         <Icon className="h-3 w-3 shrink-0" />
         <span>{label}</span>
-        {summary && <span className="truncate max-w-48 opacity-60">{summary}</span>}
-        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-0 group-hover/tool:opacity-40 transition-all" />
+        {summary && <span className="flex-1 truncate text-muted-foreground/40">{summary}</span>}
+        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1 mb-2 ml-5 rounded-lg border border-border/40 bg-card p-3">
@@ -327,13 +340,19 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
     );
   }
 
-  // All done — collapsible summary
+  // All done — collapsible with inline tool names
+  const uniqueLabels = [...new Set(tools.map((t) => getToolDisplay(getToolName(t)).label))];
+  const summaryText = uniqueLabels.length <= 3
+    ? uniqueLabels.join(", ")
+    : `${uniqueLabels.slice(0, 2).join(", ")} +${uniqueLabels.length - 2} more`;
+
   return (
     <Collapsible defaultOpen={false}>
-      <CollapsibleTrigger className="my-0.5 flex items-center gap-1.5 py-0.5 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
+      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
         {hasError && <AlertCircle className="h-3 w-3 shrink-0 text-destructive/60" />}
-        <span>Used {tools.length} tools</span>
-        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-30 transition-transform" />
+        <span>{summaryText}</span>
+        <span className="text-muted-foreground/30">{tools.length} steps</span>
+        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-2 space-y-0">
