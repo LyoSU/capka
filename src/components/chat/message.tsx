@@ -331,11 +331,7 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
   return (
     <Collapsible defaultOpen={false}>
       <CollapsibleTrigger className="my-0.5 flex items-center gap-1.5 py-0.5 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
-        {hasError ? (
-          <AlertCircle className="h-3 w-3 shrink-0 text-destructive/60" />
-        ) : (
-          <span className="h-3 w-3 shrink-0 text-center text-[10px] leading-3 opacity-50">{tools.length}</span>
-        )}
+        {hasError && <AlertCircle className="h-3 w-3 shrink-0 text-destructive/60" />}
         <span>Used {tools.length} tools</span>
         <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-30 transition-transform" />
       </CollapsibleTrigger>
