@@ -32,6 +32,7 @@ function formatRelativeTime(dateStr: string): string {
 function formatValue(value: unknown): string {
   if (value === undefined || value === null) return "";
   if (typeof value === "string") {
+    if (!value.trim()) return "";
     try {
       return formatValue(JSON.parse(value));
     } catch {
@@ -45,20 +46,23 @@ function formatValue(value: unknown): string {
   // MCP format: { structuredContent: { content: "..." } }
   if (obj.structuredContent && typeof obj.structuredContent === "object") {
     const sc = obj.structuredContent as Record<string, unknown>;
-    if (sc.content) return String(sc.content);
+    if (typeof sc.content === "string" && sc.content.trim()) return sc.content;
   }
   // MCP format: { content: [{ text: "...", type: "text" }] }
   if (Array.isArray(obj.content)) {
     const texts = (obj.content as { text?: string; type?: string }[])
-      .filter((c) => c.type === "text" && c.text)
-      .map((c) => c.text);
+      .filter((c) => c.type === "text" && c.text?.trim())
+      .map((c) => c.text!);
     if (texts.length > 0) return texts.join("\n");
   }
   // Common fields
-  if (typeof obj.content === "string") return obj.content;
-  if (typeof obj.text === "string") return obj.text;
-  if (typeof obj.result === "string") return obj.result;
-  if (typeof obj.message === "string") return obj.message;
+  if (typeof obj.content === "string" && obj.content.trim()) return obj.content;
+  if (typeof obj.text === "string" && obj.text.trim()) return obj.text;
+  if (typeof obj.result === "string" && obj.result.trim()) return obj.result;
+  if (typeof obj.message === "string" && obj.message.trim()) return obj.message;
+
+  // If isError is false and everything is empty, it's just a success with no output
+  if (obj.isError === false) return "";
 
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
 }
