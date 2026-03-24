@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build",
+    "docker:prod": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "sandbox:build": "docker build -f Dockerfile.sandbox -t unclaw-sandbox ."
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

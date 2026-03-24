@@ -1,0 +1,13 @@
+services:
+  platform:
+    build: .
+    command: npm run dev
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=postgresql://unClaw:unClaw@postgres:5432/unClaw
+      - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
+      - CONTROLLER_SECRET=${CONTROLLER_SECRET:-unclaw-sandbox-secret}
