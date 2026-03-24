@@ -1,8 +1,8 @@
 import { requireSession } from "@/lib/auth";
 import { getSetting, setSetting } from "@/lib/settings";
 
-const READABLE_KEYS = ["platform_name", "telegram_bot_token"];
-const WRITABLE_KEYS = ["platform_name", "telegram_bot_token"];
+const READABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context"];
+const WRITABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context"];
 const BLOCKED_KEYS = ["auth_secret", "setup_complete", "admin_email"];
 
 export async function GET(req: Request) {

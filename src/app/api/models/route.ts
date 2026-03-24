@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
+import { getSetting } from "@/lib/settings";
+import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
 
 export interface ModelInfo {
   id: string;
@@ -41,6 +43,9 @@ export async function GET() {
       apiKey = decrypt(apiKey, mk);
     }
 
+    const minCtxSetting = await getSetting("model_min_context");
+    const minContext = minCtxSetting ? parseInt(minCtxSetting, 10) : DEFAULT_MODEL_MIN_CONTEXT;
+
     try {
       const res = await fetch("https://openrouter.ai/api/v1/models", {
         headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
@@ -58,8 +63,7 @@ export async function GET() {
         .filter((m: RawModel) => {
           if (!m.id || m.id.includes(":free") || m.id.includes(":extended")) return false;
           const prompt = parseFloat(m.pricing?.prompt || "0");
-          // Only paid models with decent context
-          return prompt > 0 && (m.context_length || 0) >= 8_000;
+          return prompt > 0 && (m.context_length || 0) >= minContext;
         })
         .map((m: RawModel) => ({
           id: m.id,

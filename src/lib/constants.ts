@@ -1,4 +1,7 @@
 export const MEMORY_TYPES = ["fact", "preference", "context"] as const;
+
+/** Default model list filter — overridable via settings UI */
+export const DEFAULT_MODEL_MIN_CONTEXT = 100_000;
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 
 /** Format bytes to human-readable string */
