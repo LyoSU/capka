@@ -16,9 +16,16 @@ const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 // Active sessions: sessionId -> { containerId, userId, lastActivity }
 const sessions = new Map();
 
+/** Sanitize IDs to prevent path traversal and Docker name injection */
+function sanitize(id) {
+  return String(id).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+}
+
 // --- Docker helpers ---
 
 async function createSandbox(sessionId, userId) {
+  sessionId = sanitize(sessionId);
+  userId = sanitize(userId);
   const workspacePath = `${DATA_ROOT}/${userId}/${sessionId}/sandbox`;
 
   const container = await docker.createContainer({
@@ -33,6 +40,7 @@ async function createSandbox(sessionId, userId) {
       CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
       NetworkMode: "none",
       Binds: [`${workspacePath}:/workspace`],
+      Init: true, // tini as PID 1 — proper signal handling + zombie reaping
     },
     User: "1000:1000",
     WorkingDir: "/workspace",
@@ -69,7 +77,19 @@ async function execInSandbox(containerId, command, timeout = EXEC_TIMEOUT) {
   });
 
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
+      // Actually kill the process on timeout
+      try {
+        const info = await execObj.inspect();
+        if (info.Running) {
+          // Kill the exec's PID inside the container
+          const killExec = await container.exec({
+            Cmd: ["kill", "-9", String(info.Pid)],
+            User: "root",
+          });
+          await killExec.start({});
+        }
+      } catch { /* best effort */ }
       reject(new Error(`Command timed out after ${timeout}ms`));
     }, timeout);
 

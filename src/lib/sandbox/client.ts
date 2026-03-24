@@ -14,6 +14,7 @@ async function request(path: string, method: string, body?: unknown) {
       Authorization: `Bearer ${CONTROLLER_SECRET}`,
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(method === "POST" ? 150_000 : 10_000), // exec can take up to 120s
   });
 
   const data = await res.json();
@@ -21,12 +22,24 @@ async function request(path: string, method: string, body?: unknown) {
   return data;
 }
 
+/** Sanitize ID for safe use in Docker names and paths */
+function sanitizeId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+}
+
 export async function createSession(sessionId: string, userId: string) {
-  return request("/sessions", "POST", { sessionId, userId });
+  return request("/sessions", "POST", {
+    sessionId: sanitizeId(sessionId),
+    userId: sanitizeId(userId),
+  });
+}
+
+export function getSanitizedSessionId(chatId: string): string {
+  return sanitizeId(chatId);
 }
 
 export async function execCommand(sessionId: string, command: string, timeout?: number) {
-  return request(`/sessions/${sessionId}/exec`, "POST", { command, timeout }) as Promise<{
+  return request(`/sessions/${sanitizeId(sessionId)}/exec`, "POST", { command, timeout }) as Promise<{
     stdout: string;
     stderr: string;
     exitCode: number;
@@ -34,7 +47,7 @@ export async function execCommand(sessionId: string, command: string, timeout?: 
 }
 
 export async function destroySession(sessionId: string) {
-  return request(`/sessions/${sessionId}`, "DELETE");
+  return request(`/sessions/${sanitizeId(sessionId)}`, "DELETE");
 }
 
 export async function listSessions() {
