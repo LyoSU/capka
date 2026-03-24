@@ -3,7 +3,6 @@
 import { useRef, useEffect, useState, useMemo } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
 import { ChatMessage, ThinkingIndicator } from "@/components/chat/message";
@@ -100,13 +99,16 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
   return (
     <div className="flex h-full flex-col">
       {isEmpty ? (
-        <div className="relative flex flex-1 flex-col items-center justify-center gap-4">
-          <div className="inline-flex rounded-full border bg-background/80 px-1 shadow-sm backdrop-blur-sm">
-            <ModelSelector value={model} onChange={setModel} />
-          </div>
-          <MessageSquare className="h-8 w-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Start a conversation</p>
-          <div className="w-full max-w-xl px-4">
+        <div className="relative flex flex-1 flex-col items-center justify-center px-4">
+          <div className="w-full max-w-2xl space-y-8">
+            <div className="text-center space-y-3">
+              <h1 className="text-4xl font-medium tracking-tight text-foreground/85">
+                What can I help with?
+              </h1>
+              <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
+                <ModelSelector value={model} onChange={setModel} />
+              </div>
+            </div>
             <ChatInput
               value={input}
               onChange={setInput}
@@ -118,8 +120,8 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
         </div>
       ) : (
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center px-4 py-2">
-            <div className="inline-flex rounded-full border bg-background/80 px-1 shadow-sm backdrop-blur-sm">
+          <div className="flex items-center border-b px-4 py-2">
+            <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
               <ModelSelector value={model} onChange={setModel} />
             </div>
           </div>
@@ -145,7 +147,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
             </div>
           </div>
 
-          <div className="absolute inset-x-0 bottom-0">
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
             <ChatInput
               value={input}
               onChange={setInput}

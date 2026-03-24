@@ -104,7 +104,7 @@ export default function IntegrationsPage() {
       <div>
         <h2 className="text-base font-medium">Integrations</h2>
         <p className="text-sm text-muted-foreground">
-          Connect external services to AntiClaw.
+          Connect external services to unClaw.
         </p>
       </div>
       <Separator />
@@ -152,7 +152,7 @@ export default function IntegrationsPage() {
         <div>
           <h3 className="text-sm font-medium">Link Telegram Account</h3>
           <p className="text-sm text-muted-foreground">
-            Connect your Telegram account to chat with AntiClaw from Telegram.
+            Connect your Telegram account to chat with unClaw from Telegram.
           </p>
         </div>
 

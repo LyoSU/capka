@@ -121,7 +121,7 @@ function ThinkingIndicator() {
       {Array.from({ length: 9 }).map((_, i) => (
         <div
           key={i}
-          className="h-1.5 w-1.5 rounded-full"
+          className="h-1.5 w-1.5 rounded-full bg-foreground/60"
           style={{ animation: `dot-chase 1.6s ease-in-out ${order[i] * 0.15}s infinite` }}
         />
       ))}
@@ -276,7 +276,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
     return (
       <div className="group/msg flex justify-end px-4 py-3">
         <div className="max-w-[70%]">
-          <div className="inline-block rounded-2xl bg-muted px-4 py-2 text-sm">
+          <div className="inline-block rounded-2xl bg-primary text-primary-foreground px-4 py-2.5 text-sm">
             {text || "..."}
           </div>
           <div className="mt-1 flex justify-end">

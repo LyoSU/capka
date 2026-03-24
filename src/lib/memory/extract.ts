@@ -40,7 +40,8 @@ export async function extractMemories(
     const candidates = extracted
       .split("\n")
       .map((l) => l.trim())
-      .filter((l) => l.length > 5 && l.length < 200);
+      .filter((l) => l.length > 5 && l.length < 200)
+      .slice(0, 10);
 
     // Deduplicate against existing memories
     const existingLower = existingMemories.map((m) => m.toLowerCase());

@@ -7,7 +7,7 @@ import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AntiClaw",
+  title: "unClaw",
   description: "Personal AI Platform",
   icons: {
     icon: [
@@ -31,9 +31,11 @@ export default function RootLayout({
     >
       <head>
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#0a0a0a" />
+        <meta name="theme-color" content="#f0ede8" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#1f1e1d" media="(prefers-color-scheme: dark)" />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem("theme");var d=t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches);if(d)document.documentElement.classList.add("dark")}catch(e){}})()` }} />
       </head>
-      <body className="font-sans antialiased text-sm">
+      <body className="font-sans antialiased">
         <Providers>
           {children}
           <Toaster />

@@ -99,7 +99,7 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-3">
         <div className="flex items-center justify-between">
-          <span className="text-base font-medium">AntiClaw</span>
+          <span className="text-base font-medium">unClaw</span>
           <SidebarTrigger />
         </div>
       </SidebarHeader>
@@ -186,8 +186,15 @@ export function AppSidebar() {
         ))}
 
         {chats.length === 0 && (
-          <div className="px-4 py-6 text-center text-xs text-muted-foreground">
-            {search ? "No chats found" : "No chats yet"}
+          <div className="flex flex-col items-center px-4 py-10 text-center">
+            <div className="mb-3 grid grid-cols-3 gap-1 opacity-20">
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div key={i} className="h-2 w-2 rounded-sm bg-foreground" />
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {debouncedSearch ? "No chats found" : "Start a new chat to get going"}
+            </p>
           </div>
         )}
       </SidebarContent>

@@ -45,7 +45,7 @@ export default function LoginPage() {
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
           <CardDescription>
-            Enter your credentials to access AntiClaw.
+            Enter your credentials to access unClaw.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -27,7 +27,6 @@ function applyTheme(theme: Theme) {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("system");
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("theme") as Theme | null;
@@ -37,7 +36,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
     } else {
       applyTheme("system");
     }
-    setMounted(true);
 
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
@@ -54,8 +52,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
     localStorage.setItem("theme", t);
     applyTheme(t);
   }
-
-  if (!mounted) return null;
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>

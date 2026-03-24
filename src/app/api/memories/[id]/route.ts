@@ -31,7 +31,7 @@ export async function PUT(
     return Response.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  await db.update(memories).set(updates).where(eq(memories.id, id));
+  await db.update(memories).set(updates).where(and(eq(memories.id, id), eq(memories.userId, userId)));
   return Response.json({ ...existing, ...updates });
 }
 
@@ -44,6 +44,6 @@ export async function DELETE(
   const existing = await findMemory(id, userId);
   if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
 
-  await db.delete(memories).where(eq(memories.id, id));
+  await db.delete(memories).where(and(eq(memories.id, id), eq(memories.userId, userId)));
   return new Response(null, { status: 204 });
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "anticlaw-v1";
+const CACHE_NAME = "unClaw-v1";
 
 self.addEventListener("install", () => {
   self.skipWaiting();

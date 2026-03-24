@@ -17,7 +17,7 @@ export async function getBot(): Promise<Bot | null> {
 
   _bot.command("start", async (ctx) => {
     await ctx.reply(
-      "Welcome to AntiClaw! Use /link CODE to connect your account.",
+      "Welcome to unClaw! Use /link CODE to connect your account.",
     );
   });
 

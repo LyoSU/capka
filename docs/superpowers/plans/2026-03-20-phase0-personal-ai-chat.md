@@ -61,14 +61,14 @@ Task 3 (auth) ──┐    Task 5 (chat backend)      Task 4 (layout+theme)
 - [ ] **Step 1: Initialize Next.js project**
 
 ```bash
-cd /Users/ly/dev/anticlaw
+cd /Users/ly/dev/unClaw
 npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias "@/*" --turbopack --no-git
 ```
 
 - [ ] **Step 2: Initialize git repository**
 
 ```bash
-cd /Users/ly/dev/anticlaw
+cd /Users/ly/dev/unClaw
 git init
 ```
 
@@ -209,7 +209,7 @@ import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AntiClaw",
+  title: "unClaw",
   description: "Personal AI Platform",
 };
 
@@ -273,7 +273,7 @@ data/
 ```
 # No .env required! All config is done through the web UI.
 # Only set DATABASE_URL if NOT using docker-compose (which auto-configures it).
-# DATABASE_URL=postgresql://anticlaw:anticlaw@localhost:5432/anticlaw
+# DATABASE_URL=postgresql://unClaw:unClaw@localhost:5432/unClaw
 ```
 
 - [ ] **Step 11: Verify build**
@@ -314,15 +314,15 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: anticlaw
-      POSTGRES_PASSWORD: anticlaw
-      POSTGRES_DB: anticlaw
+      POSTGRES_USER: unClaw
+      POSTGRES_PASSWORD: unClaw
+      POSTGRES_DB: unClaw
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U anticlaw"]
+      test: ["CMD-SHELL", "pg_isready -U unClaw"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -351,7 +351,7 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL || "postgresql://anticlaw:anticlaw@localhost:5432/anticlaw",
+    url: process.env.DATABASE_URL || "postgresql://unClaw:unClaw@localhost:5432/unClaw",
   },
 });
 ```
@@ -526,7 +526,7 @@ import * as schema from "./schema";
 
 const connectionString =
   process.env.DATABASE_URL ||
-  "postgresql://anticlaw:anticlaw@localhost:5432/anticlaw";
+  "postgresql://unClaw:unClaw@localhost:5432/unClaw";
 
 export const db = drizzle(connectionString, { schema });
 ```
@@ -902,7 +902,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center">
       <div className="w-full max-w-sm space-y-6 px-4">
         <div className="space-y-1 text-center">
-          <h1 className="text-xl font-semibold">AntiClaw</h1>
+          <h1 className="text-xl font-semibold">unClaw</h1>
           <p className="text-muted-foreground">Sign in to your account</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -1023,7 +1023,7 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="p-3">
-        <span className="font-medium">AntiClaw</span>
+        <span className="font-medium">unClaw</span>
         <Button variant="outline" size="sm" className="w-full mt-2" asChild>
           <Link href="/chat">
             <Plus className="h-4 w-4 mr-1.5" />
@@ -1207,7 +1207,7 @@ import { MCPClient } from "@mastra/mcp";
 
 export function createMCPClient(userStoragePath: string) {
   return new MCPClient({
-    id: "anticlaw-mcp",
+    id: "unClaw-mcp",
     servers: {
       filesystem: {
         command: "npx",
@@ -1228,10 +1228,10 @@ import { Memory } from "@mastra/memory";
 import { PgStore } from "@mastra/pg";
 
 const connectionString =
-  process.env.DATABASE_URL || "postgresql://anticlaw:anticlaw@localhost:5432/anticlaw";
+  process.env.DATABASE_URL || "postgresql://unClaw:unClaw@localhost:5432/unClaw";
 
 export const chatAgentMemory = new Memory({
-  storage: new PgStore({ id: "anticlaw-memory", connectionString }),
+  storage: new PgStore({ id: "unClaw-memory", connectionString }),
   options: {
     lastMessages: 40,
     workingMemory: {
@@ -1247,8 +1247,8 @@ export function createChatAgent(
 ) {
   return new Agent({
     id: "chat-agent",
-    name: "AntiClaw Assistant",
-    instructions: `You are a helpful personal AI assistant called AntiClaw.
+    name: "unClaw Assistant",
+    instructions: `You are a helpful personal AI assistant called unClaw.
 You have access to tools for file management and other tasks.
 Always confirm before executing actions with side effects.
 Be concise and direct.`,
@@ -1996,7 +1996,7 @@ export async function getBot(): Promise<Bot | null> {
   _bot = new Bot(token);
 
   _bot.command("start", async (ctx) => {
-    await ctx.reply("Welcome to AntiClaw! Use /link CODE to connect your account.");
+    await ctx.reply("Welcome to unClaw! Use /link CODE to connect your account.");
   });
 
   _bot.command("link", async (ctx) => {
@@ -2283,7 +2283,7 @@ export default nextConfig;
 
 - [ ] **Step 3: Update docker-compose.yml**
 
-Add `platform` service with `DATABASE_URL=postgresql://anticlaw:anticlaw@postgres:5432/anticlaw`, depends on healthy postgres.
+Add `platform` service with `DATABASE_URL=postgresql://unClaw:unClaw@postgres:5432/unClaw`, depends on healthy postgres.
 
 - [ ] **Step 4: Write PWA manifest + service worker**
 

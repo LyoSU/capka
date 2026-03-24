@@ -13,7 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { formatSize } from "@/lib/files";
+import { formatSize } from "@/lib/constants";
 
 type UploadResult = { name: string; path?: string; error?: string };
 

@@ -27,7 +27,7 @@ export async function PATCH(
     if (key in body) updates[key] = body[key];
   }
 
-  await db.update(chats).set(updates).where(eq(chats.id, id));
+  await db.update(chats).set(updates).where(and(eq(chats.id, id), eq(chats.userId, userId)));
   return Response.json({ ok: true });
 }
 
@@ -39,6 +39,6 @@ export async function DELETE(
   const { id } = await params;
   if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
 
-  await db.delete(chats).where(eq(chats.id, id));
+  await db.delete(chats).where(and(eq(chats.id, id), eq(chats.userId, userId)));
   return new Response(null, { status: 204 });
 }

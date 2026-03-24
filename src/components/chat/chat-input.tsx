@@ -38,9 +38,9 @@ export function ChatInput({
   };
 
   return (
-    <div className="px-4 pb-4 pt-2">
-      <div className="mx-auto max-w-3xl">
-        <div className="flex items-end gap-2 rounded-2xl border bg-background p-2 shadow-sm">
+    <div className="px-4 pb-5 pt-2">
+      <div className="mx-auto max-w-2xl">
+        <div className="rounded-2xl border bg-card shadow-sm transition-shadow focus-within:shadow-md">
           <textarea
             ref={textareaRef}
             value={value}
@@ -49,30 +49,32 @@ export function ChatInput({
               resize();
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Send a message..."
+            placeholder="Assign a task or ask anything"
             rows={1}
-            className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+            className="w-full resize-none bg-transparent px-4 pt-4 pb-2 text-[15px] leading-relaxed placeholder:text-muted-foreground/50 focus-visible:outline-none"
             style={{ maxHeight: 200 }}
           />
-          {isLoading ? (
-            <Button
-              size="icon"
-              variant="outline"
-              className="h-8 w-8 shrink-0 rounded-xl"
-              onClick={onStop}
-            >
-              <Square className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              size="icon"
-              className="h-8 w-8 shrink-0 rounded-xl"
-              disabled={!value.trim()}
-              onClick={onSubmit}
-            >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-          )}
+          <div className="flex items-center justify-end px-3 pb-2.5">
+            {isLoading ? (
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-8 w-8 shrink-0 rounded-xl"
+                onClick={onStop}
+              >
+                <Square className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                className="h-8 w-8 shrink-0 rounded-xl"
+                disabled={!value.trim()}
+                onClick={onSubmit}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>

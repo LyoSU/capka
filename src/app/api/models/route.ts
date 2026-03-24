@@ -1,8 +1,6 @@
-import { headers } from "next/headers";
-import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 
-import { getAuth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { getMasterKey } from "@/lib/settings";
@@ -21,23 +19,21 @@ const cacheMap = new Map<string, { models: ModelInfo[]; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
 
 export async function GET() {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  const { userId } = await requireSession();
 
   const [config] = await db
     .select()
     .from(providerConfigs)
-    .where(and(eq(providerConfigs.userId, session.user.id), eq(providerConfigs.isActive, true)))
+    .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
     .limit(1);
 
-  if (!config) return NextResponse.json({ models: [], provider: null });
+  if (!config) return Response.json({ models: [], provider: null });
 
   // For OpenRouter — fetch live model list
   if (config.provider === "openrouter") {
-    const cached = cacheMap.get(session.user.id);
+    const cached = cacheMap.get(userId);
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
-      return NextResponse.json({ models: cached.models, provider: "openrouter" });
+      return Response.json({ models: cached.models, provider: "openrouter" });
     }
 
     let apiKey = config.apiKey;
@@ -67,13 +63,13 @@ export async function GET() {
         }))
         .sort((a: ModelInfo, b: ModelInfo) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
 
-      cacheMap.set(session.user.id, { models, ts: Date.now() });
-      return NextResponse.json({ models, provider: "openrouter" });
+      cacheMap.set(userId, { models, ts: Date.now() });
+      return Response.json({ models, provider: "openrouter" });
     } catch {
-      return NextResponse.json({ models: [], provider: "openrouter" });
+      return Response.json({ models: [], provider: "openrouter" });
     }
   }
 
   // For other providers — return empty (they use typed model IDs)
-  return NextResponse.json({ models: [], provider: config.provider });
+  return Response.json({ models: [], provider: config.provider });
 }

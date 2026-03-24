@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { UploadDialog } from "@/components/files/upload-dialog";
 import { CreateDirectoryDialog } from "@/components/files/create-directory-dialog";
 import { cn } from "@/lib/utils";
-import { formatSize } from "@/lib/files";
+import { formatSize } from "@/lib/constants";
 
 type FileEntry = {
   name: string;

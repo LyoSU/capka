@@ -72,10 +72,11 @@ export function ChatContextMenu({
   }
 
   async function submitRename() {
+    if (!renaming) return;
+    setRenaming(false);
     if (renameValue.trim() && renameValue !== chat.title) {
       await patchChat({ title: renameValue.trim() });
     }
-    setRenaming(false);
   }
 
   if (renaming) {

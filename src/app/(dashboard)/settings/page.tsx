@@ -7,7 +7,7 @@ export default function GeneralSettingsPage() {
       <div>
         <h2 className="text-base font-medium">Appearance</h2>
         <p className="text-sm text-muted-foreground">
-          Choose how AntiClaw looks on your device.
+          Choose how unClaw looks on your device.
         </p>
       </div>
       <Separator />

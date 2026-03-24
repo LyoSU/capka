@@ -43,7 +43,7 @@ export async function PUT(
   const [updated] = await db
     .update(projects)
     .set(updates)
-    .where(eq(projects.id, id))
+    .where(and(eq(projects.id, id), eq(projects.userId, userId)))
     .returning();
 
   return Response.json(updated);
@@ -59,7 +59,7 @@ export async function DELETE(
   if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
 
   await db.update(chats).set({ projectId: null }).where(eq(chats.projectId, id));
-  await db.delete(projects).where(eq(projects.id, id));
+  await db.delete(projects).where(and(eq(projects.id, id), eq(projects.userId, userId)));
 
   return new Response(null, { status: 204 });
 }
