@@ -67,7 +67,7 @@ export async function POST(req: Request) {
             role: "user",
             content: text,
             platform: "web",
-          }),
+          }).onConflictDoNothing(),
           db.update(chats).set({
             ...(isNewChat ? { title: text.slice(0, 100) } : {}),
             updatedAt: new Date(),

@@ -58,7 +58,7 @@ export async function DELETE(
   const existing = await findProject(id, userId);
   if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
 
-  await db.update(chats).set({ projectId: null }).where(eq(chats.projectId, id));
+  await db.update(chats).set({ projectId: null }).where(and(eq(chats.projectId, id), eq(chats.userId, userId)));
   await db.delete(projects).where(and(eq(projects.id, id), eq(projects.userId, userId)));
 
   return new Response(null, { status: 204 });

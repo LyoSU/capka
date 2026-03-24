@@ -13,11 +13,13 @@ const PROVIDER_META: Record<string, { label: string; icon: typeof Brain }> = {
   openai: { label: "OpenAI", icon: Zap },
   anthropic: { label: "Anthropic", icon: Brain },
   google: { label: "Google", icon: Sparkles },
-  meta: { label: "Meta", icon: Zap },
+  "meta-llama": { label: "Meta", icon: Zap },
   mistralai: { label: "Mistral", icon: Sparkles },
   deepseek: { label: "DeepSeek", icon: Brain },
-  x: { label: "xAI", icon: Zap },
+  "x-ai": { label: "xAI", icon: Zap },
   xiaomi: { label: "Xiaomi", icon: Sparkles },
+  qwen: { label: "Qwen", icon: Sparkles },
+  minimax: { label: "MiniMax", icon: Brain },
 };
 
 function formatContext(ctx: number): string {
