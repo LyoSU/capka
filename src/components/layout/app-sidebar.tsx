@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
-import { MessageSquare, Plus, Settings, FolderKanban, FolderOpen, Archive } from "lucide-react";
+import { MessageSquare, Plus, Settings, FolderKanban, Archive } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -118,15 +118,6 @@ export function AppSidebar() {
                 <SidebarMenuButton render={<Link href={newChatHref} />}>
                   <Plus className="h-4 w-4" />
                   <span>New Chat</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/files" />}
-                  data-active={pathname === "/files" || undefined}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                  <span>Files</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

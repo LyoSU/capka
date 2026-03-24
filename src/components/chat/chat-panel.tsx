@@ -5,9 +5,12 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { toast } from "sonner";
 
+import { FolderOpen } from "lucide-react";
 import { ChatMessage, ThinkingIndicator } from "@/components/chat/message";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ModelSelector } from "@/components/chat/model-selector";
+import { SandboxFiles } from "@/components/chat/sandbox-files";
+import { Button } from "@/components/ui/button";
 
 interface ChatPanelProps {
   chatId: string;
@@ -95,9 +98,11 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
   };
 
   const isEmpty = messages.length === 0;
+  const [filesOpen, setFilesOpen] = useState(false);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full">
+      <div className="flex flex-1 flex-col">
       {isEmpty ? (
         <div className="relative flex flex-1 flex-col items-center justify-center px-4">
           <div className="w-full max-w-2xl space-y-8">
@@ -120,10 +125,19 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
         </div>
       ) : (
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center border-b px-4 py-2">
+          <div className="flex items-center justify-between border-b px-4 py-2">
             <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
               <ModelSelector value={model} onChange={setModel} />
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setFilesOpen(!filesOpen)}
+              title="Workspace files"
+            >
+              <FolderOpen className="h-4 w-4" />
+            </Button>
           </div>
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto pb-24">
@@ -158,6 +172,8 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
           </div>
         </div>
       )}
+      </div>
+      <SandboxFiles chatId={chatId} open={filesOpen} onClose={() => setFilesOpen(false)} />
     </div>
   );
 }

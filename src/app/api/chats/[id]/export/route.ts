@@ -2,7 +2,9 @@ import { eq, and, asc } from "drizzle-orm";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
-import { sanitizeFilename } from "@/lib/files";
+function sanitizeFilename(name: string): string {
+  return name.replace(/["\\\n\r]/g, "_");
+}
 
 export async function GET(
   req: Request,
