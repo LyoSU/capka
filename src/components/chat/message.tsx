@@ -109,6 +109,65 @@ function getInputSummary(input: unknown): string | null {
   return first ? String(first).slice(0, 60) : null;
 }
 
+// --- Tool detail renderer ---
+
+function ToolDetails({ toolName, output, errorText }: { toolName: string; output?: unknown; errorText?: string }) {
+  if (errorText) {
+    return <p className="text-xs text-destructive/80">{errorText}</p>;
+  }
+
+  const text = formatValue(output);
+  if (!text) return <p className="text-xs text-muted-foreground/50">Done</p>;
+
+  const lower = toolName.toLowerCase();
+  const isCode = lower.includes("read") || lower.includes("file");
+  const isCommand = lower.includes("exec") || lower.includes("run") || lower.includes("shell");
+  const isListing = lower.includes("list") || lower.includes("dir");
+
+  // File content — show as code
+  if (isCode && text.length > 50) {
+    return (
+      <pre className="overflow-x-auto rounded-md bg-muted p-2.5 font-mono text-[11px] leading-relaxed max-h-48 overflow-y-auto">
+        {text.slice(0, 3000)}{text.length > 3000 ? "\n..." : ""}
+      </pre>
+    );
+  }
+
+  // Command output — terminal style
+  if (isCommand) {
+    return (
+      <pre className="overflow-x-auto rounded-md bg-foreground/5 p-2.5 font-mono text-[11px] leading-relaxed max-h-36 overflow-y-auto text-muted-foreground">
+        {text.slice(0, 2000)}{text.length > 2000 ? "\n..." : ""}
+      </pre>
+    );
+  }
+
+  // Directory listing — clean lines
+  if (isListing) {
+    const lines = text.split("\n").filter(Boolean).slice(0, 30);
+    return (
+      <div className="space-y-0.5 text-xs text-muted-foreground">
+        {lines.map((line, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <Folder className="h-3 w-3 shrink-0 opacity-40" />
+            <span className="truncate">{line.trim()}</span>
+          </div>
+        ))}
+        {text.split("\n").length > 30 && (
+          <span className="text-muted-foreground/40">+{text.split("\n").length - 30} more</span>
+        )}
+      </div>
+    );
+  }
+
+  // Default — clean readable text
+  return (
+    <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-36 overflow-y-auto">
+      {text.slice(0, 2000)}{text.length > 2000 ? "..." : ""}
+    </div>
+  );
+}
+
 // --- Sub-components ---
 
 function CopyButton({ text }: { text: string }) {
@@ -240,8 +299,8 @@ function ToolCard({ part }: { part: ToolPart }) {
         <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-0 group-hover/tool:opacity-40 transition-all" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1 mb-2 ml-5 max-h-32 overflow-y-auto rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
-          <pre className="whitespace-pre-wrap break-words">{formatValue(part.output)}</pre>
+        <div className="mt-1 mb-2 ml-5 rounded-lg border border-border/40 bg-card p-3">
+          <ToolDetails toolName={rawName} output={part.output} errorText={part.errorText} />
         </div>
       </CollapsibleContent>
     </Collapsible>
