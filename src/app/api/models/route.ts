@@ -55,7 +55,12 @@ export async function GET() {
       };
 
       const models: ModelInfo[] = (data.data ?? [])
-        .filter((m: RawModel) => m.id && !m.id.includes(":free"))
+        .filter((m: RawModel) => {
+          if (!m.id || m.id.includes(":free") || m.id.includes(":extended")) return false;
+          const prompt = parseFloat(m.pricing?.prompt || "0");
+          // Only paid models with decent context
+          return prompt > 0 && (m.context_length || 0) >= 8_000;
+        })
         .map((m: RawModel) => ({
           id: m.id,
           name: m.name || m.id.split("/").pop(),

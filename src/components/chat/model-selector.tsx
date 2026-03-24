@@ -80,9 +80,14 @@ function ModelList({
   const filtered = useMemo(() => {
     if (!search) return models;
     const q = search.toLowerCase();
-    return models.filter(
-      (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q),
-    );
+    return models.filter((m) => {
+      const providerLabel = PROVIDER_META[m.provider]?.label || m.provider;
+      return (
+        m.id.toLowerCase().includes(q) ||
+        m.name.toLowerCase().includes(q) ||
+        providerLabel.toLowerCase().includes(q)
+      );
+    });
   }, [models, search]);
 
   const indexMap = useMemo(() => new Map(filtered.map((m, i) => [m.id, i])), [filtered]);
@@ -94,7 +99,7 @@ function ModelList({
       list.push(m);
       map.set(m.provider, list);
     }
-    const priority = ["openai", "anthropic", "google", "meta", "mistralai", "deepseek", "x"];
+    const priority = ["openai", "anthropic", "google", "meta-llama", "mistralai", "deepseek", "x-ai", "qwen"];
     return [...map.entries()].sort(([a], [b]) => {
       const ai = priority.indexOf(a);
       const bi = priority.indexOf(b);
@@ -165,35 +170,27 @@ function ModelList({
                     data-index={globalIdx}
                     onClick={() => onSelect(model)}
                     onMouseEnter={() => onActiveIndex(globalIdx)}
-                    className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors active:bg-accent ${
+                    className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors active:bg-accent ${
                       isActive ? "bg-accent" : ""
                     } ${isCurrent ? "bg-accent/50" : ""}`}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate text-sm font-medium">{model.name}</span>
+                        <span className="truncate text-sm">{model.name}</span>
                         {isCurrent && (
-                          <span className="shrink-0 rounded-full bg-foreground/10 px-1.5 py-0.5 text-[9px] font-medium">
-                            current
+                          <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">
+                            active
                           </span>
                         )}
                       </div>
-                      <span className="text-[11px] text-muted-foreground/70 truncate block">
-                        {model.id}
-                      </span>
-                    </div>
-
-                    <div className="shrink-0 text-right">
-                      {model.context > 0 && (
-                        <div className="text-[11px] text-muted-foreground tabular-nums">
-                          {formatContext(model.context)}
-                        </div>
-                      )}
-                      {model.pricing.prompt > 0 && (
-                        <div className="text-[10px] text-muted-foreground/50 tabular-nums">
-                          {formatPrice(model.pricing.prompt)}/M
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60">
+                        {model.context > 0 && (
+                          <span className="tabular-nums">{formatContext(model.context)} ctx</span>
+                        )}
+                        {model.pricing.prompt > 0 && (
+                          <span className="tabular-nums">{formatPrice(model.pricing.prompt)}/M</span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 );
@@ -290,6 +287,8 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   }, [activeIndex]);
 
   const currentModelId = value.includes(":") ? value.split(":").slice(1).join(":") : value;
+  const currentProvider = currentModelId.includes("/") ? currentModelId.split("/")[0] : "";
+  const CurrentProviderIcon = PROVIDER_META[currentProvider]?.icon;
 
   return (
     <div ref={containerRef} className="relative">
@@ -297,6 +296,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
         onClick={() => setOpen(!open)}
         className="flex h-7 items-center gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
       >
+        {CurrentProviderIcon && <CurrentProviderIcon size={14} />}
         <span className="truncate max-w-40">{getDisplayName(value)}</span>
         <ChevronDown className={`h-3 w-3 shrink-0 opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
