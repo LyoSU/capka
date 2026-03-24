@@ -1,7 +1,7 @@
 import { type UIMessage } from "ai";
 import {
   Copy, Check, Send,
-  ChevronRight, Loader2, CheckCircle2, AlertCircle,
+  ChevronRight, Loader2, AlertCircle,
   FileSearch, Globe, Terminal, Folder,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -28,9 +28,38 @@ function formatRelativeTime(dateStr: string): string {
   return dtfFull.format(new Date(dateStr));
 }
 
+/** Extract human-readable text from tool output (handles MCP nested formats) */
 function formatValue(value: unknown): string {
   if (value === undefined || value === null) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    try {
+      return formatValue(JSON.parse(value));
+    } catch {
+      return value;
+    }
+  }
+  if (typeof value !== "object") return String(value);
+
+  const obj = value as Record<string, unknown>;
+
+  // MCP format: { structuredContent: { content: "..." } }
+  if (obj.structuredContent && typeof obj.structuredContent === "object") {
+    const sc = obj.structuredContent as Record<string, unknown>;
+    if (sc.content) return String(sc.content);
+  }
+  // MCP format: { content: [{ text: "...", type: "text" }] }
+  if (Array.isArray(obj.content)) {
+    const texts = (obj.content as { text?: string; type?: string }[])
+      .filter((c) => c.type === "text" && c.text)
+      .map((c) => c.text);
+    if (texts.length > 0) return texts.join("\n");
+  }
+  // Common fields
+  if (typeof obj.content === "string") return obj.content;
+  if (typeof obj.text === "string") return obj.text;
+  if (typeof obj.result === "string") return obj.result;
+  if (typeof obj.message === "string") return obj.message;
+
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
 }
 
@@ -56,16 +85,28 @@ function getToolName(part: ToolPart): string {
   return "unknown";
 }
 
-// Friendly tool display name + icon
-function getToolDisplay(name: string): { label: string; icon: typeof Terminal } {
+// Friendly tool display — human-readable labels
+function getToolDisplay(name: string): { label: string; activeLabel: string; icon: typeof Terminal } {
   const lower = name.toLowerCase();
-  if (lower.includes("read") || lower.includes("file")) return { label: "Reading file", icon: FileSearch };
-  if (lower.includes("list") || lower.includes("dir")) return { label: "Listing directory", icon: Folder };
-  if (lower.includes("search") || lower.includes("web")) return { label: "Searching web", icon: Globe };
-  if (lower.includes("write") || lower.includes("edit")) return { label: "Writing file", icon: FileSearch };
-  // Default: clean up the tool name
+  if (lower.includes("read") || lower.includes("file_read")) return { label: "Read a file", activeLabel: "Reading file...", icon: FileSearch };
+  if (lower.includes("list") || lower.includes("dir")) return { label: "Browsed files", activeLabel: "Browsing files...", icon: Folder };
+  if (lower.includes("search") || lower.includes("web")) return { label: "Searched the web", activeLabel: "Searching...", icon: Globe };
+  if (lower.includes("write") || lower.includes("edit") || lower.includes("create")) return { label: "Wrote a file", activeLabel: "Writing...", icon: FileSearch };
+  if (lower.includes("exec") || lower.includes("run") || lower.includes("shell")) return { label: "Ran a command", activeLabel: "Running...", icon: Terminal };
   const clean = name.replace(/^filesystem_/, "").replace(/_/g, " ");
-  return { label: clean, icon: Terminal };
+  return { label: clean, activeLabel: `${clean}...`, icon: Terminal };
+}
+
+function getInputSummary(input: unknown): string | null {
+  if (!input || typeof input !== "object") return typeof input === "string" ? input : null;
+  const obj = input as Record<string, unknown>;
+  // Show the most meaningful field
+  if (obj.path) return String(obj.path);
+  if (obj.query) return String(obj.query);
+  if (obj.command) return String(obj.command).slice(0, 60);
+  if (obj.url) return String(obj.url);
+  const first = Object.values(obj)[0];
+  return first ? String(first).slice(0, 60) : null;
 }
 
 // --- Sub-components ---
@@ -164,75 +205,43 @@ function TextContent({ text, isStreaming }: { text: string; isStreaming?: boolea
 
 function ToolCard({ part }: { part: ToolPart }) {
   const rawName = getToolName(part);
-  const { label, icon: Icon } = getToolDisplay(rawName);
+  const { label, activeLabel, icon: Icon } = getToolDisplay(rawName);
   const isRunning = !part.state.startsWith("output-");
   const isError = part.state === "output-error";
-  const isDone = part.state === "output-available";
-  const hasInput = part.input !== undefined && part.input !== null;
-  const hasOutput = isDone && part.output !== undefined;
+  const summary = getInputSummary(part.input);
 
-  // Compact inline display for running tools
+  // Running — subtle inline with spinner
   if (isRunning) {
     return (
-      <div className="my-2 flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground/70">
         <Loader2 className="h-3 w-3 animate-spin" />
-        <Icon className="h-3 w-3" />
-        <span>{label}</span>
-        {hasInput && (
-          <span className="truncate max-w-60 font-mono text-[10px] opacity-60">
-            {typeof part.input === "object" ? Object.values(part.input as Record<string, unknown>).join(", ") : String(part.input)}
-          </span>
-        )}
+        <span className="text-xs">{activeLabel}</span>
       </div>
     );
   }
 
-  // Completed tool — collapsible with result
+  // Error — show inline
+  if (isError) {
+    return (
+      <div className="my-1 flex items-center gap-2 py-0.5 text-destructive/70">
+        <AlertCircle className="h-3 w-3" />
+        <span className="text-xs">Something went wrong</span>
+      </div>
+    );
+  }
+
+  // Done — single line, expandable on click
   return (
     <Collapsible defaultOpen={false}>
-      <CollapsibleTrigger className="my-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 transition-colors group/tool [&[data-state=open]>.chevron]:rotate-90">
-        {isError ? (
-          <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
-        ) : (
-          <CheckCircle2 className="h-3 w-3 shrink-0 text-green-500/70" />
-        )}
+      <CollapsibleTrigger className="my-0.5 flex items-center gap-1.5 py-0.5 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors group/tool [&[data-state=open]>.chevron]:rotate-90">
         <Icon className="h-3 w-3 shrink-0" />
-        <span className="flex-1 text-left truncate">{label}</span>
-        {hasInput && (
-          <span className="truncate max-w-40 font-mono text-[10px] opacity-50 group-hover/tool:opacity-70">
-            {typeof part.input === "object"
-              ? Object.values(part.input as Record<string, unknown>)[0] as string
-              : String(part.input)}
-          </span>
-        )}
-        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
+        <span>{label}</span>
+        {summary && <span className="truncate max-w-48 opacity-60">{summary}</span>}
+        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-0 group-hover/tool:opacity-40 transition-all" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="ml-5 mb-2 space-y-1.5 border-l-2 border-border/50 pl-3">
-          {hasInput && (
-            <div>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Input</span>
-              <pre className="mt-0.5 overflow-x-auto rounded bg-muted/50 px-2 py-1.5 text-[11px] font-mono leading-relaxed whitespace-pre-wrap break-all text-muted-foreground">
-                {formatValue(part.input)}
-              </pre>
-            </div>
-          )}
-          {hasOutput && (
-            <div>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Result</span>
-              <pre className="mt-0.5 overflow-x-auto rounded bg-muted/50 px-2 py-1.5 text-[11px] font-mono leading-relaxed whitespace-pre-wrap break-all text-muted-foreground max-h-40 overflow-y-auto">
-                {formatValue(part.output)}
-              </pre>
-            </div>
-          )}
-          {isError && part.errorText && (
-            <div>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-destructive/60">Error</span>
-              <pre className="mt-0.5 overflow-x-auto rounded bg-destructive/5 px-2 py-1.5 text-[11px] font-mono text-destructive whitespace-pre-wrap break-all">
-                {part.errorText}
-              </pre>
-            </div>
-          )}
+        <div className="mt-1 mb-2 ml-5 max-h-32 overflow-y-auto rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+          <pre className="whitespace-pre-wrap break-words">{formatValue(part.output)}</pre>
         </div>
       </CollapsibleContent>
     </Collapsible>
