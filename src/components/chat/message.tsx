@@ -146,20 +146,14 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
     );
   }
 
-  // Directory listing — clean lines
+  // Directory listing — clean text list
   if (isListing) {
-    const lines = text.split("\n").filter(Boolean).slice(0, 30);
+    const lines = text.split("\n").filter(Boolean);
+    const shown = lines.slice(0, 20);
     return (
-      <div className="space-y-0.5 text-xs text-muted-foreground">
-        {lines.map((line, i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <Folder className="h-3 w-3 shrink-0 opacity-40" />
-            <span className="truncate">{line.trim()}</span>
-          </div>
-        ))}
-        {text.split("\n").length > 30 && (
-          <span className="text-muted-foreground/40">+{text.split("\n").length - 30} more</span>
-        )}
+      <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
+        {shown.join("\n")}
+        {lines.length > 20 && `\n… +${lines.length - 20} more`}
       </div>
     );
   }
@@ -311,6 +305,51 @@ function ToolCard({ part }: { part: ToolPart }) {
   );
 }
 
+/** Groups consecutive tool calls into a collapsible summary */
+function ToolGroup({ tools }: { tools: ToolPart[] }) {
+  const allDone = tools.every((t) => t.state.startsWith("output-"));
+  const hasError = tools.some((t) => t.state === "output-error");
+  const running = tools.filter((t) => !t.state.startsWith("output-"));
+
+  // Single tool — render directly
+  if (tools.length === 1) return <ToolCard part={tools[0]} />;
+
+  // Multiple tools still running
+  if (!allDone && running.length > 0) {
+    const last = running[running.length - 1];
+    const { activeLabel } = getToolDisplay(getToolName(last));
+    return (
+      <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground/70">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span className="text-xs">{activeLabel}</span>
+        <span className="text-xs text-muted-foreground/40">({tools.length} steps)</span>
+      </div>
+    );
+  }
+
+  // All done — collapsible summary
+  return (
+    <Collapsible defaultOpen={false}>
+      <CollapsibleTrigger className="my-0.5 flex items-center gap-1.5 py-0.5 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
+        {hasError ? (
+          <AlertCircle className="h-3 w-3 shrink-0 text-destructive/60" />
+        ) : (
+          <span className="h-3 w-3 shrink-0 text-center text-[10px] leading-3 opacity-50">{tools.length}</span>
+        )}
+        <span>Used {tools.length} tools</span>
+        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-30 transition-transform" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-2 space-y-0">
+          {tools.map((t) => (
+            <ToolCard key={t.toolCallId} part={t} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram: boolean }) {
   return (
     <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100">
@@ -367,18 +406,31 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
     <div className="group/msg px-4 py-3">
       <div className="max-w-none">
         {hasAnyContent ? (
-          parts.map((part, i) => {
-            if (part.type === "text") {
-              const text = (part as { text: string }).text;
-              if (!text) return null;
-              const isLast = i === parts.length - 1 || parts.slice(i + 1).every((p) => p.type !== "text");
-              return <TextContent key={i} text={text} isStreaming={isStreaming && isLast} />;
+          (() => {
+            // Group consecutive tool parts together
+            const groups: ({ kind: "text"; text: string; idx: number } | { kind: "tools"; tools: ToolPart[] })[] = [];
+            for (let i = 0; i < parts.length; i++) {
+              const part = parts[i];
+              if (part.type === "text") {
+                const text = (part as { text: string }).text;
+                if (text) groups.push({ kind: "text", text, idx: i });
+              } else if (isToolPart(part)) {
+                const last = groups[groups.length - 1];
+                if (last?.kind === "tools") {
+                  last.tools.push(part as ToolPart);
+                } else {
+                  groups.push({ kind: "tools", tools: [part as ToolPart] });
+                }
+              }
             }
-            if (isToolPart(part)) {
-              return <ToolCard key={(part as ToolPart).toolCallId} part={part as ToolPart} />;
-            }
-            return null;
-          })
+            return groups.map((g, gi) => {
+              if (g.kind === "text") {
+                const isLast = gi === groups.length - 1 || groups.slice(gi + 1).every((x) => x.kind !== "text");
+                return <TextContent key={gi} text={g.text} isStreaming={isStreaming && isLast} />;
+              }
+              return <ToolGroup key={gi} tools={g.tools} />;
+            });
+          })()
         ) : isStreaming ? (
           <ThinkingIndicator />
         ) : (
