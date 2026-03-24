@@ -19,7 +19,7 @@ export async function POST(req: Request) {
       baseUrl: baseUrl || undefined,
     });
 
-    const { text } = await generateText({ model, prompt: "Say ok", maxOutputTokens: 10 });
+    const { text } = await generateText({ model, prompt: "Say ok", maxOutputTokens: 20 });
     return Response.json({ success: true, text });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Connection failed";
