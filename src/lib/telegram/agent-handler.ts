@@ -1,7 +1,7 @@
 import { generateText, stepCountIs } from "ai";
 import { resolveUserModel } from "@/lib/providers/resolve";
-import { loadMCPTools } from "@/lib/mcp/config";
-import { SYSTEM_PROMPT } from "@/lib/agents/chat-agent";
+import { loadSandboxTools } from "@/lib/sandbox/tools";
+import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
 
 export async function processMessageForTelegram(
   userId: string,
@@ -9,14 +9,14 @@ export async function processMessageForTelegram(
   userMessage: string,
 ): Promise<string> {
   const model = await resolveUserModel(userId);
-  const { tools, close } = await loadMCPTools(userId);
+  const { tools, close } = await loadSandboxTools(userId, chatId);
 
   try {
-    const hasTools = Object.keys(tools).length > 0;
     const { text } = await generateText({
       model,
-      system: SYSTEM_PROMPT,
-      ...(hasTools ? { tools, stopWhen: stepCountIs(25) } : {}),
+      system: `${SYSTEM_PROMPT}\n\n${SANDBOX_PROMPT}`,
+      tools,
+      stopWhen: stepCountIs(25),
       messages: [{ role: "user", content: userMessage }],
     });
     return text;

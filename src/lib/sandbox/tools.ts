@@ -4,7 +4,7 @@ import { createSession, execCommand } from "./client";
 
 /**
  * Create sandbox tools for a chat session.
- * Returns AI SDK tools + close function (same interface as loadMCPTools).
+ * Returns AI SDK tools + close function.
  */
 export async function loadSandboxTools(userId: string, chatId: string) {
   // Ensure sandbox container exists

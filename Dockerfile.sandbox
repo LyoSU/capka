@@ -19,7 +19,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
 RUN npx playwright install --with-deps chromium 2>/dev/null || true
 
 # Python common packages
-RUN pip3 install --no-cache-dir --break-system-packages \
+RUN pip3 install --no-cache-dir \
     requests beautifulsoup4 pandas numpy matplotlib
 
 # Non-root user
