@@ -1,16 +1,13 @@
-import { headers } from "next/headers";
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { getAuth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { getMasterKey } from "@/lib/settings";
 
 export async function GET() {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  const { userId } = await requireSession();
 
   const rows = await db
     .select({
@@ -22,15 +19,13 @@ export async function GET() {
       createdAt: providerConfigs.createdAt,
     })
     .from(providerConfigs)
-    .where(eq(providerConfigs.userId, session.user.id));
+    .where(eq(providerConfigs.userId, userId));
 
   return Response.json(rows);
 }
 
 export async function POST(req: Request) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  const { userId } = await requireSession();
 
   const { provider, apiKey, baseUrl, defaultModel } = await req.json();
   if (!provider) {
@@ -44,12 +39,12 @@ export async function POST(req: Request) {
   await db
     .update(providerConfigs)
     .set({ isActive: false })
-    .where(eq(providerConfigs.userId, session.user.id));
+    .where(eq(providerConfigs.userId, userId));
 
   const id = nanoid();
   await db.insert(providerConfigs).values({
     id,
-    userId: session.user.id,
+    userId,
     provider,
     apiKey: encryptedKey,
     baseUrl: baseUrl || null,
@@ -61,9 +56,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  const { userId } = await requireSession();
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
@@ -71,7 +64,7 @@ export async function DELETE(req: Request) {
 
   await db
     .delete(providerConfigs)
-    .where(and(eq(providerConfigs.id, id), eq(providerConfigs.userId, session.user.id)));
+    .where(and(eq(providerConfigs.id, id), eq(providerConfigs.userId, userId)));
 
   return Response.json({ ok: true });
 }

@@ -1,7 +1,5 @@
-import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
@@ -11,7 +9,7 @@ import { getAuth } from "@/lib/auth";
 export async function POST(req: Request) {
   const complete = await isSetupComplete();
   if (complete) {
-    return NextResponse.json({ error: "Setup already complete" }, { status: 403 });
+    return Response.json({ error: "Setup already complete" }, { status: 403 });
   }
 
   const body = await req.json();
@@ -20,10 +18,10 @@ export async function POST(req: Request) {
   if (step === "account") {
     const { email } = body;
     if (!email) {
-      return NextResponse.json({ error: "Missing email" }, { status: 400 });
+      return Response.json({ error: "Missing email" }, { status: 400 });
     }
     await setSetting("admin_email", email);
-    return NextResponse.json({ ok: true });
+    return Response.json({ ok: true });
   }
 
   if (step === "provider") {
@@ -31,13 +29,13 @@ export async function POST(req: Request) {
     const auth = await getAuth();
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const userId = session.user.id;
     const { provider, apiKey, baseUrl, defaultModel } = body;
     if (!provider) {
-      return NextResponse.json({ error: "Missing provider" }, { status: 400 });
+      return Response.json({ error: "Missing provider" }, { status: 400 });
     }
 
     const masterKey = await getMasterKey();
@@ -58,13 +56,13 @@ export async function POST(req: Request) {
       isActive: true,
     });
 
-    return NextResponse.json({ ok: true });
+    return Response.json({ ok: true });
   }
 
   if (step === "complete") {
     await setSetting("setup_complete", "true");
-    return NextResponse.json({ ok: true });
+    return Response.json({ ok: true });
   }
 
-  return NextResponse.json({ error: "Unknown step" }, { status: 400 });
+  return Response.json({ error: "Unknown step" }, { status: 400 });
 }

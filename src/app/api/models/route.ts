@@ -14,6 +14,42 @@ export interface ModelInfo {
   pricing: { prompt: number; completion: number };
 }
 
+// Top-tier model prefixes — only show models from these families
+const TOP_MODELS = new Set([
+  // OpenAI
+  "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano",
+  "openai/gpt-4o", "openai/gpt-4o-mini",
+  "openai/o3", "openai/o3-mini", "openai/o4-mini",
+  // Anthropic
+  "anthropic/claude-sonnet-4", "anthropic/claude-opus-4",
+  "anthropic/claude-3.7-sonnet", "anthropic/claude-3.5-haiku",
+  // Google
+  "google/gemini-2.5-pro", "google/gemini-2.5-flash",
+  "google/gemini-2.0-flash",
+  // Meta
+  "meta-llama/llama-4-maverick", "meta-llama/llama-4-scout",
+  "meta-llama/llama-3.3-70b-instruct",
+  // DeepSeek
+  "deepseek/deepseek-r1", "deepseek/deepseek-chat",
+  "deepseek/deepseek-r1-0528",
+  // Mistral
+  "mistralai/mistral-large", "mistralai/mistral-medium",
+  "mistralai/codestral",
+  // xAI
+  "x-ai/grok-3", "x-ai/grok-3-mini",
+  // Qwen
+  "qwen/qwen3-235b-a22b", "qwen/qwen3-30b-a3b",
+]);
+
+function isTopModel(id: string): boolean {
+  // Exact match or prefix match (e.g. "openai/gpt-4.1" matches "openai/gpt-4.1-2025-04-14")
+  if (TOP_MODELS.has(id)) return true;
+  for (const prefix of TOP_MODELS) {
+    if (id.startsWith(prefix + "-") || id.startsWith(prefix + ":")) return true;
+  }
+  return false;
+}
+
 // Cache models per user for 10 minutes
 const cacheMap = new Map<string, { models: ModelInfo[]; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
@@ -50,7 +86,7 @@ export async function GET() {
 
       type RawModel = { id: string; name?: string; context_length?: number; pricing?: { prompt?: string; completion?: string } };
       const models: ModelInfo[] = (data.data ?? [])
-        .filter((m: RawModel) => m.id && !m.id.includes(":free"))
+        .filter((m: RawModel) => m.id && !m.id.includes(":free") && isTopModel(m.id))
         .map((m: RawModel) => ({
           id: m.id,
           name: m.name || m.id.split("/").pop(),

@@ -1,16 +1,11 @@
-import { headers } from "next/headers";
-import { getAuth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
 import { eventBus } from "@/lib/events";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
-
-  const userId = session.user.id;
+  const { userId } = await requireSession();
   let unsubscribe: (() => void) | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
 

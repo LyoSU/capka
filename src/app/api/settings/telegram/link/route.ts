@@ -1,15 +1,10 @@
-import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
-import { getAuth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { linkCodes, telegramLinks } from "@/lib/db/schema";
 
 export async function POST() {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
-
-  const userId = session.user.id;
+  const { userId } = await requireSession();
 
   // Generate a cryptographically secure 6-digit code
   const { randomInt } = await import("crypto");
@@ -25,11 +20,7 @@ export async function POST() {
 }
 
 export async function GET() {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
-
-  const userId = session.user.id;
+  const { userId } = await requireSession();
 
   const [link] = await db
     .select()

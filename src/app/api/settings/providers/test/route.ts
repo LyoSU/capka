@@ -1,12 +1,9 @@
-import { headers } from "next/headers";
 import { generateText } from "ai";
-import { getAuth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
 import { getModel } from "@/lib/providers";
 
 export async function POST(req: Request) {
-  const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  await requireSession();
 
   const { provider, apiKey, modelId, baseUrl } = await req.json();
   if (!provider || !modelId) {
