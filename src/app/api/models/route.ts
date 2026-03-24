@@ -59,9 +59,15 @@ export async function GET() {
         pricing?: { prompt?: string; completion?: string };
       };
 
+      // Date-stamped variant pattern: ends with -YYYY-MM-DD or -MMDD
+      const DATED = /-(20\d{2}-\d{2}-\d{2}|\d{4})$/;
+
       const models: ModelInfo[] = (data.data ?? [])
         .filter((m: RawModel) => {
           if (!m.id || m.id.includes(":free") || m.id.includes(":extended")) return false;
+          const slug = m.id.split("/")[1] || "";
+          // Skip date-stamped duplicates (e.g. gpt-5.4-2026-01-15)
+          if (DATED.test(slug)) return false;
           const prompt = parseFloat(m.pricing?.prompt || "0");
           return prompt > 0 && (m.context_length || 0) >= minContext;
         })
