@@ -88,7 +88,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
         </div>
       ) : (
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between border-b px-4 py-2">
+          <div className="flex items-center justify-between px-4 py-2">
             <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
               <ModelSelector value={model} onChange={setModel} />
             </div>

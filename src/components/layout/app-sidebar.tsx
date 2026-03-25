@@ -190,17 +190,10 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="p-2">
+      <SidebarFooter className="mt-auto p-2">
         <div className="flex items-center justify-between group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1">
           <span className="group-data-[collapsible=icon]:hidden"><ThemeSwitcher /></span>
           <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
-            <Link
-              href={newChatHref}
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-              title="New Chat"
-            >
-              <Plus className="h-4 w-4" />
-            </Link>
             <Link
               href="/chat/archived"
               className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
