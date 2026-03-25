@@ -45,6 +45,7 @@ function useSetting(key: string, fallback: string) {
 export default function GeneralSettingsPage() {
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");
+  const registration = useSetting("registration_enabled", "true");
 
   const contextLabel = (val: string) => {
     const n = parseInt(val, 10);
@@ -128,6 +129,38 @@ export default function GeneralSettingsPage() {
               body: JSON.stringify({ key: "sandbox_enabled", value: checked ? "true" : "false" }),
             }).then((r) => {
               if (r.ok) toast.success(checked ? "Sandbox enabled" : "Sandbox disabled");
+              else toast.error("Failed to update");
+            });
+          }}
+        />
+      </div>
+
+      <Separator />
+
+      {/* Registration */}
+      <div>
+        <h2 className="text-base font-medium">Registration</h2>
+        <p className="text-sm text-muted-foreground">
+          Control whether new users can create accounts.
+        </p>
+      </div>
+      <div className="flex items-center justify-between rounded-lg border p-4">
+        <div>
+          <p className="text-sm font-medium">Allow registration</p>
+          <p className="text-xs text-muted-foreground">
+            When disabled, only admins can add new users. Existing users can still log in.
+          </p>
+        </div>
+        <Switch
+          checked={registration.value === "true"}
+          onCheckedChange={(checked) => {
+            registration.update(checked ? "true" : "false");
+            fetch("/api/settings", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ key: "registration_enabled", value: checked ? "true" : "false" }),
+            }).then((r) => {
+              if (r.ok) toast.success(checked ? "Registration enabled" : "Registration disabled");
               else toast.error("Failed to update");
             });
           }}

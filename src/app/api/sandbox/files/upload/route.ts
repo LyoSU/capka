@@ -1,9 +1,9 @@
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { createSession, uploadFile } from "@/lib/sandbox/client";
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await requireSession();
+    const { userId } = await requireRole("admin", "user");
     const formData = await req.formData();
     const chatId = formData.get("chatId") as string;
     const path = (formData.get("path") as string) || ".";

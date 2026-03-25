@@ -1,6 +1,6 @@
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession } from "@/lib/auth";
+import { requireSession, requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
@@ -25,7 +25,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
 
   const { provider, apiKey, baseUrl, defaultModel } = await req.json();
   if (!provider) {
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");

@@ -1,6 +1,6 @@
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession } from "@/lib/auth";
+import { requireSession, requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 
@@ -16,7 +16,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
   const body = await req.json();
   const { name, description, systemPrompt, defaultModel, sandboxNetwork } = body;
 

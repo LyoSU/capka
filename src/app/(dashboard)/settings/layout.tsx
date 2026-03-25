@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings, Link2, Puzzle, Brain } from "lucide-react";
+import { Settings, Link2, Puzzle, Brain, Users } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,7 @@ const navItems = [
   { label: "Connections", href: "/settings/connections", icon: Link2 },
   { label: "Integrations", href: "/settings/integrations", icon: Puzzle },
   { label: "Memory", href: "/settings/memory", icon: Brain },
+  { label: "Users", href: "/settings/users", icon: Users },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

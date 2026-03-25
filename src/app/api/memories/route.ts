@@ -1,6 +1,6 @@
 import { eq, and, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession } from "@/lib/auth";
+import { requireSession, requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memories } from "@/lib/db/schema";
 import { MEMORY_TYPES } from "@/lib/constants";
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
   const body = await req.json();
   const { content, type = "fact", projectId } = body;
 

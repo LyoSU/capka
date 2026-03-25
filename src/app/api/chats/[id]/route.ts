@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
 
@@ -16,7 +16,7 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
   const { id } = await params;
   if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
 
@@ -35,7 +35,7 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
   const { id } = await params;
   if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
 

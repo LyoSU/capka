@@ -1,9 +1,9 @@
 import { generateText } from "ai";
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { getModel } from "@/lib/providers";
 
 export async function POST(req: Request) {
-  await requireSession();
+  await requireRole("admin", "user");
 
   const { provider, apiKey, modelId, baseUrl } = await req.json();
   if (!provider || !modelId) {
