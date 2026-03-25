@@ -514,9 +514,21 @@ export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) 
             return groups.map((g, gi) => {
               if (g.kind === "text") {
                 const isLast = gi === groups.length - 1 || groups.slice(gi + 1).every((x) => x.kind !== "text");
-                return <TextContent key={gi} text={g.text} isStreaming={isStreaming && isLast} chatId={chatId} />;
+                // Add top margin when text follows tools (visual separation between phases)
+                const afterTools = gi > 0 && groups[gi - 1].kind === "tools";
+                return (
+                  <div key={gi} className={afterTools ? "mt-3 pt-3 border-t border-border/30" : ""}>
+                    <TextContent text={g.text} isStreaming={isStreaming && isLast} chatId={chatId} />
+                  </div>
+                );
               }
-              return <ToolGroup key={gi} tools={g.tools} />;
+              // Add top margin when tools follow text
+              const afterText = gi > 0 && groups[gi - 1].kind === "text";
+              return (
+                <div key={gi} className={`${afterText ? "mt-2" : ""} rounded-lg bg-muted/30 px-3 py-2`}>
+                  <ToolGroup tools={g.tools} />
+                </div>
+              );
             });
           })()
         ) : isStreaming ? (

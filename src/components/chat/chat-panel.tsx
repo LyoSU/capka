@@ -97,7 +97,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
             </Button>
           </div>
 
-          <div ref={scrollRef} className="flex-1 overflow-y-auto pb-24">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto pb-40">
             <div className="mx-auto max-w-3xl">
               {messages.map((message, i) => (
                 <ChatMessage
