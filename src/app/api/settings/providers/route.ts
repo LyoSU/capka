@@ -55,6 +55,21 @@ export async function POST(req: Request) {
   return Response.json({ id, provider, defaultModel, isActive: true });
 }
 
+export async function PUT(req: Request) {
+  const { userId } = await requireRole("admin", "user");
+  const { id, defaultModel } = await req.json();
+  if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
+
+  const [updated] = await db
+    .update(providerConfigs)
+    .set({ defaultModel: defaultModel || null })
+    .where(and(eq(providerConfigs.id, id), eq(providerConfigs.userId, userId)))
+    .returning();
+
+  if (!updated) return Response.json({ error: "Not found" }, { status: 404 });
+  return Response.json({ id: updated.id, defaultModel: updated.defaultModel });
+}
+
 export async function DELETE(req: Request) {
   const { userId } = await requireRole("admin", "user");
 

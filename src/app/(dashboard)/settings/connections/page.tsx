@@ -22,6 +22,7 @@ interface ProviderConfig {
   id: string;
   provider: string;
   defaultModel: string | null;
+  baseUrl: string | null;
   isActive: boolean | null;
 }
 
@@ -30,6 +31,8 @@ export default function ConnectionsPage() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [editingModel, setEditingModel] = useState<string | null>(null);
+  const [newModel, setNewModel] = useState("");
 
   // Form state
   const [provider, setProvider] = useState<Provider>("openai");
@@ -65,6 +68,21 @@ export default function ConnectionsPage() {
       toast.success("Provider removed");
     } else {
       toast.error("Failed to remove provider");
+    }
+  };
+
+  const handleUpdateModel = async (id: string, model: string) => {
+    const res = await fetch("/api/settings/providers", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, defaultModel: model }),
+    });
+    if (res.ok) {
+      setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, defaultModel: model } : c)));
+      setEditingModel(null);
+      toast.success("Default model updated");
+    } else {
+      toast.error("Failed to update model");
     }
   };
 
@@ -136,27 +154,61 @@ export default function ConnectionsPage() {
           <p className="text-sm text-muted-foreground">No providers configured yet.</p>
         )}
         {configs.map((c) => (
-          <div
-            key={c.id}
-            className="flex items-center justify-between rounded-md border p-3"
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium capitalize">{c.provider}</span>
-              {c.defaultModel && <Badge variant="secondary">{c.defaultModel}</Badge>}
-              {c.isActive && (
-                <Badge variant="outline" className="text-xs">
-                  active
-                </Badge>
+          <div key={c.id} className="rounded-lg border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold capitalize">{c.provider}</span>
+                {c.isActive && (
+                  <Badge variant="outline" className="text-[10px]">active</Badge>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                onClick={() => handleDelete(c.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Default Model</label>
+              {editingModel === c.id ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={newModel}
+                    onChange={(e) => setNewModel(e.target.value)}
+                    placeholder="e.g. openai/gpt-5.4"
+                    className="h-8 text-sm"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        handleUpdateModel(c.id, newModel);
+                      } else if (e.key === "Escape") {
+                        setEditingModel(null);
+                      }
+                    }}
+                  />
+                  <Button size="sm" className="h-8" onClick={() => handleUpdateModel(c.id, newModel)}>
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-8" onClick={() => setEditingModel(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  className="flex items-center gap-2 text-sm hover:text-foreground transition-colors text-left"
+                  onClick={() => { setEditingModel(c.id); setNewModel(c.defaultModel || ""); }}
+                >
+                  <Badge variant="secondary" className="font-mono">
+                    {c.defaultModel || "not set"}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground/50">click to change</span>
+                </button>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-destructive"
-              onClick={() => handleDelete(c.id)}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
           </div>
         ))}
       </div>
