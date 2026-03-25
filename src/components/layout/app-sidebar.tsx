@@ -96,15 +96,15 @@ export function AppSidebar() {
     : "/chat";
 
   return (
-    <Sidebar>
-      <SidebarHeader className="p-3">
-        <div className="flex items-center justify-between">
-          <span className="text-base font-medium">unClaw</span>
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="p-2">
+        <div className="flex items-center justify-between group-data-[collapsible=icon]:justify-center">
+          <span className="text-base font-medium group-data-[collapsible=icon]:hidden">unClaw</span>
           <SidebarTrigger />
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="group-data-[collapsible=icon]:hidden">
         <SidebarGroup>
           <SidebarGroupContent>
             <div className="px-2 pb-1">
@@ -190,28 +190,34 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="p-3">
-        <SidebarSeparator />
-        <div className="flex items-center justify-between pt-2">
-          <ThemeSwitcher />
-          <div className="flex items-center gap-1">
+      <SidebarFooter className="p-2">
+        <div className="flex items-center justify-between group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1">
+          <span className="group-data-[collapsible=icon]:hidden"><ThemeSwitcher /></span>
+          <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
+            <Link
+              href={newChatHref}
+              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
+              title="New Chat"
+            >
+              <Plus className="h-4 w-4" />
+            </Link>
             <Link
               href="/chat/archived"
-              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
               title="Archived"
             >
               <Archive className="h-4 w-4" />
             </Link>
             <Link
               href="/projects"
-              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
               title="Projects"
             >
               <FolderKanban className="h-4 w-4" />
             </Link>
             <Link
               href="/settings"
-              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
               title="Settings"
             >
               <Settings className="h-4 w-4" />
