@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { FolderOpen } from "lucide-react";
 import { ChatMessage, ThinkingIndicator } from "@/components/chat/message";
-import { ChatInput } from "@/components/chat/chat-input";
+import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
 import { ModelSelector } from "@/components/chat/model-selector";
 import { SandboxFiles } from "@/components/chat/sandbox-files";
 import { Button } from "@/components/ui/button";
@@ -28,19 +28,21 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const [input, setInput] = useState("");
+  const [files, setFiles] = useState<AttachedFile[]>([]);
 
   const handleSubmit = async () => {
     const text = input.trim();
-    if (!text) return;
+    const attachedFiles = files.map((af) => af.file);
+    if (!text && attachedFiles.length === 0) return;
+
     setInput("");
+    setFiles([]);
     try {
-      await sendMessage(text, model);
+      await sendMessage(text, model, attachedFiles.length > 0 ? attachedFiles : undefined);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to send message");
     }
@@ -48,6 +50,18 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
 
   const isEmpty = messages.length === 0;
   const [filesOpen, setFilesOpen] = useState(false);
+
+  const inputEl = (
+    <ChatInput
+      value={input}
+      onChange={setInput}
+      onSubmit={handleSubmit}
+      onStop={stop}
+      isLoading={isLoading}
+      files={files}
+      onFilesChange={setFiles}
+    />
+  );
 
   return (
     <div className="flex h-full">
@@ -63,13 +77,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
                 <ModelSelector value={model} onChange={setModel} />
               </div>
             </div>
-            <ChatInput
-              value={input}
-              onChange={setInput}
-              onSubmit={handleSubmit}
-              onStop={stop}
-              isLoading={isLoading}
-            />
+            {inputEl}
           </div>
         </div>
       ) : (
@@ -111,13 +119,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
           </div>
 
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
-            <ChatInput
-              value={input}
-              onChange={setInput}
-              onSubmit={handleSubmit}
-              onStop={stop}
-              isLoading={isLoading}
-            />
+            {inputEl}
           </div>
         </div>
       )}

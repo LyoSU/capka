@@ -209,16 +209,48 @@ export function useBackgroundChat({
     return () => clearInterval(poll);
   }, [status, chatId, loadHistory]);
 
+  // ── Upload files to sandbox workspace ────────────────────────
+  const uploadFiles = useCallback(
+    async (files: File[]): Promise<string[]> => {
+      const uploaded: string[] = [];
+      for (const file of files) {
+        const form = new FormData();
+        form.append("chatId", chatId);
+        form.append("path", ".");
+        form.append("file", file);
+        const res = await fetch("/api/sandbox/files/upload", { method: "POST", body: form });
+        if (res.ok) {
+          const data = await res.json();
+          uploaded.push(data.name || file.name);
+        }
+      }
+      return uploaded;
+    },
+    [chatId],
+  );
+
   // ── Send message ───────────────────────────────────────────
   const sendMessage = useCallback(
-    async (text: string, model: string) => {
-      if (!text.trim()) return;
+    async (text: string, model: string, files?: File[]) => {
+      if (!text.trim() && (!files || files.length === 0)) return;
 
-      // Optimistically add user message
+      // Upload files first — AI needs them in workspace before processing
+      let fileContext = "";
+      if (files && files.length > 0) {
+        const names = await uploadFiles(files);
+        if (names.length > 0) {
+          const listing = names.map((n) => `  - /workspace/${n}`).join("\n");
+          fileContext = `\n\n[Attached files uploaded to workspace:\n${listing}]`;
+        }
+      }
+
+      const fullText = (text.trim() + fileContext) || `Please process the attached files.${fileContext}`;
+
+      // Optimistically add user message (show original text, not file context)
       const userMsg: Message = {
         id: nanoid(),
         role: "user",
-        parts: [{ type: "text", text }],
+        parts: [{ type: "text", text: text.trim() || "Process these files" }],
       };
       const currentMessages = [...msgRef.current, userMsg];
       setMessages(currentMessages);
@@ -232,7 +264,7 @@ export function useBackgroundChat({
             chatId,
             projectId,
             model,
-            userMessage: text,
+            userMessage: fullText,
             messages: currentMessages.map((m) => ({
               id: m.id,
               role: m.role,
@@ -248,15 +280,13 @@ export function useBackgroundChat({
 
         const { taskId: newTaskId } = await res.json();
         setTaskId(newTaskId);
-        // task:start SSE event will add the assistant message
       } catch (e) {
-        // Rollback optimistic user message
         setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
         setStatus("idle");
         throw e;
       }
     },
-    [chatId, projectId],
+    [chatId, projectId, uploadFiles],
   );
 
   // ── Stop / Cancel ──────────────────────────────────────────
