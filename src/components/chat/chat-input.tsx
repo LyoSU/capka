@@ -45,7 +45,7 @@ export function ChatInput({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "0";
-    el.style.height = `${el.scrollHeight}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, []);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -89,7 +89,7 @@ export function ChatInput({
     <div className="px-4 md:px-6 pb-6 pt-2">
       <div className="mx-auto max-w-3xl lg:max-w-4xl">
         <div
-          className={`rounded-2xl border bg-card shadow-sm transition-all focus-within:shadow-md ${dragOver ? "ring-2 ring-primary/30 border-primary/30" : ""}`}
+          className={`overflow-hidden rounded-2xl border bg-card shadow-sm transition-all focus-within:shadow-md ${dragOver ? "ring-2 ring-primary/30 border-primary/30" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
@@ -119,21 +119,19 @@ export function ChatInput({
             </div>
           )}
 
-          <div className="max-h-60 overflow-y-auto px-5 pt-4 pb-2 scrollbar-thin">
-            <textarea
-              ref={textareaRef}
-              value={value}
-              onChange={(e) => {
-                onChange(e.target.value);
-                resize();
-              }}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder={files.length > 0 ? "Add a message about the files..." : "Assign a task or ask anything"}
-              rows={1}
-              className="w-full resize-none overflow-hidden bg-transparent text-[15px] leading-relaxed placeholder:text-muted-foreground/50 focus-visible:outline-none"
-            />
-          </div>
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => {
+              onChange(e.target.value);
+              resize();
+            }}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={files.length > 0 ? "Add a message about the files..." : "Assign a task or ask anything"}
+            rows={1}
+            className="w-full max-h-60 resize-none overflow-y-auto bg-transparent px-5 pt-4 pb-2 text-[15px] leading-relaxed placeholder:text-muted-foreground/50 focus-visible:outline-none scrollbar-none"
+          />
           <div className="flex items-center justify-between px-3 pb-2.5">
             {/* Attach button */}
             <div>

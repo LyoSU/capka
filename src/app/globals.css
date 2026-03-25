@@ -158,3 +158,11 @@
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
   background: oklch(0.5 0 0 / 0.3);
 }
+
+/* Hide scrollbar completely (still scrollable) */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
