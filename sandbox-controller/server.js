@@ -312,11 +312,13 @@ const server = createServer(async (req, res) => {
       const fileStat = await stat(fullPath).catch(() => null);
       if (!fileStat || fileStat.isDirectory()) return jsonRes(res, 404, { error: "File not found" });
 
-      const filename = basename(fullPath).replace(/"/g, "_");
+      const rawName = basename(fullPath);
+      const safeName = rawName.replace(/[^\x20-\x7E]/g, "_"); // ASCII-safe fallback
+      const encodedName = encodeURIComponent(rawName);
       res.writeHead(200, {
         "Content-Type": "application/octet-stream",
         "Content-Length": fileStat.size,
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="${safeName}"; filename*=UTF-8''${encodedName}`,
       });
       await pipeline(createReadStream(fullPath), res);
       return;
