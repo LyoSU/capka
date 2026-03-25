@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
+import { toast } from "sonner";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -39,20 +40,26 @@ export function useBackgroundChat({
   const msgRef = useRef(messages);
   msgRef.current = messages;
 
+  const [error, setError] = useState<string | null>(null);
+
   // ── Load history from DB ───────────────────────────────────
   const loadHistory = useCallback(() => {
     fetch(`/api/chat?chatId=${chatId}`)
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load chat (${r.status})`);
+        return r.json();
+      })
       .then((history: Message[]) => {
         if (history.length > 0) setMessages(history);
-        // Check if the last assistant message is still running
+        setError(null);
         const last = history[history.length - 1];
         const meta = last?.metadata as { taskStatus?: string } | undefined;
-        if (meta?.taskStatus === "running") {
-          setStatus("running");
-        }
+        if (meta?.taskStatus === "running") setStatus("running");
       })
-      .catch(() => {});
+      .catch((e) => {
+        console.error("[chat] loadHistory failed:", e);
+        setError("Failed to load messages");
+      });
   }, [chatId]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
@@ -71,19 +78,19 @@ export function useBackgroundChat({
   }, [chatId]);
 
   // ── SSE listener ───────────────────────────────────────────
-  const sseAlive = useRef(false);
-
   useEffect(() => {
     let es: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout>;
+    let retryDelay = 1000; // exponential backoff: 1s, 2s, 4s, 8s, max 30s
 
     const connect = () => {
       es = new EventSource("/api/events");
 
+      es.onopen = () => { retryDelay = 1000; }; // reset backoff on success
+
       es.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as TaskEvent;
-          sseAlive.current = true;
 
           // Only handle events for this chat
           if ("chatId" in data && data.chatId !== chatId) return;
@@ -160,7 +167,7 @@ export function useBackgroundChat({
             case "task:finish": {
               setStatus("idle");
               setTaskId(null);
-              // Reload from DB to get clean final state
+              if (data.error) toast.error(`Task failed: ${data.error}`);
               loadHistory();
               break;
             }
@@ -176,9 +183,9 @@ export function useBackgroundChat({
 
       es.onerror = () => {
         es?.close();
-        sseAlive.current = false;
         clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(connect, 5000);
+        reconnectTimer = setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 30000);
       };
     };
 
@@ -297,5 +304,5 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId]);
 
-  return { messages, status, sendMessage, stop, isLoading: status === "running" };
+  return { messages, status, error, sendMessage, stop, isLoading: status === "running" };
 }

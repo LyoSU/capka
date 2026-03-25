@@ -1,6 +1,6 @@
 import { eq, and, asc, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession } from "@/lib/auth";
+import { requireSession, requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages, projects, memories, tasks } from "@/lib/db/schema";
 import { resolveUserModel } from "@/lib/providers/resolve";
@@ -11,7 +11,7 @@ import { startTask } from "@/lib/tasks/runner";
 export async function POST(req: Request) {
   let mcpClose: (() => Promise<void>) | undefined;
   try {
-    const { userId } = await requireSession();
+    const { userId } = await requireRole("admin", "user");
     const body = await req.json();
     const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
     const chatId = requestChatId || nanoid();

@@ -1,4 +1,4 @@
-import { requireSession } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import { getSetting, setSetting } from "@/lib/settings";
 
 const READABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context", "sandbox_enabled"];
@@ -6,7 +6,7 @@ const WRITABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context
 const BLOCKED_KEYS = ["auth_secret", "setup_complete", "admin_email"];
 
 export async function GET(req: Request) {
-  await requireSession();
+  await requireAdmin();
   const { searchParams } = new URL(req.url);
   const key = searchParams.get("key");
   if (!key) return Response.json({ error: "Missing key" }, { status: 400 });
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  await requireSession();
+  await requireAdmin();
   const { key, value, encrypted } = await req.json();
   if (!key || value === undefined) {
     return Response.json({ error: "Missing key or value" }, { status: 400 });

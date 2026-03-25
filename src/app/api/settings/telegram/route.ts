@@ -1,10 +1,10 @@
 import { Bot } from "grammy";
-import { requireSession } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import { setSetting } from "@/lib/settings";
 import { generateSecret } from "@/lib/crypto";
 
 export async function POST(req: Request) {
-  await requireSession();
+  await requireAdmin();
 
   const { botToken } = await req.json();
   if (!botToken?.trim()) {

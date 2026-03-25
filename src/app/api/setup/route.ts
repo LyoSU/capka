@@ -2,7 +2,7 @@ import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
-import { providerConfigs } from "@/lib/db/schema";
+import { providerConfigs, users } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { setSetting, isSetupComplete, getMasterKey } from "@/lib/settings";
 import { getAuth } from "@/lib/auth";
@@ -61,6 +61,12 @@ export async function POST(req: Request) {
   }
 
   if (step === "complete") {
+    // Make the first user (who completed setup) an admin
+    const auth = await getAuth();
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (session) {
+      await db.update(users).set({ role: "admin" }).where(eq(users.id, session.user.id));
+    }
     await setSetting("setup_complete", "true");
     return Response.json({ ok: true });
   }

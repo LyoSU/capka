@@ -30,12 +30,32 @@ export async function getAuth() {
   return _auth as ReturnType<typeof betterAuth>;
 }
 
-/** Require authenticated session — returns userId or throws 401 Response.
- *  Must only be called from server-side route handlers. */
-export async function requireSession(): Promise<{ userId: string; session: Awaited<ReturnType<Awaited<ReturnType<typeof getAuth>>["api"]["getSession"]>> }> {
+export type Role = "admin" | "user" | "viewer";
+
+/** Require authenticated session — returns userId and role or throws 401 Response. */
+export async function requireSession(): Promise<{
+  userId: string;
+  role: Role;
+  session: Awaited<ReturnType<Awaited<ReturnType<typeof getAuth>>["api"]["getSession"]>>;
+}> {
   const { headers } = await import("next/headers");
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) throw Response.json({ error: "Unauthorized" }, { status: 401 });
-  return { userId: session.user.id, session };
+  const role = ((session.user as Record<string, unknown>).role as Role) || "user";
+  return { userId: session.user.id, role, session };
+}
+
+/** Require a minimum role — throws 403 if insufficient. */
+export async function requireRole(...allowed: Role[]) {
+  const ctx = await requireSession();
+  if (!allowed.includes(ctx.role)) {
+    throw Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return ctx;
+}
+
+/** Require admin role. */
+export async function requireAdmin() {
+  return requireRole("admin");
 }
