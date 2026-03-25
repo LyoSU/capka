@@ -183,12 +183,12 @@ function ModelList({
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60">
+                      <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground/60">
                         {model.context > 0 && (
-                          <span className="tabular-nums">{formatContext(model.context)} ctx</span>
+                          <span className="tabular-nums">{formatContext(model.context)} tokens</span>
                         )}
                         {model.pricing.prompt > 0 && (
-                          <span className="tabular-nums">{formatPrice(model.pricing.prompt)}/M</span>
+                          <span className="tabular-nums">${model.pricing.prompt < 1 ? model.pricing.prompt.toFixed(2) : model.pricing.prompt.toFixed(1)}/M in</span>
                         )}
                       </div>
                     </div>
@@ -291,28 +291,27 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 
   const currentModelId = value.includes(":") ? value.split(":").slice(1).join(":") : value;
   const currentProvider = currentModelId.includes("/") ? currentModelId.split("/")[0] : "";
-  const CurrentProviderIcon = PROVIDER_META[currentProvider]?.icon;
-  const currentProviderLabel = PROVIDER_META[currentProvider]?.label;
+  const providerMeta = PROVIDER_META[currentProvider];
+  const ProviderIcon = providerMeta?.icon ?? Sparkles;
+  const providerLabel = providerMeta?.label ?? (currentProvider || null);
   const currentModel = models.find((m) => m.id === currentModelId);
 
   return (
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex h-9 items-center gap-2.5 px-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        className="flex h-9 items-center gap-2.5 px-3 text-sm hover:text-foreground transition-colors"
       >
-        {CurrentProviderIcon && (
-          <span className="flex h-5 w-5 items-center justify-center rounded-md bg-muted">
-            <CurrentProviderIcon size={13} />
-          </span>
-        )}
-        <span className="flex items-baseline gap-1.5">
-          <span className="truncate max-w-48 font-medium text-foreground">{getDisplayName(value)}</span>
-          {currentProviderLabel && (
-            <span className="text-[11px] text-muted-foreground/60 hidden sm:inline">{currentProviderLabel}</span>
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0">
+          <ProviderIcon size={14} />
+        </span>
+        <span className="flex items-baseline gap-1.5 min-w-0">
+          <span className="truncate max-w-52 font-medium text-foreground">{getDisplayName(value)}</span>
+          {providerLabel && (
+            <span className="text-xs text-muted-foreground/50 hidden sm:inline">{providerLabel}</span>
           )}
           {currentModel && currentModel.context > 0 && (
-            <span className="text-[11px] text-muted-foreground/40 tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span>
+            <span className="text-xs text-muted-foreground/35 tabular-nums hidden md:inline">{formatContext(currentModel.context)} tokens</span>
           )}
         </span>
         <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
