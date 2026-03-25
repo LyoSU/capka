@@ -221,6 +221,7 @@ function ModelList({
 export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [configProvider, setConfigProvider] = useState("");
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -236,19 +237,19 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Fetch models on first open
+  // Fetch models on mount (needed for display name in pill)
   useEffect(() => {
-    if (!open || models.length > 0) return;
+    if (models.length > 0) return;
     setLoading(true);
     fetch("/api/models")
       .then((r) => {
         if (!r.ok) throw new Error("Failed to load models");
         return r.json();
       })
-      .then((data) => setModels(data.models ?? []))
+      .then((data) => { setModels(data.models ?? []); if (data.provider) setConfigProvider(data.provider); })
       .catch(() => setModels([{ id: value, name: value.split(":").pop() || value, provider: "", context: 0, pricing: { prompt: 0, completion: 0 } }]))
       .finally(() => setLoading(false));
-  }, [open, models.length]);
+  }, [models.length]);
 
   // Close on outside click (desktop only)
   useEffect(() => {
@@ -277,10 +278,10 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 
   const select = useCallback(
     (model: ModelInfo) => {
-      onChange(`openrouter:${model.id}`);
+      onChange(configProvider ? `${configProvider}:${model.id}` : model.id);
       setOpen(false);
     },
-    [onChange],
+    [onChange, configProvider],
   );
 
   // Scroll active into view
@@ -306,7 +307,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
           <ProviderIcon size={14} />
         </span>
         <span className="flex items-baseline gap-1.5 min-w-0">
-          <span className="truncate max-w-52 font-medium text-foreground">{getDisplayName(value)}</span>
+          <span className="truncate max-w-52 font-medium text-foreground">{currentModel?.name || getDisplayName(value)}</span>
           {providerLabel && (
             <span className="text-xs text-muted-foreground/50 hidden sm:inline">{providerLabel}</span>
           )}
