@@ -103,6 +103,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
                 <ChatMessage
                   key={message.id}
                   message={message as never}
+                  chatId={chatId}
                   isStreaming={
                     isLoading &&
                     i === messages.length - 1 &&

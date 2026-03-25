@@ -1,6 +1,7 @@
 import { type UIMessage } from "ai";
+import React from "react";
 import {
-  Copy, Check, Send,
+  Copy, Check, Send, Download,
   ChevronRight, Loader2, AlertCircle,
   FileSearch, Globe, Terminal, Folder,
 } from "lucide-react";
@@ -254,21 +255,85 @@ function closeOpenMarkdown(text: string): string {
 
 const proseClasses = "prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-medium [&_blockquote]:border-border [&_blockquote]:text-muted-foreground [&_hr]:border-border [&_a]:text-foreground [&_a]:underline [&_a]:underline-offset-2 [&_table]:text-xs";
 
-function TextContent({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
+function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
   const md = isStreaming ? closeOpenMarkdown(text) : text;
   return (
     <div className={`${proseClasses}${isStreaming ? " streaming-text" : ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          code: ({ className, children }) => <CodeBlock className={className}>{children}</CodeBlock>,
+          code: ({ className, children }) => {
+            // Inline code with /workspace/ path = clickable download link
+            // NOTE: This is a React component rendering file paths from AI output — not shell execution
+            if (!className && chatId && typeof children === "string" && children.startsWith("/workspace/")) {
+              const filePath = children.replace(/^\/workspace\//, "");
+              const fileName = filePath.split("/").pop() || filePath;
+              const href = `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`;
+              return (
+                <a
+                  href={href}
+                  download={fileName}
+                  className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary no-underline hover:bg-primary/20 transition-colors"
+                >
+                  <Download className="h-3 w-3" />
+                  {fileName}
+                </a>
+              );
+            }
+            return <CodeBlock className={className}>{children}</CodeBlock>;
+          },
           pre: ({ children }) => <>{children}</>,
+          p: ({ children }) => {
+            if (!chatId) return <p>{children}</p>;
+            return <p>{processWorkspacePaths(children, chatId)}</p>;
+          },
         }}
       >
         {md}
       </ReactMarkdown>
     </div>
   );
+}
+
+/** Convert /workspace/... paths in text nodes to download links */
+function processWorkspacePaths(children: React.ReactNode, chatId: string): React.ReactNode {
+  if (!Array.isArray(children)) {
+    if (typeof children !== "string") return children;
+    return replacePathsInText(children, chatId);
+  }
+  return children.map((child, i) => {
+    if (typeof child === "string") return <React.Fragment key={i}>{replacePathsInText(child, chatId)}</React.Fragment>;
+    return child;
+  });
+}
+
+function replacePathsInText(text: string, chatId: string): React.ReactNode {
+  // Match /workspace/path.ext patterns (supports cyrillic, spaces, brackets)
+  const regex = /\/workspace\/([\w/.А-Яа-яІіЇїЄєҐґ_\-\s()]+\.\w+)/g;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    const filePath = match[1];
+    const fileName = filePath.split("/").pop() || filePath;
+    const href = `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`;
+    parts.push(
+      <a
+        key={match.index}
+        href={href}
+        download={fileName}
+        className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary no-underline hover:bg-primary/20 transition-colors"
+      >
+        <Download className="h-3 w-3" />
+        {fileName}
+      </a>,
+    );
+    last = match.index + match[0].length;
+  }
+  if (parts.length === 0) return text;
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 function ToolCard({ part }: { part: ToolPart }) {
@@ -386,11 +451,12 @@ function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram
 interface ChatMessageProps {
   message: UIMessage;
   isStreaming?: boolean;
+  chatId?: string;
 }
 
 export { ThinkingIndicator };
 
-export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
+export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) {
   const isUser = message.role === "user";
   const metadata = message.metadata as
     | { createdAt?: string | null; platform?: string | null }
@@ -448,7 +514,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
             return groups.map((g, gi) => {
               if (g.kind === "text") {
                 const isLast = gi === groups.length - 1 || groups.slice(gi + 1).every((x) => x.kind !== "text");
-                return <TextContent key={gi} text={g.text} isStreaming={isStreaming && isLast} />;
+                return <TextContent key={gi} text={g.text} isStreaming={isStreaming && isLast} chatId={chatId} />;
               }
               return <ToolGroup key={gi} tools={g.tools} />;
             });
