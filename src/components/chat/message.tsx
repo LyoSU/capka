@@ -194,7 +194,7 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
       <Streamdown
         parseIncompleteMarkdown={isStreaming}
         shikiTheme={["github-light", "github-dark"]}
-        controls={{ code: { copy: true }, table: false }}
+        controls={{ code: { copy: true }, table: { copy: true, download: true, fullscreen: true } }}
       >
         {text}
       </Streamdown>
@@ -217,18 +217,20 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
   );
 }
 
-const downloadLinkClass = "inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary no-underline hover:bg-primary/20 transition-colors";
-
 function DownloadLink({ chatId, filePath }: { chatId: string; filePath: string }) {
   const fileName = filePath.split("/").pop() || filePath;
+  const ext = fileName.split(".").pop()?.toLowerCase() || "";
+  const isImage = ["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext);
+  const label = isImage ? "Image" : ext.toUpperCase();
   return (
     <a
       href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`}
       download={fileName}
-      className={downloadLinkClass}
+      className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium text-foreground no-underline shadow-sm hover:bg-accent transition-colors"
     >
-      <Download className="h-3 w-3" />
-      {fileName}
+      <Download className="h-4 w-4 text-muted-foreground" />
+      <span className="truncate max-w-48">{fileName}</span>
+      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{label}</span>
     </a>
   );
 }

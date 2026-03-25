@@ -167,16 +167,17 @@
   display: none;
 }
 
-/* Streamdown — flatten table wrapper so tables render inline */
+/* Streamdown — clean table styling without nested card look */
 [data-streamdown="table-wrapper"] {
-  all: unset;
-  display: block;
-  overflow-x: auto;
-  margin: 0.5rem 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0.75rem 0;
 }
 [data-streamdown="table"] {
   width: 100%;
-  border-collapse: collapse;
   font-size: 0.8125rem;
 }
 [data-streamdown="table-header-cell"],
@@ -187,5 +188,6 @@
 }
 [data-streamdown="table-header-cell"] {
   font-weight: 600;
+  font-size: 0.75rem;
   color: var(--muted-foreground);
 }
