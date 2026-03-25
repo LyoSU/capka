@@ -45,7 +45,7 @@ export function ChatInput({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "0";
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+    el.style.height = `${el.scrollHeight}px`;
   }, []);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -119,19 +119,21 @@ export function ChatInput({
             </div>
           )}
 
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => {
-              onChange(e.target.value);
-              resize();
-            }}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder={files.length > 0 ? "Add a message about the files..." : "Assign a task or ask anything"}
-            rows={1}
-            className="w-full max-h-60 resize-none overflow-y-auto bg-transparent px-5 pt-4 pb-2 text-[15px] leading-relaxed placeholder:text-muted-foreground/50 focus-visible:outline-none scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
-          />
+          <div className="max-h-60 overflow-y-auto px-5 pt-4 pb-2 scrollbar-thin">
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => {
+                onChange(e.target.value);
+                resize();
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder={files.length > 0 ? "Add a message about the files..." : "Assign a task or ask anything"}
+              rows={1}
+              className="w-full resize-none overflow-hidden bg-transparent text-[15px] leading-relaxed placeholder:text-muted-foreground/50 focus-visible:outline-none"
+            />
+          </div>
           <div className="flex items-center justify-between px-3 pb-2.5">
             {/* Attach button */}
             <div>
