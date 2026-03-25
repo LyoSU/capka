@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   try {
     const { userId } = await requireSession();
     const body = await req.json();
-    const { chatId: requestChatId, model: requestModel, projectId, userMessage } = body;
+    const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
     const chatId = requestChatId || nanoid();
 
     const [chatRow, model, mcp, project, userMemories] = await Promise.all([
@@ -85,6 +85,13 @@ export async function POST(req: Request) {
         systemPrompt += `\n\n## Current workspace files:\n\`\`\`\n${ws.stdout.trim()}\n\`\`\``;
       }
     } catch { /* sandbox not ready yet */ }
+
+    // Inject attached file context so AI knows user just uploaded these
+    const fileList = attachedFiles as string[] | undefined;
+    if (fileList?.length) {
+      const listing = fileList.map((f: string) => `  - /workspace/${f}`).join("\n");
+      systemPrompt += `\n\n## User just attached these files:\n${listing}\nOpen and process them as requested.`;
+    }
 
     // Create task and start background execution
     const taskId = nanoid();

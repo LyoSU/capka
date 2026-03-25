@@ -231,26 +231,33 @@ function ThinkingIndicator() {
   );
 }
 
-function StreamingText({ text }: { text: string }) {
-  const fadeLen = 25;
-  if (text.length <= fadeLen) {
-    return <span className="streaming-fade whitespace-pre-wrap text-sm leading-relaxed">{text}</span>;
-  }
-  const stable = text.slice(0, -fadeLen);
-  const fading = text.slice(-fadeLen);
-  return (
-    <span className="whitespace-pre-wrap text-sm leading-relaxed">
-      {stable}<span className="streaming-fade">{fading}</span>
-    </span>
-  );
+/** Close open markdown tags so partial streaming text renders correctly */
+function closeOpenMarkdown(text: string): string {
+  // Close unclosed code fences
+  const fenceCount = (text.match(/^```/gm) || []).length;
+  if (fenceCount % 2 !== 0) text += "\n```";
+
+  // Close unclosed inline code
+  const backtickCount = (text.match(/(?<!`)`(?!`)/g) || []).length;
+  if (backtickCount % 2 !== 0) text += "`";
+
+  // Close unclosed bold
+  const boldCount = (text.match(/\*\*/g) || []).length;
+  if (boldCount % 2 !== 0) text += "**";
+
+  // Close unclosed italic (single *)
+  const italicCount = (text.match(/(?<!\*)\*(?!\*)/g) || []).length;
+  if (italicCount % 2 !== 0) text += "*";
+
+  return text;
 }
 
 const proseClasses = "prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-medium [&_blockquote]:border-border [&_blockquote]:text-muted-foreground [&_hr]:border-border [&_a]:text-foreground [&_a]:underline [&_a]:underline-offset-2 [&_table]:text-xs";
 
 function TextContent({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
-  if (isStreaming) return <StreamingText text={text} />;
+  const md = isStreaming ? closeOpenMarkdown(text) : text;
   return (
-    <div className={proseClasses}>
+    <div className={`${proseClasses}${isStreaming ? " streaming-text" : ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -258,7 +265,7 @@ function TextContent({ text, isStreaming }: { text: string; isStreaming?: boolea
           pre: ({ children }) => <>{children}</>,
         }}
       >
-        {text}
+        {md}
       </ReactMarkdown>
     </div>
   );

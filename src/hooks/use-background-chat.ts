@@ -235,22 +235,18 @@ export function useBackgroundChat({
       if (!text.trim() && (!files || files.length === 0)) return;
 
       // Upload files first — AI needs them in workspace before processing
-      let fileContext = "";
+      let uploadedFiles: string[] = [];
       if (files && files.length > 0) {
-        const names = await uploadFiles(files);
-        if (names.length > 0) {
-          const listing = names.map((n) => `  - /workspace/${n}`).join("\n");
-          fileContext = `\n\n[Attached files uploaded to workspace:\n${listing}]`;
-        }
+        uploadedFiles = await uploadFiles(files);
       }
 
-      const fullText = (text.trim() + fileContext) || `Please process the attached files.${fileContext}`;
+      const displayText = text.trim() || (uploadedFiles.length > 0 ? "Process these files" : "");
 
-      // Optimistically add user message (show original text, not file context)
+      // Optimistically add user message (clean text only, no file metadata)
       const userMsg: Message = {
         id: nanoid(),
         role: "user",
-        parts: [{ type: "text", text: text.trim() || "Process these files" }],
+        parts: [{ type: "text", text: displayText }],
       };
       const currentMessages = [...msgRef.current, userMsg];
       setMessages(currentMessages);
@@ -264,7 +260,9 @@ export function useBackgroundChat({
             chatId,
             projectId,
             model,
-            userMessage: fullText,
+            userMessage: displayText,
+            // File context sent separately — injected into system prompt, not saved as user message
+            attachedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
             messages: currentMessages.map((m) => ({
               id: m.id,
               role: m.role,
