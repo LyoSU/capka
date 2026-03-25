@@ -86,8 +86,8 @@ export function ChatInput({
   const hasContent = value.trim() || files.length > 0;
 
   return (
-    <div className="px-4 pb-5 pt-2">
-      <div className="mx-auto max-w-2xl">
+    <div className="px-4 md:px-6 pb-6 pt-2">
+      <div className="mx-auto max-w-3xl lg:max-w-4xl">
         <div
           className={`rounded-2xl border bg-card shadow-sm transition-all focus-within:shadow-md ${dragOver ? "ring-2 ring-primary/30 border-primary/30" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}

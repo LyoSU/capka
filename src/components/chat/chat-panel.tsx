@@ -73,8 +73,8 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
     <div className="flex h-full">
       <div className="flex flex-1 flex-col">
       {isEmpty ? (
-        <div className="relative flex flex-1 flex-col items-center justify-center px-4">
-          <div className="w-full max-w-2xl space-y-8">
+        <div className="relative flex flex-1 flex-col items-center justify-center px-6">
+          <div className="w-full max-w-3xl space-y-10">
             <div className="text-center space-y-3">
               <h1 className="text-2xl md:text-4xl font-medium tracking-tight text-foreground/85">
                 What can I help with?
@@ -88,14 +88,14 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
         </div>
       ) : (
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2">
+          <div className="flex items-center justify-between px-6 py-3">
             <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
               <ModelSelector value={model} onChange={setModel} />
             </div>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="h-8 w-8"
               onClick={() => setFilesOpen(!filesOpen)}
               title="Workspace files"
             >
@@ -104,7 +104,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
           </div>
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto pb-40">
-            <div className="mx-auto max-w-3xl">
+            <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
               {messages.map((message, i) => (
                 <ChatMessage
                   key={message.id}

@@ -251,7 +251,7 @@ function closeOpenMarkdown(text: string): string {
   return text;
 }
 
-const proseClasses = "prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-medium [&_blockquote]:border-border [&_blockquote]:text-muted-foreground [&_hr]:border-border [&_a]:text-foreground [&_a]:underline [&_a]:underline-offset-2 [&_table]:text-xs";
+const proseClasses = "prose prose-sm dark:prose-invert max-w-none text-[15px] leading-relaxed [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-[15px] [&_h3]:font-medium [&_blockquote]:border-border [&_blockquote]:text-muted-foreground [&_hr]:border-border [&_a]:text-foreground [&_a]:underline [&_a]:underline-offset-2 [&_table]:text-xs";
 
 function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
   const md = isStreaming ? closeOpenMarkdown(text) : text;
@@ -459,9 +459,9 @@ export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) 
       .join("");
 
     return (
-      <div className="group/msg flex justify-end px-4 py-3">
-        <div className="max-w-[70%]">
-          <div className="inline-block rounded-2xl bg-primary text-primary-foreground px-4 py-2.5 text-sm">
+      <div className="group/msg flex justify-end px-4 md:px-6 py-4">
+        <div className="max-w-[75%] lg:max-w-[65%]">
+          <div className="inline-block rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
             {text || "..."}
           </div>
           <div className="mt-1 flex justify-end">
@@ -489,7 +489,7 @@ export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) 
   const lastTextIdx = groups.reduce((acc, g, i) => g.kind === "text" ? i : acc, -1);
 
   return (
-    <div className="group/msg px-4 py-3">
+    <div className="group/msg px-4 md:px-6 py-4">
       <div className="max-w-none">
         {groups.length > 0 ? (
           groups.map((g, gi) => {
