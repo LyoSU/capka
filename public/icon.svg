@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="108" fill="#0a0a0a"/>
   <g fill="none" stroke="#fafafa" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Three claw marks -->
-    <path d="M160 140 Q170 260 190 360"/>
-    <path d="M256 120 Q256 250 256 370"/>
-    <path d="M352 140 Q342 260 322 360"/>
+    <!-- Three claw marks — endpoints sink into the base arc -->
+    <path d="M175 140 Q180 265 200 382"/>
+    <path d="M256 120 Q256 255 256 388"/>
+    <path d="M337 140 Q332 265 312 382"/>
     <!-- Base arc connecting the claws -->
     <path d="M160 370 Q256 420 352 370"/>
   </g>
