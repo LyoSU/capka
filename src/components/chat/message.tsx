@@ -1,13 +1,12 @@
 import { type UIMessage } from "ai";
-import { Fragment } from "react";
 import {
-  Copy, Check, Send, Download,
+  Send, Download,
   ChevronRight, Loader2, AlertCircle,
   FileSearch, Globe, Terminal, Folder,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { useState, useCallback } from "react";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
+import { useState } from "react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 
 // --- Helpers ---
@@ -173,49 +172,6 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
 
 // --- Sub-components ---
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [text]);
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="absolute top-2 right-2 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-    >
-      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-    </button>
-  );
-}
-
-function CodeBlock({ className, children }: { className?: string; children: React.ReactNode }) {
-  const match = /language-(\w+)/.exec(className || "");
-  const language = match ? match[1] : "";
-  const code = String(children).replace(/\n$/, "");
-
-  if (!match) {
-    return <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{children}</code>;
-  }
-
-  return (
-    <div className="group relative my-3">
-      {language && (
-        <div className="flex items-center justify-between rounded-t-md border border-b-0 bg-muted/50 px-3 py-1">
-          <span className="text-xs text-muted-foreground">{language}</span>
-        </div>
-      )}
-      <div className="relative">
-        <pre className={`overflow-x-auto bg-muted p-3 font-mono text-xs ${language ? "rounded-b-md border border-t-0" : "rounded-md"}`}>
-          <code>{code}</code>
-        </pre>
-        <CopyButton text={code} />
-      </div>
-    </div>
-  );
-}
 
 function ThinkingIndicator() {
   const order = [0, 1, 2, 5, 8, 7, 6, 3, 4];
@@ -232,49 +188,31 @@ function ThinkingIndicator() {
   );
 }
 
-/** Close open markdown tags so partial streaming text renders correctly */
-function closeOpenMarkdown(text: string): string {
-  // Each check fixes the highest-priority unclosed tag and returns early
-  // to avoid scanning inside already-open blocks (e.g. * inside code fences)
-  const fenceCount = (text.match(/^```/gm) || []).length;
-  if (fenceCount % 2 !== 0) return text + "\n```";
-
-  const backtickCount = (text.match(/(?<!`)`(?!`)/g) || []).length;
-  if (backtickCount % 2 !== 0) return text + "`";
-
-  const boldCount = (text.match(/\*\*/g) || []).length;
-  if (boldCount % 2 !== 0) return text + "**";
-
-  const italicCount = (text.match(/(?<!\*)\*(?!\*)/g) || []).length;
-  if (italicCount % 2 !== 0) return text + "*";
-
-  return text;
+function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
+  return (
+    <div className={`streamdown-content text-[15px] leading-relaxed${isStreaming ? " streaming-text" : ""}`}>
+      <Streamdown
+        parseIncompleteMarkdown={isStreaming}
+        shikiTheme={["github-light", "github-dark"]}
+        controls={{ code: { copy: true } }}
+      >
+        {text}
+      </Streamdown>
+      {chatId && <WorkspaceLinks text={text} chatId={chatId} />}
+    </div>
+  );
 }
 
-const proseClasses = "prose prose-sm dark:prose-invert max-w-none text-[15px] leading-relaxed [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-[15px] [&_h3]:font-medium [&_blockquote]:border-border [&_blockquote]:text-muted-foreground [&_hr]:border-border [&_a]:text-foreground [&_a]:underline [&_a]:underline-offset-2 [&_table]:text-xs";
-
-function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
-  const md = isStreaming ? closeOpenMarkdown(text) : text;
+/** Render download links for /workspace/ paths mentioned in text */
+function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
+  const regex = /\/workspace\/([\w/.А-Яа-яІіЇїЄєҐґ_\-\s()]+\.\w+)/g;
+  const paths: string[] = [];
+  let match;
+  while ((match = regex.exec(text)) !== null) paths.push(match[1]);
+  if (paths.length === 0) return null;
   return (
-    <div className={`${proseClasses}${isStreaming ? " streaming-text" : ""}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code: ({ className, children }) => {
-            if (!className && chatId && typeof children === "string" && children.startsWith("/workspace/")) {
-              return <DownloadLink chatId={chatId} filePath={children.replace(/^\/workspace\//, "")} />;
-            }
-            return <CodeBlock className={className}>{children}</CodeBlock>;
-          },
-          pre: ({ children }) => <>{children}</>,
-          p: ({ children }) => {
-            if (!chatId) return <p>{children}</p>;
-            return <p>{processWorkspacePaths(children, chatId)}</p>;
-          },
-        }}
-      >
-        {md}
-      </ReactMarkdown>
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {paths.map((p) => <DownloadLink key={p} chatId={chatId} filePath={p} />)}
     </div>
   );
 }
@@ -295,32 +233,6 @@ function DownloadLink({ chatId, filePath }: { chatId: string; filePath: string }
   );
 }
 
-/** Convert /workspace/... paths in text nodes to download links */
-function processWorkspacePaths(children: React.ReactNode, chatId: string): React.ReactNode {
-  if (!Array.isArray(children)) {
-    if (typeof children !== "string") return children;
-    return replacePathsInText(children, chatId);
-  }
-  return children.map((child, i) => {
-    if (typeof child === "string") return <Fragment key={i}>{replacePathsInText(child, chatId)}</Fragment>;
-    return child;
-  });
-}
-
-function replacePathsInText(text: string, chatId: string): React.ReactNode {
-  const regex = /\/workspace\/([\w/.А-Яа-яІіЇїЄєҐґ_\-\s()]+\.\w+)/g;
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > last) parts.push(text.slice(last, match.index));
-    parts.push(<DownloadLink key={match.index} chatId={chatId} filePath={match[1]} />);
-    last = match.index + match[0].length;
-  }
-  if (parts.length === 0) return text;
-  if (last < text.length) parts.push(text.slice(last));
-  return <>{parts}</>;
-}
 
 function ToolCard({ part }: { part: ToolPart }) {
   const rawName = getToolName(part);
