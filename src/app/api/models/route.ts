@@ -1,8 +1,5 @@
-import { eq, and } from "drizzle-orm";
-
 import { requireSession } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { providerConfigs, users } from "@/lib/db/schema";
+import { resolveProviderConfig } from "@/lib/providers/resolve";
 import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getSetting } from "@/lib/settings";
@@ -16,30 +13,13 @@ export interface ModelInfo {
   pricing: { prompt: number; completion: number };
 }
 
-// Cache models per user for 10 minutes
 const cacheMap = new Map<string, { models: ModelInfo[]; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
 
 export async function GET() {
   const { userId } = await requireSession();
 
-  // User's own config, then fallback to admin's shared config
-  let [config] = await db
-    .select()
-    .from(providerConfigs)
-    .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
-    .limit(1);
-
-  if (!config) {
-    const adminConfigs = await db
-      .select({ config: providerConfigs })
-      .from(providerConfigs)
-      .innerJoin(users, eq(providerConfigs.userId, users.id))
-      .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true)))
-      .limit(1);
-    config = adminConfigs[0]?.config;
-  }
-
+  const config = await resolveProviderConfig(userId);
   if (!config) return Response.json({ models: [], provider: null });
 
   if (config.provider === "openrouter") {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -43,11 +44,7 @@ function useSetting(key: string, fallback: string) {
 }
 
 export default function GeneralSettingsPage() {
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/admin/users").then((r) => setIsAdmin(r.ok)).catch(() => {});
-  }, []);
+  const isAdmin = useIsAdmin();
 
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");

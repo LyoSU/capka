@@ -297,11 +297,11 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex h-7 items-center gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="flex h-8 items-center gap-2 px-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
-        {CurrentProviderIcon && <CurrentProviderIcon size={14} />}
-        <span className="truncate max-w-40">{getDisplayName(value)}</span>
-        <ChevronDown className={`h-3 w-3 shrink-0 opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
+        {CurrentProviderIcon && <CurrentProviderIcon size={16} />}
+        <span className="truncate max-w-48 font-medium">{getDisplayName(value)}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && !isMobile && (

@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Settings, Link2, Puzzle, Brain, Users } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { cn } from "@/lib/utils";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 type NavItem = { label: string; href: string; icon: typeof Settings; adminOnly?: boolean };
 
@@ -19,14 +19,7 @@ const navItems: NavItem[] = [
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    // Check if current user is admin (lightweight probe)
-    fetch("/api/admin/users", { method: "GET" })
-      .then((r) => setIsAdmin(r.ok))
-      .catch(() => setIsAdmin(false));
-  }, []);
+  const isAdmin = useIsAdmin();
 
   const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 

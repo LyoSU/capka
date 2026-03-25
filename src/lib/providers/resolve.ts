@@ -5,29 +5,28 @@ import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel } from "@/lib/providers";
 
-/**
- * Resolve model: user's own config → fallback to admin's global config.
- * This way admin sets up provider once and all users can use it.
- */
-export async function resolveUserModel(userId: string, requestModel?: string) {
-  // Try user's own config first
+/** Find active provider config: user's own → fallback to any admin's config. */
+export async function resolveProviderConfig(userId: string) {
   let [config] = await db
     .select()
     .from(providerConfigs)
     .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
     .limit(1);
 
-  // Fallback: find any admin's active config (shared for all users)
   if (!config) {
-    const adminConfigs = await db
+    const rows = await db
       .select({ config: providerConfigs })
       .from(providerConfigs)
       .innerJoin(users, eq(providerConfigs.userId, users.id))
       .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true)))
       .limit(1);
-    config = adminConfigs[0]?.config;
+    config = rows[0]?.config;
   }
+  return config ?? null;
+}
 
+export async function resolveUserModel(userId: string, requestModel?: string) {
+  const config = await resolveProviderConfig(userId);
   if (!config) throw new Error("No LLM provider configured. Ask your admin to set one up.");
   if (!config.defaultModel) throw new Error("No default model set. Configure one in Settings → Connections.");
 
