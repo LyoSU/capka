@@ -1,28 +1,41 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Settings, Link2, Puzzle, Brain, Users } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { cn } from "@/lib/utils";
 
-const navItems = [
+type NavItem = { label: string; href: string; icon: typeof Settings; adminOnly?: boolean };
+
+const navItems: NavItem[] = [
   { label: "General", href: "/settings", icon: Settings },
   { label: "Connections", href: "/settings/connections", icon: Link2 },
   { label: "Integrations", href: "/settings/integrations", icon: Puzzle },
   { label: "Memory", href: "/settings/memory", icon: Brain },
-  { label: "Users", href: "/settings/users", icon: Users },
+  { label: "Users", href: "/settings/users", icon: Users, adminOnly: true },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    // Check if current user is admin (lightweight probe)
+    fetch("/api/admin/users", { method: "GET" })
+      .then((r) => setIsAdmin(r.ok))
+      .catch(() => setIsAdmin(false));
+  }, []);
+
+  const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <>
       <Header title="Settings" />
       <div className="flex flex-1 overflow-hidden">
         <nav className="flex w-48 flex-col gap-1 border-r p-3">
-          {navItems.map((item) => {
+          {visibleItems.map((item) => {
             const isActive =
               item.href === "/settings"
                 ? pathname === "/settings"
