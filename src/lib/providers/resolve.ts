@@ -1,22 +1,34 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { providerConfigs } from "@/lib/db/schema";
+import { providerConfigs, users } from "@/lib/db/schema";
 import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel } from "@/lib/providers";
 
 /**
- * Resolve a user's active provider config into an AI SDK model instance.
- * Handles DB lookup, key decryption, and model resolution.
+ * Resolve model: user's own config → fallback to admin's global config.
+ * This way admin sets up provider once and all users can use it.
  */
 export async function resolveUserModel(userId: string, requestModel?: string) {
-  const [config] = await db
+  // Try user's own config first
+  let [config] = await db
     .select()
     .from(providerConfigs)
     .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
     .limit(1);
 
-  if (!config) throw new Error("No LLM provider configured. Set one up in Settings.");
+  // Fallback: find any admin's active config (shared for all users)
+  if (!config) {
+    const adminConfigs = await db
+      .select({ config: providerConfigs })
+      .from(providerConfigs)
+      .innerJoin(users, eq(providerConfigs.userId, users.id))
+      .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true)))
+      .limit(1);
+    config = adminConfigs[0]?.config;
+  }
+
+  if (!config) throw new Error("No LLM provider configured. Ask your admin to set one up.");
   if (!config.defaultModel) throw new Error("No default model set. Configure one in Settings → Connections.");
 
   let apiKey = config.apiKey;

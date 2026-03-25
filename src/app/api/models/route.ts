@@ -2,7 +2,7 @@ import { eq, and } from "drizzle-orm";
 
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { providerConfigs } from "@/lib/db/schema";
+import { providerConfigs, users } from "@/lib/db/schema";
 import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getSetting } from "@/lib/settings";
@@ -23,11 +23,22 @@ const CACHE_TTL = 10 * 60 * 1000;
 export async function GET() {
   const { userId } = await requireSession();
 
-  const [config] = await db
+  // User's own config, then fallback to admin's shared config
+  let [config] = await db
     .select()
     .from(providerConfigs)
     .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
     .limit(1);
+
+  if (!config) {
+    const adminConfigs = await db
+      .select({ config: providerConfigs })
+      .from(providerConfigs)
+      .innerJoin(users, eq(providerConfigs.userId, users.id))
+      .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true)))
+      .limit(1);
+    config = adminConfigs[0]?.config;
+  }
 
   if (!config) return Response.json({ models: [], provider: null });
 
