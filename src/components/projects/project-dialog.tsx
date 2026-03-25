@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 
 export type Project = {
   id: string;
@@ -21,6 +22,7 @@ export type Project = {
   description: string | null;
   systemPrompt: string | null;
   defaultModel: string | null;
+  sandboxNetwork: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -40,6 +42,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
+  const [internetAccess, setInternetAccess] = useState(false);
 
   useEffect(() => {
     if (project) {
@@ -47,11 +50,13 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
       setDescription(project.description ?? "");
       setSystemPrompt(project.systemPrompt ?? "");
       setDefaultModel(project.defaultModel ?? "");
+      setInternetAccess(project.sandboxNetwork === "bridge");
     } else {
       setName("");
       setDescription("");
       setSystemPrompt("");
       setDefaultModel("");
+      setInternetAccess(false);
     }
   }, [project, open]);
 
@@ -68,7 +73,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description, systemPrompt, defaultModel }),
+        body: JSON.stringify({ name, description, systemPrompt, defaultModel, sandboxNetwork: internetAccess ? "bridge" : "none" }),
       });
 
       if (!res.ok) {
@@ -142,6 +147,20 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
             <p className="text-xs text-muted-foreground">
               Overrides the global default for chats in this project.
             </p>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="sandbox-internet">Internet Access</Label>
+              <p className="text-xs text-muted-foreground">
+                Allow sandbox to access the internet (download files, APIs, etc.)
+              </p>
+            </div>
+            <Switch
+              id="sandbox-internet"
+              checked={internetAccess}
+              onCheckedChange={setInternetAccess}
+            />
           </div>
         </div>
 

@@ -39,6 +39,7 @@ export async function PUT(
   if (body.description !== undefined) updates.description = body.description?.trim() || null;
   if (body.systemPrompt !== undefined) updates.systemPrompt = body.systemPrompt?.trim() || null;
   if (body.defaultModel !== undefined) updates.defaultModel = body.defaultModel?.trim() || null;
+  if (body.sandboxNetwork !== undefined) updates.sandboxNetwork = body.sandboxNetwork === "bridge" ? "bridge" : "none";
 
   const [updated] = await db
     .update(projects)

@@ -18,7 +18,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const { userId } = await requireSession();
   const body = await req.json();
-  const { name, description, systemPrompt, defaultModel } = body;
+  const { name, description, systemPrompt, defaultModel, sandboxNetwork } = body;
 
   if (!name?.trim()) {
     return Response.json({ error: "Name is required" }, { status: 400 });
@@ -34,6 +34,7 @@ export async function POST(req: Request) {
       description: description?.trim() || null,
       systemPrompt: systemPrompt?.trim() || null,
       defaultModel: defaultModel?.trim() || null,
+      sandboxNetwork: sandboxNetwork === "bridge" ? "bridge" : "none",
     })
     .returning();
 
