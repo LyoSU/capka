@@ -102,6 +102,13 @@ export function AppSidebar() {
           <span className="text-base font-medium group-data-[collapsible=icon]:hidden">unClaw</span>
           <SidebarTrigger />
         </div>
+        <Link
+          href={newChatHref}
+          className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden h-8 w-8 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:mx-auto")}
+          title="New Chat"
+        >
+          <Plus className="h-4 w-4" />
+        </Link>
       </SidebarHeader>
 
       <SidebarContent className="group-data-[collapsible=icon]:hidden">
