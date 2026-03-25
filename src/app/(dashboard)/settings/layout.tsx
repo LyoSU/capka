@@ -11,8 +11,8 @@ type NavItem = { label: string; href: string; icon: typeof Settings; adminOnly?:
 
 const navItems: NavItem[] = [
   { label: "General", href: "/settings", icon: Settings },
-  { label: "Connections", href: "/settings/connections", icon: Link2 },
-  { label: "Integrations", href: "/settings/integrations", icon: Puzzle },
+  { label: "Connections", href: "/settings/connections", icon: Link2, adminOnly: true },
+  { label: "Integrations", href: "/settings/integrations", icon: Puzzle, adminOnly: true },
   { label: "Memory", href: "/settings/memory", icon: Brain },
   { label: "Users", href: "/settings/users", icon: Users, adminOnly: true },
 ];

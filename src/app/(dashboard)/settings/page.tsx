@@ -43,6 +43,12 @@ function useSetting(key: string, fallback: string) {
 }
 
 export default function GeneralSettingsPage() {
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/users").then((r) => setIsAdmin(r.ok)).catch(() => {});
+  }, []);
+
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");
   const registration = useSetting("registration_enabled", "true");
@@ -69,103 +75,106 @@ export default function GeneralSettingsPage() {
         <ThemeSwitcher />
       </div>
 
-      <Separator />
+      {isAdmin && (
+        <>
+          <Separator />
 
-      {/* Model filter */}
-      <div>
-        <h2 className="text-base font-medium">Model Filter</h2>
-        <p className="text-sm text-muted-foreground">
-          Control which models appear in the model selector.
-        </p>
-      </div>
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Minimum context window</label>
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              value={minCtx.value}
-              onChange={(e) => minCtx.update(e.target.value)}
-              placeholder="100000"
-              className="w-40"
-            />
-            <span className="text-sm text-muted-foreground">
-              {contextLabel(minCtx.value)}
-            </span>
+          {/* Model filter — admin only */}
+          <div>
+            <h2 className="text-base font-medium">Model Filter</h2>
+            <p className="text-sm text-muted-foreground">
+              Control which models appear in the model selector.
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Models with context below this are hidden. Default: 100k.
-          </p>
-        </div>
-        {minCtx.dirty && (
-          <Button size="sm" onClick={minCtx.save}>Save</Button>
-        )}
-      </div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Minimum context window</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={minCtx.value}
+                  onChange={(e) => minCtx.update(e.target.value)}
+                  placeholder="100000"
+                  className="w-40"
+                />
+                <span className="text-sm text-muted-foreground">
+                  {contextLabel(minCtx.value)}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Models with context below this are hidden. Default: 100k.
+              </p>
+            </div>
+            {minCtx.dirty && (
+              <Button size="sm" onClick={minCtx.save}>Save</Button>
+            )}
+          </div>
 
-      <Separator />
+          <Separator />
 
-      {/* Sandbox */}
-      <div>
-        <h2 className="text-base font-medium">Sandbox</h2>
-        <p className="text-sm text-muted-foreground">
-          Give AI full access to a sandboxed Linux environment with Python, Node.js, and dev tools.
-        </p>
-      </div>
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div>
-          <p className="text-sm font-medium">Enable sandbox</p>
-          <p className="text-xs text-muted-foreground">
-            AI can execute commands, read/write files, and run code in an isolated container per chat.
-          </p>
-        </div>
-        <Switch
-          checked={sandbox.value === "true"}
-          onCheckedChange={(checked) => {
-            sandbox.update(checked ? "true" : "false");
-            // Auto-save toggle
-            fetch("/api/settings", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ key: "sandbox_enabled", value: checked ? "true" : "false" }),
-            }).then((r) => {
-              if (r.ok) toast.success(checked ? "Sandbox enabled" : "Sandbox disabled");
-              else toast.error("Failed to update");
-            });
-          }}
-        />
-      </div>
+          {/* Sandbox — admin only */}
+          <div>
+            <h2 className="text-base font-medium">Sandbox</h2>
+            <p className="text-sm text-muted-foreground">
+              Give AI full access to a sandboxed Linux environment with Python, Node.js, and dev tools.
+            </p>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div>
+              <p className="text-sm font-medium">Enable sandbox</p>
+              <p className="text-xs text-muted-foreground">
+                AI can execute commands, read/write files, and run code in an isolated container per chat.
+              </p>
+            </div>
+            <Switch
+              checked={sandbox.value === "true"}
+              onCheckedChange={(checked) => {
+                sandbox.update(checked ? "true" : "false");
+                fetch("/api/settings", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ key: "sandbox_enabled", value: checked ? "true" : "false" }),
+                }).then((r) => {
+                  if (r.ok) toast.success(checked ? "Sandbox enabled" : "Sandbox disabled");
+                  else toast.error("Failed to update");
+                });
+              }}
+            />
+          </div>
 
-      <Separator />
+          <Separator />
 
-      {/* Registration */}
-      <div>
-        <h2 className="text-base font-medium">Registration</h2>
-        <p className="text-sm text-muted-foreground">
-          Control whether new users can create accounts.
-        </p>
-      </div>
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div>
-          <p className="text-sm font-medium">Allow registration</p>
-          <p className="text-xs text-muted-foreground">
-            When disabled, only admins can add new users. Existing users can still log in.
-          </p>
-        </div>
-        <Switch
-          checked={registration.value === "true"}
-          onCheckedChange={(checked) => {
-            registration.update(checked ? "true" : "false");
-            fetch("/api/settings", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ key: "registration_enabled", value: checked ? "true" : "false" }),
-            }).then((r) => {
-              if (r.ok) toast.success(checked ? "Registration enabled" : "Registration disabled");
-              else toast.error("Failed to update");
-            });
-          }}
-        />
-      </div>
+          {/* Registration — admin only */}
+          <div>
+            <h2 className="text-base font-medium">Registration</h2>
+            <p className="text-sm text-muted-foreground">
+              Control whether new users can create accounts.
+            </p>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div>
+              <p className="text-sm font-medium">Allow registration</p>
+              <p className="text-xs text-muted-foreground">
+                When disabled, only admins can add new users. Existing users can still log in.
+              </p>
+            </div>
+            <Switch
+              checked={registration.value === "true"}
+              onCheckedChange={(checked) => {
+                registration.update(checked ? "true" : "false");
+                fetch("/api/settings", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ key: "registration_enabled", value: checked ? "true" : "false" }),
+                }).then((r) => {
+                  if (r.ok) toast.success(checked ? "Registration enabled" : "Registration disabled");
+                  else toast.error("Failed to update");
+                });
+              }}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }
