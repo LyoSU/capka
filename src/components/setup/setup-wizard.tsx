@@ -7,6 +7,7 @@ import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModelPicker } from "@/components/chat/model-picker";
 import {
   Select,
   SelectContent,
@@ -300,20 +301,11 @@ export function SetupWizard() {
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="model">Default Model</Label>
-            <Input
-              id="model"
+            <Label>Default Model</Label>
+            <ModelPicker
               value={defaultModel}
-              onChange={(e) => setDefaultModel(e.target.value)}
-              placeholder={
-                provider === "openai"
-                  ? "gpt-5.2"
-                  : provider === "anthropic"
-                    ? "claude-sonnet-4-20250514"
-                    : provider === "openrouter"
-                      ? "openai/gpt-5.2"
-                      : "llama3.3"
-              }
+              onChange={setDefaultModel}
+              placeholder="Search or type model name..."
             />
           </div>
 
