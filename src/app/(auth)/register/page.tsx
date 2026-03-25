@@ -53,6 +53,10 @@ export default function RegisterPage() {
     router.push("/chat");
   }
 
+  if (registrationEnabled === null) {
+    return <div className="flex min-h-screen items-center justify-center"><div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" /></div>;
+  }
+
   if (registrationEnabled === false) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
@@ -117,7 +121,7 @@ export default function RegisterPage() {
                 minLength={8}
               />
             </div>
-            <Button type="submit" disabled={loading || registrationEnabled === null} className="w-full">
+            <Button type="submit" disabled={loading} className="w-full">
               {loading ? "Creating account..." : "Create account"}
             </Button>
           </form>
