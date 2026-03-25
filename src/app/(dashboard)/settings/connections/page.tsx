@@ -32,8 +32,6 @@ export default function ConnectionsPage() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [editingModel, setEditingModel] = useState<string | null>(null);
-  const [newModel, setNewModel] = useState("");
 
   // Form state
   const [provider, setProvider] = useState<Provider>("openai");
@@ -80,7 +78,6 @@ export default function ConnectionsPage() {
     });
     if (res.ok) {
       setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, defaultModel: model } : c)));
-      setEditingModel(null);
       toast.success("Default model updated");
     } else {
       toast.error("Failed to update model");

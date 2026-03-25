@@ -4,7 +4,8 @@ import { eq, and } from "drizzle-orm";
 
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { providerConfigs, projects, chats } from "@/lib/db/schema";
+import { projects, chats } from "@/lib/db/schema";
+import { resolveProviderConfig } from "@/lib/providers/resolve";
 import { ChatPanel } from "@/components/chat/chat-panel";
 
 export default async function ChatIdPage({
@@ -31,17 +32,7 @@ export default async function ChatIdPage({
   const projectId = existingChat?.projectId ?? qsProjectId ?? null;
 
   const [config, project] = await Promise.all([
-    db
-      .select()
-      .from(providerConfigs)
-      .where(
-        and(
-          eq(providerConfigs.userId, session.user.id),
-          eq(providerConfigs.isActive, true),
-        ),
-      )
-      .limit(1)
-      .then((r) => r[0]),
+    resolveProviderConfig(session.user.id),
     projectId
       ? db
           .select()

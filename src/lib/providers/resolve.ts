@@ -19,6 +19,7 @@ export async function resolveProviderConfig(userId: string) {
       .from(providerConfigs)
       .innerJoin(users, eq(providerConfigs.userId, users.id))
       .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true)))
+      .orderBy(providerConfigs.createdAt)
       .limit(1);
     config = rows[0]?.config;
   }

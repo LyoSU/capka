@@ -232,6 +232,8 @@ export function useBackgroundChat({
         if (res.ok) {
           const data = await res.json();
           uploaded.push(data.name || file.name);
+        } else {
+          toast.error(`Failed to upload ${file.name}`);
         }
       }
       return uploaded;
