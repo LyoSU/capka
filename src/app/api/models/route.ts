@@ -13,6 +13,7 @@ export interface ModelInfo {
   pricing: { prompt: number; completion: number };
 }
 
+const MAX_CACHE_ENTRIES = 50;
 const cacheMap = new Map<string, { models: ModelInfo[]; ts: number }>();
 const CACHE_TTL = 10 * 60 * 1000;
 
@@ -77,6 +78,15 @@ export async function GET() {
         );
 
       cacheMap.set(userId, { models, ts: Date.now() });
+      // Evict stale + cap size
+      const now = Date.now();
+      for (const [k, v] of cacheMap) {
+        if (now - v.ts > CACHE_TTL) cacheMap.delete(k);
+      }
+      if (cacheMap.size > MAX_CACHE_ENTRIES) {
+        const oldest = [...cacheMap.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+        if (oldest) cacheMap.delete(oldest[0]);
+      }
       return Response.json({ models, provider: "openrouter" });
     } catch {
       return Response.json({ models: [], provider: "openrouter" });
