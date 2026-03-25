@@ -15,6 +15,13 @@ services:
       timeout: 5s
       retries: 5
 
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: unclaw-sandbox
+    entrypoint: ["echo", "sandbox image built"]
+
   sandbox-controller:
     build: ./sandbox-controller
     volumes:
@@ -25,7 +32,10 @@ services:
       - DATA_ROOT=/data/storage
       - SANDBOX_IMAGE=unclaw-sandbox
     depends_on:
-      - postgres
+      sandbox:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   platform:

@@ -134,6 +134,7 @@ export const projects = pgTable("projects", {
   description: text("description"),
   systemPrompt: text("system_prompt"),
   defaultModel: text("default_model"),
+  sandboxNetwork: text("sandbox_network").default("none"), // "none" | "bridge"
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_projects_user_id").on(table.userId)]);

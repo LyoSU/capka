@@ -122,7 +122,7 @@ export function SandboxFiles({
   if (!open) return null;
 
   return (
-    <div className="flex h-full w-80 flex-col border-l bg-card">
+    <div className="fixed inset-y-0 right-0 z-40 flex h-full w-80 flex-col border-l bg-card shadow-lg md:static md:z-auto md:shadow-none">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-sm font-medium">Workspace</span>

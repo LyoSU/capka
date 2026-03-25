@@ -70,7 +70,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
         <div className="relative flex flex-1 flex-col items-center justify-center px-4">
           <div className="w-full max-w-2xl space-y-8">
             <div className="text-center space-y-3">
-              <h1 className="text-4xl font-medium tracking-tight text-foreground/85">
+              <h1 className="text-2xl md:text-4xl font-medium tracking-tight text-foreground/85">
                 What can I help with?
               </h1>
               <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">

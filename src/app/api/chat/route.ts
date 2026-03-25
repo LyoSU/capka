@@ -16,18 +16,18 @@ export async function POST(req: Request) {
     const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
     const chatId = requestChatId || nanoid();
 
-    const [chatRow, model, mcp, project, userMemories] = await Promise.all([
+    const [chatRow, model, project, userMemories] = await Promise.all([
       requestChatId
         ? db.select({ id: chats.id, userId: chats.userId, title: chats.title }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
         : undefined,
       resolveUserModel(userId, requestModel),
-      loadSandboxTools(userId, chatId),
       projectId
         ? db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
         : Promise.resolve(undefined),
       db.select().from(memories).where(eq(memories.userId, userId)).orderBy(desc(memories.createdAt)).limit(50),
     ]);
 
+    const mcp = await loadSandboxTools(userId, chatId, project?.sandboxNetwork ?? undefined);
     mcpClose = mcp.close;
 
     // IDOR: chat exists but belongs to another user

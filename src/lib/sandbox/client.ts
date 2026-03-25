@@ -29,10 +29,11 @@ async function request(path: string, method: string, body?: unknown) {
 
 // ── Session lifecycle ────────────────────────────────────────
 
-export async function createSession(sessionId: string, userId: string) {
+export async function createSession(sessionId: string, userId: string, networkMode?: string) {
   return request("/sessions", "POST", {
     sessionId: sanitizeId(sessionId),
     userId: sanitizeId(userId),
+    ...(networkMode ? { networkMode } : {}),
   });
 }
 

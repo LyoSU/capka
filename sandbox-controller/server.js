@@ -70,12 +70,12 @@ async function dirSize(dir) {
 
 // --- Docker helpers ---
 
-async function createSandbox(sessionId, userId) {
+async function createSandbox(sessionId, userId, networkMode = "none") {
   sessionId = sanitize(sessionId);
   userId = sanitize(userId);
   const wsPath = workspacePath(userId, sessionId);
+  const network = networkMode === "bridge" ? "bridge" : "none";
 
-  // Ensure workspace dir exists
   await mkdir(wsPath, { recursive: true });
 
   const container = await docker.createContainer({
@@ -89,7 +89,7 @@ async function createSandbox(sessionId, userId) {
       SecurityOpt: ["no-new-privileges"],
       CapDrop: ["ALL"],
       CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
-      NetworkMode: "none",
+      NetworkMode: network,
       Binds: [`${wsPath}:/workspace`],
       Init: true,
     },
@@ -99,14 +99,34 @@ async function createSandbox(sessionId, userId) {
     Labels: {
       "unclaw.session": sessionId,
       "unclaw.user": userId,
+      "unclaw.network": network,
     },
   });
 
   await container.start();
 
-  const session = { containerId: container.id, userId, lastActivity: Date.now() };
+  const session = { containerId: container.id, userId, networkMode: network, lastActivity: Date.now() };
   sessions.set(sessionId, session);
   return session;
+}
+
+/** Restart a stopped container (e.g. after idle cleanup) */
+async function restartSandbox(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  try {
+    const container = docker.getContainer(session.containerId);
+    const info = await container.inspect();
+    if (!info.State.Running) {
+      await container.start();
+      session.lastActivity = Date.now();
+    }
+    return session;
+  } catch {
+    // Container gone — remove stale session
+    sessions.delete(sessionId);
+    return null;
+  }
 }
 
 async function execInSandbox(containerId, command, timeout = EXEC_TIMEOUT) {
@@ -239,11 +259,18 @@ const server = createServer(async (req, res) => {
   try {
     // POST /sessions — create sandbox
     if (method === "POST" && path === "/sessions") {
-      const { sessionId, userId } = await parseBody(req);
+      const { sessionId, userId, networkMode } = await parseBody(req);
       if (!sessionId || !userId) return jsonRes(res, 400, { error: "Missing sessionId or userId" });
+
+      // Existing session — try to reuse or restart
       if (sessions.has(sessionId)) {
-        sessions.get(sessionId).lastActivity = Date.now();
-        return jsonRes(res, 200, { sessionId, status: "reused" });
+        const existing = sessions.get(sessionId);
+        const restarted = await restartSandbox(sessionId);
+        if (restarted) {
+          restarted.lastActivity = Date.now();
+          return jsonRes(res, 200, { sessionId, status: "reused" });
+        }
+        // Container gone — fall through to create new one
       }
 
       // Per-user session limit
@@ -252,7 +279,7 @@ const server = createServer(async (req, res) => {
         return jsonRes(res, 429, { error: `Max ${MAX_SESSIONS_PER_USER} active sandboxes per user` });
       }
 
-      await createSandbox(sessionId, userId);
+      await createSandbox(sessionId, userId, networkMode);
       return jsonRes(res, 201, { sessionId, status: "created" });
     }
 
