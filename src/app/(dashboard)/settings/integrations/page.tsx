@@ -63,7 +63,8 @@ export default function IntegrationsPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success(`Bot @${data.botUsername} connected! Webhook registered.`);
+        toast.success(`Bot @${data.botUsername} connected!`);
+        if (data.warning) toast.warning(data.warning);
         setHasToken(true);
         setBotToken("");
       } else {

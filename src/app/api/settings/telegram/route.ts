@@ -36,10 +36,12 @@ export async function POST(req: Request) {
     await bot.api.setWebhook(webhookUrl, { secret_token: webhookSecret });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
-    return Response.json(
-      { error: `Token saved but webhook registration failed: ${msg}. You may need to set it manually.` },
-      { status: 207 },
-    );
+    return Response.json({
+      ok: true,
+      botUsername: botInfo.username,
+      webhookUrl,
+      warning: `Webhook registration failed: ${msg}. You may need to set it manually.`,
+    });
   }
 
   return Response.json({
