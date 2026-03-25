@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { getMasterKey } from "@/lib/settings";
+import { PROVIDERS } from "@/lib/providers";
 
 export async function GET() {
   const { userId } = await requireSession();
@@ -28,8 +29,7 @@ export async function POST(req: Request) {
   const { userId } = await requireRole("admin", "user");
 
   const { provider, apiKey, baseUrl, defaultModel } = await req.json();
-  const VALID_PROVIDERS = ["openai", "anthropic", "openrouter", "ollama"];
-  if (!provider || !VALID_PROVIDERS.includes(provider)) {
+  if (!provider || !PROVIDERS.includes(provider)) {
     return Response.json({ error: "Invalid or missing provider" }, { status: 400 });
   }
 

@@ -203,12 +203,10 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   );
 }
 
-/** Render download links for /workspace/ paths mentioned in text */
+const WORKSPACE_PATH_RE = /\/workspace\/([\w/.А-Яа-яІіЇїЄєҐґ_\-\s()]+\.\w+)/g;
+
 function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
-  const regex = /\/workspace\/([\w/.А-Яа-яІіЇїЄєҐґ_\-\s()]+\.\w+)/g;
-  const paths: string[] = [];
-  let match;
-  while ((match = regex.exec(text)) !== null) paths.push(match[1]);
+  const paths = Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]);
   if (paths.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
