@@ -194,7 +194,7 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
       <Streamdown
         parseIncompleteMarkdown={isStreaming}
         shikiTheme={["github-light", "github-dark"]}
-        controls={{ code: { copy: true } }}
+        controls={{ code: { copy: true }, table: false }}
       >
         {text}
       </Streamdown>
