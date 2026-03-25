@@ -263,8 +263,12 @@ const server = createServer(async (req, res) => {
       const { sessionId, userId, networkMode } = await parseBody(req);
       if (!sessionId || !userId) return jsonRes(res, 400, { error: "Missing sessionId or userId" });
 
-      // Existing session — try to reuse or restart
+      // Existing session — verify same user, then reuse or restart
       if (sessions.has(sessionId)) {
+        const existing = sessions.get(sessionId);
+        if (existing.userId !== sanitize(userId)) {
+          return jsonRes(res, 403, { error: "Session belongs to another user" });
+        }
         const restarted = await restartSandbox(sessionId);
         if (restarted) {
           restarted.lastActivity = Date.now();

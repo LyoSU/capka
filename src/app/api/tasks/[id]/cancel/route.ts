@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
 import { cancelTask } from "@/lib/tasks/runner";
@@ -8,7 +8,7 @@ export async function POST(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
   const { id } = await params;
 
   // Verify ownership

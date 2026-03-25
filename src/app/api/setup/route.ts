@@ -21,6 +21,11 @@ export async function POST(req: Request) {
     if (!email) {
       return Response.json({ error: "Missing email" }, { status: 400 });
     }
+    // Prevent overwriting admin email once set (anti-hijack)
+    const existing = await getSetting("admin_email");
+    if (existing) {
+      return Response.json({ error: "Admin account already configured" }, { status: 403 });
+    }
     await setSetting("admin_email", email);
     return Response.json({ ok: true });
   }

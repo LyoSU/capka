@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { linkCodes, telegramLinks } from "@/lib/db/schema";
 
 export async function POST() {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
 
   // Generate a cryptographically secure 6-digit code
   const { randomInt } = await import("crypto");
@@ -20,7 +20,7 @@ export async function POST() {
 }
 
 export async function GET() {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
 
   const [link] = await db
     .select()

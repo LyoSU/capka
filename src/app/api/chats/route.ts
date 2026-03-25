@@ -1,6 +1,6 @@
 import { eq, desc, and, ilike, isNull, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession } from "@/lib/auth";
+import { requireSession, requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
 
@@ -40,7 +40,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const { userId } = await requireSession();
+  const { userId } = await requireRole("admin", "user");
   const body = await req.json();
 
   const id = body.id || nanoid();
