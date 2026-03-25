@@ -139,8 +139,16 @@ export async function GET(req: Request) {
     .orderBy(asc(messages.createdAt))
     .limit(100);
 
+  type StoredPart =
+    | { type: "text"; text: string }
+    | { type: "tool-call"; id: string; name: string; input: unknown }
+    | { type: "tool-result"; id: string; name: string; output: unknown }
+    | { type: "tool-error"; id: string; name: string; error: string };
+
   type ToolMeta = {
     status?: string;
+    parts?: StoredPart[];
+    // Legacy format (pre-ordered-parts)
     toolCalls?: { id: string; name: string; input: unknown }[];
     toolResults?: { id: string; name: string; output: unknown }[];
   };
@@ -149,7 +157,33 @@ export async function GET(req: Request) {
     const meta = m.metadata as ToolMeta | null;
     const parts: unknown[] = [];
 
-    if (meta?.toolCalls) {
+    if (meta?.parts) {
+      // New format: ordered parts array — preserves text → tools → text sequence
+      const resultMap = new Map<string, StoredPart>();
+      const errorMap = new Map<string, string>();
+      for (const p of meta.parts) {
+        if (p.type === "tool-result") resultMap.set(p.id, p);
+        else if (p.type === "tool-error") errorMap.set(p.id, p.error);
+      }
+      for (const p of meta.parts) {
+        if (p.type === "text") {
+          if (p.text) parts.push({ type: "text", text: p.text });
+        } else if (p.type === "tool-call") {
+          const tr = resultMap.get(p.id) as { output?: unknown } | undefined;
+          const err = errorMap.get(p.id);
+          parts.push({
+            type: "dynamic-tool",
+            toolCallId: p.id,
+            toolName: p.name,
+            state: tr ? "output-available" : "output-error",
+            input: p.input,
+            output: tr?.output,
+            ...(err ? { errorText: err } : {}),
+          });
+        }
+      }
+    } else if (meta?.toolCalls) {
+      // Legacy format: flat arrays, tools first then text
       const resultMap = new Map(meta.toolResults?.map((tr) => [tr.id, tr]) ?? []);
       for (const tc of meta.toolCalls) {
         const tr = resultMap.get(tc.id);
@@ -162,9 +196,10 @@ export async function GET(req: Request) {
           output: tr?.output,
         });
       }
+      if (m.content) parts.push({ type: "text", text: m.content });
+    } else if (m.content) {
+      parts.push({ type: "text", text: m.content });
     }
-
-    if (m.content) parts.push({ type: "text" as const, text: m.content });
 
     return {
       id: m.id,

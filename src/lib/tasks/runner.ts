@@ -42,17 +42,26 @@ export function startTask(opts: StartTaskOpts) {
 
   const msgId = nanoid();
 
+  // Ordered parts — hoisted so catch can access accumulated state
+  type PartEntry =
+    | { type: "text"; text: string }
+    | { type: "tool-call"; id: string; name: string; input: unknown }
+    | { type: "tool-result"; id: string; name: string; output: unknown }
+    | { type: "tool-error"; id: string; name: string; error: string };
+  const parts: PartEntry[] = [];
+  const getFullText = () => parts.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
+  let streamError: string | undefined;
+
   // Fire-and-forget — runs independently of HTTP lifecycle
   (async () => {
     try {
-      // Insert placeholder assistant message
       await db.insert(messages).values({
         id: msgId,
         chatId,
         role: "assistant",
         content: "",
         platform: "web",
-        metadata: { taskId, status: "running", toolCalls: [], toolResults: [] },
+        metadata: { taskId, status: "running", parts: [] },
       });
 
       eventBus.emit(channel, { type: "task:start", taskId, chatId, messageId: msgId });
@@ -68,17 +77,18 @@ export function startTask(opts: StartTaskOpts) {
         abortSignal: ac.signal,
       });
 
-      // Accumulated state
-      let accText = "";
-      const accToolCalls: { id: string; name: string; input: unknown }[] = [];
-      const accToolResults: { id: string; name: string; output: unknown }[] = [];
+      function appendText(delta: string) {
+        const last = parts[parts.length - 1];
+        if (last?.type === "text") last.text += delta;
+        else parts.push({ type: "text", text: delta });
+      }
 
       for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;
 
         switch (event.type) {
           case "text-delta":
-            accText += event.text;
+            appendText(event.text);
             eventBus.emit(channel, {
               type: "task:text-delta",
               taskId, chatId, messageId: msgId,
@@ -87,7 +97,8 @@ export function startTask(opts: StartTaskOpts) {
             break;
 
           case "tool-call":
-            accToolCalls.push({
+            parts.push({
+              type: "tool-call",
               id: event.toolCallId,
               name: event.toolName,
               input: event.input,
@@ -102,7 +113,8 @@ export function startTask(opts: StartTaskOpts) {
             break;
 
           case "tool-result":
-            accToolResults.push({
+            parts.push({
+              type: "tool-result",
               id: event.toolCallId,
               name: event.toolName,
               output: event.output,
@@ -115,43 +127,58 @@ export function startTask(opts: StartTaskOpts) {
             });
             break;
 
+          case "tool-error":
+            parts.push({
+              type: "tool-error",
+              id: event.toolCallId,
+              name: event.toolName,
+              error: event.error instanceof Error ? event.error.message : String(event.error),
+            });
+            eventBus.emit(channel, {
+              type: "task:tool-result",
+              taskId, chatId, messageId: msgId,
+              toolCallId: event.toolCallId,
+              result: { error: event.error instanceof Error ? event.error.message : String(event.error) },
+            });
+            break;
+
+          case "error":
+            streamError = event.error instanceof Error ? event.error.message : String(event.error);
+            break;
+
           case "finish-step":
             // Progressive save — update assistant message in DB after each step
             await db.update(messages).set({
-              content: accText,
-              metadata: {
-                taskId,
-                status: "running",
-                toolCalls: accToolCalls,
-                toolResults: accToolResults,
-              },
+              content: getFullText(),
+              metadata: { taskId, status: "running", parts },
             }).where(eq(messages.id, msgId));
             break;
         }
       }
 
       // Final save
-      const finalStatus = ac.signal.aborted ? "cancelled" : "completed";
+      const finalStatus = ac.signal.aborted ? "cancelled" : streamError ? "failed" : "completed";
       await db.update(messages).set({
-        content: accText,
+        content: getFullText(),
         metadata: {
           taskId,
           status: finalStatus,
-          toolCalls: accToolCalls.length > 0 ? accToolCalls : undefined,
-          toolResults: accToolResults.length > 0 ? accToolResults : undefined,
+          parts: parts.length > 0 ? parts : undefined,
         },
       }).where(eq(messages.id, msgId));
 
       await db.update(tasks).set({
         status: finalStatus,
+        ...(streamError ? { error: streamError } : {}),
         updatedAt: new Date(),
       }).where(eq(tasks.id, taskId));
 
       eventBus.emit(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus });
 
       // Extract memories (fire-and-forget)
-      if (accText) {
-        extractMemories(model, accText, existingMemories.map((m) => m.content))
+      const text = getFullText();
+      if (text) {
+        extractMemories(model, text, existingMemories.map((m) => m.content))
           .then(async (newFacts) => {
             if (newFacts.length > 0) {
               await db.insert(memories).values(
@@ -166,10 +193,13 @@ export function startTask(opts: StartTaskOpts) {
       const status = isAbort ? "cancelled" : "failed";
       const error = isAbort ? undefined : (e instanceof Error ? e.message : "Unknown error");
 
-      // Update both task AND message status so UI doesn't stay stuck on "running"
+      // Update both task AND message status — preserve any parts already accumulated
       await Promise.all([
         db.update(tasks).set({ status, error, updatedAt: new Date() }).where(eq(tasks.id, taskId)).catch(() => {}),
-        db.update(messages).set({ metadata: { taskId, status, error } }).where(eq(messages.id, msgId)).catch(() => {}),
+        db.update(messages).set({
+          content: getFullText(),
+          metadata: { taskId, status, error, parts: parts.length > 0 ? parts : undefined },
+        }).where(eq(messages.id, msgId)).catch(() => {}),
       ]);
       eventBus.emit(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status, error });
     } finally {

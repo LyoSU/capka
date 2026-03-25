@@ -263,22 +263,8 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
         remarkPlugins={[remarkGfm]}
         components={{
           code: ({ className, children }) => {
-            // Inline code with /workspace/ path = clickable download link
-            // NOTE: This is a React component rendering file paths from AI output — not shell execution
             if (!className && chatId && typeof children === "string" && children.startsWith("/workspace/")) {
-              const filePath = children.replace(/^\/workspace\//, "");
-              const fileName = filePath.split("/").pop() || filePath;
-              const href = `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`;
-              return (
-                <a
-                  href={href}
-                  download={fileName}
-                  className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary no-underline hover:bg-primary/20 transition-colors"
-                >
-                  <Download className="h-3 w-3" />
-                  {fileName}
-                </a>
-              );
+              return <DownloadLink chatId={chatId} filePath={children.replace(/^\/workspace\//, "")} />;
             }
             return <CodeBlock className={className}>{children}</CodeBlock>;
           },
@@ -295,6 +281,23 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   );
 }
 
+const downloadLinkClass = "inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary no-underline hover:bg-primary/20 transition-colors";
+
+function DownloadLink({ chatId, filePath, keyProp }: { chatId: string; filePath: string; keyProp?: number }) {
+  const fileName = filePath.split("/").pop() || filePath;
+  return (
+    <a
+      key={keyProp}
+      href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`}
+      download={fileName}
+      className={downloadLinkClass}
+    >
+      <Download className="h-3 w-3" />
+      {fileName}
+    </a>
+  );
+}
+
 /** Convert /workspace/... paths in text nodes to download links */
 function processWorkspacePaths(children: React.ReactNode, chatId: string): React.ReactNode {
   if (!Array.isArray(children)) {
@@ -308,27 +311,13 @@ function processWorkspacePaths(children: React.ReactNode, chatId: string): React
 }
 
 function replacePathsInText(text: string, chatId: string): React.ReactNode {
-  // Match /workspace/path.ext patterns (supports cyrillic, spaces, brackets)
   const regex = /\/workspace\/([\w/.А-Яа-яІіЇїЄєҐґ_\-\s()]+\.\w+)/g;
   const parts: React.ReactNode[] = [];
   let last = 0;
   let match;
   while ((match = regex.exec(text)) !== null) {
     if (match.index > last) parts.push(text.slice(last, match.index));
-    const filePath = match[1];
-    const fileName = filePath.split("/").pop() || filePath;
-    const href = `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`;
-    parts.push(
-      <a
-        key={match.index}
-        href={href}
-        download={fileName}
-        className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary no-underline hover:bg-primary/20 transition-colors"
-      >
-        <Download className="h-3 w-3" />
-        {fileName}
-      </a>,
-    );
+    parts.push(<DownloadLink key={match.index} chatId={chatId} filePath={match[1]} keyProp={match.index} />);
     last = match.index + match[0].length;
   }
   if (parts.length === 0) return text;
