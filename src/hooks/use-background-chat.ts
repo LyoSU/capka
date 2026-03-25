@@ -46,6 +46,7 @@ export function useBackgroundChat({
   const loadHistory = useCallback(() => {
     fetch(`/api/chat?chatId=${chatId}`)
       .then((r) => {
+        if (r.status === 404) return []; // new chat — no history yet
         if (!r.ok) throw new Error(`Failed to load chat (${r.status})`);
         return r.json();
       })

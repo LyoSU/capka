@@ -39,11 +39,17 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
     const attachedFiles = files.map((af) => af.file);
     if (!text && attachedFiles.length === 0) return;
 
+    // Save state for rollback on error
+    const savedInput = input;
+    const savedFiles = files;
     setInput("");
     setFiles([]);
     try {
       await sendMessage(text, model, attachedFiles.length > 0 ? attachedFiles : undefined);
     } catch (e) {
+      // Restore input so user doesn't lose their text
+      setInput(savedInput);
+      setFiles(savedFiles);
       toast.error(e instanceof Error ? e.message : "Failed to send message");
     }
   };

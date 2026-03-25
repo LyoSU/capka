@@ -241,9 +241,12 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     if (!open || models.length > 0) return;
     setLoading(true);
     fetch("/api/models")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load models");
+        return r.json();
+      })
       .then((data) => setModels(data.models ?? []))
-      .catch(() => {})
+      .catch(() => setModels([{ id: value, name: value.split(":").pop() || value, provider: "", context: 0, pricing: { prompt: 0, completion: 0 } }]))
       .finally(() => setLoading(false));
   }, [open, models.length]);
 
