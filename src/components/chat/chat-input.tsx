@@ -130,7 +130,7 @@ export function ChatInput({
             onPaste={handlePaste}
             placeholder={files.length > 0 ? "Add a message about the files..." : "Assign a task or ask anything"}
             rows={1}
-            className="w-full max-h-60 resize-none overflow-y-auto bg-transparent px-5 pt-4 pb-2 text-[15px] leading-relaxed placeholder:text-muted-foreground/50 focus-visible:outline-none scrollbar-none"
+            className="w-full max-h-60 resize-none overflow-y-auto bg-transparent px-5 pr-3 pt-4 pb-2 text-[15px] leading-relaxed placeholder:text-muted-foreground/50 focus-visible:outline-none scrollbar-thin"
           />
           <div className="flex items-center justify-between px-3 pb-2.5">
             {/* Attach button */}
