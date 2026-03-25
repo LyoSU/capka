@@ -250,6 +250,10 @@ export function useBackgroundChat({
       let uploadedFiles: string[] = [];
       if (files && files.length > 0) {
         uploadedFiles = await uploadFiles(files);
+        if (uploadedFiles.length < files.length) {
+          toast.error(`${files.length - uploadedFiles.length} file(s) failed to upload — message not sent`);
+          return;
+        }
       }
 
       const displayText = text.trim() || (uploadedFiles.length > 0 ? "Process these files" : "");

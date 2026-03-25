@@ -4,7 +4,7 @@
  */
 
 const CONTROLLER_URL = process.env.SANDBOX_CONTROLLER_URL || "http://localhost:3001";
-const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET || "unclaw-sandbox-secret";
+const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET || "";
 
 function sanitizeId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);

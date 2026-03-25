@@ -21,7 +21,7 @@ export function getModel(
       return p(modelId);
     }
     case "openrouter": {
-      const p = createOpenRouter({ apiKey: config?.apiKey! });
+      const p = createOpenRouter({ apiKey: config?.apiKey ?? "" });
       return p.chat(modelId);
     }
     case "ollama": {

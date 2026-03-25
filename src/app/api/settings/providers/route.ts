@@ -28,8 +28,9 @@ export async function POST(req: Request) {
   const { userId } = await requireRole("admin", "user");
 
   const { provider, apiKey, baseUrl, defaultModel } = await req.json();
-  if (!provider) {
-    return Response.json({ error: "Missing provider" }, { status: 400 });
+  const VALID_PROVIDERS = ["openai", "anthropic", "openrouter", "ollama"];
+  if (!provider || !VALID_PROVIDERS.includes(provider)) {
+    return Response.json({ error: "Invalid or missing provider" }, { status: 400 });
   }
 
   const masterKey = await getMasterKey();

@@ -80,7 +80,7 @@ export function SetupWizard() {
       const res = await fetch("/api/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ step: "account", email }),
+        body: JSON.stringify({ step: "account" }),
       });
       if (!res.ok) {
         const data = await res.json();

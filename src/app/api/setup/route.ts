@@ -17,9 +17,15 @@ export async function POST(req: Request) {
   const { step } = body;
 
   if (step === "account") {
-    const { email } = body;
+    // Require auth — prevents remote pre-claiming of admin email
+    const auth = await getAuth();
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
+    }
+    const email = session.user.email;
     if (!email) {
-      return Response.json({ error: "Missing email" }, { status: 400 });
+      return Response.json({ error: "Account has no email" }, { status: 400 });
     }
     // Prevent overwriting admin email once set (anti-hijack)
     const existing = await getSetting("admin_email");

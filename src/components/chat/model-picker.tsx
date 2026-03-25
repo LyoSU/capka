@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { Search, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
@@ -20,19 +20,20 @@ export function ModelPicker({
   placeholder?: string;
 }) {
   const [models, setModels] = useState<Model[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
+  const fetchedRef = useRef(false);
 
   useEffect(() => {
-    if (models.length > 0) return;
-    setLoading(true);
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
     fetch("/api/models")
       .then((r) => r.ok ? r.json() : { models: [] })
       .then((d) => setModels(d.models ?? []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [models.length]);
+  }, []);
 
   const filtered = useMemo(() => {
     if (!search) return models.slice(0, 50);

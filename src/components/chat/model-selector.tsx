@@ -42,13 +42,6 @@ function formatContext(ctx: number): string {
   return String(ctx);
 }
 
-function formatPrice(price: number): string {
-  if (price === 0) return "free";
-  if (price < 0.01) return "<$0.01";
-  if (price < 1) return `$${price.toFixed(2)}`;
-  return `$${price.toFixed(1)}`;
-}
-
 function getDisplayName(value: string): string {
   if (!value) return "select model";
   const parts = value.split(":");
@@ -222,12 +215,13 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [configProvider, setConfigProvider] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const fetchedRef = useRef(false);
 
   // Detect mobile
   useEffect(() => {
@@ -239,8 +233,8 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 
   // Fetch models on mount (needed for display name in pill)
   useEffect(() => {
-    if (models.length > 0) return;
-    setLoading(true);
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
     fetch("/api/models")
       .then((r) => {
         if (!r.ok) throw new Error("Failed to load models");
@@ -249,7 +243,8 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
       .then((data) => { setModels(data.models ?? []); if (data.provider) setConfigProvider(data.provider); })
       .catch(() => setModels([{ id: value, name: value.split(":").pop() || value, provider: "", context: 0, pricing: { prompt: 0, completion: 0 } }]))
       .finally(() => setLoading(false));
-  }, [models.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount, value only used as fallback
+  }, []);
 
   // Close on outside click (desktop only)
   useEffect(() => {
@@ -263,10 +258,12 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     return () => document.removeEventListener("mousedown", handler);
   }, [open, isMobile]);
 
-  // Reset on open
-  useEffect(() => {
-    if (open) { setSearch(""); setActiveIndex(0); }
-  }, [open]);
+  const toggleOpen = useCallback(() => {
+    setOpen((prev) => {
+      if (!prev) { setSearch(""); setActiveIndex(0); }
+      return !prev;
+    });
+  }, []);
 
   // Lock body scroll on mobile
   useEffect(() => {
@@ -300,7 +297,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   return (
     <div ref={containerRef} className="relative">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={toggleOpen}
         className="flex h-9 items-center gap-2.5 px-3 text-sm hover:text-foreground transition-colors"
       >
         <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0">

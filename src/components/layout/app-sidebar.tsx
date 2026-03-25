@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
@@ -15,7 +16,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { buttonVariants } from "@/components/ui/button";
@@ -99,8 +99,11 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-2">
         <div className="flex items-center justify-between group-data-[collapsible=icon]:justify-center">
-          <span className="text-base font-medium group-data-[collapsible=icon]:hidden">unClaw</span>
-          <SidebarTrigger />
+          <div className="flex items-center gap-2">
+            <Image src="/icon.svg" alt="unClaw" width={24} height={24} className="rounded-md" />
+            <span className="text-base font-medium group-data-[collapsible=icon]:hidden">unClaw</span>
+          </div>
+          <SidebarTrigger className="group-data-[collapsible=icon]:hidden" />
         </div>
         <Link
           href={newChatHref}

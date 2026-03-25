@@ -24,7 +24,9 @@ export async function GET() {
   if (!config) return Response.json({ models: [], provider: null });
 
   if (config.provider === "openrouter") {
-    const cached = cacheMap.get(userId);
+    // Cache key includes config id so provider/key changes invalidate immediately
+    const cacheKey = `${userId}:${config.id}`;
+    const cached = cacheMap.get(cacheKey);
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
       return Response.json({ models: cached.models, provider: "openrouter" });
     }
@@ -77,7 +79,7 @@ export async function GET() {
           a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name),
         );
 
-      cacheMap.set(userId, { models, ts: Date.now() });
+      cacheMap.set(cacheKey, { models, ts: Date.now() });
       // Evict stale + cap size
       const now = Date.now();
       for (const [k, v] of cacheMap) {
