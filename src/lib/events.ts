@@ -16,4 +16,6 @@ class EventBus {
   }
 }
 
-export const eventBus = new EventBus();
+// Attach to globalThis so the same instance survives Next.js module re-evaluation
+const g = globalThis as unknown as { __eventBus?: EventBus };
+export const eventBus = g.__eventBus ?? (g.__eventBus = new EventBus());

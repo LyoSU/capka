@@ -1,21 +1,19 @@
-import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { eq, and, asc, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { chats, messages, projects, memories } from "@/lib/db/schema";
+import { chats, messages, projects, memories, tasks } from "@/lib/db/schema";
 import { resolveUserModel } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
-import { extractMemories } from "@/lib/memory/extract";
+import { startTask } from "@/lib/tasks/runner";
 
 export async function POST(req: Request) {
   let mcpClose: (() => Promise<void>) | undefined;
-
   try {
     const { userId } = await requireSession();
     const body = await req.json();
-    const { chatId: requestChatId, model: requestModel, projectId } = body;
+    const { chatId: requestChatId, model: requestModel, projectId, userMessage } = body;
     const chatId = requestChatId || nanoid();
 
     const [chatRow, model, mcp, project, userMemories] = await Promise.all([
@@ -29,8 +27,8 @@ export async function POST(req: Request) {
         : Promise.resolve(undefined),
       db.select().from(memories).where(eq(memories.userId, userId)).orderBy(desc(memories.createdAt)).limit(50),
     ]);
+
     mcpClose = mcp.close;
-    const { tools } = mcp;
 
     // IDOR: chat exists but belongs to another user
     if (chatRow && chatRow.userId !== userId) {
@@ -50,32 +48,25 @@ export async function POST(req: Request) {
     }
 
     // Save user message + update chat title
-    const lastUserMsg = body.messages?.filter((m: { role: string }) => m.role === "user").pop();
-    if (lastUserMsg) {
-      const text = lastUserMsg.parts
-        ?.filter((p: { type: string }) => p.type === "text")
-        .map((p: { text: string }) => p.text)
-        .join("") || lastUserMsg.content || "";
-
-      if (text) {
-        const isNewChat = !existingChat || existingChat.title === "New Chat";
-        await Promise.all([
-          db.insert(messages).values({
-            id: lastUserMsg.id || nanoid(),
-            chatId,
-            role: "user",
-            content: text,
-            platform: "web",
-          }).onConflictDoNothing(),
-          db.update(chats).set({
-            ...(isNewChat ? { title: text.slice(0, 100) } : {}),
-            updatedAt: new Date(),
-          }).where(eq(chats.id, chatId)),
-        ]);
-      }
+    const text = userMessage || "";
+    if (text) {
+      const isNewChat = !existingChat || existingChat.title === "New Chat";
+      await Promise.all([
+        db.insert(messages).values({
+          id: nanoid(),
+          chatId,
+          role: "user",
+          content: text,
+          platform: "web",
+        }).onConflictDoNothing(),
+        db.update(chats).set({
+          ...(isNewChat ? { title: text.slice(0, 100) } : {}),
+          updatedAt: new Date(),
+        }).where(eq(chats.id, chatId)),
+      ]);
     }
 
-    // Build system prompt: base + sandbox + project + memories
+    // Build system prompt
     let systemPrompt = `${SYSTEM_PROMPT}\n\n${SANDBOX_PROMPT}`;
     if (project?.systemPrompt) {
       systemPrompt += `\n\n--- Project Instructions ---\n${project.systemPrompt}`;
@@ -85,63 +76,34 @@ export async function POST(req: Request) {
       systemPrompt += `\n\n## Things you know about the user:\n${memoryLines}`;
     }
 
-    const hasTools = Object.keys(tools).length > 0;
-    const result = streamText({
+    // Inject workspace snapshot so AI knows what files exist without extra ls calls
+    // NOTE: execCommand runs inside isolated Docker container, not on host
+    try {
+      const { execCommand: sandboxExec } = await import("@/lib/sandbox/client");
+      const ws = await sandboxExec(chatId, "find /workspace -maxdepth 3 -not -path '*/\\.*' | head -50", 5000).catch(() => null);
+      if (ws?.stdout?.trim()) {
+        systemPrompt += `\n\n## Current workspace files:\n\`\`\`\n${ws.stdout.trim()}\n\`\`\``;
+      }
+    } catch { /* sandbox not ready yet */ }
+
+    // Create task and start background execution
+    const taskId = nanoid();
+    await db.insert(tasks).values({ id: taskId, chatId, userId });
+
+    startTask({
+      taskId,
+      chatId,
+      userId,
       model,
-      ...(hasTools ? { tools, stopWhen: stepCountIs(25) } : {}),
-      system: systemPrompt,
-      messages: await convertToModelMessages(body.messages),
-      onError: async () => { await mcpClose?.(); },
-      async onFinish({ text, steps }) {
-        const toolCalls = steps.flatMap((step) =>
-          (step.toolCalls ?? []).map((tc) => ({
-            id: tc.toolCallId,
-            name: tc.toolName,
-            input: tc.input,
-          })),
-        );
-        const toolResults = steps.flatMap((step) =>
-          (step.toolResults ?? []).map((tr) => ({
-            id: tr.toolCallId,
-            name: tr.toolName,
-            output: tr.output,
-          })),
-        );
-
-        if (text || toolCalls.length > 0) {
-          await db.insert(messages).values({
-            id: nanoid(),
-            chatId,
-            role: "assistant",
-            content: text || "",
-            platform: "web",
-            metadata: toolCalls.length > 0 ? { toolCalls, toolResults } : undefined,
-          });
-        }
-
-        // Extract and save new memories (fire-and-forget)
-        if (text) {
-          extractMemories(model, text, userMemories.map((m) => m.content))
-            .then(async (newFacts) => {
-              if (newFacts.length > 0) {
-                await db.insert(memories).values(
-                  newFacts.map((content) => ({
-                    id: nanoid(),
-                    userId,
-                    content,
-                    type: "fact",
-                  })),
-                );
-              }
-            })
-            .catch((e) => console.error("[memory] save failed:", e));
-        }
-
-        await mcpClose?.();
-      },
+      tools: mcp.tools,
+      systemPrompt,
+      uiMessages: body.messages || [],
+      closeMcp: mcpClose!,
+      existingMemories: userMemories,
     });
 
-    return result.toUIMessageStreamResponse();
+    // Return immediately — client syncs via SSE
+    return Response.json({ taskId, chatId });
   } catch (e: unknown) {
     await mcpClose?.();
     if (e instanceof Response) return e;
@@ -170,7 +132,11 @@ export async function GET(req: Request) {
     .orderBy(asc(messages.createdAt))
     .limit(100);
 
-  type ToolMeta = { toolCalls?: { id: string; name: string; input: unknown }[]; toolResults?: { id: string; name: string; output: unknown }[] };
+  type ToolMeta = {
+    status?: string;
+    toolCalls?: { id: string; name: string; input: unknown }[];
+    toolResults?: { id: string; name: string; output: unknown }[];
+  };
 
   const uiMessages = rows.map((m) => {
     const meta = m.metadata as ToolMeta | null;
@@ -200,6 +166,7 @@ export async function GET(req: Request) {
       metadata: {
         createdAt: m.createdAt?.toISOString() ?? null,
         platform: m.platform ?? "web",
+        taskStatus: meta?.status,
       },
     };
   });

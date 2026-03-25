@@ -1,30 +1,33 @@
 import { requireSession } from "@/lib/auth";
-import { execCommand, createSession } from "@/lib/sandbox/client";
+import { createSession, downloadFile } from "@/lib/sandbox/client";
 
 export async function GET(req: Request) {
-  const { userId } = await requireSession();
-  const { searchParams } = new URL(req.url);
-  const chatId = searchParams.get("chatId");
-  const path = searchParams.get("path");
-
-  if (!chatId || !path) return Response.json({ error: "Missing chatId or path" }, { status: 400 });
-
   try {
+    const { userId } = await requireSession();
+    const { searchParams } = new URL(req.url);
+    const chatId = searchParams.get("chatId");
+    const filePath = searchParams.get("path");
+
+    if (!chatId || !filePath) return Response.json({ error: "Missing chatId or path" }, { status: 400 });
+
     await createSession(chatId, userId);
-    const result = await execCommand(chatId, `cat '${path.replace(/'/g, "'\\''")}'`);
+    const controllerRes = await downloadFile(chatId, filePath);
 
-    if (result.exitCode !== 0) {
-      return Response.json({ error: result.stderr || "File not found" }, { status: 404 });
-    }
+    // Proxy the binary stream from controller to client
+    const filename = filePath.split("/").pop() || "file";
+    const safeFilename = filename.replace(/[^\x20-\x7E]/g, "_"); // ASCII-safe fallback
+    const encodedFilename = encodeURIComponent(filename);
 
-    const filename = path.split("/").pop() || "file";
-    return new Response(result.stdout, {
+    return new Response(controllerRes.body, {
       headers: {
-        "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${filename.replace(/"/g, "_")}"`,
+        "Content-Type": controllerRes.headers.get("Content-Type") || "application/octet-stream",
+        "Content-Length": controllerRes.headers.get("Content-Length") || "",
+        "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`,
       },
     });
   } catch (e) {
+    if (e instanceof Response) return e;
+    console.error("[download]", e);
     return Response.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
 }

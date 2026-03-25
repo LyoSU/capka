@@ -220,7 +220,7 @@ export function SandboxFiles({
               {!entry.isDirectory && (
                 <a
                   href={downloadUrl(entry.path)}
-                  download
+                  download={entry.name}
                   className="shrink-0 rounded p-0.5 text-muted-foreground/40 opacity-0 hover:text-foreground group-hover:opacity-100 transition-opacity"
                 >
                   <Download className="h-3 w-3" />

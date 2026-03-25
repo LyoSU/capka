@@ -1,8 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useMemo } from "react";
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { useRef, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { FolderOpen } from "lucide-react";
@@ -11,6 +9,7 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { ModelSelector } from "@/components/chat/model-selector";
 import { SandboxFiles } from "@/components/chat/sandbox-files";
 import { Button } from "@/components/ui/button";
+import { useBackgroundChat } from "@/hooks/use-background-chat";
 
 interface ChatPanelProps {
   chatId: string;
@@ -18,68 +17,14 @@ interface ChatPanelProps {
   projectId?: string;
 }
 
-function fetchMessages(chatId: string) {
-  return fetch(`/api/chat?chatId=${chatId}`).then((r) => (r.ok ? r.json() : []));
-}
-
 export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const transport = useMemo(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { chatId, projectId } }),
-    [chatId, projectId],
-  );
-
-  const { messages, setMessages, sendMessage, status, stop } = useChat({
-    id: chatId,
-    transport,
-    onError: (err) => {
-      console.error("[chat] useChat error:", err);
-      toast.error(err.message || "Failed to send message");
-    },
+  const { messages, isLoading, sendMessage, stop } = useBackgroundChat({
+    chatId,
+    projectId,
   });
-
-  // Load chat history from DB on mount
-  useEffect(() => {
-    fetchMessages(chatId)
-      .then((history) => { if (history.length > 0) setMessages(history); })
-      .catch(() => {});
-  }, [chatId, setMessages]);
-
-  // SSE: listen for real-time events (e.g. Telegram messages)
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-
-    const connect = () => {
-      es = new EventSource("/api/events");
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "new_message" && data.chatId === chatId) {
-            fetchMessages(chatId)
-              .then((msgs) => { if (msgs?.length) setMessages(msgs); })
-              .catch(() => {});
-          }
-        } catch { /* ignore parse errors */ }
-      };
-      es.onerror = () => {
-        es?.close();
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(connect, 5000);
-      };
-    };
-
-    connect();
-    return () => {
-      clearTimeout(reconnectTimer);
-      es?.close();
-    };
-  }, [chatId, setMessages]);
-
-  const isLoading = status === "streaming" || status === "submitted";
-  const [input, setInput] = useState("");
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -88,13 +33,17 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
     }
   }, [messages]);
 
+  const [input, setInput] = useState("");
+
   const handleSubmit = async () => {
     const text = input.trim();
     if (!text) return;
     setInput("");
-    // onError callback handles stream errors via toast — catch only silences
-    // unhandled rejections from sendMessage itself (e.g. network failure before stream)
-    await sendMessage({ text }, { body: { model } }).catch(() => {});
+    try {
+      await sendMessage(text, model);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to send message");
+    }
   };
 
   const isEmpty = messages.length === 0;
@@ -145,7 +94,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
               {messages.map((message, i) => (
                 <ChatMessage
                   key={message.id}
-                  message={message}
+                  message={message as never}
                   isStreaming={
                     isLoading &&
                     i === messages.length - 1 &&

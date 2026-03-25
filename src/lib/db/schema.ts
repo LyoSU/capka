@@ -110,6 +110,21 @@ export const linkCodes = pgTable("link_codes", {
   expiresAt: timestamp("expires_at").notNull(),
 });
 
+// ── Background Tasks ─────────────────────────────────────────
+
+export const tasks = pgTable("tasks", {
+  id: text("id").primaryKey(),
+  chatId: text("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
+  status: text("status").notNull().default("running"), // running, completed, failed, cancelled
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_tasks_chat_id").on(table.chatId),
+  index("idx_tasks_user_id_status").on(table.userId, table.status),
+]);
+
 // ── Phase 1: Professional Workspace ──────────────────────────
 
 export const projects = pgTable("projects", {
