@@ -24,6 +24,11 @@ export async function getAuth() {
       },
     }),
     emailAndPassword: { enabled: true },
+    user: {
+      additionalFields: {
+        role: { type: "string", defaultValue: "user", input: false },
+      },
+    },
     session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
     plugins: [nextCookies()],
   });
