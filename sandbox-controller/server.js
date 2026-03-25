@@ -3,16 +3,11 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { readdir, stat, mkdir, realpath } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { join, resolve, basename } from "node:path";
-import { randomUUID } from "node:crypto";
 import Docker from "dockerode";
 
 const docker = new Docker({ socketPath: "/var/run/docker.sock" });
 const PORT = process.env.PORT || 3001;
-const SECRET = process.env.CONTROLLER_SECRET || (() => {
-  const fallback = randomUUID();
-  console.warn("[sandbox-controller] CONTROLLER_SECRET not set — using random secret for this session. Set CONTROLLER_SECRET in env for production.");
-  return fallback;
-})();
+const SECRET = process.env.CONTROLLER_SECRET || "unclaw-sandbox-secret";
 
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "unclaw-sandbox";
 const MEMORY_LIMIT = parseInt(process.env.SANDBOX_MEMORY_MB || "512") * 1024 * 1024;

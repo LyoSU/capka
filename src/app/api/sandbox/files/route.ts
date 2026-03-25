@@ -1,4 +1,4 @@
-import { requireSession } from "@/lib/auth";
+import { requireSession, ApiError } from "@/lib/auth";
 import { createSession, listFiles } from "@/lib/sandbox/client";
 import { verifyChatOwnership } from "@/lib/sandbox/verify-ownership";
 
@@ -16,7 +16,7 @@ export async function GET(req: Request) {
     const data = await listFiles(chatId, path);
     return Response.json(data);
   } catch (e) {
-    if (e instanceof Response) return e;
+    if (e instanceof ApiError) return e.toResponse();
     return Response.json({ entries: [], error: e instanceof Error ? e.message : "Failed" });
   }
 }

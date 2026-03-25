@@ -7,23 +7,23 @@ import { getModel } from "@/lib/providers";
 
 /** Find active provider config: user's own → fallback to any admin's config. */
 export async function resolveProviderConfig(userId: string) {
-  let [config] = await db
+  const [config] = await db
     .select()
     .from(providerConfigs)
     .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
     .limit(1);
 
-  if (!config) {
-    const rows = await db
-      .select({ config: providerConfigs })
-      .from(providerConfigs)
-      .innerJoin(users, eq(providerConfigs.userId, users.id))
-      .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true)))
-      .orderBy(providerConfigs.createdAt)
-      .limit(1);
-    config = rows[0]?.config;
-  }
-  return config ?? null;
+  if (config) return { ...config, isShared: false };
+
+  const rows = await db
+    .select({ config: providerConfigs })
+    .from(providerConfigs)
+    .innerJoin(users, eq(providerConfigs.userId, users.id))
+    .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true)))
+    .orderBy(providerConfigs.createdAt)
+    .limit(1);
+  const fallback = rows[0]?.config;
+  return fallback ? { ...fallback, isShared: true } : null;
 }
 
 export async function resolveUserModel(userId: string, requestModel?: string) {

@@ -21,14 +21,14 @@ export async function GET() {
   const { userId } = await requireSession();
 
   const config = await resolveProviderConfig(userId);
-  if (!config) return Response.json({ models: [], provider: null });
+  if (!config) return Response.json({ models: [], provider: null, isShared: false });
 
   if (config.provider === "openrouter") {
     // Cache key includes config id so provider/key changes invalidate immediately
     const cacheKey = `${userId}:${config.id}`;
     const cached = cacheMap.get(cacheKey);
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
-      return Response.json({ models: cached.models, provider: "openrouter" });
+      return Response.json({ models: cached.models, provider: "openrouter", isShared: config.isShared });
     }
 
     let apiKey = config.apiKey;
@@ -89,11 +89,11 @@ export async function GET() {
         const oldest = [...cacheMap.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
         if (oldest) cacheMap.delete(oldest[0]);
       }
-      return Response.json({ models, provider: "openrouter" });
+      return Response.json({ models, provider: "openrouter", isShared: config.isShared });
     } catch {
-      return Response.json({ models: [], provider: "openrouter" });
+      return Response.json({ models: [], provider: "openrouter", isShared: config.isShared });
     }
   }
 
-  return Response.json({ models: [], provider: config.provider });
+  return Response.json({ models: [], provider: config.provider, isShared: config.isShared });
 }

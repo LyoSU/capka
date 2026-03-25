@@ -37,7 +37,19 @@ export async function getAuth() {
 
 export type Role = "admin" | "user" | "viewer";
 
-/** Require authenticated session — returns userId and role or throws 401 Response. */
+/** API error that carries HTTP status — avoids `throw Response` which breaks across Next.js module boundaries. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+  toResponse() {
+    return Response.json({ error: this.message }, { status: this.status });
+  }
+}
+
+/** Require authenticated session — returns userId and role or throws ApiError. */
 export async function requireSession(): Promise<{
   userId: string;
   role: Role;
@@ -45,18 +57,24 @@ export async function requireSession(): Promise<{
 }> {
   const { headers } = await import("next/headers");
   const auth = await getAuth();
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw Response.json({ error: "Unauthorized" }, { status: 401 });
+  let session;
+  try {
+    session = await auth.api.getSession({ headers: await headers() });
+  } catch (e) {
+    console.error("[auth] getSession threw:", e);
+    throw new ApiError("Unauthorized", 401);
+  }
+  if (!session) throw new ApiError("Unauthorized", 401);
   const rawRole = (session.user as Record<string, unknown>).role;
   const role: Role = rawRole === "admin" || rawRole === "viewer" ? rawRole : "user";
   return { userId: session.user.id, role, session };
 }
 
-/** Require a minimum role — throws 403 if insufficient. */
+/** Require a minimum role — throws ApiError if insufficient. */
 export async function requireRole(...allowed: Role[]) {
   const ctx = await requireSession();
   if (!allowed.includes(ctx.role)) {
-    throw Response.json({ error: "Forbidden" }, { status: 403 });
+    throw new ApiError("Forbidden", 403);
   }
   return ctx;
 }

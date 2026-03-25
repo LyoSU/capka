@@ -215,6 +215,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [configProvider, setConfigProvider] = useState("");
+  const [isShared, setIsShared] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -240,7 +241,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
         if (!r.ok) throw new Error("Failed to load models");
         return r.json();
       })
-      .then((data) => { setModels(data.models ?? []); if (data.provider) setConfigProvider(data.provider); })
+      .then((data) => { setModels(data.models ?? []); if (data.provider) setConfigProvider(data.provider); if (data.isShared) setIsShared(true); })
       .catch(() => setModels([{ id: value, name: value.split(":").pop() || value, provider: "", context: 0, pricing: { prompt: 0, completion: 0 } }]))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount, value only used as fallback
@@ -310,6 +311,9 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
           )}
           {currentModel && currentModel.context > 0 && (
             <span className="text-xs text-muted-foreground/35 tabular-nums hidden md:inline">{formatContext(currentModel.context)} tokens</span>
+          )}
+          {isShared && (
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title="Using admin&apos;s shared provider config">shared</span>
           )}
         </span>
         <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />

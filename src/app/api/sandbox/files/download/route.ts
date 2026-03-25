@@ -1,4 +1,4 @@
-import { requireSession } from "@/lib/auth";
+import { requireSession, ApiError } from "@/lib/auth";
 import { createSession, downloadFile } from "@/lib/sandbox/client";
 import { verifyChatOwnership } from "@/lib/sandbox/verify-ownership";
 
@@ -28,7 +28,7 @@ export async function GET(req: Request) {
       },
     });
   } catch (e) {
-    if (e instanceof Response) return e;
+    if (e instanceof ApiError) return e.toResponse();
     console.error("[download]", e);
     return Response.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }

@@ -1,11 +1,18 @@
-import { requireSession } from "@/lib/auth";
+import { requireSession, ApiError } from "@/lib/auth";
 import { eventBus } from "@/lib/events";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const { userId } = await requireSession();
+  let userId: string;
+  try {
+    const ctx = await requireSession();
+    userId = ctx.userId;
+  } catch (e) {
+    if (e instanceof ApiError) return e.toResponse();
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   let unsubscribe: (() => void) | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
 

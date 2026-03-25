@@ -17,6 +17,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
@@ -60,6 +61,7 @@ function groupByDate(chats: ChatItem[]) {
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const { toggleSidebar, state: sidebarState } = useSidebar();
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -100,7 +102,13 @@ export function AppSidebar() {
       <SidebarHeader className="p-2">
         <div className="flex items-center justify-between group-data-[collapsible=icon]:justify-center">
           <div className="flex items-center gap-2">
-            <Image src="/icon.svg" alt="unClaw" width={24} height={24} className="rounded-md" />
+            <button
+              onClick={sidebarState === "collapsed" ? toggleSidebar : undefined}
+              className={cn("shrink-0 rounded-md transition-opacity", sidebarState === "collapsed" && "hover:opacity-70 cursor-pointer")}
+              title={sidebarState === "collapsed" ? "Expand sidebar" : undefined}
+            >
+              <Image src="/icon.svg" alt="unClaw" width={24} height={24} className="rounded-md" />
+            </button>
             <span className="text-base font-medium group-data-[collapsible=icon]:hidden">unClaw</span>
           </div>
           <SidebarTrigger className="group-data-[collapsible=icon]:hidden" />

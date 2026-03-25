@@ -4,7 +4,7 @@
  */
 
 const CONTROLLER_URL = process.env.SANDBOX_CONTROLLER_URL || "http://localhost:3001";
-const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET || "";
+const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET || "unclaw-sandbox-secret";
 
 function sanitizeId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
@@ -22,8 +22,8 @@ async function request(path: string, method: string, body?: unknown) {
     signal: AbortSignal.timeout(method === "POST" ? 150_000 : 10_000),
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `Sandbox API error: ${res.status}`);
+  const data = await res.json().catch(() => ({ error: `Sandbox ${res.status}` }));
+  if (!res.ok) throw new Error(`Sandbox: ${data.error || res.status} (${method} ${path})`);
   return data;
 }
 

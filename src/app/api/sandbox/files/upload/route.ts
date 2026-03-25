@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth";
+import { requireRole, ApiError } from "@/lib/auth";
 import { createSession, uploadFile } from "@/lib/sandbox/client";
 import { verifyChatOwnership } from "@/lib/sandbox/verify-ownership";
 
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     const result = await uploadFile(chatId, path, file);
     return Response.json(result);
   } catch (e) {
-    if (e instanceof Response) return e;
+    if (e instanceof ApiError) return e.toResponse();
     return Response.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }
 }
