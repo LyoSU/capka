@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, Plus, Loader2 } from "lucide-react";
+import { Trash2, Plus, Loader2, Power } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,6 +58,20 @@ export default function ConnectionsPage() {
     setBaseUrl("");
     setDefaultModel("");
     setShowForm(false);
+  };
+
+  const handleActivate = async (id: string) => {
+    const res = await fetch("/api/settings/providers", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, activate: true }),
+    });
+    if (res.ok) {
+      setConfigs((prev) => prev.map((c) => ({ ...c, isActive: c.id === id })));
+      toast.success("Provider activated");
+    } else {
+      toast.error("Failed to activate provider");
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -160,14 +174,27 @@ export default function ConnectionsPage() {
                   <Badge variant="outline" className="text-[10px]">active</Badge>
                 )}
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                onClick={() => handleDelete(c.id)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center gap-1">
+                {!c.isActive && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-primary"
+                    onClick={() => handleActivate(c.id)}
+                    title="Activate"
+                  >
+                    <Power className="h-4 w-4" />
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  onClick={() => handleDelete(c.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-1">

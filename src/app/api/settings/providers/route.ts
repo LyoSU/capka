@@ -58,8 +58,20 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   const { userId } = await requireRole("admin", "user");
-  const { id, defaultModel } = await req.json();
+  const { id, defaultModel, activate } = await req.json();
   if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
+
+  if (activate) {
+    // Deactivate all, then activate this one
+    await db.update(providerConfigs).set({ isActive: false }).where(eq(providerConfigs.userId, userId));
+    const [updated] = await db
+      .update(providerConfigs)
+      .set({ isActive: true })
+      .where(and(eq(providerConfigs.id, id), eq(providerConfigs.userId, userId)))
+      .returning();
+    if (!updated) return Response.json({ error: "Not found" }, { status: 404 });
+    return Response.json({ id: updated.id, isActive: true });
+  }
 
   const [updated] = await db
     .update(providerConfigs)
