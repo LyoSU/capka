@@ -292,16 +292,30 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   const currentModelId = value.includes(":") ? value.split(":").slice(1).join(":") : value;
   const currentProvider = currentModelId.includes("/") ? currentModelId.split("/")[0] : "";
   const CurrentProviderIcon = PROVIDER_META[currentProvider]?.icon;
+  const currentProviderLabel = PROVIDER_META[currentProvider]?.label;
+  const currentModel = models.find((m) => m.id === currentModelId);
 
   return (
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex h-8 items-center gap-2 px-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        className="flex h-9 items-center gap-2.5 px-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
-        {CurrentProviderIcon && <CurrentProviderIcon size={16} />}
-        <span className="truncate max-w-48 font-medium">{getDisplayName(value)}</span>
-        <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
+        {CurrentProviderIcon && (
+          <span className="flex h-5 w-5 items-center justify-center rounded-md bg-muted">
+            <CurrentProviderIcon size={13} />
+          </span>
+        )}
+        <span className="flex items-baseline gap-1.5">
+          <span className="truncate max-w-48 font-medium text-foreground">{getDisplayName(value)}</span>
+          {currentProviderLabel && (
+            <span className="text-[11px] text-muted-foreground/60 hidden sm:inline">{currentProviderLabel}</span>
+          )}
+          {currentModel && currentModel.context > 0 && (
+            <span className="text-[11px] text-muted-foreground/40 tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span>
+          )}
+        </span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && !isMobile && (
