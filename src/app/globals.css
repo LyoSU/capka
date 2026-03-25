@@ -166,3 +166,26 @@
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* Streamdown — flatten table wrapper so tables render inline */
+[data-streamdown="table-wrapper"] {
+  all: unset;
+  display: block;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+[data-streamdown="table"] {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+[data-streamdown="table-header-cell"],
+[data-streamdown="table-cell"] {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+[data-streamdown="table-header-cell"] {
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
