@@ -1,5 +1,6 @@
 import { requireSession } from "@/lib/auth";
 import { createSession, downloadFile } from "@/lib/sandbox/client";
+import { verifyChatOwnership } from "@/lib/sandbox/verify-ownership";
 
 export async function GET(req: Request) {
   try {
@@ -10,6 +11,7 @@ export async function GET(req: Request) {
 
     if (!chatId || !filePath) return Response.json({ error: "Missing chatId or path" }, { status: 400 });
 
+    await verifyChatOwnership(chatId, userId);
     await createSession(chatId, userId);
     const controllerRes = await downloadFile(chatId, filePath);
 

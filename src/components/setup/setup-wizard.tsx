@@ -173,12 +173,12 @@ export function SetupWizard() {
           body: JSON.stringify({ botToken }),
         });
         const data = await res.json();
-        if (!res.ok && res.status !== 207) {
+        if (!res.ok) {
           toast.error(data.error || "Failed to save Telegram token");
           return;
         }
-        if (res.status === 207) {
-          toast.warning(data.error);
+        if (data.warning) {
+          toast.warning(data.warning);
         }
       }
 

@@ -1,10 +1,12 @@
 import { Bot } from "grammy";
 import { requireAdmin } from "@/lib/auth";
-import { setSetting } from "@/lib/settings";
+import { setSetting, isSetupComplete } from "@/lib/settings";
 import { generateSecret } from "@/lib/crypto";
 
 export async function POST(req: Request) {
-  await requireAdmin();
+  // During setup wizard, user isn't admin yet — allow if setup not complete
+  const setupDone = await isSetupComplete();
+  if (setupDone) await requireAdmin();
 
   const { botToken } = await req.json();
   if (!botToken?.trim()) {

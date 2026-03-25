@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
-import { setSetting, isSetupComplete, getMasterKey } from "@/lib/settings";
+import { getSetting, setSetting, isSetupComplete, getMasterKey } from "@/lib/settings";
 import { getAuth } from "@/lib/auth";
 
 export async function POST(req: Request) {
@@ -61,12 +61,18 @@ export async function POST(req: Request) {
   }
 
   if (step === "complete") {
-    // Make the first user (who completed setup) an admin
+    // Require authenticated session to finish setup — prevents unauthenticated lockout
     const auth = await getAuth();
     const session = await auth.api.getSession({ headers: await headers() });
-    if (session) {
-      await db.update(users).set({ role: "admin" }).where(eq(users.id, session.user.id));
+    if (!session) {
+      return Response.json({ error: "Must be signed in to complete setup" }, { status: 401 });
     }
+    // Verify this is the admin email from step 1
+    const adminEmail = await getSetting("admin_email");
+    if (adminEmail && session.user.email !== adminEmail) {
+      return Response.json({ error: "Only the admin account can complete setup" }, { status: 403 });
+    }
+    await db.update(users).set({ role: "admin" }).where(eq(users.id, session.user.id));
     await setSetting("setup_complete", "true");
     return Response.json({ ok: true });
   }

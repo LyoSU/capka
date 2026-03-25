@@ -42,7 +42,8 @@ export async function requireSession(): Promise<{
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) throw Response.json({ error: "Unauthorized" }, { status: 401 });
-  const role = ((session.user as Record<string, unknown>).role as Role) || "user";
+  const rawRole = (session.user as Record<string, unknown>).role;
+  const role: Role = rawRole === "admin" || rawRole === "viewer" ? rawRole : "user";
   return { userId: session.user.id, role, session };
 }
 
