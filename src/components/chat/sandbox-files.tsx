@@ -67,13 +67,6 @@ export function SandboxFiles({
 
   const navigate = (newPath: string) => setPath(newPath);
 
-  const goUp = () => {
-    if (path === ".") return;
-    const parts = path.split("/");
-    parts.pop();
-    setPath(parts.length ? parts.join("/") : ".");
-  };
-
   const downloadUrl = (filePath: string) =>
     `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`;
 

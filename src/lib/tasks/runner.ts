@@ -7,12 +7,8 @@ import { eventBus } from "@/lib/events";
 import { extractMemories } from "@/lib/memory/extract";
 import type { LanguageModel } from "ai";
 
-// In-memory registry for abort control (single-instance; swap for Redis if scaling horizontally)
 const running = new Map<string, AbortController>();
-
-export function isTaskRunning(taskId: string): boolean {
-  return running.has(taskId);
-}
+const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
 
 export function cancelTask(taskId: string): boolean {
   const ac = running.get(taskId);
@@ -132,18 +128,18 @@ export function startTask(opts: StartTaskOpts) {
               type: "tool-error",
               id: event.toolCallId,
               name: event.toolName,
-              error: event.error instanceof Error ? event.error.message : String(event.error),
+              error: errMsg(event.error),
             });
             eventBus.emit(channel, {
               type: "task:tool-result",
               taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId,
-              result: { error: event.error instanceof Error ? event.error.message : String(event.error) },
+              result: { error: errMsg(event.error) },
             });
             break;
 
           case "error":
-            streamError = event.error instanceof Error ? event.error.message : String(event.error);
+            streamError = errMsg(event.error);
             break;
 
           case "finish-step":
@@ -191,7 +187,7 @@ export function startTask(opts: StartTaskOpts) {
     } catch (e) {
       const isAbort = e instanceof Error && e.name === "AbortError";
       const status = isAbort ? "cancelled" : "failed";
-      const error = isAbort ? undefined : (e instanceof Error ? e.message : "Unknown error");
+      const error = isAbort ? undefined : errMsg(e);
 
       // Update both task AND message status — preserve any parts already accumulated
       await Promise.all([

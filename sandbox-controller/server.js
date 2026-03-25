@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createReadStream, createWriteStream } from "node:fs";
-import { readdir, stat, mkdir } from "node:fs/promises";
+import { readdir, stat, mkdir, realpath } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { join, resolve, basename } from "node:path";
 import Docker from "dockerode";
@@ -42,8 +42,6 @@ function safeJoin(base, userPath) {
 /** Resolve real path and verify it's still within base (blocks symlink escapes) */
 async function safeRealPath(base, userPath) {
   const full = safeJoin(base, userPath);
-  // For operations that read existing files, resolve symlinks
-  const { realpath } = await import("node:fs/promises");
   try {
     const real = await realpath(full);
     if (real !== base && !real.startsWith(base + "/")) throw new Error("Symlink escape blocked");
@@ -73,8 +71,8 @@ async function dirSize(dir) {
 async function createSandbox(sessionId, userId, networkMode = "none") {
   sessionId = sanitize(sessionId);
   userId = sanitize(userId);
+  networkMode = networkMode === "bridge" ? "bridge" : "none";
   const wsPath = workspacePath(userId, sessionId);
-  const network = networkMode === "bridge" ? "bridge" : "none";
 
   await mkdir(wsPath, { recursive: true });
 
@@ -89,7 +87,7 @@ async function createSandbox(sessionId, userId, networkMode = "none") {
       SecurityOpt: ["no-new-privileges"],
       CapDrop: ["ALL"],
       CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
-      NetworkMode: network,
+      NetworkMode: networkMode,
       Binds: [`${wsPath}:/workspace`],
       Init: true,
     },
@@ -99,13 +97,13 @@ async function createSandbox(sessionId, userId, networkMode = "none") {
     Labels: {
       "unclaw.session": sessionId,
       "unclaw.user": userId,
-      "unclaw.network": network,
+      "unclaw.network": networkMode,
     },
   });
 
   await container.start();
 
-  const session = { containerId: container.id, userId, networkMode: network, lastActivity: Date.now() };
+  const session = { containerId: container.id, userId, networkMode, lastActivity: Date.now() };
   sessions.set(sessionId, session);
   return session;
 }
@@ -119,7 +117,6 @@ async function restartSandbox(sessionId) {
     const info = await container.inspect();
     if (!info.State.Running) {
       await container.start();
-      session.lastActivity = Date.now();
     }
     return session;
   } catch {
@@ -222,6 +219,10 @@ async function recoverSessions() {
       if (c.State === "running") {
         sessions.set(sessionId, { containerId: c.Id, userId, lastActivity: Date.now() });
         console.log(`[recover] found running sandbox ${sessionId}`);
+      } else {
+        // Clean up stopped containers from previous runs
+        docker.getContainer(c.Id).remove({ force: true }).catch(() => {});
+        console.log(`[recover] removed stopped sandbox ${sessionId}`);
       }
     }
   } catch (e) {
@@ -264,7 +265,6 @@ const server = createServer(async (req, res) => {
 
       // Existing session — try to reuse or restart
       if (sessions.has(sessionId)) {
-        const existing = sessions.get(sessionId);
         const restarted = await restartSandbox(sessionId);
         if (restarted) {
           restarted.lastActivity = Date.now();
@@ -371,7 +371,7 @@ const server = createServer(async (req, res) => {
       const MAX_UPLOAD = MAX_UPLOAD_MB * 1024 * 1024;
       for await (const chunk of req) {
         totalSize += chunk.length;
-        if (totalSize > MAX_UPLOAD) return jsonRes(res, 413, { error: "File too large (max 100MB)" });
+        if (totalSize > MAX_UPLOAD) return jsonRes(res, 413, { error: `File too large (max ${MAX_UPLOAD_MB}MB)` });
         chunks.push(chunk);
       }
       const body = Buffer.concat(chunks);
@@ -416,10 +416,7 @@ const server = createServer(async (req, res) => {
 
       const destDir = safeJoin(wsBase, targetPath === "." ? "" : targetPath);
       await mkdir(destDir, { recursive: true });
-      const destFile = join(destDir, basename(fileName));
-
-      // Ensure dest is still within workspace
-      if (!destFile.startsWith(wsBase)) return jsonRes(res, 400, { error: "Invalid path" });
+      const destFile = join(await safeRealPath(wsBase, targetPath === "." ? "" : targetPath), basename(fileName));
 
       const ws = createWriteStream(destFile);
       ws.end(fileData);

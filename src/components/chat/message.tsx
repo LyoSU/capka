@@ -1,5 +1,5 @@
 import { type UIMessage } from "ai";
-import React from "react";
+import { Fragment } from "react";
 import {
   Copy, Check, Send, Download,
   ChevronRight, Loader2, AlertCircle,
@@ -283,11 +283,10 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
 
 const downloadLinkClass = "inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary no-underline hover:bg-primary/20 transition-colors";
 
-function DownloadLink({ chatId, filePath, keyProp }: { chatId: string; filePath: string; keyProp?: number }) {
+function DownloadLink({ chatId, filePath }: { chatId: string; filePath: string }) {
   const fileName = filePath.split("/").pop() || filePath;
   return (
     <a
-      key={keyProp}
       href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`}
       download={fileName}
       className={downloadLinkClass}
@@ -305,7 +304,7 @@ function processWorkspacePaths(children: React.ReactNode, chatId: string): React
     return replacePathsInText(children, chatId);
   }
   return children.map((child, i) => {
-    if (typeof child === "string") return <React.Fragment key={i}>{replacePathsInText(child, chatId)}</React.Fragment>;
+    if (typeof child === "string") return <Fragment key={i}>{replacePathsInText(child, chatId)}</Fragment>;
     return child;
   });
 }
@@ -317,7 +316,7 @@ function replacePathsInText(text: string, chatId: string): React.ReactNode {
   let match;
   while ((match = regex.exec(text)) !== null) {
     if (match.index > last) parts.push(text.slice(last, match.index));
-    parts.push(<DownloadLink key={match.index} chatId={chatId} filePath={match[1]} keyProp={match.index} />);
+    parts.push(<DownloadLink key={match.index} chatId={chatId} filePath={match[1]} />);
     last = match.index + match[0].length;
   }
   if (parts.length === 0) return text;
@@ -475,51 +474,42 @@ export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) 
     );
   }
 
-  // Assistant — render parts in original order
+  // Assistant — group consecutive parts by kind
   const parts = message.parts;
-  const hasAnyContent = parts.length > 0;
+  type Group = { kind: "text"; text: string } | { kind: "tools"; tools: ToolPart[] };
+  const groups: Group[] = [];
+  for (const part of parts) {
+    if (part.type === "text") {
+      const text = (part as { text: string }).text;
+      if (text) groups.push({ kind: "text", text });
+    } else if (isToolPart(part)) {
+      const last = groups[groups.length - 1];
+      if (last?.kind === "tools") last.tools.push(part as ToolPart);
+      else groups.push({ kind: "tools", tools: [part as ToolPart] });
+    }
+  }
+  const lastTextIdx = groups.reduce((acc, g, i) => g.kind === "text" ? i : acc, -1);
 
   return (
     <div className="group/msg px-4 py-3">
       <div className="max-w-none">
-        {hasAnyContent ? (
-          (() => {
-            // Group consecutive tool parts together
-            const groups: ({ kind: "text"; text: string; idx: number } | { kind: "tools"; tools: ToolPart[] })[] = [];
-            for (let i = 0; i < parts.length; i++) {
-              const part = parts[i];
-              if (part.type === "text") {
-                const text = (part as { text: string }).text;
-                if (text) groups.push({ kind: "text", text, idx: i });
-              } else if (isToolPart(part)) {
-                const last = groups[groups.length - 1];
-                if (last?.kind === "tools") {
-                  last.tools.push(part as ToolPart);
-                } else {
-                  groups.push({ kind: "tools", tools: [part as ToolPart] });
-                }
-              }
-            }
-            return groups.map((g, gi) => {
-              if (g.kind === "text") {
-                const isLast = gi === groups.length - 1 || groups.slice(gi + 1).every((x) => x.kind !== "text");
-                // Add top margin when text follows tools (visual separation between phases)
-                const afterTools = gi > 0 && groups[gi - 1].kind === "tools";
-                return (
-                  <div key={gi} className={afterTools ? "mt-3 pt-3 border-t border-border/30" : ""}>
-                    <TextContent text={g.text} isStreaming={isStreaming && isLast} chatId={chatId} />
-                  </div>
-                );
-              }
-              // Add top margin when tools follow text
-              const afterText = gi > 0 && groups[gi - 1].kind === "text";
+        {groups.length > 0 ? (
+          groups.map((g, gi) => {
+            if (g.kind === "text") {
+              const afterTools = gi > 0 && groups[gi - 1].kind === "tools";
               return (
-                <div key={gi} className={`${afterText ? "mt-2" : ""} rounded-lg bg-muted/30 px-3 py-2`}>
-                  <ToolGroup tools={g.tools} />
+                <div key={gi} className={afterTools ? "mt-3 pt-3 border-t border-border/30" : ""}>
+                  <TextContent text={g.text} isStreaming={isStreaming && gi === lastTextIdx} chatId={chatId} />
                 </div>
               );
-            });
-          })()
+            }
+            const afterText = gi > 0 && groups[gi - 1].kind === "text";
+            return (
+              <div key={gi} className={`${afterText ? "mt-2" : ""} rounded-lg bg-muted/30 px-3 py-2`}>
+                <ToolGroup tools={g.tools} />
+              </div>
+            );
+          })
         ) : isStreaming ? (
           <ThinkingIndicator />
         ) : (

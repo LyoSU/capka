@@ -171,11 +171,12 @@ export async function GET(req: Request) {
         } else if (p.type === "tool-call") {
           const tr = resultMap.get(p.id) as { output?: unknown } | undefined;
           const err = errorMap.get(p.id);
+          const state = tr ? "output-available" : err ? "output-error" : "partial-call";
           parts.push({
             type: "dynamic-tool",
             toolCallId: p.id,
             toolName: p.name,
-            state: tr ? "output-available" : "output-error",
+            state,
             input: p.input,
             output: tr?.output,
             ...(err ? { errorText: err } : {}),

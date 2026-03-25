@@ -144,9 +144,11 @@ export function useBackgroundChat({
                 if (idx === -1) return prev;
                 const msgs = [...prev];
                 const msg = msgs[idx];
+                const result = data.result as Record<string, unknown> | undefined;
+                const isError = result && typeof result === "object" && "error" in result;
                 const parts = msg.parts.map((p) =>
                   p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
-                    ? { ...p, state: "output-available", output: data.result }
+                    ? { ...p, state: isError ? "output-error" : "output-available", output: data.result }
                     : p,
                 );
                 msgs[idx] = { ...msg, parts };
