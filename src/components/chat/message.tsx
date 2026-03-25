@@ -234,21 +234,19 @@ function ThinkingIndicator() {
 
 /** Close open markdown tags so partial streaming text renders correctly */
 function closeOpenMarkdown(text: string): string {
-  // Close unclosed code fences
+  // Each check fixes the highest-priority unclosed tag and returns early
+  // to avoid scanning inside already-open blocks (e.g. * inside code fences)
   const fenceCount = (text.match(/^```/gm) || []).length;
-  if (fenceCount % 2 !== 0) text += "\n```";
+  if (fenceCount % 2 !== 0) return text + "\n```";
 
-  // Close unclosed inline code
   const backtickCount = (text.match(/(?<!`)`(?!`)/g) || []).length;
-  if (backtickCount % 2 !== 0) text += "`";
+  if (backtickCount % 2 !== 0) return text + "`";
 
-  // Close unclosed bold
   const boldCount = (text.match(/\*\*/g) || []).length;
-  if (boldCount % 2 !== 0) text += "**";
+  if (boldCount % 2 !== 0) return text + "**";
 
-  // Close unclosed italic (single *)
   const italicCount = (text.match(/(?<!\*)\*(?!\*)/g) || []).length;
-  if (italicCount % 2 !== 0) text += "*";
+  if (italicCount % 2 !== 0) return text + "*";
 
   return text;
 }
