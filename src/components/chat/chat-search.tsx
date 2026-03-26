@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 export function ChatSearch({
@@ -33,8 +33,19 @@ export function ChatSearch({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="Search chats..."
-          className="pl-7 h-7 text-sm"
+          className="pl-7 h-7 text-sm pr-7"
         />
+        {value && (
+          <button
+            onClick={() => {
+              onChange("");
+              inputRef.current?.focus();
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

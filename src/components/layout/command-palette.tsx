@@ -13,6 +13,8 @@ import {
   FolderKanban,
   FolderOpen,
   Brain,
+  Keyboard,
+  Search,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -22,6 +24,7 @@ import {
   CommandGroup,
   CommandItem,
   CommandShortcut,
+  CommandSeparator,
 } from "@/components/ui/command";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useTheme } from "@/components/providers";
@@ -111,6 +114,31 @@ export function CommandPalette() {
           <CommandItem onSelect={() => run(cycleTheme)}>
             <Moon className="mr-2 h-4 w-4" />
             Toggle Theme
+          </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Keyboard Shortcuts">
+          <CommandItem disabled>
+            <Keyboard className="mr-2 h-4 w-4" />
+            Command Palette
+            <CommandShortcut>⌘K</CommandShortcut>
+          </CommandItem>
+          <CommandItem disabled>
+            <MessageSquarePlus className="mr-2 h-4 w-4" />
+            New Chat
+            <CommandShortcut>⌘N</CommandShortcut>
+          </CommandItem>
+          <CommandItem disabled>
+            <PanelLeft className="mr-2 h-4 w-4" />
+            Toggle Sidebar
+            <CommandShortcut>⌘B</CommandShortcut>
+          </CommandItem>
+          <CommandItem disabled>
+            <Search className="mr-2 h-4 w-4" />
+            Search Chats
+            <CommandShortcut>⌘⇧F</CommandShortcut>
           </CommandItem>
         </CommandGroup>
       </CommandList>

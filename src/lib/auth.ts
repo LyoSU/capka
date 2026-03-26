@@ -4,6 +4,7 @@ import { nextCookies } from "better-auth/next-js";
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { getMasterKey } from "./settings";
+import { ZodError } from "zod";
 import { AppError, isAppError, UnauthorizedError, ForbiddenError } from "./errors";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,6 +82,9 @@ export function apiHandler<T extends (...args: any[]) => Promise<Response>>(hand
     try {
       return await handler(...args);
     } catch (e) {
+      if (e instanceof ZodError) {
+        return Response.json({ error: e.issues[0]?.message || "Invalid request" }, { status: 400 });
+      }
       if (isAppError(e)) return (e as AppError).toResponse();
       const req = args[0] as Request;
       console.error(`[api] ${req.method} ${new URL(req.url).pathname}:`, e);

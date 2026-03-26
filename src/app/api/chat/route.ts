@@ -10,13 +10,14 @@ import { startTask } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
+import { chatRequestSchema } from "@/lib/chat/contracts";
 
 export const POST = apiHandler(async (req: Request) => {
   let mcpClose: (() => Promise<void>) | undefined;
   let taskStarted = false;
   try {
     const { userId } = await requireRole("admin", "user");
-    const body = await req.json();
+    const body = chatRequestSchema.parse(await req.json());
     const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
     const chatId = requestChatId || nanoid();
 

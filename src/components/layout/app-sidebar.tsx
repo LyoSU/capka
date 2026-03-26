@@ -210,7 +210,12 @@ export function AppSidebar() {
 
       <SidebarFooter className="mt-auto p-2">
         <div className="flex items-center justify-between group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1">
-          <span className="group-data-[collapsible=icon]:hidden"><ThemeSwitcher /></span>
+          <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
+            <ThemeSwitcher />
+            <kbd className="pointer-events-none select-none text-[10px] text-muted-foreground/60 font-mono">
+              ⌘K
+            </kbd>
+          </div>
           <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
             <Link
               href="/chat/archived"

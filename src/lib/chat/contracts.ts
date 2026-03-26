@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+// Inbound POST /api/chat body
+export const chatRequestSchema = z.object({
+  chatId: z.string().optional(),
+  model: z.string().optional(),
+  projectId: z.string().optional(),
+  userMessage: z.string().default(""),
+  attachedFiles: z.array(z.object({ name: z.string(), type: z.string() })).optional(),
+  messages: z.array(z.any()).optional(),
+});
+
 // Stored in messages.metadata.parts — the DB representation
 export const storedPartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),

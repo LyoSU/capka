@@ -1,8 +1,16 @@
 import { eq, desc, and, ilike, isNull, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { z } from "zod";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
+
+const createChatSchema = z.object({
+  id: z.string().optional(),
+  title: z.string().optional(),
+  model: z.string().optional(),
+  projectId: z.string().optional(),
+});
 
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
@@ -41,7 +49,7 @@ export const GET = apiHandler(async (req: Request) => {
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
-  const body = await req.json();
+  const body = createChatSchema.parse(await req.json());
 
   const id = body.id || nanoid();
   await db.insert(chats).values({
