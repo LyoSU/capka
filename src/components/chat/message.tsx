@@ -173,20 +173,6 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
 // --- Sub-components ---
 
 
-function ThinkingIndicator() {
-  const order = [0, 1, 2, 5, 8, 7, 6, 3, 4];
-  return (
-    <div className="inline-grid grid-cols-3 gap-[3px] p-1">
-      {Array.from({ length: 9 }).map((_, i) => (
-        <div
-          key={i}
-          className="h-1.5 w-1.5 rounded-full bg-foreground/60"
-          style={{ animation: `dot-chase 1.6s ease-in-out ${order[i] * 0.15}s infinite` }}
-        />
-      ))}
-    </div>
-  );
-}
 
 function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
   return (
@@ -352,8 +338,6 @@ interface ChatMessageProps {
   chatId?: string;
 }
 
-export { ThinkingIndicator };
-
 export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) {
   const isUser = message.role === "user";
   const metadata = message.metadata as
@@ -420,9 +404,7 @@ export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) 
               </div>
             );
           })
-        ) : isStreaming ? (
-          <ThinkingIndicator />
-        ) : (
+        ) : isStreaming ? null : (
           <span className="text-muted-foreground text-sm">...</span>
         )}
         <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
