@@ -2,29 +2,19 @@ import { eq, and } from "drizzle-orm";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, chats } from "@/lib/db/schema";
-
-async function findProject(id: string, userId: string) {
-  const [project] = await db
-    .select()
-    .from(projects)
-    .where(and(eq(projects.id, id), eq(projects.userId, userId)))
-    .limit(1);
-  return project;
-}
+import { requireOwned } from "@/lib/db/ownership";
 
 export const GET = apiHandler(async (_req, { params }) => {
   const { userId } = await requireSession();
   const { id } = await params;
-  const project = await findProject(id, userId);
-  if (!project) return Response.json({ error: "Not found" }, { status: 404 });
+  const project = await requireOwned(projects, id, userId, "Project");
   return Response.json(project);
 });
 
 export const PUT = apiHandler(async (req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
-  const existing = await findProject(id, userId);
-  if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
+  await requireOwned(projects, id, userId, "Project");
 
   const body = await req.json();
   const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -47,8 +37,7 @@ export const PUT = apiHandler(async (req, { params }) => {
 export const DELETE = apiHandler(async (_req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
-  const existing = await findProject(id, userId);
-  if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
+  await requireOwned(projects, id, userId, "Project");
 
   await db.update(chats).set({ projectId: null }).where(and(eq(chats.projectId, id), eq(chats.userId, userId)));
   await db.delete(projects).where(and(eq(projects.id, id), eq(projects.userId, userId)));

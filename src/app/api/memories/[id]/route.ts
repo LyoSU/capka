@@ -3,21 +3,12 @@ import { requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memories } from "@/lib/db/schema";
 import { MEMORY_TYPES } from "@/lib/constants";
-
-async function findMemory(id: string, userId: string) {
-  const [memory] = await db
-    .select()
-    .from(memories)
-    .where(and(eq(memories.id, id), eq(memories.userId, userId)))
-    .limit(1);
-  return memory;
-}
+import { requireOwned } from "@/lib/db/ownership";
 
 export const PUT = apiHandler(async (req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
-  const existing = await findMemory(id, userId);
-  if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
+  const existing = await requireOwned(memories, id, userId, "Memory");
 
   const body = await req.json();
   const updates: Record<string, string> = {};
@@ -35,8 +26,7 @@ export const PUT = apiHandler(async (req, { params }) => {
 export const DELETE = apiHandler(async (_req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
-  const existing = await findMemory(id, userId);
-  if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
+  await requireOwned(memories, id, userId, "Memory");
 
   await db.delete(memories).where(and(eq(memories.id, id), eq(memories.userId, userId)));
   return new Response(null, { status: 204 });

@@ -2,20 +2,12 @@ import { eq, and } from "drizzle-orm";
 import { requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
-
-async function findChat(id: string, userId: string) {
-  const [chat] = await db
-    .select({ id: chats.id })
-    .from(chats)
-    .where(and(eq(chats.id, id), eq(chats.userId, userId)))
-    .limit(1);
-  return chat;
-}
+import { requireOwned } from "@/lib/db/ownership";
 
 export const PATCH = apiHandler(async (req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
-  if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
+  await requireOwned(chats, id, userId, "Chat");
 
   const body = await req.json();
   const allowed = ["title", "pinned", "archived", "projectId"] as const;
@@ -31,7 +23,7 @@ export const PATCH = apiHandler(async (req, { params }) => {
 export const DELETE = apiHandler(async (_req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
-  if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
+  await requireOwned(chats, id, userId, "Chat");
 
   await db.delete(chats).where(and(eq(chats.id, id), eq(chats.userId, userId)));
   return new Response(null, { status: 204 });
