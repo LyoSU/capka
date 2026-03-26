@@ -1,10 +1,10 @@
 import { eq, desc, and, ilike, isNull, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession, requireRole } from "@/lib/auth";
+import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
 
-export async function GET(req: Request) {
+export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
   const { searchParams } = new URL(req.url);
   const search = searchParams.get("search");
@@ -37,9 +37,9 @@ export async function GET(req: Request) {
     .limit(100);
 
   return Response.json(rows);
-}
+});
 
-export async function POST(req: Request) {
+export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
   const body = await req.json();
 
@@ -53,4 +53,4 @@ export async function POST(req: Request) {
   }).onConflictDoNothing();
 
   return Response.json({ id }, { status: 201 });
-}
+});

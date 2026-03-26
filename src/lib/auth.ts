@@ -83,3 +83,19 @@ export async function requireRole(...allowed: Role[]) {
 export async function requireAdmin() {
   return requireRole("admin");
 }
+
+/** Wrap a route handler with automatic ApiError → Response conversion + logging. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function apiHandler<T extends (...args: any[]) => Promise<Response>>(handler: T): T {
+  return (async (...args: Parameters<T>) => {
+    try {
+      return await handler(...args);
+    } catch (e) {
+      if (e instanceof ApiError) return e.toResponse();
+      const req = args[0] as Request;
+      console.error(`[api] ${req.method} ${new URL(req.url).pathname}:`, e);
+      const msg = e instanceof Error ? e.message : "Internal server error";
+      return Response.json({ error: msg }, { status: 500 });
+    }
+  }) as T;
+}

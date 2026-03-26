@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { requireSession, requireRole } from "@/lib/auth";
+import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, chats } from "@/lib/db/schema";
 
@@ -12,21 +12,15 @@ async function findProject(id: string, userId: string) {
   return project;
 }
 
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const GET = apiHandler(async (_req, { params }) => {
   const { userId } = await requireSession();
   const { id } = await params;
   const project = await findProject(id, userId);
   if (!project) return Response.json({ error: "Not found" }, { status: 404 });
   return Response.json(project);
-}
+});
 
-export async function PUT(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const PUT = apiHandler(async (req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
   const existing = await findProject(id, userId);
@@ -48,12 +42,9 @@ export async function PUT(
     .returning();
 
   return Response.json(updated);
-}
+});
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const DELETE = apiHandler(async (_req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
   const existing = await findProject(id, userId);
@@ -63,4 +54,4 @@ export async function DELETE(
   await db.delete(projects).where(and(eq(projects.id, id), eq(projects.userId, userId)));
 
   return new Response(null, { status: 204 });
-}
+});

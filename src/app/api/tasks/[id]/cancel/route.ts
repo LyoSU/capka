@@ -1,17 +1,13 @@
 import { eq, and } from "drizzle-orm";
-import { requireRole } from "@/lib/auth";
+import { requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
 import { cancelTask } from "@/lib/tasks/runner";
 
-export async function POST(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const POST = apiHandler(async (_req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
 
-  // Verify ownership
   const [task] = await db
     .select()
     .from(tasks)
@@ -28,4 +24,4 @@ export async function POST(
   }
 
   return Response.json({ ok: true });
-}
+});

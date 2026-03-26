@@ -1,25 +1,22 @@
 import { eq } from "drizzle-orm";
-import { requireRole } from "@/lib/auth";
+import { requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { linkCodes, telegramLinks } from "@/lib/db/schema";
 
-export async function POST() {
+export const POST = apiHandler(async () => {
   const { userId } = await requireRole("admin", "user");
 
-  // Generate a cryptographically secure 6-digit code
   const { randomInt } = await import("crypto");
   const code = String(randomInt(100000, 999999));
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-  // Delete any existing codes for this user
   await db.delete(linkCodes).where(eq(linkCodes.userId, userId));
-
   await db.insert(linkCodes).values({ code, userId, expiresAt });
 
   return Response.json({ code, expiresAt: expiresAt.toISOString() });
-}
+});
 
-export async function GET() {
+export const GET = apiHandler(async () => {
   const { userId } = await requireRole("admin", "user");
 
   const [link] = await db
@@ -33,4 +30,4 @@ export async function GET() {
     username: link?.telegramUsername || null,
     linkedAt: link?.linkedAt?.toISOString() || null,
   });
-}
+});

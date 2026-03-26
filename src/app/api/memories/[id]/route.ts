@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { requireRole } from "@/lib/auth";
+import { requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memories } from "@/lib/db/schema";
 import { MEMORY_TYPES } from "@/lib/constants";
@@ -13,10 +13,7 @@ async function findMemory(id: string, userId: string) {
   return memory;
 }
 
-export async function PUT(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const PUT = apiHandler(async (req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
   const existing = await findMemory(id, userId);
@@ -33,12 +30,9 @@ export async function PUT(
 
   await db.update(memories).set(updates).where(and(eq(memories.id, id), eq(memories.userId, userId)));
   return Response.json({ ...existing, ...updates });
-}
+});
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const DELETE = apiHandler(async (_req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
   const existing = await findMemory(id, userId);
@@ -46,4 +40,4 @@ export async function DELETE(
 
   await db.delete(memories).where(and(eq(memories.id, id), eq(memories.userId, userId)));
   return new Response(null, { status: 204 });
-}
+});

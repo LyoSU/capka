@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { requireRole } from "@/lib/auth";
+import { requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
 
@@ -12,10 +12,7 @@ async function findChat(id: string, userId: string) {
   return chat;
 }
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const PATCH = apiHandler(async (req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
   if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
@@ -29,16 +26,13 @@ export async function PATCH(
 
   await db.update(chats).set(updates).where(and(eq(chats.id, id), eq(chats.userId, userId)));
   return Response.json({ ok: true });
-}
+});
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const DELETE = apiHandler(async (_req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
   if (!await findChat(id, userId)) return Response.json({ error: "Not found" }, { status: 404 });
 
   await db.delete(chats).where(and(eq(chats.id, id), eq(chats.userId, userId)));
   return new Response(null, { status: 204 });
-}
+});

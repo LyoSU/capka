@@ -1,13 +1,13 @@
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession, requireRole } from "@/lib/auth";
+import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { getMasterKey } from "@/lib/settings";
 import { PROVIDERS } from "@/lib/providers";
 
-export async function GET() {
+export const GET = apiHandler(async () => {
   const { userId } = await requireSession();
 
   const rows = await db
@@ -23,9 +23,9 @@ export async function GET() {
     .where(eq(providerConfigs.userId, userId));
 
   return Response.json(rows);
-}
+});
 
-export async function POST(req: Request) {
+export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
 
   const { provider, apiKey, baseUrl, defaultModel } = await req.json();
@@ -54,15 +54,14 @@ export async function POST(req: Request) {
   });
 
   return Response.json({ id, provider, defaultModel, isActive: true });
-}
+});
 
-export async function PUT(req: Request) {
+export const PUT = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
   const { id, defaultModel, activate } = await req.json();
   if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
   if (activate) {
-    // Deactivate all, then activate this one
     await db.update(providerConfigs).set({ isActive: false }).where(eq(providerConfigs.userId, userId));
     const [updated] = await db
       .update(providerConfigs)
@@ -81,9 +80,9 @@ export async function PUT(req: Request) {
 
   if (!updated) return Response.json({ error: "Not found" }, { status: 404 });
   return Response.json({ id: updated.id, defaultModel: updated.defaultModel });
-}
+});
 
-export async function DELETE(req: Request) {
+export const DELETE = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
 
   const { searchParams } = new URL(req.url);
@@ -95,4 +94,4 @@ export async function DELETE(req: Request) {
     .where(and(eq(providerConfigs.id, id), eq(providerConfigs.userId, userId)));
 
   return Response.json({ ok: true });
-}
+});

@@ -1,11 +1,11 @@
 import { eq, and, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession, requireRole } from "@/lib/auth";
+import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memories } from "@/lib/db/schema";
 import { MEMORY_TYPES } from "@/lib/constants";
 
-export async function GET(req: Request) {
+export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
   const { searchParams } = new URL(req.url);
   const projectId = searchParams.get("projectId");
@@ -23,9 +23,9 @@ export async function GET(req: Request) {
     .limit(200);
 
   return Response.json(rows);
-}
+});
 
-export async function POST(req: Request) {
+export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
   const body = await req.json();
   const { content, type = "fact", projectId } = body;
@@ -47,4 +47,4 @@ export async function POST(req: Request) {
 
   await db.insert(memories).values(memory);
   return Response.json(memory, { status: 201 });
-}
+});

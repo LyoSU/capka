@@ -1,15 +1,13 @@
 import { eq, and, asc } from "drizzle-orm";
-import { requireSession } from "@/lib/auth";
+import { requireSession, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
+
 function sanitizeFilename(name: string): string {
   return name.replace(/["\\\n\r]/g, "_");
 }
 
-export async function GET(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export const GET = apiHandler(async (req, { params }) => {
   const { userId } = await requireSession();
   const { id } = await params;
 
@@ -54,4 +52,4 @@ export async function GET(
   }, {
     headers: { "Content-Disposition": `attachment; filename="${safeName}.json"` },
   });
-}
+});

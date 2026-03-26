@@ -1,11 +1,11 @@
-import { requireAdmin } from "@/lib/auth";
+import { requireAdmin, apiHandler } from "@/lib/auth";
 import { getSetting, setSetting } from "@/lib/settings";
 
 const READABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context", "sandbox_enabled", "registration_enabled"];
 const WRITABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context", "sandbox_enabled", "registration_enabled"];
 const BLOCKED_KEYS = ["auth_secret", "setup_complete", "admin_email"];
 
-export async function GET(req: Request) {
+export const GET = apiHandler(async (req: Request) => {
   await requireAdmin();
   const { searchParams } = new URL(req.url);
   const key = searchParams.get("key");
@@ -17,9 +17,9 @@ export async function GET(req: Request) {
 
   const value = await getSetting(key);
   return Response.json({ key, value });
-}
+});
 
-export async function PUT(req: Request) {
+export const PUT = apiHandler(async (req: Request) => {
   await requireAdmin();
   const { key, value, encrypted } = await req.json();
   if (!key || value === undefined) {
@@ -33,4 +33,4 @@ export async function PUT(req: Request) {
   const ENCRYPT_KEYS = ["telegram_bot_token"];
   await setSetting(key, value, ENCRYPT_KEYS.includes(key) || (encrypted ?? false));
   return Response.json({ ok: true });
-}
+});

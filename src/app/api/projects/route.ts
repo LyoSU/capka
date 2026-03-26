@@ -1,10 +1,10 @@
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession, requireRole } from "@/lib/auth";
+import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 
-export async function GET() {
+export const GET = apiHandler(async () => {
   const { userId } = await requireSession();
   const rows = await db
     .select()
@@ -13,9 +13,9 @@ export async function GET() {
     .orderBy(desc(projects.updatedAt));
 
   return Response.json(rows);
-}
+});
 
-export async function POST(req: Request) {
+export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
   const body = await req.json();
   const { name, description, systemPrompt, defaultModel, sandboxNetwork } = body;
@@ -39,4 +39,4 @@ export async function POST(req: Request) {
     .returning();
 
   return Response.json(project, { status: 201 });
-}
+});
