@@ -101,6 +101,7 @@ export default function RegisterPage() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
                 required
+                disabled={loading}
                 autoFocus
               />
             </div>
@@ -113,6 +114,7 @@ export default function RegisterPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={loading}
               />
             </div>
             <div className="grid gap-2">
@@ -121,6 +123,7 @@ export default function RegisterPage() {
                 id="password"
                 type="password"
                 value={password}
+                disabled={loading}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}

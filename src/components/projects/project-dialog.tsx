@@ -121,7 +121,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Brief description..."
-              className="min-h-12"
+              className="min-h-16"
             />
           </div>
 
