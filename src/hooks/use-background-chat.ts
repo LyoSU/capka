@@ -223,9 +223,22 @@ export function useBackgroundChat({
     return () => clearInterval(poll);
   }, [status, chatId, loadHistory]);
 
+  // ── Ensure chat row exists in DB (needed before file upload) ──
+  const ensureChatRef = useRef(false);
+  const ensureChat = useCallback(async () => {
+    if (ensureChatRef.current) return;
+    ensureChatRef.current = true;
+    await fetch("/api/chats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: chatId, projectId }),
+    }).catch(() => {}); // ignore conflict (chat already exists)
+  }, [chatId, projectId]);
+
   // ── Upload files to sandbox workspace ────────────────────────
   const uploadFiles = useCallback(
     async (files: File[]): Promise<string[]> => {
+      await ensureChat();
       const uploaded: string[] = [];
       for (const file of files) {
         const form = new FormData();
@@ -242,7 +255,7 @@ export function useBackgroundChat({
       }
       return uploaded;
     },
-    [chatId],
+    [chatId, ensureChat],
   );
 
   // ── Send message ───────────────────────────────────────────

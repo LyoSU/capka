@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     title: body.title || "New Chat",
     model: body.model,
     projectId: body.projectId,
-  });
+  }).onConflictDoNothing();
 
   return Response.json({ id }, { status: 201 });
 }

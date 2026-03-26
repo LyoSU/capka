@@ -277,17 +277,20 @@ const server = createServer(async (req, res) => {
         // Container gone — fall through to create new one
       }
 
-      // Per-user session limit — evict oldest if full
+      // Per-user session limit — evict least recently used idle session
       const uid = sanitize(userId);
       const userSessions = [...sessions.entries()].filter(([, s]) => s.userId === uid);
       if (userSessions.length >= MAX_SESSIONS_PER_USER) {
-        const oldest = userSessions.reduce((min, cur) => cur[1].lastActivity < min[1].lastActivity ? cur : min);
-        if (oldest) {
-          const [oldId, oldSession] = oldest;
-          try { const c = docker.getContainer(oldSession.containerId); await c.stop({ t: 2 }); await c.remove(); } catch { /* already gone */ }
-          sessions.delete(oldId);
-          console.log(`[sandbox] evicted oldest session ${oldId} for user ${uid}`);
-        }
+        const now = Date.now();
+        const ACTIVE_THRESHOLD = 60_000; // skip sessions used in last 60s
+        const idle = userSessions.filter(([, s]) => now - s.lastActivity > ACTIVE_THRESHOLD);
+        const victim = idle.length > 0
+          ? idle.reduce((min, cur) => cur[1].lastActivity < min[1].lastActivity ? cur : min)
+          : userSessions.reduce((min, cur) => cur[1].lastActivity < min[1].lastActivity ? cur : min);
+        const [oldId, oldSession] = victim;
+        try { const c = docker.getContainer(oldSession.containerId); await c.stop({ t: 2 }); await c.remove(); } catch { /* already gone */ }
+        sessions.delete(oldId);
+        console.log(`[sandbox] evicted session ${oldId} for user ${uid} (idle: ${now - oldSession.lastActivity}ms)`);
       }
 
       await createSandbox(sessionId, userId, networkMode);
