@@ -47,7 +47,7 @@ async function downloadBounded(
     const batch = files.slice(i, i + MAX_CONCURRENT_DOWNLOADS);
     const settled = await Promise.allSettled(
       batch.map(async (file) => {
-        const res = await downloadFile(chatId, `/workspace/${file.name}`);
+        const res = await downloadFile(chatId, file.name);
         return { file, buf: Buffer.from(await res.arrayBuffer()) };
       }),
     );
