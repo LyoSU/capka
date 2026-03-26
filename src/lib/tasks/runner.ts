@@ -8,6 +8,7 @@ import { eventBus } from "@/lib/events";
 import { extractMemories } from "@/lib/memory/extract";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
+import type { StoredPart } from "@/lib/chat/contracts";
 
 const running = new Map<string, AbortController>();
 const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
@@ -105,12 +106,7 @@ export function startTask(opts: StartTaskOpts) {
   const msgId = nanoid();
 
   // Ordered parts — hoisted so catch can access accumulated state
-  type PartEntry =
-    | { type: "text"; text: string }
-    | { type: "tool-call"; id: string; name: string; input: unknown }
-    | { type: "tool-result"; id: string; name: string; output: unknown }
-    | { type: "tool-error"; id: string; name: string; error: string };
-  const parts: PartEntry[] = [];
+  const parts: StoredPart[] = [];
   const getFullText = () => parts.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
   let streamError: string | undefined;
 

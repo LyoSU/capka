@@ -1,0 +1,20 @@
+import { z } from "zod";
+
+// Stored in messages.metadata.parts — the DB representation
+export const storedPartSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("tool-call"), id: z.string(), name: z.string(), input: z.unknown() }),
+  z.object({ type: z.literal("tool-result"), id: z.string(), name: z.string(), output: z.unknown() }),
+  z.object({ type: z.literal("tool-error"), id: z.string(), name: z.string(), error: z.string() }),
+]);
+export type StoredPart = z.infer<typeof storedPartSchema>;
+
+export type MessageMeta = {
+  taskId?: string;
+  status?: string;
+  error?: string;
+  parts?: StoredPart[];
+  // Legacy format
+  toolCalls?: { id: string; name: string; input: unknown }[];
+  toolResults?: { id: string; name: string; output: unknown }[];
+};

@@ -5,9 +5,10 @@ import { db } from "@/lib/db";
 import { chats, messages, projects, memories, tasks } from "@/lib/db/schema";
 import { resolveUserModel } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
-import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
 import { startTask } from "@/lib/tasks/runner";
-import { isNativeMultimodal, type FileRef } from "@/lib/constants";
+import type { FileRef } from "@/lib/constants";
+import { toUIMessages } from "@/lib/chat/presenter";
+import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 
 export async function POST(req: Request) {
   let mcpClose: (() => Promise<void>) | undefined;
@@ -67,43 +68,22 @@ export async function POST(req: Request) {
       ]);
     }
 
-    // Build system prompt
-    let systemPrompt = `${SYSTEM_PROMPT}\n\n${SANDBOX_PROMPT}`;
-    if (project?.systemPrompt) {
-      systemPrompt += `\n\n--- Project Instructions ---\n${project.systemPrompt}`;
-    }
-    if (userMemories.length > 0) {
-      const memoryLines = userMemories.map((m) => `- ${m.content}`).join("\n");
-      systemPrompt += `\n\n## Things you know about the user:\n${memoryLines}`;
-    }
-
-    // Inject workspace snapshot so AI knows what files exist without extra ls calls
-    // NOTE: execCommand runs inside isolated Docker container, not on host
+    // Workspace snapshot — NOTE: execCommand runs inside isolated Docker container, not on host
+    let workspaceSnapshot: string | undefined;
     try {
       const { execCommand: sandboxExec } = await import("@/lib/sandbox/client");
       const ws = await sandboxExec(chatId, "find /workspace -maxdepth 3 -not -path '*/\\.*' | head -50", 5000).catch(() => null);
-      if (ws?.stdout?.trim()) {
-        systemPrompt += `\n\n## Current workspace files:\n\`\`\`\n${ws.stdout.trim()}\n\`\`\``;
-      }
+      if (ws?.stdout?.trim()) workspaceSnapshot = ws.stdout.trim();
     } catch { /* sandbox not ready yet */ }
 
-    // Single-pass: classify files and build prompt lines
     const fileList = attachedFiles as FileRef[] | undefined;
-    const nativeFiles: FileRef[] = [];
-    const promptLines: string[] = [];
-    let hasToolOnly = false;
-
-    for (const f of fileList ?? []) {
-      const native = isNativeMultimodal(f.type);
-      if (native) nativeFiles.push(f);
-      else hasToolOnly = true;
-      promptLines.push(`  - /workspace/${f.name}${native ? " (attached natively — you can see/read it directly)" : ""}`);
-    }
-
-    if (promptLines.length > 0) {
-      systemPrompt += `\n\n## User just attached these files:\n${promptLines.join("\n")}`;
-      if (hasToolOnly) systemPrompt += `\nOpen non-native files with tools as needed.`;
-    }
+    const { nativeFiles } = classifyFiles(fileList);
+    const systemPrompt = buildSystemPrompt({
+      project,
+      memories: userMemories,
+      workspaceSnapshot,
+      attachedFiles: fileList,
+    });
 
     // Create task and start background execution
     const taskId = nanoid();
@@ -152,80 +132,5 @@ export async function GET(req: Request) {
     .orderBy(asc(messages.createdAt))
     .limit(100);
 
-  type StoredPart =
-    | { type: "text"; text: string }
-    | { type: "tool-call"; id: string; name: string; input: unknown }
-    | { type: "tool-result"; id: string; name: string; output: unknown }
-    | { type: "tool-error"; id: string; name: string; error: string };
-
-  type ToolMeta = {
-    status?: string;
-    parts?: StoredPart[];
-    // Legacy format (pre-ordered-parts)
-    toolCalls?: { id: string; name: string; input: unknown }[];
-    toolResults?: { id: string; name: string; output: unknown }[];
-  };
-
-  const uiMessages = rows.map((m) => {
-    const meta = m.metadata as ToolMeta | null;
-    const parts: unknown[] = [];
-
-    if (meta?.parts) {
-      // New format: ordered parts array — preserves text → tools → text sequence
-      const resultMap = new Map<string, StoredPart>();
-      const errorMap = new Map<string, string>();
-      for (const p of meta.parts) {
-        if (p.type === "tool-result") resultMap.set(p.id, p);
-        else if (p.type === "tool-error") errorMap.set(p.id, p.error);
-      }
-      for (const p of meta.parts) {
-        if (p.type === "text") {
-          if (p.text) parts.push({ type: "text", text: p.text });
-        } else if (p.type === "tool-call") {
-          const tr = resultMap.get(p.id) as { output?: unknown } | undefined;
-          const err = errorMap.get(p.id);
-          const state = tr ? "output-available" : err ? "output-error" : "partial-call";
-          parts.push({
-            type: "dynamic-tool",
-            toolCallId: p.id,
-            toolName: p.name,
-            state,
-            input: p.input,
-            output: tr?.output,
-            ...(err ? { errorText: err } : {}),
-          });
-        }
-      }
-    } else if (meta?.toolCalls) {
-      // Legacy format: flat arrays, tools first then text
-      const resultMap = new Map(meta.toolResults?.map((tr) => [tr.id, tr]) ?? []);
-      for (const tc of meta.toolCalls) {
-        const tr = resultMap.get(tc.id);
-        parts.push({
-          type: "dynamic-tool",
-          toolCallId: tc.id,
-          toolName: tc.name,
-          state: tr ? "output-available" : "output-error",
-          input: tc.input,
-          output: tr?.output,
-        });
-      }
-      if (m.content) parts.push({ type: "text", text: m.content });
-    } else if (m.content) {
-      parts.push({ type: "text", text: m.content });
-    }
-
-    return {
-      id: m.id,
-      role: m.role,
-      parts,
-      metadata: {
-        createdAt: m.createdAt?.toISOString() ?? null,
-        platform: m.platform ?? "web",
-        taskStatus: meta?.status,
-      },
-    };
-  });
-
-  return Response.json(uiMessages);
+  return Response.json(toUIMessages(rows));
 }
