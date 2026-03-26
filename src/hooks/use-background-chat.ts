@@ -37,6 +37,7 @@ export function useBackgroundChat({
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<"idle" | "running">("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null; toolCount: number }>({ startedAt: 0, currentTool: null, toolCount: 0 });
   const msgRef = useRef(messages);
   msgRef.current = messages;
 
@@ -99,7 +100,7 @@ export function useBackgroundChat({
           switch (data.type) {
             case "task:start": {
               setStatus("running");
-              // Add empty assistant message
+              setTaskInfo({ startedAt: Date.now(), currentTool: null, toolCount: 0 });
               setMessages((prev) => [
                 ...prev,
                 { id: data.messageId, role: "assistant", parts: [] },
@@ -127,6 +128,7 @@ export function useBackgroundChat({
             }
 
             case "task:tool-call": {
+              setTaskInfo((prev) => ({ ...prev, currentTool: data.toolName, toolCount: prev.toolCount + 1 }));
               setMessages((prev) => {
                 const idx = prev.findIndex((m) => m.id === data.messageId);
                 if (idx === -1) return prev;
@@ -147,6 +149,7 @@ export function useBackgroundChat({
             }
 
             case "task:tool-result": {
+              setTaskInfo((prev) => ({ ...prev, currentTool: null }));
               setMessages((prev) => {
                 const idx = prev.findIndex((m) => m.id === data.messageId);
                 if (idx === -1) return prev;
@@ -168,6 +171,7 @@ export function useBackgroundChat({
             case "task:finish": {
               setStatus("idle");
               setTaskId(null);
+              setTaskInfo({ startedAt: 0, currentTool: null, toolCount: 0 });
               if (data.error) toast.error(`Task failed: ${data.error}`);
               loadHistory();
               break;
@@ -313,5 +317,5 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId]);
 
-  return { messages, status, error, sendMessage, stop, isLoading: status === "running" };
+  return { messages, status, error, sendMessage, stop, isLoading: status === "running", taskInfo };
 }
