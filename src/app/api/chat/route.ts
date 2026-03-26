@@ -7,6 +7,7 @@ import { resolveUserModel } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
 import { startTask } from "@/lib/tasks/runner";
+import { isNativeMultimodal, type FileRef } from "@/lib/constants";
 
 export async function POST(req: Request) {
   let mcpClose: (() => Promise<void>) | undefined;
@@ -86,11 +87,22 @@ export async function POST(req: Request) {
       }
     } catch { /* sandbox not ready yet */ }
 
-    // Inject attached file context so AI knows user just uploaded these
-    const fileList = attachedFiles as string[] | undefined;
-    if (fileList?.length) {
-      const listing = fileList.map((f: string) => `  - /workspace/${f}`).join("\n");
-      systemPrompt += `\n\n## User just attached these files:\n${listing}\nOpen and process them as requested.`;
+    // Single-pass: classify files and build prompt lines
+    const fileList = attachedFiles as FileRef[] | undefined;
+    const nativeFiles: FileRef[] = [];
+    const promptLines: string[] = [];
+    let hasToolOnly = false;
+
+    for (const f of fileList ?? []) {
+      const native = isNativeMultimodal(f.type);
+      if (native) nativeFiles.push(f);
+      else hasToolOnly = true;
+      promptLines.push(`  - /workspace/${f.name}${native ? " (attached natively — you can see/read it directly)" : ""}`);
+    }
+
+    if (promptLines.length > 0) {
+      systemPrompt += `\n\n## User just attached these files:\n${promptLines.join("\n")}`;
+      if (hasToolOnly) systemPrompt += `\nOpen non-native files with tools as needed.`;
     }
 
     // Create task and start background execution
@@ -107,6 +119,7 @@ export async function POST(req: Request) {
       uiMessages: body.messages || [],
       closeMcp: mcpClose!,
       existingMemories: userMemories,
+      nativeFiles: nativeFiles.length > 0 ? nativeFiles : undefined,
     });
 
     // Return immediately — client syncs via SSE

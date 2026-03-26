@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
+import type { FileRef } from "@/lib/constants";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -172,7 +173,7 @@ export function useBackgroundChat({
               setStatus("idle");
               setTaskId(null);
               setTaskInfo({ startedAt: 0, currentTool: null });
-              if (data.error) toast.error(`Task failed: ${data.error}`);
+              if (data.error) setError(data.error);
               loadHistory();
               break;
             }
@@ -235,25 +236,25 @@ export function useBackgroundChat({
     }).catch(() => {}); // ignore conflict (chat already exists)
   }, [chatId, projectId]);
 
-  // ── Upload files to sandbox workspace ────────────────────────
+  // ── Upload files to sandbox workspace (parallel) ─────────────
   const uploadFiles = useCallback(
-    async (files: File[]): Promise<string[]> => {
+    async (files: File[]): Promise<FileRef[]> => {
       await ensureChat();
-      const uploaded: string[] = [];
-      for (const file of files) {
-        const form = new FormData();
-        form.append("chatId", chatId);
-        form.append("path", ".");
-        form.append("file", file);
-        const res = await fetch("/api/sandbox/files/upload", { method: "POST", body: form });
-        if (res.ok) {
-          const data = await res.json();
-          uploaded.push(data.name || file.name);
-        } else {
-          // Don't toast per-file — sendMessage shows a single summary toast
-        }
-      }
-      return uploaded;
+      const results = await Promise.allSettled(
+        files.map(async (file) => {
+          const form = new FormData();
+          form.append("chatId", chatId);
+          form.append("path", ".");
+          form.append("file", file);
+          const res = await fetch("/api/sandbox/files/upload", { method: "POST", body: form });
+          if (!res.ok) throw new Error("upload failed");
+          const data: { name?: string } = await res.json();
+          return { name: data.name || file.name, type: file.type };
+        }),
+      );
+      return results
+        .filter((r): r is PromiseFulfilledResult<FileRef> => r.status === "fulfilled")
+        .map((r) => r.value);
     },
     [chatId, ensureChat],
   );
@@ -264,12 +265,13 @@ export function useBackgroundChat({
       if (!text.trim() && (!files || files.length === 0)) return;
 
       // Upload files first — AI needs them in workspace before processing
-      let uploadedFiles: string[] = [];
+      let uploadedFiles: FileRef[] = [];
       if (files && files.length > 0) {
         uploadedFiles = await uploadFiles(files);
         const failed = files.length - uploadedFiles.length;
         if (failed > 0) {
-          const names = files.filter((f) => !uploadedFiles.includes(f.name)).map((f) => f.name).join(", ");
+          const uploadedNames = new Set(uploadedFiles.map((f) => f.name));
+          const names = files.filter((f) => !uploadedNames.has(f.name)).map((f) => f.name).join(", ");
           toast.error(`Upload failed: ${names || `${failed} file(s)`} — message not sent`);
           return;
         }
@@ -296,7 +298,6 @@ export function useBackgroundChat({
             projectId,
             model,
             userMessage: displayText,
-            // File context sent separately — injected into system prompt, not saved as user message
             attachedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
             messages: currentMessages.map((m) => ({
               id: m.id,

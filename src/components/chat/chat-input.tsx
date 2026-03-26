@@ -2,8 +2,12 @@
 
 import { useRef, useState, useCallback, type KeyboardEvent, type DragEvent } from "react";
 import { ArrowUp, Paperclip, Square, X, File, FileText, FileImage, FileSpreadsheet } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatSize } from "@/lib/constants";
+
+/** Max single file size for upload (100MB) */
+const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
 export type AttachedFile = {
   file: File;
@@ -58,11 +62,19 @@ export function ChatInput({
   };
 
   const addFiles = (newFiles: FileList | File[]) => {
-    const added = Array.from(newFiles).map((file) => ({
-      file,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    }));
-    onFilesChange([...files, ...added]);
+    const valid: AttachedFile[] = [];
+    const rejected: string[] = [];
+    for (const file of Array.from(newFiles)) {
+      if (file.size > MAX_FILE_SIZE) {
+        rejected.push(`${file.name} (${formatSize(file.size)})`);
+      } else {
+        valid.push({ file, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
+      }
+    }
+    if (rejected.length > 0) {
+      toast.error(`Too large (max ${formatSize(MAX_FILE_SIZE)}): ${rejected.join(", ")}`);
+    }
+    if (valid.length > 0) onFilesChange([...files, ...valid]);
   };
 
   const removeFile = (id: string) => {

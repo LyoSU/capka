@@ -1,11 +1,13 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
+import type { LanguageModel, ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { tasks, messages, memories } from "@/lib/db/schema";
 import { eventBus } from "@/lib/events";
 import { extractMemories } from "@/lib/memory/extract";
-import type { LanguageModel } from "ai";
+import { downloadFile } from "@/lib/sandbox/client";
+import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 
 const running = new Map<string, AbortController>();
 const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
@@ -28,10 +30,74 @@ interface StartTaskOpts {
   uiMessages: any[];
   closeMcp: () => Promise<void>;
   existingMemories: { content: string }[];
+  nativeFiles?: FileRef[];
+}
+
+/** Max concurrent file downloads from sandbox */
+const MAX_CONCURRENT_DOWNLOADS = 5;
+
+/** Download files with bounded concurrency */
+async function downloadBounded(
+  files: FileRef[],
+  chatId: string,
+): Promise<{ file: FileRef; buf: Buffer }[]> {
+  const results: { file: FileRef; buf: Buffer }[] = [];
+  for (let i = 0; i < files.length; i += MAX_CONCURRENT_DOWNLOADS) {
+    const batch = files.slice(i, i + MAX_CONCURRENT_DOWNLOADS);
+    const settled = await Promise.allSettled(
+      batch.map(async (file) => {
+        const res = await downloadFile(chatId, `/workspace/${file.name}`);
+        return { file, buf: Buffer.from(await res.arrayBuffer()) };
+      }),
+    );
+    for (const r of settled) {
+      if (r.status === "fulfilled") results.push(r.value);
+      else console.warn(`[task] failed to read file for native injection:`, r.reason);
+    }
+  }
+  return results;
+}
+
+/** Read multimodal files from sandbox and inject as FilePart in the last user message */
+async function injectNativeFiles(
+  modelMessages: ModelMessage[],
+  chatId: string,
+  files: FileRef[],
+): Promise<void> {
+  if (files.length === 0) return;
+
+  const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
+  if (!lastUser) return;
+
+  const downloaded = await downloadBounded(files, chatId);
+
+  const parts: FilePart[] = [];
+  let totalBytes = 0;
+
+  for (const { file, buf } of downloaded) {
+    if (buf.length > MAX_NATIVE_FILE_BYTES) {
+      console.log(`[task] skipping ${file.name} (${(buf.length / 1024 / 1024).toFixed(1)}MB > 20MB limit)`);
+      continue;
+    }
+    if (totalBytes + buf.length > MAX_NATIVE_TOTAL_BYTES) {
+      console.log(`[task] skipping ${file.name} — would exceed 50MB aggregate limit`);
+      continue;
+    }
+    totalBytes += buf.length;
+    parts.push({ type: "file", mediaType: file.type, data: buf, filename: file.name });
+  }
+
+  if (parts.length === 0) return;
+
+  type UserPart = TextPart | ImagePart | FilePart;
+  const existing: UserPart[] = typeof lastUser.content === "string"
+    ? [{ type: "text", text: lastUser.content }]
+    : [...lastUser.content];
+  lastUser.content = [...existing, ...parts];
 }
 
 export function startTask(opts: StartTaskOpts) {
-  const { taskId, chatId, userId, model, tools, systemPrompt, uiMessages, closeMcp, existingMemories } = opts;
+  const { taskId, chatId, userId, model, tools, systemPrompt, uiMessages, closeMcp, existingMemories, nativeFiles } = opts;
   const channel = `user:${userId}`;
   const ac = new AbortController();
   running.set(taskId, ac);
@@ -64,6 +130,11 @@ export function startTask(opts: StartTaskOpts) {
 
       const hasTools = Object.keys(tools).length > 0;
       const modelMessages = await convertToModelMessages(uiMessages);
+
+      // Inject images/PDFs as native content so the model can see/read them directly
+      if (nativeFiles?.length) {
+        await injectNativeFiles(modelMessages, chatId, nativeFiles);
+      }
 
       const result = streamText({
         model,
