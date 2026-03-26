@@ -184,6 +184,9 @@
   border-radius: 0.5rem;
   font-size: 0.8125rem;
 }
+[data-streamdown="code-block-actions"] {
+  margin: 0.5rem 0.5rem 0 0;
+}
 
 /* Streamdown — flatten table wrapper */
 [data-streamdown="table-wrapper"] {

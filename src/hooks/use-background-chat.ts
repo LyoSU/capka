@@ -233,7 +233,7 @@ export function useBackgroundChat({
           const data = await res.json();
           uploaded.push(data.name || file.name);
         } else {
-          toast.error(`Failed to upload ${file.name}`);
+          // Don't toast per-file — sendMessage shows a single summary toast
         }
       }
       return uploaded;
@@ -250,8 +250,10 @@ export function useBackgroundChat({
       let uploadedFiles: string[] = [];
       if (files && files.length > 0) {
         uploadedFiles = await uploadFiles(files);
-        if (uploadedFiles.length < files.length) {
-          toast.error(`${files.length - uploadedFiles.length} file(s) failed to upload — message not sent`);
+        const failed = files.length - uploadedFiles.length;
+        if (failed > 0) {
+          const names = files.filter((f) => !uploadedFiles.includes(f.name)).map((f) => f.name).join(", ");
+          toast.error(`Upload failed: ${names || `${failed} file(s)`} — message not sent`);
           return;
         }
       }
