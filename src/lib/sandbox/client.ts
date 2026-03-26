@@ -3,6 +3,8 @@
  * Platform never touches Docker socket directly — only through this API.
  */
 
+import { SandboxError } from "@/lib/errors";
+
 const CONTROLLER_URL = process.env.SANDBOX_CONTROLLER_URL || "http://localhost:3001";
 const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET || "unclaw-sandbox-secret";
 
@@ -23,7 +25,10 @@ async function request(path: string, method: string, body?: unknown) {
   });
 
   const data = await res.json().catch(() => ({ error: `Sandbox ${res.status}` }));
-  if (!res.ok) throw new Error(`Sandbox: ${data.error || res.status} (${method} ${path})`);
+  if (!res.ok) {
+    const op = path.split("/").pop() || method.toLowerCase();
+    throw new SandboxError(data.error || `Sandbox ${res.status}`, op, res.status >= 500);
+  }
   return data;
 }
 
@@ -74,7 +79,7 @@ export async function downloadFile(sessionId: string, filePath: string): Promise
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Download failed" }));
-    throw new Error(err.error || `Download failed: ${res.status}`);
+    throw new SandboxError(err.error || `Download failed: ${res.status}`, "download", res.status >= 500);
   }
   return res;
 }
@@ -92,6 +97,6 @@ export async function uploadFile(sessionId: string, path: string, file: File): P
     signal: AbortSignal.timeout(60_000),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Upload failed");
+  if (!res.ok) throw new SandboxError(data.error || "Upload failed", "upload", false);
   return data;
 }

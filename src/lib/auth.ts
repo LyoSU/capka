@@ -4,6 +4,7 @@ import { nextCookies } from "better-auth/next-js";
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { getMasterKey } from "./settings";
+import { AppError, UnauthorizedError, ForbiddenError } from "./errors";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _auth: any = null;
@@ -37,19 +38,10 @@ export async function getAuth() {
 
 export type Role = "admin" | "user" | "viewer";
 
-/** API error that carries HTTP status — avoids `throw Response` which breaks across Next.js module boundaries. */
-export class ApiError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-  toResponse() {
-    return Response.json({ error: this.message }, { status: this.status });
-  }
-}
+/** @deprecated Use AppError from lib/errors.ts — kept as alias for incremental migration */
+export const ApiError = AppError;
 
-/** Require authenticated session — returns userId and role or throws ApiError. */
+/** Require authenticated session — throws UnauthorizedError. */
 export async function requireSession(): Promise<{
   userId: string;
   role: Role;
@@ -62,20 +54,18 @@ export async function requireSession(): Promise<{
     session = await auth.api.getSession({ headers: await headers() });
   } catch (e) {
     console.error("[auth] getSession threw:", e);
-    throw new ApiError("Unauthorized", 401);
+    throw new UnauthorizedError();
   }
-  if (!session) throw new ApiError("Unauthorized", 401);
+  if (!session) throw new UnauthorizedError();
   const rawRole = (session.user as Record<string, unknown>).role;
   const role: Role = rawRole === "admin" || rawRole === "viewer" ? rawRole : "user";
   return { userId: session.user.id, role, session };
 }
 
-/** Require a minimum role — throws ApiError if insufficient. */
+/** Require a minimum role — throws ForbiddenError if insufficient. */
 export async function requireRole(...allowed: Role[]) {
   const ctx = await requireSession();
-  if (!allowed.includes(ctx.role)) {
-    throw new ApiError("Forbidden", 403);
-  }
+  if (!allowed.includes(ctx.role)) throw new ForbiddenError();
   return ctx;
 }
 
@@ -84,18 +74,17 @@ export async function requireAdmin() {
   return requireRole("admin");
 }
 
-/** Wrap a route handler with automatic ApiError → Response conversion + logging. */
+/** Wrap a route handler — catches AppError → safe response, unknown errors → generic 500. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function apiHandler<T extends (...args: any[]) => Promise<Response>>(handler: T): T {
   return (async (...args: Parameters<T>) => {
     try {
       return await handler(...args);
     } catch (e) {
-      if (e instanceof ApiError) return e.toResponse();
+      if (e instanceof AppError) return e.toResponse();
       const req = args[0] as Request;
       console.error(`[api] ${req.method} ${new URL(req.url).pathname}:`, e);
-      const msg = e instanceof Error ? e.message : "Internal server error";
-      return Response.json({ error: msg }, { status: 500 });
+      return Response.json({ error: "Internal server error" }, { status: 500 });
     }
   }) as T;
 }
