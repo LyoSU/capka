@@ -277,10 +277,17 @@ const server = createServer(async (req, res) => {
         // Container gone — fall through to create new one
       }
 
-      // Per-user session limit
-      const userSessions = [...sessions.values()].filter((s) => s.userId === sanitize(userId));
+      // Per-user session limit — evict oldest if full
+      const uid = sanitize(userId);
+      const userSessions = [...sessions.entries()].filter(([, s]) => s.userId === uid);
       if (userSessions.length >= MAX_SESSIONS_PER_USER) {
-        return jsonRes(res, 429, { error: `Max ${MAX_SESSIONS_PER_USER} active sandboxes per user` });
+        const oldest = userSessions.sort((a, b) => a[1].lastActivity - b[1].lastActivity)[0];
+        if (oldest) {
+          const [oldId, oldSession] = oldest;
+          try { const c = docker.getContainer(oldSession.containerId); await c.stop({ t: 2 }); await c.remove(); } catch { /* already gone */ }
+          sessions.delete(oldId);
+          console.log(`[sandbox] evicted oldest session ${oldId} for user ${uid}`);
+        }
       }
 
       await createSandbox(sessionId, userId, networkMode);
