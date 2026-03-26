@@ -37,13 +37,17 @@ interface StartTaskOpts {
 /** Max concurrent file downloads from sandbox */
 const MAX_CONCURRENT_DOWNLOADS = 5;
 
-/** Download files with bounded concurrency */
+/** Download files with bounded concurrency and total size budget */
 async function downloadBounded(
   files: FileRef[],
   chatId: string,
 ): Promise<{ file: FileRef; buf: Buffer }[]> {
   const results: { file: FileRef; buf: Buffer }[] = [];
+  let totalBytes = 0;
+
   for (let i = 0; i < files.length; i += MAX_CONCURRENT_DOWNLOADS) {
+    if (totalBytes >= MAX_NATIVE_TOTAL_BYTES) break;
+
     const batch = files.slice(i, i + MAX_CONCURRENT_DOWNLOADS);
     const settled = await Promise.allSettled(
       batch.map(async (file) => {
@@ -52,8 +56,21 @@ async function downloadBounded(
       }),
     );
     for (const r of settled) {
-      if (r.status === "fulfilled") results.push(r.value);
-      else console.warn(`[task] failed to read file for native injection:`, r.reason);
+      if (r.status === "rejected") {
+        console.warn(`[task] failed to read file for native injection:`, r.reason);
+        continue;
+      }
+      const { file, buf } = r.value;
+      if (buf.length > MAX_NATIVE_FILE_BYTES) {
+        console.log(`[task] skipping ${file.name} (${(buf.length / 1024 / 1024).toFixed(1)}MB > 20MB limit)`);
+        continue;
+      }
+      if (totalBytes + buf.length > MAX_NATIVE_TOTAL_BYTES) {
+        console.log(`[task] skipping ${file.name} — would exceed 50MB aggregate limit`);
+        continue;
+      }
+      totalBytes += buf.length;
+      results.push(r.value);
     }
   }
   return results;
@@ -71,24 +88,12 @@ async function injectNativeFiles(
   if (!lastUser) return;
 
   const downloaded = await downloadBounded(files, chatId);
+  if (downloaded.length === 0) return;
 
-  const parts: FilePart[] = [];
-  let totalBytes = 0;
-
-  for (const { file, buf } of downloaded) {
-    if (buf.length > MAX_NATIVE_FILE_BYTES) {
-      console.log(`[task] skipping ${file.name} (${(buf.length / 1024 / 1024).toFixed(1)}MB > 20MB limit)`);
-      continue;
-    }
-    if (totalBytes + buf.length > MAX_NATIVE_TOTAL_BYTES) {
-      console.log(`[task] skipping ${file.name} — would exceed 50MB aggregate limit`);
-      continue;
-    }
-    totalBytes += buf.length;
-    parts.push({ type: "file", mediaType: file.type, data: buf, filename: file.name });
-  }
-
-  if (parts.length === 0) return;
+  const parts: FilePart[] = downloaded.map(({ file, buf }) => ({
+    type: "file", mediaType: file.type, data: buf, filename: file.name,
+  }));
+  const totalBytes = downloaded.reduce((sum, { buf }) => sum + buf.length, 0);
 
   type UserPart = TextPart | ImagePart | FilePart;
   const existing: UserPart[] = typeof lastUser.content === "string"
@@ -146,34 +151,16 @@ export function startTask(opts: StartTaskOpts) {
 
       let result = makeStream();
 
-      // If model rejects image input, strip file parts and retry transparently
-      if (injectedNative) {
-        try {
-          // Trigger the API call — errors surface here before any events
-          const iter = result.fullStream[Symbol.asyncIterator]();
-          await iter.next();
-        } catch (e) {
-          const msg = errMsg(e);
-          if (msg.includes("image input") || msg.includes("vision") || msg.includes("multimodal") || msg.includes("does not support")) {
-            console.log("[task] model doesn't support vision — retrying without native files");
-            const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
-            if (lastUser && Array.isArray(lastUser.content)) {
-              lastUser.content = lastUser.content.filter((p) => p.type !== "file");
-            }
-            result = makeStream();
-          } else {
-            throw e;
-          }
-        }
-      }
-
       function appendText(delta: string) {
         const last = parts[parts.length - 1];
         if (last?.type === "text") last.text += delta;
         else parts.push({ type: "text", text: delta });
       }
 
-      for await (const event of result.fullStream) {
+      // Stream events — if model rejects vision, strip files and retry once
+      let retried = false;
+      const consume = async () => {
+        for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;
 
         switch (event.type) {
@@ -243,6 +230,28 @@ export function startTask(opts: StartTaskOpts) {
               metadata: { taskId, status: "running", parts },
             }).where(eq(messages.id, msgId));
             break;
+        }
+        }
+      };
+
+      try {
+        await consume();
+      } catch (e) {
+        // If model rejects vision input, strip file parts and retry once
+        const msg = errMsg(e);
+        const isVisionError = injectedNative && !retried &&
+          (msg.includes("image input") || msg.includes("vision") || msg.includes("multimodal") || msg.includes("does not support"));
+        if (isVisionError) {
+          console.log("[task] model doesn't support vision — retrying without native files");
+          retried = true;
+          const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
+          if (lastUser && Array.isArray(lastUser.content)) {
+            lastUser.content = lastUser.content.filter((p) => p.type !== "file");
+          }
+          result = makeStream();
+          await consume();
+        } else {
+          throw e;
         }
       }
 

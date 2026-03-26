@@ -27,7 +27,9 @@ async function request(path: string, method: string, body?: unknown) {
   const data = await res.json().catch(() => ({ error: `Sandbox ${res.status}` }));
   if (!res.ok) {
     const op = path.split("/").pop() || method.toLowerCase();
-    throw new SandboxError(data.error || `Sandbox ${res.status}`, op, res.status >= 500);
+    const raw = data.error || `Sandbox ${res.status}`;
+    console.error(`[sandbox] ${method} ${path}:`, raw);
+    throw new SandboxError("Sandbox operation failed", op, res.status >= 500);
   }
   return data;
 }
@@ -79,7 +81,8 @@ export async function downloadFile(sessionId: string, filePath: string): Promise
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Download failed" }));
-    throw new SandboxError(err.error || `Download failed: ${res.status}`, "download", res.status >= 500);
+    console.error("[sandbox] download:", err.error);
+    throw new SandboxError("File download failed", "download", res.status >= 500);
   }
   return res;
 }
@@ -97,6 +100,9 @@ export async function uploadFile(sessionId: string, path: string, file: File): P
     signal: AbortSignal.timeout(60_000),
   });
   const data = await res.json();
-  if (!res.ok) throw new SandboxError(data.error || "Upload failed", "upload", false);
+  if (!res.ok) {
+    console.error("[sandbox] upload:", data.error);
+    throw new SandboxError("File upload failed", "upload", false);
+  }
   return data;
 }

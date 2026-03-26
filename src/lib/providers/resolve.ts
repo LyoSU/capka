@@ -4,6 +4,7 @@ import { providerConfigs, users } from "@/lib/db/schema";
 import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel } from "@/lib/providers";
+import { ValidationError } from "@/lib/errors";
 
 /** Find active provider config: user's own → fallback to any admin's config. */
 export async function resolveProviderConfig(userId: string) {
@@ -28,8 +29,8 @@ export async function resolveProviderConfig(userId: string) {
 
 export async function resolveUserModel(userId: string, requestModel?: string) {
   const config = await resolveProviderConfig(userId);
-  if (!config) throw new Error("No LLM provider configured. Ask your admin to set one up.");
-  if (!config.defaultModel) throw new Error("No default model set. Configure one in Settings → Connections.");
+  if (!config) throw new ValidationError("No LLM provider configured. Ask your admin to set one up.");
+  if (!config.defaultModel) throw new ValidationError("No default model set. Configure one in Settings → Connections.");
 
   let apiKey = config.apiKey;
   if (apiKey) {
