@@ -1,9 +1,10 @@
 import { eq, and, asc, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession, requireRole } from "@/lib/auth";
+import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { isAppError, type AppError } from "@/lib/errors";
 import { db } from "@/lib/db";
 import { chats, messages, projects, memories, tasks } from "@/lib/db/schema";
+import { requireOwned } from "@/lib/db/ownership";
 import { resolveUserModel } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { startTask } from "@/lib/tasks/runner";
@@ -113,17 +114,13 @@ export async function POST(req: Request) {
   }
 }
 
-export async function GET(req: Request) {
+export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
-
   const { searchParams } = new URL(req.url);
   const chatId = searchParams.get("chatId");
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
 
-  const [chat] = await db.select({ id: chats.id }).from(chats)
-    .where(and(eq(chats.id, chatId), eq(chats.userId, userId)))
-    .limit(1);
-  if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+  await requireOwned(chats, chatId, userId, "Chat");
 
   const rows = await db
     .select()
@@ -133,4 +130,4 @@ export async function GET(req: Request) {
     .limit(100);
 
   return Response.json(toUIMessages(rows));
-}
+});
