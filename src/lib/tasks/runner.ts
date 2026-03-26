@@ -130,17 +130,42 @@ export function startTask(opts: StartTaskOpts) {
       const modelMessages = await convertToModelMessages(uiMessages);
 
       // Inject images/PDFs as native content so the model can see/read them directly
+      let injectedNative = false;
       if (nativeFiles?.length) {
         await injectNativeFiles(modelMessages, chatId, nativeFiles);
+        injectedNative = true;
       }
 
-      const result = streamText({
+      const makeStream = () => streamText({
         model,
         ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25) } : {}),
         system: systemPrompt,
         messages: modelMessages,
         abortSignal: ac.signal,
       });
+
+      let result = makeStream();
+
+      // If model rejects image input, strip file parts and retry transparently
+      if (injectedNative) {
+        try {
+          // Trigger the API call — errors surface here before any events
+          const iter = result.fullStream[Symbol.asyncIterator]();
+          await iter.next();
+        } catch (e) {
+          const msg = errMsg(e);
+          if (msg.includes("image input") || msg.includes("vision") || msg.includes("multimodal") || msg.includes("does not support")) {
+            console.log("[task] model doesn't support vision — retrying without native files");
+            const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
+            if (lastUser && Array.isArray(lastUser.content)) {
+              lastUser.content = lastUser.content.filter((p) => p.type !== "file");
+            }
+            result = makeStream();
+          } else {
+            throw e;
+          }
+        }
+      }
 
       function appendText(delta: string) {
         const last = parts[parts.length - 1];
