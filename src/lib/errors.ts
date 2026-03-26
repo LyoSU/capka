@@ -3,16 +3,23 @@
 export class AppError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly _isAppError = true; // Fallback tag — instanceof can break across module boundaries
 
   constructor(message: string, status: number, code?: string) {
     super(message);
     this.status = status;
     this.code = code ?? `ERR_${status}`;
+    Object.setPrototypeOf(this, new.target.prototype); // Fix instanceof after transpilation
   }
 
   toResponse(): Response {
     return Response.json({ error: this.message, code: this.code }, { status: this.status });
   }
+}
+
+/** Check if an error is an AppError (handles cross-boundary instanceof failures) */
+export function isAppError(e: unknown): e is AppError {
+  return e instanceof AppError || (e != null && typeof e === "object" && "_isAppError" in e);
 }
 
 export class NotFoundError extends AppError {

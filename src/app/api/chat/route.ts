@@ -1,6 +1,7 @@
 import { eq, and, asc, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession, requireRole, ApiError } from "@/lib/auth";
+import { requireSession, requireRole } from "@/lib/auth";
+import { isAppError, type AppError } from "@/lib/errors";
 import { db } from "@/lib/db";
 import { chats, messages, projects, memories, tasks } from "@/lib/db/schema";
 import { resolveUserModel } from "@/lib/providers/resolve";
@@ -106,10 +107,9 @@ export async function POST(req: Request) {
     return Response.json({ taskId, chatId });
   } catch (e: unknown) {
     await mcpClose?.();
-    if (e instanceof ApiError) return e.toResponse();
-    const msg = e instanceof Error ? e.message : "An unexpected error occurred";
-    console.error("[chat]", msg);
-    return Response.json({ error: msg }, { status: 500 });
+    if (isAppError(e)) return (e as AppError).toResponse();
+    console.error("[chat]", e);
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 

@@ -1,4 +1,5 @@
-import { requireSession, ApiError } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
+import { isAppError, type AppError } from "@/lib/errors";
 import { eventBus } from "@/lib/events";
 
 export const runtime = "nodejs";
@@ -10,7 +11,7 @@ export async function GET() {
     const ctx = await requireSession();
     userId = ctx.userId;
   } catch (e) {
-    if (e instanceof ApiError) return e.toResponse();
+    if (isAppError(e)) return (e as AppError).toResponse();
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   let unsubscribe: (() => void) | null = null;

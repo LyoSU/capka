@@ -4,7 +4,7 @@ import { nextCookies } from "better-auth/next-js";
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { getMasterKey } from "./settings";
-import { AppError, UnauthorizedError, ForbiddenError } from "./errors";
+import { AppError, isAppError, UnauthorizedError, ForbiddenError } from "./errors";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _auth: any = null;
@@ -81,7 +81,7 @@ export function apiHandler<T extends (...args: any[]) => Promise<Response>>(hand
     try {
       return await handler(...args);
     } catch (e) {
-      if (e instanceof AppError) return e.toResponse();
+      if (isAppError(e)) return (e as AppError).toResponse();
       const req = args[0] as Request;
       console.error(`[api] ${req.method} ${new URL(req.url).pathname}:`, e);
       return Response.json({ error: "Internal server error" }, { status: 500 });
