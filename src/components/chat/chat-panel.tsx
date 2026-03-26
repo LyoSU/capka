@@ -106,24 +106,31 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto pb-40">
             <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
-              {messages.map((message, i) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message as never}
-                  chatId={chatId}
-                  isStreaming={
-                    isLoading &&
-                    i === messages.length - 1 &&
-                    message.role === "assistant"
-                  }
-                />
-              ))}
-              {isLoading && (
-                <TaskStatus
-                  startedAt={taskInfo.startedAt || Date.now()}
-                  currentTool={taskInfo.currentTool}
-                  toolCount={taskInfo.toolCount}
-                />
+              {messages.map((message, i) => {
+                const isLast = i === messages.length - 1;
+                const isStreamingMsg = isLoading && isLast && message.role === "assistant";
+                return (
+                  <ChatMessage
+                    key={message.id}
+                    message={message as never}
+                    chatId={chatId}
+                    isStreaming={isStreamingMsg}
+                    statusSlot={isStreamingMsg ? (
+                      <TaskStatus
+                        startedAt={taskInfo.startedAt}
+                        currentTool={taskInfo.currentTool}
+                      />
+                    ) : undefined}
+                  />
+                );
+              })}
+              {isLoading && messages.length > 0 && messages[messages.length - 1].role === "user" && (
+                <div className="px-4 py-3">
+                  <TaskStatus
+                    startedAt={taskInfo.startedAt}
+                    currentTool={taskInfo.currentTool}
+                  />
+                </div>
               )}
             </div>
           </div>

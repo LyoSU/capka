@@ -336,9 +336,10 @@ interface ChatMessageProps {
   message: UIMessage;
   isStreaming?: boolean;
   chatId?: string;
+  statusSlot?: React.ReactNode;
 }
 
-export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) {
+export function ChatMessage({ message, isStreaming, chatId, statusSlot }: ChatMessageProps) {
   const isUser = message.role === "user";
   const metadata = message.metadata as
     | { createdAt?: string | null; platform?: string | null }
@@ -407,7 +408,8 @@ export function ChatMessage({ message, isStreaming, chatId }: ChatMessageProps) 
         ) : isStreaming ? null : (
           <span className="text-muted-foreground text-sm">...</span>
         )}
-        <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
+        {statusSlot}
+        {!isStreaming && <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />}
       </div>
     </div>
   );

@@ -42,6 +42,7 @@ export function TaskStatus({
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
+    if (!startedAt) return;
     const tick = () => setElapsed(Date.now() - startedAt);
     tick();
     const id = setInterval(tick, 1000);
