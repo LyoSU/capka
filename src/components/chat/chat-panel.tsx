@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { FolderOpen } from "lucide-react";
-import { ChatMessage, ThinkingIndicator } from "@/components/chat/message";
+import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
 import { ModelSelector } from "@/components/chat/model-selector";
@@ -118,14 +118,9 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
                   }
                 />
               ))}
-              {isLoading && messages.length > 0 && messages[messages.length - 1].role === "user" && (
-                <div className="px-4 py-3">
-                  <ThinkingIndicator />
-                </div>
-              )}
-              {isLoading && taskInfo.startedAt > 0 && (
+              {isLoading && (
                 <TaskStatus
-                  startedAt={taskInfo.startedAt}
+                  startedAt={taskInfo.startedAt || Date.now()}
                   currentTool={taskInfo.currentTool}
                   toolCount={taskInfo.toolCount}
                 />
