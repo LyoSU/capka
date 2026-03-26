@@ -167,18 +167,25 @@
   display: none;
 }
 
-/* Streamdown — clean styling without nested card look */
-.streamdown-content pre {
-  border-radius: 0.5rem;
-  margin: 0.75rem 0;
-}
-.streamdown-content [class*="code-block"] {
+/* Streamdown — flatten code block: remove outer card wrapper */
+[data-streamdown="code-block"] {
   border: none;
+  background: transparent;
   box-shadow: none;
+  padding: 0;
+  gap: 0;
+  margin: 0.75rem 0;
+  border-radius: 0;
+}
+[data-streamdown="code-block-header"] {
+  display: none;
+}
+[data-streamdown="code-block-body"] {
   border-radius: 0.5rem;
-  overflow: hidden;
+  font-size: 0.8125rem;
 }
 
+/* Streamdown — flatten table wrapper */
 [data-streamdown="table-wrapper"] {
   border: none;
   background: transparent;

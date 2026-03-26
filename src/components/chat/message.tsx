@@ -190,7 +190,7 @@ function ThinkingIndicator() {
 
 function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
   return (
-    <div className={`streamdown-content text-[15px] leading-relaxed${isStreaming ? " streaming-text" : ""}`}>
+    <div className="text-[15px] leading-relaxed">
       <Streamdown
         parseIncompleteMarkdown={isStreaming}
         shikiTheme={["github-light", "github-dark"]}
