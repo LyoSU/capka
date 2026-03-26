@@ -255,6 +255,23 @@ export function startTask(opts: StartTaskOpts) {
         }
       }
 
+      // Retry once if model produced no content (empty response)
+      if (!ac.signal.aborted && !streamError) {
+        const hasContent = parts.some((p) =>
+          (p.type === "text" && p.text.trim()) || p.type === "tool-call",
+        );
+        if (!hasContent) {
+          console.log("[task] empty response — retrying once");
+          parts.length = 0;
+          result = makeStream();
+          try {
+            await consume();
+          } catch (retryErr) {
+            streamError = errMsg(retryErr);
+          }
+        }
+      }
+
       // Final save
       const finalStatus = ac.signal.aborted ? "cancelled" : streamError ? "failed" : "completed";
       await db.update(messages).set({

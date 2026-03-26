@@ -3,6 +3,7 @@ import {
   Send, Download,
   ChevronRight, Loader2, AlertCircle,
   FileSearch, Globe, Terminal, Folder,
+  FileText, FileCode, FileImage, File,
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
@@ -189,33 +190,78 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   );
 }
 
-const WORKSPACE_PATH_RE = /\/workspace\/([\w/.А-Яа-яІіЇїЄєҐґ_\-\s()]+\.\w+)/g;
+const WORKSPACE_PATH_RE = /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
 
-function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
-  const paths = Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]);
-  if (paths.length === 0) return null;
-  return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {paths.map((p) => <DownloadLink key={p} chatId={chatId} filePath={p} />)}
-    </div>
-  );
+const DOC_EXT = new Set(["docx", "doc", "pdf", "odt", "rtf", "txt", "md", "log"]);
+const SHEET_EXT = new Set(["xlsx", "xls", "csv", "numbers", "tsv"]);
+const IMG_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
+const CODE_EXT_DL = new Set(["ts", "tsx", "js", "jsx", "py", "rb", "go", "rs", "java", "css", "html", "sh", "sql", "c", "cpp", "json", "yaml", "yml"]);
+
+function getFileStyle(ext: string) {
+  if (DOC_EXT.has(ext))      return { label: "Document",    Icon: FileText,  color: "text-blue-400",    bg: "bg-blue-500/10" };
+  if (SHEET_EXT.has(ext))    return { label: "Spreadsheet", Icon: FileText,  color: "text-emerald-400", bg: "bg-emerald-500/10" };
+  if (IMG_EXT.has(ext))      return { label: "Image",       Icon: FileImage, color: "text-violet-400",  bg: "bg-violet-500/10" };
+  if (CODE_EXT_DL.has(ext))  return { label: "Code",        Icon: FileCode,  color: "text-amber-400",   bg: "bg-amber-500/10" };
+  return { label: ext.toUpperCase() || "File", Icon: File, color: "text-muted-foreground", bg: "bg-muted/60" };
 }
 
-function DownloadLink({ chatId, filePath }: { chatId: string; filePath: string }) {
-  const fileName = filePath.split("/").pop() || filePath;
-  const ext = fileName.split(".").pop()?.toLowerCase() || "";
-  const isImage = ["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext);
-  const label = isImage ? "Image" : ext.toUpperCase();
+function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
+  const paths = [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))];
+  if (paths.length === 0) return null;
+
+  const downloadAll = () => {
+    const params = new URLSearchParams({ chatId });
+    paths.forEach((p) => params.append("paths", p));
+    const a = document.createElement("a");
+    a.href = `/api/sandbox/files/download-all?${params}`;
+    a.download = "workspace-files.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
   return (
-    <a
-      href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(filePath)}`}
-      download={fileName}
-      className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium text-foreground no-underline shadow-sm hover:bg-accent transition-colors"
-    >
-      <Download className="h-4 w-4 text-muted-foreground" />
-      <span className="truncate max-w-48">{fileName}</span>
-      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{label}</span>
-    </a>
+    <div className="mt-4 overflow-hidden rounded-xl border border-border/50">
+      <div className="flex items-center justify-between bg-muted/30 px-4 py-2.5">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+          {paths.length === 1 ? "Artifact" : `${paths.length} Artifacts`}
+        </span>
+        {paths.length > 1 && (
+          <button
+            type="button"
+            onClick={downloadAll}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground/50 transition-colors hover:text-foreground"
+          >
+            <Download className="h-3 w-3" />
+            <span>Download all</span>
+          </button>
+        )}
+      </div>
+      <div className="divide-y divide-border/25">
+        {paths.map((p) => {
+          const fileName = p.split("/").pop() || p;
+          const ext = fileName.split(".").pop()?.toLowerCase() || "";
+          const { label, Icon, color, bg } = getFileStyle(ext);
+          return (
+            <a
+              key={p}
+              href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(p)}`}
+              download={fileName}
+              className="group/file flex items-center gap-3.5 px-4 py-3 no-underline transition-colors hover:bg-accent/50"
+            >
+              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${bg}`}>
+                <Icon className={`h-[18px] w-[18px] ${color}`} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium leading-snug text-foreground">{fileName}</p>
+                <p className="text-xs text-muted-foreground/50">{label} · {ext.toUpperCase()}</p>
+              </div>
+              <Download className="h-4 w-4 shrink-0 text-muted-foreground/20 transition-colors group-hover/file:text-muted-foreground" />
+            </a>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -342,7 +388,7 @@ interface ChatMessageProps {
 export function ChatMessage({ message, isStreaming, chatId, statusSlot }: ChatMessageProps) {
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -406,7 +452,13 @@ export function ChatMessage({ message, isStreaming, chatId, statusSlot }: ChatMe
             );
           })
         ) : isStreaming ? null : (
-          <span className="text-muted-foreground text-sm">...</span>
+          <span className="text-muted-foreground text-sm">
+            {metadata?.taskStatus === "failed"
+              ? "Failed to generate a response"
+              : metadata?.taskStatus === "cancelled"
+                ? "Response was cancelled"
+                : "..."}
+          </span>
         )}
         {statusSlot}
         {!isStreaming && <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />}
