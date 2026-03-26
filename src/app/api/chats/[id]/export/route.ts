@@ -4,7 +4,9 @@ import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
 
 function sanitizeFilename(name: string): string {
-  return name.replace(/["\\\n\r]/g, "_");
+  // ASCII-safe fallback for Content-Disposition header
+  const ascii = name.replace(/[^\x20-\x7E]/g, "_").replace(/["\\\n\r]/g, "_");
+  return ascii || "chat";
 }
 
 export const GET = apiHandler(async (req, { params }) => {
@@ -27,10 +29,13 @@ export const GET = apiHandler(async (req, { params }) => {
 
   const { searchParams } = new URL(req.url);
   const format = searchParams.get("format") || "json";
-  const safeName = sanitizeFilename(chat.title || "chat");
+  const title = chat.title || "chat";
+  const safeName = sanitizeFilename(title);
+  const disposition = (ext: string) =>
+    `attachment; filename="${safeName}.${ext}"; filename*=UTF-8''${encodeURIComponent(title)}.${ext}`;
 
   if (format === "markdown") {
-    const lines: string[] = [`# ${chat.title || "Untitled Chat"}`, ""];
+    const lines: string[] = [`# ${title}`, ""];
     for (const msg of rows) {
       const ts = msg.createdAt
         ? new Date(msg.createdAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })
@@ -41,7 +46,7 @@ export const GET = apiHandler(async (req, { params }) => {
     return new Response(lines.join("\n"), {
       headers: {
         "Content-Type": "text/markdown; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${safeName}.md"`,
+        "Content-Disposition": disposition("md"),
       },
     });
   }
@@ -50,6 +55,6 @@ export const GET = apiHandler(async (req, { params }) => {
     chat: { id: chat.id, title: chat.title, model: chat.model, createdAt: chat.createdAt, updatedAt: chat.updatedAt },
     messages: rows.map((m) => ({ id: m.id, role: m.role, content: m.content, platform: m.platform, metadata: m.metadata, createdAt: m.createdAt })),
   }, {
-    headers: { "Content-Disposition": `attachment; filename="${safeName}.json"` },
+    headers: { "Content-Disposition": disposition("json") },
   });
 });
