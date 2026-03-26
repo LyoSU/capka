@@ -53,10 +53,14 @@ export function TaskStatus({
 
   return (
     <div className="flex items-center gap-2.5 px-5 py-3 text-sm text-muted-foreground/50 animate-in fade-in duration-300">
-      <div className="flex gap-1">
-        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:150ms]" />
-        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:300ms]" />
+      <div className="inline-grid grid-cols-3 gap-[3px]">
+        {Array.from({ length: 9 }).map((_, i) => (
+          <div
+            key={i}
+            className="h-1.5 w-1.5 rounded-full bg-foreground/40"
+            style={{ animation: `dot-chase 1.6s ease-in-out ${[0,1,2,5,8,7,6,3,4][i] * 0.15}s infinite` }}
+          />
+        ))}
       </div>
       <span>{label}{time ? ` · ${time}` : ""}</span>
     </div>
