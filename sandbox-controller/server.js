@@ -281,7 +281,7 @@ const server = createServer(async (req, res) => {
       const uid = sanitize(userId);
       const userSessions = [...sessions.entries()].filter(([, s]) => s.userId === uid);
       if (userSessions.length >= MAX_SESSIONS_PER_USER) {
-        const oldest = userSessions.sort((a, b) => a[1].lastActivity - b[1].lastActivity)[0];
+        const oldest = userSessions.reduce((min, cur) => cur[1].lastActivity < min[1].lastActivity ? cur : min);
         if (oldest) {
           const [oldId, oldSession] = oldest;
           try { const c = docker.getContainer(oldSession.containerId); await c.stop({ t: 2 }); await c.remove(); } catch { /* already gone */ }

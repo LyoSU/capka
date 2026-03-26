@@ -11,24 +11,20 @@ function formatElapsed(ms: number): string {
   return `${min}:${String(remSec).padStart(2, "0")}`;
 }
 
-const LABELS: Record<string, string> = {
-  execute_bash: "Running code",
-  execute_python: "Running code",
-  file_read: "Reading",
-  file_write: "Writing",
-  file_edit: "Editing",
-  list_directory: "Looking at files",
-  web_search: "Searching",
-  web_browse: "Browsing",
-};
+// Shared keyword → label mapping (same patterns as message.tsx TOOL_PATTERNS)
+const ACTIVE_LABELS: [string[], string][] = [
+  [["read", "file_read"], "Reading"],
+  [["list", "dir"], "Looking at files"],
+  [["search", "web"], "Searching"],
+  [["write", "edit", "create"], "Writing"],
+  [["exec", "run", "shell", "bash", "python"], "Running code"],
+];
 
 function getLabel(name: string | null): string {
   if (!name) return "Thinking";
-  if (LABELS[name]) return LABELS[name];
-  if (name.includes("exec") || name.includes("run") || name.includes("bash")) return "Running code";
-  if (name.includes("read") || name.includes("file")) return "Reading";
-  if (name.includes("search") || name.includes("web")) return "Searching";
-  return "Working";
+  const lower = name.toLowerCase();
+  const match = ACTIVE_LABELS.find(([kws]) => kws.some((k) => lower.includes(k)));
+  return match ? match[1] : "Working";
 }
 
 export function TaskStatus({
@@ -37,7 +33,6 @@ export function TaskStatus({
 }: {
   startedAt: number;
   currentTool: string | null;
-  toolCount?: number;
 }) {
   const [elapsed, setElapsed] = useState(0);
 
