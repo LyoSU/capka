@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
-import type { FileRef } from "@/lib/constants";
+import { inferMimeType, type FileRef } from "@/lib/constants";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -249,7 +249,7 @@ export function useBackgroundChat({
           const res = await fetch("/api/sandbox/files/upload", { method: "POST", body: form });
           if (!res.ok) throw new Error("upload failed");
           const data: { name?: string } = await res.json();
-          return { name: data.name || file.name, type: file.type };
+          return { name: data.name || file.name, type: inferMimeType(file.name, file.type) };
         }),
       );
       return results

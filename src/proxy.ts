@@ -10,7 +10,7 @@ const PUBLIC_PATHS = [
   "/api/setup",
 ];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (

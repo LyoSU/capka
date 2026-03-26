@@ -1,7 +1,6 @@
 import { eq, and, asc, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
-import { isAppError, type AppError } from "@/lib/errors";
 import { db } from "@/lib/db";
 import { chats, messages, projects, memories, tasks } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
@@ -12,8 +11,9 @@ import type { FileRef } from "@/lib/constants";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 
-export async function POST(req: Request) {
+export const POST = apiHandler(async (req: Request) => {
   let mcpClose: (() => Promise<void>) | undefined;
+  let taskStarted = false;
   try {
     const { userId } = await requireRole("admin", "user");
     const body = await req.json();
@@ -103,16 +103,15 @@ export async function POST(req: Request) {
       existingMemories: userMemories,
       nativeFiles: nativeFiles.length > 0 ? nativeFiles : undefined,
     });
+    taskStarted = true;
 
     // Return immediately — client syncs via SSE
     return Response.json({ taskId, chatId });
-  } catch (e: unknown) {
-    await mcpClose?.();
-    if (isAppError(e)) return (e as AppError).toResponse();
-    console.error("[chat]", e);
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+  } catch (e) {
+    if (!taskStarted) await mcpClose?.();
+    throw e;
   }
-}
+});
 
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();

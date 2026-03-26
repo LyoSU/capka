@@ -95,6 +95,8 @@ async function injectNativeFiles(
     ? [{ type: "text", text: lastUser.content }]
     : [...lastUser.content];
   lastUser.content = [...existing, ...parts];
+
+  console.log(`[task] injected ${parts.length} native file(s) (${(totalBytes / 1024).toFixed(0)}KB) into model message`);
 }
 
 export function startTask(opts: StartTaskOpts) {

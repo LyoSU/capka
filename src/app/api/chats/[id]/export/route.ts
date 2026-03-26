@@ -1,7 +1,8 @@
-import { eq, and, asc } from "drizzle-orm";
+import { eq, asc } from "drizzle-orm";
 import { requireSession, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
+import { requireOwned } from "@/lib/db/ownership";
 
 function sanitizeFilename(name: string): string {
   // ASCII-safe fallback for Content-Disposition header
@@ -13,12 +14,7 @@ export const GET = apiHandler(async (req, { params }) => {
   const { userId } = await requireSession();
   const { id } = await params;
 
-  const [chat] = await db
-    .select()
-    .from(chats)
-    .where(and(eq(chats.id, id), eq(chats.userId, userId)))
-    .limit(1);
-  if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+  const chat = await requireOwned(chats, id, userId, "Chat");
 
   const rows = await db
     .select()
@@ -29,7 +25,7 @@ export const GET = apiHandler(async (req, { params }) => {
 
   const { searchParams } = new URL(req.url);
   const format = searchParams.get("format") || "json";
-  const title = chat.title || "chat";
+  const title = (chat.title as string) || "chat";
   const safeName = sanitizeFilename(title);
   const disposition = (ext: string) =>
     `attachment; filename="${safeName}.${ext}"; filename*=UTF-8''${encodeURIComponent(title)}.${ext}`;
