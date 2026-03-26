@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, Pencil, Trash2, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
   Card,
   CardHeader,
@@ -19,6 +20,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editProject, setEditProject] = useState<Project | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   const fetchProjects = useCallback(() => {
     fetch("/api/projects")
@@ -42,8 +44,6 @@ export default function ProjectsPage() {
   }
 
   async function handleDelete(project: Project) {
-    if (!confirm(`Delete "${project.name}"? Chats will be kept but unlinked.`)) return;
-
     try {
       const res = await fetch(`/api/projects/${project.id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -51,6 +51,7 @@ export default function ProjectsPage() {
         return;
       }
       toast.success("Project deleted");
+      setDeleteTarget(null);
       fetchProjects();
     } catch {
       toast.error("Something went wrong");
@@ -144,7 +145,7 @@ export default function ProjectsPage() {
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    onClick={() => handleDelete(project)}
+                    onClick={() => setDeleteTarget(project)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -160,6 +161,14 @@ export default function ProjectsPage() {
         onOpenChange={setDialogOpen}
         project={editProject}
         onSaved={handleSaved}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+        title={`Delete "${deleteTarget?.name}"?`}
+        description="Chats will be kept but unlinked from this project."
       />
     </div>
   );

@@ -161,9 +161,16 @@ export default function ConnectionsPage() {
 
       {/* Provider list */}
       <div className="space-y-2">
-        {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
         {!loading && configs.length === 0 && !showForm && (
-          <p className="text-sm text-muted-foreground">No providers configured yet.</p>
+          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
+            <Power className="h-5 w-5 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">No providers configured yet</p>
+          </div>
         )}
         {configs.map((c) => (
           <div key={c.id} className="rounded-lg border p-4 space-y-3">

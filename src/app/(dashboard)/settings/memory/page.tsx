@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, Plus, Pencil, Check, X, Loader2 } from "lucide-react";
+import { Trash2, Plus, Pencil, Check, X, Loader2, Brain } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -33,6 +34,7 @@ export default function MemoryPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [editType, setEditType] = useState<MemoryType>("fact");
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Form state
   const [newContent, setNewContent] = useState("");
@@ -83,6 +85,7 @@ export default function MemoryPage() {
     const res = await fetch(`/api/memories/${id}`, { method: "DELETE" });
     if (res.ok) {
       setMemories((prev) => prev.filter((m) => m.id !== id));
+      setDeleteId(null);
       toast.success("Memory deleted");
     } else {
       toast.error("Failed to delete memory");
@@ -202,14 +205,25 @@ export default function MemoryPage() {
       )}
 
       {/* Memory list */}
-      {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {loading && (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      )}
 
       {!loading && memories.length === 0 && (
-        <div className="rounded-md border border-dashed p-8 text-center">
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
+          <Brain className="h-5 w-5 text-muted-foreground/40" />
           <p className="text-sm text-muted-foreground">
-            No memories yet. The AI will learn about you as you chat, or you can add memories manually.
+            No memories yet. The AI will learn about you as you chat.
           </p>
         </div>
+      )}
+
+      {!loading && filterType !== "all" && memories.length > 0 && grouped[filterType as MemoryType]?.length === 0 && (
+        <p className="py-4 text-center text-sm text-muted-foreground">
+          No {typeLabel[filterType as MemoryType]?.toLowerCase() || filterType} memories
+        </p>
       )}
 
       {!loading &&
@@ -276,7 +290,7 @@ export default function MemoryPage() {
                           variant="ghost"
                           size="icon-xs"
                           className="text-muted-foreground hover:text-destructive"
-                          onClick={() => handleDelete(m.id)}
+                          onClick={() => setDeleteId(m.id)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -288,6 +302,14 @@ export default function MemoryPage() {
             </div>
           );
         })}
+
+      <ConfirmDialog
+        open={!!deleteId}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+        onConfirm={() => deleteId && handleDelete(deleteId)}
+        title="Delete memory?"
+        description="This memory will be permanently removed."
+      />
     </div>
   );
 }

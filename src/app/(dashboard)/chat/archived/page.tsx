@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, ArrowLeft, Trash2, RotateCcw } from "lucide-react";
+import { Archive, ArrowLeft, Trash2, RotateCcw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 
 type ArchivedChat = {
   id: string;
@@ -16,12 +17,15 @@ type ArchivedChat = {
 export default function ArchivedChatsPage() {
   const router = useRouter();
   const [chats, setChats] = useState<ArchivedChat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const fetchArchived = useCallback(() => {
     fetch("/api/chats?archived=true")
       .then((r) => (r.ok ? r.json() : []))
       .then(setChats)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -39,6 +43,7 @@ export default function ArchivedChatsPage() {
 
   async function deleteChat(id: string) {
     await fetch(`/api/chats/${id}`, { method: "DELETE" });
+    setDeleteId(null);
     fetchArchived();
   }
 
@@ -55,9 +60,15 @@ export default function ArchivedChatsPage() {
             Back to chats
           </Link>
 
-          {chats.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : chats.length === 0 ? (
             <div className="flex flex-col items-center gap-3 py-16 text-center">
-              <Archive className="h-8 w-8 text-muted-foreground" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted/50">
+                <Archive className="h-6 w-6 text-muted-foreground/40" />
+              </div>
               <p className="text-sm text-muted-foreground">No archived chats</p>
             </div>
           ) : (
@@ -80,7 +91,7 @@ export default function ArchivedChatsPage() {
                       </p>
                     )}
                   </div>
-                  <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex shrink-0 gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -94,7 +105,7 @@ export default function ArchivedChatsPage() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-destructive"
-                      onClick={() => deleteChat(chat.id)}
+                      onClick={() => setDeleteId(chat.id)}
                       title="Delete permanently"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -106,6 +117,14 @@ export default function ArchivedChatsPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!deleteId}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+        onConfirm={() => deleteId && deleteChat(deleteId)}
+        title="Delete chat permanently?"
+        description="This action cannot be undone. The chat and all its messages will be permanently deleted."
+      />
     </>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Shield, ShieldCheck, Eye, Loader2 } from "lucide-react";
+import { Shield, ShieldCheck, Eye, Loader2, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -122,8 +122,9 @@ export default function UsersPage() {
           );
         })}
         {users.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            No users found
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <Users className="h-5 w-5 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">No users found</p>
           </div>
         )}
       </div>

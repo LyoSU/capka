@@ -121,15 +121,20 @@ export default function IntegrationsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {hasToken && tokenLoaded ? (
+          {!tokenLoaded ? (
+            <Badge variant="secondary" className="text-xs text-muted-foreground/50">
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              Checking...
+            </Badge>
+          ) : hasToken ? (
             <Badge variant="outline" className="text-xs">
               Token configured
             </Badge>
-          ) : tokenLoaded ? (
+          ) : (
             <Badge variant="secondary" className="text-xs">
               Not configured
             </Badge>
-          ) : null}
+          )}
         </div>
 
         <div className="flex gap-2">

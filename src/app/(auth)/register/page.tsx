@@ -15,6 +15,7 @@ import {
   CardTitle,
   CardFooter,
 } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function RegisterPage() {
@@ -54,7 +55,11 @@ export default function RegisterPage() {
   }
 
   if (registrationEnabled === null) {
-    return <div className="flex min-h-screen items-center justify-center"><div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" /></div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   if (registrationEnabled === false) {
