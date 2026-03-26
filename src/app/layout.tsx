@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { Providers } from "@/components/providers";
@@ -35,8 +36,9 @@ export default function RootLayout({
         <meta name="theme-color" content="#1f1e1d" media="(prefers-color-scheme: dark)" />
       </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
-        {/* Theme init script — static string, no user input, safe from XSS */}
-        <script dangerouslySetInnerHTML={{ __html: 'try{var t=localStorage.getItem("theme");if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")}catch(e){}' }} />
+        <Script id="theme-init" strategy="beforeInteractive">
+          {`try{var t=localStorage.getItem("theme");if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")}catch(e){}`}
+        </Script>
         <Providers>
           {children}
           <Toaster />

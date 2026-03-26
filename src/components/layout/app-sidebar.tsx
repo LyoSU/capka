@@ -212,7 +212,7 @@ export function AppSidebar() {
         <div className="flex items-center justify-between group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1">
           <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
             <ThemeSwitcher />
-            <kbd className="pointer-events-none select-none text-[10px] text-muted-foreground/60 font-mono">
+            <kbd className="pointer-events-none select-none text-[10px] text-muted-foreground/60 font-mono" suppressHydrationWarning>
               {typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘K" : "Ctrl+K"}
             </kbd>
           </div>
