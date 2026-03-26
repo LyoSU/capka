@@ -12,7 +12,10 @@ export async function POST(req: Request) {
 
     if (!chatId || !file) return Response.json({ error: "Missing chatId or file" }, { status: 400 });
 
-    await verifyChatOwnership(chatId, userId);
+    // For new chats, the chat row doesn't exist yet (created on first message).
+    // Verify ownership only if the chat already exists — otherwise allow upload
+    // so files are ready in workspace before the message is sent.
+    await verifyChatOwnership(chatId, userId, { allowMissing: true });
     await createSession(chatId, userId);
     const result = await uploadFile(chatId, path, file);
     return Response.json(result);
