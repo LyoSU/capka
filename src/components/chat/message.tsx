@@ -93,28 +93,28 @@ function getToolName(part: ToolPart): string {
   return "unknown";
 }
 
-// Friendly tool display — human-readable labels
-function getToolDisplay(name: string): { label: string; activeLabel: string; icon: typeof Terminal } {
+// Tool display config — keyword patterns → human-friendly labels
+const TOOL_PATTERNS: { keywords: string[]; label: string; activeLabel: string; icon: typeof Terminal }[] = [
+  { keywords: ["read", "file_read"],                   label: "Looked at a file",  activeLabel: "Reading...",          icon: FileSearch },
+  { keywords: ["list", "dir"],                         label: "Browsed files",     activeLabel: "Looking at files...", icon: Folder },
+  { keywords: ["search", "web"],                       label: "Searched the web",  activeLabel: "Searching...",        icon: Globe },
+  { keywords: ["write", "edit", "create"],             label: "Created a file",    activeLabel: "Writing...",          icon: FileSearch },
+  { keywords: ["exec", "run", "shell", "bash", "python"], label: "Ran some code",  activeLabel: "Working...",         icon: Terminal },
+];
+const TOOL_FALLBACK = { label: "Used a tool", activeLabel: "Working...", icon: Terminal };
+
+function getToolDisplay(name: string) {
   const lower = name.toLowerCase();
-  if (lower.includes("read") || lower.includes("file_read")) return { label: "Read a file", activeLabel: "Reading file...", icon: FileSearch };
-  if (lower.includes("list") || lower.includes("dir")) return { label: "Browsed files", activeLabel: "Browsing files...", icon: Folder };
-  if (lower.includes("search") || lower.includes("web")) return { label: "Searched the web", activeLabel: "Searching...", icon: Globe };
-  if (lower.includes("write") || lower.includes("edit") || lower.includes("create")) return { label: "Wrote a file", activeLabel: "Writing...", icon: FileSearch };
-  if (lower.includes("exec") || lower.includes("run") || lower.includes("shell")) return { label: "Ran a command", activeLabel: "Running...", icon: Terminal };
-  const clean = name.replace(/^filesystem_/, "").replace(/_/g, " ");
-  return { label: clean, activeLabel: `${clean}...`, icon: Terminal };
+  return TOOL_PATTERNS.find((p) => p.keywords.some((k) => lower.includes(k))) ?? TOOL_FALLBACK;
 }
 
+/** Extract a short, user-friendly hint from tool input — just file names or search queries */
 function getInputSummary(input: unknown): string | null {
-  if (!input || typeof input !== "object") return typeof input === "string" ? input : null;
+  if (!input || typeof input !== "object") return null;
   const obj = input as Record<string, unknown>;
-  // Show the most meaningful field
-  if (obj.path) return String(obj.path);
-  if (obj.query) return String(obj.query);
-  if (obj.command) return String(obj.command).slice(0, 60);
-  if (obj.url) return String(obj.url);
-  const first = Object.values(obj)[0];
-  return first ? String(first).slice(0, 60) : null;
+  if (obj.path) return String(obj.path).split("/").pop() || null;
+  if (obj.query) return String(obj.query).slice(0, 50);
+  return null;
 }
 
 // --- Tool detail renderer ---
