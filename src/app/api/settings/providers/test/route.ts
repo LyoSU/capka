@@ -1,8 +1,8 @@
 import { generateText } from "ai";
-import { requireRole } from "@/lib/auth";
+import { requireRole, apiHandler } from "@/lib/auth";
 import { getModel } from "@/lib/providers";
 
-export async function POST(req: Request) {
+export const POST = apiHandler(async (req: Request) => {
   await requireRole("admin", "user");
 
   const { provider, apiKey, modelId, baseUrl } = await req.json();
@@ -22,4 +22,4 @@ export async function POST(req: Request) {
     const message = err instanceof Error ? err.message : "Connection failed";
     return Response.json({ success: false, error: message }, { status: 200 });
   }
-}
+});
