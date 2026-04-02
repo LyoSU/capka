@@ -162,12 +162,12 @@ export function ChatInput({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 rounded-xl text-muted-foreground/50 hover:text-foreground"
+                className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground/50 hover:text-foreground"
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach files"
                 aria-label="Attach files"
               >
-                <Paperclip className="h-4 w-4" />
+                <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
               </Button>
             </div>
 
@@ -176,21 +176,21 @@ export function ChatInput({
               <Button
                 size="icon"
                 variant="outline"
-                className="h-8 w-8 shrink-0 rounded-xl"
+                className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl"
                 onClick={onStop}
                 aria-label="Stop generation"
               >
-                <Square className="h-3.5 w-3.5" />
+                <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               </Button>
             ) : (
               <Button
                 size="icon"
-                className="h-8 w-8 shrink-0 rounded-xl"
+                className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl"
                 disabled={!hasContent}
                 onClick={onSubmit}
                 aria-label="Send message"
               >
-                <ArrowUp className="h-4 w-4" />
+                <ArrowUp className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
               </Button>
             )}
           </div>

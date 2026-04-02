@@ -246,7 +246,7 @@ export function SandboxFiles({
                     <a
                       href={downloadUrl(entry.path)}
                       download={entry.name}
-                      className="shrink-0 rounded-md p-1.5 text-muted-foreground/25 opacity-0 transition-all hover:bg-accent hover:text-foreground group-hover:opacity-100"
+                      className="shrink-0 rounded-md p-1.5 text-muted-foreground/25 sm:opacity-0 transition-all hover:bg-accent hover:text-foreground sm:group-hover:opacity-100"
                     >
                       <Download className="h-3.5 w-3.5" />
                     </a>

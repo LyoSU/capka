@@ -108,7 +108,7 @@ export function ChatContextMenu({
         {children}
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="ml-auto opacity-0 group-hover/chat:opacity-100 shrink-0 rounded p-0.5 hover:bg-accent focus-visible:opacity-100"
+            className="ml-auto sm:opacity-0 sm:group-hover/chat:opacity-100 shrink-0 rounded p-0.5 hover:bg-accent focus-visible:opacity-100"
           >
             <MoreHorizontal className="h-4 w-4" />
           </DropdownMenuTrigger>

@@ -369,7 +369,7 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
 
 function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram: boolean }) {
   return (
-    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100">
+    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground opacity-60 sm:opacity-0 transition-opacity duration-200 sm:group-hover/msg:opacity-100">
       {isTelegram && <Send className="h-3 w-3" />}
       <span>{timestamp}</span>
     </div>

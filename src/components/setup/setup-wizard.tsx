@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff } from "lucide-react";
+import { Check, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -20,16 +20,35 @@ const STEPS = ["Account", "Provider", "Telegram"] as const;
 const PROVIDERS = ["openai", "anthropic", "openrouter", "ollama"] as const;
 type Provider = (typeof PROVIDERS)[number];
 
-function ProgressBar({ current }: { current: number }) {
+function Stepper({ current }: { current: number }) {
   return (
-    <div className="flex items-center justify-center gap-2 mb-8">
-      {STEPS.map((_, i) => (
-        <div
-          key={i}
-          className={`h-1.5 w-10 rounded-full transition-colors ${
-            i <= current ? "bg-primary" : "bg-muted"
-          }`}
-        />
+    <div className="flex items-center gap-2 mb-8">
+      {STEPS.map((label, i) => (
+        <div key={i} className="flex items-center gap-2 flex-1">
+          <div
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors ${
+              i <= current
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {i < current ? <Check className="h-3.5 w-3.5" /> : i + 1}
+          </div>
+          <span
+            className={`text-xs font-medium hidden sm:inline ${
+              i === current ? "text-foreground" : "text-muted-foreground"
+            }`}
+          >
+            {label}
+          </span>
+          {i < STEPS.length - 1 && (
+            <div
+              className={`flex-1 h-px transition-colors ${
+                i < current ? "bg-primary" : "bg-border"
+              }`}
+            />
+          )}
+        </div>
       ))}
     </div>
   );
@@ -208,7 +227,7 @@ export function SetupWizard() {
 
   return (
     <div className="space-y-6">
-      <ProgressBar current={step} />
+      <Stepper current={step} />
 
       <div className="text-center space-y-1">
         <h1 className="text-xl font-semibold">
@@ -333,9 +352,18 @@ export function SetupWizard() {
             </p>
           </div>
 
-          <Button className="w-full" onClick={handleProvider} disabled={loading}>
-            {loading ? "Testing..." : "Test & Save"}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => setStep(0)}
+              disabled={loading}
+            >
+              Back
+            </Button>
+            <Button className="flex-1" onClick={handleProvider} disabled={loading}>
+              {loading ? "Testing..." : "Test & Save"}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -357,8 +385,15 @@ export function SetupWizard() {
 
           <div className="flex gap-2">
             <Button
-              variant="outline"
-              className="flex-1"
+              variant="ghost"
+              onClick={() => setStep(1)}
+              disabled={loading}
+            >
+              Back
+            </Button>
+            <Button
+              variant="ghost"
+              className="text-muted-foreground"
               onClick={() => handleFinish(true)}
               disabled={loading}
             >
