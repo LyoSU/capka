@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, Plus, Loader2, Power } from "lucide-react";
+import { Trash2, Plus, Loader2, Unplug, Power } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { ModelPicker } from "@/components/chat/model-picker";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 
 const PROVIDERS = ["openai", "anthropic", "openrouter", "ollama"] as const;
 type Provider = (typeof PROVIDERS)[number];
@@ -32,6 +33,7 @@ export default function ConnectionsPage() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Form state
   const [provider, setProvider] = useState<Provider>("openai");
@@ -70,7 +72,7 @@ export default function ConnectionsPage() {
       setConfigs((prev) => prev.map((c) => ({ ...c, isActive: c.id === id })));
       toast.success("Provider activated");
     } else {
-      toast.error("Failed to activate provider");
+      toast.error("Could not activate provider. Please try again.");
     }
   };
 
@@ -78,9 +80,10 @@ export default function ConnectionsPage() {
     const res = await fetch(`/api/settings/providers?id=${id}`, { method: "DELETE" });
     if (res.ok) {
       setConfigs((prev) => prev.filter((c) => c.id !== id));
+      setDeleteId(null);
       toast.success("Provider removed");
     } else {
-      toast.error("Failed to remove provider");
+      toast.error("Could not remove provider. Please try again.");
     }
   };
 
@@ -94,7 +97,7 @@ export default function ConnectionsPage() {
       setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, defaultModel: model } : c)));
       toast.success("Default model updated");
     } else {
-      toast.error("Failed to update model");
+      toast.error("Could not update default model. Please try again.");
     }
   };
 
@@ -142,7 +145,7 @@ export default function ConnectionsPage() {
         resetForm();
         fetchConfigs();
       } else {
-        toast.error("Failed to save provider");
+        toast.error("Could not save provider settings. Please check your API key and try again.");
       }
     } finally {
       setSaving(false);
@@ -167,9 +170,12 @@ export default function ConnectionsPage() {
           </div>
         )}
         {!loading && configs.length === 0 && !showForm && (
-          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
-            <Power className="h-5 w-5 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">No providers configured yet</p>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="rounded-xl bg-muted/50 p-3 mb-3">
+              <Unplug className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <p className="text-sm text-muted-foreground">No providers connected</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Add an API key to start using AI models</p>
           </div>
         )}
         {configs.map((c) => (
@@ -197,7 +203,7 @@ export default function ConnectionsPage() {
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                  onClick={() => handleDelete(c.id)}
+                  onClick={() => setDeleteId(c.id)}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -283,6 +289,14 @@ export default function ConnectionsPage() {
           Add Provider
         </Button>
       )}
+
+      <ConfirmDialog
+        open={!!deleteId}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+        onConfirm={() => deleteId && handleDelete(deleteId)}
+        title="Remove provider?"
+        description="This will disconnect the provider and remove its API key."
+      />
     </div>
   );
 }

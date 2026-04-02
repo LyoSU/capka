@@ -165,6 +165,7 @@ export function ChatInput({
                 className="h-8 w-8 rounded-xl text-muted-foreground/50 hover:text-foreground"
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach files"
+                aria-label="Attach files"
               >
                 <Paperclip className="h-4 w-4" />
               </Button>
@@ -177,6 +178,7 @@ export function ChatInput({
                 variant="outline"
                 className="h-8 w-8 shrink-0 rounded-xl"
                 onClick={onStop}
+                aria-label="Stop generation"
               >
                 <Square className="h-3.5 w-3.5" />
               </Button>
@@ -186,6 +188,7 @@ export function ChatInput({
                 className="h-8 w-8 shrink-0 rounded-xl"
                 disabled={!hasContent}
                 onClick={onSubmit}
+                aria-label="Send message"
               >
                 <ArrowUp className="h-4 w-4" />
               </Button>

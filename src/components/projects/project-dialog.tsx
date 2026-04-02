@@ -78,7 +78,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        toast.error(data.error || "Failed to save project");
+        toast.error(data.error || (isEdit ? "Could not update project. Please try again." : "Could not create project. Please try again."));
         return;
       }
 
@@ -87,7 +87,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
       onSaved?.(saved);
       onOpenChange(false);
     } catch {
-      toast.error("Something went wrong");
+      toast.error(isEdit ? "Could not update project. Please try again." : "Could not create project. Please try again.");
     } finally {
       setSaving(false);
     }

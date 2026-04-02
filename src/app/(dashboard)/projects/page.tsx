@@ -47,14 +47,14 @@ export default function ProjectsPage() {
     try {
       const res = await fetch(`/api/projects/${project.id}`, { method: "DELETE" });
       if (!res.ok) {
-        toast.error("Failed to delete project");
+        toast.error("Could not delete project. Please try again.");
         return;
       }
       toast.success("Project deleted");
       setDeleteTarget(null);
       fetchProjects();
     } catch {
-      toast.error("Something went wrong");
+      toast.error("Could not delete project. Please try again.");
     }
   }
 

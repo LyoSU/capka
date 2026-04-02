@@ -57,7 +57,8 @@ export function SetupWizard() {
 
   async function handleAccount() {
     if (!name || !email || !password) {
-      toast.error("All fields are required");
+      const missing = [!name && "Name", !email && "Email", !password && "Password"].filter(Boolean).join(", ");
+      toast.error(`${missing} ${missing.includes(",") ? "are" : "is"} required`);
       return;
     }
     if (password.length < 8) {
@@ -73,7 +74,7 @@ export function SetupWizard() {
         password,
       });
       if (error) {
-        toast.error(error.message || "Failed to create account");
+        toast.error(error.message || "Could not create account. Please try again.");
         return;
       }
 
@@ -84,7 +85,7 @@ export function SetupWizard() {
       });
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.error || "Failed to save account");
+        toast.error(data.error || "Could not create account. Please try again.");
         return;
       }
 
@@ -96,7 +97,7 @@ export function SetupWizard() {
 
       setStep(1);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      toast.error(err instanceof Error ? err.message : "Could not create account. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -131,7 +132,7 @@ export function SetupWizard() {
       });
       const testData = await testRes.json();
       if (!testData.success) {
-        toast.error(testData.error || "Connection test failed");
+        toast.error(testData.error || "Could not verify API key. Please check the key and try again.");
         return;
       }
 
@@ -150,13 +151,13 @@ export function SetupWizard() {
       });
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.error || "Failed to save provider");
+        toast.error(data.error || "Could not save provider settings. Please try again.");
         return;
       }
 
       setStep(2);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      toast.error(err instanceof Error ? err.message : "Could not verify API key. Please check the key and try again.");
     } finally {
       setLoading(false);
     }
@@ -196,7 +197,7 @@ export function SetupWizard() {
 
       router.push("/chat");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      toast.error(err instanceof Error ? err.message : "Could not complete setup. Please try again.");
     } finally {
       setLoading(false);
     }

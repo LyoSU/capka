@@ -137,7 +137,7 @@ export function SandboxFiles({
           )}
         </div>
         <div className="flex items-center gap-0.5">
-          <label title="Upload files">
+          <label title="Upload files" aria-label="Upload files">
             <input
               type="file"
               multiple
@@ -148,10 +148,10 @@ export function SandboxFiles({
               <Upload className={`h-3.5 w-3.5 ${uploading ? "animate-pulse" : ""}`} />
             </div>
           </label>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground/50 hover:text-foreground" onClick={fetchFiles} title="Refresh">
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground/50 hover:text-foreground" onClick={fetchFiles} title="Refresh" aria-label="Refresh files">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground/50 hover:text-foreground" onClick={onClose}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground/50 hover:text-foreground" onClick={onClose} aria-label="Close file panel">
             <X className="h-3.5 w-3.5" />
           </Button>
         </div>

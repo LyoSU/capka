@@ -33,7 +33,7 @@ export default function LoginPage() {
     });
 
     if (error) {
-      toast.error(error.message ?? "Sign in failed");
+      toast.error(error.message ?? "Invalid email or password. Please try again.");
       setLoading(false);
       return;
     }

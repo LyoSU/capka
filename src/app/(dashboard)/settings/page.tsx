@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
 function useSetting(key: string, fallback: string) {
   const [value, setValue] = useState(fallback);
   const [dirty, setDirty] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch(`/api/settings?key=${key}`)
@@ -20,7 +22,8 @@ function useSetting(key: string, fallback: string) {
       .then((data) => {
         if (data?.value != null) setValue(data.value);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [key]);
 
   const update = useCallback((v: string) => {
@@ -40,7 +43,7 @@ function useSetting(key: string, fallback: string) {
     } else toast.error("Failed to save");
   }, [key, value]);
 
-  return { value, update, save, dirty };
+  return { value, update, save, dirty, loading };
 }
 
 export default function GeneralSettingsPage() {
@@ -50,12 +53,22 @@ export default function GeneralSettingsPage() {
   const sandbox = useSetting("sandbox_enabled", "false");
   const registration = useSetting("registration_enabled", "true");
 
+  const settingsLoading = minCtx.loading || sandbox.loading || registration.loading;
+
   const contextLabel = (val: string) => {
     const n = parseInt(val, 10);
     if (!n || n <= 0) return "";
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tokens`;
     return `${(n / 1_000).toFixed(0)}k tokens`;
   };
+
+  if (settingsLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-lg space-y-6">

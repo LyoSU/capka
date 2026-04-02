@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Archive, ArrowLeft, Trash2, RotateCcw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
@@ -15,7 +14,6 @@ type ArchivedChat = {
 };
 
 export default function ArchivedChatsPage() {
-  const router = useRouter();
   const [chats, setChats] = useState<ArchivedChat[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -78,9 +76,9 @@ export default function ArchivedChatsPage() {
                   key={chat.id}
                   className="group flex items-center gap-3 rounded-lg border px-4 py-3"
                 >
-                  <div
-                    className="min-w-0 flex-1 cursor-pointer"
-                    onClick={() => router.push(`/chat/${chat.id}`)}
+                  <Link
+                    href={`/chat/${chat.id}`}
+                    className="min-w-0 flex-1"
                   >
                     <p className="truncate text-sm font-medium">
                       {chat.title || "New Chat"}
@@ -90,13 +88,14 @@ export default function ArchivedChatsPage() {
                         {new Date(chat.updatedAt).toLocaleDateString()}
                       </p>
                     )}
-                  </div>
+                  </Link>
                   <div className="flex shrink-0 gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"
                       onClick={() => unarchive(chat.id)}
+                      aria-label="Restore chat"
                       title="Unarchive"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
@@ -106,6 +105,7 @@ export default function ArchivedChatsPage() {
                       size="icon"
                       className="h-7 w-7 text-destructive"
                       onClick={() => setDeleteId(chat.id)}
+                      aria-label="Delete chat"
                       title="Delete permanently"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
