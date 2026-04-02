@@ -36,9 +36,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#1f1e1d" media="(prefers-color-scheme: dark)" />
       </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
-        <Script id="theme-init" strategy="beforeInteractive">
-          {`try{var t=localStorage.getItem("theme");if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")}catch(e){}`}
-        </Script>
+        <Script src="/theme-init.js" strategy="beforeInteractive" />
         <Providers>
           {children}
           <Toaster />

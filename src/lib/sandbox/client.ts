@@ -17,12 +17,28 @@ function authHeaders(): Record<string, string> {
 }
 
 async function request(path: string, method: string, body?: unknown) {
-  const res = await fetch(`${CONTROLLER_URL}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(method === "POST" ? 150_000 : 10_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${CONTROLLER_URL}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(method === "POST" ? 150_000 : 10_000),
+    });
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.cause && typeof (err as NodeJS.ErrnoException).cause === "object"
+      ? ((err as NodeJS.ErrnoException).cause as NodeJS.ErrnoException).code
+      : undefined;
+    if (code === "ECONNREFUSED" || code === "ENOTFOUND") {
+      console.error(`[sandbox] ${method} ${path}: controller unreachable (${code})`);
+      throw new SandboxError(
+        "Code execution is temporarily unavailable. Please try again in a moment.",
+        "connect",
+        true,
+      );
+    }
+    throw err;
+  }
 
   const data = await res.json().catch(() => ({ error: `Sandbox ${res.status}` }));
   if (!res.ok) {

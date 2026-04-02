@@ -11,6 +11,7 @@ export interface ModelInfo {
   provider: string;
   context: number;
   pricing: { prompt: number; completion: number };
+  cutoff?: string | null;
 }
 
 const MAX_CACHE_ENTRIES = 50;
@@ -48,9 +49,14 @@ export const GET = apiHandler(async () => {
     type RawModel = {
       id: string;
       name?: string;
+      created?: number;
+      knowledge_cutoff?: string | null;
       context_length?: number;
       pricing?: { prompt?: string; completion?: string };
     };
+
+    // Hide models added to OpenRouter more than 2 months ago
+    const TWO_MONTHS_AGO = Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 60;
 
     // Date-stamped variant pattern: ends with -YYYY-MM-DD or -MMDD
     const DATED = /-(20\d{2}-\d{2}-\d{2}|\d{4})$/;
@@ -59,8 +65,8 @@ export const GET = apiHandler(async () => {
       .filter((m: RawModel) => {
         if (!m.id || m.id.includes(":free") || m.id.includes(":extended")) return false;
         const slug = m.id.split("/")[1] || "";
-        // Skip date-stamped duplicates (e.g. gpt-5.4-2026-01-15)
         if (DATED.test(slug)) return false;
+        if (m.created && m.created < TWO_MONTHS_AGO) return false;
         const prompt = parseFloat(m.pricing?.prompt || "0");
         return prompt > 0 && (m.context_length || 0) >= minContext;
       })
@@ -73,6 +79,7 @@ export const GET = apiHandler(async () => {
           prompt: parseFloat(m.pricing?.prompt || "0") * 1_000_000,
           completion: parseFloat(m.pricing?.completion || "0") * 1_000_000,
         },
+        cutoff: m.knowledge_cutoff || null,
       }))
       .sort((a: ModelInfo, b: ModelInfo) =>
         a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name),

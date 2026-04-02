@@ -183,6 +183,9 @@ function ModelList({
                         {model.pricing.prompt > 0 && (
                           <span className="tabular-nums">${model.pricing.prompt < 1 ? model.pricing.prompt.toFixed(2) : model.pricing.prompt.toFixed(1)}/M in</span>
                         )}
+                        {model.cutoff && (
+                          <span className="tabular-nums">cutoff {model.cutoff}</span>
+                        )}
                       </div>
                     </div>
                   </button>
