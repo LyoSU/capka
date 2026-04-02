@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,8 @@ export function SetupWizard() {
 
   // Step 3 - Telegram
   const [botToken, setBotToken] = useState("");
+
+  const [showApiKey, setShowApiKey] = useState(false);
 
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -278,13 +281,24 @@ export function SetupWizard() {
           {provider !== "ollama" && (
             <div className="space-y-1.5">
               <Label htmlFor="apiKey">API Key</Label>
-              <Input
-                id="apiKey"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-              />
+              <div className="relative">
+                <Input
+                  id="apiKey"
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="pr-9"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey((v) => !v)}
+                  aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
           )}
 

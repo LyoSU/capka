@@ -11,7 +11,6 @@ import {
   PanelLeft,
   Moon,
   FolderKanban,
-  FolderOpen,
   Brain,
   Keyboard,
   Search,
@@ -82,10 +81,6 @@ export function CommandPalette() {
           <CommandItem onSelect={() => run(() => router.push("/projects"))}>
             <FolderKanban className="mr-2 h-4 w-4" />
             Projects
-          </CommandItem>
-          <CommandItem onSelect={() => run(() => router.push("/files"))}>
-            <FolderOpen className="mr-2 h-4 w-4" />
-            Files
           </CommandItem>
           <CommandItem onSelect={() => run(() => router.push("/settings"))}>
             <Settings className="mr-2 h-4 w-4" />

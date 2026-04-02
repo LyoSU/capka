@@ -35,6 +35,7 @@ export default function MemoryPage() {
   const [editContent, setEditContent] = useState("");
   const [editType, setEditType] = useState<MemoryType>("fact");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   // Form state
   const [newContent, setNewContent] = useState("");
@@ -43,11 +44,15 @@ export default function MemoryPage() {
 
   const fetchMemories = useCallback(async () => {
     try {
+      setError("");
       const url = filterType !== "all"
         ? `/api/memories?type=${filterType}`
         : "/api/memories";
       const res = await fetch(url);
       if (res.ok) setMemories(await res.json());
+      else setError("Could not load memories. Please refresh the page.");
+    } catch {
+      setError("Could not load memories. Please refresh the page.");
     } finally {
       setLoading(false);
     }
@@ -140,6 +145,12 @@ export default function MemoryPage() {
         </p>
       </div>
       <Separator />
+
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {/* Filter + Add */}
       <div className="flex items-center gap-2">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, Plus, Loader2, Unplug, Power } from "lucide-react";
+import { Trash2, Plus, Loader2, Unplug, Power, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,17 +34,23 @@ export default function ConnectionsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   // Form state
   const [provider, setProvider] = useState<Provider>("openai");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
+  const [showKey, setShowKey] = useState(false);
 
   const fetchConfigs = useCallback(async () => {
     try {
+      setError("");
       const res = await fetch("/api/settings/providers");
       if (res.ok) setConfigs(await res.json());
+      else setError("Could not load providers. Please refresh the page.");
+    } catch {
+      setError("Could not load providers. Please refresh the page.");
     } finally {
       setLoading(false);
     }
@@ -162,6 +168,12 @@ export default function ConnectionsPage() {
       </div>
       <Separator />
 
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
       {/* Provider list */}
       <div className="space-y-2">
         {loading && (
@@ -244,12 +256,23 @@ export default function ConnectionsPage() {
           {provider !== "ollama" && (
             <div className="space-y-1.5">
               <label className="text-sm">API Key</label>
-              <Input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-              />
+              <div className="relative">
+                <Input
+                  type={showKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="pr-9"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey((v) => !v)}
+                  aria-label={showKey ? "Hide API key" : "Show API key"}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
           )}
 

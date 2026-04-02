@@ -30,6 +30,7 @@ export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/admin/users")
@@ -39,7 +40,13 @@ export default function UsersPage() {
         return r.json();
       })
       .then(setUsers)
-      .catch((e) => toast.error(e.message))
+      .catch((e) => {
+        const msg = e.message === "Admin access required"
+          ? e.message
+          : "Could not load users. Please refresh the page.";
+        setError(msg);
+        toast.error(e.message);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -81,6 +88,12 @@ export default function UsersPage() {
           Manage user roles and permissions. Only admins can access this page.
         </p>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       <div className="rounded-lg border">
         <div className="grid grid-cols-[1fr_1fr_auto] gap-4 border-b px-4 py-2.5 text-xs font-medium text-muted-foreground">
