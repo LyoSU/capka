@@ -66,7 +66,7 @@ export const GET = apiHandler(async () => {
         if (!m.id || m.id.includes(":free") || m.id.includes(":extended")) return false;
         const slug = m.id.split("/")[1] || "";
         if (DATED.test(slug)) return false;
-        if (m.created && m.created < TWO_MONTHS_AGO) return false;
+        if (!m.created || m.created < TWO_MONTHS_AGO) return false;
         const prompt = parseFloat(m.pricing?.prompt || "0");
         return prompt > 0 && (m.context_length || 0) >= minContext;
       })
@@ -79,7 +79,7 @@ export const GET = apiHandler(async () => {
           prompt: parseFloat(m.pricing?.prompt || "0") * 1_000_000,
           completion: parseFloat(m.pricing?.completion || "0") * 1_000_000,
         },
-        cutoff: m.knowledge_cutoff || null,
+        cutoff: m.knowledge_cutoff && m.knowledge_cutoff !== "unknown" ? m.knowledge_cutoff : null,
       }))
       .sort((a: ModelInfo, b: ModelInfo) =>
         a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name),

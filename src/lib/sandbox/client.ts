@@ -16,21 +16,15 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${CONTROLLER_SECRET}` };
 }
 
-async function request(path: string, method: string, body?: unknown) {
-  let res: Response;
+/** Wrap fetch — rethrow ECONNREFUSED/ENOTFOUND as user-friendly SandboxError */
+async function sandboxFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
   try {
-    res = await fetch(`${CONTROLLER_URL}${path}`, {
-      method,
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(method === "POST" ? 150_000 : 10_000),
-    });
+    return await fetch(input, init);
   } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException)?.cause && typeof (err as NodeJS.ErrnoException).cause === "object"
-      ? ((err as NodeJS.ErrnoException).cause as NodeJS.ErrnoException).code
-      : undefined;
+    const cause = (err as NodeJS.ErrnoException)?.cause;
+    const code = cause && typeof cause === "object" ? (cause as NodeJS.ErrnoException).code : undefined;
     if (code === "ECONNREFUSED" || code === "ENOTFOUND") {
-      console.error(`[sandbox] ${method} ${path}: controller unreachable (${code})`);
+      console.error(`[sandbox] controller unreachable (${code})`);
       throw new SandboxError(
         "Code execution is temporarily unavailable. Please try again in a moment.",
         "connect",
@@ -39,6 +33,15 @@ async function request(path: string, method: string, body?: unknown) {
     }
     throw err;
   }
+}
+
+async function request(path: string, method: string, body?: unknown) {
+  const res = await sandboxFetch(`${CONTROLLER_URL}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(method === "POST" ? 150_000 : 10_000),
+  });
 
   const data = await res.json().catch(() => ({ error: `Sandbox ${res.status}` }));
   if (!res.ok) {
@@ -91,7 +94,7 @@ export async function listFiles(sessionId: string, path = "."): Promise<{ entrie
 export async function downloadFile(sessionId: string, filePath: string): Promise<Response> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path: filePath });
-  const res = await fetch(`${CONTROLLER_URL}/sessions/${id}/download?${params}`, {
+  const res = await sandboxFetch(`${CONTROLLER_URL}/sessions/${id}/download?${params}`, {
     headers: authHeaders(),
     signal: AbortSignal.timeout(30_000),
   });
@@ -109,7 +112,7 @@ export async function uploadFile(sessionId: string, path: string, file: File): P
   form.append("path", path);
   form.append("file", file);
 
-  const res = await fetch(`${CONTROLLER_URL}/sessions/${id}/upload`, {
+  const res = await sandboxFetch(`${CONTROLLER_URL}/sessions/${id}/upload`, {
     method: "POST",
     headers: authHeaders(),
     body: form,
