@@ -329,16 +329,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     await finalizeTask(taskId, finalStatus, streamError ?? null);
     await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus });
 
-    // Record token usage/cost (never fatal).
+    // Record token usage/cost (never fatal). `inputTokens` is the TOTAL input
+    // including cached reads, so split it: charge non-cached at the input rate
+    // and cached reads at the discounted cache rate (avoids double-counting).
     try {
       const usage = await result.totalUsage;
       if (usage) {
+        const cacheRead = usage.inputTokenDetails?.cacheReadTokens ?? 0;
+        const nonCachedInput =
+          usage.inputTokenDetails?.noCacheTokens ?? Math.max(0, (usage.inputTokens ?? 0) - cacheRead);
         await recordUsage({
           taskId, messageId: msgId, userId, provider, model: modelId,
           usage: {
-            inputTokens: usage.inputTokens ?? 0,
+            inputTokens: nonCachedInput,
             outputTokens: usage.outputTokens ?? 0,
-            cachedInputTokens: usage.cachedInputTokens ?? 0,
+            cachedInputTokens: cacheRead,
           },
         });
       }
