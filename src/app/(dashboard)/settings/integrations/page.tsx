@@ -122,7 +122,7 @@ export default function IntegrationsPage() {
 
         <div className="flex items-center gap-2">
           {!tokenLoaded ? (
-            <Badge variant="secondary" className="text-xs text-muted-foreground/50">
+            <Badge variant="secondary" className="text-xs text-muted-foreground">
               <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               Checking...
             </Badge>

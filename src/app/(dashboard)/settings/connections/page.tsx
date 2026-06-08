@@ -205,7 +205,7 @@ export default function ConnectionsPage() {
               <Unplug className="h-6 w-6 text-muted-foreground" />
             </div>
             <p className="text-sm text-muted-foreground">No providers connected</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Add an API key to start using AI models</p>
+            <p className="text-xs text-muted-foreground mt-1">Add an API key to start using AI models</p>
           </div>
         )}
         {configs.map((c) => (
