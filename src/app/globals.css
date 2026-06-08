@@ -119,13 +119,6 @@
   --chart-5: oklch(0.645 0.246 16.44);
 }
 
-.streaming-fade {
-  background: linear-gradient(to right, currentColor, transparent);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
 @keyframes dot-chase {
   0%, 60%, 100% { background-color: oklch(0.708 0.01 285 / 0.2); }
   30% { background-color: oklch(0.708 0.01 285 / 1); }
