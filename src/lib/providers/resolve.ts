@@ -27,7 +27,11 @@ export async function resolveProviderConfig(userId: string) {
   return fallback ? { ...fallback, isShared: true } : null;
 }
 
-export async function resolveUserModel(userId: string, requestModel?: string) {
+/**
+ * Resolve a user's model along with the provider/model identifiers, so callers
+ * that need to record usage/cost (the worker) don't have to re-derive them.
+ */
+export async function resolveUserModelInfo(userId: string, requestModel?: string) {
   const config = await resolveProviderConfig(userId);
   if (!config) throw new ValidationError("No LLM provider configured. Ask your admin to set one up.");
   if (!config.defaultModel) throw new ValidationError("No default model set. Configure one in Settings → Connections.");
@@ -49,8 +53,14 @@ export async function resolveUserModel(userId: string, requestModel?: string) {
     modelId = requestModel;
   }
 
-  return getModel(provider, modelId, {
+  const model = getModel(provider, modelId, {
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
   });
+  return { model, provider, modelId };
+}
+
+export async function resolveUserModel(userId: string, requestModel?: string) {
+  const { model } = await resolveUserModelInfo(userId, requestModel);
+  return model;
 }

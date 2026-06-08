@@ -1,117 +1,83 @@
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { chats, messages, projects, memories, tasks } from "@/lib/db/schema";
+import { chats, messages, projects } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
-import { resolveUserModel } from "@/lib/providers/resolve";
-import { loadSandboxTools } from "@/lib/sandbox/tools";
-import { startTask } from "@/lib/tasks/runner";
+import { resolveUserModelInfo } from "@/lib/providers/resolve";
+import { enqueueTask } from "@/lib/tasks/queue";
+import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
 import { toUIMessages } from "@/lib/chat/presenter";
-import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 import { chatRequestSchema } from "@/lib/chat/contracts";
 
 export const POST = apiHandler(async (req: Request) => {
-  let mcpClose: (() => Promise<void>) | undefined;
-  let taskStarted = false;
-  try {
-    const { userId } = await requireRole("admin", "user");
-    const body = chatRequestSchema.parse(await req.json());
-    const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
-    const chatId = requestChatId || nanoid();
+  const { userId } = await requireRole("admin", "user");
+  const body = chatRequestSchema.parse(await req.json());
+  const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
+  const chatId = requestChatId || nanoid();
 
-    const [chatRow, model, project, userMemories] = await Promise.all([
-      requestChatId
-        ? db.select({ id: chats.id, userId: chats.userId, title: chats.title }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
-        : undefined,
-      resolveUserModel(userId, requestModel),
-      projectId
-        ? db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
-        : Promise.resolve(undefined),
-      db.select().from(memories).where(eq(memories.userId, userId)).orderBy(desc(memories.createdAt)).limit(50),
-    ]);
+  // Validate the provider/model up front so the user gets immediate feedback
+  // instead of a task that fails in the background. The worker re-resolves it.
+  await resolveUserModelInfo(userId, requestModel);
 
-    const mcp = await loadSandboxTools(userId, chatId, project?.sandboxNetwork ?? undefined);
-    mcpClose = mcp.close;
+  const [chatRow, project] = await Promise.all([
+    requestChatId
+      ? db.select({ id: chats.id, userId: chats.userId, title: chats.title }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
+      : undefined,
+    projectId
+      ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
+      : Promise.resolve(undefined),
+  ]);
 
-    // IDOR: chat exists but belongs to another user
-    if (chatRow && chatRow.userId !== userId) {
-      await mcpClose();
-      return Response.json({ error: "Chat not found" }, { status: 404 });
-    }
-    const existingChat = chatRow?.userId === userId ? chatRow : undefined;
-
-    if (!existingChat) {
-      await db.insert(chats).values({
-        id: chatId,
-        userId,
-        title: "New Chat",
-        model: requestModel,
-        projectId: project?.id ?? null,
-      });
-    }
-
-    // Save user message + update chat title
-    const text = userMessage || "";
-    if (text) {
-      const isNewChat = !existingChat || existingChat.title === "New Chat";
-      await Promise.all([
-        db.insert(messages).values({
-          id: nanoid(),
-          chatId,
-          role: "user",
-          content: text,
-          platform: "web",
-        }).onConflictDoNothing(),
-        db.update(chats).set({
-          ...(isNewChat ? { title: text.slice(0, 100) } : {}),
-          updatedAt: new Date(),
-        }).where(eq(chats.id, chatId)),
-      ]);
-    }
-
-    // Workspace snapshot — NOTE: execCommand runs inside isolated Docker container, not on host
-    let workspaceSnapshot: string | undefined;
-    try {
-      const { execCommand: sandboxExec } = await import("@/lib/sandbox/client");
-      const ws = await sandboxExec(chatId, "find /workspace -maxdepth 3 -not -path '*/\\.*' | head -50", 5000).catch(() => null);
-      if (ws?.stdout?.trim()) workspaceSnapshot = ws.stdout.trim();
-    } catch { /* sandbox not ready yet */ }
-
-    const fileList = attachedFiles as FileRef[] | undefined;
-    const { nativeFiles } = classifyFiles(fileList);
-    const systemPrompt = buildSystemPrompt({
-      project,
-      memories: userMemories,
-      workspaceSnapshot,
-      attachedFiles: fileList,
-    });
-
-    // Create task and start background execution
-    const taskId = nanoid();
-    await db.insert(tasks).values({ id: taskId, chatId, userId });
-
-    startTask({
-      taskId,
-      chatId,
-      userId,
-      model,
-      tools: mcp.tools,
-      systemPrompt,
-      uiMessages: body.messages || [],
-      closeMcp: mcpClose!,
-      existingMemories: userMemories,
-      nativeFiles: nativeFiles.length > 0 ? nativeFiles : undefined,
-    });
-    taskStarted = true;
-
-    // Return immediately — client syncs via SSE
-    return Response.json({ taskId, chatId });
-  } catch (e) {
-    if (!taskStarted) await mcpClose?.();
-    throw e;
+  // IDOR: chat exists but belongs to another user
+  if (chatRow && chatRow.userId !== userId) {
+    return Response.json({ error: "Chat not found" }, { status: 404 });
   }
+  const existingChat = chatRow?.userId === userId ? chatRow : undefined;
+
+  if (!existingChat) {
+    await db.insert(chats).values({
+      id: chatId,
+      userId,
+      title: "New Chat",
+      model: requestModel,
+      projectId: project?.id ?? null,
+    });
+  }
+
+  // Save user message + update chat title
+  const text = userMessage || "";
+  if (text) {
+    const isNewChat = !existingChat || existingChat.title === "New Chat";
+    await Promise.all([
+      db.insert(messages).values({
+        id: nanoid(),
+        chatId,
+        role: "user",
+        content: text,
+        platform: "web",
+      }).onConflictDoNothing(),
+      db.update(chats).set({
+        ...(isNewChat ? { title: text.slice(0, 100) } : {}),
+        updatedAt: new Date(),
+      }).where(eq(chats.id, chatId)),
+    ]);
+  }
+
+  // Enqueue a durable task. The worker rebuilds model/tools/prompt from this
+  // payload and runs it in the background — independent of this request.
+  const taskId = nanoid();
+  const payload: TaskPayload = {
+    requestModel,
+    projectId: project?.id,
+    uiMessages: body.messages || [],
+    attachedFiles: attachedFiles as FileRef[] | undefined,
+  };
+  await enqueueTask({ id: taskId, chatId, userId, payload });
+
+  // Return immediately — client syncs via SSE
+  return Response.json({ taskId, chatId });
 });
 
 export const GET = apiHandler(async (req: Request) => {

@@ -1,37 +1,37 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
-import type { LanguageModel, ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
-import { eq } from "drizzle-orm";
+import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
+import { eq, and, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { tasks, messages, memories } from "@/lib/db/schema";
-import { eventBus } from "@/lib/events";
+import { messages, memories, projects } from "@/lib/db/schema";
+import { realtime } from "@/lib/realtime";
+import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
+import { resolveUserModelInfo } from "@/lib/providers/resolve";
+import { loadSandboxTools } from "@/lib/sandbox/tools";
+import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
+import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import type { StoredPart } from "@/lib/chat/contracts";
 
-const running = new Map<string, AbortController>();
-const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function cancelTask(taskId: string): boolean {
-  const ac = running.get(taskId);
-  if (!ac) return false;
-  ac.abort();
-  return true;
-}
-
-interface StartTaskOpts {
-  taskId: string;
-  chatId: string;
-  userId: string;
-  model: LanguageModel;
-  tools: Record<string, unknown>;
-  systemPrompt: string;
+/** Everything persisted on the task so any worker can run it without the
+ *  originating request's memory. Model/tools/prompt are re-resolved here. */
+export interface TaskPayload {
+  requestModel?: string;
+  projectId?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   uiMessages: any[];
-  closeMcp: () => Promise<void>;
-  existingMemories: { content: string }[];
-  nativeFiles?: FileRef[];
+  attachedFiles?: FileRef[];
+}
+
+export interface ClaimedTask {
+  id: string;
+  chat_id: string;
+  user_id: string;
+  payload: unknown;
 }
 
 /** Max concurrent file downloads from sandbox */
@@ -104,44 +104,103 @@ async function injectNativeFiles(
   console.log(`[task] injected ${parts.length} native file(s) (${(totalBytes / 1024).toFixed(0)}KB) into model message`);
 }
 
-export function startTask(opts: StartTaskOpts) {
-  const { taskId, chatId, userId, model, tools, systemPrompt, uiMessages, closeMcp, existingMemories, nativeFiles } = opts;
+/** Re-resolve everything needed to run the task from its persisted payload. */
+async function prepareRun(userId: string, chatId: string, payload: TaskPayload) {
+  const [{ model, provider, modelId }, project, userMemories] = await Promise.all([
+    resolveUserModelInfo(userId, payload.requestModel),
+    payload.projectId
+      ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
+      : Promise.resolve(undefined),
+    db.select().from(memories).where(eq(memories.userId, userId)).orderBy(desc(memories.createdAt)).limit(50),
+  ]);
+
+  const mcp = await loadSandboxTools(userId, chatId, project?.sandboxNetwork ?? undefined);
+
+  // Workspace snapshot — runs inside the isolated Docker container, not the host.
+  let workspaceSnapshot: string | undefined;
+  try {
+    const { execCommand } = await import("@/lib/sandbox/client");
+    const ws = await execCommand(chatId, "find /workspace -maxdepth 3 -not -path '*/\\.*' | head -50", 5000).catch(() => null);
+    if (ws?.stdout?.trim()) workspaceSnapshot = ws.stdout.trim();
+  } catch { /* sandbox not ready yet */ }
+
+  const systemPrompt = buildSystemPrompt({
+    project,
+    memories: userMemories,
+    workspaceSnapshot,
+    attachedFiles: payload.attachedFiles,
+  });
+
+  return { model, provider, modelId, tools: mcp.tools, closeMcp: mcp.close, systemPrompt, userMemories };
+}
+
+/**
+ * Run an agent task to completion. Invoked by the worker for a claimed task
+ * row — independent of any HTTP request, so it keeps running with the user's
+ * tab closed. Streams via Postgres realtime, renews its lease via heartbeat,
+ * cancels cooperatively through a DB flag, records usage, and finalizes the
+ * task in the durable queue.
+ */
+export async function runAgentTask(task: ClaimedTask, workerId: string): Promise<void> {
+  const taskId = task.id;
+  const chatId = task.chat_id;
+  const userId = task.user_id;
   const channel = `user:${userId}`;
+  const payload = (task.payload ?? {}) as TaskPayload;
+
   const ac = new AbortController();
-  running.set(taskId, ac);
-
   const msgId = nanoid();
-
-  // Ordered parts — hoisted so catch can access accumulated state
   const parts: StoredPart[] = [];
-  const getFullText = () => parts.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
+  const getFullText = () =>
+    parts.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
   let streamError: string | undefined;
+  let closeMcp: (() => Promise<void>) | undefined;
 
-  // Fire-and-forget — runs independently of HTTP lifecycle
-  (async () => {
-    try {
-      await db.insert(messages).values({
-        id: msgId,
-        chatId,
-        role: "assistant",
-        content: "",
-        platform: "web",
-        metadata: { taskId, status: "running", parts: [] },
-      });
+  // Renew lease + poll for cooperative cancellation cross-process.
+  const monitor = setInterval(() => {
+    void (async () => {
+      try {
+        const alive = await heartbeat(taskId, workerId);
+        if (!alive) { ac.abort(); return; } // lost lease (reconciled) → stop
+        if (await isCancelRequested(taskId)) ac.abort();
+      } catch { /* transient DB hiccup; next tick retries */ }
+    })();
+  }, 5000);
 
-      eventBus.emit(channel, { type: "task:start", taskId, chatId, messageId: msgId });
+  try {
+    // Cancelled while still queued — don't spin anything up.
+    if (await isCancelRequested(taskId)) {
+      await finalizeTask(taskId, "cancelled");
+      await realtime.publish(channel, { type: "task:finish", taskId, chatId, status: "cancelled" });
+      return;
+    }
 
-      const hasTools = Object.keys(tools).length > 0;
-      const modelMessages = await convertToModelMessages(uiMessages);
+    const { model, provider, modelId, tools, closeMcp: close, systemPrompt, userMemories } =
+      await prepareRun(userId, chatId, payload);
+    closeMcp = close;
 
-      // Inject images/PDFs as native content so the model can see/read them directly
-      let injectedNative = false;
-      if (nativeFiles?.length) {
-        await injectNativeFiles(modelMessages, chatId, nativeFiles);
-        injectedNative = true;
-      }
+    await db.insert(messages).values({
+      id: msgId,
+      chatId,
+      role: "assistant",
+      content: "",
+      platform: "web",
+      metadata: { taskId, status: "running", parts: [] },
+    });
+    await realtime.publish(channel, { type: "task:start", taskId, chatId, messageId: msgId });
 
-      const makeStream = () => streamText({
+    const hasTools = Object.keys(tools).length > 0;
+    const modelMessages = await convertToModelMessages(payload.uiMessages ?? []);
+
+    let injectedNative = false;
+    const { nativeFiles } = classifyFiles(payload.attachedFiles);
+    if (nativeFiles.length) {
+      await injectNativeFiles(modelMessages, chatId, nativeFiles);
+      injectedNative = true;
+    }
+
+    const makeStream = () =>
+      streamText({
         model,
         ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25) } : {}),
         system: systemPrompt,
@@ -149,178 +208,171 @@ export function startTask(opts: StartTaskOpts) {
         abortSignal: ac.signal,
       });
 
-      let result = makeStream();
+    let result = makeStream();
 
-      function appendText(delta: string) {
-        const last = parts[parts.length - 1];
-        if (last?.type === "text") last.text += delta;
-        else parts.push({ type: "text", text: delta });
-      }
+    const appendText = (delta: string) => {
+      const last = parts[parts.length - 1];
+      if (last?.type === "text") last.text += delta;
+      else parts.push({ type: "text", text: delta });
+    };
 
-      // Stream events — if model rejects vision, strip files and retry once
-      let retried = false;
-      const consume = async () => {
-        for await (const event of result.fullStream) {
+    // Batch text deltas: one NOTIFY every ~100ms instead of per token, so a
+    // long response is a handful of round-trips, not hundreds. Tool events
+    // (rarer) publish immediately and flush any buffered text first to keep
+    // ordering correct.
+    let textBuf = "";
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushText = async () => {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      if (!textBuf) return;
+      const delta = textBuf;
+      textBuf = "";
+      await realtime.publish(channel, { type: "task:text-delta", taskId, chatId, messageId: msgId, delta });
+    };
+    const scheduleFlush = () => {
+      if (flushTimer) return;
+      flushTimer = setTimeout(() => { flushTimer = null; void flushText(); }, 100);
+    };
+
+    let retried = false;
+    const consume = async () => {
+      for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;
-
         switch (event.type) {
           case "text-delta":
             appendText(event.text);
-            eventBus.emit(channel, {
-              type: "task:text-delta",
-              taskId, chatId, messageId: msgId,
-              delta: event.text,
-            });
+            textBuf += event.text;
+            scheduleFlush();
             break;
-
           case "tool-call":
-            parts.push({
-              type: "tool-call",
-              id: event.toolCallId,
-              name: event.toolName,
-              input: event.input,
-            });
-            eventBus.emit(channel, {
-              type: "task:tool-call",
-              taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              args: event.input,
+            await flushText();
+            parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
+            await realtime.publish(channel, {
+              type: "task:tool-call", taskId, chatId, messageId: msgId,
+              toolCallId: event.toolCallId, toolName: event.toolName, args: event.input,
             });
             break;
-
           case "tool-result":
-            parts.push({
-              type: "tool-result",
-              id: event.toolCallId,
-              name: event.toolName,
-              output: event.output,
-            });
-            eventBus.emit(channel, {
-              type: "task:tool-result",
-              taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId,
-              result: event.output,
+            await flushText();
+            parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output: event.output });
+            await realtime.publish(channel, {
+              type: "task:tool-result", taskId, chatId, messageId: msgId,
+              toolCallId: event.toolCallId, result: event.output,
             });
             break;
-
           case "tool-error":
-            parts.push({
-              type: "tool-error",
-              id: event.toolCallId,
-              name: event.toolName,
-              error: errMsg(event.error),
-            });
-            eventBus.emit(channel, {
-              type: "task:tool-result",
-              taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId,
-              result: { error: errMsg(event.error) },
+            await flushText();
+            parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: errMsg(event.error) });
+            await realtime.publish(channel, {
+              type: "task:tool-result", taskId, chatId, messageId: msgId,
+              toolCallId: event.toolCallId, result: { error: errMsg(event.error) },
             });
             break;
-
           case "error":
             streamError = errMsg(event.error);
             break;
-
           case "finish-step":
-            // Progressive save — update assistant message in DB after each step
+            // Flush buffered text, progressive save + lease renewal per step.
+            await flushText();
             await db.update(messages).set({
               content: getFullText(),
               metadata: { taskId, status: "running", parts },
             }).where(eq(messages.id, msgId));
+            await heartbeat(taskId, workerId);
             break;
         }
-        }
-      };
+      }
+      await flushText();
+    };
 
-      try {
+    try {
+      await consume();
+    } catch (e) {
+      const msg = errMsg(e);
+      const isVisionError = injectedNative && !retried &&
+        (msg.includes("image input") || msg.includes("vision") || msg.includes("multimodal") || msg.includes("does not support"));
+      if (isVisionError) {
+        console.log("[task] model doesn't support vision — retrying without native files");
+        retried = true;
+        const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
+        if (lastUser && Array.isArray(lastUser.content)) {
+          lastUser.content = lastUser.content.filter((p) => p.type !== "file");
+        }
+        result = makeStream();
         await consume();
-      } catch (e) {
-        // If model rejects vision input, strip file parts and retry once
-        const msg = errMsg(e);
-        const isVisionError = injectedNative && !retried &&
-          (msg.includes("image input") || msg.includes("vision") || msg.includes("multimodal") || msg.includes("does not support"));
-        if (isVisionError) {
-          console.log("[task] model doesn't support vision — retrying without native files");
-          retried = true;
-          const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
-          if (lastUser && Array.isArray(lastUser.content)) {
-            lastUser.content = lastUser.content.filter((p) => p.type !== "file");
-          }
-          result = makeStream();
+      } else {
+        throw e;
+      }
+    }
+
+    // Retry once if the model produced no content.
+    if (!ac.signal.aborted && !streamError) {
+      const hasContent = parts.some((p) => (p.type === "text" && p.text.trim()) || p.type === "tool-call");
+      if (!hasContent) {
+        console.log("[task] empty response — retrying once");
+        parts.length = 0;
+        result = makeStream();
+        try {
           await consume();
-        } else {
-          throw e;
+        } catch (retryErr) {
+          streamError = errMsg(retryErr);
         }
       }
+    }
 
-      // Retry once if model produced no content (empty response)
-      if (!ac.signal.aborted && !streamError) {
-        const hasContent = parts.some((p) =>
-          (p.type === "text" && p.text.trim()) || p.type === "tool-call",
-        );
-        if (!hasContent) {
-          console.log("[task] empty response — retrying once");
-          parts.length = 0;
-          result = makeStream();
-          try {
-            await consume();
-          } catch (retryErr) {
-            streamError = errMsg(retryErr);
-          }
-        }
-      }
+    const finalStatus = ac.signal.aborted ? "cancelled" : streamError ? "failed" : "completed";
 
-      // Final save
-      const finalStatus = ac.signal.aborted ? "cancelled" : streamError ? "failed" : "completed";
-      await db.update(messages).set({
-        content: getFullText(),
-        metadata: {
-          taskId,
-          status: finalStatus,
-          parts: parts.length > 0 ? parts : undefined,
-        },
-      }).where(eq(messages.id, msgId));
+    await db.update(messages).set({
+      content: getFullText(),
+      metadata: { taskId, status: finalStatus, parts: parts.length > 0 ? parts : undefined },
+    }).where(eq(messages.id, msgId));
+    await finalizeTask(taskId, finalStatus, streamError ?? null);
+    await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus });
 
-      await db.update(tasks).set({
-        status: finalStatus,
-        ...(streamError ? { error: streamError } : {}),
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, taskId));
-
-      eventBus.emit(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus });
-
-      // Extract memories (fire-and-forget)
-      const text = getFullText();
-      if (text) {
-        extractMemories(model, text, existingMemories.map((m) => m.content))
-          .then(async (newFacts) => {
-            if (newFacts.length > 0) {
-              await db.insert(memories).values(
-                newFacts.map((content) => ({ id: nanoid(), userId, content, type: "fact" })),
-              );
-            }
-          })
-          .catch((e) => console.error("[task] memory extraction failed:", e));
+    // Record token usage/cost (never fatal).
+    try {
+      const usage = await result.totalUsage;
+      if (usage) {
+        await recordUsage({
+          taskId, messageId: msgId, userId, provider, model: modelId,
+          usage: {
+            inputTokens: usage.inputTokens ?? 0,
+            outputTokens: usage.outputTokens ?? 0,
+            cachedInputTokens: usage.cachedInputTokens ?? 0,
+          },
+        });
       }
     } catch (e) {
-      const isAbort = e instanceof Error && e.name === "AbortError";
-      const status = isAbort ? "cancelled" : "failed";
-      const error = isAbort ? undefined : errMsg(e);
-
-      // Update both task AND message status — preserve any parts already accumulated
-      await Promise.all([
-        db.update(tasks).set({ status, error, updatedAt: new Date() }).where(eq(tasks.id, taskId)).catch(() => {}),
-        db.update(messages).set({
-          content: getFullText(),
-          metadata: { taskId, status, error, parts: parts.length > 0 ? parts : undefined },
-        }).where(eq(messages.id, msgId)).catch(() => {}),
-      ]);
-      eventBus.emit(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status, error });
-    } finally {
-      running.delete(taskId);
-      await closeMcp().catch(() => {});
+      console.error("[task] usage capture failed:", e);
     }
-  })();
+
+    // Extract long-term memories (fire-and-forget).
+    const text = getFullText();
+    if (text) {
+      extractMemories(model, text, userMemories.map((m) => m.content))
+        .then(async (newFacts) => {
+          if (newFacts.length > 0) {
+            await db.insert(memories).values(
+              newFacts.map((content) => ({ id: nanoid(), userId, content, type: "fact" })),
+            );
+          }
+        })
+        .catch((e) => console.error("[task] memory extraction failed:", e));
+    }
+  } catch (e) {
+    const isAbort = e instanceof Error && e.name === "AbortError";
+    const status = isAbort ? "cancelled" : "failed";
+    const error = isAbort ? undefined : errMsg(e);
+    await Promise.all([
+      finalizeTask(taskId, status, error ?? null).catch(() => {}),
+      db.update(messages).set({
+        content: getFullText(),
+        metadata: { taskId, status, error, parts: parts.length > 0 ? parts : undefined },
+      }).where(eq(messages.id, msgId)).catch(() => {}),
+    ]);
+    await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status, error }).catch(() => {});
+  } finally {
+    clearInterval(monitor);
+    await closeMcp?.().catch(() => {});
+  }
 }
