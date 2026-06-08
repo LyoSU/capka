@@ -5,7 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, chats } from "@/lib/db/schema";
-import { resolveProviderConfig } from "@/lib/providers/resolve";
+import { resolveInitialModel } from "@/lib/providers/default-model";
 import { ChatPanel } from "@/components/chat/chat-panel";
 
 export default async function ChatIdPage({
@@ -24,31 +24,26 @@ export default async function ChatIdPage({
 
   // Load existing chat to check for projectId
   const [existingChat] = await db
-    .select({ projectId: chats.projectId })
+    .select({ projectId: chats.projectId, model: chats.model })
     .from(chats)
     .where(and(eq(chats.id, chatId), eq(chats.userId, session.user.id)))
     .limit(1);
 
   const projectId = existingChat?.projectId ?? qsProjectId ?? null;
 
-  const [config, project] = await Promise.all([
-    resolveProviderConfig(session.user.id),
-    projectId
-      ? db
-          .select()
-          .from(projects)
-          .where(and(eq(projects.id, projectId), eq(projects.userId, session.user.id)))
-          .limit(1)
-          .then((r) => r[0])
-      : Promise.resolve(undefined),
-  ]);
+  const project = projectId
+    ? await db
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, projectId), eq(projects.userId, session.user.id)))
+        .limit(1)
+        .then((r) => r[0])
+    : undefined;
 
-  // Project's defaultModel overrides provider default
-  const defaultModel = project?.defaultModel
-    ? project.defaultModel
-    : config?.defaultModel
-      ? `${config.provider}:${config.defaultModel}`
-      : "";
+  const defaultModel = await resolveInitialModel(session.user.id, {
+    chatModel: existingChat?.model,
+    projectDefaultModel: project?.defaultModel,
+  });
 
   return (
     <ChatPanel

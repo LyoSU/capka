@@ -17,13 +17,9 @@ export const POST = apiHandler(async (req: Request) => {
   const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
   const chatId = requestChatId || nanoid();
 
-  // Validate the provider/model up front so the user gets immediate feedback
-  // instead of a task that fails in the background. The worker re-resolves it.
-  await resolveUserModelInfo(userId, requestModel);
-
   const [chatRow, project] = await Promise.all([
     requestChatId
-      ? db.select({ id: chats.id, userId: chats.userId, title: chats.title }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
+      ? db.select({ id: chats.id, userId: chats.userId, title: chats.title, model: chats.model }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
       : undefined,
     projectId
       ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
@@ -36,12 +32,21 @@ export const POST = apiHandler(async (req: Request) => {
   }
   const existingChat = chatRow?.userId === userId ? chatRow : undefined;
 
+  // The chat's own model is the source of truth so the choice sticks across
+  // reloads/turns; an explicit per-request model (user just switched) wins and
+  // is persisted back onto the chat.
+  const effectiveModel = requestModel ?? existingChat?.model ?? undefined;
+
+  // Validate the provider/model up front so the user gets immediate feedback
+  // instead of a task that fails in the background. The worker re-resolves it.
+  await resolveUserModelInfo(userId, effectiveModel);
+
   if (!existingChat) {
     await db.insert(chats).values({
       id: chatId,
       userId,
       title: "New Chat",
-      model: requestModel,
+      model: effectiveModel ?? null,
       projectId: project?.id ?? null,
     });
   }
@@ -60,6 +65,8 @@ export const POST = apiHandler(async (req: Request) => {
       }).onConflictDoNothing(),
       db.update(chats).set({
         ...(isNewChat ? { title: text.slice(0, 100) } : {}),
+        // Persist an explicit model switch so it sticks to this chat.
+        ...(requestModel && requestModel !== existingChat?.model ? { model: requestModel } : {}),
         updatedAt: new Date(),
       }).where(eq(chats.id, chatId)),
     ]);
@@ -69,7 +76,7 @@ export const POST = apiHandler(async (req: Request) => {
   // payload and runs it in the background — independent of this request.
   const taskId = nanoid();
   const payload: TaskPayload = {
-    requestModel,
+    requestModel: effectiveModel,
     projectId: project?.id,
     uiMessages: body.messages || [],
     attachedFiles: attachedFiles as FileRef[] | undefined,

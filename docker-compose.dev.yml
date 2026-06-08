@@ -1,7 +1,9 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 services:
   platform:
-    build: .
+    build:
+      context: .
+      target: dev # full deps, no prod build — gives `next dev` hot-reload
     command: npm run dev
     volumes:
       - .:/app

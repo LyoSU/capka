@@ -10,6 +10,16 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
+# Dev target: full deps, no production build — source is bind-mounted at runtime
+# and `next dev` provides hot-reload. Used by docker-compose.dev.yml.
+FROM node:22-alpine AS dev
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+EXPOSE 3000
+ENV PORT=3000 HOSTNAME="0.0.0.0"
+CMD ["npm", "run", "dev"]
+
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
