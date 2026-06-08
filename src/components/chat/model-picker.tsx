@@ -1,10 +1,19 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef } from "react";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, Star } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { iconForSlug } from "./provider-icons";
 
-type Model = { id: string; name: string; provider: string; context: number };
+type Model = {
+  id: string;
+  name: string;
+  provider: string;
+  context: number;
+  icon?: string | null;
+  group?: string | null;
+  featured?: boolean;
+};
 
 /**
  * Lightweight model picker for settings / onboarding.
@@ -36,13 +45,18 @@ export function ModelPicker({
   }, []);
 
   const filtered = useMemo(() => {
-    if (!search) return models.slice(0, 50);
     const q = search.toLowerCase();
-    return models.filter((m) =>
-      m.id.toLowerCase().includes(q) ||
-      m.name.toLowerCase().includes(q) ||
-      m.provider.toLowerCase().includes(q)
-    ).slice(0, 50);
+    const matches = search
+      ? models.filter((m) =>
+          m.id.toLowerCase().includes(q) ||
+          m.name.toLowerCase().includes(q) ||
+          (m.group || m.provider).toLowerCase().includes(q),
+        )
+      : models;
+    // Featured first so the curated picks lead the list.
+    return [...matches]
+      .sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name))
+      .slice(0, 50);
   }, [models, search]);
 
   const selectedName = models.find((m) => m.id === value)?.name
@@ -70,21 +84,26 @@ export function ModelPicker({
               {search ? "No models found" : "No models available"}
             </div>
           )}
-          {filtered.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${m.id === value ? "bg-accent/50" : ""}`}
-              onClick={() => {
-                onChange(m.id);
-                setSearch("");
-                setOpen(false);
-              }}
-            >
-              <span className="truncate">{m.name}</span>
-              <span className="ml-2 shrink-0 text-[11px] text-muted-foreground/50">{m.provider}</span>
-            </button>
-          ))}
+          {filtered.map((m) => {
+            const Icon = iconForSlug(m.icon);
+            return (
+              <button
+                key={m.id}
+                type="button"
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${m.id === value ? "bg-accent/50" : ""}`}
+                onClick={() => {
+                  onChange(m.id);
+                  setSearch("");
+                  setOpen(false);
+                }}
+              >
+                <Icon size={14} className="shrink-0 text-muted-foreground" />
+                {m.featured && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
+                <span className="truncate flex-1">{m.name}</span>
+                <span className="ml-2 shrink-0 text-[11px] text-muted-foreground/50">{m.group || m.provider}</span>
+              </button>
+            );
+          })}
           {search && (
             <button
               type="button"

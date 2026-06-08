@@ -1,18 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback, type ComponentType } from "react";
-import { Search, ChevronDown, X, Sparkles } from "lucide-react";
-import OpenAI from "@lobehub/icons/es/OpenAI";
-import Anthropic from "@lobehub/icons/es/Anthropic";
-import Gemini from "@lobehub/icons/es/Gemini";
-import Meta from "@lobehub/icons/es/Meta";
-import Mistral from "@lobehub/icons/es/Mistral";
-import DeepSeek from "@lobehub/icons/es/DeepSeek";
-import XAI from "@lobehub/icons/es/XAI";
-import Qwen from "@lobehub/icons/es/Qwen";
-import Minimax from "@lobehub/icons/es/Minimax";
-import XiaomiMiMo from "@lobehub/icons/es/XiaomiMiMo";
-import Nvidia from "@lobehub/icons/es/Nvidia";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { Search, ChevronDown, X, Eye, Wrench, Brain, Star } from "lucide-react";
+import { iconForSlug } from "./provider-icons";
 import type { ModelInfo } from "@/app/api/models/route";
 
 interface ModelSelectorProps {
@@ -20,21 +10,9 @@ interface ModelSelectorProps {
   onChange: (value: string) => void;
 }
 
-type IconComponent = ComponentType<{ size?: number; className?: string }>;
-
-const PROVIDER_META: Record<string, { label: string; icon: IconComponent }> = {
-  openai: { label: "OpenAI", icon: OpenAI },
-  anthropic: { label: "Anthropic", icon: Anthropic },
-  google: { label: "Google", icon: Gemini },
-  "meta-llama": { label: "Meta", icon: Meta },
-  mistralai: { label: "Mistral", icon: Mistral },
-  deepseek: { label: "DeepSeek", icon: DeepSeek },
-  "x-ai": { label: "xAI", icon: XAI },
-  qwen: { label: "Qwen", icon: Qwen },
-  minimax: { label: "MiniMax", icon: Minimax },
-  xiaomi: { label: "Xiaomi", icon: XiaomiMiMo },
-  nvidia: { label: "NVIDIA", icon: Nvidia },
-};
+// Companies shown first — the rest follow alphabetically. Keeps the common
+// choices on top without hiding the long tail.
+const GROUP_PRIORITY = ["Anthropic", "OpenAI", "Google", "Meta", "Mistral", "DeepSeek", "xAI", "Qwen"];
 
 function formatContext(ctx: number): string {
   if (ctx >= 1_000_000) return `${(ctx / 1_000_000).toFixed(0)}M`;
@@ -42,11 +20,30 @@ function formatContext(ctx: number): string {
   return String(ctx);
 }
 
+function formatPrice(p: number): string {
+  return `$${p < 1 ? p.toFixed(2) : p.toFixed(1)}/M`;
+}
+
 function getDisplayName(value: string): string {
   if (!value) return "select model";
   const parts = value.split(":");
   const modelPart = parts[parts.length - 1];
   return modelPart.includes("/") ? modelPart.split("/").pop()! : modelPart;
+}
+
+function groupOf(m: ModelInfo): string {
+  return m.group || (m.provider ? m.provider : "Other");
+}
+
+function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
+  if (!caps) return null;
+  return (
+    <span className="flex items-center gap-1 text-muted-foreground/40">
+      {caps.vision && <Eye className="h-3 w-3" aria-label="vision" />}
+      {caps.tools && <Wrench className="h-3 w-3" aria-label="tools" />}
+      {caps.reasoning && <Brain className="h-3 w-3" aria-label="reasoning" />}
+    </span>
+  );
 }
 
 function ModelList({
@@ -73,14 +70,12 @@ function ModelList({
   const filtered = useMemo(() => {
     if (!search) return models;
     const q = search.toLowerCase();
-    return models.filter((m) => {
-      const providerLabel = PROVIDER_META[m.provider]?.label || m.provider;
-      return (
+    return models.filter(
+      (m) =>
         m.id.toLowerCase().includes(q) ||
         m.name.toLowerCase().includes(q) ||
-        providerLabel.toLowerCase().includes(q)
-      );
-    });
+        groupOf(m).toLowerCase().includes(q),
+    );
   }, [models, search]);
 
   const indexMap = useMemo(() => new Map(filtered.map((m, i) => [m.id, i])), [filtered]);
@@ -88,14 +83,18 @@ function ModelList({
   const groups = useMemo(() => {
     const map = new Map<string, ModelInfo[]>();
     for (const m of filtered) {
-      const list = map.get(m.provider) ?? [];
+      const g = groupOf(m);
+      const list = map.get(g) ?? [];
       list.push(m);
-      map.set(m.provider, list);
+      map.set(g, list);
     }
-    const priority = ["openai", "anthropic", "google", "meta-llama", "mistralai", "deepseek", "x-ai", "qwen"];
+    // Featured models first within each group, then by name.
+    for (const list of map.values()) {
+      list.sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name));
+    }
     return [...map.entries()].sort(([a], [b]) => {
-      const ai = priority.indexOf(a);
-      const bi = priority.indexOf(b);
+      const ai = GROUP_PRIORITY.indexOf(a);
+      const bi = GROUP_PRIORITY.indexOf(b);
       if (ai !== -1 && bi !== -1) return ai - bi;
       if (ai !== -1) return -1;
       if (bi !== -1) return 1;
@@ -122,9 +121,7 @@ function ModelList({
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
         />
         {search && (
-          <span className="text-[10px] text-muted-foreground tabular-nums">
-            {filtered.length}
-          </span>
+          <span className="text-[10px] text-muted-foreground tabular-nums">{filtered.length}</span>
         )}
       </div>
 
@@ -136,23 +133,17 @@ function ModelList({
           </div>
         )}
 
-        {groups.map(([provider, providerModels]) => {
-          const meta = PROVIDER_META[provider];
-          const Icon = meta?.icon ?? Sparkles;
-
+        {groups.map(([group, groupModels]) => {
+          const Icon = iconForSlug(groupModels[0]?.icon);
           return (
-            <div key={provider}>
+            <div key={group}>
               <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border/50">
                 <Icon size={12} />
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  {meta?.label ?? provider}
-                </span>
-                <span className="text-[10px] text-muted-foreground/50 tabular-nums">
-                  {providerModels.length}
-                </span>
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{group}</span>
+                <span className="text-[10px] text-muted-foreground/50 tabular-nums">{groupModels.length}</span>
               </div>
 
-              {providerModels.map((model) => {
+              {groupModels.map((model) => {
                 const globalIdx = indexMap.get(model.id) ?? -1;
                 const isActive = globalIdx === activeIndex;
                 const isCurrent = model.id === currentModelId;
@@ -169,23 +160,16 @@ function ModelList({
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
+                        {model.featured && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
                         <span className="truncate text-sm">{model.name}</span>
                         {isCurrent && (
-                          <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">
-                            active
-                          </span>
+                          <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">active</span>
                         )}
                       </div>
                       <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground/60">
-                        {model.context > 0 && (
-                          <span className="tabular-nums">{formatContext(model.context)} tokens</span>
-                        )}
-                        {model.pricing.prompt > 0 && (
-                          <span className="tabular-nums">${model.pricing.prompt < 1 ? model.pricing.prompt.toFixed(2) : model.pricing.prompt.toFixed(1)}/M in</span>
-                        )}
-                        {model.cutoff && (
-                          <span className="tabular-nums">cutoff {model.cutoff}</span>
-                        )}
+                        {model.context > 0 && <span className="tabular-nums">{formatContext(model.context)} ctx</span>}
+                        {model.pricing.prompt > 0 && <span className="tabular-nums">{formatPrice(model.pricing.prompt)} in</span>}
+                        <Caps caps={model.capabilities} />
                       </div>
                     </div>
                   </button>
@@ -227,7 +211,6 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const fetchedRef = useRef(false);
 
-  // Detect mobile
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
     check();
@@ -235,7 +218,6 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Fetch models on mount (needed for display name in pill)
   useEffect(() => {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
@@ -250,13 +232,10 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount, value only used as fallback
   }, []);
 
-  // Close on outside click (desktop only)
   useEffect(() => {
     if (!open || isMobile) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -269,7 +248,6 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     });
   }, []);
 
-  // Lock body scroll on mobile
   useEffect(() => {
     if (open && isMobile) {
       document.body.style.overflow = "hidden";
@@ -285,18 +263,15 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     [onChange, configProvider],
   );
 
-  // Scroll active into view
   useEffect(() => {
     const el = listRef.current?.querySelector(`[data-index="${activeIndex}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 
   const currentModelId = value.includes(":") ? value.split(":").slice(1).join(":") : value;
-  const currentProvider = currentModelId.includes("/") ? currentModelId.split("/")[0] : "";
-  const providerMeta = PROVIDER_META[currentProvider];
-  const ProviderIcon = providerMeta?.icon ?? Sparkles;
-  const providerLabel = providerMeta?.label ?? (currentProvider || null);
   const currentModel = models.find((m) => m.id === currentModelId);
+  const PillIcon = iconForSlug(currentModel?.icon);
+  const groupLabel = currentModel ? groupOf(currentModel) : null;
 
   return (
     <div ref={containerRef} className="relative">
@@ -305,15 +280,15 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
         className="flex h-9 items-center gap-2.5 px-3 text-sm hover:text-foreground transition-colors"
       >
         <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0">
-          <ProviderIcon size={14} />
+          <PillIcon size={14} />
         </span>
         <span className="flex items-baseline gap-1.5 min-w-0">
           <span className="truncate max-w-52 font-medium text-foreground">{currentModel?.name || getDisplayName(value)}</span>
-          {providerLabel && (
-            <span className="text-xs text-muted-foreground/50 hidden sm:inline">{providerLabel}</span>
+          {groupLabel && (
+            <span className="text-xs text-muted-foreground/50 hidden sm:inline">{groupLabel}</span>
           )}
           {currentModel && currentModel.context > 0 && (
-            <span className="text-xs text-muted-foreground/35 tabular-nums hidden md:inline">{formatContext(currentModel.context)} tokens</span>
+            <span className="text-xs text-muted-foreground/35 tabular-nums hidden md:inline">{formatContext(currentModel.context)} ctx</span>
           )}
           {isShared && (
             <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title="Using admin&apos;s shared provider config">shared</span>

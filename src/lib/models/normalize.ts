@@ -27,6 +27,10 @@ const ICON_RULES: [RegExp, string][] = [
   [/amazon|nova|titan/i, "amazon"],
   [/nvidia|nemotron/i, "nvidia"],
   [/ai21|jamba/i, "ai21"],
+  [/minimax/i, "minimax"],
+  [/xiaomi|mimo/i, "xiaomi"],
+  [/zhipu|z\.?ai|glm/i, "zhipu"],
+  [/moonshot|kimi/i, "moonshot"],
   [/ollama/i, "ollama"],
   [/openrouter/i, "openrouter"],
 ];
