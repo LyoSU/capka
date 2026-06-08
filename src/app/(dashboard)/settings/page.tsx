@@ -52,8 +52,9 @@ export default function GeneralSettingsPage() {
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");
   const registration = useSetting("registration_enabled", "true");
+  const blockPrivate = useSetting("block_private_provider_urls", "false");
 
-  const settingsLoading = minCtx.loading || sandbox.loading || registration.loading;
+  const settingsLoading = minCtx.loading || sandbox.loading || registration.loading || blockPrivate.loading;
 
   const contextLabel = (val: string) => {
     const n = parseInt(val, 10);
@@ -178,6 +179,40 @@ export default function GeneralSettingsPage() {
                   body: JSON.stringify({ key: "registration_enabled", value: checked ? "true" : "false" }),
                 }).then((r) => {
                   if (r.ok) toast.success(checked ? "Registration enabled" : "Registration disabled");
+                  else toast.error("Failed to update");
+                });
+              }}
+            />
+          </div>
+
+          <Separator />
+
+          {/* Security — admin only */}
+          <div>
+            <h2 className="text-base font-medium">Security</h2>
+            <p className="text-sm text-muted-foreground">
+              Control how strictly provider connections are restricted.
+            </p>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="pr-4">
+              <p className="text-sm font-medium">Block internal network addresses</p>
+              <p className="text-xs text-muted-foreground">
+                Prevents provider URLs (LiteLLM, Ollama) from pointing at private or
+                loopback addresses. Leave off if you self-host a gateway on your local
+                network. Cloud-metadata addresses are always blocked.
+              </p>
+            </div>
+            <Switch
+              checked={blockPrivate.value === "true"}
+              onCheckedChange={(checked) => {
+                blockPrivate.update(checked ? "true" : "false");
+                fetch("/api/settings", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ key: "block_private_provider_urls", value: checked ? "true" : "false" }),
+                }).then((r) => {
+                  if (r.ok) toast.success(checked ? "Strict mode enabled" : "Strict mode disabled");
                   else toast.error("Failed to update");
                 });
               }}

@@ -61,3 +61,12 @@ export async function isSetupComplete(): Promise<boolean> {
   const val = await getSetting("setup_complete");
   return val === "true";
 }
+
+/**
+ * Strict SSRF policy for admin-supplied provider URLs. Off by default so
+ * self-hosted LiteLLM/Ollama on private/loopback addresses work out of the box;
+ * when on, those ranges are blocked too (link-local/metadata is always blocked).
+ */
+export async function getBlockPrivateProviderUrls(): Promise<boolean> {
+  return (await getSetting("block_private_provider_urls")) === "true";
+}

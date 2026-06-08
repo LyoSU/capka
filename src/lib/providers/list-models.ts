@@ -1,7 +1,10 @@
+import { lookup } from "dns/promises";
+import { isIPv4 } from "net";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models as modelsTable } from "@/lib/db/schema";
 import { iconForGroup, prettyName } from "@/lib/models/normalize";
+import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { PROVIDER_META, type ProviderName } from "./registry";
 
 /**
@@ -45,12 +48,69 @@ function brandOf(id: string, fallbackGroup: string | null): { group: string | nu
 }
 
 async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
+  // `redirect: "manual"` so a permitted host can't 3xx-bounce us to a blocked
+  // target (e.g. cloud metadata) after the pre-flight address check.
+  const res = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(15_000) });
+  if (res.status >= 300 && res.status < 400) {
+    throw new Error("Provider endpoint returned an unexpected redirect");
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
   }
   return res.json();
+}
+
+/**
+ * SSRF guard for admin-supplied provider base URLs (LiteLLM gateway, Ollama).
+ * Link-local / cloud-metadata addresses (169.254.0.0/16, fe80::/10) are ALWAYS
+ * blocked — no legitimate provider lives there. Loopback and private ranges are
+ * allowed by default because self-hosted gateways often run there; an admin can
+ * opt into the stricter policy (`block_private_provider_urls`) to block those
+ * too. Resolves DNS so a public hostname can't point at an internal address.
+ */
+function isBlockedAddress(ip: string, blockPrivate: boolean): boolean {
+  const v4 = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+  if (isIPv4(v4)) {
+    const o = v4.split(".").map(Number);
+    if (o[0] === 169 && o[1] === 254) return true; // link-local + cloud metadata (always)
+    if (!blockPrivate) return false;
+    if (o[0] === 127) return true; // loopback
+    if (o[0] === 10) return true; // 10/8
+    if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true; // 172.16/12
+    if (o[0] === 192 && o[1] === 168) return true; // 192.168/16
+    if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true; // CGNAT 100.64/10
+    return false;
+  }
+  const lower = ip.toLowerCase();
+  if (/^fe[89ab]/.test(lower)) return true; // fe80::/10 link-local (always)
+  if (!blockPrivate) return false;
+  if (lower === "::1") return true; // loopback
+  if (/^f[cd]/.test(lower)) return true; // fc00::/7 unique-local
+  return false;
+}
+
+async function assertSafeProviderUrl(raw: string, blockPrivate: boolean): Promise<void> {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error("Invalid base URL");
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error("Base URL must use http or https");
+  }
+  let addrs: { address: string }[];
+  try {
+    addrs = await lookup(u.hostname, { all: true });
+  } catch {
+    throw new Error(`Could not resolve host: ${u.hostname}`);
+  }
+  for (const { address } of addrs) {
+    if (isBlockedAddress(address, blockPrivate)) {
+      throw new Error("That address isn't allowed. Check the URL or ask your admin about network restrictions.");
+    }
+  }
 }
 
 type CatalogRow = {
@@ -123,8 +183,9 @@ async function listOpenRouter(): Promise<ModelInfo[]> {
 async function listOpenAICompatible(
   baseUrl: string,
   apiKey: string | undefined,
-  opts: { filterChat?: boolean } = {},
+  opts: { filterChat?: boolean; blockPrivate?: boolean } = {},
 ): Promise<ModelInfo[]> {
+  await assertSafeProviderUrl(baseUrl, opts.blockPrivate ?? false);
   const root = baseUrl.replace(/\/+$/, "");
   const url = root.endsWith("/v1") ? `${root}/models` : `${root}/v1/models`;
   const raw = (await fetchJson(url, apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined)) as {
@@ -149,7 +210,8 @@ async function listAnthropic(apiKey: string): Promise<ModelInfo[]> {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function listOllama(baseUrl: string): Promise<ModelInfo[]> {
+async function listOllama(baseUrl: string, blockPrivate: boolean): Promise<ModelInfo[]> {
+  await assertSafeProviderUrl(baseUrl, blockPrivate);
   // baseUrl is typically ".../api"; /api/tags is the model list endpoint.
   const root = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
   const raw = (await fetchJson(`${root}/api/tags`)) as { models?: { name: string }[] };
@@ -170,12 +232,19 @@ export async function listProviderModels(opts: {
   apiKey?: string;
   baseUrl?: string;
 }): Promise<ModelInfo[]> {
+  // Only the user-supplied-URL providers need the SSRF policy; OpenRouter is
+  // catalog-only and OpenAI/Anthropic use fixed public hosts.
+  const blockPrivate =
+    opts.provider === "litellm" || opts.provider === "ollama"
+      ? await getBlockPrivateProviderUrls()
+      : false;
+
   switch (opts.provider) {
     case "openrouter":
       return listOpenRouter();
     case "litellm":
       if (!opts.baseUrl) return [];
-      return listOpenAICompatible(opts.baseUrl, opts.apiKey);
+      return listOpenAICompatible(opts.baseUrl, opts.apiKey, { blockPrivate });
     case "openai":
       if (!opts.apiKey) return [];
       return listOpenAICompatible("https://api.openai.com/v1", opts.apiKey, { filterChat: true });
@@ -183,6 +252,6 @@ export async function listProviderModels(opts: {
       if (!opts.apiKey) return [];
       return listAnthropic(opts.apiKey);
     case "ollama":
-      return listOllama(opts.baseUrl || PROVIDER_META.ollama.defaultBaseUrl!);
+      return listOllama(opts.baseUrl || PROVIDER_META.ollama.defaultBaseUrl!, blockPrivate);
   }
 }
