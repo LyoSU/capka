@@ -1,123 +1,451 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
-import { Search, Loader2, Star } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { useState, useEffect, useRef, useMemo, useCallback, createElement } from "react";
+import { Search, ChevronDown, X, Eye, Wrench, Brain, Star, Loader2, KeyRound, AlertCircle } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
+import { parseModelId, displayModelName, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
+import type { ModelInfo } from "@/app/api/models/route";
 
-type Model = {
-  id: string;
-  name: string;
-  provider: string;
-  context: number;
-  icon?: string | null;
-  group?: string | null;
-  featured?: boolean;
-};
+/** Brand glyph — resolves a slug to a stable icon component (dynamic select). */
+function BrandIcon({ slug, size, className }: { slug?: string | null; size?: number; className?: string }) {
+  return createElement(iconForSlug(slug), { size, className });
+}
 
-/**
- * Lightweight model picker for settings / onboarding.
- * Fetches from /api/models and shows a searchable list.
- */
+// Companies shown first — the rest follow alphabetically. Keeps the common
+// choices on top without hiding the long tail.
+const GROUP_PRIORITY = ["Anthropic", "OpenAI", "Google", "Meta", "Mistral", "DeepSeek", "xAI", "Qwen"];
+
+function formatContext(ctx: number): string {
+  if (ctx >= 1_000_000) return `${(ctx / 1_000_000).toFixed(0)}M`;
+  if (ctx >= 1_000) return `${(ctx / 1_000).toFixed(0)}k`;
+  return String(ctx);
+}
+
+function formatPrice(p: number): string {
+  return `$${p < 1 ? p.toFixed(2) : p.toFixed(1)}/M`;
+}
+
+function groupOf(m: ModelInfo): string {
+  return m.group || (m.provider ? m.provider : "Other");
+}
+
+function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
+  if (!caps) return null;
+  return (
+    <span className="flex items-center gap-1 text-muted-foreground/40">
+      {caps.vision && <Eye className="h-3 w-3" aria-label="vision" />}
+      {caps.tools && <Wrench className="h-3 w-3" aria-label="tools" />}
+      {caps.reasoning && <Brain className="h-3 w-3" aria-label="reasoning" />}
+    </span>
+  );
+}
+
+// ── Data ─────────────────────────────────────────────────────────────────
+
+type Source =
+  | { mode: "active" }
+  | { mode: "config"; configId: string }
+  | { mode: "credentials"; provider: ProviderName; apiKey?: string; baseUrl?: string };
+
+interface ModelsState {
+  models: ModelInfo[];
+  loading: boolean;
+  error: string | null;
+  isShared: boolean;
+  needsKey: boolean;
+}
+
+function useModels(source: Source, fallbackValue: string): ModelsState {
+  const [state, setState] = useState<ModelsState>({
+    models: [],
+    loading: true,
+    error: null,
+    isShared: false,
+    needsKey: false,
+  });
+
+  // Stable key so the effect only re-runs when the real inputs change.
+  const key =
+    source.mode === "credentials"
+      ? `cred:${source.provider}:${source.apiKey ?? ""}:${source.baseUrl ?? ""}`
+      : source.mode === "config"
+        ? `cfg:${source.configId}`
+        : "active";
+
+  useEffect(() => {
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    // Credentials mode for a key-requiring provider with no key yet: don't
+    // call the API — just prompt for the key.
+    if (source.mode === "credentials" && PROVIDER_META[source.provider]?.requiresKey && !source.apiKey) {
+      setState({ models: [], loading: false, error: null, isShared: false, needsKey: true });
+      return;
+    }
+
+    setState((s) => ({ ...s, loading: true, error: null, needsKey: false }));
+
+    const load = async () => {
+      try {
+        let res: Response;
+        if (source.mode === "credentials") {
+          res = await fetch("/api/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ provider: source.provider, apiKey: source.apiKey, baseUrl: source.baseUrl }),
+          });
+        } else if (source.mode === "config") {
+          res = await fetch(`/api/models?configId=${encodeURIComponent(source.configId)}`);
+        } else {
+          res = await fetch("/api/models");
+        }
+        const data = res.ok ? await res.json() : { models: [] };
+        if (cancelled) return;
+        setState({
+          models: data.models ?? [],
+          loading: false,
+          error: data.error ?? null,
+          isShared: !!data.isShared,
+          needsKey: false,
+        });
+        // First-run: catalog still syncing — retry once shortly.
+        if (data.syncing) retry = setTimeout(load, 4000);
+      } catch {
+        if (!cancelled) {
+          setState((s) => ({
+            ...s,
+            models: s.models.length ? s.models : [{ id: fallbackValue, name: displayModelName(fallbackValue), provider: "", context: 0, pricing: { prompt: 0, completion: 0 } }],
+            loading: false,
+            error: "Could not load models",
+          }));
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the inputs; fallbackValue is only a last-resort label
+  }, [key]);
+
+  return state;
+}
+
+// ── List ─────────────────────────────────────────────────────────────────
+
+function ModelList({
+  state,
+  search,
+  onSearch,
+  onSelect,
+  currentModelId,
+  activeIndex,
+  onActiveIndex,
+  listRef,
+  onClose,
+}: {
+  state: ModelsState;
+  search: string;
+  onSearch: (s: string) => void;
+  onSelect: (m: ModelInfo) => void;
+  currentModelId: string;
+  activeIndex: number;
+  onActiveIndex: (i: number) => void;
+  listRef: React.RefObject<HTMLDivElement | null>;
+  onClose: () => void;
+}) {
+  const { models } = state;
+  const filtered = useMemo(() => {
+    if (!search) return models;
+    const q = search.toLowerCase();
+    return models.filter(
+      (m) =>
+        m.id.toLowerCase().includes(q) ||
+        m.name.toLowerCase().includes(q) ||
+        groupOf(m).toLowerCase().includes(q),
+    );
+  }, [models, search]);
+
+  const indexMap = useMemo(() => new Map(filtered.map((m, i) => [m.id, i])), [filtered]);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, ModelInfo[]>();
+    for (const m of filtered) {
+      const g = groupOf(m);
+      const list = map.get(g) ?? [];
+      list.push(m);
+      map.set(g, list);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name));
+    }
+    return [...map.entries()].sort(([a], [b]) => {
+      const ai = GROUP_PRIORITY.indexOf(a);
+      const bi = GROUP_PRIORITY.indexOf(b);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [filtered]);
+
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b px-3 py-2.5">
+        <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <input
+          value={search}
+          onChange={(e) => { onSearch(e.target.value); onActiveIndex(0); }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") { e.preventDefault(); onActiveIndex(Math.min(activeIndex + 1, filtered.length - 1)); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); onActiveIndex(Math.max(activeIndex - 1, 0)); }
+            else if (e.key === "Enter" && filtered[activeIndex]) { e.preventDefault(); onSelect(filtered[activeIndex]); }
+            else if (e.key === "Escape") { onClose(); }
+          }}
+          placeholder="Search models..."
+          autoFocus
+          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+        />
+        {search && <span className="text-[10px] text-muted-foreground tabular-nums">{filtered.length}</span>}
+      </div>
+
+      <div ref={listRef} className="flex-1 overflow-y-auto overscroll-contain">
+        {state.loading && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {!state.loading && filtered.length === 0 && (
+          <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+            {state.needsKey ? (
+              <span className="flex flex-col items-center gap-1.5"><KeyRound className="h-4 w-4" />Enter your API key to load models</span>
+            ) : state.error ? (
+              <span className="flex flex-col items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{state.error}</span>
+            ) : search ? (
+              "No models found"
+            ) : (
+              "No models available"
+            )}
+          </div>
+        )}
+
+        {groups.map(([group, groupModels]) => {
+          return (
+            <div key={group}>
+              <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border/50">
+                <BrandIcon slug={groupModels[0]?.icon} size={12} />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{group}</span>
+                <span className="text-[10px] text-muted-foreground/50 tabular-nums">{groupModels.length}</span>
+              </div>
+
+              {groupModels.map((model) => {
+                const globalIdx = indexMap.get(model.id) ?? -1;
+                const isActive = globalIdx === activeIndex;
+                const isCurrent = model.id === currentModelId;
+                return (
+                  <button
+                    key={model.id}
+                    data-index={globalIdx}
+                    onClick={() => onSelect(model)}
+                    onMouseEnter={() => onActiveIndex(globalIdx)}
+                    className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        {model.featured && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
+                        <span className="truncate text-sm">{model.name}</span>
+                        {isCurrent && (
+                          <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">active</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground/60">
+                        {model.context > 0 && <span className="tabular-nums">{formatContext(model.context)} ctx</span>}
+                        {model.pricing.prompt > 0 && <span className="tabular-nums">{formatPrice(model.pricing.prompt)} in</span>}
+                        <Caps caps={model.capabilities} />
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// ── Picker ───────────────────────────────────────────────────────────────
+
+interface ModelPickerProps {
+  value: string;
+  onChange: (modelId: string) => void;
+  /** "pill" — the slim chat trigger; "field" — a form input. Default "field". */
+  variant?: "pill" | "field";
+  /** Configure mode: list models for these unsaved credentials. */
+  provider?: ProviderName;
+  apiKey?: string;
+  baseUrl?: string;
+  /** List models for a specific saved provider config (editing its default). */
+  configId?: string;
+  placeholder?: string;
+  disabled?: boolean;
+}
+
 export function ModelPicker({
   value,
   onChange,
-  placeholder = "Search models...",
-}: {
-  value: string;
-  onChange: (modelId: string) => void;
-  placeholder?: string;
-}) {
-  const [models, setModels] = useState<Model[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+  variant = "field",
+  provider,
+  apiKey,
+  baseUrl,
+  configId,
+  placeholder = "Select a model",
+  disabled,
+}: ModelPickerProps) {
   const [open, setOpen] = useState(false);
-  const fetchedRef = useRef(false);
+  const [search, setSearch] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const source: Source = provider
+    ? { mode: "credentials", provider, apiKey, baseUrl }
+    : configId
+      ? { mode: "config", configId }
+      : { mode: "active" };
+
+  const state = useModels(source, value);
 
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-    fetch("/api/models")
-      .then((r) => r.ok ? r.json() : { models: [] })
-      .then((d) => setModels(d.models ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    const matches = search
-      ? models.filter((m) =>
-          m.id.toLowerCase().includes(q) ||
-          m.name.toLowerCase().includes(q) ||
-          (m.group || m.provider).toLowerCase().includes(q),
-        )
-      : models;
-    // Featured first so the curated picks lead the list.
-    return [...matches]
-      .sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name))
-      .slice(0, 50);
-  }, [models, search]);
+  useEffect(() => {
+    if (!open || isMobile) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, isMobile]);
 
-  const selectedName = models.find((m) => m.id === value)?.name
-    || (value ? value.split("/").pop() : "");
+  useEffect(() => {
+    if (open && isMobile) {
+      document.body.style.overflow = "hidden";
+      return () => { document.body.style.overflow = ""; };
+    }
+  }, [open, isMobile]);
+
+  useEffect(() => {
+    const el = listRef.current?.querySelector(`[data-index="${activeIndex}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  const toggleOpen = useCallback(() => {
+    if (disabled) return;
+    setOpen((prev) => {
+      if (!prev) { setSearch(""); setActiveIndex(0); }
+      return !prev;
+    });
+  }, [disabled]);
+
+  const select = useCallback(
+    (model: ModelInfo) => {
+      onChange(model.id);
+      setOpen(false);
+    },
+    [onChange],
+  );
+
+  const currentModelId = parseModelId(value).modelId;
+  const currentModel = state.models.find((m) => m.id === currentModelId);
+  const groupLabel = currentModel ? groupOf(currentModel) : null;
+  const displayName = currentModel?.name || (value ? displayModelName(value) : "");
+
+  const list = (
+    <ModelList
+      state={state}
+      search={search}
+      onSearch={setSearch}
+      onSelect={select}
+      currentModelId={currentModelId}
+      activeIndex={activeIndex}
+      onActiveIndex={setActiveIndex}
+      listRef={listRef}
+      onClose={() => setOpen(false)}
+    />
+  );
 
   return (
-    <div className="relative">
-      <Input
-        value={open ? search : selectedName || value}
-        onChange={(e) => { setSearch(e.target.value); if (!open) setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder={placeholder}
-        className="h-9 text-sm pr-8"
-      />
-      {loading ? (
-        <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+    <div ref={containerRef} className="relative">
+      {variant === "pill" ? (
+        <button
+          type="button"
+          onClick={toggleOpen}
+          className="flex h-9 items-center gap-2.5 px-3 text-sm hover:text-foreground transition-colors"
+        >
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0">
+            <BrandIcon slug={currentModel?.icon} size={14} />
+          </span>
+          <span className="flex items-baseline gap-1.5 min-w-0">
+            <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholder}</span>
+            {groupLabel && <span className="text-xs text-muted-foreground/50 hidden sm:inline">{groupLabel}</span>}
+            {currentModel && currentModel.context > 0 && (
+              <span className="text-xs text-muted-foreground/35 tabular-nums hidden md:inline">{formatContext(currentModel.context)} ctx</span>
+            )}
+            {state.isShared && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title="Using admin's shared provider config">shared</span>
+            )}
+          </span>
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
       ) : (
-        <Search className="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground/50" />
+        <button
+          type="button"
+          onClick={toggleOpen}
+          disabled={disabled}
+          className="flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <BrandIcon slug={currentModel?.icon} size={15} className="shrink-0 text-muted-foreground" />
+          <span className={`flex-1 truncate text-left ${displayName ? "" : "text-muted-foreground/60"}`}>
+            {displayName || placeholder}
+          </span>
+          {state.loading ? (
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/50" />
+          ) : (
+            <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
+          )}
+        </button>
       )}
 
-      {open && !loading && (
-        <div className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-lg border bg-popover shadow-lg">
-          {filtered.length === 0 && (
-            <div className="py-4 text-center text-xs text-muted-foreground">
-              {search ? "No models found" : "No models available"}
-            </div>
-          )}
-          {filtered.map((m) => {
-            const Icon = iconForSlug(m.icon);
-            return (
-              <button
-                key={m.id}
-                type="button"
-                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${m.id === value ? "bg-accent/50" : ""}`}
-                onClick={() => {
-                  onChange(m.id);
-                  setSearch("");
-                  setOpen(false);
-                }}
-              >
-                <Icon size={14} className="shrink-0 text-muted-foreground" />
-                {m.featured && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
-                <span className="truncate flex-1">{m.name}</span>
-                <span className="ml-2 shrink-0 text-[11px] text-muted-foreground/50">{m.group || m.provider}</span>
-              </button>
-            );
-          })}
-          {search && (
-            <button
-              type="button"
-              className="flex w-full items-center px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent border-t"
-              onClick={() => { onChange(search); setSearch(""); setOpen(false); }}
-            >
-              Use custom: <span className="ml-1 font-mono">{search}</span>
-            </button>
-          )}
+      {open && !isMobile && (
+        <div
+          className={`absolute top-full mt-1 z-50 flex max-h-96 flex-col overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 ${
+            variant === "field" ? "inset-x-0 w-full" : "left-0 w-80"
+          }`}
+        >
+          {list}
         </div>
       )}
 
-      {/* Close on click outside */}
-      {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
+      {open && isMobile && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background">
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <span className="text-sm font-medium">Select model</span>
+            <button onClick={() => setOpen(false)} className="rounded-md p-1 hover:bg-muted">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex flex-1 flex-col min-h-0">{list}</div>
+        </div>
+      )}
     </div>
   );
 }

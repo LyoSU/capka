@@ -1,55 +1,80 @@
-import { and, asc, desc, eq } from "drizzle-orm";
-import { requireSession, apiHandler } from "@/lib/auth";
+import { and, eq } from "drizzle-orm";
+import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { models } from "@/lib/db/schema";
+import { providerConfigs } from "@/lib/db/schema";
+import { getMasterKey } from "@/lib/settings";
+import { decrypt } from "@/lib/crypto";
 import { resolveProviderConfig } from "@/lib/providers/resolve";
+import { listProviderModels, type ModelInfo } from "@/lib/providers/list-models";
+import { isProviderName } from "@/lib/providers/registry";
+import { syncModelCatalog } from "@/lib/models/catalog";
 
-export interface ModelInfo {
-  id: string;
-  name: string;
-  provider: string;
-  context: number;
-  pricing: { prompt: number; completion: number }; // USD per 1M tokens
-  cutoff?: string | null;
-  // Catalog extras (drive a grouped, iconed, no-chaos picker).
-  group?: string | null;
-  icon?: string | null;
-  capabilities?: { vision: boolean; tools: boolean; reasoning: boolean } | null;
-  featured?: boolean;
+// Re-exported for the many client components that import the picker's shape.
+export type { ModelInfo };
+
+const empty = () => Response.json({ models: [], provider: null, isShared: false });
+
+async function decryptKey(apiKey: string | null): Promise<string | undefined> {
+  if (!apiKey) return undefined;
+  const mk = await getMasterKey();
+  return decrypt(apiKey, mk);
 }
 
-const perMillion = (v: string | null) => (v ? parseFloat(v) * 1_000_000 : 0);
+async function respond(provider: string, apiKey: string | undefined, baseUrl: string | null, isShared: boolean) {
+  if (!isProviderName(provider)) return empty();
 
-export const GET = apiHandler(async () => {
-  const { userId } = await requireSession();
-
-  const config = await resolveProviderConfig(userId);
-  if (!config) return Response.json({ models: [], provider: null, isShared: false });
-
-  // The catalog is synced (OpenRouter + LiteLLM) in the background by the
-  // worker. We serve the curated set straight from Postgres — no per-request
-  // upstream fetch, no key handling here.
-  if (config.provider === "openrouter") {
-    const rows = await db
-      .select()
-      .from(models)
-      .where(and(eq(models.enabled, true), eq(models.source, "openrouter")))
-      .orderBy(desc(models.featured), asc(models.group), asc(models.displayName));
-
-    const list: ModelInfo[] = rows.map((m) => ({
-      id: m.id,
-      name: m.displayName,
-      provider: m.id.split("/")[0] || "unknown",
-      context: m.contextLength ?? 0,
-      pricing: { prompt: perMillion(m.inputPrice), completion: perMillion(m.outputPrice) },
-      group: m.group,
-      icon: m.icon,
-      capabilities: (m.capabilities as ModelInfo["capabilities"]) ?? null,
-      featured: m.featured ?? false,
-    }));
-
-    return Response.json({ models: list, provider: "openrouter", isShared: config.isShared });
+  let models: ModelInfo[] = [];
+  let error: string | undefined;
+  try {
+    models = await listProviderModels({ provider, apiKey, baseUrl: baseUrl ?? undefined });
+  } catch (e) {
+    error = e instanceof Error ? e.message : "Could not load models";
   }
 
-  return Response.json({ models: [], provider: config.provider, isShared: config.isShared });
+  // First-run safety net: if OpenRouter's catalog hasn't synced yet, kick a
+  // background sync so the picker fills in shortly — never block the request.
+  let syncing = false;
+  if (provider === "openrouter" && models.length === 0 && !error) {
+    syncing = true;
+    void syncModelCatalog().catch(() => {});
+  }
+
+  return Response.json({ models, provider, isShared, syncing, ...(error ? { error } : {}) });
+}
+
+/**
+ * GET — models for the caller's active provider, or for a specific saved
+ * config via `?configId=` (used when editing that config's default model).
+ */
+export const GET = apiHandler(async (req: Request) => {
+  const { userId } = await requireSession();
+  const configId = new URL(req.url).searchParams.get("configId");
+
+  if (configId) {
+    const [cfg] = await db
+      .select()
+      .from(providerConfigs)
+      .where(and(eq(providerConfigs.id, configId), eq(providerConfigs.userId, userId)))
+      .limit(1);
+    if (!cfg) return empty();
+    return respond(cfg.provider, await decryptKey(cfg.apiKey), cfg.baseUrl, false);
+  }
+
+  const config = await resolveProviderConfig(userId);
+  if (!config) return empty();
+  return respond(config.provider, await decryptKey(config.apiKey), config.baseUrl, config.isShared);
+});
+
+/**
+ * POST — models for credentials that aren't saved yet (setup wizard and the
+ * "add provider" form), so the picker can show real models — and validate the
+ * key — before anything is persisted.
+ */
+export const POST = apiHandler(async (req: Request) => {
+  // Lists models for arbitrary credentials/base URLs — restrict to the roles
+  // that can configure providers (also covers the in-progress admin in setup).
+  await requireRole("admin", "user");
+  const { provider, apiKey, baseUrl } = await req.json();
+  if (!provider) return empty();
+  return respond(provider, apiKey || undefined, baseUrl ?? null, false);
 });

@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { ModelPicker } from "@/components/chat/model-picker";
 
 export type Project = {
   id: string;
@@ -138,11 +139,11 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
 
           <div className="space-y-1.5">
             <Label htmlFor="project-default-model">Default Model</Label>
-            <Input
-              id="project-default-model"
+            <ModelPicker
+              variant="field"
               value={defaultModel}
-              onChange={(e) => setDefaultModel(e.target.value)}
-              placeholder="e.g. openai:gpt-5.2"
+              onChange={setDefaultModel}
+              placeholder="Use global default"
             />
             <p className="text-xs text-muted-foreground">
               Overrides the global default for chats in this project.

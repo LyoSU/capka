@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
 import { getMasterKey } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
-import { getModel } from "@/lib/providers";
+import { getModel, parseModelId } from "@/lib/providers";
 import { ValidationError } from "@/lib/errors";
 
 /** Find active provider config: user's own → fallback to any admin's config. */
@@ -45,12 +45,10 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
   let provider = config.provider;
   let modelId = config.defaultModel;
 
-  if (requestModel?.includes(":")) {
-    const [p, ...rest] = requestModel.split(":");
-    provider = p;
-    modelId = rest.join(":");
-  } else if (requestModel) {
-    modelId = requestModel;
+  if (requestModel) {
+    const parsed = parseModelId(requestModel, provider);
+    provider = parsed.provider ?? provider;
+    modelId = parsed.modelId;
   }
 
   const model = getModel(provider, modelId, {

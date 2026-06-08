@@ -15,10 +15,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ModelPicker } from "@/components/chat/model-picker";
+import { iconForSlug } from "@/components/chat/provider-icons";
+import { PROVIDER_OPTIONS, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
 
 const STEPS = ["Account", "Provider", "Telegram"] as const;
-const PROVIDERS = ["openai", "anthropic", "openrouter", "ollama"] as const;
-type Provider = (typeof PROVIDERS)[number];
 
 function Stepper({ current }: { current: number }) {
   return (
@@ -65,10 +66,19 @@ export function SetupWizard() {
   const [password, setPassword] = useState("");
 
   // Step 2 - Provider
-  const [provider, setProvider] = useState<Provider>("openai");
+  const [provider, setProvider] = useState<ProviderName>("litellm");
   const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState("http://localhost:11434/api");
+  const [baseUrl, setBaseUrl] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
+
+  const meta = PROVIDER_META[provider];
+
+  function changeProvider(next: ProviderName) {
+    setProvider(next);
+    setApiKey("");
+    setDefaultModel("");
+    setBaseUrl(PROVIDER_META[next].defaultBaseUrl ?? "");
+  }
 
   // Step 3 - Telegram
   const [botToken, setBotToken] = useState("");
@@ -130,12 +140,16 @@ export function SetupWizard() {
       toast.error("Select a provider");
       return;
     }
-    if (provider !== "ollama" && !apiKey) {
+    if (meta.requiresKey && !apiKey) {
       toast.error("API key is required");
       return;
     }
+    if (meta.requiresBaseUrl && !baseUrl) {
+      toast.error("Base URL is required");
+      return;
+    }
     if (!defaultModel) {
-      toast.error("Default model is required");
+      toast.error("Please pick a model");
       return;
     }
 
@@ -147,14 +161,14 @@ export function SetupWizard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider,
-          apiKey: provider !== "ollama" ? apiKey : undefined,
+          apiKey: meta.requiresKey ? apiKey : undefined,
           modelId: defaultModel,
-          baseUrl: provider === "ollama" ? baseUrl : undefined,
+          baseUrl: meta.requiresBaseUrl ? baseUrl : undefined,
         }),
       });
       const testData = await testRes.json();
       if (!testData.success) {
-        toast.error(testData.error || "Could not verify API key. Please check the key and try again.");
+        toast.error(testData.error || "Could not verify the connection. Please check your details and try again.");
         return;
       }
 
@@ -166,8 +180,8 @@ export function SetupWizard() {
           step: "provider",
           userId,
           provider,
-          apiKey: provider !== "ollama" ? apiKey : undefined,
-          baseUrl: provider === "ollama" ? baseUrl : undefined,
+          apiKey: meta.requiresKey ? apiKey : undefined,
+          baseUrl: meta.requiresBaseUrl ? baseUrl : undefined,
           defaultModel,
         }),
       });
@@ -283,21 +297,35 @@ export function SetupWizard() {
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label>Provider</Label>
-            <Select value={provider} onValueChange={(v) => setProvider(v as Provider)}>
-              <SelectTrigger className="w-full">
+            <Select value={provider} onValueChange={(v) => changeProvider(v as ProviderName)}>
+              <SelectTrigger className="w-full h-auto py-2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PROVIDERS.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
+                {PROVIDER_OPTIONS.map((p) => {
+                  const Icon = iconForSlug(p.iconSlug);
+                  return (
+                    <SelectItem key={p.value} value={p.value}>
+                      <span className="flex items-center gap-2.5">
+                        <Icon size={16} className="shrink-0 text-muted-foreground" />
+                        <span className="flex flex-col">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            {p.label}
+                            {p.recommended && (
+                              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">Recommended</span>
+                            )}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{p.blurb}</span>
+                        </span>
+                      </span>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
 
-          {provider !== "ollama" && (
+          {meta.requiresKey && (
             <div className="space-y-1.5">
               <Label htmlFor="apiKey">API Key</Label>
               <div className="relative">
@@ -321,35 +349,30 @@ export function SetupWizard() {
             </div>
           )}
 
-          {provider === "ollama" && (
+          {meta.requiresBaseUrl && (
             <div className="space-y-1.5">
               <Label htmlFor="baseUrl">Base URL</Label>
               <Input
                 id="baseUrl"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="http://localhost:11434/api"
+                placeholder={meta.baseUrlPlaceholder}
               />
             </div>
           )}
 
           <div className="space-y-1.5">
-            <Label>Default Model</Label>
-            <Input
+            <Label>Model</Label>
+            <ModelPicker
+              variant="field"
               value={defaultModel}
-              onChange={(e) => setDefaultModel(e.target.value)}
-              placeholder={
-                provider === "openrouter" ? "openai/gpt-5.2"
-                  : provider === "openai" ? "gpt-5.2"
-                  : provider === "anthropic" ? "claude-sonnet-4-20250514"
-                  : "llama3.3"
-              }
+              onChange={setDefaultModel}
+              provider={provider}
+              apiKey={apiKey}
+              baseUrl={baseUrl}
+              disabled={(meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl)}
+              placeholder={meta.requiresKey && !apiKey ? "Enter your API key first" : "Pick a model"}
             />
-            <p className="text-xs text-muted-foreground">
-              {provider === "openrouter"
-                ? "Format: provider/model (e.g. openai/gpt-5.2, anthropic/claude-sonnet-4)"
-                : "Enter the model ID from your provider"}
-            </p>
           </div>
 
           <div className="flex gap-2">

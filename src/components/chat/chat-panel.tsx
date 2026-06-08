@@ -7,7 +7,7 @@ import { AlertCircle, FolderOpen, RefreshCw } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
-import { ModelSelector } from "@/components/chat/model-selector";
+import { ModelPicker } from "@/components/chat/model-picker";
 import { SandboxFiles } from "@/components/chat/sandbox-files";
 import { Button } from "@/components/ui/button";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
@@ -82,7 +82,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                 What can I help with?
               </h1>
               <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
-                <ModelSelector value={model} onChange={setModel} />
+                <ModelPicker variant="pill" value={model} onChange={setModel} />
               </div>
             </div>
             {inputEl}
@@ -92,7 +92,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
         <div className="relative flex flex-1 flex-col overflow-hidden">
           <div className="flex items-center justify-between px-6 py-3">
             <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
-              <ModelSelector value={model} onChange={setModel} />
+              <ModelPicker variant="pill" value={model} onChange={setModel} />
             </div>
             <Button
               variant="ghost"

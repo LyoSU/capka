@@ -31,5 +31,5 @@ export async function resolveInitialModel(
   if (lastUsed?.model) return lastUsed.model;
 
   const config = await resolveProviderConfig(userId);
-  return config?.defaultModel ? `${config.provider}:${config.defaultModel}` : "";
+  return config?.defaultModel ?? "";
 }

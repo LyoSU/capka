@@ -15,10 +15,9 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { ModelPicker } from "@/components/chat/model-picker";
+import { iconForSlug } from "@/components/chat/provider-icons";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-
-const PROVIDERS = ["openai", "anthropic", "openrouter", "ollama"] as const;
-type Provider = (typeof PROVIDERS)[number];
+import { PROVIDER_OPTIONS, PROVIDER_META, providerLabel, type ProviderName } from "@/lib/providers/registry";
 
 interface ProviderConfig {
   id: string;
@@ -37,11 +36,20 @@ export default function ConnectionsPage() {
   const [error, setError] = useState("");
 
   // Form state
-  const [provider, setProvider] = useState<Provider>("openai");
+  const [provider, setProvider] = useState<ProviderName>("litellm");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [showKey, setShowKey] = useState(false);
+
+  const meta = PROVIDER_META[provider];
+
+  function changeProvider(next: ProviderName) {
+    setProvider(next);
+    setApiKey("");
+    setDefaultModel("");
+    setBaseUrl(PROVIDER_META[next].defaultBaseUrl ?? "");
+  }
 
   const fetchConfigs = useCallback(async () => {
     try {
@@ -61,7 +69,7 @@ export default function ConnectionsPage() {
   }, [fetchConfigs]);
 
   const resetForm = () => {
-    setProvider("openai");
+    setProvider("litellm");
     setApiKey("");
     setBaseUrl("");
     setDefaultModel("");
@@ -111,10 +119,20 @@ export default function ConnectionsPage() {
     setSaving(true);
     try {
       const modelId = defaultModel || undefined;
-      if (!modelId) {
-        toast.error("Please enter a model");
+      if (meta.requiresKey && !apiKey) {
+        toast.error("API key is required");
         return;
       }
+      if (meta.requiresBaseUrl && !baseUrl) {
+        toast.error("Base URL is required");
+        return;
+      }
+      if (!modelId) {
+        toast.error("Please pick a model");
+        return;
+      }
+
+      const effectiveBaseUrl = meta.requiresBaseUrl ? baseUrl || meta.defaultBaseUrl : undefined;
 
       // Test connection
       const testRes = await fetch("/api/settings/providers/test", {
@@ -122,9 +140,9 @@ export default function ConnectionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider,
-          apiKey: provider !== "ollama" ? apiKey : undefined,
+          apiKey: meta.requiresKey ? apiKey : undefined,
           modelId,
-          baseUrl: provider === "ollama" ? baseUrl || "http://localhost:11434/api" : undefined,
+          baseUrl: effectiveBaseUrl,
         }),
       });
 
@@ -140,8 +158,8 @@ export default function ConnectionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider,
-          apiKey: provider !== "ollama" ? apiKey : undefined,
-          baseUrl: provider === "ollama" ? baseUrl || "http://localhost:11434/api" : undefined,
+          apiKey: meta.requiresKey ? apiKey : undefined,
+          baseUrl: effectiveBaseUrl,
           defaultModel: modelId,
         }),
       });
@@ -194,7 +212,11 @@ export default function ConnectionsPage() {
           <div key={c.id} className="rounded-lg border p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold capitalize">{c.provider}</span>
+                {(() => {
+                  const Icon = iconForSlug(PROVIDER_META[c.provider as ProviderName]?.iconSlug);
+                  return <Icon size={16} className="text-muted-foreground" />;
+                })()}
+                <span className="text-sm font-semibold">{providerLabel(c.provider)}</span>
                 {c.isActive && (
                   <Badge variant="outline" className="text-[10px]">active</Badge>
                 )}
@@ -225,9 +247,11 @@ export default function ConnectionsPage() {
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">Default Model</label>
               <ModelPicker
+                variant="field"
+                configId={c.id}
                 value={c.defaultModel || ""}
                 onChange={(id) => handleUpdateModel(c.id, id)}
-                placeholder="Search or type model..."
+                placeholder="Pick a model"
               />
             </div>
           </div>
@@ -239,21 +263,35 @@ export default function ConnectionsPage() {
         <div className="space-y-4 rounded-md border p-4">
           <div className="space-y-1.5">
             <label className="text-sm">Provider</label>
-            <Select value={provider} onValueChange={(v) => setProvider(v as Provider)}>
-              <SelectTrigger className="w-full">
+            <Select value={provider} onValueChange={(v) => changeProvider(v as ProviderName)}>
+              <SelectTrigger className="w-full h-auto py-2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PROVIDERS.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
+                {PROVIDER_OPTIONS.map((p) => {
+                  const Icon = iconForSlug(p.iconSlug);
+                  return (
+                    <SelectItem key={p.value} value={p.value}>
+                      <span className="flex items-center gap-2.5">
+                        <Icon size={16} className="shrink-0 text-muted-foreground" />
+                        <span className="flex flex-col">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            {p.label}
+                            {p.recommended && (
+                              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">Recommended</span>
+                            )}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{p.blurb}</span>
+                        </span>
+                      </span>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
 
-          {provider !== "ollama" && (
+          {meta.requiresKey && (
             <div className="space-y-1.5">
               <label className="text-sm">API Key</label>
               <div className="relative">
@@ -276,23 +314,28 @@ export default function ConnectionsPage() {
             </div>
           )}
 
-          {provider === "ollama" && (
+          {meta.requiresBaseUrl && (
             <div className="space-y-1.5">
               <label className="text-sm">Base URL</label>
               <Input
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="http://localhost:11434/api"
+                placeholder={meta.baseUrlPlaceholder}
               />
             </div>
           )}
 
           <div className="space-y-1.5">
-            <label className="text-sm">Default Model</label>
+            <label className="text-sm">Model</label>
             <ModelPicker
+              variant="field"
               value={defaultModel}
               onChange={setDefaultModel}
-              placeholder="Search or type model..."
+              provider={provider}
+              apiKey={apiKey}
+              baseUrl={baseUrl}
+              disabled={(meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl)}
+              placeholder={meta.requiresKey && !apiKey ? "Enter your API key first" : "Pick a model"}
             />
           </div>
 

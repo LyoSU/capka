@@ -3,8 +3,9 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
 
-export const PROVIDERS = ["openai", "anthropic", "openrouter", "ollama"] as const;
-export type ProviderName = (typeof PROVIDERS)[number];
+// Provider metadata + model-id helpers live in the dependency-free registry so
+// client bundles don't pull these AI SDKs. Re-exported here for back-compat.
+export * from "./registry";
 
 export function getModel(
   provider: string,
@@ -12,6 +13,11 @@ export function getModel(
   config?: { apiKey?: string; baseUrl?: string },
 ) {
   switch (provider) {
+    case "litellm": {
+      // Any OpenAI-compatible gateway (LiteLLM proxy, vLLM, Together, …).
+      const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
+      return p(modelId);
+    }
     case "openai": {
       const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
       return p(modelId);
