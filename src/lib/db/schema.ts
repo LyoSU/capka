@@ -154,6 +154,29 @@ export const usage = pgTable("usage", {
   index("idx_usage_model").on(t.model),
 ]);
 
+// ── Model catalog ────────────────────────────────────────────
+// Synced from OpenRouter (primary) + LiteLLM (fallback) so models, names,
+// grouping and prices are never hardcoded. Drives both the model picker and
+// usage cost. Admin curation (enabled/featured) survives re-syncs.
+export const models = pgTable("models", {
+  id: text("id").primaryKey(), // canonical id, e.g. "anthropic/claude-opus-4.1"
+  source: text("source").notNull(), // "openrouter" | "litellm"
+  displayName: text("display_name").notNull(), // "Anthropic: Claude Opus 4.1"
+  group: text("group"), // company, e.g. "Anthropic"
+  icon: text("icon"), // brand slug for the UI, e.g. "anthropic"
+  contextLength: integer("context_length"),
+  inputPrice: numeric("input_price"), // USD per token
+  outputPrice: numeric("output_price"),
+  cacheReadPrice: numeric("cache_read_price"),
+  capabilities: jsonb("capabilities"), // { vision, tools, reasoning }
+  enabled: boolean("enabled").default(false), // visible in picker (curated)
+  featured: boolean("featured").default(false), // pinned to the top
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [
+  index("idx_models_group").on(t.group),
+  index("idx_models_enabled").on(t.enabled),
+]);
+
 // ── Phase 1: Professional Workspace ──────────────────────────
 
 export const projects = pgTable("projects", {

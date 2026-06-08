@@ -18,7 +18,7 @@ export interface RecordUsageInput {
  */
 export async function recordUsage(input: RecordUsageInput): Promise<void> {
   try {
-    const cost = costUsd(input.model, input.usage);
+    const cost = await costUsd(input.model, input.usage);
     await db.insert(usage).values({
       id: nanoid(),
       taskId: input.taskId ?? null,
