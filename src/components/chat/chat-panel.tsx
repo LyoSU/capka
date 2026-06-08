@@ -8,7 +8,7 @@ import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
 import { ModelPicker } from "@/components/chat/model-picker";
-import { SandboxFiles } from "@/components/chat/sandbox-files";
+import { WorkspacePanel, type ProgressStep } from "@/components/chat/workspace-panel";
 import { Button } from "@/components/ui/button";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
 
@@ -58,6 +58,17 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
 
   const isEmpty = messages.length === 0;
   const [filesOpen, setFilesOpen] = useState(false);
+
+  // Progress steps for the panel = the latest assistant message's tool parts.
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  const steps: ProgressStep[] = (lastAssistant?.parts ?? [])
+    .filter((p): p is { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown } => p.type === "dynamic-tool")
+    .map((p) => ({ toolName: p.toolName, state: p.state, input: p.input }));
+
+  // A failed assistant message renders its own ErrorNotice — don't also show
+  // the bottom banner for the same failure (the banner stays for load errors).
+  const lastMsg = messages[messages.length - 1];
+  const lastFailed = (lastMsg?.metadata as { taskStatus?: string } | undefined)?.taskStatus === "failed";
 
   const inputEl = (
     <ChatInput
@@ -138,7 +149,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
           </div>
 
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
-            {error && (
+            {error && !lastFailed && (
               <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
                 <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                   <AlertCircle className="h-4 w-4 shrink-0" />
@@ -159,7 +170,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
         </div>
       )}
       </div>
-      <SandboxFiles chatId={chatId} open={filesOpen} onClose={() => setFilesOpen(false)} />
+      <WorkspacePanel
+        chatId={chatId}
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+        steps={steps}
+        running={isLoading}
+        attachments={files}
+      />
     </div>
   );
 }

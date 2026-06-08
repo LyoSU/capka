@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, type KeyboardEvent, type DragEvent } from "react";
+import { useRef, useState, useCallback, useMemo, useEffect, type KeyboardEvent, type DragEvent } from "react";
 import { ArrowUp, Paperclip, Square, X, File, FileText, FileImage, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,16 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // Thumbnails for image attachments so a photo is obviously a photo.
+  const previews = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const af of files) {
+      if (af.file.type.startsWith("image/")) m.set(af.id, URL.createObjectURL(af.file));
+    }
+    return m;
+  }, [files]);
+  useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
 
   const resize = useCallback(() => {
     const el = textareaRef.current;
@@ -111,17 +121,30 @@ export function ChatInput({
             <div className="flex flex-wrap gap-2 px-3 pt-3">
               {files.map((af) => {
                 const Icon = fileIcon(af.file.name);
+                const preview = previews.get(af.id);
                 return (
                   <div
                     key={af.id}
-                    className="group flex items-center gap-1.5 rounded-lg border bg-muted/50 px-2.5 py-1.5 text-xs"
+                    className="group flex items-center gap-1.5 rounded-lg border bg-muted/50 py-1.5 pl-1.5 pr-2.5 text-xs"
                   >
-                    <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-                    <span className="max-w-32 truncate">{af.file.name}</span>
-                    <span className="text-muted-foreground/40">{formatSize(af.file.size)}</span>
+                    {preview ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={preview} alt={af.file.name} className="h-7 w-7 shrink-0 rounded-md object-cover" />
+                    ) : (
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-background">
+                        <Icon className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      </span>
+                    )}
+                    <div className="flex flex-col">
+                      <span className="max-w-32 truncate leading-tight">{af.file.name}</span>
+                      <span className="text-[10px] leading-tight text-muted-foreground/40">
+                        {preview ? "Image" : "File"} · {formatSize(af.file.size)}
+                      </span>
+                    </div>
                     <button
                       onClick={() => removeFile(af.id)}
                       className="ml-0.5 rounded-full p-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground transition-colors"
+                      aria-label={`Remove ${af.file.name}`}
                     >
                       <X className="h-3 w-3" />
                     </button>

@@ -95,10 +95,13 @@ export function useBackgroundChat({
             case "task:start": {
               setStatus("running");
               setTaskInfo({ startedAt: Date.now(), currentTool: null });
-              setMessages((prev) => [
-                ...prev,
-                { id: data.messageId, role: "assistant", parts: [] },
-              ]);
+              // Idempotent: if history already loaded this assistant row
+              // (reconnect / cross-channel), don't append a duplicate.
+              setMessages((prev) =>
+                prev.some((m) => m.id === data.messageId)
+                  ? prev
+                  : [...prev, { id: data.messageId, role: "assistant", parts: [] }],
+              );
               break;
             }
 
