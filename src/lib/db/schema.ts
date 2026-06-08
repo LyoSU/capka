@@ -1,5 +1,5 @@
 import {
-  pgTable, text, boolean, timestamp, integer, jsonb, index, bigint,
+  pgTable, text, boolean, timestamp, integer, jsonb, index, bigint, numeric,
 } from "drizzle-orm/pg-core";
 
 export const settings = pgTable("settings", {
@@ -117,13 +117,41 @@ export const tasks = pgTable("tasks", {
   id: text("id").primaryKey(),
   chatId: text("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull(),
-  status: text("status").notNull().default("running"), // running, completed, failed, cancelled
+  status: text("status").notNull().default("queued"), // queued, running, completed, failed, cancelled
   error: text("error"),
+  // Self-contained run payload so any worker can execute the task without the
+  // originating request's in-memory state (chatId, model id, system prompt, etc.).
+  payload: jsonb("payload"),
+  // Durable-queue bookkeeping (FOR UPDATE SKIP LOCKED + lease/heartbeat).
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  heartbeatAt: timestamp("heartbeat_at"),
+  workerId: text("worker_id"),
+  cancelRequested: boolean("cancel_requested").default(false),
+  attempts: integer("attempts").default(0),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   index("idx_tasks_chat_id").on(table.chatId),
   index("idx_tasks_user_id_status").on(table.userId, table.status),
+  index("idx_tasks_status_lease").on(table.status, table.leaseExpiresAt),
+]);
+
+// Per-task / per-message token usage and cost, captured at finalize time.
+export const usage = pgTable("usage", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id"),
+  messageId: text("message_id"),
+  userId: text("user_id").notNull(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").default(0),
+  outputTokens: integer("output_tokens").default(0),
+  cachedInputTokens: integer("cached_input_tokens").default(0),
+  costUsd: numeric("cost_usd"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [
+  index("idx_usage_user_created").on(t.userId, t.createdAt),
+  index("idx_usage_model").on(t.model),
 ]);
 
 // ── Phase 1: Professional Workspace ──────────────────────────
