@@ -169,7 +169,7 @@ export default function IntegrationsPage() {
           </div>
         ) : linked ? (
           <div className="flex items-center gap-2 rounded-md border p-3">
-            <Link2 className="h-4 w-4 text-green-500" />
+            <Link2 className="h-4 w-4 text-success" />
             <span className="text-sm">
               Linked{linkUsername ? ` as @${linkUsername}` : ""}
             </span>

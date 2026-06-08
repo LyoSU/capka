@@ -65,7 +65,7 @@ function ProgressSection({ steps, running }: { steps: ProgressStep[]; running: b
           return (
             <div key={i} className="flex items-center gap-2 py-1 text-xs">
               <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                {done ? <Check className="h-3.5 w-3.5 text-emerald-500" />
+                {done ? <Check className="h-3.5 w-3.5 text-success" />
                   : failed ? <AlertCircle className="h-3.5 w-3.5 text-destructive" />
                   : <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/60" />}
               </span>
