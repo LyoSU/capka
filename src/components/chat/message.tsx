@@ -66,6 +66,18 @@ function formatValue(value: unknown): string {
   if (typeof obj.result === "string" && obj.result.trim()) return obj.result;
   if (typeof obj.message === "string" && obj.message.trim()) return obj.message;
 
+  // unClaw sandbox tool shapes — show the human-meaningful field, never the
+  // raw { output, exitCode, success } wrapper (that JSON is dev noise).
+  if (typeof obj.output === "string") return obj.output.trim(); // execute_bash/python/node
+  if (typeof obj.listing === "string") return obj.listing.trim(); // list_files
+  if (typeof obj.matches === "string") return obj.matches.trim(); // search_files
+  if (typeof obj.error === "string" && obj.error.trim()) return obj.error; // tool-reported error
+  if (typeof obj.stdout === "string" || typeof obj.stderr === "string") {
+    return [obj.stdout, obj.stderr].filter((s) => typeof s === "string" && s.trim()).join("\n");
+  }
+  // write_file / str_replace success: { success: true, path } — no body to show.
+  if (obj.success === true) return "";
+
   // If isError is false and everything is empty, it's just a success with no output
   if (obj.isError === false) return "";
 
@@ -99,7 +111,7 @@ const TOOL_PATTERNS: { keywords: string[]; label: string; activeLabel: string; i
   { keywords: ["read", "file_read"],                   label: "Looked at a file",  activeLabel: "Reading...",          icon: FileSearch },
   { keywords: ["list", "dir"],                         label: "Browsed files",     activeLabel: "Looking at files...", icon: Folder },
   { keywords: ["search", "web"],                       label: "Searched the web",  activeLabel: "Searching...",        icon: Globe },
-  { keywords: ["write", "edit", "create"],             label: "Created a file",    activeLabel: "Writing...",          icon: FileSearch },
+  { keywords: ["write", "edit", "create"],             label: "Created a file",    activeLabel: "Writing...",          icon: FileText },
   { keywords: ["exec", "run", "shell", "bash", "python"], label: "Ran some code",  activeLabel: "Working...",         icon: Terminal },
 ];
 const TOOL_FALLBACK = { label: "Used a tool", activeLabel: "Working...", icon: Terminal };
