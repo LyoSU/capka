@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ChevronDown, Download, File, FileCode, FileImage, FileText, FileSpreadsheet,
-  Folder, FolderOpen, Loader2, Upload, X, Check, AlertCircle, ChevronLeft,
+  ChevronDown, Download, Folder, Loader2, Upload, X, Check, AlertCircle, ChevronLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { formatSize } from "@/lib/constants";
+import { fileKind } from "@/lib/file-kinds";
 import { describeStep } from "./steps";
 import type { AttachedFile } from "./chat-input";
 
@@ -16,21 +16,6 @@ type FileEntry = { name: string; path: string; isDirectory: boolean; size: numbe
 
 /** A progress step derived from an assistant message's tool parts. */
 export type ProgressStep = { toolName: string; state: string; input?: unknown };
-
-const DOC_EXTS = new Set(["docx", "doc", "pdf", "odt", "rtf", "txt", "log", "md"]);
-const SHEET_EXTS = new Set(["xlsx", "xls", "csv", "numbers", "tsv"]);
-const CODE_EXTS = new Set(["ts", "tsx", "js", "jsx", "py", "rb", "go", "rs", "java", "css", "html", "json", "yaml", "yml", "sh", "sql"]);
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
-
-function fileStyle(name: string, isDir: boolean) {
-  if (isDir) return { Icon: FolderOpen, color: "text-primary/70", bg: "bg-primary/10" };
-  const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
-  if (IMAGE_EXTS.has(ext)) return { Icon: FileImage, color: "text-violet-400", bg: "bg-violet-500/10" };
-  if (SHEET_EXTS.has(ext)) return { Icon: FileSpreadsheet, color: "text-emerald-400", bg: "bg-emerald-500/10" };
-  if (DOC_EXTS.has(ext)) return { Icon: FileText, color: "text-blue-400", bg: "bg-blue-500/10" };
-  if (CODE_EXTS.has(ext)) return { Icon: FileCode, color: "text-amber-400", bg: "bg-amber-500/10" };
-  return { Icon: File, color: "text-muted-foreground/60", bg: "bg-muted/50" };
-}
 
 function Section({ title, count, defaultOpen, action, children }: {
   title: string;
@@ -122,7 +107,7 @@ function ContextSection({ attachments }: { attachments: AttachedFile[] }) {
         {attachments.map((a) => {
           const isImage = a.file.type.startsWith("image/");
           const url = urls.get(a.id);
-          const { Icon, color, bg } = fileStyle(a.file.name, false);
+          const { Icon, color, bg } = fileKind(a.file.name);
           return (
             <div key={a.id} className="flex items-center gap-3 rounded-lg px-1 py-1">
               {isImage && url ? (
@@ -254,7 +239,7 @@ function FilesSection({ chatId }: { chatId: string }) {
 
       <div className="space-y-0.5 px-3">
         {sorted.map((entry) => {
-          const { Icon, color, bg } = fileStyle(entry.name, entry.isDirectory);
+          const { Icon, color, bg } = fileKind(entry.name, entry.isDirectory);
           return (
             <div key={entry.path} className="group flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-accent/40">
               <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${bg}`}>

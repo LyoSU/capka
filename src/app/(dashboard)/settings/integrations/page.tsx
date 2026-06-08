@@ -185,7 +185,7 @@ export default function IntegrationsPage() {
                   Send this command to the bot in Telegram:
                 </p>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono">
+                  <code className="flex-1 rounded-md bg-muted px-3 py-2 text-sm font-mono">
                     /link {linkCode}
                   </code>
                   <Button

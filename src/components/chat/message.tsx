@@ -2,12 +2,12 @@ import { type UIMessage } from "ai";
 import {
   Send, Download,
   ChevronRight, Loader2, AlertCircle,
-  FileText, FileCode, FileImage, File,
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { useState } from "react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { fileKind, extOf } from "@/lib/file-kinds";
 import { describeStep } from "./steps";
 
 // --- Helpers ---
@@ -180,19 +180,6 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
 
 const WORKSPACE_PATH_RE = /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
 
-const DOC_EXT = new Set(["docx", "doc", "pdf", "odt", "rtf", "txt", "md", "log"]);
-const SHEET_EXT = new Set(["xlsx", "xls", "csv", "numbers", "tsv"]);
-const IMG_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
-const CODE_EXT_DL = new Set(["ts", "tsx", "js", "jsx", "py", "rb", "go", "rs", "java", "css", "html", "sh", "sql", "c", "cpp", "json", "yaml", "yml"]);
-
-function getFileStyle(ext: string) {
-  if (DOC_EXT.has(ext))      return { label: "Document",    Icon: FileText,  color: "text-blue-400",    bg: "bg-blue-500/10" };
-  if (SHEET_EXT.has(ext))    return { label: "Spreadsheet", Icon: FileText,  color: "text-emerald-400", bg: "bg-emerald-500/10" };
-  if (IMG_EXT.has(ext))      return { label: "Image",       Icon: FileImage, color: "text-violet-400",  bg: "bg-violet-500/10" };
-  if (CODE_EXT_DL.has(ext))  return { label: "Code",        Icon: FileCode,  color: "text-amber-400",   bg: "bg-amber-500/10" };
-  return { label: ext.toUpperCase() || "File", Icon: File, color: "text-muted-foreground", bg: "bg-muted/60" };
-}
-
 function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
   const paths = [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))];
   if (paths.length === 0) return null;
@@ -228,8 +215,8 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
       <div className="divide-y divide-border/25">
         {paths.map((p) => {
           const fileName = p.split("/").pop() || p;
-          const ext = fileName.split(".").pop()?.toLowerCase() || "";
-          const { label, Icon, color, bg } = getFileStyle(ext);
+          const ext = extOf(fileName);
+          const { label, Icon, color, bg } = fileKind(fileName);
           return (
             <a
               key={p}

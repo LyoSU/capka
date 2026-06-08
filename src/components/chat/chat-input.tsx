@@ -1,10 +1,11 @@
 "use client";
 
 import { useRef, useState, useCallback, useMemo, useEffect, type KeyboardEvent, type DragEvent } from "react";
-import { ArrowUp, Paperclip, Square, X, File, FileText, FileImage, FileSpreadsheet } from "lucide-react";
+import { ArrowUp, Paperclip, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatSize } from "@/lib/constants";
+import { fileKind } from "@/lib/file-kinds";
 
 /** Max single file size for upload (100MB) */
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
@@ -22,14 +23,6 @@ interface ChatInputProps {
   isLoading: boolean;
   files: AttachedFile[];
   onFilesChange: (files: AttachedFile[]) => void;
-}
-
-function fileIcon(name: string) {
-  const ext = name.split(".").pop()?.toLowerCase() || "";
-  if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext)) return FileImage;
-  if (["xlsx", "xls", "csv"].includes(ext)) return FileSpreadsheet;
-  if (["pdf", "doc", "docx", "txt", "md"].includes(ext)) return FileText;
-  return File;
 }
 
 export function ChatInput({
@@ -120,7 +113,7 @@ export function ChatInput({
           {files.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 pt-3">
               {files.map((af) => {
-                const Icon = fileIcon(af.file.name);
+                const { Icon, color, bg } = fileKind(af.file.name);
                 const preview = previews.get(af.id);
                 return (
                   <div
@@ -131,8 +124,8 @@ export function ChatInput({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={preview} alt={af.file.name} className="h-7 w-7 shrink-0 rounded-md object-cover" />
                     ) : (
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-background">
-                        <Icon className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${bg}`}>
+                        <Icon className={`h-3.5 w-3.5 ${color}`} />
                       </span>
                     )}
                     <div className="flex flex-col">
