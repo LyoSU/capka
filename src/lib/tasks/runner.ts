@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { messages, memories, projects } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
+import { deliverTaskResult, type TaskOrigin } from "./delivery";
 import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
@@ -27,6 +28,8 @@ export interface TaskPayload {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   uiMessages: any[];
   attachedFiles?: FileRef[];
+  /** Where to push the result besides the web UI (e.g. Telegram). */
+  origin?: TaskOrigin;
 }
 
 export interface ClaimedTask {
@@ -197,7 +200,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       chatId,
       role: "assistant",
       content: "",
-      platform: "web",
+      platform: payload.origin?.platform ?? "web",
       metadata: { taskId, status: "running", parts: [] },
     });
     await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId });
@@ -347,6 +350,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }).where(eq(messages.id, msgId));
     await finalizeTask(taskId, finalStatus, streamError ?? null);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
+    if (payload.origin) {
+      await deliverTaskResult(payload.origin, { status: finalStatus, text: getFullText(), error: failure?.userMessage });
+    }
 
     // Record token usage/cost (never fatal). `inputTokens` is the TOTAL input
     // including cached reads, so split it: charge non-cached at the input rate
@@ -400,6 +406,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }).where(eq(messages.id, msgId)).catch(() => {}),
     ]);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
+    if (payload.origin) {
+      await deliverTaskResult(payload.origin, { status, text: getFullText(), error: failure?.userMessage });
+    }
   } finally {
     clearInterval(monitor);
     await closeMcp?.().catch(() => {});

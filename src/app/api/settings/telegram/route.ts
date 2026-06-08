@@ -1,7 +1,7 @@
 import { Bot } from "grammy";
 import { requireAdmin, apiHandler } from "@/lib/auth";
 import { setSetting, isSetupComplete } from "@/lib/settings";
-import { generateSecret } from "@/lib/crypto";
+import { restartBot } from "@/lib/telegram/bot";
 
 export const POST = apiHandler(async (req: Request) => {
   // During setup wizard, user isn't admin yet — allow if setup not complete
@@ -25,30 +25,18 @@ export const POST = apiHandler(async (req: Request) => {
   // Save token (encrypted)
   await setSetting("telegram_bot_token", botToken.trim(), true);
 
-  // Generate and save webhook secret
-  const webhookSecret = generateSecret().slice(0, 32);
-  await setSetting("telegram_webhook_secret", webhookSecret, true);
-
-  // Register webhook with Telegram
-  const baseUrl = process.env.BETTER_AUTH_URL || `${req.headers.get("x-forwarded-proto") || "https"}://${req.headers.get("host")}`;
-  const webhookUrl = `${baseUrl}/api/webhook/telegram`;
-
+  // Start (or restart) long-polling with the new token — no public webhook
+  // URL needed, so this works behind NAT/firewalls out of the box.
   try {
-    const bot = new Bot(botToken.trim());
-    await bot.api.setWebhook(webhookUrl, { secret_token: webhookSecret });
+    await restartBot();
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     return Response.json({
       ok: true,
       botUsername: botInfo.username,
-      webhookUrl,
-      warning: `Webhook registration failed: ${msg}. You may need to set it manually.`,
+      warning: `Saved, but couldn't start the bot: ${msg}. Restarting the server will retry.`,
     });
   }
 
-  return Response.json({
-    ok: true,
-    botUsername: botInfo.username,
-    webhookUrl,
-  });
+  return Response.json({ ok: true, botUsername: botInfo.username });
 });

@@ -1,12 +1,16 @@
-import { Bot, webhookCallback } from "grammy";
+import { Bot } from "grammy";
 import { nanoid } from "nanoid";
-import { eq, desc } from "drizzle-orm";
+import { eq, asc, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
+import { enqueueTask } from "@/lib/tasks/queue";
+import { toUIMessages } from "@/lib/chat/presenter";
+import type { TaskPayload } from "@/lib/tasks/runner";
 
 let _bot: Bot | null = null;
+let _polling = false;
 
 export async function getBot(): Promise<Bot | null> {
   if (_bot) return _bot;
@@ -100,40 +104,68 @@ export async function getBot(): Promise<Bot | null> {
       .set({ updatedAt: new Date() })
       .where(eq(chats.id, chat.id));
 
-    // Emit SSE event for real-time sync
-    await publishTaskEvent(link.userId, {
-      type: "new_message",
-      chatId: chat.id,
-    });
+    // Tell any open web client a message landed in this chat.
+    await publishTaskEvent(link.userId, { type: "new_message", chatId: chat.id });
 
+    // Run through the SAME durable engine as the web: build the conversation
+    // from history and enqueue a task. The worker executes it (with memory,
+    // project context, usage and the sandbox) and the runner pushes the reply
+    // back to Telegram via the task origin — so it survives restarts and the
+    // two channels can never drift.
     try {
-      const { processMessageForTelegram } = await import("./agent-handler");
-      const response = await processMessageForTelegram(
-        link.userId,
-        chat.id,
-        ctx.message.text,
-      );
+      const rows = await db
+        .select({
+          id: messages.id, role: messages.role, content: messages.content,
+          metadata: messages.metadata, createdAt: messages.createdAt, platform: messages.platform,
+        })
+        .from(messages)
+        .where(eq(messages.chatId, chat.id))
+        .orderBy(asc(messages.createdAt))
+        .limit(100);
 
-      await db.insert(messages).values({
-        id: nanoid(),
-        chatId: chat.id,
-        role: "assistant",
-        content: response,
-        platform: "telegram",
-      });
-      await publishTaskEvent(link.userId, {
-        type: "new_message",
-        chatId: chat.id,
-      });
-      await ctx.reply(response, { parse_mode: "Markdown" });
+      const payload: TaskPayload = {
+        requestModel: chat.model ?? undefined,
+        uiMessages: toUIMessages(rows),
+        origin: { platform: "telegram", telegramChatId: ctx.chat.id },
+      };
+      await enqueueTask({ id: nanoid(), chatId: chat.id, userId: link.userId, payload });
+      await ctx.replyWithChatAction("typing").catch(() => {});
     } catch (error: unknown) {
-      const msg =
-        error instanceof Error ? error.message : "Unknown error occurred";
-      await ctx.reply(`Error: ${msg}`);
+      const msg = error instanceof Error ? error.message : "Unknown error occurred";
+      await ctx.reply(`Couldn't start the assistant: ${msg}`);
     }
   });
 
   return _bot;
+}
+
+/**
+ * Start the bot in long-polling mode — no public webhook URL needed, works
+ * behind NAT, and the bot becomes a persistent process that the runner can
+ * deliver replies through. Idempotent; a no-op if no token is configured.
+ */
+export async function startBot(): Promise<void> {
+  if (_polling) return;
+  const bot = await getBot();
+  if (!bot) return;
+  _polling = true;
+  // Drop any previously-registered webhook so getUpdates won't 409.
+  await bot.api.deleteWebhook().catch(() => {});
+  // bot.start() resolves only when the bot stops, so never await it here.
+  void bot.start({ onStart: (info) => console.log(`[telegram] polling as @${info.username}`) });
+}
+
+/** Stop polling and drop the singleton (so a new token takes effect). */
+export async function stopBot(): Promise<void> {
+  if (_bot && _polling) await _bot.stop().catch(() => {});
+  _polling = false;
+  _bot = null;
+}
+
+/** Apply a newly-saved token: stop the old bot, start a fresh one. */
+export async function restartBot(): Promise<void> {
+  await stopBot();
+  await startBot();
 }
 
 async function findLink(telegramUserId: number) {
@@ -143,10 +175,4 @@ async function findLink(telegramUserId: number) {
     .where(eq(telegramLinks.telegramUserId, telegramUserId))
     .limit(1);
   return link || null;
-}
-
-export async function getWebhookHandler() {
-  const bot = await getBot();
-  if (!bot) return null;
-  return webhookCallback(bot, "std/http");
 }

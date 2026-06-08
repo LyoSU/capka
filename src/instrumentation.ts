@@ -18,4 +18,13 @@ export async function register() {
 
   const { startWorker } = await import("@/lib/tasks/worker");
   await startWorker();
+
+  // Start the Telegram bot in long-polling mode (no-op if no token configured).
+  // Never block startup on it.
+  try {
+    const { startBot } = await import("@/lib/telegram/bot");
+    await startBot();
+  } catch (e) {
+    console.error("[telegram] failed to start bot polling:", e);
+  }
 }
