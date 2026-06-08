@@ -6,6 +6,15 @@ import { encrypt, decrypt, generateSecret } from "./crypto";
 let masterKeyCache: string | null = null;
 
 export async function getMasterKey(): Promise<string> {
+  // Root of trust: prefer an explicit env/secret outside the DB. Encrypting
+  // provider keys with a key stored in the same DB gives ~zero protection
+  // against a DB leak, so production must set UNCLAW_MASTER_KEY.
+  const envKey = process.env.UNCLAW_MASTER_KEY?.trim();
+  if (envKey) {
+    masterKeyCache = envKey;
+    return envKey;
+  }
+
   if (masterKeyCache) return masterKeyCache;
 
   const row = await db.select().from(settings).where(eq(settings.key, "auth_secret")).limit(1);
@@ -15,6 +24,10 @@ export async function getMasterKey(): Promise<string> {
     return masterKeyCache;
   }
 
+  console.warn(
+    "[security] UNCLAW_MASTER_KEY is not set — generating a master key and storing it in the DB. " +
+    "This is insecure (a DB leak exposes all provider keys). Set UNCLAW_MASTER_KEY in production.",
+  );
   const secret = generateSecret();
   await db.insert(settings).values({ key: "auth_secret", value: secret, isEncrypted: false });
   masterKeyCache = secret;
