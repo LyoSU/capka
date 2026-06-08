@@ -4,7 +4,7 @@ import { eq, and } from "drizzle-orm";
 
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { projects, chats } from "@/lib/db/schema";
+import { projects, chats, users } from "@/lib/db/schema";
 import { resolveInitialModel } from "@/lib/providers/default-model";
 import { ChatPanel } from "@/components/chat/chat-panel";
 
@@ -40,16 +40,20 @@ export default async function ChatIdPage({
         .then((r) => r[0])
     : undefined;
 
-  const defaultModel = await resolveInitialModel(session.user.id, {
-    chatModel: existingChat?.model,
-    projectDefaultModel: project?.defaultModel,
-  });
+  const [defaultModel, userRow] = await Promise.all([
+    resolveInitialModel(session.user.id, {
+      chatModel: existingChat?.model,
+      projectDefaultModel: project?.defaultModel,
+    }),
+    db.select({ role: users.role }).from(users).where(eq(users.id, session.user.id)).limit(1).then((r) => r[0]),
+  ]);
 
   return (
     <ChatPanel
       chatId={chatId}
       defaultModel={defaultModel}
       projectId={projectId ?? undefined}
+      isAdmin={userRow?.role === "admin"}
     />
   );
 }

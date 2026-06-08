@@ -16,9 +16,10 @@ interface ChatPanelProps {
   chatId: string;
   defaultModel: string;
   projectId?: string;
+  isAdmin?: boolean;
 }
 
-export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPanelProps) {
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -114,6 +115,7 @@ export function ChatPanel({ chatId, defaultModel, projectId }: ChatPanelProps) {
                     key={message.id}
                     message={message as never}
                     chatId={chatId}
+                    isAdmin={isAdmin}
                     isStreaming={isStreamingMsg}
                     statusSlot={isStreamingMsg ? (
                       <TaskStatus

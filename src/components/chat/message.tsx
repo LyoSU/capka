@@ -379,6 +379,32 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
   );
 }
 
+/** Friendly, role-aware failure notice. Everyone sees `message`; admins can
+ *  expand the raw technical `detail`. */
+function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: string; isAdmin?: boolean }) {
+  return (
+    <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5">
+      <div className="flex items-start gap-2 text-sm text-destructive">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span className="flex-1">{message}</span>
+      </div>
+      {isAdmin && detail && detail !== message && (
+        <Collapsible>
+          <CollapsibleTrigger className="mt-1.5 ml-6 flex items-center gap-1 text-xs text-destructive/60 hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
+            <ChevronRight className="chevron h-3 w-3 transition-transform" />
+            Technical details
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <pre className="mt-1 ml-6 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-destructive/5 p-2 font-mono text-[11px] text-destructive/70">
+              {detail}
+            </pre>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </div>
+  );
+}
+
 function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram: boolean }) {
   return (
     <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground opacity-60 sm:opacity-0 transition-opacity duration-200 sm:group-hover/msg:opacity-100">
@@ -395,12 +421,13 @@ interface ChatMessageProps {
   isStreaming?: boolean;
   chatId?: string;
   statusSlot?: React.ReactNode;
+  isAdmin?: boolean;
 }
 
-export function ChatMessage({ message, isStreaming, chatId, statusSlot }: ChatMessageProps) {
+export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin }: ChatMessageProps) {
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -463,14 +490,17 @@ export function ChatMessage({ message, isStreaming, chatId, statusSlot }: ChatMe
               </div>
             );
           })
-        ) : isStreaming ? null : (
+        ) : isStreaming || metadata?.taskStatus === "failed" ? null : (
           <span className="text-muted-foreground text-sm">
-            {metadata?.taskStatus === "failed"
-              ? "Failed to generate a response"
-              : metadata?.taskStatus === "cancelled"
-                ? "Response was cancelled"
-                : "..."}
+            {metadata?.taskStatus === "cancelled" ? "Response was cancelled" : "..."}
           </span>
+        )}
+        {metadata?.taskStatus === "failed" && (
+          <ErrorNotice
+            message={metadata.error || "Something went wrong while generating a response. Please try again."}
+            detail={metadata.errorDetail || undefined}
+            isAdmin={isAdmin}
+          />
         )}
         {statusSlot}
         {!isStreaming && <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />}

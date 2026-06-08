@@ -12,6 +12,7 @@ import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
+import { classifyLLMError } from "@/lib/errors/friendly";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import type { StoredPart } from "@/lib/chat/contracts";
@@ -334,13 +335,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
 
     const finalStatus = ac.signal.aborted ? "cancelled" : streamError ? "failed" : "completed";
+    // Map any provider error to a friendly, role-aware shape: users see
+    // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
+    const failure = streamError ? classifyLLMError(streamError) : undefined;
 
     await db.update(messages).set({
       content: getFullText(),
-      metadata: { taskId, status: finalStatus, parts: parts.length > 0 ? parts : undefined },
+      metadata: {
+        taskId, status: finalStatus, parts: parts.length > 0 ? parts : undefined,
+        ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
+      },
     }).where(eq(messages.id, msgId));
     await finalizeTask(taskId, finalStatus, streamError ?? null);
-    await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus });
+    await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
 
     // Record token usage/cost (never fatal). `inputTokens` is the TOTAL input
     // including cached reads, so split it: charge non-cached at the input rate
@@ -382,15 +389,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";
     const status = isAbort ? "cancelled" : "failed";
-    const error = isAbort ? undefined : errMsg(e);
+    const failure = isAbort ? undefined : classifyLLMError(e);
     await Promise.all([
-      finalizeTask(taskId, status, error ?? null).catch(() => {}),
+      finalizeTask(taskId, status, failure?.adminDetail ?? null).catch(() => {}),
       db.update(messages).set({
         content: getFullText(),
-        metadata: { taskId, status, error, parts: parts.length > 0 ? parts : undefined },
+        metadata: {
+          taskId, status, parts: parts.length > 0 ? parts : undefined,
+          ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
+        },
       }).where(eq(messages.id, msgId)).catch(() => {}),
     ]);
-    await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status, error }).catch(() => {});
+    await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
   } finally {
     clearInterval(monitor);
     await closeMcp?.().catch(() => {});
