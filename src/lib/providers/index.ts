@@ -15,8 +15,10 @@ export function getModel(
   switch (provider) {
     case "litellm": {
       // Any OpenAI-compatible gateway (LiteLLM proxy, vLLM, Together, …).
+      // Use Chat Completions (.chat), NOT the default Responses API — gateways
+      // universally expose /chat/completions, while /responses often 404s.
       const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
-      return p(modelId);
+      return p.chat(modelId);
     }
     case "openai": {
       const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
