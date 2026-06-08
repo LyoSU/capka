@@ -1,6 +1,7 @@
 import { requireSession, apiHandler } from "@/lib/auth";
-import { createSession, downloadFile } from "@/lib/sandbox/client";
+import { downloadFile } from "@/lib/sandbox/client";
 import { requireOwned } from "@/lib/db/ownership";
+import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { chats } from "@/lib/db/schema";
 
 export const GET = apiHandler(async (req: Request) => {
@@ -11,9 +12,9 @@ export const GET = apiHandler(async (req: Request) => {
 
   if (!chatId || !filePath) return Response.json({ error: "Missing chatId or path" }, { status: 400 });
 
-  await requireOwned(chats, chatId, userId, "Chat");
-  await createSession(chatId, userId);
-  const controllerRes = await downloadFile(chatId, filePath);
+  const chat = await requireOwned(chats, chatId, userId, "Chat");
+  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
+  const controllerRes = await downloadFile(key, filePath, userId);
 
   // Proxy the binary stream from controller to client
   const filename = filePath.split("/").pop() || "file";

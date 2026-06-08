@@ -85,15 +85,17 @@ type FileEntry = {
   modifiedAt: string | null;
 };
 
-export async function listFiles(sessionId: string, path = "."): Promise<{ entries: FileEntry[]; error?: string }> {
+export async function listFiles(sessionId: string, path = ".", userId?: string): Promise<{ entries: FileEntry[]; error?: string }> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path });
+  if (userId) params.set("userId", userId);
   return request(`/sessions/${id}/files?${params}`, "GET");
 }
 
-export async function downloadFile(sessionId: string, filePath: string): Promise<Response> {
+export async function downloadFile(sessionId: string, filePath: string, userId?: string): Promise<Response> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path: filePath });
+  if (userId) params.set("userId", userId);
   const res = await sandboxFetch(`${CONTROLLER_URL}/sessions/${id}/download?${params}`, {
     headers: authHeaders(),
     signal: AbortSignal.timeout(30_000),
@@ -106,13 +108,14 @@ export async function downloadFile(sessionId: string, filePath: string): Promise
   return res;
 }
 
-export async function uploadFile(sessionId: string, path: string, file: File): Promise<{ ok: boolean; path: string; name: string }> {
+export async function uploadFile(sessionId: string, path: string, file: File, userId?: string): Promise<{ ok: boolean; path: string; name: string }> {
   const id = sanitizeId(sessionId);
   const form = new FormData();
   form.append("path", path);
   form.append("file", file);
 
-  const res = await sandboxFetch(`${CONTROLLER_URL}/sessions/${id}/upload`, {
+  const query = userId ? `?userId=${encodeURIComponent(sanitizeId(userId))}` : "";
+  const res = await sandboxFetch(`${CONTROLLER_URL}/sessions/${id}/upload${query}`, {
     method: "POST",
     headers: authHeaders(),
     body: form,

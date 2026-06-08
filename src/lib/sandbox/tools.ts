@@ -9,11 +9,11 @@ import { createSession, execCommand } from "./client";
  * NOTE: All commands run inside an isolated Docker container (not on the host).
  * Shell injection within the sandbox is by design — the container IS the security boundary.
  */
-export async function loadSandboxTools(userId: string, chatId: string, networkMode?: string) {
-  await createSession(chatId, userId, networkMode);
+export async function loadSandboxTools(userId: string, sessionKey: string, networkMode?: string) {
+  await createSession(sessionKey, userId, networkMode);
 
   const run = (cmd: string, timeout?: number) =>
-    execCommand(chatId, cmd, Math.min(timeout || 30000, 300000));
+    execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000));
 
   const tools = {
     execute_bash: tool({

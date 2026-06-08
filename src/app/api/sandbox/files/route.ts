@@ -1,6 +1,7 @@
 import { requireSession, apiHandler } from "@/lib/auth";
-import { createSession, listFiles } from "@/lib/sandbox/client";
+import { listFiles } from "@/lib/sandbox/client";
 import { requireOwned } from "@/lib/db/ownership";
+import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { chats } from "@/lib/db/schema";
 
 export const GET = apiHandler(async (req: Request) => {
@@ -11,8 +12,10 @@ export const GET = apiHandler(async (req: Request) => {
 
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
 
-  await requireOwned(chats, chatId, userId, "Chat");
-  await createSession(chatId, userId);
-  const data = await listFiles(chatId, path);
+  // Browse the chat's project folder (shared) or its own — read from host fs,
+  // no running container required.
+  const chat = await requireOwned(chats, chatId, userId, "Chat");
+  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
+  const data = await listFiles(key, path, userId);
   return Response.json(data);
 });

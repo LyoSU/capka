@@ -32,6 +32,23 @@ function workspacePath(userId, sessionId) {
   return resolve(DATA_ROOT, sanitize(userId), sanitize(sessionId), "sandbox");
 }
 
+/** Per-user global folder, mounted as /shared into every container.
+ *  "_global" can never collide with a nanoid session id. */
+function globalPath(userId) {
+  return resolve(DATA_ROOT, sanitize(userId), "_global", "sandbox");
+}
+
+/** Resolve the host workspace base for a file op. Prefers the live session's
+ *  owner; otherwise trusts the platform-supplied userId (the platform already
+ *  authenticated the user and verified chat ownership). Returns null if neither
+ *  is available, so file management works without a running container. */
+function resolveWsBase(sessionId, fallbackUserId) {
+  const session = sessions.get(sessionId);
+  const userId = session ? session.userId : (fallbackUserId ? sanitize(fallbackUserId) : null);
+  if (!userId) return null;
+  return { wsBase: workspacePath(userId, sessionId), session };
+}
+
 function safeJoin(base, userPath) {
   const full = resolve(base, userPath);
   // Must start with base + separator (not just prefix match)
@@ -73,8 +90,10 @@ async function createSandbox(sessionId, userId, networkMode = "none") {
   userId = sanitize(userId);
   networkMode = networkMode === "bridge" ? "bridge" : "none";
   const wsPath = workspacePath(userId, sessionId);
+  const sharedPath = globalPath(userId);
 
   await mkdir(wsPath, { recursive: true });
+  await mkdir(sharedPath, { recursive: true });
 
   const container = await docker.createContainer({
     Image: SANDBOX_IMAGE,
@@ -88,7 +107,7 @@ async function createSandbox(sessionId, userId, networkMode = "none") {
       CapDrop: ["ALL"],
       CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
       NetworkMode: networkMode,
-      Binds: [`${wsPath}:/workspace`],
+      Binds: [`${wsPath}:/workspace`, `${sharedPath}:/shared`],
       Init: true,
     },
     User: "1000:1000",
@@ -312,11 +331,11 @@ const server = createServer(async (req, res) => {
     // GET /sessions/:id/files?path=. — list directory (native fs, no exec)
     const filesMatch = path.match(/^\/sessions\/([^/]+)\/files$/);
     if (method === "GET" && filesMatch) {
-      const session = sessions.get(filesMatch[1]);
-      if (!session) return jsonRes(res, 404, { error: "Session not found" });
-      session.lastActivity = Date.now();
+      const resolved = resolveWsBase(filesMatch[1], url.searchParams.get("userId"));
+      if (!resolved) return jsonRes(res, 400, { error: "Missing userId" });
+      if (resolved.session) resolved.session.lastActivity = Date.now();
 
-      const wsBase = workspacePath(session.userId, filesMatch[1]);
+      const wsBase = resolved.wsBase;
       const relPath = url.searchParams.get("path") || ".";
       const dirPath = await safeRealPath(wsBase, relPath);
 
@@ -341,11 +360,11 @@ const server = createServer(async (req, res) => {
     // GET /sessions/:id/download?path=file — stream file binary (native fs)
     const dlMatch = path.match(/^\/sessions\/([^/]+)\/download$/);
     if (method === "GET" && dlMatch) {
-      const session = sessions.get(dlMatch[1]);
-      if (!session) return jsonRes(res, 404, { error: "Session not found" });
-      session.lastActivity = Date.now();
+      const resolved = resolveWsBase(dlMatch[1], url.searchParams.get("userId"));
+      if (!resolved) return jsonRes(res, 400, { error: "Missing userId" });
+      if (resolved.session) resolved.session.lastActivity = Date.now();
 
-      const wsBase = workspacePath(session.userId, dlMatch[1]);
+      const wsBase = resolved.wsBase;
       const filePath = url.searchParams.get("path");
       if (!filePath) return jsonRes(res, 400, { error: "Missing path" });
 
@@ -368,11 +387,11 @@ const server = createServer(async (req, res) => {
     // POST /sessions/:id/upload — upload file (multipart)
     const upMatch = path.match(/^\/sessions\/([^/]+)\/upload$/);
     if (method === "POST" && upMatch) {
-      const session = sessions.get(upMatch[1]);
-      if (!session) return jsonRes(res, 404, { error: "Session not found" });
-      session.lastActivity = Date.now();
+      const resolved = resolveWsBase(upMatch[1], url.searchParams.get("userId"));
+      if (!resolved) return jsonRes(res, 400, { error: "Missing userId" });
+      if (resolved.session) resolved.session.lastActivity = Date.now();
 
-      const wsBase = workspacePath(session.userId, upMatch[1]);
+      const wsBase = resolved.wsBase;
 
       // Parse multipart boundary
       const contentType = req.headers["content-type"] || "";

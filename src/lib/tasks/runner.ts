@@ -1,6 +1,6 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, or, isNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { messages, memories, projects } from "@/lib/db/schema";
@@ -8,6 +8,7 @@ import { realtime } from "@/lib/realtime";
 import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
+import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
@@ -40,7 +41,8 @@ const MAX_CONCURRENT_DOWNLOADS = 5;
 /** Download files with bounded concurrency and total size budget */
 async function downloadBounded(
   files: FileRef[],
-  chatId: string,
+  sessionKey: string,
+  userId: string,
 ): Promise<{ file: FileRef; buf: Buffer }[]> {
   const results: { file: FileRef; buf: Buffer }[] = [];
   let totalBytes = 0;
@@ -51,7 +53,7 @@ async function downloadBounded(
     const batch = files.slice(i, i + MAX_CONCURRENT_DOWNLOADS);
     const settled = await Promise.allSettled(
       batch.map(async (file) => {
-        const res = await downloadFile(chatId, file.name);
+        const res = await downloadFile(sessionKey, file.name, userId);
         return { file, buf: Buffer.from(await res.arrayBuffer()) };
       }),
     );
@@ -79,7 +81,8 @@ async function downloadBounded(
 /** Read multimodal files from sandbox and inject as FilePart in the last user message */
 async function injectNativeFiles(
   modelMessages: ModelMessage[],
-  chatId: string,
+  sessionKey: string,
+  userId: string,
   files: FileRef[],
 ): Promise<void> {
   if (files.length === 0) return;
@@ -87,7 +90,7 @@ async function injectNativeFiles(
   const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
   if (!lastUser) return;
 
-  const downloaded = await downloadBounded(files, chatId);
+  const downloaded = await downloadBounded(files, sessionKey, userId);
   if (downloaded.length === 0) return;
 
   const parts: FilePart[] = downloaded.map(({ file, buf }) => ({
@@ -104,23 +107,31 @@ async function injectNativeFiles(
   console.log(`[task] injected ${parts.length} native file(s) (${(totalBytes / 1024).toFixed(0)}KB) into model message`);
 }
 
-/** Re-resolve everything needed to run the task from its persisted payload. */
-async function prepareRun(userId: string, chatId: string, payload: TaskPayload) {
+/** Re-resolve everything needed to run the task from its persisted payload.
+ *  `sessionKey` is the project (shared folder) or the chat itself — see
+ *  workspaceSessionKey. Memory is scoped to the project plus user-global facts. */
+async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload) {
+  // A project chat sees its project memory + user-global (unscoped) memory.
+  // A standalone chat sees only user-global memory, so projects don't leak.
+  const memoryFilter = payload.projectId
+    ? and(eq(memories.userId, userId), or(eq(memories.projectId, payload.projectId), isNull(memories.projectId)))
+    : and(eq(memories.userId, userId), isNull(memories.projectId));
+
   const [{ model, provider, modelId }, project, userMemories] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
-    db.select().from(memories).where(eq(memories.userId, userId)).orderBy(desc(memories.createdAt)).limit(50),
+    db.select().from(memories).where(memoryFilter).orderBy(desc(memories.createdAt)).limit(50),
   ]);
 
-  const mcp = await loadSandboxTools(userId, chatId, project?.sandboxNetwork ?? undefined);
+  const mcp = await loadSandboxTools(userId, sessionKey, project?.sandboxNetwork ?? undefined);
 
   // Workspace snapshot — runs inside the isolated Docker container, not the host.
   let workspaceSnapshot: string | undefined;
   try {
     const { execCommand } = await import("@/lib/sandbox/client");
-    const ws = await execCommand(chatId, "find /workspace -maxdepth 3 -not -path '*/\\.*' | head -50", 5000).catch(() => null);
+    const ws = await execCommand(sessionKey, "find /workspace -maxdepth 3 -not -path '*/\\.*' | head -50", 5000).catch(() => null);
     if (ws?.stdout?.trim()) workspaceSnapshot = ws.stdout.trim();
   } catch { /* sandbox not ready yet */ }
 
@@ -147,6 +158,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   const userId = task.user_id;
   const channel = `user:${userId}`;
   const payload = (task.payload ?? {}) as TaskPayload;
+  // Shared project folder when the chat belongs to a project, else its own.
+  const sessionKey = workspaceSessionKey({ id: chatId, projectId: payload.projectId ?? null });
 
   const ac = new AbortController();
   const msgId = nanoid();
@@ -176,7 +189,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
 
     const { model, provider, modelId, tools, closeMcp: close, systemPrompt, userMemories } =
-      await prepareRun(userId, chatId, payload);
+      await prepareRun(userId, sessionKey, payload);
     closeMcp = close;
 
     await db.insert(messages).values({
@@ -195,7 +208,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let injectedNative = false;
     const { nativeFiles } = classifyFiles(payload.attachedFiles);
     if (nativeFiles.length) {
-      await injectNativeFiles(modelMessages, chatId, nativeFiles);
+      await injectNativeFiles(modelMessages, sessionKey, userId, nativeFiles);
       injectedNative = true;
     }
 
@@ -358,7 +371,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .then(async (newFacts) => {
           if (newFacts.length > 0) {
             await db.insert(memories).values(
-              newFacts.map((content) => ({ id: nanoid(), userId, content, type: "fact" })),
+              newFacts.map((content) => ({
+                id: nanoid(), userId, projectId: payload.projectId ?? null, content, type: "fact",
+              })),
             );
           }
         })

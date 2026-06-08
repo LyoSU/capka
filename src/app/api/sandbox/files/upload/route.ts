@@ -1,6 +1,7 @@
 import { requireRole, apiHandler } from "@/lib/auth";
-import { createSession, uploadFile } from "@/lib/sandbox/client";
+import { uploadFile } from "@/lib/sandbox/client";
 import { requireOwned } from "@/lib/db/ownership";
+import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { chats } from "@/lib/db/schema";
 
 export const POST = apiHandler(async (req: Request) => {
@@ -12,8 +13,8 @@ export const POST = apiHandler(async (req: Request) => {
 
   if (!chatId || !file) return Response.json({ error: "Missing chatId or file" }, { status: 400 });
 
-  await requireOwned(chats, chatId, userId, "Chat");
-  await createSession(chatId, userId);
-  const result = await uploadFile(chatId, path, file);
+  const chat = await requireOwned(chats, chatId, userId, "Chat");
+  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
+  const result = await uploadFile(key, path, file, userId);
   return Response.json(result);
 });

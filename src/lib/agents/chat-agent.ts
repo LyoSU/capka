@@ -28,7 +28,8 @@ OS: Ubuntu 24.04 | Python 3.12 | Node.js 22 | Java 21 | Bash 5.2 | LaTeX
 - \`search_files\` — grep/ripgrep search
 
 ### Workspace
-Files persist in /workspace between messages. This is your working directory.
+- \`/workspace\` — your working directory. Files persist between messages. When the chat belongs to a project, this folder is **shared across all chats in that project**, so files you create here are available in the project's other chats.
+- \`/shared\` — the user's **global** folder, available in every chat regardless of project. Use it for files the user wants reusable everywhere; keep project-specific work in /workspace.
 
 ## Rules
 

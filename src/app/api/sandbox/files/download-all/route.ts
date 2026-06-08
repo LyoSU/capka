@@ -1,6 +1,7 @@
 import { requireSession, apiHandler } from "@/lib/auth";
 import { createSession, execCommand, downloadFile } from "@/lib/sandbox/client";
 import { requireOwned } from "@/lib/db/ownership";
+import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { chats } from "@/lib/db/schema";
 
 // Only allow safe characters in file paths (matches client-side WORKSPACE_PATH_RE)
@@ -19,8 +20,10 @@ export const GET = apiHandler(async (req: Request) => {
     return Response.json({ error: "Invalid path" }, { status: 400 });
   }
 
-  await requireOwned(chats, chatId, userId, "Chat");
-  await createSession(chatId, userId);
+  const chat = await requireOwned(chats, chatId, userId, "Chat");
+  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
+  // Archiving shells out to zip/tar, so a live container is required here.
+  await createSession(key, userId);
 
   const shellPaths = paths.map((p) => `'${p.replace(/'/g, "'\\''")}'`).join(" ");
 
@@ -29,18 +32,18 @@ export const GET = apiHandler(async (req: Request) => {
   let displayName = "workspace-files.zip";
   let contentType = "application/zip";
 
-  const zipResult = await execCommand(chatId, `cd /workspace && rm -f '${archiveName}' && zip -r '${archiveName}' ${shellPaths}`, 30_000);
+  const zipResult = await execCommand(key, `cd /workspace && rm -f '${archiveName}' && zip -r '${archiveName}' ${shellPaths}`, 30_000);
   if (zipResult.exitCode !== 0) {
     archiveName = ".download.tar.gz";
     displayName = "workspace-files.tar.gz";
     contentType = "application/gzip";
-    const tarResult = await execCommand(chatId, `cd /workspace && tar -czf '${archiveName}' ${shellPaths}`, 30_000);
+    const tarResult = await execCommand(key, `cd /workspace && tar -czf '${archiveName}' ${shellPaths}`, 30_000);
     if (tarResult.exitCode !== 0) {
       return Response.json({ error: "Failed to create archive" }, { status: 500 });
     }
   }
 
-  const controllerRes = await downloadFile(chatId, archiveName);
+  const controllerRes = await downloadFile(key, archiveName, userId);
   return new Response(controllerRes.body, {
     headers: {
       "Content-Type": contentType,

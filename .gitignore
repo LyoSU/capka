@@ -41,3 +41,7 @@ data/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local tooling (editor / code-index caches)
+.codegraph/
+.cursor/
