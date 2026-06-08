@@ -2,13 +2,13 @@ import { type UIMessage } from "ai";
 import {
   Send, Download,
   ChevronRight, Loader2, AlertCircle,
-  FileSearch, Globe, Terminal, Folder,
   FileText, FileCode, FileImage, File,
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { useState } from "react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { describeStep } from "./steps";
 
 // --- Helpers ---
 
@@ -104,30 +104,6 @@ function getToolName(part: ToolPart): string {
   if (part.toolName) return part.toolName;
   if (part.type.startsWith("tool-")) return part.type.slice(5);
   return "unknown";
-}
-
-// Tool display config — keyword patterns → human-friendly labels
-const TOOL_PATTERNS: { keywords: string[]; label: string; activeLabel: string; icon: typeof Terminal }[] = [
-  { keywords: ["read", "file_read"],                   label: "Looked at a file",  activeLabel: "Reading...",          icon: FileSearch },
-  { keywords: ["list", "dir"],                         label: "Browsed files",     activeLabel: "Looking at files...", icon: Folder },
-  { keywords: ["search", "web"],                       label: "Searched the web",  activeLabel: "Searching...",        icon: Globe },
-  { keywords: ["write", "edit", "create"],             label: "Created a file",    activeLabel: "Writing...",          icon: FileText },
-  { keywords: ["exec", "run", "shell", "bash", "python"], label: "Ran some code",  activeLabel: "Working...",         icon: Terminal },
-];
-const TOOL_FALLBACK = { label: "Used a tool", activeLabel: "Working...", icon: Terminal };
-
-function getToolDisplay(name: string) {
-  const lower = name.toLowerCase();
-  return TOOL_PATTERNS.find((p) => p.keywords.some((k) => lower.includes(k))) ?? TOOL_FALLBACK;
-}
-
-/** Extract a short, user-friendly hint from tool input — just file names or search queries */
-function getInputSummary(input: unknown): string | null {
-  if (!input || typeof input !== "object") return null;
-  const obj = input as Record<string, unknown>;
-  if (obj.path) return String(obj.path).split("/").pop() || null;
-  if (obj.query) return String(obj.query).slice(0, 50);
-  return null;
 }
 
 // --- Tool detail renderer ---
@@ -280,10 +256,9 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
 
 function ToolCard({ part }: { part: ToolPart }) {
   const rawName = getToolName(part);
-  const { label, activeLabel, icon: Icon } = getToolDisplay(rawName);
+  const { label, activeLabel, detail, Icon } = describeStep(rawName, part.input);
   const isRunning = !part.state.startsWith("output-");
   const isError = part.state === "output-error";
-  const summary = getInputSummary(part.input);
 
   // Running — subtle inline with spinner
   if (isRunning) {
@@ -291,7 +266,7 @@ function ToolCard({ part }: { part: ToolPart }) {
       <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground/70">
         <Loader2 className="h-3 w-3 animate-spin" />
         <span className="text-xs">{activeLabel}</span>
-        {summary && <span className="truncate max-w-40 text-xs text-muted-foreground/40">{summary}</span>}
+        {detail && <span className="truncate max-w-40 font-mono text-[11px] text-muted-foreground/40">{detail}</span>}
       </div>
     );
   }
@@ -302,7 +277,7 @@ function ToolCard({ part }: { part: ToolPart }) {
       <Collapsible defaultOpen={!!part.errorText}>
         <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-destructive/70 hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
           <AlertCircle className="h-3 w-3 shrink-0" />
-          <span className="flex-1 text-left">{label} failed</span>
+          <span className="flex-1 text-left">{label} · failed</span>
           <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -320,7 +295,7 @@ function ToolCard({ part }: { part: ToolPart }) {
       <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
         <Icon className="h-3 w-3 shrink-0" />
         <span>{label}</span>
-        {summary && <span className="flex-1 truncate text-muted-foreground/40">{summary}</span>}
+        {detail && <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground/40">{detail}</span>}
         <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -344,7 +319,7 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
   // Multiple tools still running
   if (!allDone && running.length > 0) {
     const last = running[running.length - 1];
-    const { activeLabel } = getToolDisplay(getToolName(last));
+    const { activeLabel } = describeStep(getToolName(last), last.input);
     return (
       <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground/70">
         <Loader2 className="h-3 w-3 animate-spin" />
@@ -354,8 +329,8 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
     );
   }
 
-  // All done — collapsible with inline tool names
-  const uniqueLabels = [...new Set(tools.map((t) => getToolDisplay(getToolName(t)).label))];
+  // All done — collapsible with inline step labels
+  const uniqueLabels = [...new Set(tools.map((t) => describeStep(getToolName(t), t.input).label))];
   const summaryText = uniqueLabels.length <= 3
     ? uniqueLabels.join(", ")
     : `${uniqueLabels.slice(0, 2).join(", ")} +${uniqueLabels.length - 2} more`;

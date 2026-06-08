@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { describeStep } from "./steps";
 
 function formatElapsed(ms: number): string {
   const sec = Math.floor(ms / 1000);
@@ -9,22 +10,6 @@ function formatElapsed(ms: number): string {
   const min = Math.floor(sec / 60);
   const remSec = sec % 60;
   return `${min}:${String(remSec).padStart(2, "0")}`;
-}
-
-// Shared keyword → label mapping (same patterns as message.tsx TOOL_PATTERNS)
-const ACTIVE_LABELS: [string[], string][] = [
-  [["read", "file_read"], "Reading"],
-  [["list", "dir"], "Looking at files"],
-  [["search", "web"], "Searching"],
-  [["write", "edit", "create"], "Writing"],
-  [["exec", "run", "shell", "bash", "python"], "Running code"],
-];
-
-function getLabel(name: string | null): string {
-  if (!name) return "Thinking";
-  const lower = name.toLowerCase();
-  const match = ACTIVE_LABELS.find(([kws]) => kws.some((k) => lower.includes(k)));
-  return match ? match[1] : "Working";
 }
 
 export function TaskStatus({
@@ -44,7 +29,7 @@ export function TaskStatus({
     return () => clearInterval(id);
   }, [startedAt]);
 
-  const label = getLabel(currentTool);
+  const label = currentTool ? describeStep(currentTool).activeLabel : "Thinking…";
   const time = formatElapsed(elapsed);
 
   return (
