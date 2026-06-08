@@ -32,6 +32,9 @@ services:
     environment:
       - CONTROLLER_SECRET=${CONTROLLER_SECRET:-unclaw-sandbox-secret}
       - DATA_ROOT=/data/storage
+      # Real host path of ./data/storage — needed so sandbox bind mounts resolve
+      # on the Docker daemon host (esp. Docker Desktop). Defaults to PWD-based.
+      - HOST_DATA_ROOT=${PWD}/data/storage
       - SANDBOX_IMAGE=unclaw-sandbox
     depends_on:
       sandbox:

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createReadStream, createWriteStream } from "node:fs";
-import { readdir, stat, mkdir, realpath } from "node:fs/promises";
+import { readdir, stat, mkdir, realpath, chown } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { join, resolve, basename } from "node:path";
 import Docker from "dockerode";
@@ -15,9 +15,25 @@ const CPU_LIMIT = parseFloat(process.env.SANDBOX_CPUS || "1.0") * 1e9;
 const EXEC_TIMEOUT = parseInt(process.env.SANDBOX_EXEC_TIMEOUT_MS || "30000");
 const IDLE_TTL = parseInt(process.env.SANDBOX_IDLE_TTL_MS || "900000"); // 15 min
 const DATA_ROOT = process.env.DATA_ROOT || resolve(import.meta.dirname, "..", "data", "storage");
+// The controller reads/writes workspaces via DATA_ROOT (its own filesystem), but
+// when it asks Docker to bind-mount a workspace into a SIBLING sandbox container,
+// Docker resolves the bind source on the DAEMON host — not inside this container.
+// So sandbox binds must use the host path. On native Linux the controller usually
+// mounts the host dir at the same path, so HOST_DATA_ROOT defaults to DATA_ROOT
+// (identity); on Docker Desktop it must be set to the real host path of the mount.
+const HOST_DATA_ROOT = process.env.HOST_DATA_ROOT || DATA_ROOT;
+/** Translate a controller-internal storage path to the daemon-host path used for binds. */
+function toHostPath(internalPath) {
+  return internalPath.startsWith(DATA_ROOT)
+    ? HOST_DATA_ROOT + internalPath.slice(DATA_ROOT.length)
+    : internalPath;
+}
 const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
 const MAX_WORKSPACE_MB = parseInt(process.env.MAX_WORKSPACE_MB || "500");
 const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB || "100");
+// Must match the uid/gid the sandbox image runs as (User 1000:1000 below).
+const SANDBOX_UID = parseInt(process.env.SANDBOX_UID || "1000");
+const SANDBOX_GID = parseInt(process.env.SANDBOX_GID || "1000");
 
 // Active sessions: sessionId -> { containerId, userId, lastActivity }
 const sessions = new Map();
@@ -36,6 +52,26 @@ function workspacePath(userId, sessionId) {
  *  "_global" can never collide with a nanoid session id. */
 function globalPath(userId) {
   return resolve(DATA_ROOT, sanitize(userId), "_global", "sandbox");
+}
+
+/** Create + own the workspace and shared mount points for a session.
+ *  The controller runs as root and creates dirs root-owned, but the sandbox
+ *  container runs as a non-root user — chown the mounts so the agent can write
+ *  to /workspace and /shared. Idempotent: also repairs pre-existing folders.
+ *  (CapAdd DAC_OVERRIDE is not reliably effective for the non-root user, so we
+ *  fix ownership rather than rely on it.) Returns the workspace path. */
+async function ensureMounts(userId, sessionId) {
+  const wsPath = workspacePath(userId, sessionId);
+  const sharedPath = globalPath(userId);
+  await mkdir(wsPath, { recursive: true });
+  await mkdir(sharedPath, { recursive: true });
+  // On native Linux the controller creates these root-owned, so chown them to the
+  // sandbox user. On Docker Desktop the host-path bind already maps to the
+  // container user, and chown is a virtiofs no-op — harmless either way.
+  for (const dir of [wsPath, sharedPath]) {
+    await chown(dir, SANDBOX_UID, SANDBOX_GID).catch(() => {});
+  }
+  return wsPath;
 }
 
 /** Resolve the host workspace base for a file op. Prefers the live session's
@@ -89,11 +125,8 @@ async function createSandbox(sessionId, userId, networkMode = "none") {
   sessionId = sanitize(sessionId);
   userId = sanitize(userId);
   networkMode = networkMode === "bridge" ? "bridge" : "none";
-  const wsPath = workspacePath(userId, sessionId);
+  const wsPath = await ensureMounts(userId, sessionId);
   const sharedPath = globalPath(userId);
-
-  await mkdir(wsPath, { recursive: true });
-  await mkdir(sharedPath, { recursive: true });
 
   const container = await docker.createContainer({
     Image: SANDBOX_IMAGE,
@@ -107,7 +140,7 @@ async function createSandbox(sessionId, userId, networkMode = "none") {
       CapDrop: ["ALL"],
       CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
       NetworkMode: networkMode,
-      Binds: [`${wsPath}:/workspace`, `${sharedPath}:/shared`],
+      Binds: [`${toHostPath(wsPath)}:/workspace`, `${toHostPath(sharedPath)}:/shared`],
       Init: true,
     },
     User: "1000:1000",
@@ -291,6 +324,7 @@ const server = createServer(async (req, res) => {
         const restarted = await restartSandbox(sessionId);
         if (restarted) {
           restarted.lastActivity = Date.now();
+          await ensureMounts(existing.userId, sessionId); // repair perms on reuse
           return jsonRes(res, 200, { sessionId, status: "reused" });
         }
         // Container gone — fall through to create new one
