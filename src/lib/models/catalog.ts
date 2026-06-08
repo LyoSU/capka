@@ -1,4 +1,4 @@
-import { eq, or, like } from "drizzle-orm";
+import { eq, or, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models } from "@/lib/db/schema";
 import {
@@ -176,41 +176,48 @@ export async function syncModelCatalog(): Promise<{ openrouter: number; litellm:
   return { openrouter: or, litellm: ll };
 }
 
+const CHUNK = 500; // keep well under Postgres' parameter limit
+
 async function upsertModels(list: CatalogModel[], opts?: { skipExisting?: boolean }) {
   if (!list.length) return;
-  for (const m of list) {
-    const row = {
-      id: m.id,
-      source: m.source,
-      displayName: m.displayName,
-      group: m.group,
-      icon: m.icon,
-      contextLength: m.contextLength,
-      inputPrice: m.inputPrice === null ? null : String(m.inputPrice),
-      outputPrice: m.outputPrice === null ? null : String(m.outputPrice),
-      cacheReadPrice: m.cacheReadPrice === null ? null : String(m.cacheReadPrice),
-      capabilities: m.capabilities,
-      enabled: m.enabled,
-      updatedAt: new Date(),
-    };
-    const insert = db.insert(models).values(row);
+  const now = new Date();
+  const rows = list.map((m) => ({
+    id: m.id,
+    source: m.source,
+    displayName: m.displayName,
+    group: m.group,
+    icon: m.icon,
+    contextLength: m.contextLength,
+    inputPrice: m.inputPrice === null ? null : String(m.inputPrice),
+    outputPrice: m.outputPrice === null ? null : String(m.outputPrice),
+    cacheReadPrice: m.cacheReadPrice === null ? null : String(m.cacheReadPrice),
+    capabilities: m.capabilities,
+    enabled: m.enabled,
+    updatedAt: now,
+  }));
+
+  // Bulk upsert in chunks. One round-trip per chunk instead of per row keeps
+  // a ~3k-model sync fast. Admin curation (enabled/featured) is preserved by
+  // not touching those columns on conflict.
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const batch = rows.slice(i, i + CHUNK);
+    const insert = db.insert(models).values(batch);
     if (opts?.skipExisting) {
       await insert.onConflictDoNothing();
     } else {
-      // Update metadata/prices but preserve admin curation (enabled/featured).
       await insert.onConflictDoUpdate({
         target: models.id,
         set: {
-          source: row.source,
-          displayName: row.displayName,
-          group: row.group,
-          icon: row.icon,
-          contextLength: row.contextLength,
-          inputPrice: row.inputPrice,
-          outputPrice: row.outputPrice,
-          cacheReadPrice: row.cacheReadPrice,
-          capabilities: row.capabilities,
-          updatedAt: row.updatedAt,
+          source: sql`excluded.source`,
+          displayName: sql`excluded.display_name`,
+          group: sql`excluded."group"`,
+          icon: sql`excluded.icon`,
+          contextLength: sql`excluded.context_length`,
+          inputPrice: sql`excluded.input_price`,
+          outputPrice: sql`excluded.output_price`,
+          cacheReadPrice: sql`excluded.cache_read_price`,
+          capabilities: sql`excluded.capabilities`,
+          updatedAt: sql`excluded.updated_at`,
         },
       });
     }
