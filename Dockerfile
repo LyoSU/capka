@@ -17,6 +17,9 @@ RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# SQL migration files — needed at runtime for auto-migrate on boot (standalone
+# output doesn't include them since they aren't traced as code dependencies).
+COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 RUN mkdir -p data/storage && chown -R nextjs:nodejs data
 USER nextjs
 EXPOSE 3000
