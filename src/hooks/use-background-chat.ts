@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { inferMimeType, type FileRef } from "@/lib/constants";
+import type { TaskEvent } from "@/lib/tasks/events";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -17,14 +18,6 @@ type Message = {
   parts: Part[];
   metadata?: Record<string, unknown>;
 };
-
-type TaskEvent =
-  | { type: "task:start"; taskId: string; chatId: string; messageId: string }
-  | { type: "task:text-delta"; taskId: string; chatId: string; messageId: string; delta: string }
-  | { type: "task:tool-call"; taskId: string; chatId: string; messageId: string; toolCallId: string; toolName: string; args: unknown }
-  | { type: "task:tool-result"; taskId: string; chatId: string; messageId: string; toolCallId: string; result: unknown }
-  | { type: "task:finish"; taskId: string; chatId: string; messageId: string; status: string; error?: string }
-  | { type: "new_message"; chatId: string };
 
 // ── Hook ─────────────────────────────────────────────────────
 

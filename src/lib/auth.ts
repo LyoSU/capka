@@ -39,9 +39,6 @@ export async function getAuth() {
 
 export type Role = "admin" | "user" | "viewer";
 
-/** @deprecated Use AppError from lib/errors.ts — kept as alias for incremental migration */
-export const ApiError = AppError;
-
 /** Require authenticated session — throws UnauthorizedError. */
 export async function requireSession(): Promise<{
   userId: string;

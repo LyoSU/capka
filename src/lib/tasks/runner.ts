@@ -4,7 +4,7 @@ import { eq, and, or, isNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { messages, memories, projects } from "@/lib/db/schema";
-import { realtime } from "@/lib/realtime";
+import { publishTaskEvent } from "./events";
 import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
@@ -157,7 +157,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   const taskId = task.id;
   const chatId = task.chat_id;
   const userId = task.user_id;
-  const channel = `user:${userId}`;
   const payload = (task.payload ?? {}) as TaskPayload;
   // Shared project folder when the chat belongs to a project, else its own.
   const sessionKey = workspaceSessionKey({ id: chatId, projectId: payload.projectId ?? null });
@@ -185,7 +184,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Cancelled while still queued — don't spin anything up.
     if (await isCancelRequested(taskId)) {
       await finalizeTask(taskId, "cancelled");
-      await realtime.publish(channel, { type: "task:finish", taskId, chatId, status: "cancelled" });
+      await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, status: "cancelled" });
       return;
     }
 
@@ -201,7 +200,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       platform: "web",
       metadata: { taskId, status: "running", parts: [] },
     });
-    await realtime.publish(channel, { type: "task:start", taskId, chatId, messageId: msgId });
+    await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId });
 
     const hasTools = Object.keys(tools).length > 0;
     const modelMessages = await convertToModelMessages(payload.uiMessages ?? []);
@@ -241,7 +240,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (!textBuf) return;
       const delta = textBuf;
       textBuf = "";
-      await realtime.publish(channel, { type: "task:text-delta", taskId, chatId, messageId: msgId, delta });
+      await publishTaskEvent(userId, { type: "task:text-delta", taskId, chatId, messageId: msgId, delta });
     };
     const scheduleFlush = () => {
       if (flushTimer) return;
@@ -261,7 +260,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           case "tool-call":
             await flushText();
             parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
-            await realtime.publish(channel, {
+            await publishTaskEvent(userId, {
               type: "task:tool-call", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, toolName: event.toolName, args: event.input,
             });
@@ -269,7 +268,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           case "tool-result":
             await flushText();
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output: event.output });
-            await realtime.publish(channel, {
+            await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: event.output,
             });
@@ -277,7 +276,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           case "tool-error":
             await flushText();
             parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: errMsg(event.error) });
-            await realtime.publish(channel, {
+            await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: { error: errMsg(event.error) },
             });
@@ -347,7 +346,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       },
     }).where(eq(messages.id, msgId));
     await finalizeTask(taskId, finalStatus, streamError ?? null);
-    await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
+    await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
 
     // Record token usage/cost (never fatal). `inputTokens` is the TOTAL input
     // including cached reads, so split it: charge non-cached at the input rate
@@ -400,7 +399,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         },
       }).where(eq(messages.id, msgId)).catch(() => {}),
     ]);
-    await realtime.publish(channel, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
+    await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
   } finally {
     clearInterval(monitor);
     await closeMcp?.().catch(() => {});

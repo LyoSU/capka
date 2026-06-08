@@ -5,6 +5,7 @@ import { models } from "@/lib/db/schema";
 import { realtime } from "@/lib/realtime";
 import { claimNextTask, reconcileZombies } from "@/lib/tasks/queue";
 import { runAgentTask } from "@/lib/tasks/runner";
+import { publishTaskEvent } from "@/lib/tasks/events";
 import { syncModelCatalog } from "@/lib/models/catalog";
 
 /**
@@ -63,9 +64,9 @@ async function reconcile(): Promise<void> {
   try {
     const dead = await reconcileZombies();
     for (const t of dead) {
-      await realtime.publish(`user:${t.user_id}`, {
+      await publishTaskEvent(t.user_id, {
         type: "task:finish", taskId: t.id, chatId: t.chat_id, status: "failed",
-        error: "worker lost (lease expired)",
+        error: "The task was interrupted before it finished. Please try again.",
       });
     }
     if (dead.length) console.log(`[worker] reconciled ${dead.length} zombie task(s)`);
