@@ -1,6 +1,6 @@
 import { requireSession } from "@/lib/auth";
 import { isAppError, type AppError } from "@/lib/errors";
-import { eventBus } from "@/lib/events";
+import { realtime } from "@/lib/realtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ export async function GET() {
   let heartbeat: ReturnType<typeof setInterval> | null = null;
 
   const stream = new ReadableStream({
-    start(controller) {
+    async start(controller) {
       const encoder = new TextEncoder();
 
       const send = (data: string) => {
@@ -32,8 +32,8 @@ export async function GET() {
       // Send initial connection event
       send(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
 
-      // Subscribe to user events
-      unsubscribe = eventBus.subscribe(
+      // Subscribe to user events over Postgres LISTEN/NOTIFY
+      unsubscribe = await realtime.subscribe(
         `user:${userId}`,
         (data: unknown) => {
           send(`data: ${JSON.stringify(data)}\n\n`);

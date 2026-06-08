@@ -4,7 +4,7 @@ import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
-import { eventBus } from "@/lib/events";
+import { realtime } from "@/lib/realtime";
 
 let _bot: Bot | null = null;
 
@@ -101,7 +101,7 @@ export async function getBot(): Promise<Bot | null> {
       .where(eq(chats.id, chat.id));
 
     // Emit SSE event for real-time sync
-    eventBus.emit(`user:${link.userId}`, {
+    await realtime.publish(`user:${link.userId}`, {
       type: "new_message",
       chatId: chat.id,
     });
@@ -121,7 +121,7 @@ export async function getBot(): Promise<Bot | null> {
         content: response,
         platform: "telegram",
       });
-      eventBus.emit(`user:${link.userId}`, {
+      await realtime.publish(`user:${link.userId}`, {
         type: "new_message",
         chatId: chat.id,
       });
