@@ -4,4 +4,5 @@ node_modules
 *.env*
 data
 .DS_Store
-drizzle
+# NOTE: drizzle/ is intentionally NOT ignored — its SQL files are copied into
+# the runtime image for auto-migrate on boot (see Dockerfile).
