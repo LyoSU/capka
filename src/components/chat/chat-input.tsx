@@ -130,13 +130,13 @@ export function ChatInput({
                     )}
                     <div className="flex flex-col">
                       <span className="max-w-32 truncate leading-tight">{af.file.name}</span>
-                      <span className="text-[10px] leading-tight text-muted-foreground/40">
+                      <span className="text-[10px] leading-tight text-muted-foreground">
                         {preview ? "Image" : "File"} · {formatSize(af.file.size)}
                       </span>
                     </div>
                     <button
                       onClick={() => removeFile(af.id)}
-                      className="ml-0.5 rounded-full p-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground transition-colors"
+                      className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                       aria-label={`Remove ${af.file.name}`}
                     >
                       <X className="h-3 w-3" />
@@ -159,7 +159,7 @@ export function ChatInput({
               onPaste={handlePaste}
               placeholder={files.length > 0 ? "Add a message about the files..." : "Assign a task or ask anything"}
               rows={1}
-              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-[15px] leading-relaxed placeholder:text-muted-foreground/50 focus-visible:outline-none"
+              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-[15px] leading-relaxed placeholder:text-muted-foreground focus-visible:outline-none"
             />
           </div>
           <div className="flex items-center justify-between px-3 pb-2.5">
@@ -178,7 +178,7 @@ export function ChatInput({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground/50 hover:text-foreground"
+                className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground hover:text-foreground"
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach files"
                 aria-label="Attach files"

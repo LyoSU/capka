@@ -33,7 +33,7 @@ export function TaskStatus({
   const time = formatElapsed(elapsed);
 
   return (
-    <div className="flex items-center gap-2.5 px-5 py-3 text-sm text-muted-foreground/70 animate-in fade-in duration-300">
+    <div className="flex items-center gap-2.5 px-5 py-3 text-sm text-muted-foreground animate-in fade-in duration-300">
       <div className="inline-grid grid-cols-3 gap-[3px]">
         {Array.from({ length: 9 }).map((_, i) => (
           <div

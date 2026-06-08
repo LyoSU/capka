@@ -32,7 +32,7 @@ function groupOf(m: ModelInfo): string {
 function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
   if (!caps) return null;
   return (
-    <span className="flex items-center gap-1 text-muted-foreground/40">
+    <span className="flex items-center gap-1 text-muted-foreground">
       {caps.vision && <Eye className="h-3 w-3" aria-label="vision" />}
       {caps.tools && <Wrench className="h-3 w-3" aria-label="tools" />}
       {caps.reasoning && <Brain className="h-3 w-3" aria-label="reasoning" />}
@@ -205,7 +205,7 @@ function ModelList({
           }}
           placeholder="Search models..."
           autoFocus
-          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
         {search && <span className="text-[10px] text-muted-foreground tabular-nums">{filtered.length}</span>}
       </div>
@@ -237,7 +237,7 @@ function ModelList({
               <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border/50">
                 <BrandIcon slug={groupModels[0]?.icon} size={12} />
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{group}</span>
-                <span className="text-[10px] text-muted-foreground/50 tabular-nums">{groupModels.length}</span>
+                <span className="text-[10px] text-muted-foreground tabular-nums">{groupModels.length}</span>
               </div>
 
               {groupModels.map((model) => {
@@ -260,7 +260,7 @@ function ModelList({
                           <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">active</span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground/60">
+                      <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground">
                         {model.context > 0 && <span className="tabular-nums">{formatContext(model.context)} ctx</span>}
                         {model.pricing.prompt > 0 && <span className="tabular-nums">{formatPrice(model.pricing.prompt)} in</span>}
                         <Caps caps={model.capabilities} />
@@ -396,9 +396,9 @@ export function ModelPicker({
           </span>
           <span className="flex items-baseline gap-1.5 min-w-0">
             <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholder}</span>
-            {groupLabel && <span className="text-xs text-muted-foreground/50 hidden sm:inline">{groupLabel}</span>}
+            {groupLabel && <span className="text-xs text-muted-foreground hidden sm:inline">{groupLabel}</span>}
             {currentModel && currentModel.context > 0 && (
-              <span className="text-xs text-muted-foreground/35 tabular-nums hidden md:inline">{formatContext(currentModel.context)} ctx</span>
+              <span className="text-xs text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)} ctx</span>
             )}
             {state.isShared && (
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title="Using admin's shared provider config">shared</span>
@@ -414,7 +414,7 @@ export function ModelPicker({
           className="flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <BrandIcon slug={currentModel?.icon} size={15} className="shrink-0 text-muted-foreground" />
-          <span className={`flex-1 truncate text-left ${displayName ? "" : "text-muted-foreground/60"}`}>
+          <span className={`flex-1 truncate text-left ${displayName ? "" : "text-muted-foreground"}`}>
             {displayName || placeholder}
           </span>
           {state.loading ? (

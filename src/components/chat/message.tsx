@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { fileKind, extOf } from "@/lib/file-kinds";
 import { describeStep } from "./steps";
@@ -110,11 +110,11 @@ function getToolName(part: ToolPart): string {
 
 function ToolDetails({ toolName, output, errorText }: { toolName: string; output?: unknown; errorText?: string }) {
   if (errorText) {
-    return <p className="text-xs text-destructive/80">{errorText}</p>;
+    return <p className="text-xs text-destructive">{errorText}</p>;
   }
 
   const text = formatValue(output);
-  if (!text) return <p className="text-xs text-muted-foreground/50">Done</p>;
+  if (!text) return <p className="text-xs text-muted-foreground">Done</p>;
 
   const lower = toolName.toLowerCase();
   const isCode = lower.includes("read") || lower.includes("file");
@@ -181,7 +181,12 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
 const WORKSPACE_PATH_RE = /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
 
 function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
-  const paths = [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))];
+  // Re-scanning the message text on every render is wasteful; the artifact
+  // paths only change when the text does.
+  const paths = useMemo(
+    () => [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))],
+    [text],
+  );
   if (paths.length === 0) return null;
 
   const downloadAll = () => {
@@ -198,14 +203,14 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
   return (
     <div className="mt-4 overflow-hidden rounded-xl border border-border/50">
       <div className="flex items-center justify-between bg-muted/30 px-4 py-2.5">
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+        <span className="text-xs font-medium text-muted-foreground">
           {paths.length === 1 ? "Artifact" : `${paths.length} Artifacts`}
         </span>
         {paths.length > 1 && (
           <button
             type="button"
             onClick={downloadAll}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground/50 transition-colors hover:text-foreground"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <Download className="h-3 w-3" />
             <span>Download all</span>
@@ -229,7 +234,7 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium leading-snug text-foreground">{fileName}</p>
-                <p className="text-xs text-muted-foreground/50">{label} · {ext.toUpperCase()}</p>
+                <p className="text-xs text-muted-foreground">{label} · {ext.toUpperCase()}</p>
               </div>
               <Download className="h-4 w-4 shrink-0 text-muted-foreground/20 transition-colors group-hover/file:text-muted-foreground" />
             </a>
@@ -250,10 +255,10 @@ function ToolCard({ part }: { part: ToolPart }) {
   // Running — subtle inline with spinner
   if (isRunning) {
     return (
-      <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground/70">
+      <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground">
         <Loader2 className="h-3 w-3 animate-spin" />
         <span className="text-xs">{activeLabel}</span>
-        {detail && <span className="truncate max-w-40 font-mono text-[11px] text-muted-foreground/40">{detail}</span>}
+        {detail && <span className="truncate max-w-40 font-mono text-[11px] text-muted-foreground">{detail}</span>}
       </div>
     );
   }
@@ -262,13 +267,13 @@ function ToolCard({ part }: { part: ToolPart }) {
   if (isError) {
     return (
       <Collapsible defaultOpen={!!part.errorText}>
-        <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-destructive/70 hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
+        <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-destructive hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
           <AlertCircle className="h-3 w-3 shrink-0" />
           <span className="flex-1 text-left">{label} · failed</span>
           <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="mt-1 mb-2 ml-5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive/80">
+          <div className="mt-1 mb-2 ml-5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
             {part.errorText || "Unknown error"}
           </div>
         </CollapsibleContent>
@@ -279,10 +284,10 @@ function ToolCard({ part }: { part: ToolPart }) {
   // Done — full-width row, expandable
   return (
     <Collapsible defaultOpen={false}>
-      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
+      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
         <Icon className="h-3 w-3 shrink-0" />
         <span>{label}</span>
-        {detail && <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground/40">{detail}</span>}
+        {detail && <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground">{detail}</span>}
         <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -308,10 +313,10 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
     const last = running[running.length - 1];
     const { activeLabel } = describeStep(getToolName(last), last.input);
     return (
-      <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground/70">
+      <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground">
         <Loader2 className="h-3 w-3 animate-spin" />
         <span className="text-xs">{activeLabel}</span>
-        <span className="text-xs text-muted-foreground/40">({tools.length} steps)</span>
+        <span className="text-xs text-muted-foreground">({tools.length} steps)</span>
       </div>
     );
   }
@@ -324,10 +329,10 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
 
   return (
     <Collapsible defaultOpen={false}>
-      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
-        {hasError && <AlertCircle className="h-3 w-3 shrink-0 text-destructive/60" />}
+      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
+        {hasError && <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />}
         <span>{summaryText}</span>
-        <span className="text-muted-foreground/30">{tools.length} steps</span>
+        <span className="text-muted-foreground">{tools.length} steps</span>
         <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
       </CollapsibleTrigger>
       <CollapsibleContent>
