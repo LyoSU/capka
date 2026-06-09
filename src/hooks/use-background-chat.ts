@@ -342,5 +342,5 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId]);
 
-  return { messages, status, error, sendMessage, stop, isLoading: status === "running", taskInfo };
+  return { messages, status, error, sendMessage, stop, reload: loadHistory, isLoading: status === "running", taskInfo };
 }

@@ -66,6 +66,29 @@ export default function GeneralSettingsPage() {
   const settingsLoading =
     minCtx.loading || sandbox.loading || registration.loading || shareProviders.loading || blockPrivate.loading;
 
+  // Optimistic toggle with rollback — flip immediately, but restore the previous
+  // value if the save fails so the UI never lies about persisted state.
+  const toggle = (
+    s: ReturnType<typeof useSetting>,
+    key: string,
+    checked: boolean,
+    onMsg: string,
+    offMsg: string,
+  ) => {
+    const prev = s.value;
+    s.update(checked ? "true" : "false");
+    fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value: checked ? "true" : "false" }),
+    })
+      .then((r) => {
+        if (r.ok) toast.success(checked ? onMsg : offMsg);
+        else { s.update(prev); toast.error(t("updateFailed")); }
+      })
+      .catch(() => { s.update(prev); toast.error(t("updateFailed")); });
+  };
+
   const contextLabel = (val: string) => {
     const n = parseInt(val, 10);
     if (!n || n <= 0) return "";
@@ -153,17 +176,7 @@ export default function GeneralSettingsPage() {
             </div>
             <Switch
               checked={sandbox.value === "true"}
-              onCheckedChange={(checked) => {
-                sandbox.update(checked ? "true" : "false");
-                fetch("/api/settings", {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ key: "sandbox_enabled", value: checked ? "true" : "false" }),
-                }).then((r) => {
-                  if (r.ok) toast.success(checked ? t("sandboxEnabled") : t("sandboxDisabled"));
-                  else toast.error(t("updateFailed"));
-                });
-              }}
+              onCheckedChange={(checked) => toggle(sandbox, "sandbox_enabled", checked, t("sandboxEnabled"), t("sandboxDisabled"))}
             />
           </div>
 
@@ -185,17 +198,7 @@ export default function GeneralSettingsPage() {
             </div>
             <Switch
               checked={registration.value === "true"}
-              onCheckedChange={(checked) => {
-                registration.update(checked ? "true" : "false");
-                fetch("/api/settings", {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ key: "registration_enabled", value: checked ? "true" : "false" }),
-                }).then((r) => {
-                  if (r.ok) toast.success(checked ? t("registrationEnabled") : t("registrationDisabled"));
-                  else toast.error(t("updateFailed"));
-                });
-              }}
+              onCheckedChange={(checked) => toggle(registration, "registration_enabled", checked, t("registrationEnabled"), t("registrationDisabled"))}
             />
           </div>
 
@@ -208,17 +211,7 @@ export default function GeneralSettingsPage() {
             </div>
             <Switch
               checked={shareProviders.value === "true"}
-              onCheckedChange={(checked) => {
-                shareProviders.update(checked ? "true" : "false");
-                fetch("/api/settings", {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ key: "share_admin_providers", value: checked ? "true" : "false" }),
-                }).then((r) => {
-                  if (r.ok) toast.success(checked ? t("shareEnabled") : t("shareDisabled"));
-                  else toast.error(t("updateFailed"));
-                });
-              }}
+              onCheckedChange={(checked) => toggle(shareProviders, "share_admin_providers", checked, t("shareEnabled"), t("shareDisabled"))}
             />
           </div>
 
@@ -241,17 +234,7 @@ export default function GeneralSettingsPage() {
             </div>
             <Switch
               checked={blockPrivate.value === "true"}
-              onCheckedChange={(checked) => {
-                blockPrivate.update(checked ? "true" : "false");
-                fetch("/api/settings", {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ key: "block_private_provider_urls", value: checked ? "true" : "false" }),
-                }).then((r) => {
-                  if (r.ok) toast.success(checked ? t("strictEnabled") : t("strictDisabled"));
-                  else toast.error(t("updateFailed"));
-                });
-              }}
+              onCheckedChange={(checked) => toggle(blockPrivate, "block_private_provider_urls", checked, t("strictEnabled"), t("strictDisabled"))}
             />
           </div>
         </>

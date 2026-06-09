@@ -32,7 +32,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   const atBottomRef = useRef(true);
   const [showScrollDown, setShowScrollDown] = useState(false);
 
-  const { messages, isLoading, error, sendMessage, stop, taskInfo } = useBackgroundChat({
+  const { messages, isLoading, error, sendMessage, stop, reload, taskInfo } = useBackgroundChat({
     chatId,
     projectId,
   });
@@ -209,7 +209,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6 text-destructive hover:text-destructive"
-                    onClick={() => window.location.reload()}
+                    onClick={reload}
                     aria-label={t("panel.retry")}
                   >
                     <RefreshCw className="h-3.5 w-3.5" />

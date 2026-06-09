@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored helper scripts — their lint noise was drowning real signal.
+    ".claude/**",
   ]),
 ]);
 
