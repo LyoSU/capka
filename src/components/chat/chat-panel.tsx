@@ -10,6 +10,8 @@ import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePanel, type ProgressStep } from "@/components/chat/workspace-panel";
+import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
+import { RecentChats } from "@/components/chat/recent-chats";
 import { Button } from "@/components/ui/button";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
 
@@ -18,29 +20,6 @@ interface ChatPanelProps {
   defaultModel: string;
   projectId?: string;
   isAdmin?: boolean;
-}
-
-// Concrete, office-relevant starters for the blank chat. Each fills the composer
-// with a scaffold the user finishes and sends, so a non-technical first-timer
-// sees what to do instead of a blank page. They hide once the user starts typing.
-const STARTER_KEYS = ["analyzeData", "summarizeDoc", "createDoc", "convertFile"] as const;
-
-function StarterSuggestions({ onPick }: { onPick: (text: string) => void }) {
-  const t = useTranslations("chat.panel.suggestions");
-  return (
-    <div className="flex flex-wrap justify-center gap-2 pt-1">
-      {STARTER_KEYS.map((key) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => onPick(t(`${key}.prompt`))}
-          className="rounded-full border bg-card px-3.5 py-1.5 text-sm text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
-        >
-          {t(`${key}.label`)}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPanelProps) {
@@ -123,14 +102,15 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
             {inputEl}
 
             <div className="mx-auto max-w-3xl px-4 md:px-6 lg:max-w-4xl">
-              <div className="-mt-3 flex justify-end">
+              <div className="-mt-3 flex justify-center">
                 <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
                   <ModelPicker variant="pill" value={model} onChange={setModel} />
                 </div>
               </div>
               {!input && (
-                <div className="mt-5">
-                  <StarterSuggestions onPick={setInput} />
+                <div className="mt-8 space-y-6">
+                  <RecentChats />
+                  <FileTypeSuggestions onPick={setInput} />
                 </div>
               )}
             </div>

@@ -31,6 +31,16 @@ function hasTools(m: ModelInfo): boolean {
   return !!m.capabilities?.tools;
 }
 
+/** Drop the "Provider:" prefix the catalog bakes into display names — the brand
+ *  icon and the group header already convey the provider, so "Google: Gemini …"
+ *  next to a Google icon under a Google header reads as a stutter. */
+function stripGroup(name: string, group?: string | null): string {
+  if (group && name.toLowerCase().startsWith(`${group.toLowerCase()}:`)) {
+    return name.slice(group.length + 1).trim();
+  }
+  return name;
+}
+
 function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
   const t = useTranslations("chat.model");
   if (!caps || (!caps.vision && !caps.reasoning)) return null;
@@ -268,7 +278,7 @@ function ModelList({
                     className={`flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
                   >
                     {model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
-                    <span className="min-w-0 flex-1 truncate text-sm">{model.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm">{stripGroup(model.name, group)}</span>
                     {isCurrent && (
                       <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
                     )}
@@ -380,7 +390,7 @@ export function ModelPicker({
   const currentModelId = parseModelId(value).modelId;
   const currentModel = state.models.find((m) => m.id === currentModelId);
   const groupLabel = currentModel ? groupOf(currentModel) : null;
-  const displayName = currentModel?.name || (value ? displayModelName(value) : "");
+  const displayName = stripGroup(currentModel?.name || (value ? displayModelName(value) : ""), groupLabel);
   const placeholderText = placeholder ?? t("placeholder");
 
   const list = (
@@ -410,7 +420,6 @@ export function ModelPicker({
           </span>
           <span className="flex items-baseline gap-1.5 min-w-0">
             <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholderText}</span>
-            {groupLabel && <span className="text-xs text-muted-foreground hidden sm:inline">{groupLabel}</span>}
             {currentModel && currentModel.context > 0 && (
               <span className="text-xs text-muted-foreground tabular-nums hidden md:inline" title={t("context")}>{formatContext(currentModel.context)}</span>
             )}
