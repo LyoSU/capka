@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { AlertCircle, FolderOpen, RefreshCw } from "lucide-react";
+import { AlertCircle, FolderOpen, RefreshCw, Sparkles } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
@@ -111,19 +111,28 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     <div className="flex h-full">
       <div className="flex flex-1 flex-col">
       {isEmpty ? (
-        <div className="relative flex flex-1 flex-col items-center justify-center px-6">
-          <div className="w-full max-w-3xl space-y-10">
-            <div className="text-center space-y-3">
-              <h1 className="text-2xl md:text-4xl font-medium tracking-tight text-foreground/85">
+        <div className="relative flex flex-1 flex-col items-center justify-center py-10">
+          <div className="w-full">
+            <div className="mb-8 flex items-center justify-center gap-3 px-6">
+              <Sparkles className="h-6 w-6 shrink-0 text-primary md:h-7 md:w-7" />
+              <h1 className="text-balance text-center text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
                 {t("panel.greeting")}
               </h1>
-              <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
-                <ModelPicker variant="pill" value={model} onChange={setModel} />
-              </div>
             </div>
-            <div className="space-y-3">
-              {inputEl}
-              {!input && <StarterSuggestions onPick={setInput} />}
+
+            {inputEl}
+
+            <div className="mx-auto max-w-3xl px-4 md:px-6 lg:max-w-4xl">
+              <div className="-mt-3 flex justify-end">
+                <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
+                  <ModelPicker variant="pill" value={model} onChange={setModel} />
+                </div>
+              </div>
+              {!input && (
+                <div className="mt-5">
+                  <StarterSuggestions onPick={setInput} />
+                </div>
+              )}
             </div>
           </div>
         </div>
