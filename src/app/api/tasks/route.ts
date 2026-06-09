@@ -10,8 +10,10 @@ export const GET = apiHandler(async (req: Request) => {
   const chatId = searchParams.get("chatId");
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
 
+  // Project only what the client needs — the payload column holds the full chat
+  // history (jsonb) and is never used here, so don't ship it on every poll.
   const [task] = await db
-    .select()
+    .select({ id: tasks.id, status: tasks.status, error: tasks.error })
     .from(tasks)
     .where(and(eq(tasks.chatId, chatId), eq(tasks.userId, userId)))
     .orderBy(desc(tasks.createdAt))

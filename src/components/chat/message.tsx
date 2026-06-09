@@ -3,9 +3,8 @@ import {
   Send, Download,
   ChevronRight, Loader2, AlertCircle,
 } from "lucide-react";
-import { Streamdown } from "streamdown";
-import "streamdown/styles.css";
-import { useState, useMemo } from "react";
+import { Markdown } from "@/components/chat/markdown";
+import { useState, useMemo, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { fileKind, extOf } from "@/lib/file-kinds";
@@ -173,13 +172,7 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
 function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
   return (
     <div className="text-[15px] leading-relaxed">
-      <Streamdown
-        parseIncompleteMarkdown={isStreaming}
-        shikiTheme={["github-light", "github-dark"]}
-        controls={{ code: { copy: true }, table: { copy: true, download: true, fullscreen: true } }}
-      >
-        {text}
-      </Streamdown>
+      <Markdown isStreaming={isStreaming}>{text}</Markdown>
       {chatId && <WorkspaceLinks text={text} chatId={chatId} />}
     </div>
   );
@@ -405,7 +398,7 @@ interface ChatMessageProps {
   isAdmin?: boolean;
 }
 
-export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -492,3 +485,8 @@ export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin 
     </div>
   );
 }
+
+// Memoized: with stable message identities (state changes only mutate the one
+// streaming message), keystrokes in the input and tokens for OTHER messages no
+// longer re-render the whole history.
+export const ChatMessage = memo(ChatMessageImpl);

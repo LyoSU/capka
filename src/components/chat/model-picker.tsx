@@ -78,6 +78,12 @@ interface ModelsState {
   needsKey: boolean;
 }
 
+// Cache last successful results per source so re-mounting the picker (every
+// navigation between chats) shows models instantly and revalidates quietly,
+// instead of flashing a spinner and re-probing the provider each time.
+const CLIENT_MODELS_TTL_MS = 5 * 60_000;
+const clientModelsCache = new Map<string, { at: number; models: ModelInfo[]; isShared: boolean }>();
+
 function useModels(source: Source, fallbackValue: string, loadErrorMsg: string): ModelsState {
   const [state, setState] = useState<ModelsState>({
     models: [],
@@ -106,7 +112,14 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
       return;
     }
 
-    setState((s) => ({ ...s, loading: true, error: null, needsKey: false }));
+    const cached = clientModelsCache.get(key);
+    if (cached && Date.now() - cached.at < CLIENT_MODELS_TTL_MS) {
+      // Serve from cache immediately; the fetch below revalidates in the
+      // background without flipping back to a loading state.
+      setState({ models: cached.models, loading: false, error: null, isShared: cached.isShared, needsKey: false });
+    } else {
+      setState((s) => ({ ...s, loading: true, error: null, needsKey: false }));
+    }
 
     const load = async () => {
       try {
@@ -124,6 +137,9 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
         }
         const data = res.ok ? await res.json() : { models: [] };
         if (cancelled) return;
+        if (res.ok && Array.isArray(data.models) && data.models.length > 0) {
+          clientModelsCache.set(key, { at: Date.now(), models: data.models, isShared: !!data.isShared });
+        }
         setState({
           models: data.models ?? [],
           loading: false,

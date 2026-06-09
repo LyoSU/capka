@@ -34,6 +34,9 @@ export function useBackgroundChat({
   const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null }>({ startedAt: 0, currentTool: null });
   const msgRef = useRef(messages);
   msgRef.current = messages;
+  // Whether the SSE stream is currently connected — drives how hard the polling
+  // fallback works (aggressive only when SSE is down).
+  const sseHealthyRef = useRef(false);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -82,7 +85,7 @@ export function useBackgroundChat({
     const connect = () => {
       es = new EventSource("/api/events");
 
-      es.onopen = () => { retryDelay = 1000; }; // reset backoff on success
+      es.onopen = () => { retryDelay = 1000; sseHealthyRef.current = true; }; // reset backoff on success
 
       es.onmessage = (event) => {
         try {
@@ -184,6 +187,7 @@ export function useBackgroundChat({
       };
 
       es.onerror = () => {
+        sseHealthyRef.current = false;
         es?.close();
         clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(connect, retryDelay);
@@ -193,17 +197,24 @@ export function useBackgroundChat({
 
     connect();
     return () => {
+      sseHealthyRef.current = false;
       clearTimeout(reconnectTimer);
       es?.close();
     };
   }, [chatId, loadHistory]);
 
-  // ── Polling fallback — catches updates if SSE misses them ──
+  // ── Polling fallback — only really needed when SSE is down ──
   useEffect(() => {
     if (status !== "running") return;
 
+    let ticks = 0;
     const poll = setInterval(() => {
-      // Poll task status — if finished, reload messages
+      ticks += 1;
+      // When SSE is healthy it already delivers task:finish — running a full
+      // poll alongside it every 3s is wasted load. Poll aggressively only while
+      // SSE is down; otherwise keep a light insurance check (~every 21s).
+      if (sseHealthyRef.current && ticks % 7 !== 0) return;
+
       fetch(`/api/tasks?chatId=${chatId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((task) => {
