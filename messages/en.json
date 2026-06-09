@@ -260,6 +260,31 @@
       "blockPrivateHint": "Prevents provider URLs (LiteLLM, Ollama) from pointing at private or loopback addresses. Leave off if you self-host a gateway on your local network. Cloud-metadata addresses are always blocked.",
       "strictEnabled": "Strict mode enabled",
       "strictDisabled": "Strict mode disabled"
+    },
+    "memory": {
+      "title": "Agent Memory",
+      "subtitle": "Things the AI remembers about you across conversations.",
+      "allTypes": "All types",
+      "add": "Add memory",
+      "content": "Content",
+      "contentPlaceholder": "e.g. Prefers TypeScript over JavaScript",
+      "type": "Type",
+      "empty": "No memories yet. The AI will learn about you as you chat.",
+      "emptyFiltered": "No {type} memories",
+      "added": "Memory added",
+      "addFailed": "Failed to add memory",
+      "deleted": "Memory deleted",
+      "deleteFailed": "Failed to delete memory",
+      "updated": "Memory updated",
+      "updateFailed": "Failed to update memory",
+      "loadError": "Could not load memories. Please refresh the page.",
+      "confirmDeleteTitle": "Delete memory?",
+      "confirmDeleteDesc": "This memory will be permanently removed.",
+      "types": {
+        "fact": "Facts",
+        "preference": "Preferences",
+        "context": "Context"
+      }
     }
   },
   "auth": {

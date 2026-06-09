@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { Trash2, Plus, Pencil, Check, X, Loader2, Brain } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,9 @@ interface Memory {
 }
 
 export default function MemoryPage() {
+  const t = useTranslations("settings.memory");
+  const tc = useTranslations("common");
+  const locale = useLocale();
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -50,13 +54,13 @@ export default function MemoryPage() {
         : "/api/memories";
       const res = await fetch(url);
       if (res.ok) setMemories(await res.json());
-      else setError("Could not load memories. Please refresh the page.");
+      else setError(t("loadError"));
     } catch {
-      setError("Could not load memories. Please refresh the page.");
+      setError(t("loadError"));
     } finally {
       setLoading(false);
     }
-  }, [filterType]);
+  }, [filterType, t]);
 
   useEffect(() => {
     fetchMemories();
@@ -77,9 +81,9 @@ export default function MemoryPage() {
         setNewContent("");
         setNewType("fact");
         setShowForm(false);
-        toast.success("Memory added");
+        toast.success(t("added"));
       } else {
-        toast.error("Failed to add memory");
+        toast.error(t("addFailed"));
       }
     } finally {
       setSaving(false);
@@ -91,9 +95,9 @@ export default function MemoryPage() {
     if (res.ok) {
       setMemories((prev) => prev.filter((m) => m.id !== id));
       setDeleteId(null);
-      toast.success("Memory deleted");
+      toast.success(t("deleted"));
     } else {
-      toast.error("Failed to delete memory");
+      toast.error(t("deleteFailed"));
     }
   };
 
@@ -118,9 +122,9 @@ export default function MemoryPage() {
       const updated = await res.json();
       setMemories((prev) => prev.map((m) => (m.id === id ? { ...m, ...updated } : m)));
       setEditingId(null);
-      toast.success("Memory updated");
+      toast.success(t("updated"));
     } else {
-      toast.error("Failed to update memory");
+      toast.error(t("updateFailed"));
     }
   };
 
@@ -131,17 +135,17 @@ export default function MemoryPage() {
   };
 
   const typeLabel: Record<string, string> = {
-    fact: "Facts",
-    preference: "Preferences",
-    context: "Context",
+    fact: t("types.fact"),
+    preference: t("types.preference"),
+    context: t("types.context"),
   };
 
   return (
     <div className="max-w-lg space-y-6">
       <div>
-        <h2 className="text-base font-medium">Agent Memory</h2>
+        <h2 className="text-base font-medium">{t("title")}</h2>
         <p className="text-sm text-muted-foreground">
-          Things the AI remembers about you across conversations.
+          {t("subtitle")}
         </p>
       </div>
       <Separator />
@@ -159,7 +163,7 @@ export default function MemoryPage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All types</SelectItem>
+            <SelectItem value="all">{t("allTypes")}</SelectItem>
             {MEMORY_TYPES.map((t) => (
               <SelectItem key={t} value={t}>
                 {typeLabel[t]}
@@ -171,7 +175,7 @@ export default function MemoryPage() {
         {!showForm && (
           <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
             <Plus className="mr-1.5 h-4 w-4" />
-            Add memory
+            {t("add")}
           </Button>
         )}
       </div>
@@ -180,16 +184,16 @@ export default function MemoryPage() {
       {showForm && (
         <div className="space-y-3 rounded-md border p-4">
           <div className="space-y-1.5">
-            <label className="text-sm">Content</label>
+            <label className="text-sm">{t("content")}</label>
             <Input
               value={newContent}
               onChange={(e) => setNewContent(e.target.value)}
-              placeholder="e.g. Prefers TypeScript over JavaScript"
+              placeholder={t("contentPlaceholder")}
               onKeyDown={(e) => e.key === "Enter" && handleAdd()}
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm">Type</label>
+            <label className="text-sm">{t("type")}</label>
             <Select value={newType} onValueChange={(v) => setNewType(v as MemoryType)}>
               <SelectTrigger className="w-full">
                 <SelectValue />
@@ -206,10 +210,10 @@ export default function MemoryPage() {
           <div className="flex gap-2">
             <Button size="sm" onClick={handleAdd} disabled={saving}>
               {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Save
+              {tc("save")}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowForm(false)} disabled={saving}>
-              Cancel
+              {tc("cancel")}
             </Button>
           </div>
         </div>
@@ -226,14 +230,14 @@ export default function MemoryPage() {
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
           <Brain className="h-5 w-5 text-muted-foreground/40" />
           <p className="text-sm text-muted-foreground">
-            No memories yet. The AI will learn about you as you chat.
+            {t("empty")}
           </p>
         </div>
       )}
 
       {!loading && filterType !== "all" && memories.length > 0 && grouped[filterType as MemoryType]?.length === 0 && (
         <p className="py-4 text-center text-sm text-muted-foreground">
-          No {typeLabel[filterType as MemoryType]?.toLowerCase() || filterType} memories
+          {t("emptyFiltered", { type: (typeLabel[filterType as MemoryType] || filterType).toLowerCase() })}
         </p>
       )}
 
@@ -282,9 +286,9 @@ export default function MemoryPage() {
                       <div className="flex-1 space-y-1">
                         <p className="text-sm">{m.content}</p>
                         <div className="flex items-center gap-2">
-                          <Badge variant="secondary">{m.type}</Badge>
+                          <Badge variant="secondary">{typeLabel[m.type] || m.type}</Badge>
                           <span className="text-xs text-muted-foreground">
-                            {new Date(m.createdAt).toLocaleDateString()}
+                            {new Date(m.createdAt).toLocaleDateString(locale)}
                           </span>
                         </div>
                       </div>
@@ -318,8 +322,8 @@ export default function MemoryPage() {
         open={!!deleteId}
         onOpenChange={(open) => !open && setDeleteId(null)}
         onConfirm={() => deleteId && handleDelete(deleteId)}
-        title="Delete memory?"
-        description="This memory will be permanently removed."
+        title={t("confirmDeleteTitle")}
+        description={t("confirmDeleteDesc")}
       />
     </div>
   );
