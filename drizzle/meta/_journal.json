@@ -36,6 +36,13 @@
       "when": 1780921610181,
       "tag": "0004_medical_speed_demon",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781007512030,
+      "tag": "0005_add_user_locale",
+      "breakpoints": true
     }
   ]
 }

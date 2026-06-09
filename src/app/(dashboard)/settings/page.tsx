@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -9,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
+import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
 
 function useSetting(key: string, fallback: string) {
@@ -48,6 +50,7 @@ function useSetting(key: string, fallback: string) {
 
 export default function GeneralSettingsPage() {
   const isAdmin = useIsAdmin();
+  const tLang = useTranslations("language");
 
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");
@@ -84,6 +87,10 @@ export default function GeneralSettingsPage() {
       <div className="space-y-1.5">
         <label className="text-sm font-medium">Theme</label>
         <ThemeSwitcher />
+      </div>
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium">{tLang("label")}</label>
+        <LanguageSwitcher />
       </div>
 
       {isAdmin && (

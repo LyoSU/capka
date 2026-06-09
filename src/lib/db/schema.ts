@@ -16,6 +16,7 @@ export const users = pgTable("user", {
   emailVerified: boolean("email_verified").default(false),
   image: text("image"),
   role: text("role").notNull().default("user"), // "admin" | "user" | "viewer"
+  locale: text("locale"), // "en" | "uk" | null (null = follow browser/default)
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

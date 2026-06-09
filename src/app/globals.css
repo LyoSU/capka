@@ -139,6 +139,20 @@
   }
 }
 
+/* Respect the OS "reduce motion" setting. Single source of truth for the whole
+   app: collapse every animation/transition to near-instant rather than chasing
+   each component. New animated code is covered automatically. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Thin scrollbar for textareas and overflow areas */
 .scrollbar-thin {
   scrollbar-width: thin;

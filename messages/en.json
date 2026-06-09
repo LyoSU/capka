@@ -1,0 +1,32 @@
+{
+  "common": {
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "edit": "Edit",
+    "create": "Create",
+    "creating": "Creating…",
+    "close": "Close",
+    "back": "Back",
+    "retry": "Try again",
+    "loading": "Loading…",
+    "search": "Search",
+    "confirm": "Confirm",
+    "remove": "Remove",
+    "add": "Add",
+    "copy": "Copy",
+    "copied": "Copied",
+    "optional": "Optional",
+    "required": "Required",
+    "error": "Something went wrong",
+    "saved": "Saved"
+  },
+  "language": {
+    "label": "Language",
+    "description": "Interface language",
+    "updated": "Language updated",
+    "updateFailed": "Couldn't change the language"
+  }
+}
