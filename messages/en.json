@@ -45,6 +45,18 @@
       "older": "Older"
     }
   },
+  "chat": {
+    "untitled": "New Chat",
+    "archived": {
+      "title": "Archived chats",
+      "back": "Back to chats",
+      "empty": "No archived chats",
+      "restore": "Restore chat",
+      "delete": "Delete permanently",
+      "confirmTitle": "Delete chat permanently?",
+      "confirmDescription": "This action cannot be undone. The chat and all its messages will be permanently deleted."
+    }
+  },
   "settings": {
     "title": "Settings",
     "nav": {

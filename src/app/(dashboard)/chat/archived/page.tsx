@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Archive, ArrowLeft, Trash2, RotateCcw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
@@ -14,6 +15,7 @@ type ArchivedChat = {
 };
 
 export default function ArchivedChatsPage() {
+  const t = useTranslations("chat");
   const [chats, setChats] = useState<ArchivedChat[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export default function ArchivedChatsPage() {
 
   return (
     <>
-      <Header title="Archived Chats" />
+      <Header title={t("archived.title")} />
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-2xl">
           <Link
@@ -55,7 +57,7 @@ export default function ArchivedChatsPage() {
             className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Back to chats
+            {t("archived.back")}
           </Link>
 
           {loading ? (
@@ -67,7 +69,7 @@ export default function ArchivedChatsPage() {
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted/50">
                 <Archive className="h-6 w-6 text-muted-foreground/40" />
               </div>
-              <p className="text-sm text-muted-foreground">No archived chats</p>
+              <p className="text-sm text-muted-foreground">{t("archived.empty")}</p>
             </div>
           ) : (
             <div className="space-y-1">
@@ -81,7 +83,7 @@ export default function ArchivedChatsPage() {
                     className="min-w-0 flex-1"
                   >
                     <p className="truncate text-sm font-medium">
-                      {chat.title || "New Chat"}
+                      {chat.title || t("untitled")}
                     </p>
                     {chat.updatedAt && (
                       <p className="text-xs text-muted-foreground">
@@ -95,8 +97,8 @@ export default function ArchivedChatsPage() {
                       size="icon"
                       className="h-7 w-7"
                       onClick={() => unarchive(chat.id)}
-                      aria-label="Restore chat"
-                      title="Unarchive"
+                      aria-label={t("archived.restore")}
+                      title={t("archived.restore")}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                     </Button>
@@ -105,8 +107,8 @@ export default function ArchivedChatsPage() {
                       size="icon"
                       className="h-7 w-7 text-destructive"
                       onClick={() => setDeleteId(chat.id)}
-                      aria-label="Delete chat"
-                      title="Delete permanently"
+                      aria-label={t("archived.delete")}
+                      title={t("archived.delete")}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -122,8 +124,8 @@ export default function ArchivedChatsPage() {
         open={!!deleteId}
         onOpenChange={(open) => !open && setDeleteId(null)}
         onConfirm={() => deleteId && deleteChat(deleteId)}
-        title="Delete chat permanently?"
-        description="This action cannot be undone. The chat and all its messages will be permanently deleted."
+        title={t("archived.confirmTitle")}
+        description={t("archived.confirmDescription")}
       />
     </>
   );
