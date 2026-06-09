@@ -3,11 +3,35 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { readdir, stat, mkdir, realpath, chown } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { join, resolve, basename } from "node:path";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import Docker from "dockerode";
 
 const docker = new Docker({ socketPath: "/var/run/docker.sock" });
 const PORT = process.env.PORT || 3001;
-const SECRET = process.env.CONTROLLER_SECRET || "unclaw-sandbox-secret";
+const SECRET = process.env.CONTROLLER_SECRET;
+
+// This controller has unrestricted access to the Docker socket — anyone who can
+// authenticate to it is root-equivalent on the host. Refuse to boot without a
+// strong secret. ALLOW_DEFAULT_SECRET is a local-dev-only escape hatch.
+const DEFAULT_SECRET = "unclaw-sandbox-secret";
+if (!SECRET || (SECRET === DEFAULT_SECRET && process.env.ALLOW_DEFAULT_SECRET !== "true")) {
+  console.error(
+    "[sandbox-controller] FATAL: CONTROLLER_SECRET is unset or left at the default value.\n" +
+    "  This service can control the Docker daemon (root-equivalent on the host).\n" +
+    "  Generate a strong secret and set CONTROLLER_SECRET on both the controller\n" +
+    "  and the platform:  openssl rand -hex 32\n" +
+    "  (Local development only: set ALLOW_DEFAULT_SECRET=true to bypass this check.)",
+  );
+  process.exit(1);
+}
+
+/** Constant-time string comparison (avoids timing oracles on the shared secret). */
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
 
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "unclaw-sandbox";
 const MEMORY_LIMIT = parseInt(process.env.SANDBOX_MEMORY_MB || "512") * 1024 * 1024;
@@ -74,15 +98,32 @@ async function ensureMounts(userId, sessionId) {
   return wsPath;
 }
 
+/** Sign a userId+sessionId pair so the controller can trust a workspace owner
+ *  even when no container is running. The platform (which authenticated the user
+ *  and verified ownership) derives the same HMAC from the shared secret. Without
+ *  this, anyone holding the bearer secret could read/write ANY user's workspace
+ *  by passing an arbitrary userId in the query string. */
+function workspaceToken(userId, sessionId) {
+  return createHmac("sha256", SECRET)
+    .update(`${sanitize(userId)}|${sanitize(sessionId)}`)
+    .digest("hex");
+}
+
 /** Resolve the host workspace base for a file op. Prefers the live session's
- *  owner; otherwise trusts the platform-supplied userId (the platform already
- *  authenticated the user and verified chat ownership). Returns null if neither
- *  is available, so file management works without a running container. */
-function resolveWsBase(sessionId, fallbackUserId) {
+ *  owner; otherwise trusts a platform-supplied userId ONLY if accompanied by a
+ *  valid HMAC token (so file management works without a running container while
+ *  still binding the request to one user). Returns:
+ *    { wsBase, session } on success,
+ *    { missing: true }   when no owner could be determined,
+ *    { forbidden: true } when the token is absent or invalid. */
+function resolveWsBase(sessionId, fallbackUserId, token) {
   const session = sessions.get(sessionId);
-  const userId = session ? session.userId : (fallbackUserId ? sanitize(fallbackUserId) : null);
-  if (!userId) return null;
-  return { wsBase: workspacePath(userId, sessionId), session };
+  if (session) return { wsBase: workspacePath(session.userId, sessionId), session };
+  if (!fallbackUserId) return { missing: true };
+  if (!token || !safeEqual(workspaceToken(fallbackUserId, sessionId), token)) {
+    return { forbidden: true };
+  }
+  return { wsBase: workspacePath(sanitize(fallbackUserId), sessionId), session: null };
 }
 
 function safeJoin(base, userPath) {
@@ -301,13 +342,19 @@ function jsonRes(res, status, data) {
 // --- HTTP API ---
 
 const server = createServer(async (req, res) => {
-  if (req.headers.authorization !== `Bearer ${SECRET}`) {
-    return jsonRes(res, 401, { error: "Unauthorized" });
-  }
-
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname;
   const method = req.method;
+
+  // Health is public so container orchestrators (compose/Coolify healthchecks)
+  // can probe it without the secret. It exposes nothing sensitive.
+  if (method === "GET" && path === "/health") {
+    return jsonRes(res, 200, { ok: true, sessions: sessions.size });
+  }
+
+  if (!safeEqual(req.headers.authorization || "", `Bearer ${SECRET}`)) {
+    return jsonRes(res, 401, { error: "Unauthorized" });
+  }
 
   try {
     // POST /sessions — create sandbox
@@ -365,8 +412,9 @@ const server = createServer(async (req, res) => {
     // GET /sessions/:id/files?path=. — list directory (native fs, no exec)
     const filesMatch = path.match(/^\/sessions\/([^/]+)\/files$/);
     if (method === "GET" && filesMatch) {
-      const resolved = resolveWsBase(filesMatch[1], url.searchParams.get("userId"));
-      if (!resolved) return jsonRes(res, 400, { error: "Missing userId" });
+      const resolved = resolveWsBase(filesMatch[1], url.searchParams.get("userId"), url.searchParams.get("token"));
+      if (resolved.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (resolved.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
       if (resolved.session) resolved.session.lastActivity = Date.now();
 
       const wsBase = resolved.wsBase;
@@ -394,8 +442,9 @@ const server = createServer(async (req, res) => {
     // GET /sessions/:id/download?path=file — stream file binary (native fs)
     const dlMatch = path.match(/^\/sessions\/([^/]+)\/download$/);
     if (method === "GET" && dlMatch) {
-      const resolved = resolveWsBase(dlMatch[1], url.searchParams.get("userId"));
-      if (!resolved) return jsonRes(res, 400, { error: "Missing userId" });
+      const resolved = resolveWsBase(dlMatch[1], url.searchParams.get("userId"), url.searchParams.get("token"));
+      if (resolved.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (resolved.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
       if (resolved.session) resolved.session.lastActivity = Date.now();
 
       const wsBase = resolved.wsBase;
@@ -421,8 +470,9 @@ const server = createServer(async (req, res) => {
     // POST /sessions/:id/upload — upload file (multipart)
     const upMatch = path.match(/^\/sessions\/([^/]+)\/upload$/);
     if (method === "POST" && upMatch) {
-      const resolved = resolveWsBase(upMatch[1], url.searchParams.get("userId"));
-      if (!resolved) return jsonRes(res, 400, { error: "Missing userId" });
+      const resolved = resolveWsBase(upMatch[1], url.searchParams.get("userId"), url.searchParams.get("token"));
+      if (resolved.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (resolved.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
       if (resolved.session) resolved.session.lastActivity = Date.now();
 
       const wsBase = resolved.wsBase;
@@ -504,11 +554,6 @@ const server = createServer(async (req, res) => {
       const list = [];
       for (const [id, s] of sessions) list.push({ id, userId: s.userId, lastActivity: s.lastActivity });
       return jsonRes(res, 200, list);
-    }
-
-    // GET /health
-    if (method === "GET" && path === "/health") {
-      return jsonRes(res, 200, { ok: true, sessions: sessions.size });
     }
 
     jsonRes(res, 404, { error: "Not found" });

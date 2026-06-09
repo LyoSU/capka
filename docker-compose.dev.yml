@@ -1,5 +1,23 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# Layers dev-only conveniences over the secure base: zero-config default secrets,
+# host-published ports bound to 127.0.0.1 (loopback only — never the public iface),
+# and hot-reloading `next dev`.
 services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: unClaw
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  sandbox-controller:
+    environment:
+      - CONTROLLER_SECRET=unclaw-sandbox-secret
+      # Opt-in escape hatch — lets the controller boot with the default secret.
+      # NEVER set this outside local development.
+      - ALLOW_DEFAULT_SECRET=true
+    ports:
+      - "127.0.0.1:3001:3001"
+
   platform:
     build:
       context: .
@@ -13,4 +31,4 @@ services:
     environment:
       - DATABASE_URL=postgresql://unClaw:unClaw@postgres:5432/unClaw
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
-      - CONTROLLER_SECRET=${CONTROLLER_SECRET:-unclaw-sandbox-secret}
+      - CONTROLLER_SECRET=unclaw-sandbox-secret
