@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, Link2, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
 export default function IntegrationsPage() {
+  const t = useTranslations("settings.integrations");
+  const tc = useTranslations("common");
   const [botToken, setBotToken] = useState("");
   const [tokenSaving, setTokenSaving] = useState(false);
   const [tokenLoaded, setTokenLoaded] = useState(false);
@@ -51,7 +54,7 @@ export default function IntegrationsPage() {
 
   const handleSaveToken = async () => {
     if (!botToken.trim()) {
-      toast.error("Enter a bot token");
+      toast.error(t("enterToken"));
       return;
     }
     setTokenSaving(true);
@@ -63,12 +66,12 @@ export default function IntegrationsPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success(`Bot @${data.botUsername} connected!`);
+        toast.success(t("botConnected", { username: data.botUsername }));
         if (data.warning) toast.warning(data.warning);
         setHasToken(true);
         setBotToken("");
       } else {
-        toast.error(data.error || "Failed to save token");
+        toast.error(data.error || t("saveTokenFailed"));
       }
     } finally {
       setTokenSaving(false);
@@ -84,7 +87,7 @@ export default function IntegrationsPage() {
         setLinkCode(data.code);
         setCodeExpiry(data.expiresAt);
       } else {
-        toast.error("Failed to generate link code");
+        toast.error(t("generateFailed"));
       }
     } finally {
       setGeneratingCode(false);
@@ -95,7 +98,7 @@ export default function IntegrationsPage() {
     if (linkCode) {
       navigator.clipboard.writeText(`/link ${linkCode}`);
       setCopied(true);
-      toast.success("Copied to clipboard");
+      toast.success(t("copied"));
       setTimeout(() => setCopied(false), 2000);
     }
   };
@@ -103,9 +106,9 @@ export default function IntegrationsPage() {
   return (
     <div className="max-w-lg space-y-6">
       <div>
-        <h2 className="text-base font-medium">Integrations</h2>
+        <h2 className="text-base font-medium">{t("title")}</h2>
         <p className="text-sm text-muted-foreground">
-          Connect external services to unClaw.
+          {t("subtitle")}
         </p>
       </div>
       <Separator />
@@ -113,10 +116,9 @@ export default function IntegrationsPage() {
       {/* Telegram Bot Token */}
       <div className="space-y-4">
         <div>
-          <h3 className="text-sm font-medium">Telegram Bot</h3>
+          <h3 className="text-sm font-medium">{t("telegram.title")}</h3>
           <p className="text-sm text-muted-foreground">
-            Enter your Telegram bot token from @BotFather to enable Telegram
-            integration.
+            {t("telegram.desc")}
           </p>
         </div>
 
@@ -124,15 +126,15 @@ export default function IntegrationsPage() {
           {!tokenLoaded ? (
             <Badge variant="secondary" className="text-xs text-muted-foreground">
               <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              Checking...
+              {t("checking")}
             </Badge>
           ) : hasToken ? (
             <Badge variant="outline" className="text-xs">
-              Token configured
+              {t("tokenConfigured")}
             </Badge>
           ) : (
             <Badge variant="secondary" className="text-xs">
-              Not configured
+              {t("notConfigured")}
             </Badge>
           )}
         </div>
@@ -142,11 +144,11 @@ export default function IntegrationsPage() {
             type="password"
             value={botToken}
             onChange={(e) => setBotToken(e.target.value)}
-            placeholder={hasToken ? "Enter new token to replace" : "123456:ABC-DEF..."}
+            placeholder={hasToken ? t("telegram.placeholderReplace") : "123456:ABC-DEF..."}
           />
           <Button onClick={handleSaveToken} disabled={tokenSaving}>
             {tokenSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save
+            {tc("save")}
           </Button>
         </div>
       </div>
@@ -156,25 +158,25 @@ export default function IntegrationsPage() {
       {/* Link Account */}
       <div className="space-y-4">
         <div>
-          <h3 className="text-sm font-medium">Link Telegram Account</h3>
+          <h3 className="text-sm font-medium">{t("link.title")}</h3>
           <p className="text-sm text-muted-foreground">
-            Connect your Telegram account to chat with unClaw from Telegram.
+            {t("link.desc")}
           </p>
         </div>
 
         {linkLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Checking status...
+            {t("link.checkingStatus")}
           </div>
         ) : linked ? (
           <div className="flex items-center gap-2 rounded-md border p-3">
             <Link2 className="h-4 w-4 text-success" />
             <span className="text-sm">
-              Linked{linkUsername ? ` as @${linkUsername}` : ""}
+              {linkUsername ? t("link.linkedAs", { username: linkUsername }) : t("link.linked")}
             </span>
             <Badge variant="outline" className="ml-auto text-xs">
-              Connected
+              {t("link.connected")}
             </Badge>
           </div>
         ) : (
@@ -182,7 +184,7 @@ export default function IntegrationsPage() {
             {linkCode ? (
               <div className="space-y-2 rounded-md border p-4">
                 <p className="text-sm text-muted-foreground">
-                  Send this command to the bot in Telegram:
+                  {t("link.sendCommand")}
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 rounded-md bg-muted px-3 py-2 text-sm font-mono">
@@ -203,7 +205,7 @@ export default function IntegrationsPage() {
                 </div>
                 {codeExpiry && (
                   <p className="text-xs text-muted-foreground">
-                    Code expires in 5 minutes
+                    {t("link.codeExpires")}
                   </p>
                 )}
                 <Button
@@ -214,7 +216,7 @@ export default function IntegrationsPage() {
                     fetchLinkStatus();
                   }}
                 >
-                  Done / Refresh status
+                  {t("link.doneRefresh")}
                 </Button>
               </div>
             ) : (
@@ -227,12 +229,12 @@ export default function IntegrationsPage() {
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
                 <Link2 className="mr-2 h-4 w-4" />
-                Generate Link Code
+                {t("link.generateCode")}
               </Button>
             )}
             {!hasToken && (
               <p className="text-xs text-muted-foreground">
-                Configure the bot token above before linking your account.
+                {t("link.configureFirst")}
               </p>
             )}
           </div>

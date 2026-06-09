@@ -285,6 +285,36 @@
         "preference": "Preferences",
         "context": "Context"
       }
+    },
+    "integrations": {
+      "title": "Integrations",
+      "subtitle": "Connect external services to unClaw.",
+      "checking": "Checking…",
+      "tokenConfigured": "Token configured",
+      "notConfigured": "Not configured",
+      "enterToken": "Enter a bot token",
+      "botConnected": "Bot @{username} connected!",
+      "saveTokenFailed": "Failed to save token",
+      "generateFailed": "Failed to generate link code",
+      "copied": "Copied to clipboard",
+      "telegram": {
+        "title": "Telegram Bot",
+        "desc": "Enter your Telegram bot token from @BotFather to enable Telegram integration.",
+        "placeholderReplace": "Enter new token to replace"
+      },
+      "link": {
+        "title": "Link Telegram Account",
+        "desc": "Connect your Telegram account to chat with unClaw from Telegram.",
+        "checkingStatus": "Checking status…",
+        "linked": "Linked",
+        "linkedAs": "Linked as @{username}",
+        "connected": "Connected",
+        "sendCommand": "Send this command to the bot in Telegram:",
+        "codeExpires": "Code expires in 5 minutes",
+        "doneRefresh": "Done / Refresh status",
+        "generateCode": "Generate Link Code",
+        "configureFirst": "Configure the bot token above before linking your account."
+      }
     }
   },
   "auth": {
