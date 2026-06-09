@@ -1,5 +1,6 @@
 import { lookup } from "dns/promises";
 import { isIPv4 } from "net";
+import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models as modelsTable } from "@/lib/db/schema";
@@ -111,6 +112,18 @@ async function assertSafeProviderUrl(raw: string, blockPrivate: boolean): Promis
       throw new Error("That address isn't allowed. Check the URL or ask your admin about network restrictions.");
     }
   }
+}
+
+/**
+ * SSRF guard to run before ANY live request to a provider — model listing, the
+ * "Test" button, AND real inference. Only user-supplied-URL providers
+ * (litellm/ollama) carry a base URL worth checking; OpenAI/Anthropic/OpenRouter
+ * use fixed public hosts. Resolves DNS and blocks link-local/metadata (always)
+ * plus private ranges when the admin opted into the stricter policy.
+ */
+export async function assertSafeProviderConfig(provider: string, baseUrl?: string | null): Promise<void> {
+  if ((provider !== "litellm" && provider !== "ollama") || !baseUrl) return;
+  await assertSafeProviderUrl(baseUrl, await getBlockPrivateProviderUrls());
 }
 
 type CatalogRow = {
@@ -227,7 +240,40 @@ async function listOllama(baseUrl: string, blockPrivate: boolean): Promise<Model
  * typing. Throws on a provider/network/auth failure so callers can show a
  * friendly message.
  */
+// Live provider listings hit the network (15s timeout each) and the picker
+// re-fetches on every mount. Cache successful results per credential set for a
+// few minutes so navigating between chats doesn't re-probe the provider.
+const MODELS_TTL_MS = 5 * 60_000;
+const modelsCache = new Map<string, { at: number; models: ModelInfo[] }>();
+
+function modelsCacheKey(o: { provider: string; apiKey?: string; baseUrl?: string }): string {
+  const keyHash = o.apiKey ? createHash("sha256").update(o.apiKey).digest("hex").slice(0, 16) : "";
+  return `${o.provider}|${o.baseUrl ?? ""}|${keyHash}`;
+}
+
+/** Drop the cache (call when a provider config changes so the next list is fresh). */
+export function invalidateModelsCache(): void {
+  modelsCache.clear();
+}
+
 export async function listProviderModels(opts: {
+  provider: ProviderName;
+  apiKey?: string;
+  baseUrl?: string;
+}): Promise<ModelInfo[]> {
+  // OpenRouter is served from the synced DB catalog — already fast, never cache.
+  if (opts.provider !== "openrouter") {
+    const key = modelsCacheKey(opts);
+    const hit = modelsCache.get(key);
+    if (hit && Date.now() - hit.at < MODELS_TTL_MS) return hit.models;
+    const models = await listProviderModelsLive(opts);
+    modelsCache.set(key, { at: Date.now(), models });
+    return models;
+  }
+  return listProviderModelsLive(opts);
+}
+
+async function listProviderModelsLive(opts: {
   provider: ProviderName;
   apiKey?: string;
   baseUrl?: string;

@@ -11,7 +11,7 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: unClaw
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-unClaw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: unClaw
     expose:
       - "5432"
@@ -39,7 +39,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/data
     environment:
-      - CONTROLLER_SECRET=${CONTROLLER_SECRET:-unclaw-sandbox-secret}
+      - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - DATA_ROOT=/data/storage
       # Docker resolves sibling-container bind sources on the daemon host, not
       # inside this container. On Coolify the compose project dir is the clone
@@ -49,6 +49,11 @@ services:
       # Keep test resource usage modest on a shared, RAM-tight host.
       - SANDBOX_MEMORY_MB=384
       - MAX_SESSIONS_PER_USER=2
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     depends_on:
       sandbox:
         condition: service_completed_successfully
@@ -65,15 +70,21 @@ services:
     environment:
       # Coolify generates Traefik routing for this domain → platform:3000.
       - SERVICE_FQDN_PLATFORM_3000=https://unclaw.yuri.ly
-      - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD:-unClaw}@postgres:5432/unClaw
+      - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD}@postgres:5432/unClaw
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
-      - CONTROLLER_SECRET=${CONTROLLER_SECRET:-unclaw-sandbox-secret}
+      - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - UNCLAW_MASTER_KEY=${UNCLAW_MASTER_KEY}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     depends_on:
       postgres:
         condition: service_healthy
       sandbox-controller:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

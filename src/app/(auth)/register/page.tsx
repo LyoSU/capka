@@ -102,6 +102,7 @@ export default function RegisterPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t("register.namePlaceholder")}
+                autoComplete="name"
                 required
                 disabled={loading}
                 autoFocus
@@ -113,6 +114,7 @@ export default function RegisterPage() {
                 id="email"
                 type="email"
                 placeholder="you@example.com"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -124,6 +126,7 @@ export default function RegisterPage() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="new-password"
                 value={password}
                 disabled={loading}
                 onChange={(e) => setPassword(e.target.value)}

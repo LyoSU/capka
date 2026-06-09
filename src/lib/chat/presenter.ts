@@ -20,7 +20,10 @@ export function toUIMessages(rows: { id: string; role: string; content: string; 
         } else if (p.type === "tool-call") {
           const tr = resultMap.get(p.id) as { output?: unknown } | undefined;
           const err = errorMap.get(p.id);
-          const state = tr ? "output-available" : err ? "output-error" : "partial-call";
+          // AI SDK 6 tool-part states: input-streaming | input-available |
+          // output-available | output-error. A call with neither result nor
+          // error yet has its input available and is awaiting output.
+          const state = tr ? "output-available" : err ? "output-error" : "input-available";
           parts.push({
             type: "dynamic-tool",
             toolCallId: p.id,

@@ -1,6 +1,9 @@
-import { getSetting } from "@/lib/settings";
+import { getSetting, isSetupComplete } from "@/lib/settings";
 
 export async function GET() {
-  const value = await getSetting("registration_enabled");
-  return Response.json({ enabled: value !== "false" });
+  // Mirror the gate in /api/auth/[...all]: closed by default once set up, but
+  // open before setup so the first admin can register.
+  const setupDone = await isSetupComplete();
+  const enabled = !setupDone || (await getSetting("registration_enabled")) === "true";
+  return Response.json({ enabled });
 }

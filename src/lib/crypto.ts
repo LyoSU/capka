@@ -13,8 +13,15 @@ export function encrypt(plaintext: string, keyHex: string): string {
 }
 
 export function decrypt(ciphertext: string, keyHex: string): string {
-  const [ivHex, tagHex, dataHex] = ciphertext.split(":");
+  const parts = ciphertext.split(":");
+  if (parts.length !== 3) {
+    throw new Error("Malformed ciphertext (expected iv:tag:data)");
+  }
+  const [ivHex, tagHex, dataHex] = parts;
   const key = Buffer.from(keyHex, "hex");
+  if (key.length !== 32) {
+    throw new Error("Master key must be 32 bytes (64 hex characters)");
+  }
   const iv = Buffer.from(ivHex, "hex");
   const tag = Buffer.from(tagHex, "hex");
   const data = Buffer.from(dataHex, "hex");
@@ -25,4 +32,9 @@ export function decrypt(ciphertext: string, keyHex: string): string {
 
 export function generateSecret(): string {
   return randomBytes(32).toString("hex");
+}
+
+/** A master key must be 32 bytes encoded as 64 hex chars (AES-256). */
+export function isValidMasterKey(key: string): boolean {
+  return /^[0-9a-fA-F]{64}$/.test(key);
 }

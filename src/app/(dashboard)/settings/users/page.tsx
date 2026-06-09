@@ -122,7 +122,7 @@ export default function UsersPage() {
                 onValueChange={(v) => v && updateRole(user.id, v)}
                 disabled={updating === user.id}
               >
-                <SelectTrigger className="w-28 h-8 text-xs">
+                <SelectTrigger className="w-28 h-8 text-xs" aria-label={t("changeRole")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

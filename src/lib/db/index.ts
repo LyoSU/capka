@@ -7,6 +7,12 @@ export const DATABASE_URL =
 
 // One shared pool for both Drizzle and the raw queries the durable queue needs
 // (FOR UPDATE SKIP LOCKED, lease math) so we don't open redundant connections.
-export const pool = new Pool({ connectionString: DATABASE_URL });
+// Bound the pool explicitly — API routes and the in-process worker share it, so
+// an unbounded default could exhaust Postgres connections under load.
+export const pool = new Pool({
+  connectionString: DATABASE_URL,
+  max: Number(process.env.PG_POOL_MAX) || 10,
+  idleTimeoutMillis: 30_000,
+});
 
 export const db = drizzle(pool, { schema });

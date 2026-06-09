@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { inferMimeType, type FileRef } from "@/lib/constants";
@@ -28,12 +29,16 @@ export function useBackgroundChat({
   chatId: string;
   projectId?: string;
 }) {
+  const t = useTranslations("chat.hook");
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<"idle" | "running">("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null }>({ startedAt: 0, currentTool: null });
   const msgRef = useRef(messages);
   msgRef.current = messages;
+  // Whether the SSE stream is currently connected — drives how hard the polling
+  // fallback works (aggressive only when SSE is down).
+  const sseHealthyRef = useRef(false);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -54,9 +59,9 @@ export function useBackgroundChat({
       })
       .catch((e) => {
         console.error("[chat] loadHistory failed:", e);
-        setError("Failed to load messages");
+        setError(t("loadFailed"));
       });
-  }, [chatId]);
+  }, [chatId, t]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -82,7 +87,7 @@ export function useBackgroundChat({
     const connect = () => {
       es = new EventSource("/api/events");
 
-      es.onopen = () => { retryDelay = 1000; }; // reset backoff on success
+      es.onopen = () => { retryDelay = 1000; sseHealthyRef.current = true; }; // reset backoff on success
 
       es.onmessage = (event) => {
         try {
@@ -136,7 +141,8 @@ export function useBackgroundChat({
                   type: "dynamic-tool",
                   toolCallId: data.toolCallId,
                   toolName: data.toolName,
-                  state: "partial-call",
+                  // Valid AI SDK 6 state — input is here, output pending.
+                  state: "input-available",
                   input: data.args,
                 });
                 msgs[idx] = { ...msg, parts };
@@ -184,6 +190,7 @@ export function useBackgroundChat({
       };
 
       es.onerror = () => {
+        sseHealthyRef.current = false;
         es?.close();
         clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(connect, retryDelay);
@@ -193,17 +200,24 @@ export function useBackgroundChat({
 
     connect();
     return () => {
+      sseHealthyRef.current = false;
       clearTimeout(reconnectTimer);
       es?.close();
     };
   }, [chatId, loadHistory]);
 
-  // ── Polling fallback — catches updates if SSE misses them ──
+  // ── Polling fallback — only really needed when SSE is down ──
   useEffect(() => {
     if (status !== "running") return;
 
+    let ticks = 0;
     const poll = setInterval(() => {
-      // Poll task status — if finished, reload messages
+      ticks += 1;
+      // When SSE is healthy it already delivers task:finish — running a full
+      // poll alongside it every 3s is wasted load. Poll aggressively only while
+      // SSE is down; otherwise keep a light insurance check (~every 21s).
+      if (sseHealthyRef.current && ticks % 7 !== 0) return;
+
       fetch(`/api/tasks?chatId=${chatId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((task) => {
@@ -268,12 +282,12 @@ export function useBackgroundChat({
         if (failed > 0) {
           const uploadedNames = new Set(uploadedFiles.map((f) => f.name));
           const names = files.filter((f) => !uploadedNames.has(f.name)).map((f) => f.name).join(", ");
-          toast.error(`Upload failed: ${names || `${failed} file(s)`} — message not sent`);
+          toast.error(t("uploadFailed", { files: names || `${failed}` }));
           return;
         }
       }
 
-      const displayText = text.trim() || (uploadedFiles.length > 0 ? "Process these files" : "");
+      const displayText = text.trim() || (uploadedFiles.length > 0 ? t("processFiles") : "");
 
       // Optimistically add user message (clean text only, no file metadata)
       const userMsg: Message = {
@@ -304,8 +318,9 @@ export function useBackgroundChat({
         });
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: "Request failed" }));
-          throw new Error(err.error || "Request failed");
+          if (res.status === 429) throw new Error(t("rateLimited"));
+          const err = await res.json().catch(() => ({ error: t("requestFailed") }));
+          throw new Error(err.error || t("requestFailed"));
         }
 
         const { taskId: newTaskId } = await res.json();
@@ -316,7 +331,7 @@ export function useBackgroundChat({
         throw e;
       }
     },
-    [chatId, projectId, uploadFiles],
+    [chatId, projectId, uploadFiles, t],
   );
 
   // ── Stop / Cancel ──────────────────────────────────────────
@@ -327,5 +342,5 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId]);
 
-  return { messages, status, error, sendMessage, stop, isLoading: status === "running", taskInfo };
+  return { messages, status, error, sendMessage, stop, reload: loadHistory, isLoading: status === "running", taskInfo };
 }

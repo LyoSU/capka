@@ -3,15 +3,22 @@ import {
   Send, Download,
   ChevronRight, Loader2, AlertCircle,
 } from "lucide-react";
-import { Streamdown } from "streamdown";
-import "streamdown/styles.css";
-import { useState, useMemo } from "react";
+import { Markdown } from "@/components/chat/markdown";
+import { useState, useMemo, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { fileKind, extOf } from "@/lib/file-kinds";
 import { describeStep } from "./steps";
 
 // --- Helpers ---
+
+// LLM error categories that have an errors.llm.<category> translation. The
+// server stores the category in message metadata; the user-facing text is
+// rendered here (localized) instead of the English string baked in at runtime.
+const LLM_ERROR_CATEGORIES = new Set([
+  "out_of_credits", "invalid_key", "rate_limited", "model_unavailable",
+  "context_too_long", "network", "timed_out", "unknown",
+]);
 
 type TimeTranslator = (key: string, values?: Record<string, string | number>) => string;
 
@@ -161,7 +168,7 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
   // Default — clean readable text
   return (
     <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-36 overflow-y-auto">
-      {text.slice(0, 2000)}{text.length > 2000 ? "..." : ""}
+      {text.slice(0, 2000)}{text.length > 2000 ? "…" : ""}
     </div>
   );
 }
@@ -173,13 +180,7 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
 function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
   return (
     <div className="text-[15px] leading-relaxed">
-      <Streamdown
-        parseIncompleteMarkdown={isStreaming}
-        shikiTheme={["github-light", "github-dark"]}
-        controls={{ code: { copy: true }, table: { copy: true, download: true, fullscreen: true } }}
-      >
-        {text}
-      </Streamdown>
+      <Markdown isStreaming={isStreaming}>{text}</Markdown>
       {chatId && <WorkspaceLinks text={text} chatId={chatId} />}
     </div>
   );
@@ -364,7 +365,7 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
 function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: string; isAdmin?: boolean }) {
   const t = useTranslations("chat.tool");
   return (
-    <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5">
+    <div role="alert" className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5">
       <div className="flex items-start gap-2 text-sm text-destructive">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <span className="flex-1">{message}</span>
@@ -405,13 +406,14 @@ interface ChatMessageProps {
   isAdmin?: boolean;
 }
 
-export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
+  const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -427,8 +429,8 @@ export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin 
     return (
       <div className="group/msg flex justify-end px-4 md:px-6 py-4">
         <div className="max-w-[75%] lg:max-w-[65%]">
-          <div className="inline-block rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
-            {text || "..."}
+          <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
+            {text || "…"}
           </div>
           <div className="mt-1 flex justify-end">
             <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
@@ -476,12 +478,16 @@ export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin 
           })
         ) : isStreaming || metadata?.taskStatus === "failed" ? null : (
           <span className="text-muted-foreground text-sm">
-            {metadata?.taskStatus === "cancelled" ? t("cancelled") : "..."}
+            {metadata?.taskStatus === "cancelled" ? t("cancelled") : "…"}
           </span>
         )}
         {metadata?.taskStatus === "failed" && (
           <ErrorNotice
-            message={metadata.error || t("genericError")}
+            message={
+              metadata.errorCategory && LLM_ERROR_CATEGORIES.has(metadata.errorCategory)
+                ? tErr(metadata.errorCategory)
+                : metadata.error || t("genericError")
+            }
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
           />
@@ -492,3 +498,8 @@ export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin 
     </div>
   );
 }
+
+// Memoized: with stable message identities (state changes only mutate the one
+// streaming message), keystrokes in the input and tokens for OTHER messages no
+// longer re-render the whole history.
+export const ChatMessage = memo(ChatMessageImpl);

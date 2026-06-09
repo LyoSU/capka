@@ -241,6 +241,7 @@ export default function ConnectionsPage() {
                   size="icon"
                   className="h-7 w-7 text-muted-foreground hover:text-destructive"
                   onClick={() => setDeleteId(c.id)}
+                  aria-label={tc("delete")}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>

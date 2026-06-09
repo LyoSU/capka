@@ -103,6 +103,10 @@ export const telegramLinks = pgTable("telegram_links", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   telegramUserId: bigint("telegram_user_id", { mode: "number" }).notNull().unique(),
   telegramUsername: text("telegram_username"),
+  // The chat Telegram messages flow into. Pinning it (instead of "last updated
+  // chat") stops Telegram replies from leaking into web/project chats and keeps
+  // project context (files + memory) consistent across both channels.
+  activeChatId: text("active_chat_id").references(() => chats.id, { onDelete: "set null" }),
   linkedAt: timestamp("linked_at").defaultNow(),
 }, (table) => [index("idx_telegram_links_tg_user_id").on(table.telegramUserId)]);
 

@@ -6,6 +6,7 @@ import { providerConfigs } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { getMasterKey } from "@/lib/settings";
 import { PROVIDERS } from "@/lib/providers";
+import { invalidateModelsCache } from "@/lib/providers/list-models";
 
 export const GET = apiHandler(async () => {
   const { userId } = await requireSession();
@@ -53,6 +54,7 @@ export const POST = apiHandler(async (req: Request) => {
     isActive: true,
   });
 
+  invalidateModelsCache();
   return Response.json({ id, provider, defaultModel, isActive: true });
 });
 
@@ -69,6 +71,7 @@ export const PUT = apiHandler(async (req: Request) => {
       .where(and(eq(providerConfigs.id, id), eq(providerConfigs.userId, userId)))
       .returning();
     if (!updated) return Response.json({ error: "Not found" }, { status: 404 });
+    invalidateModelsCache();
     return Response.json({ id: updated.id, isActive: true });
   }
 
@@ -79,6 +82,7 @@ export const PUT = apiHandler(async (req: Request) => {
     .returning();
 
   if (!updated) return Response.json({ error: "Not found" }, { status: 404 });
+  invalidateModelsCache();
   return Response.json({ id: updated.id, defaultModel: updated.defaultModel });
 });
 
@@ -93,5 +97,6 @@ export const DELETE = apiHandler(async (req: Request) => {
     .delete(providerConfigs)
     .where(and(eq(providerConfigs.id, id), eq(providerConfigs.userId, userId)));
 
+  invalidateModelsCache();
   return Response.json({ ok: true });
 });

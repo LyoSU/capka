@@ -1,0 +1,2 @@
+ALTER TABLE "telegram_links" ADD COLUMN "active_chat_id" text;--> statement-breakpoint
+ALTER TABLE "telegram_links" ADD CONSTRAINT "telegram_links_active_chat_id_chats_id_fk" FOREIGN KEY ("active_chat_id") REFERENCES "public"."chats"("id") ON DELETE set null ON UPDATE no action;

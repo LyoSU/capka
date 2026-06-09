@@ -1,12 +1,13 @@
 import { Bot } from "grammy";
 import { nanoid } from "nanoid";
-import { eq, asc, desc } from "drizzle-orm";
+import { eq, asc, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
 import { toUIMessages } from "@/lib/chat/presenter";
+import { take } from "@/lib/rate-limit";
 import type { TaskPayload } from "@/lib/tasks/runner";
 
 let _bot: Bot | null = null;
@@ -26,7 +27,13 @@ export async function getBot(): Promise<Bot | null> {
   });
 
   _bot.command("link", async (ctx) => {
-    const code = ctx.match?.trim();
+    // Throttle guessing attempts per Telegram user (defense-in-depth on top of
+    // the large code space).
+    if (!take(`tglink:${ctx.from!.id}`, 5).ok) {
+      await ctx.reply("Too many attempts. Please wait a minute and try again.");
+      return;
+    }
+    const code = ctx.match?.trim().toUpperCase();
     if (!code) {
       await ctx.reply("Usage: /link CODE");
       return;
@@ -43,12 +50,23 @@ export async function getBot(): Promise<Bot | null> {
       return;
     }
 
-    await db.insert(telegramLinks).values({
-      id: nanoid(),
-      userId: lc.userId,
-      telegramUserId: ctx.from!.id,
-      telegramUsername: ctx.from?.username || null,
-    });
+    // This Telegram id may already be linked (re-running /link). The unique
+    // constraint on telegram_user_id would otherwise throw with no reply —
+    // re-point the existing link to the new account instead.
+    const existing = await findLink(ctx.from!.id);
+    if (existing) {
+      await db
+        .update(telegramLinks)
+        .set({ userId: lc.userId, telegramUsername: ctx.from?.username || null, activeChatId: null })
+        .where(eq(telegramLinks.id, existing.id));
+    } else {
+      await db.insert(telegramLinks).values({
+        id: nanoid(),
+        userId: lc.userId,
+        telegramUserId: ctx.from!.id,
+        telegramUsername: ctx.from?.username || null,
+      });
+    }
     await db.delete(linkCodes).where(eq(linkCodes.code, code));
     await ctx.reply("Account linked!");
   });
@@ -63,6 +81,7 @@ export async function getBot(): Promise<Bot | null> {
     await db
       .insert(chats)
       .values({ id, userId: link.userId, title: "Telegram Chat" });
+    await db.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
     await ctx.reply("New chat started!");
   });
 
@@ -73,22 +92,16 @@ export async function getBot(): Promise<Bot | null> {
       return;
     }
 
-    // Find or create chat
-    let [chat] = await db
-      .select()
-      .from(chats)
-      .where(eq(chats.userId, link.userId))
-      .orderBy(desc(chats.updatedAt))
-      .limit(1);
-    if (!chat) {
-      const id = nanoid();
-      await db.insert(chats).values({
-        id,
-        userId: link.userId,
-        title: ctx.message.text.slice(0, 100),
-      });
-      [chat] = await db.select().from(chats).where(eq(chats.id, id)).limit(1);
+    // Same per-user flood guard as the web enqueue path.
+    if (!take(`chat:${link.userId}`).ok) {
+      await ctx.reply("You're sending messages too fast — please wait a moment.");
+      return;
     }
+
+    // Route into the link's pinned Telegram chat — NOT "whatever the user last
+    // touched on the web", which would mix Telegram replies into web/project
+    // chats and lose project context.
+    const chat = await resolveActiveChat(link, ctx.message.text.slice(0, 100));
 
     // Save user message
     await db.insert(messages).values({
@@ -125,6 +138,7 @@ export async function getBot(): Promise<Bot | null> {
 
       const payload: TaskPayload = {
         requestModel: chat.model ?? undefined,
+        projectId: chat.projectId ?? undefined,
         uiMessages: toUIMessages(rows),
         origin: { platform: "telegram", telegramChatId: ctx.chat.id },
       };
@@ -136,7 +150,36 @@ export async function getBot(): Promise<Bot | null> {
     }
   });
 
+  // Without this, a throwing handler is either swallowed or crashes the polling
+  // process depending on the runtime. Log it and keep the bot alive.
+  _bot.catch((err) => {
+    console.error(`[telegram] handler error (update ${err.ctx.update.update_id}):`, err.error);
+  });
+
   return _bot;
+}
+
+/**
+ * Resolve the chat Telegram messages belong to: the link's pinned active chat
+ * if it still exists, otherwise a fresh dedicated chat that we then pin.
+ */
+async function resolveActiveChat(
+  link: { id: string; userId: string; activeChatId: string | null },
+  firstMessage: string,
+) {
+  if (link.activeChatId) {
+    const [c] = await db
+      .select()
+      .from(chats)
+      .where(and(eq(chats.id, link.activeChatId), eq(chats.userId, link.userId)))
+      .limit(1);
+    if (c) return c;
+  }
+  const id = nanoid();
+  await db.insert(chats).values({ id, userId: link.userId, title: firstMessage || "Telegram Chat" });
+  await db.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
+  const [c] = await db.select().from(chats).where(eq(chats.id, id)).limit(1);
+  return c;
 }
 
 /**

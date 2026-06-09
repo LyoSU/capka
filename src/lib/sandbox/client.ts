@@ -3,10 +3,11 @@
  * Platform never touches Docker socket directly — only through this API.
  */
 
+import { createHmac } from "node:crypto";
 import { SandboxError } from "@/lib/errors";
 
 const CONTROLLER_URL = process.env.SANDBOX_CONTROLLER_URL || "http://localhost:3001";
-const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET || "unclaw-sandbox-secret";
+const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET ?? "";
 
 function sanitizeId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
@@ -14,6 +15,15 @@ function sanitizeId(id: string): string {
 
 function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${CONTROLLER_SECRET}` };
+}
+
+/** HMAC proving this caller is authorized to act on <userId>'s workspace.
+ *  The controller recomputes it from the same shared secret. Must match the
+ *  controller's `workspaceToken` exactly (sanitized userId|sessionId). */
+function workspaceToken(userId: string, sessionId: string): string {
+  return createHmac("sha256", CONTROLLER_SECRET)
+    .update(`${sanitizeId(userId)}|${sanitizeId(sessionId)}`)
+    .digest("hex");
 }
 
 /** Wrap fetch — rethrow ECONNREFUSED/ENOTFOUND as user-friendly SandboxError */
@@ -88,14 +98,20 @@ type FileEntry = {
 export async function listFiles(sessionId: string, path = ".", userId?: string): Promise<{ entries: FileEntry[]; error?: string }> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path });
-  if (userId) params.set("userId", userId);
+  if (userId) {
+    params.set("userId", userId);
+    params.set("token", workspaceToken(userId, sessionId));
+  }
   return request(`/sessions/${id}/files?${params}`, "GET");
 }
 
 export async function downloadFile(sessionId: string, filePath: string, userId?: string): Promise<Response> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path: filePath });
-  if (userId) params.set("userId", userId);
+  if (userId) {
+    params.set("userId", userId);
+    params.set("token", workspaceToken(userId, sessionId));
+  }
   const res = await sandboxFetch(`${CONTROLLER_URL}/sessions/${id}/download?${params}`, {
     headers: authHeaders(),
     signal: AbortSignal.timeout(30_000),
@@ -114,7 +130,9 @@ export async function uploadFile(sessionId: string, path: string, file: File, us
   form.append("path", path);
   form.append("file", file);
 
-  const query = userId ? `?userId=${encodeURIComponent(sanitizeId(userId))}` : "";
+  const query = userId
+    ? `?userId=${encodeURIComponent(sanitizeId(userId))}&token=${workspaceToken(userId, sessionId)}`
+    : "";
   const res = await sandboxFetch(`${CONTROLLER_URL}/sessions/${id}/upload${query}`, {
     method: "POST",
     headers: authHeaders(),
