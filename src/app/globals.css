@@ -8,6 +8,7 @@
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
   --font-heading: var(--font-sans);
+  --font-display: var(--font-lora), Georgia, "Times New Roman", serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-sidebar-ring: var(--sidebar-ring);

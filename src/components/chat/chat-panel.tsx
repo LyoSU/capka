@@ -115,7 +115,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
           <div className="w-full">
             <div className="mb-8 flex items-center justify-center gap-3 px-6">
               <Sparkles className="h-6 w-6 shrink-0 text-primary md:h-7 md:w-7" />
-              <h1 className="text-balance text-center text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
+              <h1 className="font-display text-balance text-center text-3xl font-medium tracking-tight text-foreground md:text-[2.75rem] md:leading-[1.1]">
                 {t("panel.greeting")}
               </h1>
             </div>

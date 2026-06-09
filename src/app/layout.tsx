@@ -2,12 +2,22 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
+import { Lora } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
+
+// Serif display face for hero headings. Cyrillic subset is required — the UI is
+// Ukrainian-first, and Latin-only display serifs (Instrument Serif, Fraunces)
+// would fall back to a generic serif for Cyrillic text.
+const lora = Lora({
+  subsets: ["latin", "cyrillic"],
+  variable: "--font-lora",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "unClaw",
@@ -30,7 +40,7 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      className={`${GeistSans.variable} ${GeistMono.variable} ${lora.variable}`}
       suppressHydrationWarning
     >
       <head>
