@@ -52,24 +52,24 @@
     "editingFile": "Редагування {file}…",
     "readFile": "Прочитано {file}",
     "readingFile": "Читання {file}…",
-    "listedFiles": "Переглянуто файли",
-    "listingFiles": "Перегляд файлів…",
-    "searchedFor": "Пошук «{query}»",
-    "searchedFiles": "Пошук у файлах",
+    "listedFiles": "Отримано список файлів",
+    "listingFiles": "Отримання списку файлів…",
+    "searchedFor": "Виконано пошук «{query}»",
+    "searchedFiles": "Виконано пошук у файлах",
     "searchingFiles": "Пошук у файлах…",
     "ranCommand": "Виконано команду",
     "runningCommand": "Виконання команди…",
-    "ranPython": "Виконано Python",
-    "runningPython": "Виконання Python…",
-    "ranJavaScript": "Виконано JavaScript",
-    "runningJavaScript": "Виконання JavaScript…",
-    "searchedWebFor": "Пошук в інтернеті: «{query}»",
-    "searchedWeb": "Пошук в інтернеті",
+    "ranPython": "Виконано код Python",
+    "runningPython": "Виконання коду Python…",
+    "ranJavaScript": "Виконано код JavaScript",
+    "runningJavaScript": "Виконання коду JavaScript…",
+    "searchedWebFor": "Виконано пошук в інтернеті: «{query}»",
+    "searchedWeb": "Виконано пошук в інтернеті",
     "searchingWeb": "Пошук в інтернеті…",
     "fetchedPage": "Завантажено сторінку",
     "fetchingPage": "Завантаження сторінки…",
     "usedTool": "Використано інструмент",
-    "working": "Робота…"
+    "working": "Виконання…"
   },
   "chat": {
     "untitled": "Новий чат",
@@ -80,7 +80,7 @@
     },
     "panel": {
       "greeting": "Чим можу допомогти?",
-      "workspaceFiles": "Файли робочої теки",
+      "workspaceFiles": "Робочі файли",
       "sendFailed": "Не вдалося надіслати повідомлення"
     },
     "menu": {
@@ -94,28 +94,28 @@
       "deleteDescription": "Чат «{title}» і всі його повідомлення буде видалено назавжди."
     },
     "taskStatus": {
-      "thinking": "Думаю…"
+      "thinking": "Обробка…"
     },
     "model": {
       "search": "Пошук моделей…",
       "placeholder": "Оберіть модель",
-      "selectModel": "Вибір моделі",
+      "selectModel": "Оберіть модель",
       "needKey": "Введіть свій API-ключ, щоб завантажити моделі",
       "noneFound": "Моделей не знайдено",
       "noneAvailable": "Немає доступних моделей",
       "loadError": "Не вдалося завантажити моделі",
       "active": "активна",
       "shared": "спільна",
-      "sharedTooltip": "Використовується спільна конфігурація провайдера від адміністратора",
+      "sharedTooltip": "Використовує налаштування провайдера, задані адміністратором",
       "caps": {
         "vision": "розпізнавання зображень",
         "tools": "інструменти",
-        "reasoning": "міркування"
+        "reasoning": "логічне мислення"
       }
     },
     "input": {
-      "placeholder": "Постав задачу або запитай будь-що",
-      "placeholderFiles": "Додайте повідомлення про файли…",
+      "placeholder": "Поставте завдання або запитайте будь-що",
+      "placeholderFiles": "Опишіть, що зробити з файлами…",
       "attach": "Прикріпити файли",
       "stop": "Зупинити генерацію",
       "send": "Надіслати повідомлення",
@@ -130,7 +130,7 @@
       "stepsHint": "Тут з'являтимуться кроки, поки асистент працює.",
       "context": "Контекст",
       "contextHint": "Тут з'являються файли, які ви додаєте до повідомлення.",
-      "youAdded": "ви додали",
+      "youAdded": "Ви додали",
       "files": "Файли",
       "upload": "Завантажити файли",
       "downloadAll": "Завантажити все",
@@ -325,7 +325,7 @@
       "description": "Введіть свої дані, щоб увійти в unClaw.",
       "submit": "Увійти",
       "submitting": "Вхід…",
-      "invalidCredentials": "Невірна пошта або пароль. Спробуйте ще раз.",
+      "invalidCredentials": "Неправильна пошта або пароль. Спробуйте ще раз.",
       "noAccount": "Ще не маєте акаунта?",
       "createOne": "Створити"
     },
