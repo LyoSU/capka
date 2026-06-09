@@ -37,6 +37,11 @@
       "home": "Go to home"
     }
   },
+  "providerStatus": {
+    "outOfCredits": "The AI account is out of credit. Top it up to restore the assistant for everyone.",
+    "invalidKey": "The AI provider isn't connected. Check the provider settings to restore the assistant.",
+    "fix": "Open settings"
+  },
   "theme": {
     "system": "System theme",
     "light": "Light theme",
@@ -229,6 +234,7 @@
       "connections": "Connections",
       "integrations": "Integrations",
       "memory": "Memory",
+      "usage": "Usage",
       "users": "Users"
     },
     "usersPage": {
@@ -278,7 +284,17 @@
       "blockPrivate": "Block internal network addresses",
       "blockPrivateHint": "Prevents provider URLs (LiteLLM, Ollama) from pointing at private or loopback addresses. Leave off if you self-host a gateway on your local network. Cloud-metadata addresses are always blocked.",
       "strictEnabled": "Strict mode enabled",
-      "strictDisabled": "Strict mode disabled"
+      "strictDisabled": "Strict mode disabled",
+      "masterKey": {
+        "insecureTitle": "Protect your provider keys",
+        "insecureBody": "The key that encrypts your AI provider keys is stored in the database. Anyone who can read the database can read those keys. Copy this line into your server's environment file, then restart unClaw:",
+        "restartHint": "After restarting, this warning disappears.",
+        "secureLeftover": "Protected by an environment key. An old copy is still in the database. Remove it to finish.",
+        "removeDbCopy": "Remove database copy",
+        "removed": "Database copy removed",
+        "removeFailed": "Couldn't remove the database copy",
+        "secureClean": "Provider keys are protected by an environment key."
+      }
     },
     "memory": {
       "title": "Agent Memory",
@@ -369,6 +385,20 @@
       "connectionFailed": "Connection failed: {error}",
       "saved": "Provider saved and set as active",
       "saveError": "Could not save provider settings. Please check your API key and try again."
+    },
+    "usage": {
+      "title": "Usage & cost",
+      "subtitle": "What the shared AI provider key is costing, and who is using it.",
+      "rangeDays": "{days} days",
+      "totalCost": "Total cost",
+      "calls": "Requests",
+      "inputTokens": "Input tokens",
+      "outputTokens": "Output tokens",
+      "byModel": "By model",
+      "byUser": "By user",
+      "callsN": "{count, plural, one {# request} other {# requests}}",
+      "unknownUser": "Unknown user",
+      "empty": "No usage recorded yet."
     }
   },
   "setup": {

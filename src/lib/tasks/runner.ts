@@ -13,7 +13,7 @@ import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
-import { classifyLLMError } from "@/lib/errors/friendly";
+import { classifyLLMError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import type { StoredPart } from "@/lib/chat/contracts";
@@ -41,6 +41,14 @@ export interface ClaimedTask {
 
 /** Max concurrent file downloads from sandbox */
 const MAX_CONCURRENT_DOWNLOADS = 5;
+
+/**
+ * Hard wall-clock ceiling for a single task. The lease/heartbeat only catches a
+ * DEAD worker; a LIVE worker stuck on a hung tool or LLM call keeps renewing its
+ * lease forever and would hold a concurrency slot indefinitely. This deadline
+ * aborts such a run so the slot frees and the user gets a clear failure.
+ */
+const MAX_TASK_MS = 10 * 60_000;
 
 /** Download files with bounded concurrency and total size budget */
 async function downloadBounded(
@@ -165,6 +173,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   const sessionKey = workspaceSessionKey({ id: chatId, projectId: payload.projectId ?? null });
 
   const ac = new AbortController();
+  let deadlineHit = false;
+  const deadline = setTimeout(() => {
+    deadlineHit = true;
+    ac.abort();
+  }, MAX_TASK_MS);
   const msgId = nanoid();
   const parts: StoredPart[] = [];
   const getFullText = () =>
@@ -336,10 +349,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    const finalStatus = ac.signal.aborted ? "cancelled" : streamError ? "failed" : "completed";
+    const finalStatus = deadlineHit ? "failed" : ac.signal.aborted ? "cancelled" : streamError ? "failed" : "completed";
     // Map any provider error to a friendly, role-aware shape: users see
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
-    const failure = streamError ? classifyLLMError(streamError) : undefined;
+    const failure = deadlineHit ? TIMED_OUT_ERROR : streamError ? classifyLLMError(streamError) : undefined;
 
     await db.update(messages).set({
       content: getFullText(),
@@ -348,7 +361,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
       },
     }).where(eq(messages.id, msgId));
-    await finalizeTask(taskId, finalStatus, streamError ?? null);
+    await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
     if (payload.origin) {
       await deliverTaskResult(payload.origin, { status: finalStatus, text: getFullText(), error: failure?.userMessage });
@@ -393,8 +406,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";
-    const status = isAbort ? "cancelled" : "failed";
-    const failure = isAbort ? undefined : classifyLLMError(e);
+    const status = isAbort && !deadlineHit ? "cancelled" : "failed";
+    const failure = deadlineHit ? TIMED_OUT_ERROR : isAbort ? undefined : classifyLLMError(e);
     await Promise.all([
       finalizeTask(taskId, status, failure?.adminDetail ?? null).catch(() => {}),
       db.update(messages).set({
@@ -410,6 +423,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       await deliverTaskResult(payload.origin, { status, text: getFullText(), error: failure?.userMessage });
     }
   } finally {
+    clearTimeout(deadline);
     clearInterval(monitor);
     await closeMcp?.().catch(() => {});
   }

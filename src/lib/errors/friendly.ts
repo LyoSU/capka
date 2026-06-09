@@ -13,6 +13,7 @@ export type LLMErrorCategory =
   | "model_unavailable"
   | "context_too_long"
   | "network"
+  | "timed_out"
   | "unknown";
 
 export interface FriendlyError {
@@ -81,3 +82,15 @@ export function classifyLLMError(raw: unknown): FriendlyError {
     adminDetail: detail || DEFAULT_USER_MESSAGE,
   };
 }
+
+/**
+ * Server-enforced run deadline. Used directly (not via the regex rules, which
+ * would mis-match a generic "timeout" as a network error) when a task exceeds
+ * its wall-clock budget — a live worker stuck on a hung tool/LLM call.
+ */
+export const TIMED_OUT_ERROR: FriendlyError = {
+  category: "timed_out",
+  userMessage:
+    "This task took too long and was stopped. Please try again, or break it into smaller steps.",
+  adminDetail: "Task exceeded the maximum run time and was aborted by the server.",
+};

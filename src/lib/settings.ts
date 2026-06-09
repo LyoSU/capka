@@ -34,6 +34,36 @@ export async function getMasterKey(): Promise<string> {
   return secret;
 }
 
+/**
+ * Where the master key lives, for the admin security banner.
+ * - "env":  UNCLAW_MASTER_KEY is set (the secure root of trust, outside the DB).
+ * - "db":   no env var; the key is stored PLAINTEXT in the DB — a DB leak exposes
+ *           every provider key. `dbKey` is returned so an admin can copy the SAME
+ *           value into the env (changing it would break decryption + all sessions).
+ * - "none": no key persisted yet (pre-setup).
+ *
+ * `dbKeyPresent` flags a leftover DB copy even when env is set, so the banner can
+ * offer to clean it up — otherwise a DB dump still leaks the key.
+ */
+export async function getMasterKeyStatus(): Promise<{
+  source: "env" | "db" | "none";
+  dbKeyPresent: boolean;
+  dbKey: string | null;
+}> {
+  const envKey = process.env.UNCLAW_MASTER_KEY?.trim();
+  const row = await db.select().from(settings).where(eq(settings.key, "auth_secret")).limit(1);
+  const dbKey = row[0]?.value ?? null;
+  if (envKey) return { source: "env", dbKeyPresent: !!dbKey, dbKey: null };
+  if (dbKey) return { source: "db", dbKeyPresent: true, dbKey };
+  return { source: "none", dbKeyPresent: false, dbKey: null };
+}
+
+/** Delete the DB-stored master key. Caller MUST verify the env key is set first,
+ *  or the next getMasterKey() would mint a new one and orphan all encrypted data. */
+export async function removeStoredMasterKey(): Promise<void> {
+  await db.delete(settings).where(eq(settings.key, "auth_secret"));
+}
+
 export async function getSetting(key: string): Promise<string | null> {
   const row = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
   if (!row[0]) return null;

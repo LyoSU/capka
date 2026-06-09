@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
+import { MasterKeyBanner } from "@/components/settings/master-key-banner";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
 
 function useSetting(key: string, fallback: string) {
@@ -205,6 +206,7 @@ export default function GeneralSettingsPage() {
               {t("securityDesc")}
             </p>
           </div>
+          <MasterKeyBanner />
           <div className="flex items-center justify-between rounded-lg border p-4">
             <div className="pr-4">
               <p className="text-sm font-medium">{t("blockPrivate")}</p>
