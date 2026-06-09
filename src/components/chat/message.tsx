@@ -365,7 +365,7 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
 function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: string; isAdmin?: boolean }) {
   const t = useTranslations("chat.tool");
   return (
-    <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5">
+    <div role="alert" className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5">
       <div className="flex items-start gap-2 text-sm text-destructive">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <span className="flex-1">{message}</span>

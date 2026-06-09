@@ -273,10 +273,10 @@ export default function MemoryPage() {
                             ))}
                           </SelectContent>
                         </Select>
-                        <Button variant="ghost" size="icon-xs" onClick={() => handleUpdate(m.id)}>
+                        <Button variant="ghost" size="icon-xs" onClick={() => handleUpdate(m.id)} aria-label={tc("save")}>
                           <Check className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon-xs" onClick={cancelEdit}>
+                        <Button variant="ghost" size="icon-xs" onClick={cancelEdit} aria-label={tc("cancel")}>
                           <X className="h-4 w-4" />
                         </Button>
                       </div>
@@ -298,6 +298,7 @@ export default function MemoryPage() {
                           size="icon-xs"
                           className="text-muted-foreground hover:text-foreground"
                           onClick={() => startEdit(m)}
+                          aria-label={tc("edit")}
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
@@ -306,6 +307,7 @@ export default function MemoryPage() {
                           size="icon-xs"
                           className="text-muted-foreground hover:text-destructive"
                           onClick={() => setDeleteId(m.id)}
+                          aria-label={tc("delete")}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

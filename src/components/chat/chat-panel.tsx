@@ -202,7 +202,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
             )}
             {error && !lastFailed && (
               <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
-                <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                   <AlertCircle className="h-4 w-4 shrink-0" />
                   <span className="flex-1">{error}</span>
                   <Button
@@ -210,6 +210,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                     size="icon"
                     className="h-6 w-6 text-destructive hover:text-destructive"
                     onClick={() => window.location.reload()}
+                    aria-label={t("panel.retry")}
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                   </Button>

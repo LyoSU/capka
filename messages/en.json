@@ -182,7 +182,8 @@
           }
         }
       },
-      "scrollDown": "Scroll to bottom"
+      "scrollDown": "Scroll to bottom",
+      "retry": "Retry"
     },
     "menu": {
       "rename": "Rename",
@@ -192,7 +193,8 @@
       "unarchive": "Unarchive",
       "export": "Export",
       "deleteTitle": "Delete chat",
-      "deleteDescription": "This will permanently delete “{title}” and all its messages."
+      "deleteDescription": "This will permanently delete “{title}” and all its messages.",
+      "options": "Chat actions"
     },
     "taskStatus": {
       "thinking": "Thinking…"
@@ -213,7 +215,8 @@
         "vision": "Reads images",
         "tools": "Can use tools",
         "reasoning": "Thinks step by step"
-      }
+      },
+      "close": "Close"
     },
     "input": {
       "placeholder": "Assign a task or ask anything",
@@ -272,7 +275,8 @@
       "uploadFailed": "Upload failed: {files} — message not sent.",
       "processFiles": "Process these files",
       "requestFailed": "Request failed."
-    }
+    },
+    "clearSearch": "Clear search"
   },
   "projects": {
     "title": "Projects",
@@ -337,7 +341,8 @@
         "admin": "Admin",
         "user": "User",
         "viewer": "Viewer"
-      }
+      },
+      "changeRole": "Change role"
     },
     "general": {
       "appearance": "Appearance",

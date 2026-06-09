@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback, createElement } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, useId, createElement } from "react";
 import { useTranslations } from "next-intl";
 import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
@@ -195,6 +195,8 @@ function ModelList({
   onClose: () => void;
 }) {
   const t = useTranslations("chat.model");
+  const listboxId = useId();
+  const optionId = (i: number) => `${listboxId}-opt-${i}`;
   // Only tool-capable models are usable here, so they're the only ones listed.
   const models = useMemo(() => state.models.filter(hasTools), [state.models]);
   const filtered = useMemo(() => {
@@ -246,12 +248,17 @@ function ModelList({
           }}
           placeholder={t("search")}
           autoFocus
+          role="combobox"
+          aria-expanded
+          aria-controls={listboxId}
+          aria-activedescendant={filtered.length ? optionId(activeIndex) : undefined}
+          aria-label={t("search")}
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
         {search && <span className="text-[10px] text-muted-foreground tabular-nums">{filtered.length}</span>}
       </div>
 
-      <div ref={listRef} className="flex-1 overflow-y-auto overscroll-contain">
+      <div ref={listRef} id={listboxId} role="listbox" aria-label={t("selectModel")} className="flex-1 overflow-y-auto overscroll-contain">
         {state.loading && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -288,6 +295,9 @@ function ModelList({
                 return (
                   <button
                     key={model.id}
+                    id={optionId(globalIdx)}
+                    role="option"
+                    aria-selected={isActive}
                     data-index={globalIdx}
                     onClick={() => onSelect(model)}
                     onMouseEnter={() => onActiveIndex(globalIdx)}
@@ -350,6 +360,12 @@ export function ModelPicker({
   const [isMobile, setIsMobile] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const close = useCallback(() => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, []);
 
   const source: Source = provider
     ? { mode: "credentials", provider, apiKey, baseUrl }
@@ -419,7 +435,7 @@ export function ModelPicker({
       activeIndex={activeIndex}
       onActiveIndex={setActiveIndex}
       listRef={listRef}
-      onClose={() => setOpen(false)}
+      onClose={close}
     />
   );
 
@@ -427,8 +443,11 @@ export function ModelPicker({
     <div ref={containerRef} className="relative">
       {variant === "pill" ? (
         <button
+          ref={triggerRef}
           type="button"
           onClick={toggleOpen}
+          aria-haspopup="listbox"
+          aria-expanded={open}
           className="flex h-9 items-center gap-2.5 px-3 text-sm hover:text-foreground transition-colors"
         >
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0">
@@ -447,9 +466,12 @@ export function ModelPicker({
         </button>
       ) : (
         <button
+          ref={triggerRef}
           type="button"
           onClick={toggleOpen}
           disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={open}
           className="flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <BrandIcon slug={currentModel?.icon} size={15} className="shrink-0 text-muted-foreground" />
@@ -466,6 +488,7 @@ export function ModelPicker({
 
       {open && !isMobile && (
         <div
+          onKeyDown={(e) => { if (e.key === "Escape") close(); }}
           className={`absolute top-full mt-1 z-50 flex max-h-96 flex-col overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 ${
             variant === "field" ? "inset-x-0 w-full" : "left-0 w-80"
           }`}
@@ -475,10 +498,13 @@ export function ModelPicker({
       )}
 
       {open && isMobile && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        <div
+          onKeyDown={(e) => { if (e.key === "Escape") close(); }}
+          className="fixed inset-0 z-50 flex flex-col bg-background"
+        >
           <div className="flex items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-medium">{t("selectModel")}</span>
-            <button onClick={() => setOpen(false)} className="rounded-md p-1 hover:bg-muted">
+            <button onClick={close} aria-label={t("close")} className="rounded-md p-1 hover:bg-muted">
               <X className="h-4 w-4" />
             </button>
           </div>

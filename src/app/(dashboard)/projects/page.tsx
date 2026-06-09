@@ -19,6 +19,7 @@ import { ProjectDialog, type Project } from "@/components/projects/project-dialo
 
 export default function ProjectsPage() {
   const t = useTranslations("projects");
+  const tc = useTranslations("common");
   const locale = useLocale();
   const [projects, setProjects] = useState<Project[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -142,6 +143,7 @@ export default function ProjectsPage() {
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => handleEdit(project)}
+                    aria-label={tc("edit")}
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -149,6 +151,7 @@ export default function ProjectsPage() {
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => setDeleteTarget(project)}
+                    aria-label={tc("delete")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
