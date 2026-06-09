@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { Trash2, Plus, Loader2, Unplug, Power, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ interface ProviderConfig {
 }
 
 export default function ConnectionsPage() {
+  const t = useTranslations("settings.connections");
+  const tc = useTranslations("common");
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -56,13 +59,13 @@ export default function ConnectionsPage() {
       setError("");
       const res = await fetch("/api/settings/providers");
       if (res.ok) setConfigs(await res.json());
-      else setError("Could not load providers. Please refresh the page.");
+      else setError(t("loadError"));
     } catch {
-      setError("Could not load providers. Please refresh the page.");
+      setError(t("loadError"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchConfigs();
@@ -84,9 +87,9 @@ export default function ConnectionsPage() {
     });
     if (res.ok) {
       setConfigs((prev) => prev.map((c) => ({ ...c, isActive: c.id === id })));
-      toast.success("Provider activated");
+      toast.success(t("activated"));
     } else {
-      toast.error("Could not activate provider. Please try again.");
+      toast.error(t("activateError"));
     }
   };
 
@@ -95,9 +98,9 @@ export default function ConnectionsPage() {
     if (res.ok) {
       setConfigs((prev) => prev.filter((c) => c.id !== id));
       setDeleteId(null);
-      toast.success("Provider removed");
+      toast.success(t("removed"));
     } else {
-      toast.error("Could not remove provider. Please try again.");
+      toast.error(t("removeError"));
     }
   };
 
@@ -109,9 +112,9 @@ export default function ConnectionsPage() {
     });
     if (res.ok) {
       setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, defaultModel: model } : c)));
-      toast.success("Default model updated");
+      toast.success(t("modelUpdated"));
     } else {
-      toast.error("Could not update default model. Please try again.");
+      toast.error(t("modelUpdateError"));
     }
   };
 
@@ -120,15 +123,15 @@ export default function ConnectionsPage() {
     try {
       const modelId = defaultModel || undefined;
       if (meta.requiresKey && !apiKey) {
-        toast.error("API key is required");
+        toast.error(t("keyRequired"));
         return;
       }
       if (meta.requiresBaseUrl && !baseUrl) {
-        toast.error("Base URL is required");
+        toast.error(t("baseUrlRequired"));
         return;
       }
       if (!modelId) {
-        toast.error("Please pick a model");
+        toast.error(t("pickModelError"));
         return;
       }
 
@@ -148,7 +151,7 @@ export default function ConnectionsPage() {
 
       const testData = await testRes.json();
       if (!testData.success) {
-        toast.error(`Connection failed: ${testData.error}`);
+        toast.error(t("connectionFailed", { error: testData.error }));
         return;
       }
 
@@ -165,11 +168,11 @@ export default function ConnectionsPage() {
       });
 
       if (saveRes.ok) {
-        toast.success("Provider saved and set as active");
+        toast.success(t("saved"));
         resetForm();
         fetchConfigs();
       } else {
-        toast.error("Could not save provider settings. Please check your API key and try again.");
+        toast.error(t("saveError"));
       }
     } finally {
       setSaving(false);
@@ -179,9 +182,9 @@ export default function ConnectionsPage() {
   return (
     <div className="max-w-lg space-y-6">
       <div>
-        <h2 className="text-base font-medium">LLM Providers</h2>
+        <h2 className="text-base font-medium">{t("title")}</h2>
         <p className="text-sm text-muted-foreground">
-          Manage AI provider connections and API keys.
+          {t("subtitle")}
         </p>
       </div>
       <Separator />
@@ -204,8 +207,8 @@ export default function ConnectionsPage() {
             <div className="rounded-xl bg-muted/50 p-3 mb-3">
               <Unplug className="h-6 w-6 text-muted-foreground" />
             </div>
-            <p className="text-sm text-muted-foreground">No providers connected</p>
-            <p className="text-xs text-muted-foreground mt-1">Add an API key to start using AI models</p>
+            <p className="text-sm text-muted-foreground">{t("empty")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("emptyHint")}</p>
           </div>
         )}
         {configs.map((c) => (
@@ -218,7 +221,7 @@ export default function ConnectionsPage() {
                 })()}
                 <span className="text-sm font-semibold">{providerLabel(c.provider)}</span>
                 {c.isActive && (
-                  <Badge variant="outline" className="text-[10px]">active</Badge>
+                  <Badge variant="outline" className="text-[10px]">{t("active")}</Badge>
                 )}
               </div>
               <div className="flex items-center gap-1">
@@ -228,7 +231,7 @@ export default function ConnectionsPage() {
                     size="icon"
                     className="h-7 w-7 text-muted-foreground hover:text-primary"
                     onClick={() => handleActivate(c.id)}
-                    title="Activate"
+                    title={t("activate")}
                   >
                     <Power className="h-4 w-4" />
                   </Button>
@@ -245,13 +248,13 @@ export default function ConnectionsPage() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Default Model</label>
+              <label className="text-xs text-muted-foreground">{t("defaultModel")}</label>
               <ModelPicker
                 variant="field"
                 configId={c.id}
                 value={c.defaultModel || ""}
                 onChange={(id) => handleUpdateModel(c.id, id)}
-                placeholder="Pick a model"
+                placeholder={t("pickModel")}
               />
             </div>
           </div>
@@ -262,7 +265,7 @@ export default function ConnectionsPage() {
       {showForm ? (
         <div className="space-y-4 rounded-md border p-4">
           <div className="space-y-1.5">
-            <label className="text-sm">Provider</label>
+            <label className="text-sm">{t("providerField")}</label>
             <Select value={provider} onValueChange={(v) => changeProvider(v as ProviderName)}>
               <SelectTrigger className="w-full h-auto py-2">
                 <SelectValue />
@@ -278,7 +281,7 @@ export default function ConnectionsPage() {
                           <span className="flex items-center gap-1.5 font-medium">
                             {p.label}
                             {p.recommended && (
-                              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">Recommended</span>
+                              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("recommended")}</span>
                             )}
                           </span>
                           <span className="text-xs text-muted-foreground">{p.blurb}</span>
@@ -293,7 +296,7 @@ export default function ConnectionsPage() {
 
           {meta.requiresKey && (
             <div className="space-y-1.5">
-              <label className="text-sm">API Key</label>
+              <label className="text-sm">{t("apiKey")}</label>
               <div className="relative">
                 <Input
                   type={showKey ? "text" : "password"}
@@ -305,7 +308,7 @@ export default function ConnectionsPage() {
                 <button
                   type="button"
                   onClick={() => setShowKey((v) => !v)}
-                  aria-label={showKey ? "Hide API key" : "Show API key"}
+                  aria-label={showKey ? t("hideKey") : t("showKey")}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -316,7 +319,7 @@ export default function ConnectionsPage() {
 
           {meta.requiresBaseUrl && (
             <div className="space-y-1.5">
-              <label className="text-sm">Base URL</label>
+              <label className="text-sm">{t("baseUrl")}</label>
               <Input
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
@@ -326,7 +329,7 @@ export default function ConnectionsPage() {
           )}
 
           <div className="space-y-1.5">
-            <label className="text-sm">Model</label>
+            <label className="text-sm">{t("model")}</label>
             <ModelPicker
               variant="field"
               value={defaultModel}
@@ -335,24 +338,24 @@ export default function ConnectionsPage() {
               apiKey={apiKey}
               baseUrl={baseUrl}
               disabled={(meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl)}
-              placeholder={meta.requiresKey && !apiKey ? "Enter your API key first" : "Pick a model"}
+              placeholder={meta.requiresKey && !apiKey ? t("enterKeyFirst") : t("pickModel")}
             />
           </div>
 
           <div className="flex gap-2">
             <Button onClick={handleTestAndSave} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Test &amp; Save
+              {t("testSave")}
             </Button>
             <Button variant="ghost" onClick={resetForm} disabled={saving}>
-              Cancel
+              {tc("cancel")}
             </Button>
           </div>
         </div>
       ) : (
         <Button variant="outline" onClick={() => setShowForm(true)}>
           <Plus className="mr-2 h-4 w-4" />
-          Add Provider
+          {t("addProvider")}
         </Button>
       )}
 
@@ -360,8 +363,8 @@ export default function ConnectionsPage() {
         open={!!deleteId}
         onOpenChange={(open) => !open && setDeleteId(null)}
         onConfirm={() => deleteId && handleDelete(deleteId)}
-        title="Remove provider?"
-        description="This will disconnect the provider and remove its API key."
+        title={t("confirmRemoveTitle")}
+        description={t("confirmRemoveDesc")}
       />
     </div>
   );
