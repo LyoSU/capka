@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   Pin,
   PinOff,
@@ -46,6 +47,8 @@ export function ChatContextMenu({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const t = useTranslations("chat");
+  const tc = useTranslations("common");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -115,7 +118,7 @@ export function ChatContextMenu({
           <DropdownMenuContent side="right" align="start" sideOffset={8}>
             <DropdownMenuItem onClick={startRename}>
               <Pencil className="h-4 w-4" />
-              Rename
+              {t("menu.rename")}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => patchChat({ pinned: !chat.pinned })}
@@ -123,12 +126,12 @@ export function ChatContextMenu({
               {chat.pinned ? (
                 <>
                   <PinOff className="h-4 w-4" />
-                  Unpin
+                  {t("menu.unpin")}
                 </>
               ) : (
                 <>
                   <Pin className="h-4 w-4" />
-                  Pin
+                  {t("menu.pin")}
                 </>
               )}
             </DropdownMenuItem>
@@ -136,7 +139,7 @@ export function ChatContextMenu({
               onClick={() => patchChat({ archived: !chat.archived })}
             >
               <Archive className="h-4 w-4" />
-              {chat.archived ? "Unarchive" : "Archive"}
+              {chat.archived ? t("menu.unarchive") : t("menu.archive")}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
@@ -144,7 +147,7 @@ export function ChatContextMenu({
               }}
             >
               <Download className="h-4 w-4" />
-              Export
+              {t("menu.export")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -152,7 +155,7 @@ export function ChatContextMenu({
               onClick={() => setDeleteOpen(true)}
             >
               <Trash2 className="h-4 w-4" />
-              Delete
+              {tc("delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -161,17 +164,17 @@ export function ChatContextMenu({
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete chat</DialogTitle>
+            <DialogTitle>{t("menu.deleteTitle")}</DialogTitle>
             <DialogDescription>
-              This will permanently delete &ldquo;{chat.title || "New Chat"}&rdquo; and all its messages.
+              {t("menu.deleteDescription", { title: chat.title || t("untitled") })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-              Cancel
+              {tc("cancel")}
             </Button>
             <Button variant="destructive" onClick={deleteChat}>
-              Delete
+              {tc("delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

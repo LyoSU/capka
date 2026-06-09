@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
@@ -11,6 +12,7 @@ export function ChatSearch({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const t = useTranslations("chat");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -32,7 +34,7 @@ export function ChatSearch({
           ref={inputRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Search chats..."
+          placeholder={t("searchChats")}
           className="pl-7 h-7 text-sm pr-7"
         />
         {value && (

@@ -45,8 +45,117 @@
       "older": "Раніше"
     }
   },
+  "steps": {
+    "createdFile": "Створено {file}",
+    "creatingFile": "Створення {file}…",
+    "editedFile": "Відредаговано {file}",
+    "editingFile": "Редагування {file}…",
+    "readFile": "Прочитано {file}",
+    "readingFile": "Читання {file}…",
+    "listedFiles": "Переглянуто файли",
+    "listingFiles": "Перегляд файлів…",
+    "searchedFor": "Пошук «{query}»",
+    "searchedFiles": "Пошук у файлах",
+    "searchingFiles": "Пошук у файлах…",
+    "ranCommand": "Виконано команду",
+    "runningCommand": "Виконання команди…",
+    "ranPython": "Виконано Python",
+    "runningPython": "Виконання Python…",
+    "ranJavaScript": "Виконано JavaScript",
+    "runningJavaScript": "Виконання JavaScript…",
+    "searchedWebFor": "Пошук в інтернеті: «{query}»",
+    "searchedWeb": "Пошук в інтернеті",
+    "searchingWeb": "Пошук в інтернеті…",
+    "fetchedPage": "Завантажено сторінку",
+    "fetchingPage": "Завантаження сторінки…",
+    "usedTool": "Використано інструмент",
+    "working": "Робота…"
+  },
   "chat": {
     "untitled": "Новий чат",
+    "searchChats": "Пошук чатів…",
+    "fileType": {
+      "image": "Зображення",
+      "file": "Файл"
+    },
+    "panel": {
+      "greeting": "Чим можу допомогти?",
+      "workspaceFiles": "Файли робочої теки",
+      "sendFailed": "Не вдалося надіслати повідомлення"
+    },
+    "menu": {
+      "rename": "Перейменувати",
+      "pin": "Закріпити",
+      "unpin": "Відкріпити",
+      "archive": "Архівувати",
+      "unarchive": "Розархівувати",
+      "export": "Експортувати",
+      "deleteTitle": "Видалити чат",
+      "deleteDescription": "Чат «{title}» і всі його повідомлення буде видалено назавжди."
+    },
+    "taskStatus": {
+      "thinking": "Думаю…"
+    },
+    "model": {
+      "search": "Пошук моделей…",
+      "placeholder": "Оберіть модель",
+      "selectModel": "Вибір моделі",
+      "needKey": "Введіть свій API-ключ, щоб завантажити моделі",
+      "noneFound": "Моделей не знайдено",
+      "noneAvailable": "Немає доступних моделей",
+      "loadError": "Не вдалося завантажити моделі",
+      "active": "активна",
+      "shared": "спільна",
+      "sharedTooltip": "Використовується спільна конфігурація провайдера від адміністратора",
+      "caps": {
+        "vision": "розпізнавання зображень",
+        "tools": "інструменти",
+        "reasoning": "міркування"
+      }
+    },
+    "input": {
+      "placeholder": "Постав задачу або запитай будь-що",
+      "placeholderFiles": "Додайте повідомлення про файли…",
+      "attach": "Прикріпити файли",
+      "stop": "Зупинити генерацію",
+      "send": "Надіслати повідомлення",
+      "remove": "Прибрати {name}",
+      "tooLarge": "Завеликий (макс. {max}): {files}"
+    },
+    "workspace": {
+      "title": "Робота",
+      "close": "Закрити панель",
+      "progress": "Прогрес",
+      "starting": "Запуск…",
+      "stepsHint": "Тут з'являтимуться кроки, поки асистент працює.",
+      "context": "Контекст",
+      "contextHint": "Тут з'являються файли, які ви додаєте до повідомлення.",
+      "youAdded": "ви додали",
+      "files": "Файли",
+      "upload": "Завантажити файли",
+      "downloadAll": "Завантажити все",
+      "createHint": "Надішліть повідомлення, щоб створити робочу теку.",
+      "loadError": "Не вдалося завантажити файли",
+      "empty": "Поки що немає файлів.",
+      "uploadFailed": "Не вдалося завантажити {name}"
+    },
+    "tool": {
+      "done": "Готово",
+      "failed": "помилка",
+      "unknownError": "Невідома помилка",
+      "technicalDetails": "Технічні деталі",
+      "artifacts": "{count, plural, one {Артефакт} few {# артефакти} many {# артефактів} other {# артефакту}}",
+      "steps": "{count, plural, one {# крок} few {# кроки} many {# кроків} other {# кроку}}",
+      "more": "+{count} ще"
+    },
+    "time": {
+      "justNow": "щойно",
+      "yesterday": "Вчора {time}"
+    },
+    "message": {
+      "cancelled": "Відповідь скасовано",
+      "genericError": "Під час генерації відповіді сталася помилка. Спробуйте ще раз."
+    },
     "archived": {
       "title": "Архівовані чати",
       "back": "Назад до чатів",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   ChevronDown, Download, Folder, Loader2, Upload, X, Check, AlertCircle, ChevronLeft,
 } from "lucide-react";
@@ -46,20 +47,22 @@ function Section({ title, count, defaultOpen, action, children }: {
 // ── Progress ───────────────────────────────────────────────────────────────
 
 function ProgressSection({ steps, running }: { steps: ProgressStep[]; running: boolean }) {
+  const t = useTranslations("chat.workspace");
+  const tSteps = useTranslations("steps");
   if (steps.length === 0) {
     return (
-      <Section title="Progress" defaultOpen>
+      <Section title={t("progress")} defaultOpen>
         <p className="px-4 py-3 text-xs text-muted-foreground">
-          {running ? "Starting…" : "Steps will appear here as the assistant works."}
+          {running ? t("starting") : t("stepsHint")}
         </p>
       </Section>
     );
   }
   return (
-    <Section title="Progress" defaultOpen>
+    <Section title={t("progress")} defaultOpen>
       <div className="space-y-0.5 px-3">
         {steps.map((s, i) => {
-          const { label, activeLabel, Icon } = describeStep(s.toolName, s.input);
+          const { label, activeLabel, Icon } = describeStep(tSteps, s.toolName, s.input);
           const done = s.state === "output-available";
           const failed = s.state === "output-error";
           return (
@@ -84,6 +87,8 @@ function ProgressSection({ steps, running }: { steps: ProgressStep[]; running: b
 // ── Context (pending attachments) ────────────────────────────────────────────
 
 function ContextSection({ attachments }: { attachments: AttachedFile[] }) {
+  const t = useTranslations("chat.workspace");
+  const tf = useTranslations("chat.fileType");
   const urls = useMemo(() => {
     const m = new Map<string, string>();
     for (const a of attachments) {
@@ -96,13 +101,13 @@ function ContextSection({ attachments }: { attachments: AttachedFile[] }) {
 
   if (attachments.length === 0) {
     return (
-      <Section title="Context">
-        <p className="px-4 py-3 text-xs text-muted-foreground">Files you attach to your message appear here.</p>
+      <Section title={t("context")}>
+        <p className="px-4 py-3 text-xs text-muted-foreground">{t("contextHint")}</p>
       </Section>
     );
   }
   return (
-    <Section title="Context" count={attachments.length} defaultOpen>
+    <Section title={t("context")} count={attachments.length} defaultOpen>
       <div className="space-y-1 px-3">
         {attachments.map((a) => {
           const isImage = a.file.type.startsWith("image/");
@@ -121,7 +126,7 @@ function ContextSection({ attachments }: { attachments: AttachedFile[] }) {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm text-foreground/90">{a.file.name}</p>
                 <p className="text-[10px] text-muted-foreground">
-                  {isImage ? "Image" : "File"} · {formatSize(a.file.size)} · you added
+                  {isImage ? tf("image") : tf("file")} · {formatSize(a.file.size)} · {t("youAdded")}
                 </p>
               </div>
             </div>
@@ -135,6 +140,8 @@ function ContextSection({ attachments }: { attachments: AttachedFile[] }) {
 // ── Files (workspace) ────────────────────────────────────────────────────────
 
 function FilesSection({ chatId }: { chatId: string }) {
+  const t = useTranslations("chat.workspace");
+  const tc = useTranslations("common");
   const [path, setPath] = useState(".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -150,11 +157,11 @@ function FilesSection({ chatId }: { chatId: string }) {
       if (data.error) setError(data.error);
       setEntries(data.entries ?? []);
     } catch {
-      setError("Failed to load files");
+      setError(t("loadError"));
     } finally {
       setLoading(false);
     }
-  }, [chatId, path]);
+  }, [chatId, path, t]);
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
@@ -184,7 +191,7 @@ function FilesSection({ chatId }: { chatId: string }) {
         form.append("path", path);
         form.append("file", file);
         const res = await fetch("/api/sandbox/files/upload", { method: "POST", body: form });
-        if (!res.ok) toast.error(`Failed to upload ${file.name}`);
+        if (!res.ok) toast.error(t("uploadFailed", { name: file.name }));
       }
       fetchFiles();
     } finally {
@@ -194,14 +201,14 @@ function FilesSection({ chatId }: { chatId: string }) {
 
   const action = (
     <div className="flex items-center gap-0.5">
-      <label title="Upload files" aria-label="Upload files">
+      <label title={t("upload")} aria-label={t("upload")}>
         <input type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
         <div className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
           <Upload className={`h-3.5 w-3.5 ${uploading ? "animate-pulse" : ""}`} />
         </div>
       </label>
       {files.length > 1 && (
-        <button onClick={downloadAll} title="Download all" className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+        <button onClick={downloadAll} title={t("downloadAll")} className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
           <Download className="h-3.5 w-3.5" />
         </button>
       )}
@@ -209,13 +216,13 @@ function FilesSection({ chatId }: { chatId: string }) {
   );
 
   return (
-    <Section title="Files" count={files.length} defaultOpen action={action}>
+    <Section title={t("files")} count={files.length} defaultOpen action={action}>
       {path !== "." && (
         <button
           onClick={() => setPath(path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".")}
           className="mx-3 mb-1 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-3 w-3" /> Back
+          <ChevronLeft className="h-3 w-3" /> {tc("back")}
         </button>
       )}
 
@@ -226,7 +233,7 @@ function FilesSection({ chatId }: { chatId: string }) {
       {error && (
         <div className="px-4 py-4 text-center">
           {error.includes("Session not found") || error.includes("not found") ? (
-            <p className="text-xs text-muted-foreground">Send a message to create the workspace.</p>
+            <p className="text-xs text-muted-foreground">{t("createHint")}</p>
           ) : (
             <p className="text-xs text-muted-foreground">{error}</p>
           )}
@@ -234,7 +241,7 @@ function FilesSection({ chatId }: { chatId: string }) {
       )}
 
       {!error && sorted.length === 0 && !loading && (
-        <p className="px-4 py-3 text-xs text-muted-foreground">No files yet.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">{t("empty")}</p>
       )}
 
       <div className="space-y-0.5 px-3">
@@ -286,14 +293,15 @@ export function WorkspacePanel({
   running: boolean;
   attachments: AttachedFile[];
 }) {
+  const t = useTranslations("chat.workspace");
   if (!open) return null;
   return (
     <div className="fixed inset-y-0 right-0 z-40 flex h-full w-80 flex-col border-l bg-card shadow-lg md:static md:z-auto md:shadow-none">
       <div className="flex items-center justify-between border-b border-border/50 bg-muted/20 px-4 py-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-          <Folder className="h-4 w-4 text-muted-foreground" /> Working
+          <Folder className="h-4 w-4 text-muted-foreground" /> {t("title")}
         </h3>
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={onClose} aria-label="Close panel">
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={onClose} aria-label={t("close")}>
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>

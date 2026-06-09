@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useMemo, useEffect, type KeyboardEvent, type DragEvent } from "react";
+import { useTranslations } from "next-intl";
 import { ArrowUp, Paperclip, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,8 @@ export function ChatInput({
   files,
   onFilesChange,
 }: ChatInputProps) {
+  const t = useTranslations("chat.input");
+  const tf = useTranslations("chat.fileType");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -75,7 +78,7 @@ export function ChatInput({
       }
     }
     if (rejected.length > 0) {
-      toast.error(`Too large (max ${formatSize(MAX_FILE_SIZE)}): ${rejected.join(", ")}`);
+      toast.error(t("tooLarge", { max: formatSize(MAX_FILE_SIZE), files: rejected.join(", ") }));
     }
     if (valid.length > 0) onFilesChange([...files, ...valid]);
   };
@@ -131,13 +134,13 @@ export function ChatInput({
                     <div className="flex flex-col">
                       <span className="max-w-32 truncate leading-tight">{af.file.name}</span>
                       <span className="text-[10px] leading-tight text-muted-foreground">
-                        {preview ? "Image" : "File"} · {formatSize(af.file.size)}
+                        {preview ? tf("image") : tf("file")} · {formatSize(af.file.size)}
                       </span>
                     </div>
                     <button
                       onClick={() => removeFile(af.id)}
                       className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                      aria-label={`Remove ${af.file.name}`}
+                      aria-label={t("remove", { name: af.file.name })}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -157,7 +160,7 @@ export function ChatInput({
               }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={files.length > 0 ? "Add a message about the files..." : "Assign a task or ask anything"}
+              placeholder={files.length > 0 ? t("placeholderFiles") : t("placeholder")}
               rows={1}
               className="w-full resize-none overflow-hidden bg-transparent pr-2 text-[15px] leading-relaxed placeholder:text-muted-foreground focus-visible:outline-none"
             />
@@ -180,8 +183,8 @@ export function ChatInput({
                 size="icon"
                 className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground hover:text-foreground"
                 onClick={() => fileInputRef.current?.click()}
-                title="Attach files"
-                aria-label="Attach files"
+                title={t("attach")}
+                aria-label={t("attach")}
               >
                 <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
               </Button>
@@ -194,7 +197,7 @@ export function ChatInput({
                 variant="outline"
                 className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl"
                 onClick={onStop}
-                aria-label="Stop generation"
+                aria-label={t("stop")}
               >
                 <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               </Button>
@@ -204,7 +207,7 @@ export function ChatInput({
                 className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl"
                 disabled={!hasContent}
                 onClick={onSubmit}
-                aria-label="Send message"
+                aria-label={t("send")}
               >
                 <ArrowUp className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
               </Button>

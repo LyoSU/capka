@@ -45,8 +45,117 @@
       "older": "Older"
     }
   },
+  "steps": {
+    "createdFile": "Created {file}",
+    "creatingFile": "Creating {file}…",
+    "editedFile": "Edited {file}",
+    "editingFile": "Editing {file}…",
+    "readFile": "Read {file}",
+    "readingFile": "Reading {file}…",
+    "listedFiles": "Listed files",
+    "listingFiles": "Looking through files…",
+    "searchedFor": "Searched for “{query}”",
+    "searchedFiles": "Searched files",
+    "searchingFiles": "Searching files…",
+    "ranCommand": "Ran a command",
+    "runningCommand": "Running a command…",
+    "ranPython": "Ran Python",
+    "runningPython": "Running Python…",
+    "ranJavaScript": "Ran JavaScript",
+    "runningJavaScript": "Running JavaScript…",
+    "searchedWebFor": "Searched the web for “{query}”",
+    "searchedWeb": "Searched the web",
+    "searchingWeb": "Searching the web…",
+    "fetchedPage": "Fetched a page",
+    "fetchingPage": "Fetching a page…",
+    "usedTool": "Used a tool",
+    "working": "Working…"
+  },
   "chat": {
     "untitled": "New Chat",
+    "searchChats": "Search chats…",
+    "fileType": {
+      "image": "Image",
+      "file": "File"
+    },
+    "panel": {
+      "greeting": "What can I help with?",
+      "workspaceFiles": "Workspace files",
+      "sendFailed": "Failed to send message"
+    },
+    "menu": {
+      "rename": "Rename",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "archive": "Archive",
+      "unarchive": "Unarchive",
+      "export": "Export",
+      "deleteTitle": "Delete chat",
+      "deleteDescription": "This will permanently delete “{title}” and all its messages."
+    },
+    "taskStatus": {
+      "thinking": "Thinking…"
+    },
+    "model": {
+      "search": "Search models…",
+      "placeholder": "Select a model",
+      "selectModel": "Select model",
+      "needKey": "Enter your API key to load models",
+      "noneFound": "No models found",
+      "noneAvailable": "No models available",
+      "loadError": "Could not load models",
+      "active": "active",
+      "shared": "shared",
+      "sharedTooltip": "Using admin's shared provider config",
+      "caps": {
+        "vision": "vision",
+        "tools": "tools",
+        "reasoning": "reasoning"
+      }
+    },
+    "input": {
+      "placeholder": "Assign a task or ask anything",
+      "placeholderFiles": "Add a message about the files…",
+      "attach": "Attach files",
+      "stop": "Stop generation",
+      "send": "Send message",
+      "remove": "Remove {name}",
+      "tooLarge": "Too large (max {max}): {files}"
+    },
+    "workspace": {
+      "title": "Working",
+      "close": "Close panel",
+      "progress": "Progress",
+      "starting": "Starting…",
+      "stepsHint": "Steps will appear here as the assistant works.",
+      "context": "Context",
+      "contextHint": "Files you attach to your message appear here.",
+      "youAdded": "you added",
+      "files": "Files",
+      "upload": "Upload files",
+      "downloadAll": "Download all",
+      "createHint": "Send a message to create the workspace.",
+      "loadError": "Failed to load files",
+      "empty": "No files yet.",
+      "uploadFailed": "Failed to upload {name}"
+    },
+    "tool": {
+      "done": "Done",
+      "failed": "failed",
+      "unknownError": "Unknown error",
+      "technicalDetails": "Technical details",
+      "artifacts": "{count, plural, one {Artifact} other {# Artifacts}}",
+      "steps": "{count, plural, one {# step} other {# steps}}",
+      "more": "+{count} more"
+    },
+    "time": {
+      "justNow": "just now",
+      "yesterday": "Yesterday {time}"
+    },
+    "message": {
+      "cancelled": "Response was cancelled",
+      "genericError": "Something went wrong while generating a response. Please try again."
+    },
     "archived": {
       "title": "Archived chats",
       "back": "Back to chats",

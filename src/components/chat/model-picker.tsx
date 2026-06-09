@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback, createElement } from "react";
+import { useTranslations } from "next-intl";
 import { Search, ChevronDown, X, Eye, Wrench, Brain, Star, Loader2, KeyRound, AlertCircle } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
 import { parseModelId, displayModelName, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
@@ -30,12 +31,13 @@ function groupOf(m: ModelInfo): string {
 }
 
 function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
+  const t = useTranslations("chat.model");
   if (!caps) return null;
   return (
     <span className="flex items-center gap-1 text-muted-foreground">
-      {caps.vision && <Eye className="h-3 w-3" aria-label="vision" />}
-      {caps.tools && <Wrench className="h-3 w-3" aria-label="tools" />}
-      {caps.reasoning && <Brain className="h-3 w-3" aria-label="reasoning" />}
+      {caps.vision && <Eye className="h-3 w-3" aria-label={t("caps.vision")} />}
+      {caps.tools && <Wrench className="h-3 w-3" aria-label={t("caps.tools")} />}
+      {caps.reasoning && <Brain className="h-3 w-3" aria-label={t("caps.reasoning")} />}
     </span>
   );
 }
@@ -55,7 +57,7 @@ interface ModelsState {
   needsKey: boolean;
 }
 
-function useModels(source: Source, fallbackValue: string): ModelsState {
+function useModels(source: Source, fallbackValue: string, loadErrorMsg: string): ModelsState {
   const [state, setState] = useState<ModelsState>({
     models: [],
     loading: true,
@@ -116,7 +118,7 @@ function useModels(source: Source, fallbackValue: string): ModelsState {
             ...s,
             models: s.models.length ? s.models : [{ id: fallbackValue, name: displayModelName(fallbackValue), provider: "", context: 0, pricing: { prompt: 0, completion: 0 } }],
             loading: false,
-            error: "Could not load models",
+            error: loadErrorMsg,
           }));
         }
       }
@@ -155,6 +157,7 @@ function ModelList({
   listRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
 }) {
+  const t = useTranslations("chat.model");
   const { models } = state;
   const filtered = useMemo(() => {
     if (!search) return models;
@@ -203,7 +206,7 @@ function ModelList({
             else if (e.key === "Enter" && filtered[activeIndex]) { e.preventDefault(); onSelect(filtered[activeIndex]); }
             else if (e.key === "Escape") { onClose(); }
           }}
-          placeholder="Search models..."
+          placeholder={t("search")}
           autoFocus
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
@@ -220,13 +223,13 @@ function ModelList({
         {!state.loading && filtered.length === 0 && (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">
             {state.needsKey ? (
-              <span className="flex flex-col items-center gap-1.5"><KeyRound className="h-4 w-4" />Enter your API key to load models</span>
+              <span className="flex flex-col items-center gap-1.5"><KeyRound className="h-4 w-4" />{t("needKey")}</span>
             ) : state.error ? (
               <span className="flex flex-col items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{state.error}</span>
             ) : search ? (
-              "No models found"
+              t("noneFound")
             ) : (
-              "No models available"
+              t("noneAvailable")
             )}
           </div>
         )}
@@ -257,7 +260,7 @@ function ModelList({
                         {model.featured && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
                         <span className="truncate text-sm">{model.name}</span>
                         {isCurrent && (
-                          <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">active</span>
+                          <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">{t("active")}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground">
@@ -302,9 +305,10 @@ export function ModelPicker({
   apiKey,
   baseUrl,
   configId,
-  placeholder = "Select a model",
+  placeholder,
   disabled,
 }: ModelPickerProps) {
+  const t = useTranslations("chat.model");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -318,7 +322,7 @@ export function ModelPicker({
       ? { mode: "config", configId }
       : { mode: "active" };
 
-  const state = useModels(source, value);
+  const state = useModels(source, value, t("loadError"));
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
@@ -368,6 +372,7 @@ export function ModelPicker({
   const currentModel = state.models.find((m) => m.id === currentModelId);
   const groupLabel = currentModel ? groupOf(currentModel) : null;
   const displayName = currentModel?.name || (value ? displayModelName(value) : "");
+  const placeholderText = placeholder ?? t("placeholder");
 
   const list = (
     <ModelList
@@ -395,13 +400,13 @@ export function ModelPicker({
             <BrandIcon slug={currentModel?.icon} size={14} />
           </span>
           <span className="flex items-baseline gap-1.5 min-w-0">
-            <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholder}</span>
+            <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholderText}</span>
             {groupLabel && <span className="text-xs text-muted-foreground hidden sm:inline">{groupLabel}</span>}
             {currentModel && currentModel.context > 0 && (
               <span className="text-xs text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)} ctx</span>
             )}
             {state.isShared && (
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title="Using admin's shared provider config">shared</span>
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title={t("sharedTooltip")}>{t("shared")}</span>
             )}
           </span>
           <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
@@ -415,7 +420,7 @@ export function ModelPicker({
         >
           <BrandIcon slug={currentModel?.icon} size={15} className="shrink-0 text-muted-foreground" />
           <span className={`flex-1 truncate text-left ${displayName ? "" : "text-muted-foreground"}`}>
-            {displayName || placeholder}
+            {displayName || placeholderText}
           </span>
           {state.loading ? (
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/50" />
@@ -438,7 +443,7 @@ export function ModelPicker({
       {open && isMobile && (
         <div className="fixed inset-0 z-50 flex flex-col bg-background">
           <div className="flex items-center justify-between border-b px-4 py-3">
-            <span className="text-sm font-medium">Select model</span>
+            <span className="text-sm font-medium">{t("selectModel")}</span>
             <button onClick={() => setOpen(false)} className="rounded-md p-1 hover:bg-muted">
               <X className="h-4 w-4" />
             </button>

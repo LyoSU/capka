@@ -6,27 +6,33 @@ import {
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { useState, useMemo } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { fileKind, extOf } from "@/lib/file-kinds";
 import { describeStep } from "./steps";
 
 // --- Helpers ---
 
-const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-const dtfTime = new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" });
-const dtfFull = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+type TimeTranslator = (key: string, values?: Record<string, string | number>) => string;
 
-function formatRelativeTime(dateStr: string): string {
-  const diffSec = Math.round((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diffSec < 60) return "just now";
+/** Locale-aware relative timestamp. Intl formatters are built per call from the
+ *  active locale so the same component reads "2 hours ago" or "2 години тому". */
+function formatRelativeTime(dateStr: string, locale: string, t: TimeTranslator): string {
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const date = new Date(dateStr);
+  const diffSec = Math.round((Date.now() - date.getTime()) / 1000);
+  if (diffSec < 60) return t("justNow");
   const diffMin = Math.round(diffSec / 60);
   if (diffMin < 60) return rtf.format(-diffMin, "minute");
   const diffHr = Math.round(diffMin / 60);
   if (diffHr < 24) return rtf.format(-diffHr, "hour");
   const diffDay = Math.round(diffHr / 24);
-  if (diffDay === 1) return `Yesterday ${dtfTime.format(new Date(dateStr))}`;
+  if (diffDay === 1) {
+    const time = new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(date);
+    return t("yesterday", { time });
+  }
   if (diffDay < 7) return rtf.format(-diffDay, "day");
-  return dtfFull.format(new Date(dateStr));
+  return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
 /** Extract human-readable text from tool output (handles MCP nested formats) */
@@ -109,12 +115,13 @@ function getToolName(part: ToolPart): string {
 // --- Tool detail renderer ---
 
 function ToolDetails({ toolName, output, errorText }: { toolName: string; output?: unknown; errorText?: string }) {
+  const t = useTranslations("chat.tool");
   if (errorText) {
     return <p className="text-xs text-destructive">{errorText}</p>;
   }
 
   const text = formatValue(output);
-  if (!text) return <p className="text-xs text-muted-foreground">Done</p>;
+  if (!text) return <p className="text-xs text-muted-foreground">{t("done")}</p>;
 
   const lower = toolName.toLowerCase();
   const isCode = lower.includes("read") || lower.includes("file");
@@ -146,7 +153,7 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
     return (
       <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
         {shown.join("\n")}
-        {lines.length > 20 && `\n… +${lines.length - 20} more`}
+        {lines.length > 20 && `\n… ${t("more", { count: lines.length - 20 })}`}
       </div>
     );
   }
@@ -181,6 +188,8 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
 const WORKSPACE_PATH_RE = /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
 
 function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
+  const t = useTranslations("chat.tool");
+  const tw = useTranslations("chat.workspace");
   // Re-scanning the message text on every render is wasteful; the artifact
   // paths only change when the text does.
   const paths = useMemo(
@@ -204,7 +213,7 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
     <div className="mt-4 overflow-hidden rounded-xl border border-border/50">
       <div className="flex items-center justify-between bg-muted/30 px-4 py-2.5">
         <span className="text-xs font-medium text-muted-foreground">
-          {paths.length === 1 ? "Artifact" : `${paths.length} Artifacts`}
+          {t("artifacts", { count: paths.length })}
         </span>
         {paths.length > 1 && (
           <button
@@ -213,7 +222,7 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
             className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <Download className="h-3 w-3" />
-            <span>Download all</span>
+            <span>{tw("downloadAll")}</span>
           </button>
         )}
       </div>
@@ -247,8 +256,10 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
 
 
 function ToolCard({ part }: { part: ToolPart }) {
+  const tSteps = useTranslations("steps");
+  const t = useTranslations("chat.tool");
   const rawName = getToolName(part);
-  const { label, activeLabel, detail, Icon } = describeStep(rawName, part.input);
+  const { label, activeLabel, detail, Icon } = describeStep(tSteps, rawName, part.input);
   const isRunning = !part.state.startsWith("output-");
   const isError = part.state === "output-error";
 
@@ -269,12 +280,12 @@ function ToolCard({ part }: { part: ToolPart }) {
       <Collapsible defaultOpen={!!part.errorText}>
         <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-destructive hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
           <AlertCircle className="h-3 w-3 shrink-0" />
-          <span className="flex-1 text-left">{label} · failed</span>
+          <span className="flex-1 text-left">{label} · {t("failed")}</span>
           <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="mt-1 mb-2 ml-5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
-            {part.errorText || "Unknown error"}
+            {part.errorText || t("unknownError")}
           </div>
         </CollapsibleContent>
       </Collapsible>
@@ -301,6 +312,8 @@ function ToolCard({ part }: { part: ToolPart }) {
 
 /** Groups consecutive tool calls into a collapsible summary */
 function ToolGroup({ tools }: { tools: ToolPart[] }) {
+  const tSteps = useTranslations("steps");
+  const tTool = useTranslations("chat.tool");
   const allDone = tools.every((t) => t.state.startsWith("output-"));
   const hasError = tools.some((t) => t.state === "output-error");
   const running = tools.filter((t) => !t.state.startsWith("output-"));
@@ -311,28 +324,28 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
   // Multiple tools still running
   if (!allDone && running.length > 0) {
     const last = running[running.length - 1];
-    const { activeLabel } = describeStep(getToolName(last), last.input);
+    const { activeLabel } = describeStep(tSteps, getToolName(last), last.input);
     return (
       <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground">
         <Loader2 className="h-3 w-3 animate-spin" />
         <span className="text-xs">{activeLabel}</span>
-        <span className="text-xs text-muted-foreground">({tools.length} steps)</span>
+        <span className="text-xs text-muted-foreground">({tTool("steps", { count: tools.length })})</span>
       </div>
     );
   }
 
   // All done — collapsible with inline step labels
-  const uniqueLabels = [...new Set(tools.map((t) => describeStep(getToolName(t), t.input).label))];
+  const uniqueLabels = [...new Set(tools.map((t) => describeStep(tSteps, getToolName(t), t.input).label))];
   const summaryText = uniqueLabels.length <= 3
     ? uniqueLabels.join(", ")
-    : `${uniqueLabels.slice(0, 2).join(", ")} +${uniqueLabels.length - 2} more`;
+    : `${uniqueLabels.slice(0, 2).join(", ")} ${tTool("more", { count: uniqueLabels.length - 2 })}`;
 
   return (
     <Collapsible defaultOpen={false}>
       <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
         {hasError && <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />}
         <span>{summaryText}</span>
-        <span className="text-muted-foreground">{tools.length} steps</span>
+        <span className="text-muted-foreground">{tTool("steps", { count: tools.length })}</span>
         <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -349,6 +362,7 @@ function ToolGroup({ tools }: { tools: ToolPart[] }) {
 /** Friendly, role-aware failure notice. Everyone sees `message`; admins can
  *  expand the raw technical `detail`. */
 function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: string; isAdmin?: boolean }) {
+  const t = useTranslations("chat.tool");
   return (
     <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5">
       <div className="flex items-start gap-2 text-sm text-destructive">
@@ -359,7 +373,7 @@ function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: s
         <Collapsible>
           <CollapsibleTrigger className="mt-1.5 ml-6 flex items-center gap-1 text-xs text-destructive/60 hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
             <ChevronRight className="chevron h-3 w-3 transition-transform" />
-            Technical details
+            {t("technicalDetails")}
           </CollapsibleTrigger>
           <CollapsibleContent>
             <pre className="mt-1 ml-6 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-destructive/5 p-2 font-mono text-[11px] text-destructive/70">
@@ -392,13 +406,16 @@ interface ChatMessageProps {
 }
 
 export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin }: ChatMessageProps) {
+  const locale = useLocale();
+  const t = useTranslations("chat.message");
+  const tTime = useTranslations("chat.time");
   const isUser = message.role === "user";
   const metadata = message.metadata as
     | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
-  const timestamp = formatRelativeTime(createdAt);
+  const timestamp = formatRelativeTime(createdAt, locale, tTime);
   const isTelegram = metadata?.platform === "telegram";
 
   if (isUser) {
@@ -459,12 +476,12 @@ export function ChatMessage({ message, isStreaming, chatId, statusSlot, isAdmin 
           })
         ) : isStreaming || metadata?.taskStatus === "failed" ? null : (
           <span className="text-muted-foreground text-sm">
-            {metadata?.taskStatus === "cancelled" ? "Response was cancelled" : "..."}
+            {metadata?.taskStatus === "cancelled" ? t("cancelled") : "..."}
           </span>
         )}
         {metadata?.taskStatus === "failed" && (
           <ErrorNotice
-            message={metadata.error || "Something went wrong while generating a response. Please try again."}
+            message={metadata.error || t("genericError")}
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
           />

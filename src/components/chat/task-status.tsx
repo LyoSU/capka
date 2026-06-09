@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { describeStep } from "./steps";
 
 function formatElapsed(ms: number): string {
@@ -20,6 +21,8 @@ export function TaskStatus({
   currentTool: string | null;
 }) {
   const [elapsed, setElapsed] = useState(0);
+  const tSteps = useTranslations("steps");
+  const t = useTranslations("chat.taskStatus");
 
   useEffect(() => {
     if (!startedAt) return;
@@ -29,7 +32,7 @@ export function TaskStatus({
     return () => clearInterval(id);
   }, [startedAt]);
 
-  const label = currentTool ? describeStep(currentTool).activeLabel : "Thinking…";
+  const label = currentTool ? describeStep(tSteps, currentTool).activeLabel : t("thinking");
   const time = formatElapsed(elapsed);
 
   return (

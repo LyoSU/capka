@@ -5,6 +5,10 @@ import {
 
 export type StepIcon = ComponentType<{ className?: string }>;
 
+/** A minimal translator shape (next-intl's `useTranslations("steps")`),
+ *  decoupled so this module doesn't depend on next-intl's exact types. */
+export type StepTranslator = (key: string, values?: Record<string, string | number>) => string;
+
 export interface StepDescriptor {
   Icon: StepIcon;
   /** Past-tense, with the concrete object: "Created logo.svg". */
@@ -38,50 +42,51 @@ function prettyToolName(name: string): string {
  * non-technical user understands. Shared by the chat transcript and the
  * progress panel so they never describe the same action differently.
  */
-export function describeStep(toolName: string, input?: unknown): StepDescriptor {
+export function describeStep(t: StepTranslator, toolName: string, input?: unknown): StepDescriptor {
   const args = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const name = toolName.toLowerCase();
 
   switch (name) {
     case "write_file": {
-      const f = basename(args.path);
-      return { Icon: FilePlus, label: `Created ${f}`, activeLabel: `Creating ${f}…` };
+      const file = basename(args.path);
+      return { Icon: FilePlus, label: t("createdFile", { file }), activeLabel: t("creatingFile", { file }) };
     }
     case "str_replace": {
-      const f = basename(args.path);
-      return { Icon: FilePen, label: `Edited ${f}`, activeLabel: `Editing ${f}…` };
+      const file = basename(args.path);
+      return { Icon: FilePen, label: t("editedFile", { file }), activeLabel: t("editingFile", { file }) };
     }
     case "read_file": {
-      const f = basename(args.path);
-      return { Icon: FileText, label: `Read ${f}`, activeLabel: `Reading ${f}…` };
+      const file = basename(args.path);
+      return { Icon: FileText, label: t("readFile", { file }), activeLabel: t("readingFile", { file }) };
     }
     case "list_files":
-      return { Icon: Folder, label: "Listed files", activeLabel: "Looking through files…" };
+      return { Icon: Folder, label: t("listedFiles"), activeLabel: t("listingFiles") };
     case "search_files": {
-      const q = clip(args.pattern, 32);
+      const query = clip(args.pattern, 32);
       return {
         Icon: Search,
-        label: q ? `Searched for “${q}”` : "Searched files",
-        activeLabel: "Searching files…",
+        label: query ? t("searchedFor", { query }) : t("searchedFiles"),
+        activeLabel: t("searchingFiles"),
       };
     }
     case "execute_bash":
-      return { Icon: Terminal, label: "Ran a command", activeLabel: "Running a command…", detail: clip(args.command) };
+      return { Icon: Terminal, label: t("ranCommand"), activeLabel: t("runningCommand"), detail: clip(args.command) };
     case "execute_python":
-      return { Icon: Code, label: "Ran Python", activeLabel: "Running Python…" };
+      return { Icon: Code, label: t("ranPython"), activeLabel: t("runningPython") };
     case "execute_node":
-      return { Icon: Code, label: "Ran JavaScript", activeLabel: "Running JavaScript…" };
+      return { Icon: Code, label: t("ranJavaScript"), activeLabel: t("runningJavaScript") };
   }
 
   // Heuristics for MCP / unknown tools so they still read like actions.
   if (/(web|search|google|brave|tavily)/.test(name)) {
-    const q = clip(args.query ?? args.q ?? args.pattern, 40);
-    return { Icon: Globe, label: q ? `Searched the web for “${q}”` : "Searched the web", activeLabel: "Searching the web…" };
+    const query = clip(args.query ?? args.q ?? args.pattern, 40);
+    return { Icon: Globe, label: query ? t("searchedWebFor", { query }) : t("searchedWeb"), activeLabel: t("searchingWeb") };
   }
   if (/(fetch|http|url|browse|scrape)/.test(name)) {
-    return { Icon: Globe, label: "Fetched a page", activeLabel: "Fetching a page…" };
+    return { Icon: Globe, label: t("fetchedPage"), activeLabel: t("fetchingPage") };
   }
 
+  // Unknown tool — its own name is the most useful label (not translatable).
   const pretty = prettyToolName(toolName);
-  return { Icon: Wrench, label: pretty || "Used a tool", activeLabel: `${pretty || "Working"}…` };
+  return { Icon: Wrench, label: pretty || t("usedTool"), activeLabel: pretty ? `${pretty}…` : t("working") };
 }

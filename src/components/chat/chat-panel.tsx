@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { AlertCircle, FolderOpen, RefreshCw } from "lucide-react";
@@ -20,6 +21,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPanelProps) {
+  const t = useTranslations("chat");
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -52,7 +54,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
       // Restore input so user doesn't lose their text
       setInput(savedInput);
       setFiles(savedFiles);
-      toast.error(e instanceof Error ? e.message : "Failed to send message");
+      toast.error(e instanceof Error ? e.message : t("panel.sendFailed"));
     }
   };
 
@@ -90,7 +92,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
           <div className="w-full max-w-3xl space-y-10">
             <div className="text-center space-y-3">
               <h1 className="text-2xl md:text-4xl font-medium tracking-tight text-foreground/85">
-                What can I help with?
+                {t("panel.greeting")}
               </h1>
               <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
                 <ModelPicker variant="pill" value={model} onChange={setModel} />
@@ -110,7 +112,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
               size="icon"
               className="h-8 w-8"
               onClick={() => setFilesOpen(!filesOpen)}
-              title="Workspace files"
+              title={t("panel.workspaceFiles")}
             >
               <FolderOpen className="h-4 w-4" />
             </Button>
