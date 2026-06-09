@@ -141,7 +141,8 @@ export function useBackgroundChat({
                   type: "dynamic-tool",
                   toolCallId: data.toolCallId,
                   toolName: data.toolName,
-                  state: "partial-call",
+                  // Valid AI SDK 6 state — input is here, output pending.
+                  state: "input-available",
                   input: data.args,
                 });
                 msgs[idx] = { ...msg, parts };

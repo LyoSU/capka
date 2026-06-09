@@ -7,6 +7,7 @@ import { claimNextTask, reconcileZombies } from "@/lib/tasks/queue";
 import { runAgentTask } from "@/lib/tasks/runner";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { syncModelCatalog } from "@/lib/models/catalog";
+import { log } from "@/lib/log";
 
 /**
  * In-process durable worker. Started once per server instance via
@@ -47,14 +48,14 @@ async function tick(): Promise<void> {
       if (!task) break;
       s.inFlight++;
       void runAgentTask(task, s.workerId)
-        .catch((e) => console.error(`[worker] task ${task.id} crashed:`, e))
+        .catch((e) => log.error("task crashed", { workerId: s.workerId, taskId: task.id, chatId: task.chat_id, err: String(e) }))
         .finally(() => {
           s.inFlight--;
           void tick(); // a slot freed — try to claim more
         });
     }
   } catch (e) {
-    console.error("[worker] tick error:", e);
+    log.error("tick error", { workerId: s.workerId, err: String(e) });
   } finally {
     s.ticking = false;
   }
@@ -69,9 +70,9 @@ async function reconcile(): Promise<void> {
         error: "The task was interrupted before it finished. Please try again.",
       });
     }
-    if (dead.length) console.log(`[worker] reconciled ${dead.length} zombie task(s)`);
+    if (dead.length) log.info("reconciled zombie tasks", { count: dead.length, taskIds: dead.map((t) => t.id) });
   } catch (e) {
-    console.error("[worker] reconcile error:", e);
+    log.error("reconcile error", { err: String(e) });
   }
 }
 
@@ -83,11 +84,11 @@ async function refreshCatalogIfStale(): Promise<void> {
     const empty = !row || row.n === 0;
     const stale = row?.latest ? Date.now() - new Date(row.latest).getTime() > CATALOG_STALE_MS : true;
     if (empty || stale) {
-      console.log("[worker] refreshing model catalog…");
+      log.info("refreshing model catalog", { reason: empty ? "empty" : "stale" });
       await syncModelCatalog();
     }
   } catch (e) {
-    console.error("[worker] catalog refresh error:", e);
+    log.error("catalog refresh error", { err: String(e) });
   }
 }
 
@@ -99,7 +100,7 @@ export async function startWorker(): Promise<void> {
   const s = state();
   if (s.started) return;
   s.started = true;
-  console.log(`[worker] starting (${s.workerId})`);
+  log.info("worker starting", { workerId: s.workerId });
 
   // Wake on enqueue (cross-process via NOTIFY), with a polling fallback.
   await realtime.subscribe("task_enqueued", () => void tick());
