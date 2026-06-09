@@ -229,6 +229,37 @@
         "user": "User",
         "viewer": "Viewer"
       }
+    },
+    "general": {
+      "appearance": "Appearance",
+      "appearanceDesc": "Choose how unClaw looks on your device.",
+      "theme": "Theme",
+      "saveFailed": "Failed to save",
+      "modelFilter": "Model Filter",
+      "modelFilterDesc": "Control which models appear in the model selector.",
+      "minContext": "Minimum context window",
+      "minContextHint": "Models with context below this are hidden. Default: 100k.",
+      "tokensK": "{value}k tokens",
+      "tokensM": "{value}M tokens",
+      "sandbox": "Sandbox",
+      "sandboxDesc": "Give AI full access to a sandboxed Linux environment with Python, Node.js, and dev tools.",
+      "enableSandbox": "Enable sandbox",
+      "enableSandboxHint": "AI can execute commands, read/write files, and run code in an isolated container per chat.",
+      "sandboxEnabled": "Sandbox enabled",
+      "sandboxDisabled": "Sandbox disabled",
+      "updateFailed": "Failed to update",
+      "registration": "Registration",
+      "registrationDesc": "Control whether new users can create accounts.",
+      "allowRegistration": "Allow registration",
+      "allowRegistrationHint": "When disabled, only admins can add new users. Existing users can still log in.",
+      "registrationEnabled": "Registration enabled",
+      "registrationDisabled": "Registration disabled",
+      "security": "Security",
+      "securityDesc": "Control how strictly provider connections are restricted.",
+      "blockPrivate": "Block internal network addresses",
+      "blockPrivateHint": "Prevents provider URLs (LiteLLM, Ollama) from pointing at private or loopback addresses. Leave off if you self-host a gateway on your local network. Cloud-metadata addresses are always blocked.",
+      "strictEnabled": "Strict mode enabled",
+      "strictDisabled": "Strict mode disabled"
     }
   },
   "auth": {

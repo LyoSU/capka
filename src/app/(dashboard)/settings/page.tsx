@@ -14,6 +14,8 @@ import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
 
 function useSetting(key: string, fallback: string) {
+  const t = useTranslations("settings.general");
+  const tc = useTranslations("common");
   const [value, setValue] = useState(fallback);
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -40,10 +42,10 @@ function useSetting(key: string, fallback: string) {
       body: JSON.stringify({ key, value }),
     });
     if (res.ok) {
-      toast.success("Saved");
+      toast.success(tc("saved"));
       setDirty(false);
-    } else toast.error("Failed to save");
-  }, [key, value]);
+    } else toast.error(t("saveFailed"));
+  }, [key, value, t, tc]);
 
   return { value, update, save, dirty, loading };
 }
@@ -51,6 +53,8 @@ function useSetting(key: string, fallback: string) {
 export default function GeneralSettingsPage() {
   const isAdmin = useIsAdmin();
   const tLang = useTranslations("language");
+  const t = useTranslations("settings.general");
+  const tc = useTranslations("common");
 
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");
@@ -62,8 +66,8 @@ export default function GeneralSettingsPage() {
   const contextLabel = (val: string) => {
     const n = parseInt(val, 10);
     if (!n || n <= 0) return "";
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tokens`;
-    return `${(n / 1_000).toFixed(0)}k tokens`;
+    if (n >= 1_000_000) return t("tokensM", { value: (n / 1_000_000).toFixed(1) });
+    return t("tokensK", { value: (n / 1_000).toFixed(0) });
   };
 
   if (settingsLoading) {
@@ -78,14 +82,14 @@ export default function GeneralSettingsPage() {
     <div className="max-w-lg space-y-6">
       {/* Theme */}
       <div>
-        <h2 className="text-base font-medium">Appearance</h2>
+        <h2 className="text-base font-medium">{t("appearance")}</h2>
         <p className="text-sm text-muted-foreground">
-          Choose how unClaw looks on your device.
+          {t("appearanceDesc")}
         </p>
       </div>
       <Separator />
       <div className="space-y-1.5">
-        <label className="text-sm font-medium">Theme</label>
+        <label className="text-sm font-medium">{t("theme")}</label>
         <ThemeSwitcher />
       </div>
       <div className="space-y-1.5">
@@ -99,14 +103,14 @@ export default function GeneralSettingsPage() {
 
           {/* Model filter — admin only */}
           <div>
-            <h2 className="text-base font-medium">Model Filter</h2>
+            <h2 className="text-base font-medium">{t("modelFilter")}</h2>
             <p className="text-sm text-muted-foreground">
-              Control which models appear in the model selector.
+              {t("modelFilterDesc")}
             </p>
           </div>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Minimum context window</label>
+              <label className="text-sm font-medium">{t("minContext")}</label>
               <div className="flex items-center gap-2">
                 <Input
                   type="number"
@@ -120,11 +124,11 @@ export default function GeneralSettingsPage() {
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Models with context below this are hidden. Default: 100k.
+                {t("minContextHint")}
               </p>
             </div>
             {minCtx.dirty && (
-              <Button size="sm" onClick={minCtx.save}>Save</Button>
+              <Button size="sm" onClick={minCtx.save}>{tc("save")}</Button>
             )}
           </div>
 
@@ -132,16 +136,16 @@ export default function GeneralSettingsPage() {
 
           {/* Sandbox — admin only */}
           <div>
-            <h2 className="text-base font-medium">Sandbox</h2>
+            <h2 className="text-base font-medium">{t("sandbox")}</h2>
             <p className="text-sm text-muted-foreground">
-              Give AI full access to a sandboxed Linux environment with Python, Node.js, and dev tools.
+              {t("sandboxDesc")}
             </p>
           </div>
           <div className="flex items-center justify-between rounded-lg border p-4">
             <div>
-              <p className="text-sm font-medium">Enable sandbox</p>
+              <p className="text-sm font-medium">{t("enableSandbox")}</p>
               <p className="text-xs text-muted-foreground">
-                AI can execute commands, read/write files, and run code in an isolated container per chat.
+                {t("enableSandboxHint")}
               </p>
             </div>
             <Switch
@@ -153,8 +157,8 @@ export default function GeneralSettingsPage() {
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ key: "sandbox_enabled", value: checked ? "true" : "false" }),
                 }).then((r) => {
-                  if (r.ok) toast.success(checked ? "Sandbox enabled" : "Sandbox disabled");
-                  else toast.error("Failed to update");
+                  if (r.ok) toast.success(checked ? t("sandboxEnabled") : t("sandboxDisabled"));
+                  else toast.error(t("updateFailed"));
                 });
               }}
             />
@@ -164,16 +168,16 @@ export default function GeneralSettingsPage() {
 
           {/* Registration — admin only */}
           <div>
-            <h2 className="text-base font-medium">Registration</h2>
+            <h2 className="text-base font-medium">{t("registration")}</h2>
             <p className="text-sm text-muted-foreground">
-              Control whether new users can create accounts.
+              {t("registrationDesc")}
             </p>
           </div>
           <div className="flex items-center justify-between rounded-lg border p-4">
             <div>
-              <p className="text-sm font-medium">Allow registration</p>
+              <p className="text-sm font-medium">{t("allowRegistration")}</p>
               <p className="text-xs text-muted-foreground">
-                When disabled, only admins can add new users. Existing users can still log in.
+                {t("allowRegistrationHint")}
               </p>
             </div>
             <Switch
@@ -185,8 +189,8 @@ export default function GeneralSettingsPage() {
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ key: "registration_enabled", value: checked ? "true" : "false" }),
                 }).then((r) => {
-                  if (r.ok) toast.success(checked ? "Registration enabled" : "Registration disabled");
-                  else toast.error("Failed to update");
+                  if (r.ok) toast.success(checked ? t("registrationEnabled") : t("registrationDisabled"));
+                  else toast.error(t("updateFailed"));
                 });
               }}
             />
@@ -196,18 +200,16 @@ export default function GeneralSettingsPage() {
 
           {/* Security — admin only */}
           <div>
-            <h2 className="text-base font-medium">Security</h2>
+            <h2 className="text-base font-medium">{t("security")}</h2>
             <p className="text-sm text-muted-foreground">
-              Control how strictly provider connections are restricted.
+              {t("securityDesc")}
             </p>
           </div>
           <div className="flex items-center justify-between rounded-lg border p-4">
             <div className="pr-4">
-              <p className="text-sm font-medium">Block internal network addresses</p>
+              <p className="text-sm font-medium">{t("blockPrivate")}</p>
               <p className="text-xs text-muted-foreground">
-                Prevents provider URLs (LiteLLM, Ollama) from pointing at private or
-                loopback addresses. Leave off if you self-host a gateway on your local
-                network. Cloud-metadata addresses are always blocked.
+                {t("blockPrivateHint")}
               </p>
             </div>
             <Switch
@@ -219,8 +221,8 @@ export default function GeneralSettingsPage() {
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ key: "block_private_provider_urls", value: checked ? "true" : "false" }),
                 }).then((r) => {
-                  if (r.ok) toast.success(checked ? "Strict mode enabled" : "Strict mode disabled");
-                  else toast.error("Failed to update");
+                  if (r.ok) toast.success(checked ? t("strictEnabled") : t("strictDisabled"));
+                  else toast.error(t("updateFailed"));
                 });
               }}
             />
