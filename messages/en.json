@@ -109,26 +109,67 @@
       "recent": "Recent",
       "getToWork": {
         "header": "Get to work with",
-        "types": { "pdf": "PDFs", "spreadsheet": "Spreadsheets", "document": "Documents", "image": "Images" },
+        "types": {
+          "pdf": "PDFs",
+          "spreadsheet": "Spreadsheets",
+          "document": "Documents",
+          "image": "Images"
+        },
         "pdf": {
-          "extractText": { "label": "Extract the text", "prompt": "Extract the text from the PDF I'll attach: " },
-          "fillForm": { "label": "Fill in a form", "prompt": "Fill in the form fields in the PDF I'll attach: " },
-          "toWord": { "label": "Convert to Word", "prompt": "Convert the PDF I'll attach into an editable Word document." }
+          "extractText": {
+            "label": "Extract the text",
+            "prompt": "Extract the text from the PDF I'll attach: "
+          },
+          "fillForm": {
+            "label": "Fill in a form",
+            "prompt": "Fill in the form fields in the PDF I'll attach: "
+          },
+          "toWord": {
+            "label": "Convert to Word",
+            "prompt": "Convert the PDF I'll attach into an editable Word document."
+          }
         },
         "spreadsheet": {
-          "analyze": { "label": "Analyze the data", "prompt": "Analyze the spreadsheet I'll attach and summarize the key trends: " },
-          "chart": { "label": "Build a chart", "prompt": "Build a clear chart from the spreadsheet I'll attach." },
-          "clean": { "label": "Clean up the data", "prompt": "Clean up and tidy the data in the spreadsheet I'll attach." }
+          "analyze": {
+            "label": "Analyze the data",
+            "prompt": "Analyze the spreadsheet I'll attach and summarize the key trends: "
+          },
+          "chart": {
+            "label": "Build a chart",
+            "prompt": "Build a clear chart from the spreadsheet I'll attach."
+          },
+          "clean": {
+            "label": "Clean up the data",
+            "prompt": "Clean up and tidy the data in the spreadsheet I'll attach."
+          }
         },
         "document": {
-          "summarize": { "label": "Summarize it", "prompt": "Summarize the document I'll attach: " },
-          "translate": { "label": "Translate it", "prompt": "Translate the document I'll attach into " },
-          "reformat": { "label": "Make it look clean", "prompt": "Reformat the document I'll attach to look clean and professional." }
+          "summarize": {
+            "label": "Summarize it",
+            "prompt": "Summarize the document I'll attach: "
+          },
+          "translate": {
+            "label": "Translate it",
+            "prompt": "Translate the document I'll attach into "
+          },
+          "reformat": {
+            "label": "Make it look clean",
+            "prompt": "Reformat the document I'll attach to look clean and professional."
+          }
         },
         "image": {
-          "ocr": { "label": "Pull out the text", "prompt": "Extract the text from the image I'll attach: " },
-          "removeBg": { "label": "Remove the background", "prompt": "Remove the background from the image I'll attach." },
-          "resize": { "label": "Resize or convert", "prompt": "Resize or convert the image I'll attach: " }
+          "ocr": {
+            "label": "Pull out the text",
+            "prompt": "Extract the text from the image I'll attach: "
+          },
+          "removeBg": {
+            "label": "Remove the background",
+            "prompt": "Remove the background from the image I'll attach."
+          },
+          "resize": {
+            "label": "Resize or convert",
+            "prompt": "Resize or convert the image I'll attach: "
+          }
         }
       }
     },
@@ -320,7 +361,11 @@
         "removed": "Database copy removed",
         "removeFailed": "Couldn't remove the database copy",
         "secureClean": "Provider keys are protected by an environment key."
-      }
+      },
+      "shareProviders": "Share admin provider keys",
+      "shareProvidersHint": "When enabled, users without their own provider key use the admin's key (and budget). Off by default.",
+      "shareEnabled": "Key sharing enabled",
+      "shareDisabled": "Key sharing disabled"
     },
     "memory": {
       "title": "Agent Memory",

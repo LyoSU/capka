@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { requireRole, apiHandler } from "@/lib/auth";
 import { getModel } from "@/lib/providers";
+import { assertSafeProviderConfig } from "@/lib/providers/list-models";
 
 export const POST = apiHandler(async (req: Request) => {
   await requireRole("admin", "user");
@@ -11,6 +12,10 @@ export const POST = apiHandler(async (req: Request) => {
   }
 
   try {
+    // SSRF guard before any outbound request — the error body is returned to
+    // the caller, so an unguarded test is a (semi-blind) SSRF primitive.
+    await assertSafeProviderConfig(provider, baseUrl);
+
     const model = getModel(provider, modelId, {
       apiKey: apiKey || undefined,
       baseUrl: baseUrl || undefined,

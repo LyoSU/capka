@@ -1,9 +1,10 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
-import { getMasterKey } from "@/lib/settings";
+import { getMasterKey, getSetting } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel, parseModelId } from "@/lib/providers";
+import { assertSafeProviderConfig } from "@/lib/providers/list-models";
 import { ValidationError } from "@/lib/errors";
 
 /** Find active provider config: user's own → fallback to any admin's config. */
@@ -15,6 +16,11 @@ export async function resolveProviderConfig(userId: string) {
     .limit(1);
 
   if (config) return { ...config, isShared: false };
+
+  // Falling back to an admin's provider key (and thus their budget + sandbox)
+  // for users without their own is an explicit opt-in, not the default — a
+  // stray account must not silently spend the admin's credits.
+  if ((await getSetting("share_admin_providers")) !== "true") return null;
 
   const rows = await db
     .select({ config: providerConfigs })
@@ -50,6 +56,9 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     provider = parsed.provider ?? provider;
     modelId = parsed.modelId;
   }
+
+  // SSRF guard on the real inference path — same policy as listing/testing.
+  await assertSafeProviderConfig(provider, config.baseUrl);
 
   const model = getModel(provider, modelId, {
     apiKey: apiKey || undefined,

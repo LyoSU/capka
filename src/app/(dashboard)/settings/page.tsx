@@ -59,10 +59,12 @@ export default function GeneralSettingsPage() {
 
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");
-  const registration = useSetting("registration_enabled", "true");
+  const registration = useSetting("registration_enabled", "false");
+  const shareProviders = useSetting("share_admin_providers", "false");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
 
-  const settingsLoading = minCtx.loading || sandbox.loading || registration.loading || blockPrivate.loading;
+  const settingsLoading =
+    minCtx.loading || sandbox.loading || registration.loading || shareProviders.loading || blockPrivate.loading;
 
   const contextLabel = (val: string) => {
     const n = parseInt(val, 10);
@@ -191,6 +193,29 @@ export default function GeneralSettingsPage() {
                   body: JSON.stringify({ key: "registration_enabled", value: checked ? "true" : "false" }),
                 }).then((r) => {
                   if (r.ok) toast.success(checked ? t("registrationEnabled") : t("registrationDisabled"));
+                  else toast.error(t("updateFailed"));
+                });
+              }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="pr-4">
+              <p className="text-sm font-medium">{t("shareProviders")}</p>
+              <p className="text-xs text-muted-foreground">
+                {t("shareProvidersHint")}
+              </p>
+            </div>
+            <Switch
+              checked={shareProviders.value === "true"}
+              onCheckedChange={(checked) => {
+                shareProviders.update(checked ? "true" : "false");
+                fetch("/api/settings", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ key: "share_admin_providers", value: checked ? "true" : "false" }),
+                }).then((r) => {
+                  if (r.ok) toast.success(checked ? t("shareEnabled") : t("shareDisabled"));
                   else toast.error(t("updateFailed"));
                 });
               }}

@@ -113,6 +113,18 @@ async function assertSafeProviderUrl(raw: string, blockPrivate: boolean): Promis
   }
 }
 
+/**
+ * SSRF guard to run before ANY live request to a provider — model listing, the
+ * "Test" button, AND real inference. Only user-supplied-URL providers
+ * (litellm/ollama) carry a base URL worth checking; OpenAI/Anthropic/OpenRouter
+ * use fixed public hosts. Resolves DNS and blocks link-local/metadata (always)
+ * plus private ranges when the admin opted into the stricter policy.
+ */
+export async function assertSafeProviderConfig(provider: string, baseUrl?: string | null): Promise<void> {
+  if ((provider !== "litellm" && provider !== "ollama") || !baseUrl) return;
+  await assertSafeProviderUrl(baseUrl, await getBlockPrivateProviderUrls());
+}
+
 type CatalogRow = {
   id: string;
   contextLength: number | null;
