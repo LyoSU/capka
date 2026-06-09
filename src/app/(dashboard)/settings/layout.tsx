@@ -2,30 +2,32 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Settings, Link2, Puzzle, Brain, Users } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 
-type NavItem = { label: string; href: string; icon: typeof Settings; adminOnly?: boolean };
+type NavItem = { key: string; href: string; icon: typeof Settings; adminOnly?: boolean };
 
 const navItems: NavItem[] = [
-  { label: "General", href: "/settings", icon: Settings },
-  { label: "Connections", href: "/settings/connections", icon: Link2, adminOnly: true },
-  { label: "Integrations", href: "/settings/integrations", icon: Puzzle, adminOnly: true },
-  { label: "Memory", href: "/settings/memory", icon: Brain },
-  { label: "Users", href: "/settings/users", icon: Users, adminOnly: true },
+  { key: "general", href: "/settings", icon: Settings },
+  { key: "connections", href: "/settings/connections", icon: Link2, adminOnly: true },
+  { key: "integrations", href: "/settings/integrations", icon: Puzzle, adminOnly: true },
+  { key: "memory", href: "/settings/memory", icon: Brain },
+  { key: "users", href: "/settings/users", icon: Users, adminOnly: true },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const t = useTranslations("settings");
   const isAdmin = useIsAdmin();
 
   const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <>
-      <Header title="Settings" />
+      <Header title={t("title")} />
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
         {/* Mobile: horizontal scroll tabs */}
         <nav className="flex gap-1 overflow-x-auto border-b px-3 py-2 md:hidden">
@@ -46,7 +48,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                 )}
               >
                 <item.icon className="h-3.5 w-3.5" />
-                {item.label}
+                {t(`nav.${item.key}`)}
               </Link>
             );
           })}
@@ -70,7 +72,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                 )}
               >
                 <item.icon className="h-4 w-4" />
-                {item.label}
+                {t(`nav.${item.key}`)}
               </Link>
             );
           })}

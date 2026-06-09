@@ -29,6 +29,32 @@
     "updated": "Мову оновлено",
     "updateFailed": "Не вдалося змінити мову"
   },
+  "nav": {
+    "newChat": "Новий чат",
+    "expandSidebar": "Розгорнути панель",
+    "pinned": "Закріплені",
+    "archived": "Архів",
+    "projects": "Проєкти",
+    "settings": "Налаштування",
+    "noChatsFound": "Чатів не знайдено",
+    "startNewChat": "Почніть новий чат",
+    "groups": {
+      "today": "Сьогодні",
+      "yesterday": "Вчора",
+      "thisWeek": "Цього тижня",
+      "older": "Раніше"
+    }
+  },
+  "settings": {
+    "title": "Налаштування",
+    "nav": {
+      "general": "Загальні",
+      "connections": "Підключення",
+      "integrations": "Інтеграції",
+      "memory": "Пам'ять",
+      "users": "Користувачі"
+    }
+  },
   "auth": {
     "emailLabel": "Електронна пошта",
     "passwordLabel": "Пароль",

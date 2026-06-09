@@ -29,6 +29,32 @@
     "updated": "Language updated",
     "updateFailed": "Couldn't change the language"
   },
+  "nav": {
+    "newChat": "New Chat",
+    "expandSidebar": "Expand sidebar",
+    "pinned": "Pinned",
+    "archived": "Archived",
+    "projects": "Projects",
+    "settings": "Settings",
+    "noChatsFound": "No chats found",
+    "startNewChat": "Start a new chat to get going",
+    "groups": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "thisWeek": "This week",
+      "older": "Older"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "nav": {
+      "general": "General",
+      "connections": "Connections",
+      "integrations": "Integrations",
+      "memory": "Memory",
+      "users": "Users"
+    }
+  },
   "auth": {
     "emailLabel": "Email",
     "passwordLabel": "Password",

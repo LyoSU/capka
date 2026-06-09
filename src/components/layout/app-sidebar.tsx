@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { MessageSquare, Plus, Settings, FolderKanban, Archive } from "lucide-react";
 import {
   Sidebar,
@@ -35,17 +36,20 @@ type ChatItem = {
   updatedAt: string | null;
 };
 
+type DateGroupKey = "today" | "yesterday" | "thisWeek" | "older";
+
 function groupByDate(chats: ChatItem[]) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today.getTime() - 86400000);
   const weekAgo = new Date(today.getTime() - 7 * 86400000);
 
-  const groups: { label: string; chats: ChatItem[] }[] = [
-    { label: "Today", chats: [] },
-    { label: "Yesterday", chats: [] },
-    { label: "This week", chats: [] },
-    { label: "Older", chats: [] },
+  // Presentation-neutral keys — the component maps them to translated labels.
+  const groups: { key: DateGroupKey; chats: ChatItem[] }[] = [
+    { key: "today", chats: [] },
+    { key: "yesterday", chats: [] },
+    { key: "thisWeek", chats: [] },
+    { key: "older", chats: [] },
   ];
 
   for (const chat of chats) {
@@ -61,6 +65,7 @@ function groupByDate(chats: ChatItem[]) {
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const t = useTranslations("nav");
   const { toggleSidebar, state: sidebarState } = useSidebar();
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -105,7 +110,7 @@ export function AppSidebar() {
             <button
               onClick={sidebarState === "collapsed" ? toggleSidebar : undefined}
               className={cn("shrink-0 rounded-md transition-opacity", sidebarState === "collapsed" && "hover:opacity-70 cursor-pointer")}
-              title={sidebarState === "collapsed" ? "Expand sidebar" : undefined}
+              title={sidebarState === "collapsed" ? t("expandSidebar") : undefined}
             >
               <Image src="/icon.svg" alt="unClaw" width={24} height={24} className="rounded-md" />
             </button>
@@ -116,7 +121,7 @@ export function AppSidebar() {
         <Link
           href={newChatHref}
           className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden h-8 w-8 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:mx-auto")}
-          title="New Chat"
+          title={t("newChat")}
         >
           <Plus className="h-4 w-4" />
         </Link>
@@ -135,7 +140,7 @@ export function AppSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton render={<Link href={newChatHref} />}>
                   <Plus className="h-4 w-4" />
-                  <span>New Chat</span>
+                  <span>{t("newChat")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -146,7 +151,7 @@ export function AppSidebar() {
 
         {pinnedChats.length > 0 && (
           <SidebarGroup>
-            <SidebarGroupLabel>Pinned</SidebarGroupLabel>
+            <SidebarGroupLabel>{t("pinned")}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {pinnedChats.map((chat) => (
@@ -158,7 +163,7 @@ export function AppSidebar() {
                       >
                         <MessageSquare className="h-4 w-4 shrink-0" />
                         <span className="truncate">
-                          {chat.title || "New Chat"}
+                          {chat.title || t("newChat")}
                         </span>
                       </SidebarMenuButton>
                     </ChatContextMenu>
@@ -170,8 +175,8 @@ export function AppSidebar() {
         )}
 
         {groups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+          <SidebarGroup key={group.key}>
+            <SidebarGroupLabel>{t(`groups.${group.key}`)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.chats.map((chat) => (
@@ -183,7 +188,7 @@ export function AppSidebar() {
                       >
                         <MessageSquare className="h-4 w-4 shrink-0" />
                         <span className="truncate">
-                          {chat.title || "New Chat"}
+                          {chat.title || t("newChat")}
                         </span>
                       </SidebarMenuButton>
                     </ChatContextMenu>
@@ -202,7 +207,7 @@ export function AppSidebar() {
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              {debouncedSearch ? "No chats found" : "Start a new chat to get going"}
+              {debouncedSearch ? t("noChatsFound") : t("startNewChat")}
             </p>
           </div>
         )}
@@ -220,21 +225,21 @@ export function AppSidebar() {
             <Link
               href="/chat/archived"
               className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-              title="Archived"
+              title={t("archived")}
             >
               <Archive className="h-4 w-4" />
             </Link>
             <Link
               href="/projects"
               className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-              title="Projects"
+              title={t("projects")}
             >
               <FolderKanban className="h-4 w-4" />
             </Link>
             <Link
               href="/settings"
               className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-              title="Settings"
+              title={t("settings")}
             >
               <Settings className="h-4 w-4" />
             </Link>
