@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { AlertCircle, FolderOpen, RefreshCw, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Sparkles } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
@@ -26,15 +26,36 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   const t = useTranslations("chat");
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Track whether the user is pinned to the bottom. We only auto-follow new
+  // content when they already are — scrolling up to re-read shouldn't yank them
+  // back down on every token.
+  const atBottomRef = useRef(true);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   const { messages, isLoading, error, sendMessage, stop, taskInfo } = useBackgroundChat({
     chatId,
     projectId,
   });
 
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    atBottomRef.current = nearBottom;
+    setShowScrollDown(!nearBottom);
+  };
+
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    atBottomRef.current = true;
+    setShowScrollDown(false);
+  };
+
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const [input, setInput] = useState("");
@@ -133,7 +154,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
             </Button>
           </div>
 
-          <div ref={scrollRef} className="flex-1 overflow-y-auto pb-40">
+          <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto pb-40">
             <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
               {messages.map((message, i) => {
                 const isLast = i === messages.length - 1;
@@ -166,6 +187,19 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
           </div>
 
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
+            {showScrollDown && (
+              <div className="pointer-events-none mb-2 flex justify-center">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="pointer-events-auto h-9 w-9 rounded-full shadow-md"
+                  onClick={scrollToBottom}
+                  aria-label={t("panel.scrollDown")}
+                >
+                  <ArrowDown className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
             {error && !lastFailed && (
               <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
                 <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

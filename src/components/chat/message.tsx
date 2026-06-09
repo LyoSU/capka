@@ -12,6 +12,14 @@ import { describeStep } from "./steps";
 
 // --- Helpers ---
 
+// LLM error categories that have an errors.llm.<category> translation. The
+// server stores the category in message metadata; the user-facing text is
+// rendered here (localized) instead of the English string baked in at runtime.
+const LLM_ERROR_CATEGORIES = new Set([
+  "out_of_credits", "invalid_key", "rate_limited", "model_unavailable",
+  "context_too_long", "network", "timed_out", "unknown",
+]);
+
 type TimeTranslator = (key: string, values?: Record<string, string | number>) => string;
 
 /** Locale-aware relative timestamp. Intl formatters are built per call from the
@@ -402,9 +410,10 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
+  const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -420,7 +429,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
     return (
       <div className="group/msg flex justify-end px-4 md:px-6 py-4">
         <div className="max-w-[75%] lg:max-w-[65%]">
-          <div className="inline-block rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
+          <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
             {text || "..."}
           </div>
           <div className="mt-1 flex justify-end">
@@ -474,7 +483,11 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
         )}
         {metadata?.taskStatus === "failed" && (
           <ErrorNotice
-            message={metadata.error || t("genericError")}
+            message={
+              metadata.errorCategory && LLM_ERROR_CATEGORIES.has(metadata.errorCategory)
+                ? tErr(metadata.errorCategory)
+                : metadata.error || t("genericError")
+            }
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
           />

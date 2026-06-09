@@ -35,6 +35,16 @@
       "title": "Page not found",
       "message": "This page doesn't exist or may have been moved.",
       "home": "Go to home"
+    },
+    "llm": {
+      "out_of_credits": "The assistant is temporarily unavailable — the AI account is out of credit. Your administrator needs to top it up.",
+      "invalid_key": "The assistant isn't connected right now. Your administrator needs to check the AI provider settings.",
+      "rate_limited": "The assistant is busy right now. Please try again in a few moments.",
+      "model_unavailable": "The selected AI model isn't available right now. Try a different model, or ask your administrator.",
+      "context_too_long": "This conversation got too long for the model. Start a new chat or shorten your message and try again.",
+      "network": "Couldn't reach the AI service. Please try again in a moment.",
+      "timed_out": "This task took too long and was stopped. Please try again, or break it into smaller steps.",
+      "unknown": "Something went wrong while generating a response. Please try again — if it keeps happening, let your administrator know."
     }
   },
   "providerStatus": {
@@ -171,7 +181,8 @@
             "prompt": "Resize or convert the image I'll attach: "
           }
         }
-      }
+      },
+      "scrollDown": "Scroll to bottom"
     },
     "menu": {
       "rename": "Rename",
@@ -255,6 +266,12 @@
       "delete": "Delete permanently",
       "confirmTitle": "Delete chat permanently?",
       "confirmDescription": "This action cannot be undone. The chat and all its messages will be permanently deleted."
+    },
+    "hook": {
+      "loadFailed": "Failed to load messages.",
+      "uploadFailed": "Upload failed: {files} — message not sent.",
+      "processFiles": "Process these files",
+      "requestFailed": "Request failed."
     }
   },
   "projects": {

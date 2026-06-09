@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { inferMimeType, type FileRef } from "@/lib/constants";
@@ -28,6 +29,7 @@ export function useBackgroundChat({
   chatId: string;
   projectId?: string;
 }) {
+  const t = useTranslations("chat.hook");
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<"idle" | "running">("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -57,9 +59,9 @@ export function useBackgroundChat({
       })
       .catch((e) => {
         console.error("[chat] loadHistory failed:", e);
-        setError("Failed to load messages");
+        setError(t("loadFailed"));
       });
-  }, [chatId]);
+  }, [chatId, t]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -279,12 +281,12 @@ export function useBackgroundChat({
         if (failed > 0) {
           const uploadedNames = new Set(uploadedFiles.map((f) => f.name));
           const names = files.filter((f) => !uploadedNames.has(f.name)).map((f) => f.name).join(", ");
-          toast.error(`Upload failed: ${names || `${failed} file(s)`} — message not sent`);
+          toast.error(t("uploadFailed", { files: names || `${failed}` }));
           return;
         }
       }
 
-      const displayText = text.trim() || (uploadedFiles.length > 0 ? "Process these files" : "");
+      const displayText = text.trim() || (uploadedFiles.length > 0 ? t("processFiles") : "");
 
       // Optimistically add user message (clean text only, no file metadata)
       const userMsg: Message = {
@@ -315,8 +317,8 @@ export function useBackgroundChat({
         });
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: "Request failed" }));
-          throw new Error(err.error || "Request failed");
+          const err = await res.json().catch(() => ({ error: t("requestFailed") }));
+          throw new Error(err.error || t("requestFailed"));
         }
 
         const { taskId: newTaskId } = await res.json();
@@ -327,7 +329,7 @@ export function useBackgroundChat({
         throw e;
       }
     },
-    [chatId, projectId, uploadFiles],
+    [chatId, projectId, uploadFiles, t],
   );
 
   // ── Stop / Cancel ──────────────────────────────────────────
