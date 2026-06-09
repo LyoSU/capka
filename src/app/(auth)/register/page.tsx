@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import { toast } from "sonner";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const t = useTranslations("auth");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -36,7 +38,7 @@ export default function RegisterPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) { toast.error("Name is required"); return; }
+    if (!name.trim()) { toast.error(t("register.nameRequired")); return; }
     setLoading(true);
 
     const { error } = await authClient.signUp.email({
@@ -46,7 +48,7 @@ export default function RegisterPage() {
     });
 
     if (error) {
-      toast.error(error.message ?? "Registration failed");
+      toast.error(error.message ?? t("register.failed"));
       setLoading(false);
       return;
     }
@@ -67,14 +69,14 @@ export default function RegisterPage() {
       <div className="flex min-h-screen items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>Registration disabled</CardTitle>
+            <CardTitle>{t("register.disabledTitle")}</CardTitle>
             <CardDescription>
-              New account registration is currently disabled by the administrator.
+              {t("register.disabledDescription")}
             </CardDescription>
           </CardHeader>
           <CardFooter>
             <Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Back to sign in
+              {t("register.backToSignIn")}
             </Link>
           </CardFooter>
         </Card>
@@ -86,27 +88,27 @@ export default function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Create account</CardTitle>
+          <CardTitle>{t("register.title")}</CardTitle>
           <CardDescription>
-            Sign up to start using unClaw.
+            {t("register.description")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="name">Name</Label>
+              <Label htmlFor="name">{t("register.nameLabel")}</Label>
               <Input
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
+                placeholder={t("register.namePlaceholder")}
                 required
                 disabled={loading}
                 autoFocus
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("emailLabel")}</Label>
               <Input
                 id="email"
                 type="email"
@@ -118,7 +120,7 @@ export default function RegisterPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("passwordLabel")}</Label>
               <Input
                 id="password"
                 type="password"
@@ -130,14 +132,14 @@ export default function RegisterPage() {
               />
             </div>
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? "Creating account..." : "Create account"}
+              {loading ? t("register.submitting") : t("register.submit")}
             </Button>
           </form>
         </CardContent>
         <CardFooter className="justify-center">
           <span className="text-sm text-muted-foreground">
-            Already have an account?{" "}
-            <Link href="/login" className="text-foreground hover:underline">Sign in</Link>
+            {t("register.haveAccount")}{" "}
+            <Link href="/login" className="text-foreground hover:underline">{t("register.signIn")}</Link>
           </span>
         </CardFooter>
       </Card>

@@ -28,5 +28,33 @@
     "description": "Мова інтерфейсу",
     "updated": "Мову оновлено",
     "updateFailed": "Не вдалося змінити мову"
+  },
+  "auth": {
+    "emailLabel": "Електронна пошта",
+    "passwordLabel": "Пароль",
+    "login": {
+      "title": "Вхід",
+      "description": "Введіть свої дані, щоб увійти в unClaw.",
+      "submit": "Увійти",
+      "submitting": "Вхід…",
+      "invalidCredentials": "Невірна пошта або пароль. Спробуйте ще раз.",
+      "noAccount": "Ще не маєте акаунта?",
+      "createOne": "Створити"
+    },
+    "register": {
+      "title": "Створення акаунта",
+      "description": "Зареєструйтеся, щоб почати користуватися unClaw.",
+      "nameLabel": "Ім'я",
+      "namePlaceholder": "Ваше ім'я",
+      "nameRequired": "Вкажіть ім'я",
+      "failed": "Не вдалося зареєструватися",
+      "submit": "Створити акаунт",
+      "submitting": "Створення акаунта…",
+      "haveAccount": "Вже маєте акаунт?",
+      "signIn": "Увійти",
+      "disabledTitle": "Реєстрацію вимкнено",
+      "disabledDescription": "Адміністратор наразі вимкнув реєстрацію нових акаунтів.",
+      "backToSignIn": "Назад до входу"
+    }
   }
 }

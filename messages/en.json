@@ -28,5 +28,33 @@
     "description": "Interface language",
     "updated": "Language updated",
     "updateFailed": "Couldn't change the language"
+  },
+  "auth": {
+    "emailLabel": "Email",
+    "passwordLabel": "Password",
+    "login": {
+      "title": "Sign in",
+      "description": "Enter your credentials to access unClaw.",
+      "submit": "Sign in",
+      "submitting": "Signing in…",
+      "invalidCredentials": "Invalid email or password. Please try again.",
+      "noAccount": "Don't have an account?",
+      "createOne": "Create one"
+    },
+    "register": {
+      "title": "Create account",
+      "description": "Sign up to start using unClaw.",
+      "nameLabel": "Name",
+      "namePlaceholder": "Your name",
+      "nameRequired": "Name is required",
+      "failed": "Registration failed",
+      "submit": "Create account",
+      "submitting": "Creating account…",
+      "haveAccount": "Already have an account?",
+      "signIn": "Sign in",
+      "disabledTitle": "Registration disabled",
+      "disabledDescription": "New account registration is currently disabled by the administrator.",
+      "backToSignIn": "Back to sign in"
+    }
   }
 }

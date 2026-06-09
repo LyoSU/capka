@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ import { toast } from "sonner";
 
 export default function LoginPage() {
   const router = useRouter();
+  const t = useTranslations("auth");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,7 +35,7 @@ export default function LoginPage() {
     });
 
     if (error) {
-      toast.error(error.message ?? "Invalid email or password. Please try again.");
+      toast.error(error.message ?? t("login.invalidCredentials"));
       setLoading(false);
       return;
     }
@@ -45,15 +47,15 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Sign in</CardTitle>
+          <CardTitle>{t("login.title")}</CardTitle>
           <CardDescription>
-            Enter your credentials to access unClaw.
+            {t("login.description")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("emailLabel")}</Label>
               <Input
                 id="email"
                 type="email"
@@ -66,7 +68,7 @@ export default function LoginPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("passwordLabel")}</Label>
               <Input
                 id="password"
                 type="password"
@@ -77,14 +79,14 @@ export default function LoginPage() {
               />
             </div>
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? "Signing in..." : "Sign in"}
+              {loading ? t("login.submitting") : t("login.submit")}
             </Button>
           </form>
         </CardContent>
         <CardFooter className="justify-center">
           <span className="text-sm text-muted-foreground">
-            Don&apos;t have an account?{" "}
-            <Link href="/register" className="text-foreground hover:underline">Create one</Link>
+            {t("login.noAccount")}{" "}
+            <Link href="/register" className="text-foreground hover:underline">{t("login.createOne")}</Link>
           </span>
         </CardFooter>
       </Card>
