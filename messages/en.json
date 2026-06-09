@@ -23,6 +23,11 @@
     "error": "Something went wrong",
     "saved": "Saved"
   },
+  "theme": {
+    "system": "System theme",
+    "light": "Light theme",
+    "dark": "Dark theme"
+  },
   "language": {
     "label": "Language",
     "description": "Interface language",
