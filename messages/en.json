@@ -352,6 +352,63 @@
       "saveError": "Could not save provider settings. Please check your API key and try again."
     }
   },
+  "setup": {
+    "back": "Back",
+    "steps": {
+      "account": "Account",
+      "provider": "Provider",
+      "telegram": "Telegram"
+    },
+    "account": {
+      "title": "Create your account",
+      "subtitle": "Set up your admin account to get started",
+      "name": "Name",
+      "namePlaceholder": "Your name",
+      "email": "Email",
+      "emailPlaceholder": "admin@example.com",
+      "password": "Password",
+      "passwordPlaceholder": "Min 8 characters",
+      "submit": "Create Account",
+      "submitting": "Creating…",
+      "allFieldsRequired": "Please fill in all fields",
+      "passwordTooShort": "Password must be at least 8 characters",
+      "error": "Could not create account. Please try again."
+    },
+    "provider": {
+      "title": "Configure AI provider",
+      "subtitle": "Connect an AI provider to power your assistant",
+      "field": "Provider",
+      "recommended": "Recommended",
+      "apiKey": "API Key",
+      "showKey": "Show API key",
+      "hideKey": "Hide API key",
+      "baseUrl": "Base URL",
+      "model": "Model",
+      "enterKeyFirst": "Enter your API key first",
+      "pickModel": "Pick a model",
+      "selectProvider": "Select a provider",
+      "keyRequired": "API key is required",
+      "baseUrlRequired": "Base URL is required",
+      "pickModelError": "Please pick a model",
+      "testError": "Could not verify the connection. Please check your details and try again.",
+      "saveError": "Could not save provider settings. Please try again.",
+      "verifyError": "Could not verify API key. Please check the key and try again.",
+      "submit": "Test & Save",
+      "submitting": "Testing…"
+    },
+    "telegram": {
+      "title": "Telegram integration",
+      "subtitle": "Optionally connect a Telegram bot",
+      "botToken": "Bot Token",
+      "hint": "Get a token from @BotFather on Telegram. You can skip this and set it up later.",
+      "saveTokenError": "Failed to save Telegram token",
+      "completeError": "Failed to complete setup",
+      "finishError": "Could not complete setup. Please try again.",
+      "skip": "Skip",
+      "submit": "Save & Finish",
+      "submitting": "Saving…"
+    }
+  },
   "auth": {
     "emailLabel": "Email",
     "passwordLabel": "Password",

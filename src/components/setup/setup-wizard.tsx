@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Check, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
@@ -19,9 +20,10 @@ import { ModelPicker } from "@/components/chat/model-picker";
 import { iconForSlug } from "@/components/chat/provider-icons";
 import { PROVIDER_OPTIONS, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
 
-const STEPS = ["Account", "Provider", "Telegram"] as const;
+const STEPS = ["account", "provider", "telegram"] as const;
 
 function Stepper({ current }: { current: number }) {
+  const t = useTranslations("setup.steps");
   return (
     <div className="flex items-center gap-2 mb-8">
       {STEPS.map((label, i) => (
@@ -40,7 +42,7 @@ function Stepper({ current }: { current: number }) {
               i === current ? "text-foreground" : "text-muted-foreground"
             }`}
           >
-            {label}
+            {t(label)}
           </span>
           {i < STEPS.length - 1 && (
             <div
@@ -57,6 +59,7 @@ function Stepper({ current }: { current: number }) {
 
 export function SetupWizard() {
   const router = useRouter();
+  const t = useTranslations("setup");
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -89,12 +92,11 @@ export function SetupWizard() {
 
   async function handleAccount() {
     if (!name || !email || !password) {
-      const missing = [!name && "Name", !email && "Email", !password && "Password"].filter(Boolean).join(", ");
-      toast.error(`${missing} ${missing.includes(",") ? "are" : "is"} required`);
+      toast.error(t("account.allFieldsRequired"));
       return;
     }
     if (password.length < 8) {
-      toast.error("Password must be at least 8 characters");
+      toast.error(t("account.passwordTooShort"));
       return;
     }
 
@@ -106,7 +108,7 @@ export function SetupWizard() {
         password,
       });
       if (error) {
-        toast.error(error.message || "Could not create account. Please try again.");
+        toast.error(error.message || t("account.error"));
         return;
       }
 
@@ -117,7 +119,7 @@ export function SetupWizard() {
       });
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.error || "Could not create account. Please try again.");
+        toast.error(data.error || t("account.error"));
         return;
       }
 
@@ -129,7 +131,7 @@ export function SetupWizard() {
 
       setStep(1);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create account. Please try again.");
+      toast.error(err instanceof Error ? err.message : t("account.error"));
     } finally {
       setLoading(false);
     }
@@ -137,19 +139,19 @@ export function SetupWizard() {
 
   async function handleProvider() {
     if (!provider) {
-      toast.error("Select a provider");
+      toast.error(t("provider.selectProvider"));
       return;
     }
     if (meta.requiresKey && !apiKey) {
-      toast.error("API key is required");
+      toast.error(t("provider.keyRequired"));
       return;
     }
     if (meta.requiresBaseUrl && !baseUrl) {
-      toast.error("Base URL is required");
+      toast.error(t("provider.baseUrlRequired"));
       return;
     }
     if (!defaultModel) {
-      toast.error("Please pick a model");
+      toast.error(t("provider.pickModelError"));
       return;
     }
 
@@ -168,7 +170,7 @@ export function SetupWizard() {
       });
       const testData = await testRes.json();
       if (!testData.success) {
-        toast.error(testData.error || "Could not verify the connection. Please check your details and try again.");
+        toast.error(testData.error || t("provider.testError"));
         return;
       }
 
@@ -187,13 +189,13 @@ export function SetupWizard() {
       });
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.error || "Could not save provider settings. Please try again.");
+        toast.error(data.error || t("provider.saveError"));
         return;
       }
 
       setStep(2);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not verify API key. Please check the key and try again.");
+      toast.error(err instanceof Error ? err.message : t("provider.verifyError"));
     } finally {
       setLoading(false);
     }
@@ -211,7 +213,7 @@ export function SetupWizard() {
         });
         const data = await res.json();
         if (!res.ok) {
-          toast.error(data.error || "Failed to save Telegram token");
+          toast.error(data.error || t("telegram.saveTokenError"));
           return;
         }
         if (data.warning) {
@@ -227,13 +229,13 @@ export function SetupWizard() {
       });
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.error || "Failed to complete setup");
+        toast.error(data.error || t("telegram.completeError"));
         return;
       }
 
       router.push("/chat");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not complete setup. Please try again.");
+      toast.error(err instanceof Error ? err.message : t("telegram.finishError"));
     } finally {
       setLoading(false);
     }
@@ -245,50 +247,50 @@ export function SetupWizard() {
 
       <div className="text-center space-y-1">
         <h1 className="text-xl font-semibold">
-          {step === 0 && "Create your account"}
-          {step === 1 && "Configure AI provider"}
-          {step === 2 && "Telegram integration"}
+          {step === 0 && t("account.title")}
+          {step === 1 && t("provider.title")}
+          {step === 2 && t("telegram.title")}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {step === 0 && "Set up your admin account to get started"}
-          {step === 1 && "Connect an AI provider to power your assistant"}
-          {step === 2 && "Optionally connect a Telegram bot"}
+          {step === 0 && t("account.subtitle")}
+          {step === 1 && t("provider.subtitle")}
+          {step === 2 && t("telegram.subtitle")}
         </p>
       </div>
 
       {step === 0 && (
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="name">{t("account.name")}</Label>
             <Input
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Your name"
+              placeholder={t("account.namePlaceholder")}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="email">{t("account.email")}</Label>
             <Input
               id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@example.com"
+              placeholder={t("account.emailPlaceholder")}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="password">Password</Label>
+            <Label htmlFor="password">{t("account.password")}</Label>
             <Input
               id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Min 8 characters"
+              placeholder={t("account.passwordPlaceholder")}
             />
           </div>
           <Button className="w-full" onClick={handleAccount} disabled={loading}>
-            {loading ? "Creating..." : "Create Account"}
+            {loading ? t("account.submitting") : t("account.submit")}
           </Button>
         </div>
       )}
@@ -296,7 +298,7 @@ export function SetupWizard() {
       {step === 1 && (
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label>Provider</Label>
+            <Label>{t("provider.field")}</Label>
             <Select value={provider} onValueChange={(v) => changeProvider(v as ProviderName)}>
               <SelectTrigger className="w-full h-auto py-2">
                 <SelectValue />
@@ -312,7 +314,7 @@ export function SetupWizard() {
                           <span className="flex items-center gap-1.5 font-medium">
                             {p.label}
                             {p.recommended && (
-                              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">Recommended</span>
+                              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("provider.recommended")}</span>
                             )}
                           </span>
                           <span className="text-xs text-muted-foreground">{p.blurb}</span>
@@ -327,7 +329,7 @@ export function SetupWizard() {
 
           {meta.requiresKey && (
             <div className="space-y-1.5">
-              <Label htmlFor="apiKey">API Key</Label>
+              <Label htmlFor="apiKey">{t("provider.apiKey")}</Label>
               <div className="relative">
                 <Input
                   id="apiKey"
@@ -340,7 +342,7 @@ export function SetupWizard() {
                 <button
                   type="button"
                   onClick={() => setShowApiKey((v) => !v)}
-                  aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                  aria-label={showApiKey ? t("provider.hideKey") : t("provider.showKey")}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -351,7 +353,7 @@ export function SetupWizard() {
 
           {meta.requiresBaseUrl && (
             <div className="space-y-1.5">
-              <Label htmlFor="baseUrl">Base URL</Label>
+              <Label htmlFor="baseUrl">{t("provider.baseUrl")}</Label>
               <Input
                 id="baseUrl"
                 value={baseUrl}
@@ -362,7 +364,7 @@ export function SetupWizard() {
           )}
 
           <div className="space-y-1.5">
-            <Label>Model</Label>
+            <Label>{t("provider.model")}</Label>
             <ModelPicker
               variant="field"
               value={defaultModel}
@@ -371,7 +373,7 @@ export function SetupWizard() {
               apiKey={apiKey}
               baseUrl={baseUrl}
               disabled={(meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl)}
-              placeholder={meta.requiresKey && !apiKey ? "Enter your API key first" : "Pick a model"}
+              placeholder={meta.requiresKey && !apiKey ? t("provider.enterKeyFirst") : t("provider.pickModel")}
             />
           </div>
 
@@ -381,10 +383,10 @@ export function SetupWizard() {
               onClick={() => setStep(0)}
               disabled={loading}
             >
-              Back
+              {t("back")}
             </Button>
             <Button className="flex-1" onClick={handleProvider} disabled={loading}>
-              {loading ? "Testing..." : "Test & Save"}
+              {loading ? t("provider.submitting") : t("provider.submit")}
             </Button>
           </div>
         </div>
@@ -393,7 +395,7 @@ export function SetupWizard() {
       {step === 2 && (
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="botToken">Bot Token</Label>
+            <Label htmlFor="botToken">{t("telegram.botToken")}</Label>
             <Input
               id="botToken"
               type="password"
@@ -402,7 +404,7 @@ export function SetupWizard() {
               placeholder="123456:ABC-DEF..."
             />
             <p className="text-xs text-muted-foreground">
-              Get a token from @BotFather on Telegram. You can skip this and set it up later.
+              {t("telegram.hint")}
             </p>
           </div>
 
@@ -412,7 +414,7 @@ export function SetupWizard() {
               onClick={() => setStep(1)}
               disabled={loading}
             >
-              Back
+              {t("back")}
             </Button>
             <Button
               variant="ghost"
@@ -420,14 +422,14 @@ export function SetupWizard() {
               onClick={() => handleFinish(true)}
               disabled={loading}
             >
-              Skip
+              {t("telegram.skip")}
             </Button>
             <Button
               className="flex-1"
               onClick={() => handleFinish(false)}
               disabled={loading || !botToken}
             >
-              {loading ? "Saving..." : "Save & Finish"}
+              {loading ? t("telegram.submitting") : t("telegram.submit")}
             </Button>
           </div>
         </div>
