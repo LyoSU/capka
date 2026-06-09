@@ -409,6 +409,26 @@
       "submitting": "Saving…"
     }
   },
+  "commandPalette": {
+    "search": "Type a command or search…",
+    "noResults": "No results found.",
+    "groups": {
+      "chat": "Chat",
+      "navigation": "Navigation",
+      "preferences": "Preferences",
+      "shortcuts": "Keyboard Shortcuts"
+    },
+    "newChat": "New Chat",
+    "projects": "Projects",
+    "settings": "Settings",
+    "memory": "Memory",
+    "connections": "Connections",
+    "integrations": "Integrations",
+    "toggleSidebar": "Toggle Sidebar",
+    "toggleTheme": "Toggle Theme",
+    "commandPalette": "Command Palette",
+    "searchChats": "Search Chats"
+  },
   "auth": {
     "emailLabel": "Email",
     "passwordLabel": "Password",

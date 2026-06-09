@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { nanoid } from "nanoid";
 import {
   MessageSquarePlus,
@@ -29,6 +30,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { useTheme } from "@/components/providers";
 
 export function CommandPalette() {
+  const t = useTranslations("commandPalette");
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const { toggleSidebar } = useSidebar();
@@ -65,74 +67,74 @@ export function CommandPalette() {
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Type a command or search..." />
+      <CommandInput placeholder={t("search")} />
       <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandEmpty>{t("noResults")}</CommandEmpty>
 
-        <CommandGroup heading="Chat">
+        <CommandGroup heading={t("groups.chat")}>
           <CommandItem onSelect={() => run(() => router.push(`/chat/${nanoid()}`))}>
             <MessageSquarePlus className="mr-2 h-4 w-4" />
-            New Chat
+            {t("newChat")}
             <CommandShortcut>⌘N</CommandShortcut>
           </CommandItem>
         </CommandGroup>
 
-        <CommandGroup heading="Navigation">
+        <CommandGroup heading={t("groups.navigation")}>
           <CommandItem onSelect={() => run(() => router.push("/projects"))}>
             <FolderKanban className="mr-2 h-4 w-4" />
-            Projects
+            {t("projects")}
           </CommandItem>
           <CommandItem onSelect={() => run(() => router.push("/settings"))}>
             <Settings className="mr-2 h-4 w-4" />
-            Settings
+            {t("settings")}
           </CommandItem>
           <CommandItem onSelect={() => run(() => router.push("/settings/memory"))}>
             <Brain className="mr-2 h-4 w-4" />
-            Memory
+            {t("memory")}
           </CommandItem>
           <CommandItem onSelect={() => run(() => router.push("/settings/connections"))}>
             <Plug className="mr-2 h-4 w-4" />
-            Connections
+            {t("connections")}
           </CommandItem>
           <CommandItem onSelect={() => run(() => router.push("/settings/integrations"))}>
             <Bot className="mr-2 h-4 w-4" />
-            Integrations
+            {t("integrations")}
           </CommandItem>
         </CommandGroup>
 
-        <CommandGroup heading="Preferences">
+        <CommandGroup heading={t("groups.preferences")}>
           <CommandItem onSelect={() => run(toggleSidebar)}>
             <PanelLeft className="mr-2 h-4 w-4" />
-            Toggle Sidebar
+            {t("toggleSidebar")}
             <CommandShortcut>⌘B</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => run(cycleTheme)}>
             <Moon className="mr-2 h-4 w-4" />
-            Toggle Theme
+            {t("toggleTheme")}
           </CommandItem>
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="Keyboard Shortcuts">
+        <CommandGroup heading={t("groups.shortcuts")}>
           <CommandItem disabled>
             <Keyboard className="mr-2 h-4 w-4" />
-            Command Palette
+            {t("commandPalette")}
             <CommandShortcut>⌘K</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
             <MessageSquarePlus className="mr-2 h-4 w-4" />
-            New Chat
+            {t("newChat")}
             <CommandShortcut>⌘N</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
             <PanelLeft className="mr-2 h-4 w-4" />
-            Toggle Sidebar
+            {t("toggleSidebar")}
             <CommandShortcut>⌘B</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
             <Search className="mr-2 h-4 w-4" />
-            Search Chats
+            {t("searchChats")}
             <CommandShortcut>⌘⇧F</CommandShortcut>
           </CommandItem>
         </CommandGroup>

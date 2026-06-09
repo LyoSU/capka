@@ -409,6 +409,26 @@
       "submitting": "Збереження…"
     }
   },
+  "commandPalette": {
+    "search": "Введіть команду або запит…",
+    "noResults": "Нічого не знайдено.",
+    "groups": {
+      "chat": "Чат",
+      "navigation": "Навігація",
+      "preferences": "Параметри",
+      "shortcuts": "Гарячі клавіші"
+    },
+    "newChat": "Новий чат",
+    "projects": "Проєкти",
+    "settings": "Налаштування",
+    "memory": "Пам'ять",
+    "connections": "Підключення",
+    "integrations": "Інтеграції",
+    "toggleSidebar": "Перемкнути бічну панель",
+    "toggleTheme": "Перемкнути тему",
+    "commandPalette": "Палітра команд",
+    "searchChats": "Пошук чатів"
+  },
   "auth": {
     "emailLabel": "Електронна пошта",
     "passwordLabel": "Пароль",
