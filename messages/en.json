@@ -23,6 +23,20 @@
     "error": "Something went wrong",
     "saved": "Saved"
   },
+  "errors": {
+    "page": {
+      "title": "Something went wrong",
+      "message": "We hit an unexpected problem on this page. Try again, and if it keeps happening, let your administrator know.",
+      "technicalDetails": "Technical details",
+      "errorId": "Reference: {id}",
+      "home": "Go to home"
+    },
+    "notFound": {
+      "title": "Page not found",
+      "message": "This page doesn't exist or may have been moved.",
+      "home": "Go to home"
+    }
+  },
   "theme": {
     "system": "System theme",
     "light": "Light theme",
