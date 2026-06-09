@@ -16,28 +16,32 @@ function BrandIcon({ slug, size, className }: { slug?: string | null; size?: num
 // choices on top without hiding the long tail.
 const GROUP_PRIORITY = ["Anthropic", "OpenAI", "Google", "Meta", "Mistral", "DeepSeek", "xAI", "Qwen"];
 
-function formatContext(ctx: number): string {
-  if (ctx >= 1_000_000) return `${(ctx / 1_000_000).toFixed(0)}M`;
-  if (ctx >= 1_000) return `${(ctx / 1_000).toFixed(0)}k`;
-  return String(ctx);
-}
-
-function formatPrice(p: number): string {
-  return `$${p < 1 ? p.toFixed(2) : p.toFixed(1)}/M`;
-}
-
 function groupOf(m: ModelInfo): string {
   return m.group || (m.provider ? m.provider : "Other");
 }
 
 function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
   const t = useTranslations("chat.model");
-  if (!caps) return null;
+  if (!caps || (!caps.vision && !caps.tools && !caps.reasoning)) return null;
+  // Icons stay compact; the plain-language meaning is one hover away (title) and
+  // announced to screen readers (aria-label) — no jargon on the row itself.
   return (
-    <span className="flex items-center gap-1 text-muted-foreground">
-      {caps.vision && <Eye className="h-3 w-3" aria-label={t("caps.vision")} />}
-      {caps.tools && <Wrench className="h-3 w-3" aria-label={t("caps.tools")} />}
-      {caps.reasoning && <Brain className="h-3 w-3" aria-label={t("caps.reasoning")} />}
+    <span className="mt-0.5 flex items-center gap-1.5 text-muted-foreground">
+      {caps.vision && (
+        <span title={t("caps.vision")} className="inline-flex">
+          <Eye className="h-3 w-3" aria-label={t("caps.vision")} />
+        </span>
+      )}
+      {caps.tools && (
+        <span title={t("caps.tools")} className="inline-flex">
+          <Wrench className="h-3 w-3" aria-label={t("caps.tools")} />
+        </span>
+      )}
+      {caps.reasoning && (
+        <span title={t("caps.reasoning")} className="inline-flex">
+          <Brain className="h-3 w-3" aria-label={t("caps.reasoning")} />
+        </span>
+      )}
     </span>
   );
 }
@@ -263,11 +267,7 @@ function ModelList({
                           <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">{t("active")}</span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground">
-                        {model.context > 0 && <span className="tabular-nums">{formatContext(model.context)} ctx</span>}
-                        {model.pricing.prompt > 0 && <span className="tabular-nums">{formatPrice(model.pricing.prompt)} in</span>}
-                        <Caps caps={model.capabilities} />
-                      </div>
+                      <Caps caps={model.capabilities} />
                     </div>
                   </button>
                 );
@@ -402,9 +402,6 @@ export function ModelPicker({
           <span className="flex items-baseline gap-1.5 min-w-0">
             <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholderText}</span>
             {groupLabel && <span className="text-xs text-muted-foreground hidden sm:inline">{groupLabel}</span>}
-            {currentModel && currentModel.context > 0 && (
-              <span className="text-xs text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)} ctx</span>
-            )}
             {state.isShared && (
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title={t("sharedTooltip")}>{t("shared")}</span>
             )}

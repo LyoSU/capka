@@ -132,9 +132,9 @@
       "shared": "shared",
       "sharedTooltip": "Using admin's shared provider config",
       "caps": {
-        "vision": "vision",
-        "tools": "tools",
-        "reasoning": "reasoning"
+        "vision": "Reads images",
+        "tools": "Can use tools",
+        "reasoning": "Thinks step by step"
       }
     },
     "input": {
@@ -224,7 +224,7 @@
       "useGlobalDefault": "Use global default",
       "defaultModelHint": "Overrides the global default for chats in this project.",
       "internet": "Internet Access",
-      "internetHint": "Allow sandbox to access the internet (download files, APIs, etc.)"
+      "internetHint": "Let the assistant download files and reach the internet while working on this project."
     }
   },
   "settings": {
