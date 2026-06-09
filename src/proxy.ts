@@ -6,7 +6,6 @@ const PUBLIC_PATHS = [
   "/register",
   "/setup",
   "/api/auth",
-  "/api/webhook",
   "/api/setup",
 ];
 
@@ -26,6 +25,10 @@ export async function proxy(request: NextRequest) {
 
   const sessionToken = request.cookies.get("better-auth.session_token");
   if (!sessionToken) {
+    // API clients want a status code, not an HTML login page.
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.redirect(new URL("/login", request.url));
   }
 

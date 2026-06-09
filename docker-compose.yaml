@@ -49,6 +49,11 @@ services:
       # Keep test resource usage modest on a shared, RAM-tight host.
       - SANDBOX_MEMORY_MB=384
       - MAX_SESSIONS_PER_USER=2
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     depends_on:
       sandbox:
         condition: service_completed_successfully
@@ -69,11 +74,17 @@ services:
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - UNCLAW_MASTER_KEY=${UNCLAW_MASTER_KEY}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     depends_on:
       postgres:
         condition: service_healthy
       sandbox-controller:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
