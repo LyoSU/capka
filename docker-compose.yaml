@@ -1,0 +1,80 @@
+# Coolify-tailored compose (read by Coolify; docker_compose_location=/docker-compose.yaml).
+# Derived from docker-compose.yml, with deploy-safety changes for a shared host:
+#   * postgres & sandbox-controller use `expose` instead of host `ports:` —
+#     on this host Docker publishes ports past UFW, so binding 5432/3001 to the
+#     host would leak Postgres and the controller to the internet.
+#   * platform is routed through Coolify's Traefik via the SERVICE_FQDN magic var
+#     instead of a host port publish (TLS + Cloudflare stay in front).
+# Internal service-to-service traffic uses compose-network DNS names.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: unClaw
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-unClaw}
+      POSTGRES_DB: unClaw
+    expose:
+      - "5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unClaw"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: unclaw-sandbox
+    entrypoint: ["echo", "sandbox image built"]
+
+  sandbox-controller:
+    build: ./sandbox-controller
+    expose:
+      - "3001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data
+    environment:
+      - CONTROLLER_SECRET=${CONTROLLER_SECRET:-unclaw-sandbox-secret}
+      - DATA_ROOT=/data/storage
+      # Docker resolves sibling-container bind sources on the daemon host, not
+      # inside this container. On Coolify the compose project dir is the clone
+      # path, so ${PWD} expands to the host path of ./data.
+      - HOST_DATA_ROOT=${PWD}/data/storage
+      - SANDBOX_IMAGE=unclaw-sandbox
+      # Keep test resource usage modest on a shared, RAM-tight host.
+      - SANDBOX_MEMORY_MB=384
+      - MAX_SESSIONS_PER_USER=2
+    depends_on:
+      sandbox:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  platform:
+    build: .
+    expose:
+      - "3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      # Coolify generates Traefik routing for this domain → platform:3000.
+      - SERVICE_FQDN_PLATFORM_3000=https://unclaw.yuri.ly
+      - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD:-unClaw}@postgres:5432/unClaw
+      - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
+      - CONTROLLER_SECRET=${CONTROLLER_SECRET:-unclaw-sandbox-secret}
+      - UNCLAW_MASTER_KEY=${UNCLAW_MASTER_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sandbox-controller:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

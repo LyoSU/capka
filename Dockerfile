@@ -8,6 +8,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# Cap the build heap so an oversized build fails as a Node heap error (build
+# fails, host survives) rather than tripping the kernel OOM killer on a
+# RAM-tight shared host. Tune via the build arg if the build legitimately needs more.
+ARG NODE_BUILD_HEAP_MB=1536
+ENV NODE_OPTIONS="--max-old-space-size=${NODE_BUILD_HEAP_MB}"
 RUN npm run build
 
 # Dev target: full deps, no production build — source is bind-mounted at runtime
