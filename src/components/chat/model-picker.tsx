@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback, createElement } from "react";
 import { useTranslations } from "next-intl";
-import { Search, ChevronDown, X, Eye, Wrench, Brain, Star, Loader2, KeyRound, AlertCircle } from "lucide-react";
+import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
 import { parseModelId, displayModelName, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
@@ -16,33 +16,40 @@ function BrandIcon({ slug, size, className }: { slug?: string | null; size?: num
 // choices on top without hiding the long tail.
 const GROUP_PRIORITY = ["Anthropic", "OpenAI", "Google", "Meta", "Mistral", "DeepSeek", "xAI", "Qwen"];
 
+function formatContext(ctx: number): string {
+  if (ctx >= 1_000_000) return `${(ctx / 1_000_000).toFixed(0)}M`;
+  if (ctx >= 1_000) return `${(ctx / 1_000).toFixed(0)}K`;
+  return String(ctx);
+}
+
 function groupOf(m: ModelInfo): string {
   return m.group || (m.provider ? m.provider : "Other");
 }
 
+/** A model is usable on this agentic platform only if it can call tools. */
+function hasTools(m: ModelInfo): boolean {
+  return !!m.capabilities?.tools;
+}
+
 function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
   const t = useTranslations("chat.model");
-  if (!caps || (!caps.vision && !caps.tools && !caps.reasoning)) return null;
-  // Icons stay compact; the plain-language meaning is one hover away (title) and
-  // announced to screen readers (aria-label) — no jargon on the row itself.
+  if (!caps || (!caps.vision && !caps.reasoning)) return null;
+  // Tool-calling is now a hard filter (every listed model has it), so its icon
+  // would just be noise. Only the capabilities that actually vary are shown,
+  // with plain-language meaning on hover and for screen readers.
   return (
-    <span className="mt-0.5 flex items-center gap-1.5 text-muted-foreground">
+    <>
       {caps.vision && (
         <span title={t("caps.vision")} className="inline-flex">
-          <Eye className="h-3 w-3" aria-label={t("caps.vision")} />
-        </span>
-      )}
-      {caps.tools && (
-        <span title={t("caps.tools")} className="inline-flex">
-          <Wrench className="h-3 w-3" aria-label={t("caps.tools")} />
+          <Eye className="h-3.5 w-3.5" aria-label={t("caps.vision")} />
         </span>
       )}
       {caps.reasoning && (
         <span title={t("caps.reasoning")} className="inline-flex">
-          <Brain className="h-3 w-3" aria-label={t("caps.reasoning")} />
+          <Brain className="h-3.5 w-3.5" aria-label={t("caps.reasoning")} />
         </span>
       )}
-    </span>
+    </>
   );
 }
 
@@ -162,7 +169,8 @@ function ModelList({
   onClose: () => void;
 }) {
   const t = useTranslations("chat.model");
-  const { models } = state;
+  // Only tool-capable models are usable here, so they're the only ones listed.
+  const models = useMemo(() => state.models.filter(hasTools), [state.models]);
   const filtered = useMemo(() => {
     if (!search) return models;
     const q = search.toLowerCase();
@@ -257,18 +265,19 @@ function ModelList({
                     data-index={globalIdx}
                     onClick={() => onSelect(model)}
                     onMouseEnter={() => onActiveIndex(globalIdx)}
-                    className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
+                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        {model.featured && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
-                        <span className="truncate text-sm">{model.name}</span>
-                        {isCurrent && (
-                          <span className="shrink-0 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium">{t("active")}</span>
-                        )}
-                      </div>
+                    {model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
+                    <span className="min-w-0 flex-1 truncate text-sm">{model.name}</span>
+                    {isCurrent && (
+                      <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
+                    )}
+                    <span className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+                      {model.context > 0 && (
+                        <span className="tabular-nums" title={t("context")}>{formatContext(model.context)}</span>
+                      )}
                       <Caps caps={model.capabilities} />
-                    </div>
+                    </span>
                   </button>
                 );
               })}
@@ -402,6 +411,9 @@ export function ModelPicker({
           <span className="flex items-baseline gap-1.5 min-w-0">
             <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholderText}</span>
             {groupLabel && <span className="text-xs text-muted-foreground hidden sm:inline">{groupLabel}</span>}
+            {currentModel && currentModel.context > 0 && (
+              <span className="text-xs text-muted-foreground tabular-nums hidden md:inline" title={t("context")}>{formatContext(currentModel.context)}</span>
+            )}
             {state.isShared && (
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title={t("sharedTooltip")}>{t("shared")}</span>
             )}

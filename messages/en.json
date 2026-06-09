@@ -105,7 +105,13 @@
     "panel": {
       "greeting": "What can I help with?",
       "workspaceFiles": "Workspace files",
-      "sendFailed": "Failed to send message"
+      "sendFailed": "Failed to send message",
+      "suggestions": {
+        "analyzeData": { "label": "Analyze data", "prompt": "Analyze the data in the file I'll attach and pull out the key points: " },
+        "summarizeDoc": { "label": "Summarize a document", "prompt": "Summarize the document I'll attach: " },
+        "createDoc": { "label": "Create a document", "prompt": "Create a document based on what I describe: " },
+        "convertFile": { "label": "Convert a file", "prompt": "Convert the file I'll attach into another format: " }
+      }
     },
     "menu": {
       "rename": "Rename",
@@ -131,6 +137,7 @@
       "active": "active",
       "shared": "shared",
       "sharedTooltip": "Using admin's shared provider config",
+      "context": "Context size: how much it can keep in mind at once",
       "caps": {
         "vision": "Reads images",
         "tools": "Can use tools",

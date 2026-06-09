@@ -20,6 +20,29 @@ interface ChatPanelProps {
   isAdmin?: boolean;
 }
 
+// Concrete, office-relevant starters for the blank chat. Each fills the composer
+// with a scaffold the user finishes and sends, so a non-technical first-timer
+// sees what to do instead of a blank page. They hide once the user starts typing.
+const STARTER_KEYS = ["analyzeData", "summarizeDoc", "createDoc", "convertFile"] as const;
+
+function StarterSuggestions({ onPick }: { onPick: (text: string) => void }) {
+  const t = useTranslations("chat.panel.suggestions");
+  return (
+    <div className="flex flex-wrap justify-center gap-2 pt-1">
+      {STARTER_KEYS.map((key) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onPick(t(`${key}.prompt`))}
+          className="rounded-full border bg-card px-3.5 py-1.5 text-sm text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+        >
+          {t(`${key}.label`)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPanelProps) {
   const t = useTranslations("chat");
   const [model, setModel] = useState(defaultModel);
@@ -98,7 +121,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                 <ModelPicker variant="pill" value={model} onChange={setModel} />
               </div>
             </div>
-            {inputEl}
+            <div className="space-y-3">
+              {inputEl}
+              {!input && <StarterSuggestions onPick={setInput} />}
+            </div>
           </div>
         </div>
       ) : (
