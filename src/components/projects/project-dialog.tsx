@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -36,6 +37,8 @@ interface ProjectDialogProps {
 }
 
 export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectDialogProps) {
+  const t = useTranslations("projects");
+  const tc = useTranslations("common");
   const isEdit = !!project;
   const [saving, setSaving] = useState(false);
 
@@ -63,7 +66,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
 
   async function handleSave() {
     if (!name.trim()) {
-      toast.error("Name is required");
+      toast.error(t("nameRequired"));
       return;
     }
 
@@ -79,16 +82,16 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        toast.error(data.error || (isEdit ? "Could not update project. Please try again." : "Could not create project. Please try again."));
+        toast.error(data.error || (isEdit ? t("updateError") : t("createError")));
         return;
       }
 
       const saved = await res.json();
-      toast.success(isEdit ? "Project updated" : "Project created");
+      toast.success(isEdit ? t("updated") : t("created"));
       onSaved?.(saved);
       onOpenChange(false);
     } catch {
-      toast.error(isEdit ? "Could not update project. Please try again." : "Could not create project. Please try again.");
+      toast.error(isEdit ? t("updateError") : t("createError"));
     } finally {
       setSaving(false);
     }
@@ -98,63 +101,63 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Project" : "New Project"}</DialogTitle>
+          <DialogTitle>{isEdit ? t("editTitle") : t("new")}</DialogTitle>
           <DialogDescription>
-            {isEdit ? "Update project settings." : "Create a new project to organize your chats."}
+            {isEdit ? t("editDesc") : t("createDesc")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="project-name">Name</Label>
+            <Label htmlFor="project-name">{t("form.name")}</Label>
             <Input
               id="project-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My Project"
+              placeholder={t("form.namePlaceholder")}
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="project-description">Description</Label>
+            <Label htmlFor="project-description">{t("form.description")}</Label>
             <Textarea
               id="project-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Brief description..."
+              placeholder={t("form.descriptionPlaceholder")}
               className="min-h-16"
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="project-system-prompt">System Prompt</Label>
+            <Label htmlFor="project-system-prompt">{t("form.systemPrompt")}</Label>
             <Textarea
               id="project-system-prompt"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="Custom instructions for this project..."
+              placeholder={t("form.systemPromptPlaceholder")}
               className="min-h-20 font-mono text-xs"
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="project-default-model">Default Model</Label>
+            <Label htmlFor="project-default-model">{t("form.defaultModel")}</Label>
             <ModelPicker
               variant="field"
               value={defaultModel}
               onChange={setDefaultModel}
-              placeholder="Use global default"
+              placeholder={t("form.useGlobalDefault")}
             />
             <p className="text-xs text-muted-foreground">
-              Overrides the global default for chats in this project.
+              {t("form.defaultModelHint")}
             </p>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border p-3">
             <div className="space-y-0.5">
-              <Label htmlFor="sandbox-internet">Internet Access</Label>
+              <Label htmlFor="sandbox-internet">{t("form.internet")}</Label>
               <p className="text-xs text-muted-foreground">
-                Allow sandbox to access the internet (download files, APIs, etc.)
+                {t("form.internetHint")}
               </p>
             </div>
             <Switch
@@ -167,10 +170,10 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : isEdit ? "Save" : "Create"}
+            {saving ? tc("saving") : isEdit ? tc("save") : tc("create")}
           </Button>
         </DialogFooter>
       </DialogContent>

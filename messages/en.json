@@ -166,6 +166,43 @@
       "confirmDescription": "This action cannot be undone. The chat and all its messages will be permanently deleted."
     }
   },
+  "projects": {
+    "title": "Projects",
+    "subtitle": "Organize your chats with custom instructions and models.",
+    "new": "New Project",
+    "create": "Create Project",
+    "empty": "No projects yet. Create one to organize your chats.",
+    "customPrompt": "Custom prompt",
+    "deleted": "Project deleted",
+    "deleteError": "Could not delete project. Please try again.",
+    "confirmDeleteTitle": "Delete “{name}”?",
+    "confirmDeleteDesc": "Chats will be kept but unlinked from this project.",
+    "selector": {
+      "allChats": "All Chats",
+      "fallback": "Project"
+    },
+    "created": "Project created",
+    "updated": "Project updated",
+    "createError": "Could not create project. Please try again.",
+    "updateError": "Could not update project. Please try again.",
+    "nameRequired": "Name is required",
+    "editTitle": "Edit Project",
+    "editDesc": "Update project settings.",
+    "createDesc": "Create a new project to organize your chats.",
+    "form": {
+      "name": "Name",
+      "namePlaceholder": "My Project",
+      "description": "Description",
+      "descriptionPlaceholder": "Brief description…",
+      "systemPrompt": "System Prompt",
+      "systemPromptPlaceholder": "Custom instructions for this project…",
+      "defaultModel": "Default Model",
+      "useGlobalDefault": "Use global default",
+      "defaultModelHint": "Overrides the global default for chats in this project.",
+      "internet": "Internet Access",
+      "internetHint": "Allow sandbox to access the internet (download files, APIs, etc.)"
+    }
+  },
   "settings": {
     "title": "Settings",
     "nav": {

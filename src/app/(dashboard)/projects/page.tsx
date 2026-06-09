@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useTranslations, useLocale } from "next-intl";
 import { Plus, Pencil, Trash2, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,8 @@ import {
 import { ProjectDialog, type Project } from "@/components/projects/project-dialog";
 
 export default function ProjectsPage() {
+  const t = useTranslations("projects");
+  const locale = useLocale();
   const [projects, setProjects] = useState<Project[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editProject, setEditProject] = useState<Project | null>(null);
@@ -47,14 +50,14 @@ export default function ProjectsPage() {
     try {
       const res = await fetch(`/api/projects/${project.id}`, { method: "DELETE" });
       if (!res.ok) {
-        toast.error("Could not delete project. Please try again.");
+        toast.error(t("deleteError"));
         return;
       }
-      toast.success("Project deleted");
+      toast.success(t("deleted"));
       setDeleteTarget(null);
       fetchProjects();
     } catch {
-      toast.error("Could not delete project. Please try again.");
+      toast.error(t("deleteError"));
     }
   }
 
@@ -64,7 +67,7 @@ export default function ProjectsPage() {
 
   function formatDate(d: string | null) {
     if (!d) return "";
-    return new Date(d).toLocaleDateString(undefined, {
+    return new Date(d).toLocaleDateString(locale, {
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -75,14 +78,14 @@ export default function ProjectsPage() {
     <div className="mx-auto max-w-4xl px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold">Projects</h1>
+          <h1 className="text-xl font-semibold">{t("title")}</h1>
           <p className="text-sm text-muted-foreground">
-            Organize your chats with custom instructions and models.
+            {t("subtitle")}
           </p>
         </div>
         <Button size="sm" onClick={handleCreate}>
           <Plus className="h-4 w-4" />
-          New Project
+          {t("new")}
         </Button>
       </div>
 
@@ -92,11 +95,11 @@ export default function ProjectsPage() {
             <MessageSquare className="h-6 w-6 text-muted-foreground" />
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            No projects yet. Create one to organize your chats.
+            {t("empty")}
           </p>
           <Button size="sm" variant="outline" onClick={handleCreate}>
             <Plus className="h-4 w-4" />
-            Create Project
+            {t("create")}
           </Button>
         </div>
       ) : (
@@ -125,7 +128,7 @@ export default function ProjectsPage() {
                       <span className="truncate max-w-[140px]">{project.defaultModel}</span>
                     )}
                     {project.systemPrompt && (
-                      <span>Custom prompt</span>
+                      <span>{t("customPrompt")}</span>
                     )}
                   </div>
                 </CardContent>
@@ -167,8 +170,8 @@ export default function ProjectsPage() {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
-        title={`Delete "${deleteTarget?.name}"?`}
-        description="Chats will be kept but unlinked from this project."
+        title={t("confirmDeleteTitle", { name: deleteTarget?.name ?? "" })}
+        description={t("confirmDeleteDesc")}
       />
     </div>
   );

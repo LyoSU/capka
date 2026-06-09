@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { FolderOpen, Plus, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ interface ProjectSelectorProps {
 }
 
 export function ProjectSelector({ value, onChange }: ProjectSelectorProps) {
+  const t = useTranslations("projects");
   const [projects, setProjects] = useState<Project[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -33,8 +35,8 @@ export function ProjectSelector({ value, onChange }: ProjectSelectorProps) {
   }, [fetchProjects]);
 
   const selectedName = value
-    ? projects.find((p) => p.id === value)?.name ?? "Project"
-    : "All Chats";
+    ? projects.find((p) => p.id === value)?.name ?? t("selector.fallback")
+    : t("selector.allChats");
 
   return (
     <>
@@ -48,7 +50,7 @@ export function ProjectSelector({ value, onChange }: ProjectSelectorProps) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuItem onClick={() => onChange(null)}>
-            All Chats
+            {t("selector.allChats")}
           </DropdownMenuItem>
           {projects.length > 0 && <DropdownMenuSeparator />}
           {projects.map((p) => (
@@ -59,7 +61,7 @@ export function ProjectSelector({ value, onChange }: ProjectSelectorProps) {
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setDialogOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
-            New Project
+            {t("new")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
