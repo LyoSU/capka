@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Shield, ShieldCheck, Eye, Loader2, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -21,12 +22,13 @@ type User = {
 };
 
 const roleConfig = {
-  admin: { label: "Admin", icon: ShieldCheck, variant: "default" as const },
-  user: { label: "User", icon: Shield, variant: "secondary" as const },
-  viewer: { label: "Viewer", icon: Eye, variant: "outline" as const },
+  admin: { icon: ShieldCheck, variant: "default" as const },
+  user: { icon: Shield, variant: "secondary" as const },
+  viewer: { icon: Eye, variant: "outline" as const },
 };
 
 export default function UsersPage() {
+  const t = useTranslations("settings.usersPage");
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
@@ -35,20 +37,18 @@ export default function UsersPage() {
   useEffect(() => {
     fetch("/api/admin/users")
       .then((r) => {
-        if (r.status === 403) throw new Error("Admin access required");
-        if (!r.ok) throw new Error("Failed to load users");
+        if (r.status === 403) throw new Error("forbidden");
+        if (!r.ok) throw new Error("load");
         return r.json();
       })
       .then(setUsers)
       .catch((e) => {
-        const msg = e.message === "Admin access required"
-          ? e.message
-          : "Could not load users. Please refresh the page.";
-        setError(msg);
-        toast.error(e.message);
+        const forbidden = e.message === "forbidden";
+        setError(forbidden ? t("adminRequired") : t("loadError"));
+        toast.error(forbidden ? t("adminRequired") : t("loadFailed"));
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [t]);
 
   const updateRole = async (userId: string, role: string) => {
     setUpdating(userId);
@@ -60,13 +60,13 @@ export default function UsersPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error || "Failed to update role");
+        toast.error(data.error || t("roleUpdateFailed"));
         return;
       }
       setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: data.role } : u)));
-      toast.success("Role updated");
+      toast.success(t("roleUpdated"));
     } catch {
-      toast.error("Failed to update role");
+      toast.error(t("roleUpdateFailed"));
     } finally {
       setUpdating(null);
     }
@@ -83,9 +83,9 @@ export default function UsersPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">Users</h2>
+        <h2 className="text-lg font-semibold">{t("title")}</h2>
         <p className="text-sm text-muted-foreground">
-          Manage user roles and permissions. Only admins can access this page.
+          {t("subtitle")}
         </p>
       </div>
 
@@ -97,9 +97,9 @@ export default function UsersPage() {
 
       <div className="rounded-lg border">
         <div className="grid grid-cols-[1fr_1fr_auto] gap-4 border-b px-4 py-2.5 text-xs font-medium text-muted-foreground">
-          <span>User</span>
-          <span>Email</span>
-          <span>Role</span>
+          <span>{t("colUser")}</span>
+          <span>{t("colEmail")}</span>
+          <span>{t("colRole")}</span>
         </div>
         {users.map((user) => {
           const cfg = roleConfig[user.role as keyof typeof roleConfig] || roleConfig.user;
@@ -112,7 +112,7 @@ export default function UsersPage() {
                 <span className="text-sm font-medium">{user.name}</span>
                 {user.role === "admin" && (
                   <Badge variant={cfg.variant} className="text-[10px] px-1.5 py-0">
-                    Admin
+                    {t("roles.admin")}
                   </Badge>
                 )}
               </div>
@@ -126,9 +126,9 @@ export default function UsersPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="user">User</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
+                  <SelectItem value="admin">{t("roles.admin")}</SelectItem>
+                  <SelectItem value="user">{t("roles.user")}</SelectItem>
+                  <SelectItem value="viewer">{t("roles.viewer")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -137,7 +137,7 @@ export default function UsersPage() {
         {users.length === 0 && (
           <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
             <Users className="h-5 w-5 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">No users found</p>
+            <p className="text-sm text-muted-foreground">{t("empty")}</p>
           </div>
         )}
       </div>

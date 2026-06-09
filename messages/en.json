@@ -211,6 +211,24 @@
       "integrations": "Integrations",
       "memory": "Memory",
       "users": "Users"
+    },
+    "usersPage": {
+      "title": "Users",
+      "subtitle": "Manage user roles and permissions. Only admins can access this page.",
+      "colUser": "User",
+      "colEmail": "Email",
+      "colRole": "Role",
+      "empty": "No users found",
+      "adminRequired": "Admin access required",
+      "loadFailed": "Failed to load users",
+      "loadError": "Could not load users. Please refresh the page.",
+      "roleUpdated": "Role updated",
+      "roleUpdateFailed": "Failed to update role",
+      "roles": {
+        "admin": "Admin",
+        "user": "User",
+        "viewer": "Viewer"
+      }
     }
   },
   "auth": {
