@@ -85,7 +85,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   const [filesOpen, setFilesOpen] = useState(false);
 
   // Progress steps for the panel = the latest assistant message's tool parts.
-  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  const lastAssistant = messages.findLast((m) => m.role === "assistant");
   const steps: ProgressStep[] = (lastAssistant?.parts ?? [])
     .filter((p): p is { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown } => p.type === "dynamic-tool")
     .map((p) => ({ toolName: p.toolName, state: p.state, input: p.input }));

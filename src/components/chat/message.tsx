@@ -168,7 +168,7 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
   // Default — clean readable text
   return (
     <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-36 overflow-y-auto">
-      {text.slice(0, 2000)}{text.length > 2000 ? "..." : ""}
+      {text.slice(0, 2000)}{text.length > 2000 ? "…" : ""}
     </div>
   );
 }
@@ -430,7 +430,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
       <div className="group/msg flex justify-end px-4 md:px-6 py-4">
         <div className="max-w-[75%] lg:max-w-[65%]">
           <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
-            {text || "..."}
+            {text || "…"}
           </div>
           <div className="mt-1 flex justify-end">
             <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
@@ -478,7 +478,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
           })
         ) : isStreaming || metadata?.taskStatus === "failed" ? null : (
           <span className="text-muted-foreground text-sm">
-            {metadata?.taskStatus === "cancelled" ? t("cancelled") : "..."}
+            {metadata?.taskStatus === "cancelled" ? t("cancelled") : "…"}
           </span>
         )}
         {metadata?.taskStatus === "failed" && (

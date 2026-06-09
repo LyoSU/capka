@@ -10,9 +10,21 @@ import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { chatRequestSchema } from "@/lib/chat/contracts";
+import { take } from "@/lib/rate-limit";
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
+
+  // Cheap per-user flood guard (single-instance, in-memory). The client maps the
+  // 429 to a friendly, localized message.
+  const rl = take(`chat:${userId}`);
+  if (!rl.ok) {
+    return Response.json(
+      { error: "Too many messages — please slow down." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } },
+    );
+  }
+
   const body = chatRequestSchema.parse(await req.json());
   const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
   const chatId = requestChatId || nanoid();

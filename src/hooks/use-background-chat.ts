@@ -318,6 +318,7 @@ export function useBackgroundChat({
         });
 
         if (!res.ok) {
+          if (res.status === 429) throw new Error(t("rateLimited"));
           const err = await res.json().catch(() => ({ error: t("requestFailed") }));
           throw new Error(err.error || t("requestFailed"));
         }

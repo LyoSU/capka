@@ -7,6 +7,7 @@ import { getSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
 import { toUIMessages } from "@/lib/chat/presenter";
+import { take } from "@/lib/rate-limit";
 import type { TaskPayload } from "@/lib/tasks/runner";
 
 let _bot: Bot | null = null;
@@ -26,7 +27,13 @@ export async function getBot(): Promise<Bot | null> {
   });
 
   _bot.command("link", async (ctx) => {
-    const code = ctx.match?.trim();
+    // Throttle guessing attempts per Telegram user (defense-in-depth on top of
+    // the large code space).
+    if (!take(`tglink:${ctx.from!.id}`, 5).ok) {
+      await ctx.reply("Too many attempts. Please wait a minute and try again.");
+      return;
+    }
+    const code = ctx.match?.trim().toUpperCase();
     if (!code) {
       await ctx.reply("Usage: /link CODE");
       return;
@@ -82,6 +89,12 @@ export async function getBot(): Promise<Bot | null> {
     const link = await findLink(ctx.from!.id);
     if (!link) {
       await ctx.reply("Account not linked. Use /link CODE");
+      return;
+    }
+
+    // Same per-user flood guard as the web enqueue path.
+    if (!take(`chat:${link.userId}`).ok) {
+      await ctx.reply("You're sending messages too fast — please wait a moment.");
       return;
     }
 

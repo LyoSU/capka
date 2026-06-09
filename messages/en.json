@@ -274,7 +274,8 @@
       "loadFailed": "Failed to load messages.",
       "uploadFailed": "Upload failed: {files} — message not sent.",
       "processFiles": "Process these files",
-      "requestFailed": "Request failed."
+      "requestFailed": "Request failed.",
+      "rateLimited": "Too many messages — please wait a moment."
     },
     "clearSearch": "Clear search"
   },
