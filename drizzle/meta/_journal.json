@@ -43,6 +43,13 @@
       "when": 1781007512030,
       "tag": "0005_add_user_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781035049900,
+      "tag": "0006_telegram_active_chat",
+      "breakpoints": true
     }
   ]
 }

@@ -16,33 +16,72 @@ type Cb = (data: unknown) => void;
 
 const NOTIFY_LIMIT = 7500;
 
+const RECONNECT_MAX_MS = 30_000;
+
 class Realtime {
   private sub: Client | null = null;
   private pub: Client | null = null;
   private subConnecting: Promise<void> | null = null;
   private chans = new Map<string, Set<Cb>>();
+  private reconnectDelay = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private buildSubClient(): Client {
+    const client = new Client({ connectionString: DATABASE_URL });
+    client.on("notification", (m) => {
+      if (!m.channel || !m.payload) return;
+      const cbs = this.chans.get(m.channel);
+      if (!cbs) return;
+      let data: unknown;
+      try {
+        data = JSON.parse(m.payload);
+      } catch {
+        return;
+      }
+      cbs.forEach((cb) => cb(data));
+    });
+    // Both `error` (reset/refused) and `end` (silent server-side close) drop the
+    // LISTEN feed. Without handling `end`, every SSE stream and the worker's
+    // task_enqueued channel goes quiet after a blip — the #1 "everything froze"
+    // report. Re-establish with backoff and re-LISTEN all live channels.
+    client.on("error", (err) => {
+      console.error("[realtime] LISTEN connection error, will reconnect:", err);
+      this.handleSubDrop(client);
+    });
+    client.on("end", () => {
+      console.warn("[realtime] LISTEN connection ended, will reconnect");
+      this.handleSubDrop(client);
+    });
+    return client;
+  }
+
+  private handleSubDrop(dropped: Client): void {
+    // Ignore drops from a stale client we've already replaced.
+    if (this.sub && this.sub !== dropped) return;
+    this.sub = null;
+    // Nothing to keep alive if no one is listening.
+    if (this.chans.size > 0) this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer || this.subConnecting) return;
+    this.reconnectDelay = Math.min(this.reconnectDelay ? this.reconnectDelay * 2 : 1_000, RECONNECT_MAX_MS);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.ensureSub()
+        .then(() => { this.reconnectDelay = 0; })
+        .catch((err) => {
+          console.error("[realtime] reconnect failed, retrying:", err);
+          this.scheduleReconnect();
+        });
+    }, this.reconnectDelay);
+  }
 
   private async ensureSub(): Promise<void> {
     if (this.sub) return;
     if (this.subConnecting) return this.subConnecting;
     this.subConnecting = (async () => {
-      const client = new Client({ connectionString: DATABASE_URL });
-      client.on("notification", (m) => {
-        if (!m.channel || !m.payload) return;
-        const cbs = this.chans.get(m.channel);
-        if (!cbs) return;
-        let data: unknown;
-        try {
-          data = JSON.parse(m.payload);
-        } catch {
-          return;
-        }
-        cbs.forEach((cb) => cb(data));
-      });
-      client.on("error", (err) => {
-        console.error("[realtime] LISTEN connection error, will reconnect:", err);
-        this.sub = null;
-      });
+      const client = this.buildSubClient();
       await client.connect();
       this.sub = client;
       // (Re-)subscribe to every channel we still have listeners for.
@@ -74,12 +113,17 @@ class Realtime {
 
   async publish(channel: string, data: unknown): Promise<void> {
     if (!this.pub) {
-      this.pub = new Client({ connectionString: DATABASE_URL });
-      this.pub.on("error", (err) => {
+      const client = new Client({ connectionString: DATABASE_URL });
+      // Drop the handle on error/end so the next publish lazily reconnects.
+      client.on("error", (err) => {
         console.error("[realtime] NOTIFY connection error:", err);
-        this.pub = null;
+        if (this.pub === client) this.pub = null;
       });
-      await this.pub.connect();
+      client.on("end", () => {
+        if (this.pub === client) this.pub = null;
+      });
+      await client.connect();
+      this.pub = client;
     }
     let payload = JSON.stringify(data ?? {});
     if (Buffer.byteLength(payload) > NOTIFY_LIMIT) {
