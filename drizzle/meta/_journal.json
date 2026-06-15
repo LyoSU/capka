@@ -50,6 +50,13 @@
       "when": 1781035049900,
       "tag": "0006_telegram_active_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781535900686,
+      "tag": "0007_simple_cerise",
+      "breakpoints": true
     }
   ]
 }

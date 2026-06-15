@@ -207,3 +207,35 @@ export const memories = pgTable("memories", {
   index("idx_memories_user_id").on(table.userId),
   index("idx_memories_project_id").on(table.projectId),
 ]);
+
+// Anthropic-compatible Agent Skills. Scope tiers: 'system' (whole deployment),
+// 'user' (one user, all projects), 'project' (one project). Precedence on name
+// collision is resolved in the service layer (project > user > system).
+export const skills = pgTable("skills", {
+  id: text("id").primaryKey(),
+  scope: text("scope").notNull(), // 'system' | 'user' | 'project'
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  body: text("body").notNull(),
+  frontmatter: jsonb("frontmatter").$type<Record<string, unknown>>().default({}),
+  source: text("source").notNull().default("manual"), // 'manual' | later 'catalog:<id>'
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_skills_user_id").on(table.userId),
+  index("idx_skills_project_id").on(table.projectId),
+  index("idx_skills_scope").on(table.scope),
+]);
+
+// Bundled files (scripts/, references) — base64 content. SKILL.md body lives in
+// skills.body; this table holds everything else, materialized into the sandbox
+// on demand. Postgres is the source of truth (no separate file store).
+export const skillFiles = pgTable("skill_files", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  content: text("content").notNull(), // base64
+}, (table) => [index("idx_skill_files_skill_id").on(table.skillId)]);
