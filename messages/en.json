@@ -520,8 +520,12 @@
       "add": "Add connector",
       "save": "Save",
       "cancel": "Cancel",
-      "namePlaceholder": "Name (e.g. notion)",
+      "namePlaceholder": "Name (e.g. Notion)",
       "tokenPlaceholder": "Access token (optional)",
+      "nameHint": "Will be saved as: {slug}",
+      "tokenHint": "If the service needs an access key, paste it here — it’s stored encrypted.",
+      "test": "Test",
+      "testOk": "Works · {count} tools found",
       "added": "Connector added.",
       "addFailed": "Couldn’t add the connector.",
       "toggleFailed": "Couldn’t update the connector.",
@@ -530,6 +534,12 @@
       "empty": "No connectors yet.",
       "toggleAria": "Toggle {name}",
       "delete": "Remove connector",
+      "health": {
+        "checking": "Checking connection…",
+        "ok": "Connected · {count} tools",
+        "unauthorized": "Token rejected — check the access key",
+        "unreachable": "Couldn’t connect — check the address"
+      },
       "scope": {
         "system": "Shared",
         "user": "Personal",

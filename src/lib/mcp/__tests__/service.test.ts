@@ -1,6 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { dedupeServersByPrecedence } from "../service";
+import { dedupeServersByPrecedence, slugifyName } from "../service";
 import type { McpServerInfo } from "../types";
+
+describe("slugifyName", () => {
+  it("normalizes human-typed names to a safe namespace", () => {
+    expect(slugifyName("Grok")).toBe("grok");
+    expect(slugifyName("My Notion")).toBe("my-notion");
+    expect(slugifyName("GitHub MCP!")).toBe("github-mcp");
+    expect(slugifyName("  spaced  out  ")).toBe("spaced-out");
+  });
+  it("returns empty for input with no alphanumerics", () => {
+    expect(slugifyName("!!!")).toBe("");
+  });
+});
 
 const s = (o: Partial<McpServerInfo>): McpServerInfo => ({
   id: o.name ?? "id", scope: "system", name: "x", transport: "http",

@@ -5,10 +5,22 @@ import { mcpServers } from "@/lib/db/schema";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
+import { ValidationError } from "@/lib/errors";
 import type { McpScope, McpSecrets, McpServerConfig, McpServerInfo } from "./types";
 
 const SCOPE_RANK: Record<McpScope, number> = { system: 0, user: 1, project: 2 };
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * The connector name doubles as the tool namespace (`mcp__<name>__<tool>`), so it
+ * must be slug-safe. Rather than reject a human-typed name ("My Notion", "Grok"),
+ * normalize it: lowercase, non-alphanumeric runs → single hyphen, trimmed, capped.
+ * "My Notion" → "my-notion", "Grok" → "grok". Empty result (e.g. only symbols) is
+ * the only invalid case and surfaces as a friendly 400.
+ */
+export function slugifyName(raw: string): string {
+  return raw.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+}
 
 function toInfo(r: typeof mcpServers.$inferSelect): McpServerInfo {
   return { id: r.id, scope: r.scope as McpScope, name: r.name, transport: r.transport as McpServerInfo["transport"], url: r.url, enabled: r.enabled };
@@ -86,13 +98,19 @@ export interface UpsertServerInput {
 }
 
 export async function upsertServer(input: UpsertServerInput): Promise<string> {
-  if (!NAME_RE.test(input.name)) throw new Error("Invalid connector name");
-  await assertSafeUrl(input.url, await getBlockPrivateProviderUrls());
+  const name = slugifyName(input.name);
+  if (!NAME_RE.test(name)) throw new ValidationError("Use letters or numbers in the connector name.");
+  try {
+    await assertSafeUrl(input.url, await getBlockPrivateProviderUrls());
+  } catch (e) {
+    // assertSafeUrl already produces friendly, non-jargon messages — surface as 400.
+    throw new ValidationError(e instanceof Error ? e.message : "That URL can't be used.");
+  }
   const key = await getMasterKey();
   const id = input.id ?? nanoid();
   const values = {
     id, scope: input.scope, userId: input.userId, projectId: input.projectId,
-    name: input.name, transport: "http" as const, url: input.url,
+    name, transport: "http" as const, url: input.url,
     secrets: input.secrets ? encrypt(JSON.stringify(input.secrets), key) : null,
     updatedAt: new Date(),
   };
