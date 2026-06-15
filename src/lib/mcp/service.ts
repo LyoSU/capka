@@ -96,6 +96,7 @@ export interface UpsertServerInput {
   url: string;
   secrets?: McpSecrets;
   authKind?: McpAuthKind;
+  source?: string; // 'manual' | 'catalog:<installId>'
 }
 
 export async function upsertServer(input: UpsertServerInput): Promise<string> {
@@ -114,6 +115,7 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
     name, transport: "http" as const, url: input.url,
     secrets: input.secrets ? encrypt(JSON.stringify(input.secrets), key) : null,
     ...(input.authKind ? { authKind: input.authKind } : {}),
+    ...(input.source ? { source: input.source } : {}),
     updatedAt: new Date(),
   };
   const existing = input.id
