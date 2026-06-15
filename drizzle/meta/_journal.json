@@ -78,6 +78,13 @@
       "when": 1781544089332,
       "tag": "0010_red_unus",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781544753935,
+      "tag": "0011_lethal_argent",
+      "breakpoints": true
     }
   ]
 }

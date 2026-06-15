@@ -323,3 +323,35 @@ export const pluginInstalls = pgTable("plugin_installs", {
   installedBy: text("installed_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [index("idx_plugin_installs_marketplace").on(table.marketplaceId)]);
+
+// Unified permission policy over skills + connectors. Default (no row) = allow.
+// G1 enforces allow/deny at tool-assembly; 'ask' is stored for the future gate.
+export const capabilityPolicies = pgTable("capability_policies", {
+  id: text("id").primaryKey(),
+  scope: text("scope").notNull().default("system"), // 'system' | 'user' | 'project'
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  capabilityType: text("capability_type").notNull(), // 'skill' | 'connector'
+  capabilityKey: text("capability_key").notNull(), // skill name / connector name
+  effect: text("effect").notNull(), // 'allow' | 'deny' | 'ask'
+  createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_capability_policies_type").on(table.capabilityType),
+  index("idx_capability_policies_scope").on(table.scope),
+]);
+
+// Append-only audit trail of governance-relevant actions.
+export const auditLog = pgTable("audit_log", {
+  id: text("id").primaryKey(),
+  actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+  action: text("action").notNull(),
+  targetType: text("target_type"),
+  targetKey: text("target_key"),
+  detail: jsonb("detail").$type<Record<string, unknown>>().default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_audit_log_created").on(table.createdAt),
+  index("idx_audit_log_action").on(table.action),
+]);
