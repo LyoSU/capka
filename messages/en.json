@@ -327,7 +327,8 @@
       "users": "Users",
       "skills": "Skills",
       "connectors": "Connectors",
-      "marketplace": "Marketplace"
+      "marketplace": "Marketplace",
+      "permissions": "Permissions"
     },
     "usersPage": {
       "title": "Users",
@@ -582,6 +583,24 @@
       "uninstalled": "Uninstalled.",
       "uninstallFailed": "Couldn’t uninstall.",
       "unsupportedSource": "This plugin’s source isn’t installable yet."
+    },
+    "permissions": {
+      "title": "Permissions",
+      "subtitle": "Control what the assistant may use, for everyone in the organization.",
+      "adminOnly": "Only admins can manage permissions.",
+      "empty": "Nothing to govern yet. Add skills or connectors first.",
+      "hint": "Deny hides a skill or connector from the assistant for everyone. Allow is the default.",
+      "skills": "Skills",
+      "connectors": "Connectors",
+      "activity": "Activity",
+      "effect": { "allow": "Allow", "ask": "Ask", "deny": "Deny" },
+      "askSoon": "Ask (human-in-the-loop) is coming soon — behaves as Allow for now.",
+      "saveFailed": "Couldn’t save that change.",
+      "actions": {
+        "plugin": { "install": "Installed plugin", "uninstall": "Removed plugin" },
+        "connector": { "add": "Added connector", "remove": "Removed connector", "enable": "Enabled connector", "disable": "Disabled connector" },
+        "policy": { "set": "Changed permission", "clear": "Reset permission" }
+      }
     }
   },
   "setup": {
