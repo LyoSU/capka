@@ -256,6 +256,7 @@ export const mcpServers = pgTable("mcp_servers", {
   command: text("command"), // stdio (B2)
   args: jsonb("args").$type<string[]>().default([]),
   secrets: text("secrets"), // AES-GCM ciphertext of { headers?, env? }
+  authKind: text("auth_kind").notNull().default("token"), // 'token' | 'oauth'
   enabled: boolean("enabled").notNull().default(true),
   source: text("source").notNull().default("manual"), // 'manual' | 'catalog:<id>'
   createdAt: timestamp("created_at").defaultNow(),
@@ -265,3 +266,35 @@ export const mcpServers = pgTable("mcp_servers", {
   index("idx_mcp_servers_project_id").on(table.projectId),
   index("idx_mcp_servers_scope").on(table.scope),
 ]);
+
+// OAuth DCR / pre-registered client, per SERVER (shared by all users — the client
+// is registered with that server's authorization server, not per person).
+export const mcpOauthClients = pgTable("mcp_oauth_clients", {
+  serverId: text("server_id").primaryKey().references(() => mcpServers.id, { onDelete: "cascade" }),
+  clientInfo: text("client_info").notNull(), // AES-GCM JSON: OAuthClientInformationFull
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// The per-USER OAuth credential for a server (each employee signs in with their
+// own account, even on a shared `system` connector).
+export const mcpOauthTokens = pgTable("mcp_oauth_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  serverId: text("server_id").notNull().references(() => mcpServers.id, { onDelete: "cascade" }),
+  tokens: text("tokens").notNull(), // AES-GCM JSON: OAuthTokens
+  account: text("account"), // optional display label
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_mcp_oauth_tokens_user").on(table.userId),
+  index("idx_mcp_oauth_tokens_server").on(table.serverId),
+]);
+
+// Short-lived in-flight authorization (one redirect round-trip). Single-use + TTL.
+export const mcpOauthStates = pgTable("mcp_oauth_states", {
+  state: text("state").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  serverId: text("server_id").notNull().references(() => mcpServers.id, { onDelete: "cascade" }),
+  codeVerifier: text("code_verifier").notNull(), // AES-GCM PKCE verifier
+  createdAt: timestamp("created_at").defaultNow(),
+});

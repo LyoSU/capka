@@ -64,6 +64,13 @@
       "when": 1781538079708,
       "tag": "0008_lazy_wolf_cub",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781540086945,
+      "tag": "0009_black_beyonder",
+      "breakpoints": true
     }
   ]
 }
