@@ -109,6 +109,14 @@ Materialization happens **inside the `skill` tool**, not at session start. Most 
 
 Adding skills to the runner means the in-process worker must be reloaded: **restart the platform container** after editing runner/skills/sandbox code (HMR does not reload the worker loop).
 
+## Forward-compat seams (for the catalog — see `2026-06-15-extension-platform-vision.md`)
+
+A lays these now so B/C/D need no migration:
+- `skills.source` vocabulary grows to `'manual' | 'catalog:<catalogItemId>'` when the Catalog Service lands — the column exists now.
+- `skills.scope = 'system'` already models "admin installed for the whole org" — the store's default install target.
+- Define the **unified secret/config descriptor** type `{ name, description, isRequired, isSecret, default }` (the normalization of MCP `environmentVariables` / Glama / Smithery / Docker) as a shared type now, even though pure-markdown skills don't use it — B/C reuse it verbatim.
+- Parser stays **lenient & total**: unknown frontmatter is preserved in `frontmatter` jsonb, never a hard failure — the same discipline the catalog needs for unknown plugin components.
+
 ## Out of scope (future sub-projects)
 
 - **B** — MCP client: connect external MCP servers, merge their tools into the loop; security model for stdio-in-sandbox vs remote-only.
