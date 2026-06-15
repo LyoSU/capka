@@ -1,4 +1,5 @@
 import type { Tool } from "ai";
+import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { connectMcpServer, disconnectMcp, type ConnectedMcp } from "./client";
 import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
@@ -16,12 +17,14 @@ export async function loadMcpTools(opts: { userId: string; projectId: string | n
   const configs = (await listEnabledServerConfigs(opts.userId, opts.projectId)).sort((a, b) =>
     a.name.localeCompare(b.name),
   );
+  // Same SSRF policy the connector URL was validated against at upsert time.
+  const blockPrivate = await getBlockPrivateProviderUrls();
   const connected: ConnectedMcp[] = [];
   const tools: Record<string, Tool> = {};
 
   for (let i = 0; i < configs.length; i += MAX_CONCURRENT) {
     const batch = configs.slice(i, i + MAX_CONCURRENT);
-    const settled = await Promise.allSettled(batch.map((c) => connectMcpServer(c)));
+    const settled = await Promise.allSettled(batch.map((c) => connectMcpServer(c, { blockPrivate })));
     settled.forEach((r, idx) => {
       const cfg = batch[idx];
       if (r.status === "rejected") {

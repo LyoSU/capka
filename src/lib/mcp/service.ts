@@ -51,13 +51,27 @@ export async function listEnabledServerConfigs(userId: string, projectId?: strin
   return out;
 }
 
-/** For the UI/API — no secrets. */
+/**
+ * For the UI/API — no secrets. Scoped exactly like listEnabledServerConfigs so a
+ * caller can never see another scope's rows: own `user` connectors (projectId
+ * null) + org `system` connectors, plus the named project's connectors ONLY when
+ * a projectId is given. NOTE: callers passing a projectId from the request MUST
+ * first assert the user belongs to that project (defense-in-depth; the query no
+ * longer leaks project rows by id alone).
+ */
 export async function listServers(userId: string, projectId?: string | null): Promise<McpServerInfo[]> {
   const rows = await db
     .select().from(mcpServers)
     .where(projectId
-      ? or(eq(mcpServers.userId, userId), eq(mcpServers.scope, "system"), eq(mcpServers.projectId, projectId))
-      : or(eq(mcpServers.userId, userId), eq(mcpServers.scope, "system")));
+      ? or(
+          and(eq(mcpServers.userId, userId), isNull(mcpServers.projectId)),
+          eq(mcpServers.scope, "system"),
+          and(eq(mcpServers.scope, "project"), eq(mcpServers.projectId, projectId)),
+        )
+      : or(
+          and(eq(mcpServers.userId, userId), isNull(mcpServers.projectId)),
+          eq(mcpServers.scope, "system"),
+        ));
   return rows.map(toInfo);
 }
 
