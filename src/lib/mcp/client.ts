@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import { assertSafeUrl } from "@/lib/net/ssrf";
+import { assertSafeUrl, createGuardedFetch } from "@/lib/net/ssrf";
 import type { McpServerConfig } from "./types";
 
 export interface ConnectedMcp {
@@ -39,32 +39,11 @@ export async function connectMcpServer(
   const headers = cfg.secrets?.headers ?? {};
 
   // SSRF: the URL passed assertSafeUrl at upsert, but DNS can change (rebind) and
-  // the server can 3xx-bounce us to an internal address. Re-check the URL here
-  // and re-validate every redirect hop before following it — mirrors the
-  // `redirect: "manual"` guard in list-models.ts. Loops are bounded.
+  // the server can 3xx-bounce us to an internal address. Fail fast here, then let
+  // the guarded fetch re-validate every request + redirect hop. Static auth headers
+  // are injected; each request is bounded so a stalled host can't hang the run.
   await assertSafeUrl(cfg.url, blockPrivate);
-
-  const MAX_REDIRECTS = 5;
-  const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number): Promise<Response> => {
-    const h = new Headers(init?.headers);
-    for (const [k, v] of Object.entries(headers)) h.set(k, v);
-    // Bound each underlying HTTP request too, so a stalled TCP/TLS read aborts
-    // rather than waiting on the SDK's own (longer) defaults.
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const signal = init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
-    const res = await fetch(input, { ...init, headers: h, signal, redirect: "manual" });
-    if (res.status >= 300 && res.status < 400) {
-      const loc = res.headers.get("location");
-      if (!loc) return res;
-      if (depth >= MAX_REDIRECTS) throw new Error("Too many redirects");
-      const base = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      const next = new URL(loc, base);
-      await assertSafeUrl(next.toString(), blockPrivate); // re-check each hop
-      return doFetch(next, init, depth + 1);
-    }
-    return res;
-  };
-  const authedFetch: typeof fetch = (input, init) => doFetch(input, init, 0);
+  const authedFetch = createGuardedFetch({ blockPrivate, timeoutMs, headers });
 
   const client = new Client({ name: "unclaw", version: "0.1.0" });
   // OAuth connectors attach `authProvider` (per-user tokens + auto-refresh); token

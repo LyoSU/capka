@@ -29,6 +29,41 @@ export function isBlockedAddress(ip: string, blockPrivate: boolean): boolean {
   return false;
 }
 
+/**
+ * A `fetch` that is safe to hand to untrusted-URL machinery (MCP transport, OAuth
+ * discovery/token requests). It validates the target of EVERY request — and every
+ * 3xx redirect hop — through `assertSafeUrl`, with `redirect: "manual"` so a public
+ * host can't bounce us to an internal address (cloud metadata) after the check.
+ * Optionally injects fixed headers and bounds each request with a timeout.
+ */
+export function createGuardedFetch(opts: {
+  blockPrivate: boolean;
+  timeoutMs?: number;
+  headers?: Record<string, string>;
+}): typeof fetch {
+  const MAX_REDIRECTS = 5;
+  const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number): Promise<Response> => {
+    const reqUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    await assertSafeUrl(reqUrl, opts.blockPrivate);
+    const h = new Headers(init?.headers);
+    if (opts.headers) for (const [k, v] of Object.entries(opts.headers)) h.set(k, v);
+    let signal = init?.signal ?? undefined;
+    if (opts.timeoutMs) {
+      const ts = AbortSignal.timeout(opts.timeoutMs);
+      signal = signal ? AbortSignal.any([signal, ts]) : ts;
+    }
+    const res = await fetch(input, { ...init, headers: h, signal, redirect: "manual" });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) return res;
+      if (depth >= MAX_REDIRECTS) throw new Error("Too many redirects");
+      return doFetch(new URL(loc, reqUrl), init, depth + 1);
+    }
+    return res;
+  };
+  return ((input, init) => doFetch(input, init, 0)) as typeof fetch;
+}
+
 export async function assertSafeUrl(raw: string, blockPrivate: boolean): Promise<void> {
   let u: URL;
   try {

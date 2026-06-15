@@ -2,6 +2,8 @@ import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { requireSession } from "@/lib/auth";
 import { getAccessibleServer } from "@/lib/mcp/service";
 import { McpOAuthProvider } from "@/lib/mcp/oauth/provider";
+import { createGuardedFetch } from "@/lib/net/ssrf";
+import { getBlockPrivateProviderUrls } from "@/lib/settings";
 
 /** Begin the OAuth sign-in for a connector: discover + (DCR) + PKCE, then 302 the
  *  user's browser to the provider's authorization page. On any failure we bounce
@@ -21,7 +23,8 @@ export async function GET(req: Request) {
     if (!server || !server.url || server.authKind !== "oauth") return settings("?error=oauth");
 
     const provider = new McpOAuthProvider(userId, server.id, "flow");
-    const result = await auth(provider, { serverUrl: server.url });
+    const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls() });
+    const result = await auth(provider, { serverUrl: server.url, fetchFn });
     if (result === "REDIRECT" && provider.capturedAuthUrl) {
       return Response.redirect(provider.capturedAuthUrl.toString(), 302);
     }
