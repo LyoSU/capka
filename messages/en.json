@@ -325,7 +325,8 @@
       "memory": "Memory",
       "usage": "Usage",
       "users": "Users",
-      "skills": "Skills"
+      "skills": "Skills",
+      "connectors": "Connectors"
     },
     "usersPage": {
       "title": "Users",
@@ -512,6 +513,28 @@
       "addHint": "Upload a .zip containing SKILL.md (and optional scripts). Available to everyone in the organization.",
       "addSuccess": "Added “{name}”.",
       "addFailed": "Couldn’t add the skill."
+    },
+    "connectors": {
+      "title": "Connectors",
+      "subtitle": "Connect external services (Notion, Linear, GitHub…) your assistant can use.",
+      "add": "Add connector",
+      "save": "Save",
+      "cancel": "Cancel",
+      "namePlaceholder": "Name (e.g. notion)",
+      "tokenPlaceholder": "Access token (optional)",
+      "added": "Connector added.",
+      "addFailed": "Couldn’t add the connector.",
+      "toggleFailed": "Couldn’t update the connector.",
+      "deleted": "Connector removed.",
+      "deleteFailed": "Couldn’t remove the connector.",
+      "empty": "No connectors yet.",
+      "toggleAria": "Toggle {name}",
+      "delete": "Remove connector",
+      "scope": {
+        "system": "Shared",
+        "user": "Personal",
+        "project": "Project"
+      }
     }
   },
   "setup": {
