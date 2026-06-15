@@ -57,6 +57,13 @@
       "when": 1781535900686,
       "tag": "0007_simple_cerise",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781538079708,
+      "tag": "0008_lazy_wolf_cub",
+      "breakpoints": true
     }
   ]
 }

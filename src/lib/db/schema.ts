@@ -239,3 +239,29 @@ export const skillFiles = pgTable("skill_files", {
   path: text("path").notNull(),
   content: text("content").notNull(), // base64
 }, (table) => [index("idx_skill_files_skill_id").on(table.skillId)]);
+
+// Remote MCP connectors (sub-project B). Scope mirrors skills: system=org-shared
+// credential, user=personal, project=project-scoped. The credential lives on the
+// row, so its reach equals the row's scope. `secrets` is AES-GCM ciphertext of
+// { headers?, env? } (env reserved for stdio/B2). `transport` stores http|sse|stdio
+// but the service serves only 'http' in B1.
+export const mcpServers = pgTable("mcp_servers", {
+  id: text("id").primaryKey(),
+  scope: text("scope").notNull(), // 'system' | 'user' | 'project'
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(), // namespace ^[a-z0-9]+(-[a-z0-9]+)*$
+  transport: text("transport").notNull().default("http"), // 'http' | 'sse' | 'stdio'
+  url: text("url"),
+  command: text("command"), // stdio (B2)
+  args: jsonb("args").$type<string[]>().default([]),
+  secrets: text("secrets"), // AES-GCM ciphertext of { headers?, env? }
+  enabled: boolean("enabled").notNull().default(true),
+  source: text("source").notNull().default("manual"), // 'manual' | 'catalog:<id>'
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_mcp_servers_user_id").on(table.userId),
+  index("idx_mcp_servers_project_id").on(table.projectId),
+  index("idx_mcp_servers_scope").on(table.scope),
+]);
