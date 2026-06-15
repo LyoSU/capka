@@ -1,5 +1,7 @@
 import { apiHandler, requireSession } from "@/lib/auth";
 import { listServers, upsertServer, setEnabled, deleteServer } from "@/lib/mcp/service";
+import { detectAuthKind } from "@/lib/mcp/oauth/detect";
+import { saveOAuthClientFromInput } from "@/lib/mcp/oauth/admin-client";
 import { db } from "@/lib/db";
 import { mcpServers } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -11,13 +13,16 @@ export const GET = apiHandler(async () => {
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
-  const { name, url, headers } = await req.json();
+  const { name, url, headers, oauthClientId, oauthClientSecret } = await req.json();
   if (typeof name !== "string" || typeof url !== "string") {
     return Response.json({ error: "name and url required" }, { status: 400 });
   }
   const secrets = headers && typeof headers === "object" ? { headers } : undefined;
-  const id = await upsertServer({ scope: "user", userId, projectId: null, name, url, secrets });
-  return Response.json({ ok: true, id });
+  // A pre-registered client (advanced) forces OAuth; otherwise auto-detect.
+  const authKind = oauthClientId ? "oauth" : await detectAuthKind(url);
+  const id = await upsertServer({ scope: "user", userId, projectId: null, name, url, secrets, authKind });
+  await saveOAuthClientFromInput(id, oauthClientId, oauthClientSecret);
+  return Response.json({ ok: true, id, authKind });
 });
 
 export const PATCH = apiHandler(async (req: Request) => {

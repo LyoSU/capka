@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import type { McpServerConfig } from "./types";
 
@@ -31,7 +32,7 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
  *  the run; on any failure the half-open transport is closed before rethrowing. */
 export async function connectMcpServer(
   cfg: McpServerConfig,
-  opts: { timeoutMs?: number; blockPrivate?: boolean } = {},
+  opts: { timeoutMs?: number; blockPrivate?: boolean; authProvider?: OAuthClientProvider } = {},
 ): Promise<ConnectedMcp> {
   const timeoutMs = opts.timeoutMs ?? CONNECT_TIMEOUT_MS;
   const blockPrivate = opts.blockPrivate ?? false;
@@ -66,7 +67,12 @@ export async function connectMcpServer(
   const authedFetch: typeof fetch = (input, init) => doFetch(input, init, 0);
 
   const client = new Client({ name: "unclaw", version: "0.1.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(cfg.url), { fetch: authedFetch });
+  // OAuth connectors attach `authProvider` (per-user tokens + auto-refresh); token
+  // connectors rely on the static headers injected by authedFetch above.
+  const transport = new StreamableHTTPClientTransport(new URL(cfg.url), {
+    fetch: authedFetch,
+    ...(opts.authProvider ? { authProvider: opts.authProvider } : {}),
+  });
   try {
     await withTimeout(client.connect(transport), timeoutMs, `mcp connect "${cfg.name}"`);
     const listed = await withTimeout(client.listTools(), timeoutMs, `mcp listTools "${cfg.name}"`);

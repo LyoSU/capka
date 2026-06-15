@@ -9,12 +9,16 @@ export interface McpSecrets {
   env?: Record<string, string>;
 }
 
+export type McpAuthKind = "token" | "oauth";
+
 /** Runtime config after decryption — what connectMcpServer needs. */
 export interface McpServerConfig {
+  id?: string;
   name: string;
   transport: McpTransport;
   url: string;
   secrets?: McpSecrets;
+  authKind?: McpAuthKind;
 }
 
 /** A server row as served to load/UI (no decrypted secrets). */
@@ -25,6 +29,7 @@ export interface McpServerInfo {
   transport: McpTransport;
   url: string | null;
   enabled: boolean;
+  authKind: McpAuthKind;
 }
 
 /** Forward-compat seam: connectors declare required secrets for the catalog. */

@@ -16,7 +16,7 @@ describe("slugifyName", () => {
 
 const s = (o: Partial<McpServerInfo>): McpServerInfo => ({
   id: o.name ?? "id", scope: "system", name: "x", transport: "http",
-  url: "https://e.x/mcp", enabled: true, ...o,
+  url: "https://e.x/mcp", enabled: true, authKind: "token", ...o,
 });
 
 describe("dedupeServersByPrecedence", () => {

@@ -1,12 +1,12 @@
 import { and, eq, or, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { mcpServers } from "@/lib/db/schema";
+import { mcpServers, projects } from "@/lib/db/schema";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import { ValidationError } from "@/lib/errors";
-import type { McpScope, McpSecrets, McpServerConfig, McpServerInfo } from "./types";
+import type { McpAuthKind, McpScope, McpSecrets, McpServerConfig, McpServerInfo } from "./types";
 
 const SCOPE_RANK: Record<McpScope, number> = { system: 0, user: 1, project: 2 };
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -23,7 +23,7 @@ export function slugifyName(raw: string): string {
 }
 
 function toInfo(r: typeof mcpServers.$inferSelect): McpServerInfo {
-  return { id: r.id, scope: r.scope as McpScope, name: r.name, transport: r.transport as McpServerInfo["transport"], url: r.url, enabled: r.enabled };
+  return { id: r.id, scope: r.scope as McpScope, name: r.name, transport: r.transport as McpServerInfo["transport"], url: r.url, enabled: r.enabled, authKind: r.authKind as McpAuthKind };
 }
 
 export function dedupeServersByPrecedence(list: McpServerInfo[]): McpServerInfo[] {
@@ -58,7 +58,7 @@ export async function listEnabledServerConfigs(userId: string, projectId?: strin
     if (r.secrets) {
       try { secrets = JSON.parse(decrypt(r.secrets, key)) as McpSecrets; } catch { secrets = undefined; }
     }
-    out.push({ name: r.name, transport: "http", url: r.url, secrets });
+    out.push({ id: r.id, name: r.name, transport: "http", url: r.url, secrets, authKind: r.authKind as McpAuthKind });
   }
   return out;
 }
@@ -95,6 +95,7 @@ export interface UpsertServerInput {
   name: string;
   url: string;
   secrets?: McpSecrets;
+  authKind?: McpAuthKind;
 }
 
 export async function upsertServer(input: UpsertServerInput): Promise<string> {
@@ -112,6 +113,7 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
     id, scope: input.scope, userId: input.userId, projectId: input.projectId,
     name, transport: "http" as const, url: input.url,
     secrets: input.secrets ? encrypt(JSON.stringify(input.secrets), key) : null,
+    ...(input.authKind ? { authKind: input.authKind } : {}),
     updatedAt: new Date(),
   };
   const existing = input.id
@@ -120,6 +122,22 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
   if (existing[0]) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
   else await db.insert(mcpServers).values(values);
   return id;
+}
+
+/** Return the server row IFF this user may use it (own user-scope, any system,
+ *  or a project they own). Used to gate the OAuth sign-in flow. */
+export async function getAccessibleServer(userId: string, serverId: string) {
+  const row = await db.select().from(mcpServers).where(eq(mcpServers.id, serverId)).limit(1);
+  const s = row[0];
+  if (!s) return null;
+  if (s.scope === "system") return s;
+  if (s.scope === "user" && s.userId === userId) return s;
+  if (s.scope === "project" && s.projectId) {
+    const p = await db.select({ id: projects.id }).from(projects)
+      .where(and(eq(projects.id, s.projectId), eq(projects.userId, userId))).limit(1);
+    if (p[0]) return s;
+  }
+  return null;
 }
 
 export async function setEnabled(id: string, enabled: boolean): Promise<void> {

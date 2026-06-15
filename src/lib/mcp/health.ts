@@ -4,10 +4,12 @@ import { mcpServers } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { connectMcpServer, disconnectMcp } from "./client";
-import type { McpSecrets } from "./types";
+import { McpOAuthProvider } from "./oauth/provider";
+import { hasUserTokens } from "./oauth/store";
+import type { McpAuthKind, McpSecrets } from "./types";
 
 /** A plain, non-jargon status the UI localizes into a friendly badge. */
-export type ProbeStatus = "ok" | "unauthorized" | "unreachable";
+export type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
 export interface ServerHealth {
   status: ProbeStatus;
   toolCount?: number;
@@ -31,14 +33,22 @@ function classify(e: unknown): ProbeStatus {
   return "unreachable";
 }
 
-/** Probe one decrypted config (bounded by connectMcpServer's own timeout). */
+/** Probe one decrypted config (bounded by connectMcpServer's own timeout).
+ *  `auth` (userId + serverId) enables OAuth servers to probe with the user's
+ *  stored token; without a token an OAuth server reports `needs_login`. */
 export async function probeConfig(
-  cfg: { name: string; url: string; secrets?: McpSecrets },
+  cfg: { name: string; url: string; secrets?: McpSecrets; authKind?: McpAuthKind; id?: string },
   blockPrivate: boolean,
+  auth?: { userId: string },
 ): Promise<ServerHealth> {
+  let authProvider: McpOAuthProvider | undefined;
+  if (cfg.authKind === "oauth" && cfg.id && auth) {
+    if (!(await hasUserTokens(auth.userId, cfg.id))) return { status: "needs_login" };
+    authProvider = new McpOAuthProvider(auth.userId, cfg.id, "runtime");
+  }
   let connected;
   try {
-    connected = await connectMcpServer({ name: cfg.name, transport: "http", url: cfg.url, secrets: cfg.secrets }, { blockPrivate });
+    connected = await connectMcpServer({ name: cfg.name, transport: "http", url: cfg.url, secrets: cfg.secrets }, { blockPrivate, authProvider });
   } catch (e) {
     return { status: classify(e) };
   }
@@ -65,22 +75,24 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
   const out: Record<string, ServerHealth> = {};
 
   // Split into cache hits vs rows needing a live probe.
-  const toProbe: { id: string; cacheKey: string; name: string; url: string; secrets?: McpSecrets }[] = [];
+  const toProbe: { id: string; cacheKey: string; name: string; url: string; secrets?: McpSecrets; authKind: McpAuthKind }[] = [];
   for (const r of httpRows) {
     const cacheKey = `${r.id}:${r.updatedAt?.getTime() ?? 0}`;
     const hit = cache.get(cacheKey);
     if (hit && now - hit.at < CACHE_TTL_MS) { out[r.id] = hit.health; continue; }
     let secrets: McpSecrets | undefined;
     if (r.secrets) { try { secrets = JSON.parse(decrypt(r.secrets, key)) as McpSecrets; } catch { secrets = undefined; } }
-    toProbe.push({ id: r.id, cacheKey, name: r.name, url: r.url!, secrets });
+    toProbe.push({ id: r.id, cacheKey, name: r.name, url: r.url!, secrets, authKind: r.authKind as McpAuthKind });
   }
 
   for (let i = 0; i < toProbe.length; i += PROBE_CONCURRENCY) {
     const batch = toProbe.slice(i, i + PROBE_CONCURRENCY);
-    const settled = await Promise.all(batch.map((p) => probeConfig(p, blockPrivate)));
+    const settled = await Promise.all(batch.map((p) => probeConfig(p, blockPrivate, { userId })));
     settled.forEach((health, idx) => {
       const p = batch[idx];
-      cache.set(p.cacheKey, { at: Date.now(), health });
+      // Don't cache `needs_login` — it flips to `ok` the moment the user signs in,
+      // and recomputing it is just a token-presence check.
+      if (health.status !== "needs_login") cache.set(p.cacheKey, { at: Date.now(), health });
       out[p.id] = health;
     });
   }

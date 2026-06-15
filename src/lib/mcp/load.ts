@@ -3,6 +3,7 @@ import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { connectMcpServer, disconnectMcp, type ConnectedMcp } from "./client";
 import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
+import { McpOAuthProvider } from "./oauth/provider";
 
 const MAX_CONCURRENT = 4;
 
@@ -24,7 +25,15 @@ export async function loadMcpTools(opts: { userId: string; projectId: string | n
 
   for (let i = 0; i < configs.length; i += MAX_CONCURRENT) {
     const batch = configs.slice(i, i + MAX_CONCURRENT);
-    const settled = await Promise.allSettled(batch.map((c) => connectMcpServer(c, { blockPrivate })));
+    const settled = await Promise.allSettled(batch.map((c) => {
+      // OAuth connectors use this user's stored tokens (auto-refresh, never
+      // redirects mid-run); a missing token throws → the server is skipped and
+      // the UI prompts the user to sign in.
+      const authProvider = c.authKind === "oauth" && c.id
+        ? new McpOAuthProvider(opts.userId, c.id, "runtime")
+        : undefined;
+      return connectMcpServer(c, { blockPrivate, authProvider });
+    }));
     settled.forEach((r, idx) => {
       const cfg = batch[idx];
       if (r.status === "rejected") {
