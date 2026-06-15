@@ -13,6 +13,7 @@ import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
+import { loadMcpTools } from "@/lib/mcp/load";
 import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
 import { classifyLLMError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
@@ -139,13 +140,15 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     db.select().from(memories).where(memoryFilter).orderBy(desc(memories.createdAt)).limit(50),
   ]);
 
-  // Sandbox tools (execute_bash, read_file, …). NOTE: not MCP — real MCP arrives
-  // in sub-project B. The skill tool is composed on top; its definition is
-  // constant across runs so it doesn't disturb the tools-cache prefix.
+  // Sandbox tools (execute_bash, read_file, …) + MCP connector tools (sub-project
+  // B, namespaced mcp__<server>__<tool>) + the skill tool. Each piece has a stable
+  // definition across runs, and the merge order is deterministic, so the
+  // position-0 tools prefix stays cache-stable turn-to-turn.
   const sandbox = await loadSandboxTools(userId, sessionKey, project?.sandboxNetwork ?? undefined);
+  const mcp = await loadMcpTools({ userId, projectId: payload.projectId ?? null });
   const availableSkills = await listAvailableSkills(userId, payload.projectId ?? null);
   const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null });
-  const tools = { ...sandbox.tools, skill: skillTool };
+  const tools = { ...sandbox.tools, ...mcp.tools, skill: skillTool };
 
   // Workspace snapshot — runs inside the isolated Docker container, not the host.
   let workspaceSnapshot: string | undefined;
@@ -163,7 +166,9 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     attachedFiles: payload.attachedFiles,
   });
 
-  return { model, provider, modelId, tools, closeMcp: sandbox.close, prompt, userMemories };
+  // Dispose both sandbox and MCP clients when the run ends.
+  const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
+  return { model, provider, modelId, tools, closeMcp: closeAll, prompt, userMemories };
 }
 
 /**
