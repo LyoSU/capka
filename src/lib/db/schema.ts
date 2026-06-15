@@ -298,3 +298,28 @@ export const mcpOauthStates = pgTable("mcp_oauth_states", {
   codeVerifier: text("code_verifier").notNull(), // AES-GCM PKCE verifier
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+// A Claude plugin marketplace the admin trusts (a GitHub repo with
+// .claude-plugin/marketplace.json). `catalog` caches its normalized plugin list.
+export const pluginMarketplaces = pgTable("plugin_marketplaces", {
+  id: text("id").primaryKey(),
+  url: text("url").notNull(),
+  name: text("name").notNull(),
+  owner: text("owner"),
+  catalog: jsonb("catalog").$type<unknown[]>().default([]),
+  refreshedAt: timestamp("refreshed_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// A record of an installed plugin, for uninstall + status. Routed skills/connectors
+// carry `source = 'catalog:<this id>'` so uninstall deletes exactly what we added.
+export const pluginInstalls = pgTable("plugin_installs", {
+  id: text("id").primaryKey(),
+  marketplaceId: text("marketplace_id").notNull().references(() => pluginMarketplaces.id, { onDelete: "cascade" }),
+  pluginName: text("plugin_name").notNull(),
+  version: text("version"), // sha/ref pinned at install
+  scope: text("scope").notNull().default("system"),
+  manifest: jsonb("manifest").$type<Record<string, unknown>>().default({}),
+  installedBy: text("installed_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [index("idx_plugin_installs_marketplace").on(table.marketplaceId)]);
