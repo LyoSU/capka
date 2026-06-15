@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Plug, Plus, Trash2, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { Loader2, Plug, Plus, Trash2, CheckCircle2, AlertTriangle, XCircle, LogIn, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 
-interface Server { id: string; name: string; url: string | null; scope: "system" | "user" | "project"; enabled: boolean }
-type ProbeStatus = "ok" | "unauthorized" | "unreachable";
+interface Server { id: string; name: string; url: string | null; scope: "system" | "user" | "project"; enabled: boolean; authKind: "token" | "oauth" }
+type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
 interface Health { status: ProbeStatus; toolCount?: number }
 
 /** Mirror of the server-side slugify so the user sees the saved name live. */
@@ -62,6 +62,13 @@ function HealthLine({ h, loading, t }: { h?: Health; loading: boolean; t: Return
       </span>
     );
   }
+  if (h.status === "needs_login") {
+    return (
+      <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
+        <LogIn className="h-3 w-3" />{t("health.needsLogin")}
+      </span>
+    );
+  }
   if (h.status === "unauthorized") {
     return (
       <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
@@ -83,10 +90,13 @@ export default function ConnectorsPage() {
   const [loading, setLoading] = useState(true);
   const [healthLoading, setHealthLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<Health | null>(null);
 
@@ -110,12 +120,22 @@ export default function ConnectorsPage() {
   }, [loadHealth]);
   useEffect(() => { load(); }, [load]);
 
+  // Surface the OAuth round-trip outcome (the callback redirects back here).
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("connected")) { toast.success(t("signedIn", { name: p.get("connected") ?? "" })); }
+    else if (p.get("error") === "oauth") { toast.error(t("signInFailed")); }
+    if (p.get("connected") || p.get("error")) window.history.replaceState({}, "", "/settings/connectors");
+  }, [t]);
+
   const slug = slugify(name);
   const canSubmit = slug.length > 0 && looksLikeUrl(url);
 
   const buildBody = () => {
     const body: Record<string, unknown> = { name: slug, url: url.trim() };
     if (token.trim()) body.headers = { Authorization: `Bearer ${token.trim()}` };
+    if (clientId.trim()) body.oauthClientId = clientId.trim();
+    if (clientSecret.trim()) body.oauthClientSecret = clientSecret.trim();
     return body;
   };
 
@@ -133,7 +153,10 @@ export default function ConnectorsPage() {
     finally { setTesting(false); }
   };
 
-  const resetForm = () => { setName(""); setUrl(""); setToken(""); setTestResult(null); setShowForm(false); };
+  const resetForm = () => {
+    setName(""); setUrl(""); setToken(""); setClientId(""); setClientSecret("");
+    setTestResult(null); setShowAdvanced(false); setShowForm(false);
+  };
 
   const add = async () => {
     if (!canSubmit) return;
@@ -141,8 +164,13 @@ export default function ConnectorsPage() {
     try {
       const res = await fetch("/api/mcp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildBody()) });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success(t("added")); resetForm(); await load(); }
-      else toast.error(data.error || t("addFailed"));
+      if (res.ok) {
+        toast.success(t("added"));
+        resetForm();
+        await load();
+        // OAuth connector → walk the user straight into sign-in.
+        if (data.authKind === "oauth" && data.id) window.location.href = `/api/mcp/oauth/start?serverId=${encodeURIComponent(data.id)}`;
+      } else toast.error(data.error || t("addFailed"));
     } finally { setSaving(false); }
   };
 
@@ -158,6 +186,14 @@ export default function ConnectorsPage() {
     const res = await fetch(`/api/mcp?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (res.ok) { setServers((s) => s.filter((x) => x.id !== id)); toast.success(t("deleted")); }
     else toast.error(t("deleteFailed"));
+  };
+
+  const signIn = (id: string) => { window.location.href = `/api/mcp/oauth/start?serverId=${encodeURIComponent(id)}`; };
+
+  const signOut = async (id: string) => {
+    const res = await fetch(`/api/mcp/oauth?serverId=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (res.ok) { toast.success(t("signedOut")); loadHealth(); }
+    else toast.error(t("signOutFailed"));
   };
 
   const scopeLabel: Record<Server["scope"], string> = { system: t("scope.system"), user: t("scope.user"), project: t("scope.project") };
@@ -188,13 +224,26 @@ export default function ConnectorsPage() {
             <p className="text-xs text-muted-foreground">{t("tokenHint")}</p>
           </div>
 
+          <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{t("advanced")}
+          </button>
+          {showAdvanced && (
+            <div className="space-y-2 rounded-md bg-muted/40 p-3">
+              <p className="text-xs text-muted-foreground">{t("advancedHint")}</p>
+              <Input placeholder={t("clientIdPlaceholder")} value={clientId} onChange={(e) => setClientId(e.target.value)} />
+              <Input placeholder={t("clientSecretPlaceholder")} value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} type="password" />
+            </div>
+          )}
+
           {testResult && (
             <div className="rounded-md bg-muted/50 px-3 py-2">
               {testResult.status === "ok"
                 ? <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-500"><CheckCircle2 className="h-3 w-3" />{t("testOk", { count: testResult.toolCount ?? 0 })}</span>
-                : testResult.status === "unauthorized"
-                  ? <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"><AlertTriangle className="h-3 w-3" />{t("health.unauthorized")}</span>
-                  : <span className="flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" />{t("health.unreachable")}</span>}
+                : testResult.status === "needs_login"
+                  ? <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"><LogIn className="h-3 w-3" />{t("testOauth")}</span>
+                  : testResult.status === "unauthorized"
+                    ? <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"><AlertTriangle className="h-3 w-3" />{t("health.unauthorized")}</span>
+                    : <span className="flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" />{t("health.unreachable")}</span>}
             </div>
           )}
 
@@ -213,29 +262,39 @@ export default function ConnectorsPage() {
           <p className="text-sm text-muted-foreground">{t("empty")}</p>
         </div>
       )}
-      {!loading && servers.map((s) => (
-        <div key={s.id} className="flex items-start justify-between gap-4 rounded-md border p-3">
-          <div className="flex flex-1 items-start gap-3">
-            <ConnectorIcon url={s.url} />
-            <div className="min-w-0 flex-1 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">{s.name}</span>
-                <Badge variant="secondary">{scopeLabel[s.scope]}</Badge>
+      {!loading && servers.map((s) => {
+        const h = health[s.id];
+        const isOauth = s.authKind === "oauth";
+        return (
+          <div key={s.id} className="flex items-start justify-between gap-4 rounded-md border p-3">
+            <div className="flex flex-1 items-start gap-3">
+              <ConnectorIcon url={s.url} />
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{s.name}</span>
+                  <Badge variant="secondary">{scopeLabel[s.scope]}</Badge>
+                </div>
+                {s.url && <p className="truncate text-xs text-muted-foreground">{s.url}</p>}
+                {s.enabled && <HealthLine h={h} loading={healthLoading} t={t} />}
               </div>
-              {s.url && <p className="truncate text-xs text-muted-foreground">{s.url}</p>}
-              {s.enabled && <HealthLine h={health[s.id]} loading={healthLoading} t={t} />}
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {isOauth && s.enabled && (h?.status === "needs_login" || h?.status === "unauthorized") && (
+                <Button size="xs" onClick={() => signIn(s.id)}><LogIn className="mr-1 h-3.5 w-3.5" />{t("signIn")}</Button>
+              )}
+              {isOauth && s.enabled && h?.status === "ok" && (
+                <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => signOut(s.id)}>{t("signOut")}</Button>
+              )}
+              <Switch checked={s.enabled} disabled={s.scope !== "user"} onCheckedChange={(v) => toggle(s.id, v)} aria-label={t("toggleAria", { name: s.name })} />
+              {s.scope === "user" && (
+                <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-destructive" onClick={() => remove(s.id)} aria-label={t("delete")}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Switch checked={s.enabled} disabled={s.scope !== "user"} onCheckedChange={(v) => toggle(s.id, v)} aria-label={t("toggleAria", { name: s.name })} />
-            {s.scope === "user" && (
-              <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-destructive" onClick={() => remove(s.id)} aria-label={t("delete")}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
