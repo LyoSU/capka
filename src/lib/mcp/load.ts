@@ -11,13 +11,19 @@ const MAX_CONCURRENT = 4;
  *  tools. A server that fails is logged and skipped — never fatal. Tools are
  *  collected in deterministic order (servers by name, tools by name) so the
  *  position-0 tool prefix stays cache-stable. */
-export async function loadMcpTools(opts: { userId: string; projectId: string | null }): Promise<{
+export async function loadMcpTools(opts: {
+  userId: string;
+  projectId: string | null;
+  /** Governance gate — a denied connector is never connected (G1). */
+  isServerAllowed?: (name: string) => boolean;
+}): Promise<{
   tools: Record<string, Tool>;
   close: () => Promise<void>;
 }> {
-  const configs = (await listEnabledServerConfigs(opts.userId, opts.projectId)).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  const allow = opts.isServerAllowed ?? (() => true);
+  const configs = (await listEnabledServerConfigs(opts.userId, opts.projectId))
+    .filter((c) => allow(c.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
   // Same SSRF policy the connector URL was validated against at upsert time.
   const blockPrivate = await getBlockPrivateProviderUrls();
   const connected: ConnectedMcp[] = [];

@@ -1,6 +1,7 @@
 import { apiHandler, requireAdmin } from "@/lib/auth";
 import { installPlugin, uninstallPlugin } from "@/lib/marketplace/install";
 import { findInstall } from "@/lib/marketplace/service";
+import { audit } from "@/lib/governance/audit";
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireAdmin();
@@ -9,11 +10,12 @@ export const POST = apiHandler(async (req: Request) => {
     return Response.json({ error: "marketplaceId and pluginName required" }, { status: 400 });
   }
   const manifest = await installPlugin({ marketplaceId, pluginName, installedBy: userId });
+  await audit({ actorId: userId, action: "plugin.install", targetType: "plugin", targetKey: pluginName, detail: { skills: manifest.skills.length, connectors: manifest.connectors.length } });
   return Response.json({ ok: true, manifest });
 });
 
 export const DELETE = apiHandler(async (req: Request) => {
-  await requireAdmin();
+  const { userId } = await requireAdmin();
   const url = new URL(req.url);
   const marketplaceId = url.searchParams.get("marketplaceId");
   const pluginName = url.searchParams.get("pluginName");
@@ -21,5 +23,6 @@ export const DELETE = apiHandler(async (req: Request) => {
   const installId = await findInstall(marketplaceId, pluginName);
   if (!installId) return Response.json({ error: "Not installed" }, { status: 404 });
   await uninstallPlugin(installId);
+  await audit({ actorId: userId, action: "plugin.uninstall", targetType: "plugin", targetKey: pluginName });
   return Response.json({ ok: true });
 });

@@ -14,6 +14,7 @@ import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
+import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
 import { classifyLLMError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
@@ -144,9 +145,16 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   // B, namespaced mcp__<server>__<tool>) + the skill tool. Each piece has a stable
   // definition across runs, and the merge order is deterministic, so the
   // position-0 tools prefix stays cache-stable turn-to-turn.
+  // Governance: an admin `deny` removes a skill/connector from the agent entirely.
+  const policy = await resolvePolicies(userId, payload.projectId ?? null);
   const sandbox = await loadSandboxTools(userId, sessionKey, project?.sandboxNetwork ?? undefined);
-  const mcp = await loadMcpTools({ userId, projectId: payload.projectId ?? null });
-  const availableSkills = await listAvailableSkills(userId, payload.projectId ?? null);
+  const mcp = await loadMcpTools({
+    userId,
+    projectId: payload.projectId ?? null,
+    isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
+  });
+  const availableSkills = (await listAvailableSkills(userId, payload.projectId ?? null))
+    .filter((s) => isUsable(policy.effect("skill", s.name)));
   const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null });
   const tools = { ...sandbox.tools, ...mcp.tools, skill: skillTool };
 

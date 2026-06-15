@@ -1,7 +1,7 @@
 import { and, eq, or, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { capabilityPolicies } from "@/lib/db/schema";
+import { capabilityPolicies, skills, mcpServers } from "@/lib/db/schema";
 import type { CapabilityType, Effect, PolicyInfo, PolicyMatcher, PolicyRow, PolicyScope } from "./types";
 
 const SCOPE_RANK: Record<PolicyScope, number> = { system: 0, user: 1, project: 2 };
@@ -78,4 +78,17 @@ export async function setPolicy(input: {
 
 export async function clearPolicy(id: string): Promise<void> {
   await db.delete(capabilityPolicies).where(eq(capabilityPolicies.id, id));
+}
+
+/** The set of governable capabilities (distinct skill + connector names) so the
+ *  admin UI can show a row per capability with its current effect. */
+export async function listCapabilityInventory(): Promise<{ capabilityType: CapabilityType; capabilityKey: string }[]> {
+  const [skillRows, serverRows] = await Promise.all([
+    db.selectDistinct({ name: skills.name }).from(skills),
+    db.selectDistinct({ name: mcpServers.name }).from(mcpServers),
+  ]);
+  return [
+    ...skillRows.map((r) => ({ capabilityType: "skill" as const, capabilityKey: r.name })),
+    ...serverRows.map((r) => ({ capabilityType: "connector" as const, capabilityKey: r.name })),
+  ];
 }
