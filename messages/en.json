@@ -326,7 +326,8 @@
       "usage": "Usage",
       "users": "Users",
       "skills": "Skills",
-      "connectors": "Connectors"
+      "connectors": "Connectors",
+      "marketplace": "Marketplace"
     },
     "usersPage": {
       "title": "Users",
@@ -557,6 +558,30 @@
         "user": "Personal",
         "project": "Project"
       }
+    },
+    "marketplace": {
+      "title": "Marketplace",
+      "subtitle": "Add a plugin marketplace, then install skills and connectors for your whole organization with one click.",
+      "adminOnly": "Only admins can manage the marketplace.",
+      "urlPlaceholder": "GitHub marketplace URL (e.g. anthropics/claude-plugins)",
+      "add": "Add",
+      "added": "Marketplace added.",
+      "addFailed": "Couldn’t add that marketplace.",
+      "empty": "No marketplaces yet. Add one above to browse plugins.",
+      "refresh": "Refresh",
+      "refreshed": "Marketplace refreshed.",
+      "refreshFailed": "Couldn’t refresh.",
+      "remove": "Remove",
+      "removed": "Marketplace removed.",
+      "removeFailed": "Couldn’t remove.",
+      "by": "by {author}",
+      "install": "Install",
+      "installed": "Installed · {skills} skills, {connectors} connectors.",
+      "installedLabel": "Installed",
+      "installFailed": "Couldn’t install that plugin.",
+      "uninstalled": "Uninstalled.",
+      "uninstallFailed": "Couldn’t uninstall.",
+      "unsupportedSource": "This plugin’s source isn’t installable yet."
     }
   },
   "setup": {
