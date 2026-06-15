@@ -77,6 +77,18 @@ The audience (non-technical staff, shared admin key, single org) plus community 
 - **Permission consent at install** (iOS model): the capability label is a consent screen, not fine print.
 - **Sandbox isolation** is the hard guarantee that makes all of the above acceptable.
 
+### Unified administration & permissions (one layer for skills + MCP + plugins)
+
+There is **one** governance model across every extension type — skills, MCP connectors, and plugins are administered identically, not by three separate systems:
+
+- **Scope = binding** everywhere: `system` (the whole organization), `user` (personal), `project`. Authoring `system`/`project` is admin-gated; users own only their `user`-scope items. (Skills already follow this in A; MCP follows it in B.)
+- **Per-capability permission policy** — `allow | ask | deny` for a skill, a connector, or a tool within a connector, evaluated at use time (Anthropic/OpenCode model). `deny` hides it from the agent; `ask` is human-in-the-loop.
+- **Org allowlist / blocklist** — admins curate which catalog items (of any type) users may install or enable, tied to the risk tiers above.
+- **Role matrix** — extends `admin | user | viewer`; reused via `requireRole`.
+- **Audit trail** — who added/enabled/used which extension.
+
+B1 ships the first brick (scope-gated authoring + encrypted, write-only secrets); the policy/allowlist/audit pieces are additive and arrive with the catalog (C/D). The point: a non-technical org gets a single, coherent admin surface for *all* extensions.
+
 ## 6. Build order & the seams A must lay now
 
 The order stands: **A (Skills) → B (MCP client) → C (plugin/marketplace installer) → D (store UX)**, with the **Catalog Service / federation** threading through C and D.

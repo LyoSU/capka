@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 interface Skill {
   id: string;
@@ -18,9 +20,12 @@ interface Skill {
 
 export default function SkillsPage() {
   const t = useTranslations("settings.skills");
+  const isAdmin = useIsAdmin();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchSkills = useCallback(async () => {
     try {
@@ -53,6 +58,28 @@ export default function SkillsPage() {
     }
   };
 
+  const handleUpload = async (file: File) => {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("scope", "system"); // admin upload = org-wide
+      const res = await fetch("/api/admin/skills", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(t("addSuccess", { name: data.name ?? "" }));
+        await fetchSkills();
+      } else {
+        toast.error(data.error || t("addFailed"));
+      }
+    } catch {
+      toast.error(t("addFailed"));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const scopeLabel: Record<Skill["scope"], string> = {
     system: t("scope.system"),
     user: t("scope.user"),
@@ -66,6 +93,34 @@ export default function SkillsPage() {
         <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
       <Separator />
+
+      {isAdmin && (
+        <div className="flex items-center justify-between gap-4 rounded-md border border-dashed p-4">
+          <div>
+            <p className="text-sm font-medium">{t("addTitle")}</p>
+            <p className="text-sm text-muted-foreground">{t("addHint")}</p>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleUpload(f);
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Upload className="mr-1.5 h-4 w-4" />}
+            {t("add")}
+          </Button>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">

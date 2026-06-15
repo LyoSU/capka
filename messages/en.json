@@ -506,7 +506,12 @@
         "system": "Shared",
         "user": "Personal",
         "project": "Project"
-      }
+      },
+      "add": "Add skill",
+      "addTitle": "Add a skill",
+      "addHint": "Upload a .zip containing SKILL.md (and optional scripts). Available to everyone in the organization.",
+      "addSuccess": "Added “{name}”.",
+      "addFailed": "Couldn’t add the skill."
     }
   },
   "setup": {
