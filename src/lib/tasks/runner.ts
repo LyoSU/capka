@@ -11,6 +11,8 @@ import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
+import { listAvailableSkills } from "@/lib/skills/service";
+import { makeSkillTool } from "@/lib/skills/tool";
 import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
 import { classifyLLMError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
@@ -137,7 +139,13 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     db.select().from(memories).where(memoryFilter).orderBy(desc(memories.createdAt)).limit(50),
   ]);
 
-  const mcp = await loadSandboxTools(userId, sessionKey, project?.sandboxNetwork ?? undefined);
+  // Sandbox tools (execute_bash, read_file, …). NOTE: not MCP — real MCP arrives
+  // in sub-project B. The skill tool is composed on top; its definition is
+  // constant across runs so it doesn't disturb the tools-cache prefix.
+  const sandbox = await loadSandboxTools(userId, sessionKey, project?.sandboxNetwork ?? undefined);
+  const availableSkills = await listAvailableSkills(userId, payload.projectId ?? null);
+  const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null });
+  const tools = { ...sandbox.tools, skill: skillTool };
 
   // Workspace snapshot — runs inside the isolated Docker container, not the host.
   let workspaceSnapshot: string | undefined;
@@ -147,14 +155,15 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     if (ws?.stdout?.trim()) workspaceSnapshot = ws.stdout.trim();
   } catch { /* sandbox not ready yet */ }
 
-  const systemPrompt = buildSystemPrompt({
+  const prompt = buildSystemPrompt({
     project,
     memories: userMemories,
+    skills: availableSkills.map((s) => ({ name: s.name, description: s.description })),
     workspaceSnapshot,
     attachedFiles: payload.attachedFiles,
   });
 
-  return { model, provider, modelId, tools: mcp.tools, closeMcp: mcp.close, systemPrompt, userMemories };
+  return { model, provider, modelId, tools, closeMcp: sandbox.close, prompt, userMemories };
 }
 
 /**
@@ -204,9 +213,25 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, tools, closeMcp: close, systemPrompt, userMemories } =
+    const { model, provider, modelId, tools, closeMcp: close, prompt, userMemories } =
       await prepareRun(userId, sessionKey, payload);
     closeMcp = close;
+
+    // Prompt caching: the stable prefix (persona + sandbox + project + skills)
+    // carries an ephemeral cache breakpoint; the volatile suffix (memories,
+    // workspace snapshot, attached files) follows it uncached so per-run churn
+    // never invalidates the cached prefix. Two consecutive system messages.
+    // `providerOptions.anthropic` is namespaced — non-Anthropic providers ignore it.
+    const systemMessages: ModelMessage[] = [
+      {
+        role: "system",
+        content: prompt.stable,
+        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      },
+    ];
+    if (prompt.volatile) {
+      systemMessages.push({ role: "system", content: prompt.volatile });
+    }
 
     await db.insert(messages).values({
       id: msgId,
@@ -232,8 +257,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       streamText({
         model,
         ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25) } : {}),
-        system: systemPrompt,
-        messages: modelMessages,
+        messages: [...systemMessages, ...modelMessages],
         abortSignal: ac.signal,
       });
 
