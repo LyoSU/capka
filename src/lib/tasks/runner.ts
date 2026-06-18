@@ -17,7 +17,7 @@ import { loadMcpTools } from "@/lib/mcp/load";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
-import { classifyLLMError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isVisionUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import type { StoredPart } from "@/lib/chat/contracts";
@@ -354,9 +354,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     try {
       await consume();
     } catch (e) {
-      const msg = errMsg(e);
-      const isVisionError = injectedNative && !retried &&
-        (msg.includes("image input") || msg.includes("vision") || msg.includes("multimodal") || msg.includes("does not support"));
+      const isVisionError = injectedNative && !retried && isVisionUnsupportedError(e);
       if (isVisionError) {
         console.log("[task] model doesn't support vision — retrying without native files");
         retried = true;
@@ -426,10 +424,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       console.error("[task] usage capture failed:", e);
     }
 
-    // Extract long-term memories (fire-and-forget).
-    const text = getFullText();
-    if (text) {
-      extractMemories(model, text, userMemories.map((m) => m.content))
+    // Extract long-term memories (fire-and-forget). Facts are about the USER, so
+    // the user's own message is the primary signal — the assistant reply is only
+    // context. (Feeding only the assistant output mined the wrong side of the turn.)
+    const lastUserText = (() => {
+      const u = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
+      if (!u) return "";
+      if (typeof u.content === "string") return u.content;
+      return u.content
+        .filter((p): p is TextPart => p.type === "text")
+        .map((p) => p.text)
+        .join("\n");
+    })();
+    if (lastUserText.trim()) {
+      extractMemories(
+        model,
+        { userText: lastUserText, assistantText: getFullText() },
+        userMemories.map((m) => m.content),
+      )
         .then(async (newFacts) => {
           if (newFacts.length > 0) {
             await db.insert(memories).values(
