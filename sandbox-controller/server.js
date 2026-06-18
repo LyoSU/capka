@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
 import { createReadStream, createWriteStream } from "node:fs";
-import { readdir, stat, mkdir, realpath, chown } from "node:fs/promises";
+import { readdir, stat, mkdir, chown } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { join, resolve, basename } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import Docker from "dockerode";
+import { sanitize, safeJoin, safeRealPath } from "./path-safety.js";
 
 const docker = new Docker({ socketPath: "/var/run/docker.sock" });
 const PORT = process.env.PORT || 3001;
@@ -61,11 +62,6 @@ const SANDBOX_GID = parseInt(process.env.SANDBOX_GID || "1000");
 
 // Active sessions: sessionId -> { containerId, userId, lastActivity }
 const sessions = new Map();
-
-/** Sanitize IDs to prevent path traversal and Docker name injection */
-function sanitize(id) {
-  return String(id).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
-}
 
 /** Resolve workspace path on host, with traversal protection */
 function workspacePath(userId, sessionId) {
@@ -124,26 +120,6 @@ function resolveWsBase(sessionId, fallbackUserId, token) {
     return { forbidden: true };
   }
   return { wsBase: workspacePath(sanitize(fallbackUserId), sessionId), session: null };
-}
-
-function safeJoin(base, userPath) {
-  const full = resolve(base, userPath);
-  // Must start with base + separator (not just prefix match)
-  if (full !== base && !full.startsWith(base + "/")) throw new Error("Path traversal blocked");
-  return full;
-}
-
-/** Resolve real path and verify it's still within base (blocks symlink escapes) */
-async function safeRealPath(base, userPath) {
-  const full = safeJoin(base, userPath);
-  try {
-    const real = await realpath(full);
-    if (real !== base && !real.startsWith(base + "/")) throw new Error("Symlink escape blocked");
-    return real;
-  } catch (e) {
-    if (e.code === "ENOENT") return full; // file doesn't exist yet (write ops)
-    throw e;
-  }
 }
 
 /** Calculate directory size recursively */
