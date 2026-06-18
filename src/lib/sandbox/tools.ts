@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { nanoid } from "nanoid";
 import { createSession, execCommand } from "./client";
 
 /**
@@ -47,7 +48,7 @@ export async function loadSandboxTools(userId: string, sessionKey: string, netwo
       execute: async ({ code, timeout }) => {
         // Base64 encode to avoid heredoc delimiter collisions and shell escaping issues
         const encoded = Buffer.from(code).toString("base64");
-        const tmpFile = `/tmp/_exec_${Date.now()}.py`;
+        const tmpFile = `/tmp/_exec_${nanoid()}.py`;
         const cmd = `echo '${encoded}' | base64 -d > ${tmpFile} && python3 ${tmpFile}; rc=$?; rm -f ${tmpFile}; exit $rc`;
         const result = await run(cmd, timeout);
         const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
@@ -66,7 +67,7 @@ export async function loadSandboxTools(userId: string, sessionKey: string, netwo
       }),
       execute: async ({ code, timeout }) => {
         const encoded = Buffer.from(code).toString("base64");
-        const tmpFile = `/tmp/_exec_${Date.now()}.mjs`;
+        const tmpFile = `/tmp/_exec_${nanoid()}.mjs`;
         const cmd = `echo '${encoded}' | base64 -d > ${tmpFile} && node ${tmpFile}; rc=$?; rm -f ${tmpFile}; exit $rc`;
         const result = await run(cmd, timeout);
         const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
@@ -101,7 +102,10 @@ export async function loadSandboxTools(userId: string, sessionKey: string, netwo
       }),
       execute: async ({ path, content }) => {
         const safePath = path.replace(/'/g, "'\\''");
-        const cmd = `mkdir -p "$(dirname '${safePath}')" && cat > '${safePath}' << 'UNCLAW_EOF'\n${content}\nUNCLAW_EOF`;
+        // Base64 the payload so an arbitrary content (including a line equal to a
+        // heredoc delimiter) is written verbatim, never truncated.
+        const encoded = Buffer.from(content).toString("base64");
+        const cmd = `mkdir -p "$(dirname '${safePath}')" && echo '${encoded}' | base64 -d > '${safePath}'`;
         const result = await run(cmd);
         if (result.exitCode !== 0) return { error: result.stderr || "Write failed", success: false };
         return { success: true, path };
@@ -126,7 +130,11 @@ with open(p) as f: content = f.read()
 if old not in content: print('ERROR: text not found'); sys.exit(1)
 with open(p, 'w') as f: f.write(content.replace(old, new, 1))
 print('OK')`;
-        const cmd = `cat > /tmp/_replace.py << 'REPLEOF'\n${pyCode}\nREPLEOF\npython3 /tmp/_replace.py`;
+        // Base64 + unique tmp path: verbatim script, no heredoc/escaping surprises,
+        // no collision when several str_replace calls run concurrently.
+        const encoded = Buffer.from(pyCode).toString("base64");
+        const tmpFile = `/tmp/_replace_${nanoid()}.py`;
+        const cmd = `echo '${encoded}' | base64 -d > ${tmpFile} && python3 ${tmpFile}; rc=$?; rm -f ${tmpFile}; exit $rc`;
         const result = await run(cmd);
         if (result.exitCode !== 0) return { error: result.stdout + result.stderr, success: false };
         return { success: true, path };
