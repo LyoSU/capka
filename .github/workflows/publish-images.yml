@@ -1,0 +1,70 @@
+name: Publish images
+
+# Build and push the prebuilt images to GHCR on every release tag (vX.Y.Z), so a
+# box can `docker compose pull` instead of building locally — no build toolchain
+# needed on the host. The base compose keeps its `build:` stanzas as a fallback,
+# so cloning + building still works without any of these images existing.
+#
+# First run prerequisites (one-time, in the GitHub repo): Settings → Actions →
+# Workflow permissions must allow read/write, and the resulting packages default
+# to private — make them public (or pull with a token) for unauthenticated pulls.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: platform
+            context: .
+            file: Dockerfile
+            target: runner
+          - name: controller
+            context: ./sandbox-controller
+            file: ./sandbox-controller/Dockerfile
+            target: ""
+          - name: sandbox
+            context: .
+            file: Dockerfile.sandbox
+            target: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action lowercases the image name, so a mixed-case owner (LyoSU)
+      # still produces a valid ghcr.io/lyosu/unclaw-* reference.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/unclaw-${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

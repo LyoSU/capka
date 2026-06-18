@@ -72,6 +72,20 @@ both the route and the app origin.
 Put a TLS-terminating reverse proxy in front of `:3000` for any internet-facing
 deployment.
 
+### Prebuilt images (skip the build)
+
+Release tags publish `platform` and `controller` images to GHCR
+(`.github/workflows/publish-images.yml`), so a host with no build toolchain can
+fetch them instead of compiling:
+
+```bash
+docker compose pull        # platform + controller from ghcr.io/lyosu/unclaw-*
+npm run up                 # generate secrets if needed, then start
+```
+
+The compose `build:` stanzas remain a fallback, so cloning and building still
+works with no images present.
+
 ## First run
 
 1. Open the app — you're routed to **`/setup`** to create the admin account.
