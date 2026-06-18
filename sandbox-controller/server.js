@@ -6,6 +6,7 @@ import { join, resolve, basename } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import Docker from "dockerode";
 import { sanitize, safeJoin, safeRealPath } from "./path-safety.js";
+import { parseMultipart } from "./multipart.js";
 
 const docker = new Docker({ socketPath: "/var/run/docker.sock" });
 const PORT = process.env.PORT || 3001;
@@ -466,12 +467,10 @@ const server = createServer(async (req, res) => {
 
       const wsBase = resolved.wsBase;
 
-      // Parse multipart boundary
+      // Collect the full body, bounded by MAX_UPLOAD, then parse it. Parsing is
+      // delegated to the tested multipart module so binary payloads (PNG/ZIP/PDF)
+      // survive byte-for-byte rather than being mangled by ad-hoc string slicing.
       const contentType = req.headers["content-type"] || "";
-      const boundaryMatch = contentType.match(/boundary=(.+)/);
-      if (!boundaryMatch) return jsonRes(res, 400, { error: "Missing multipart boundary" });
-
-      // Collect full body
       const chunks = [];
       let totalSize = 0;
       const MAX_UPLOAD = MAX_UPLOAD_MB * 1024 * 1024;
@@ -482,37 +481,14 @@ const server = createServer(async (req, res) => {
       }
       const body = Buffer.concat(chunks);
 
-      // Simple multipart parsing — extract path and file fields
-      const boundary = `--${boundaryMatch[1]}`;
-      const parts = [];
-      let start = body.indexOf(boundary) + boundary.length;
-      while (start < body.length) {
-        const nextBoundary = body.indexOf(boundary, start);
-        if (nextBoundary === -1) break;
-        parts.push(body.slice(start, nextBoundary));
-        start = nextBoundary + boundary.length;
-      }
+      const parsed = parseMultipart(body, contentType);
+      if (!parsed) return jsonRes(res, 400, { error: "Missing multipart boundary" });
 
-      let targetPath = ".";
-      let fileData = null;
-      let fileName = "upload";
-
-      for (const part of parts) {
-        const headerEnd = part.indexOf("\r\n\r\n");
-        if (headerEnd === -1) continue;
-        const headers = part.slice(0, headerEnd).toString("utf8");
-        const content = part.slice(headerEnd + 4, part.length - 2); // trim trailing \r\n
-
-        if (headers.includes('name="path"')) {
-          targetPath = content.toString("utf8").trim();
-        } else if (headers.includes('name="file"')) {
-          fileData = content;
-          const fnMatch = headers.match(/filename="([^"]+)"/);
-          if (fnMatch) fileName = fnMatch[1];
-        }
-      }
-
-      if (!fileData) return jsonRes(res, 400, { error: "No file in request" });
+      const targetPath = (parsed.fields.path ?? "").trim() || ".";
+      const file = parsed.files.find((f) => f.field === "file") ?? parsed.files[0];
+      if (!file) return jsonRes(res, 400, { error: "No file in request" });
+      const fileData = file.data;
+      const fileName = file.filename || "upload";
 
       // Check workspace disk quota
       const currentSize = await dirSize(wsBase);
