@@ -44,22 +44,30 @@ Then open http://localhost:3000 and complete the first-run setup (see below).
 ## Deployment (production)
 
 The base `docker-compose.yml` publishes only the platform on `:3000`; Postgres and
-the controller stay on the internal network. It ships **no secret defaults** — set
-these first (a `.env` file next to the compose file works; see `.env.example`):
+the controller stay on the internal network.
+
+**One command — no manual secrets, no external account beyond an LLM key:**
+
+```bash
+npm run up                                  # generate secrets → .env, then start
+PUBLIC_URL=https://unclaw.example.com npm run up   # set the public origin too
+```
+
+`scripts/up.sh` generates strong values for the three secrets below into `.env`
+on first run (idempotent: it never overwrites a value you've set, and adds a
+missing one on upgrade), then runs `docker compose up`. Prefer to manage secrets
+yourself? Set them in `.env` or your platform's env instead (see `.env.example`):
 
 | Variable | Required | Purpose |
 |---|---|---|
 | `POSTGRES_PASSWORD` | ✅ | Postgres password; the platform's `DATABASE_URL` is derived from it. |
 | `CONTROLLER_SECRET` | ✅ | Shared platform↔controller secret. The controller **refuses to boot** on the default value. `openssl rand -hex 32`. |
 | `UNCLAW_MASTER_KEY` | ✅ | 64-hex root key that encrypts provider API keys at rest, kept **outside** the DB so a DB leak alone can't decrypt them. `openssl rand -hex 32`. |
-
-```bash
-# generic self-host
-docker compose -f docker-compose.yml up --build -d
-```
+| `PUBLIC_URL` | optional | Public origin (e.g. `https://unclaw.example.com`). Unset → derived from proxy headers (`X-Forwarded-*` / `Host`). Set it behind a proxy: it's the non-spoofable source for auth callbacks and absolute links. |
 
 `docker-compose.yaml` (note the `.yaml`) is a Coolify-tailored variant (Traefik
-routing, no host port publish) — use it only on that platform.
+routing, no host port publish) — set `PUBLIC_URL` in the Coolify env and it drives
+both the route and the app origin.
 
 Put a TLS-terminating reverse proxy in front of `:3000` for any internet-facing
 deployment.
@@ -80,7 +88,8 @@ deployment.
 ```bash
 npm run dev            # Next.js dev server (expects an external Postgres via DATABASE_URL)
 npm run docker:dev     # full stack with dev defaults (recommended)
-npm run docker:prod    # build + run detached
+npm run up             # prod: generate secrets into .env (if needed), then start
+npm run docker:prod    # build + run detached (expects secrets already set)
 npm run docker:down    # stop the stack
 npm run sandbox:build  # (re)build the sandbox execution image
 npm test               # vitest (unit). Integration tests are gated behind RUN_INTEGRATION=1
