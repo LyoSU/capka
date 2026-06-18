@@ -69,7 +69,10 @@ export class McpOAuthProvider implements OAuthClientProvider {
   }
 
   state(): string {
-    this._state = nanoid(32);
+    // Memoize: this provider instance backs a single auth flow, so the value
+    // persisted via insertState must equal the one placed in the authorization
+    // URL even if the SDK reads state() more than once.
+    if (!this._state) this._state = nanoid(32);
     return this._state;
   }
 
