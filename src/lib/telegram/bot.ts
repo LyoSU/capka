@@ -175,11 +175,30 @@ async function resolveActiveChat(
       .limit(1);
     if (c) return c;
   }
-  const id = nanoid();
-  await db.insert(chats).values({ id, userId: link.userId, title: firstMessage || "Telegram Chat" });
-  await db.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
-  const [c] = await db.select().from(chats).where(eq(chats.id, id)).limit(1);
-  return c;
+  // Telegram can deliver two messages back-to-back; without serialization both
+  // would see a null activeChatId and each create a chat, leaving one orphaned
+  // ("why did it reply in a new chat?"). Lock the link row so the second message
+  // blocks until the first commits, then re-checks and reuses the pinned chat.
+  return db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ activeChatId: telegramLinks.activeChatId })
+      .from(telegramLinks)
+      .where(eq(telegramLinks.id, link.id))
+      .for("update");
+    if (locked?.activeChatId) {
+      const [existing] = await tx
+        .select()
+        .from(chats)
+        .where(and(eq(chats.id, locked.activeChatId), eq(chats.userId, link.userId)))
+        .limit(1);
+      if (existing) return existing;
+    }
+    const id = nanoid();
+    await tx.insert(chats).values({ id, userId: link.userId, title: firstMessage || "Telegram Chat" });
+    await tx.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
+    const [created] = await tx.select().from(chats).where(eq(chats.id, id)).limit(1);
+    return created;
+  });
 }
 
 /**
