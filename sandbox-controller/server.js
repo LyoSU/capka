@@ -222,8 +222,25 @@ async function restartSandbox(sessionId) {
 async function execInSandbox(containerId, command, timeout = EXEC_TIMEOUT) {
   const container = docker.getContainer(containerId);
 
+  // Run the user command inside its OWN session (setsid → it becomes a process
+  // group leader, so PGID == PID in the CONTAINER's pid namespace). On timeout, an
+  // in-container watcher SIGKILLs the whole group (`kill -KILL -$pid`), so forked
+  // children (`foo &`, nohup, subshells) die too. The previous approach killed
+  // `info.Pid` — a HOST pid — from inside the container, which targets the wrong
+  // namespace and leaked background children that held the slot until idle-TTL.
+  // base64 keeps the user command verbatim regardless of quoting.
+  const secs = Math.max(1, Math.ceil(timeout / 1000));
+  const b64 = Buffer.from(command).toString("base64");
+  const wrapper =
+    `__cmd=$(echo ${b64} | base64 -d); ` +
+    `setsid bash -c "$__cmd" & __pid=$!; ` +
+    `( sleep ${secs}; kill -KILL -"$__pid" 2>/dev/null ) & __killer=$!; ` +
+    `wait "$__pid"; __rc=$?; ` +
+    `kill "$__killer" 2>/dev/null; wait "$__killer" 2>/dev/null; ` +
+    `exit $__rc`;
+
   const execObj = await container.exec({
-    Cmd: ["bash", "-c", command],
+    Cmd: ["bash", "-c", wrapper],
     AttachStdout: true,
     AttachStderr: true,
     User: "1000:1000",
@@ -231,16 +248,12 @@ async function execInSandbox(containerId, command, timeout = EXEC_TIMEOUT) {
   });
 
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(async () => {
-      try {
-        const info = await execObj.inspect();
-        if (info.Running) {
-          const killExec = await container.exec({ Cmd: ["kill", "-9", String(info.Pid)], User: "root" });
-          await killExec.start({});
-        }
-      } catch { /* best effort */ }
+    // Backstop only: the in-container watcher self-kills at `secs`. If even that
+    // wedges (e.g. an uninterruptible syscall), reject after a grace period so
+    // the controller never hangs on the stream forever.
+    const timer = setTimeout(() => {
       reject(new Error(`Command timed out after ${timeout}ms`));
-    }, timeout);
+    }, timeout + 5000);
 
     execObj.start({ hijack: true }, (err, stream) => {
       if (err) { clearTimeout(timer); return reject(err); }
