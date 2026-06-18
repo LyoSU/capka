@@ -4,6 +4,7 @@ import { nextCookies } from "better-auth/next-js";
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { getMasterKey } from "./settings";
+import { getPublicUrl } from "./url";
 import { ZodError } from "zod";
 import { AppError, isAppError, UnauthorizedError, ForbiddenError } from "./errors";
 
@@ -15,7 +16,14 @@ export async function getAuth() {
   const secret = await getMasterKey();
   _auth = betterAuth({
     secret,
-    baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+    // Runtime, not build-time: an explicit PUBLIC_URL (operator override) wins;
+    // otherwise leave it unset so better-auth infers the origin per-request from
+    // the (proxy-aware) headers. No domain is ever baked into the image.
+    baseURL: process.env.PUBLIC_URL?.trim() || process.env.BETTER_AUTH_URL?.trim() || undefined,
+    // CSRF check: trust whatever origin getPublicUrl resolves for this request
+    // (PUBLIC_URL if set, else X-Forwarded-* / Host). Keeps the single domain in
+    // one place instead of a second hardcoded constant.
+    trustedOrigins: async (request?: Request) => [getPublicUrl({ headers: request?.headers })],
     database: drizzleAdapter(db, {
       provider: "pg",
       schema: {
