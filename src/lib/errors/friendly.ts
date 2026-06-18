@@ -84,6 +84,26 @@ export function classifyLLMError(raw: unknown): FriendlyError {
 }
 
 /**
+ * Some models/providers reject image/file inputs outright. The wording varies
+ * by provider and is NOT a stable error code, so the known shapes are matched
+ * here in ONE place instead of being scattered as inline substring checks in
+ * the runner. On a hit, the runner retries the turn once with native files
+ * stripped. Deliberately tied to image/file/vision phrasing (not a bare
+ * "unsupported") so an unrelated capability error doesn't strip attachments.
+ */
+export function isVisionUnsupportedError(raw: unknown): boolean {
+  const detail =
+    raw instanceof Error ? raw.message : typeof raw === "string" ? raw : String(raw ?? "");
+  return (
+    /\b(image input|multimodal|image_url)\b/i.test(detail) ||
+    /\b(no|without|lacks?|cannot|can'?t|doesn'?t|does not|not)\b[^.]{0,40}\b(vision|images?|multimodal)\b/i.test(
+      detail,
+    ) ||
+    /\b(vision|images?)\b[^.]{0,30}\b(not supported|unsupported|not available)\b/i.test(detail)
+  );
+}
+
+/**
  * Server-enforced run deadline. Used directly (not via the regex rules, which
  * would mis-match a generic "timeout" as a network error) when a task exceeds
  * its wall-clock budget — a live worker stuck on a hung tool/LLM call.
