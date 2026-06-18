@@ -30,6 +30,16 @@ export async function register() {
     console.error("[db] auto-migration failed (continuing without it):", e);
   }
 
+  // Guard against a master key that no longer matches the data at rest (e.g. a
+  // changed/lost UNCLAW_MASTER_KEY). Establishes the check value on first boot.
+  // Log loudly but don't crash — the setup/diagnostic page must still load.
+  try {
+    const { assertMasterKeyConsistent } = await import("@/lib/settings");
+    await assertMasterKeyConsistent();
+  } catch (e) {
+    console.error("[security]", e instanceof Error ? e.message : e);
+  }
+
   const { startWorker } = await import("@/lib/tasks/worker");
   await startWorker();
 

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { settings } from "./db/schema";
 import { encrypt, decrypt, generateSecret } from "./crypto";
+import { checkMasterKey, CANARY_PLAINTEXT } from "./master-key";
 
 let masterKeyCache: string | null = null;
 
@@ -85,6 +86,36 @@ export async function setSetting(key: string, value: string, encrypted = false):
       target: settings.key,
       set: { value: storedValue, isEncrypted: encrypted, updatedAt: new Date() },
     });
+}
+
+/**
+ * Boot-time guard: confirm the active master key still matches the data
+ * encrypted at rest. On first run there's no canary yet, so we establish one
+ * (Key Check Value). On a mismatch we throw with an actionable message — far
+ * better than letting every provider-key decryption fail with a cryptic GCM
+ * error later. The canary row is read raw (not via getSetting) so a wrong key
+ * surfaces here as a controlled mismatch rather than a thrown decrypt.
+ */
+export async function assertMasterKeyConsistent(): Promise<void> {
+  const key = await getMasterKey();
+  const row = await db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, "master_key_check"))
+    .limit(1);
+
+  const result = checkMasterKey(row[0]?.value ?? null, key);
+  if (result.status === "ok") return;
+  if (result.status === "absent") {
+    await setSetting("master_key_check", CANARY_PLAINTEXT, true);
+    return;
+  }
+
+  throw new Error(
+    "UNCLAW_MASTER_KEY does not match the key that encrypted the stored data — " +
+    "provider keys cannot be decrypted. Restore the original key (the admin → security " +
+    "page shows the value to copy) or clear the database to start fresh.",
+  );
 }
 
 export async function isSetupComplete(): Promise<boolean> {
