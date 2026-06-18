@@ -4,6 +4,8 @@
  * an outbound push; the union keeps room for more channels (email, Slack…)
  * without touching the runner. Persisted inside the task payload.
  */
+import { log } from "@/lib/log";
+
 export type TaskOrigin = { platform: "telegram"; telegramChatId: number };
 
 export interface TaskResult {
@@ -44,7 +46,7 @@ export async function deliverTaskResult(origin: TaskOrigin, result: TaskResult):
         await bot.api.sendMessage(origin.telegramChatId, part);
       }
     } catch (e) {
-      console.error("[delivery] telegram send failed:", e);
+      log.error("telegram delivery failed", { chatId: origin.telegramChatId, err: String(e) });
     }
   }
 }

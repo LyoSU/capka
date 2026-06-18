@@ -8,6 +8,7 @@ import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { take } from "@/lib/rate-limit";
+import { log } from "@/lib/log";
 import type { TaskPayload } from "@/lib/tasks/runner";
 
 let _bot: Bot | null = null;
@@ -153,7 +154,7 @@ export async function getBot(): Promise<Bot | null> {
   // Without this, a throwing handler is either swallowed or crashes the polling
   // process depending on the runtime. Log it and keep the bot alive.
   _bot.catch((err) => {
-    console.error(`[telegram] handler error (update ${err.ctx.update.update_id}):`, err.error);
+    log.error("telegram handler error", { updateId: err.ctx.update.update_id, err: String(err.error) });
   });
 
   return _bot;
@@ -214,7 +215,7 @@ export async function startBot(): Promise<void> {
   // Drop any previously-registered webhook so getUpdates won't 409.
   await bot.api.deleteWebhook().catch(() => {});
   // bot.start() resolves only when the bot stops, so never await it here.
-  void bot.start({ onStart: (info) => console.log(`[telegram] polling as @${info.username}`) });
+  void bot.start({ onStart: (info) => log.info("telegram polling started", { username: info.username }) });
 }
 
 /** Stop polling and drop the singleton (so a new token takes effect). */

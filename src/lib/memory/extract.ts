@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
+import { log } from "@/lib/log";
 
 const EXTRACTION_PROMPT = `You extract key facts about the user from a conversation turn. The user's own message is the primary signal; the assistant's reply is context only. Identify any new facts, preferences, or context about the USER that would be useful to remember for future conversations.
 
@@ -70,7 +71,7 @@ export async function extractMemories(
       );
     });
   } catch (e) {
-    console.error("[memory] extraction failed:", e);
+    log.error("memory extraction failed", { err: String(e) });
     return [];
   }
 }

@@ -5,6 +5,7 @@
 
 import { createHmac } from "node:crypto";
 import { SandboxError } from "@/lib/errors";
+import { log } from "@/lib/log";
 
 const CONTROLLER_URL = process.env.SANDBOX_CONTROLLER_URL || "http://localhost:3001";
 const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET ?? "";
@@ -34,7 +35,7 @@ async function sandboxFetch(input: RequestInfo, init?: RequestInit): Promise<Res
     const cause = (err as NodeJS.ErrnoException)?.cause;
     const code = cause && typeof cause === "object" ? (cause as NodeJS.ErrnoException).code : undefined;
     if (code === "ECONNREFUSED" || code === "ENOTFOUND") {
-      console.error(`[sandbox] controller unreachable (${code})`);
+      log.error("sandbox controller unreachable", { code });
       throw new SandboxError(
         "Code execution is temporarily unavailable. Please try again in a moment.",
         "connect",
@@ -57,7 +58,7 @@ async function request(path: string, method: string, body?: unknown) {
   if (!res.ok) {
     const op = path.split("/").pop() || method.toLowerCase();
     const raw = data.error || `Sandbox ${res.status}`;
-    console.error(`[sandbox] ${method} ${path}:`, raw);
+    log.error("sandbox request failed", { method, path, status: res.status, err: String(raw) });
     throw new SandboxError("Sandbox operation failed", op, res.status >= 500);
   }
   return data;
@@ -118,7 +119,7 @@ export async function downloadFile(sessionId: string, filePath: string, userId?:
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Download failed" }));
-    console.error("[sandbox] download:", err.error);
+    log.error("sandbox download failed", { err: String(err.error) });
     throw new SandboxError("File download failed", "download", res.status >= 500);
   }
   return res;
@@ -141,7 +142,7 @@ export async function uploadFile(sessionId: string, path: string, file: File, us
   });
   const data = await res.json();
   if (!res.ok) {
-    console.error("[sandbox] upload:", data.error);
+    log.error("sandbox upload failed", { err: String(data.error) });
     throw new SandboxError("File upload failed", "upload", false);
   }
   return data;
