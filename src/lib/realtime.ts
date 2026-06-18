@@ -1,5 +1,6 @@
 import { Client } from "pg";
 import { DATABASE_URL } from "@/lib/db";
+import { log } from "@/lib/log";
 
 /**
  * Realtime fan-out over Postgres LISTEN/NOTIFY. Replaces the old in-memory
@@ -45,11 +46,11 @@ class Realtime {
     // task_enqueued channel goes quiet after a blip — the #1 "everything froze"
     // report. Re-establish with backoff and re-LISTEN all live channels.
     client.on("error", (err) => {
-      console.error("[realtime] LISTEN connection error, will reconnect:", err);
+      log.error("LISTEN connection error, will reconnect", { err: String(err) });
       this.handleSubDrop(client);
     });
     client.on("end", () => {
-      console.warn("[realtime] LISTEN connection ended, will reconnect");
+      log.warn("LISTEN connection ended, will reconnect");
       this.handleSubDrop(client);
     });
     return client;
@@ -71,7 +72,7 @@ class Realtime {
       this.ensureSub()
         .then(() => { this.reconnectDelay = 0; })
         .catch((err) => {
-          console.error("[realtime] reconnect failed, retrying:", err);
+          log.error("LISTEN reconnect failed, retrying", { err: String(err) });
           this.scheduleReconnect();
         });
     }, this.reconnectDelay);
@@ -116,7 +117,7 @@ class Realtime {
       const client = new Client({ connectionString: DATABASE_URL });
       // Drop the handle on error/end so the next publish lazily reconnects.
       client.on("error", (err) => {
-        console.error("[realtime] NOTIFY connection error:", err);
+        log.error("NOTIFY connection error", { err: String(err) });
         if (this.pub === client) this.pub = null;
       });
       client.on("end", () => {

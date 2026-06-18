@@ -21,6 +21,7 @@ import { classifyLLMError, isVisionUnsupportedError, TIMED_OUT_ERROR } from "@/l
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import type { StoredPart } from "@/lib/chat/contracts";
+import { log } from "@/lib/log";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -75,16 +76,16 @@ async function downloadBounded(
     );
     for (const r of settled) {
       if (r.status === "rejected") {
-        console.warn(`[task] failed to read file for native injection:`, r.reason);
+        log.warn("native file read failed", { userId, err: String(r.reason) });
         continue;
       }
       const { file, buf } = r.value;
       if (buf.length > MAX_NATIVE_FILE_BYTES) {
-        console.log(`[task] skipping ${file.name} (${(buf.length / 1024 / 1024).toFixed(1)}MB > 20MB limit)`);
+        log.info("skipping native file: over per-file limit", { userId, file: file.name, bytes: buf.length });
         continue;
       }
       if (totalBytes + buf.length > MAX_NATIVE_TOTAL_BYTES) {
-        console.log(`[task] skipping ${file.name} — would exceed 50MB aggregate limit`);
+        log.info("skipping native file: over aggregate limit", { userId, file: file.name, bytes: buf.length });
         continue;
       }
       totalBytes += buf.length;
@@ -120,7 +121,7 @@ async function injectNativeFiles(
     : [...lastUser.content];
   lastUser.content = [...existing, ...parts];
 
-  console.log(`[task] injected ${parts.length} native file(s) (${(totalBytes / 1024).toFixed(0)}KB) into model message`);
+  log.info("injected native files", { userId, count: parts.length, bytes: totalBytes });
 }
 
 /** Re-resolve everything needed to run the task from its persisted payload.
@@ -356,7 +357,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     } catch (e) {
       const isVisionError = injectedNative && !retried && isVisionUnsupportedError(e);
       if (isVisionError) {
-        console.log("[task] model doesn't support vision — retrying without native files");
+        log.info("vision unsupported — retrying without native files", { taskId, chatId, userId });
         retried = true;
         const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
         if (lastUser && Array.isArray(lastUser.content)) {
@@ -373,7 +374,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     if (!ac.signal.aborted && !streamError) {
       const hasContent = parts.some((p) => (p.type === "text" && p.text.trim()) || p.type === "tool-call");
       if (!hasContent) {
-        console.log("[task] empty response — retrying once");
+        log.info("empty response — retrying once", { taskId, chatId, userId });
         parts.length = 0;
         result = makeStream();
         try {
@@ -421,7 +422,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         });
       }
     } catch (e) {
-      console.error("[task] usage capture failed:", e);
+      log.error("usage capture failed", { taskId, err: String(e) });
     }
 
     // Extract long-term memories (fire-and-forget). Facts are about the USER, so
@@ -451,7 +452,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             );
           }
         })
-        .catch((e) => console.error("[task] memory extraction failed:", e));
+        .catch((e) => log.error("memory extraction failed", { taskId, userId, err: String(e) }));
     }
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";
