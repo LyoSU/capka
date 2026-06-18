@@ -68,6 +68,9 @@ services:
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - UNCLAW_MASTER_KEY=${UNCLAW_MASTER_KEY}
+      # Public origin. Optional: unset → derived from proxy headers (X-Forwarded-*).
+      # Set it (recommended in prod) so the value can't be spoofed via headers.
+      - PUBLIC_URL=${PUBLIC_URL:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

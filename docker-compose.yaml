@@ -68,8 +68,11 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      # Coolify generates Traefik routing for this domain → platform:3000.
-      - SERVICE_FQDN_PLATFORM_3000=https://unclaw.yuri.ly
+      # One knob drives both Coolify's Traefik routing AND the app's public
+      # origin — no domain is hardcoded here. Set PUBLIC_URL in the environment
+      # (Coolify env / .env), e.g. https://unclaw.example.com.
+      - SERVICE_FQDN_PLATFORM_3000=${PUBLIC_URL}
+      - PUBLIC_URL=${PUBLIC_URL}
       - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD}@postgres:5432/unClaw
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
