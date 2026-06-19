@@ -49,3 +49,6 @@ next-env.d.ts
 .codegraph/
 .cursor/
 .playwright-mcp/
+
+# Superpowers brainstorming companion
+.superpowers/
