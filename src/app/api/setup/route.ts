@@ -27,12 +27,14 @@ export async function POST(req: Request) {
     if (!email) {
       return Response.json({ error: "Account has no email" }, { status: 400 });
     }
-    // Prevent overwriting admin email once set (anti-hijack)
+    // Anti-hijack: the admin email is claimed once and never reassigned. But a
+    // re-run by the SAME signed-in admin (e.g. a page refresh mid-setup) is
+    // idempotent — only a different account is rejected.
     const existing = await getSetting("admin_email");
-    if (existing) {
+    if (existing && existing !== email) {
       return Response.json({ error: "Admin account already configured" }, { status: 403 });
     }
-    await setSetting("admin_email", email);
+    if (!existing) await setSetting("admin_email", email);
     return Response.json({ ok: true });
   }
 
@@ -48,6 +50,12 @@ export async function POST(req: Request) {
     const { provider, apiKey, baseUrl, defaultModel } = body;
     if (!provider) {
       return Response.json({ error: "Missing provider" }, { status: 400 });
+    }
+
+    // Claim the admin email here too, so a session that resumed straight into
+    // the provider step (account step never re-run) still records it.
+    if (session.user.email && !(await getSetting("admin_email"))) {
+      await setSetting("admin_email", session.user.email);
     }
 
     const masterKey = await getMasterKey();

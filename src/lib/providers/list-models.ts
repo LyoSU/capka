@@ -5,6 +5,7 @@ import { models as modelsTable } from "@/lib/db/schema";
 import { iconForGroup, prettyName } from "@/lib/models/normalize";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
+import { parseOpenRouterModels, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
 import { PROVIDER_META, type ProviderName } from "./registry";
 
 /**
@@ -104,7 +105,20 @@ async function catalogLookup(ids: string[]): Promise<(id: string) => CatalogRow 
   return (id: string) => map.get(id) ?? map.get(bare(id)) ?? null;
 }
 
-function toModelInfo(id: string, name: string, fallbackGroup: string | null, c: CatalogRow | null): ModelInfo {
+// When a model comes from the user's OWN endpoint (LiteLLM gateway, Ollama,
+// direct OpenAI/Anthropic) but isn't in our catalog price book, we don't KNOW
+// its capabilities. The picker hides tool-incapable models, so defaulting to
+// "unknown" would silently drop the admin's own custom models. Assume usable
+// instead — surfacing a reachable model beats hiding it over missing metadata.
+const ASSUMED_CAPS: ModelInfo["capabilities"] = { vision: false, tools: true, reasoning: false };
+
+function toModelInfo(
+  id: string,
+  name: string,
+  fallbackGroup: string | null,
+  c: CatalogRow | null,
+  assumeUsableIfUnknown = false,
+): ModelInfo {
   const { group, icon } = brandOf(id, fallbackGroup);
   return {
     id,
@@ -114,7 +128,7 @@ function toModelInfo(id: string, name: string, fallbackGroup: string | null, c: 
     pricing: { prompt: perMillion(c?.inputPrice), completion: perMillion(c?.outputPrice) },
     group,
     icon,
-    capabilities: (c?.capabilities as ModelInfo["capabilities"]) ?? null,
+    capabilities: (c?.capabilities as ModelInfo["capabilities"]) ?? (assumeUsableIfUnknown ? ASSUMED_CAPS : null),
   };
 }
 
@@ -139,6 +153,39 @@ async function listOpenRouter(): Promise<ModelInfo[]> {
   }));
 }
 
+/** A freshly-parsed OpenRouter catalog entry → the picker's shape. */
+function catalogModelToInfo(m: CatalogModel): ModelInfo {
+  return {
+    id: m.id,
+    name: m.displayName,
+    provider: m.id.split("/")[0] || "unknown",
+    context: m.contextLength ?? 0,
+    pricing: { prompt: (m.inputPrice ?? 0) * 1_000_000, completion: (m.outputPrice ?? 0) * 1_000_000 },
+    group: m.group,
+    icon: m.icon,
+    capabilities: m.capabilities,
+  };
+}
+
+/**
+ * OpenRouter, straight from its live `/models` (the same source the catalog
+ * syncs from). Used only as a first-run fallback while the curated DB catalog
+ * is still empty, so the picker fills immediately instead of waiting on the
+ * background sync. The key is passed through when present; the endpoint is
+ * public, so an unauthenticated call still works. Throws on network failure so
+ * the caller can surface it.
+ */
+async function listOpenRouterLive(apiKey?: string): Promise<ModelInfo[]> {
+  const raw = await fetchJson(
+    OPENROUTER_MODELS_URL,
+    apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined,
+  );
+  return parseOpenRouterModels(raw)
+    .filter((m) => m.enabled)
+    .map(catalogModelToInfo)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 /** Any OpenAI-compatible endpoint (LiteLLM gateway, OpenAI direct, vLLM…). */
 async function listOpenAICompatible(
   baseUrl: string,
@@ -155,7 +202,7 @@ async function listOpenAICompatible(
   if (opts.filterChat) ids = ids.filter((id) => OPENAI_CHAT.test(id) && !OPENAI_NON_CHAT.test(id));
   const lookup = await catalogLookup(ids);
   return ids
-    .map((id) => toModelInfo(id, prettyName(id), null, lookup(id)))
+    .map((id) => toModelInfo(id, prettyName(id), null, lookup(id), true))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -166,7 +213,7 @@ async function listAnthropic(apiKey: string): Promise<ModelInfo[]> {
   const list = raw.data ?? [];
   const lookup = await catalogLookup(list.map((m) => m.id));
   return list
-    .map((m) => toModelInfo(m.id, m.display_name || prettyName(m.id), "Anthropic", lookup(m.id)))
+    .map((m) => toModelInfo(m.id, m.display_name || prettyName(m.id), "Anthropic", lookup(m.id), true))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -176,7 +223,7 @@ async function listOllama(baseUrl: string, blockPrivate: boolean): Promise<Model
   const root = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
   const raw = (await fetchJson(`${root}/api/tags`)) as { models?: { name: string }[] };
   return (raw.models ?? [])
-    .map((m) => toModelInfo(m.name, prettyName(m.name), "Ollama", null))
+    .map((m) => toModelInfo(m.name, prettyName(m.name), "Ollama", null, true))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -233,8 +280,13 @@ async function listProviderModelsLive(opts: {
       : false;
 
   switch (opts.provider) {
-    case "openrouter":
-      return listOpenRouter();
+    case "openrouter": {
+      // Prefer the curated, enriched DB catalog; fall back to a live listing on
+      // first run (catalog not yet synced) so the picker is never empty when
+      // the network is reachable.
+      const curated = await listOpenRouter();
+      return curated.length ? curated : listOpenRouterLive(opts.apiKey);
+    }
     case "litellm":
       if (!opts.baseUrl) return [];
       return listOpenAICompatible(opts.baseUrl, opts.apiKey, { blockPrivate });

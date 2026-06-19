@@ -206,6 +206,7 @@
       "needKey": "Enter your API key to load models",
       "noneFound": "No models found",
       "noneAvailable": "No models available",
+      "syncing": "Preparing the model list…",
       "loadError": "Could not load models",
       "active": "active",
       "shared": "shared",

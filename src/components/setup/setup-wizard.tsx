@@ -19,8 +19,9 @@ import {
 import { ModelPicker } from "@/components/chat/model-picker";
 import { iconForSlug } from "@/components/chat/provider-icons";
 import { PROVIDER_OPTIONS, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
+import { SETUP_STEPS, type SetupStep } from "@/lib/setup";
 
-const STEPS = ["account", "provider", "telegram"] as const;
+const STEPS = SETUP_STEPS;
 
 function Stepper({ current }: { current: number }) {
   const t = useTranslations("setup.steps");
@@ -57,10 +58,19 @@ function Stepper({ current }: { current: number }) {
   );
 }
 
-export function SetupWizard() {
+export function SetupWizard({
+  initialStep,
+  signedIn,
+}: {
+  initialStep: SetupStep;
+  signedIn: boolean;
+}) {
   const router = useRouter();
   const t = useTranslations("setup");
-  const [step, setStep] = useState(0);
+  // The server resolves where to resume (see lib/setup). Once a session exists
+  // the account is already created, so we never re-show — or let the user back
+  // into — the account step; doing so would dead-end on a duplicate sign-up.
+  const [step, setStep] = useState(() => Math.max(0, STEPS.indexOf(initialStep)));
   const [loading, setLoading] = useState(false);
 
   // Step 1 - Account
@@ -87,8 +97,6 @@ export function SetupWizard() {
   const [botToken, setBotToken] = useState("");
 
   const [showApiKey, setShowApiKey] = useState(false);
-
-  const [userId, setUserId] = useState<string | null>(null);
 
   async function handleAccount() {
     if (!name || !email || !password) {
@@ -121,12 +129,6 @@ export function SetupWizard() {
         const data = await res.json();
         toast.error(data.error || t("account.error"));
         return;
-      }
-
-      // Get session to retrieve userId
-      const session = await authClient.getSession();
-      if (session.data?.user?.id) {
-        setUserId(session.data.user.id);
       }
 
       setStep(1);
@@ -180,7 +182,6 @@ export function SetupWizard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           step: "provider",
-          userId,
           provider,
           apiKey: meta.requiresKey ? apiKey : undefined,
           baseUrl: meta.requiresBaseUrl ? baseUrl : undefined,
@@ -378,13 +379,15 @@ export function SetupWizard() {
           </div>
 
           <div className="flex gap-2">
-            <Button
-              variant="ghost"
-              onClick={() => setStep(0)}
-              disabled={loading}
-            >
-              {t("back")}
-            </Button>
+            {!signedIn && (
+              <Button
+                variant="ghost"
+                onClick={() => setStep(0)}
+                disabled={loading}
+              >
+                {t("back")}
+              </Button>
+            )}
             <Button className="flex-1" onClick={handleProvider} disabled={loading}>
               {loading ? t("provider.submitting") : t("provider.submit")}
             </Button>

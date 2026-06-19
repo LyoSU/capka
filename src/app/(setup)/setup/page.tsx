@@ -1,14 +1,14 @@
 import { redirect } from "next/navigation";
-import { isSetupComplete } from "@/lib/settings";
+import { getSetupState } from "@/lib/setup";
 import { SetupWizard } from "@/components/setup/setup-wizard";
 
 export const dynamic = "force-dynamic";
 
 export default async function SetupPage() {
-  const complete = await isSetupComplete();
+  const { complete, signedIn, step } = await getSetupState();
   if (complete) {
     redirect("/chat");
   }
 
-  return <SetupWizard />;
+  return <SetupWizard initialStep={step} signedIn={signedIn} />;
 }

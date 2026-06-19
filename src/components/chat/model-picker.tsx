@@ -76,6 +76,10 @@ interface ModelsState {
   error: string | null;
   isShared: boolean;
   needsKey: boolean;
+  // The backend is still building the catalog (first-run OpenRouter sync). The
+  // empty list is temporary, not a failure — surface it honestly so the user
+  // waits instead of assuming their key is wrong.
+  syncing: boolean;
 }
 
 // Cache last successful results per source so re-mounting the picker (every
@@ -91,6 +95,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
     error: null,
     isShared: false,
     needsKey: false,
+    syncing: false,
   });
 
   // Stable key so the effect only re-runs when the real inputs change.
@@ -108,7 +113,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
     // Credentials mode for a key-requiring provider with no key yet: don't
     // call the API — just prompt for the key.
     if (source.mode === "credentials" && PROVIDER_META[source.provider]?.requiresKey && !source.apiKey) {
-      setState({ models: [], loading: false, error: null, isShared: false, needsKey: true });
+      setState({ models: [], loading: false, error: null, isShared: false, needsKey: true, syncing: false });
       return;
     }
 
@@ -116,7 +121,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
     if (cached && Date.now() - cached.at < CLIENT_MODELS_TTL_MS) {
       // Serve from cache immediately; the fetch below revalidates in the
       // background without flipping back to a loading state.
-      setState({ models: cached.models, loading: false, error: null, isShared: cached.isShared, needsKey: false });
+      setState({ models: cached.models, loading: false, error: null, isShared: cached.isShared, needsKey: false, syncing: false });
     } else {
       setState((s) => ({ ...s, loading: true, error: null, needsKey: false }));
     }
@@ -146,8 +151,9 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
           error: data.error ?? null,
           isShared: !!data.isShared,
           needsKey: false,
+          syncing: !!data.syncing,
         });
-        // First-run: catalog still syncing — retry once shortly.
+        // First-run: catalog still syncing — keep polling until it fills in.
         if (data.syncing) retry = setTimeout(load, 4000);
       } catch {
         if (!cancelled) {
@@ -156,6 +162,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
             models: s.models.length ? s.models : [{ id: fallbackValue, name: displayModelName(fallbackValue), provider: "", context: 0, pricing: { prompt: 0, completion: 0 } }],
             loading: false,
             error: loadErrorMsg,
+            syncing: false,
           }));
         }
       }
@@ -267,7 +274,9 @@ function ModelList({
 
         {!state.loading && filtered.length === 0 && (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">
-            {state.needsKey ? (
+            {state.syncing ? (
+              <span className="flex flex-col items-center gap-1.5"><Loader2 className="h-4 w-4 animate-spin" />{t("syncing")}</span>
+            ) : state.needsKey ? (
               <span className="flex flex-col items-center gap-1.5"><KeyRound className="h-4 w-4" />{t("needKey")}</span>
             ) : state.error ? (
               <span className="flex flex-col items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{state.error}</span>
@@ -478,7 +487,7 @@ export function ModelPicker({
           <span className={`flex-1 truncate text-left ${displayName ? "" : "text-muted-foreground"}`}>
             {displayName || placeholderText}
           </span>
-          {state.loading ? (
+          {state.loading || state.syncing ? (
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/50" />
           ) : (
             <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
