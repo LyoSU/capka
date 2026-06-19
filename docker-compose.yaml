@@ -31,15 +31,32 @@ services:
     image: unclaw-sandbox
     entrypoint: ["echo", "sandbox image built"]
 
+  # Restricts the Docker API the controller can reach (container + exec only);
+  # the raw host socket is mounted read-only here alone, on an isolated network.
+  # Defense-in-depth, not a hard root boundary — see README for rootless Docker.
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      - CONTAINERS=1
+      - EXEC=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-proxy
+    restart: unless-stopped
+
   sandbox-controller:
     build: ./sandbox-controller
     expose:
       - "3001"
+    # Reaches the daemon via the restricted socket-proxy (DOCKER_HOST), not the
+    # host socket. Roll back: drop DOCKER_HOST, re-add the docker.sock bind.
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/data
     environment:
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
+      - DOCKER_HOST=tcp://socket-proxy:2375
       - DATA_ROOT=/data/storage
       # Docker resolves sibling-container bind sources on the daemon host, not
       # inside this container. On Coolify the compose project dir is the clone
@@ -49,6 +66,11 @@ services:
       # Keep test resource usage modest on a shared, RAM-tight host.
       - SANDBOX_MEMORY_MB=384
       - MAX_SESSIONS_PER_USER=2
+      # Sandbox networking is opt-in.
+      - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
+    networks:
+      - default
+      - docker-proxy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -59,6 +81,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      socket-proxy:
+        condition: service_started
     restart: unless-stopped
 
   platform:
@@ -89,6 +113,11 @@ services:
       sandbox-controller:
         condition: service_healthy
     restart: unless-stopped
+
+networks:
+  # Isolated controller↔socket-proxy link; the Docker API isn't reachable from
+  # the rest of the stack.
+  docker-proxy:
 
 volumes:
   postgres-data:

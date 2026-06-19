@@ -31,6 +31,25 @@ services:
     image: unclaw-sandbox
     entrypoint: ["echo", "sandbox image built"]
 
+  # Narrows the Docker API the controller can reach: only container + exec
+  # endpoints (create/start/stop/remove/exec), everything else (build, pull,
+  # images, networks, volumes, swarm, host info) denied. The raw host socket is
+  # mounted ONLY here (read-only) and lives on an isolated network the controller
+  # alone can reach. This is defense-in-depth, NOT a hard root boundary — a
+  # compromised controller can still create a non-privileged sandbox. For a true
+  # "escape ≠ host root" boundary, run a rootless Docker daemon (see README).
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      - CONTAINERS=1
+      - EXEC=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-proxy
+    restart: unless-stopped
+
   sandbox-controller:
     build: ./sandbox-controller
     # Prebuilt image (published by .github/workflows/publish-images.yml). `build:`
@@ -38,16 +57,24 @@ services:
     image: ghcr.io/lyosu/unclaw-controller:latest
     expose:
       - "3001"
+    # No host Docker socket here anymore — it reaches the daemon through the
+    # restricted socket-proxy via DOCKER_HOST. To roll back, drop DOCKER_HOST and
+    # re-add `- /var/run/docker.sock:/var/run/docker.sock`.
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/data
     environment:
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
+      - DOCKER_HOST=tcp://socket-proxy:2375
       - DATA_ROOT=/data/storage
       # Real host path of ./data/storage — needed so sandbox bind mounts resolve
       # on the Docker daemon host (esp. Docker Desktop). Defaults to PWD-based.
       - HOST_DATA_ROOT=${PWD}/data/storage
       - SANDBOX_IMAGE=unclaw-sandbox
+      # Sandbox networking is opt-in. Set to "true" to allow bridge-mode sandboxes.
+      - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
+    networks:
+      - default
+      - docker-proxy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -58,6 +85,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      socket-proxy:
+        condition: service_started
     restart: unless-stopped
 
   platform:
@@ -89,6 +118,11 @@ services:
       sandbox-controller:
         condition: service_healthy
     restart: unless-stopped
+
+networks:
+  # Isolated link between the controller and the socket-proxy. Nothing else joins
+  # it, so the (restricted) Docker API isn't reachable from the rest of the stack.
+  docker-proxy:
 
 volumes:
   postgres-data:
