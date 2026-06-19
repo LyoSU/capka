@@ -58,13 +58,36 @@ if [ "${PUBLIC_URL:-}" != "" ] && ! grep -q '^PUBLIC_URL=' "$ENV_FILE"; then
   echo "  set PUBLIC_URL=$PUBLIC_URL"
 fi
 
+# DOMAIN is the turnkey HTTPS path: persist it, the ACME email, and derive
+# PUBLIC_URL=https://DOMAIN so auth callbacks and absolute links are correct.
+if [ "${DOMAIN:-}" != "" ]; then
+  grep -q '^DOMAIN=' "$ENV_FILE" || printf 'DOMAIN=%s\n' "$DOMAIN" >>"$ENV_FILE"
+  if [ "${ACME_EMAIL:-}" != "" ]; then
+    grep -q '^ACME_EMAIL=' "$ENV_FILE" || printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL" >>"$ENV_FILE"
+  fi
+  grep -q '^PUBLIC_URL=' "$ENV_FILE" || printf 'PUBLIC_URL=https://%s\n' "$DOMAIN" >>"$ENV_FILE"
+  echo "  configured HTTPS for $DOMAIN (Caddy will fetch a Let's Encrypt cert)"
+fi
+
 if [ "$START" -eq 0 ]; then
   echo "Done (--env-only). Secrets are in $ENV_FILE."
   exit 0
 fi
 
-echo "Starting unClaw (docker compose up --build -d) ..."
-docker compose up --build -d
+# Re-read DOMAIN from .env so a value generated/persisted above is honored even
+# when it wasn't passed in the environment this run.
+DOMAIN_EFFECTIVE="${DOMAIN:-$(sed -n 's/^DOMAIN=//p' "$ENV_FILE" 2>/dev/null | head -n1)}"
+
+if [ "${DOMAIN_EFFECTIVE:-}" != "" ]; then
+  echo "Starting unClaw with automatic HTTPS for $DOMAIN_EFFECTIVE ..."
+  docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build -d
+  OPEN_URL="https://$DOMAIN_EFFECTIVE"
+else
+  echo "Starting unClaw (docker compose up --build -d) ..."
+  docker compose up --build -d
+  OPEN_URL="${PUBLIC_URL:-http://localhost:3000}"
+fi
 
 echo
-echo "unClaw is starting. Open ${PUBLIC_URL:-http://localhost:3000} and finish setup."
+echo "unClaw is starting. Open $OPEN_URL and finish setup."
+echo "(First HTTPS request may take ~30s while Caddy provisions the certificate.)"
