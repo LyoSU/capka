@@ -143,4 +143,13 @@ the platform container — HMR does not reload the in-process worker loop.
 
 ## License
 
-Private / unpublished.
+unClaw core is licensed under the **GNU AGPL-3.0** (see `LICENSE`). You may
+self-host, modify, and redistribute it under those terms; if you offer it as a
+network service, the AGPL's source-availability obligations apply.
+
+Enterprise features (SSO/OIDC & SCIM, advanced RBAC, Helm/k8s packaging,
+observability integrations, SLA support) are developed as a separate commercial
+edition and are not part of this repository.
+
+Contributions are accepted under a Contributor License Agreement — see
+`CONTRIBUTING.md`.
