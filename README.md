@@ -66,9 +66,10 @@ yourself? Set them in `.env` or your platform's env instead (see `.env.example`)
 | `UNCLAW_MASTER_KEY` | ✅ | 64-hex root key that encrypts provider API keys at rest, kept **outside** the DB so a DB leak alone can't decrypt them. `openssl rand -hex 32`. |
 | `PUBLIC_URL` | optional | Public origin (e.g. `https://unclaw.example.com`). Unset → derived from proxy headers (`X-Forwarded-*` / `Host`). Set it behind a proxy: it's the non-spoofable source for auth callbacks and absolute links. |
 
-`docker-compose.yaml` (note the `.yaml`) is a Coolify-tailored variant (Traefik
-routing, no host port publish) — set `PUBLIC_URL` in the Coolify env and it drives
-both the route and the app origin.
+`docker-compose.coolify.yml` is a Coolify-tailored variant (Traefik routing, no
+host port publish). It is **not** auto-selected — point Coolify's
+`docker_compose_location` at it, or run `docker compose -f docker-compose.coolify.yml …`.
+The default `docker compose up` uses the host-agnostic `docker-compose.yml`.
 
 Put a TLS-terminating reverse proxy in front of `:3000` for any internet-facing
 deployment.

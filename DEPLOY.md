@@ -1,7 +1,11 @@
 # Deploy (Coolify @ hetzner-auction)
 
-How unClaw runs in production. Coolify reads `docker-compose.yaml` (build-pack
-= dockercompose); `docker-compose.yml` is the local-dev variant.
+How unClaw runs in production on this host. Coolify is pointed at
+`docker-compose.coolify.yml` via its **docker_compose_location** setting
+(build-pack = dockercompose). The repo's default `docker compose` resolution
+uses the host-agnostic `docker-compose.yml`; the `.coolify.yml` variant exists
+only because this host fronts apps with its own nginx instead of Coolify's
+Traefik.
 
 ## Topology
 
@@ -35,10 +39,15 @@ fronted by host nginx + Cloudflare).
 | `POSTGRES_PASSWORD` | DB password |
 | `SANDBOX_ALLOW_NETWORK` | optional, default `false` |
 
+> **Coolify setup:** set **docker_compose_location** to `/docker-compose.coolify.yml`
+> (Configuration → Build). Without it Coolify would pick up the host-agnostic
+> `docker-compose.yml`, which publishes `3000:3000` instead of the loopback
+> `127.0.0.1:3100` this host's nginx expects.
+
 ## Host-specific deltas (this is a host-nginx host, not Traefik)
 
-Two changes in `docker-compose.yaml` exist specifically because this host uses
-its own nginx instead of Coolify's Traefik. On a Traefik host, revert both:
+Two changes in `docker-compose.coolify.yml` exist specifically because this host
+uses its own nginx instead of Coolify's Traefik. On a Traefik host, revert both:
 
 1. **`sandbox: restart: "no"`** — the one-shot image-builder must not loop.
    Coolify injects `restart: unless-stopped` into every service; combined with
