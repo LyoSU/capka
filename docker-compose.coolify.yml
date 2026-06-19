@@ -63,10 +63,10 @@ services:
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - DOCKER_HOST=tcp://socket-proxy:2375
       - DATA_ROOT=/data/storage
-      # Docker resolves sibling-container bind sources on the daemon host, not
-      # inside this container. On Coolify the compose project dir is the clone
-      # path, so ${PWD} expands to the host path of ./data.
-      - HOST_DATA_ROOT=${PWD}/data/storage
+      # NOTE: no HOST_DATA_ROOT here. Docker resolves sibling-container bind sources
+      # on the daemon host, and the controller now auto-detects that host path by
+      # inspecting its own /data mount at startup (robust under Coolify, where ${PWD}
+      # was unreliable). Only set HOST_DATA_ROOT to override the auto-detected value.
       - SANDBOX_IMAGE=unclaw-sandbox
       # Keep test resource usage modest on a shared, RAM-tight host.
       - SANDBOX_MEMORY_MB=384

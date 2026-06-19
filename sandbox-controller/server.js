@@ -4,6 +4,7 @@ import { readdir, stat, mkdir, chown } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { join, resolve, basename } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { hostname } from "node:os";
 import Docker from "dockerode";
 import { sanitize, safeJoin, safeRealPath } from "./path-safety.js";
 import { parseMultipart } from "./multipart.js";
@@ -53,15 +54,59 @@ const DATA_ROOT = process.env.DATA_ROOT || resolve(import.meta.dirname, "..", "d
 // The controller reads/writes workspaces via DATA_ROOT (its own filesystem), but
 // when it asks Docker to bind-mount a workspace into a SIBLING sandbox container,
 // Docker resolves the bind source on the DAEMON host — not inside this container.
-// So sandbox binds must use the host path. On native Linux the controller usually
-// mounts the host dir at the same path, so HOST_DATA_ROOT defaults to DATA_ROOT
-// (identity); on Docker Desktop it must be set to the real host path of the mount.
-const HOST_DATA_ROOT = process.env.HOST_DATA_ROOT || DATA_ROOT;
+// So sandbox binds must use the host path that backs DATA_ROOT.
+//
+// Deriving that path from ${PWD} at compose time is fragile: under Coolify, a
+// systemd unit, or any launcher whose working directory isn't the dir that holds
+// ./data, the guess is wrong and Docker silently bind-mounts a DIFFERENT host
+// directory into the sandbox. The agent then writes to a directory the controller
+// never reads, so files vanish — "File not found" on download, empty file browser.
+//
+// Instead we LEARN the real host path from the daemon at startup (detectHostDataRoot):
+// inspect our own container and read the host Source of the mount backing DATA_ROOT.
+// That source is authoritative, needs no operator config, and is correct on native
+// Linux and Docker Desktop alike. An explicit HOST_DATA_ROOT env still wins (escape
+// hatch); detection only runs when it's unset, and falls back to identity (correct
+// for bare, non-containerized runs).
+let hostDataRoot = process.env.HOST_DATA_ROOT || DATA_ROOT;
 /** Translate a controller-internal storage path to the daemon-host path used for binds. */
 function toHostPath(internalPath) {
   return internalPath.startsWith(DATA_ROOT)
-    ? HOST_DATA_ROOT + internalPath.slice(DATA_ROOT.length)
+    ? hostDataRoot + internalPath.slice(DATA_ROOT.length)
     : internalPath;
+}
+
+/** Resolve the daemon-host path backing DATA_ROOT by inspecting our own container's
+ *  mounts. The bind Source Docker records is a real host path, so this is
+ *  authoritative — unlike a ${PWD}-derived guess that breaks whenever the launcher's
+ *  working directory differs. An explicit HOST_DATA_ROOT override wins; detection
+ *  runs only when it's unset. Safe: any failure leaves the identity fallback. */
+async function detectHostDataRoot() {
+  if (process.env.HOST_DATA_ROOT) {
+    console.log(`[host-path] HOST_DATA_ROOT override in effect: ${hostDataRoot}`);
+    return;
+  }
+  try {
+    const self = await docker.getContainer(hostname()).inspect();
+    // The mount whose Destination is the longest prefix of DATA_ROOT backs our data dir.
+    const backing = (self.Mounts || [])
+      .filter((m) => m.Destination === DATA_ROOT || DATA_ROOT.startsWith(m.Destination + "/"))
+      .sort((a, b) => b.Destination.length - a.Destination.length)[0];
+    if (backing) {
+      hostDataRoot = backing.Source + DATA_ROOT.slice(backing.Destination.length);
+      console.log(`[host-path] resolved host data root: ${hostDataRoot} (mount ${backing.Destination} -> ${backing.Source})`);
+    } else {
+      console.warn(
+        `[host-path] no container mount backs ${DATA_ROOT}; using identity (${hostDataRoot}). ` +
+        `If sandboxes can't see files the agent writes, set HOST_DATA_ROOT to the host path of the data dir.`,
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[host-path] self-inspect failed (${e.message}); using ${hostDataRoot}. ` +
+      `Set HOST_DATA_ROOT explicitly if sandbox file operations misbehave.`,
+    );
+  }
 }
 const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
 const MAX_WORKSPACE_MB = parseInt(process.env.MAX_WORKSPACE_MB || "500");
@@ -538,6 +583,8 @@ const server = createServer(async (req, res) => {
   }
 });
 
-recoverSessions().then(() => {
-  server.listen(PORT, () => console.log(`[sandbox-controller] listening on :${PORT}`));
-});
+detectHostDataRoot()
+  .then(recoverSessions)
+  .then(() => {
+    server.listen(PORT, () => console.log(`[sandbox-controller] listening on :${PORT}`));
+  });

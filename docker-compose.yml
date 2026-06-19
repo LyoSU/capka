@@ -68,9 +68,11 @@ services:
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - DOCKER_HOST=tcp://socket-proxy:2375
       - DATA_ROOT=/data/storage
-      # Real host path of ./data/storage — needed so sandbox bind mounts resolve
-      # on the Docker daemon host (esp. Docker Desktop). Defaults to PWD-based.
-      - HOST_DATA_ROOT=${PWD}/data/storage
+      # NOTE: no HOST_DATA_ROOT here. The controller auto-detects the daemon-host
+      # path backing ./data by inspecting its own mount at startup, so sandbox bind
+      # mounts resolve correctly regardless of the launcher's working directory
+      # (the old ${PWD} guess broke under Coolify/systemd/non-repo-root launches).
+      # Set HOST_DATA_ROOT only to override the auto-detected value.
       - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
       # Sandbox networking is opt-in. Set to "true" to allow bridge-mode sandboxes.
       - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
