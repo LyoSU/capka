@@ -123,7 +123,7 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
       // background without flipping back to a loading state.
       setState({ models: cached.models, loading: false, error: null, isShared: cached.isShared, needsKey: false, syncing: false });
     } else {
-      setState((s) => ({ ...s, loading: true, error: null, needsKey: false }));
+      setState((s) => ({ ...s, loading: true, error: null, needsKey: false, syncing: false }));
     }
 
     const load = async () => {
@@ -159,7 +159,9 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
         if (!cancelled) {
           setState((s) => ({
             ...s,
-            models: s.models.length ? s.models : [{ id: fallbackValue, name: displayModelName(fallbackValue), provider: "", context: 0, pricing: { prompt: 0, completion: 0 } }],
+            // tool-capable so the picker's hasTools filter keeps it — the user
+            // must still see (and keep) their current model when a load fails.
+            models: s.models.length ? s.models : [{ id: fallbackValue, name: displayModelName(fallbackValue), provider: "", context: 0, pricing: { prompt: 0, completion: 0 }, capabilities: { vision: false, tools: true, reasoning: false } }],
             loading: false,
             error: loadErrorMsg,
             syncing: false,
