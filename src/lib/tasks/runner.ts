@@ -40,26 +40,21 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * ("litellm", Chat Completions) the summary is visible only if the upstream
  * model echoes `reasoning_content` (Anthropic/DeepSeek do; OpenAI hides it).
  */
-function reasoningConfig(provider: string):
-  | { providerOptions: Record<string, Record<string, unknown>>; maxOutputTokens?: number }
-  | undefined {
+function reasoningOptions(provider: string): Record<string, Record<string, unknown>> | undefined {
   switch (provider) {
     case "anthropic":
-      // budgetTokens must stay below maxOutputTokens, so raise the output cap to
-      // leave room for both the thought and the answer.
-      return {
-        providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 4000 } } },
-        maxOutputTokens: 16000,
-      };
+      // The SDK sets max_tokens to fit the budget — don't cap it ourselves.
+      return { anthropic: { thinking: { type: "enabled", budgetTokens: 4000 } } };
     case "openrouter":
-      return { providerOptions: { openrouter: { reasoning: { effort: "medium" } } } };
+      return { openrouter: { reasoning: { enabled: true, effort: "medium" } } };
     case "openai":
-      return { providerOptions: { openai: { reasoningSummary: "auto" } } };
+      // Responses API returns a visible reasoning summary.
+      return { openai: { reasoningSummary: "auto" } };
     case "litellm":
       // Namespace matches the provider `name` in getModel. reasoningEffort asks
       // the gateway's reasoning model to think; openai-compatible then parses the
       // streamed reasoning_content into reasoning-delta parts.
-      return { providerOptions: { litellm: { reasoningEffort: "medium" } } };
+      return { litellm: { reasoningEffort: "medium" } };
     default:
       return undefined;
   }
@@ -309,19 +304,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
 
     // Reasoning is enabled optimistically; the fallback below clears this flag
     // and re-streams without it if the model rejects thinking/reasoning.
-    const reasoning = reasoningConfig(provider);
+    const reasoning = reasoningOptions(provider);
     let useReasoning = reasoning !== undefined;
     const makeStream = () =>
       streamText({
         model,
         ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25) } : {}),
         messages: [...systemMessages, ...modelMessages],
-        ...(useReasoning && reasoning
-          ? {
-              providerOptions: reasoning.providerOptions as never,
-              ...(reasoning.maxOutputTokens ? { maxOutputTokens: reasoning.maxOutputTokens } : {}),
-            }
-          : {}),
+        ...(useReasoning && reasoning ? { providerOptions: reasoning as never } : {}),
         abortSignal: ac.signal,
       });
 
