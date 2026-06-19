@@ -90,28 +90,13 @@ works with no images present.
 
 ## Sandbox isolation & hardening
 
-Untrusted code runs in per-session containers that are locked down by a tested
-builder (`sandbox-controller/sandbox-spec.js`): never privileged,
-`no-new-privileges`, **all capabilities dropped**, non-root (`1000:1000`), memory
-/ CPU / PID limits, and **no network by default**. The controller never lets a
-caller specify container options — it only requests this fixed, safe shape.
+Untrusted code runs in per-session containers that are never privileged, drop all
+capabilities, run non-root, and have no network by default; the controller reaches
+Docker only through a restricted socket-proxy. This is defense-in-depth — for a
+true "escape ≠ host root" boundary run a **rootless** Docker daemon.
 
-The controller reaches the Docker daemon through a **socket-proxy** that exposes
-only the container and exec endpoints (build, pull, image, network, volume, and
-swarm management are denied), so the raw host socket is never mounted into the
-controller itself.
-
-> **This is defense-in-depth, not a hard boundary.** A compromised controller
-> could still create a non-privileged sandbox. The only way to make a container
-> escape *not* equal host root is to run the Docker daemon **rootless** — the
-> recommended posture for any multi-tenant or internet-facing deployment:
->
-> ```bash
-> # on the host, as a non-root user (see https://docs.docker.com/engine/security/rootless/)
-> dockerd-rootless-setuptool.sh install
-> export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
-> npm run up      # the stack now drives a rootless daemon; an escape lands as an unprivileged user
-> ```
+See **[`SECURITY.md`](SECURITY.md)** for the full threat model, the rootless
+setup, the per-deployment hardening table, and how to report a vulnerability.
 
 To allow sandboxes outbound network access (off by default), set
 `SANDBOX_ALLOW_NETWORK=true` in the environment.

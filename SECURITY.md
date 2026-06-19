@@ -1,0 +1,51 @@
+# Security Policy
+
+## Reporting a vulnerability
+
+Please report suspected vulnerabilities privately to **security@unclaw.dev**
+(or open a GitHub private security advisory). Do not file public issues for
+undisclosed vulnerabilities. We aim to acknowledge within 72 hours.
+
+## Sandbox isolation & hardening
+
+Untrusted code runs in per-session containers locked down by a tested builder
+(`sandbox-controller/sandbox-spec.js`): never privileged, `no-new-privileges`,
+**all capabilities dropped**, non-root (`1000:1000`), memory / CPU / PID limits,
+and **no network by default**. The controller never lets a caller specify
+container options — it only requests this fixed, safe shape.
+
+The controller reaches the Docker daemon through a **socket-proxy** that exposes
+only the container and exec endpoints (build, pull, image, network, volume, and
+swarm management are denied), so the raw host socket is never mounted into the
+controller itself. The platform never touches the Docker socket directly.
+
+### This is defense-in-depth, not a hard boundary
+
+A compromised controller could still create a non-privileged sandbox. The only
+way to make a container escape *not* equal host root is to run the Docker daemon
+**rootless**.
+
+```bash
+# on the host, as a non-root user
+# (see https://docs.docker.com/engine/security/rootless/)
+dockerd-rootless-setuptool.sh install
+export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
+npm run up   # the stack now drives a rootless daemon; an escape lands unprivileged
+```
+
+## Hardening posture by deployment
+
+| Deployment | Required posture |
+|---|---|
+| Single-operator / trusted users | Default stack. Keep `SANDBOX_ALLOW_NETWORK=false` unless needed. |
+| Team, semi-trusted users | Above + rootless Docker, set `PUBLIC_URL`, TLS in front (see Caddy profile). |
+| Multi-tenant / internet-facing | Above + rootless or gVisor (`runsc`) runtime, network egress policy, external managed Postgres, regular backups. |
+
+## Secret handling
+
+- `UNCLAW_MASTER_KEY` encrypts provider API keys at rest and lives **outside** the
+  database, so a DB leak alone cannot decrypt them. 64 hex chars.
+- `CONTROLLER_SECRET` gates the platform↔controller channel; the controller
+  refuses to boot on the default value in production.
+- `scripts/up.sh` generates strong values into `.env` (mode `600`) on first run
+  and never overwrites an operator-set value.
