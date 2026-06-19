@@ -45,6 +45,7 @@ data/
 *.tsbuildinfo
 next-env.d.ts
 
-# local tooling (editor / code-index caches)
+# local tooling (editor / code-index caches, MCP server output)
 .codegraph/
 .cursor/
+.playwright-mcp/
