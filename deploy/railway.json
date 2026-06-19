@@ -1,0 +1,20 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "name": "unClaw",
+  "description": "Self-hosted, extensible AI assistant platform for non-technical teams.",
+  "services": {
+    "platform": {
+      "image": "ghcr.io/lyosu/unclaw-platform:latest",
+      "variables": {
+        "DATABASE_URL": "${{Postgres.DATABASE_URL}}",
+        "UNCLAW_MASTER_KEY": "${{secret(64)}}",
+        "CONTROLLER_SECRET": "${{secret(64)}}",
+        "PUBLIC_URL": "https://${{RAILWAY_PUBLIC_DOMAIN}}"
+      }
+    },
+    "Postgres": {
+      "image": "postgres:17-alpine"
+    }
+  },
+  "notes": "Railway does not provide a Docker daemon, so the sandbox-controller / per-session sandboxes are unavailable on Railway. Use this template for the chat/agent platform only; for full sandboxed code execution, self-host the compose stack on a host with Docker (see README)."
+}

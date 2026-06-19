@@ -67,6 +67,14 @@ proxy. Prebuilt images mean no build toolchain is needed — see *Prebuilt image
 | A team | Same, plus backups + the upgrade runbook (`docs/UPGRADE.md`) and `SECURITY.md`. |
 | A company | External managed Postgres, rootless Docker, SSO — see `SECURITY.md` hardening table. |
 
+### Templates (one-click)
+
+- **Railway** — `deploy/railway.json`. Chat/agent platform only (Railway has no
+  Docker daemon, so sandboxed code execution is unavailable there).
+- **Coolify** — see `deploy/coolify.md`. Full stack including the sandbox.
+
+For full sandboxed execution, prefer the compose stack on any host with Docker.
+
 ---
 
 The base `docker-compose.yml` publishes only the platform on `:3000`; Postgres and
