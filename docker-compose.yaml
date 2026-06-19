@@ -30,6 +30,11 @@ services:
       dockerfile: Dockerfile.sandbox
     image: unclaw-sandbox
     entrypoint: ["echo", "sandbox image built"]
+    # One-shot image-builder: must NOT restart. Coolify injects
+    # `restart: unless-stopped` into every service otherwise, which turns the
+    # instant `echo` exit into a restart loop and races the controller's
+    # `service_completed_successfully` wait below.
+    restart: "no"
 
   # Restricts the Docker API the controller can reach (container + exec only);
   # the raw host socket is mounted read-only here alone, on an isolated network.
@@ -89,6 +94,11 @@ services:
     build: .
     expose:
       - "3000"
+    # This host fronts apps with its own nginx (Coolify's Traefik is stopped
+    # here), so publish to loopback for nginx to reverse-proxy. 127.0.0.1 only —
+    # never exposed past UFW. On a host that uses Coolify's Traefik, drop this.
+    ports:
+      - "127.0.0.1:3100:3000"
     volumes:
       - ./data:/app/data
     environment:

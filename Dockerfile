@@ -1,21 +1,25 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# BuildKit cache mounts persist across builds even under Coolify's forced
+# --no-cache (type=cache stores are not wiped by --no-cache). No `# syntax`
+# directive needed — Docker 28's built-in frontend supports them, and the
+# external frontend pull is unreliable inside Coolify's build helper.
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 # Cap the build heap so an oversized build fails as a Node heap error (build
 # fails, host survives) rather than tripping the kernel OOM killer on a
 # RAM-tight shared host. Tune via the build arg if the build legitimately needs more.
 ARG NODE_BUILD_HEAP_MB=1536
 ENV NODE_OPTIONS="--max-old-space-size=${NODE_BUILD_HEAP_MB}"
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # Dev target: full deps, no production build — source is bind-mounted at runtime
 # and `next dev` provides hot-reload. Used by docker-compose.dev.yml.
 FROM node:22-alpine AS dev
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME="0.0.0.0"
 CMD ["npm", "run", "dev"]
