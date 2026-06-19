@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resumeStep } from "../setup";
+import { resumeStep } from "../setup-steps";
 
 describe("resumeStep — where the first-run wizard resumes", () => {
   it("starts at account creation when there is no session", () => {

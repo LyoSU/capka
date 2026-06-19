@@ -4,21 +4,12 @@ import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { getAuth } from "@/lib/auth";
 import { isSetupComplete } from "@/lib/settings";
+import { resumeStep, type SetupStep } from "@/lib/setup-steps";
 
-/** The first-run wizard advances through these, in order. */
-export const SETUP_STEPS = ["account", "provider", "telegram"] as const;
-export type SetupStep = (typeof SETUP_STEPS)[number];
-
-/**
- * Pure: where the wizard should resume given the progress we observe on the
- * server. The account is created the moment a session exists (better-auth sets
- * the cookie on sign-up), so a signed-in visitor has already cleared step 1 —
- * re-showing it would only dead-end on a duplicate sign-up.
- */
-export function resumeStep(o: { hasSession: boolean; hasProviderConfig: boolean }): SetupStep {
-  if (!o.hasSession) return "account";
-  return o.hasProviderConfig ? "telegram" : "provider";
-}
+// Client-safe primitives (SETUP_STEPS, SetupStep, resumeStep) live in
+// ./setup-steps so client components can import them without pulling this
+// module's server-only deps (db/pg → node `tls`) into the browser bundle.
+export { SETUP_STEPS, resumeStep, type SetupStep } from "@/lib/setup-steps";
 
 /**
  * The single source of truth for setup progress. Reads real state — completion

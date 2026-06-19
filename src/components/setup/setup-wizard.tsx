@@ -19,7 +19,7 @@ import {
 import { ModelPicker } from "@/components/chat/model-picker";
 import { iconForSlug } from "@/components/chat/provider-icons";
 import { PROVIDER_OPTIONS, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
-import { SETUP_STEPS, type SetupStep } from "@/lib/setup";
+import { SETUP_STEPS, type SetupStep } from "@/lib/setup-steps";
 
 const STEPS = SETUP_STEPS;
 
