@@ -183,7 +183,8 @@
         }
       },
       "scrollDown": "Scroll to bottom",
-      "retry": "Retry"
+      "retry": "Retry",
+      "navigation": "Chat navigation"
     },
     "menu": {
       "rename": "Rename",
@@ -261,11 +262,12 @@
     "message": {
       "cancelled": "Response was cancelled",
       "genericError": "Something went wrong while generating a response. Please try again.",
-      "thinking": "Thinking",
+      "thinking": "Thinking…",
       "copy": "Copy",
       "copied": "Copied",
       "regenerate": "Regenerate",
-      "edit": "Edit"
+      "edit": "Edit",
+      "reasoning": "Reasoning"
     },
     "archived": {
       "title": "Archived chats",

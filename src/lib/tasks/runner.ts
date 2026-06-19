@@ -56,7 +56,10 @@ function reasoningConfig(provider: string):
     case "openai":
       return { providerOptions: { openai: { reasoningSummary: "auto" } } };
     case "litellm":
-      return { providerOptions: { openai: { reasoningEffort: "medium" } } };
+      // Namespace matches the provider `name` in getModel. reasoningEffort asks
+      // the gateway's reasoning model to think; openai-compatible then parses the
+      // streamed reasoning_content into reasoning-delta parts.
+      return { providerOptions: { litellm: { reasoningEffort: "medium" } } };
     default:
       return undefined;
   }

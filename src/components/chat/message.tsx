@@ -259,20 +259,28 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
 
 
 /** The model's reasoning — a quiet, collapsible "thinking" block (shown only
- *  when the provider streams reasoning). Brain glyph + a muted italic preview
- *  that expands to the full thought, so it informs without shouting. */
+ *  when the provider streams reasoning). The header is a stable label, NOT a
+ *  preview of the text — the full thought lives only in the expanded body, so
+ *  nothing is duplicated. Auto-opens while the model is thinking (the user
+ *  watches it live) and collapses once the answer begins; a manual click takes
+ *  over from the auto-follow. */
 function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
   const t = useTranslations("chat.message");
-  const preview = text.trim().replace(/\s+/g, " ");
+  const [userToggled, setUserToggled] = useState(false);
+  const [open, setOpen] = useState(!!isStreaming);
+  useEffect(() => {
+    if (!userToggled) setOpen(!!isStreaming);
+  }, [isStreaming, userToggled]);
+
   return (
-    <Collapsible defaultOpen={false}>
+    <Collapsible open={open} onOpenChange={(v) => { setUserToggled(true); setOpen(v); }}>
       <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-2 py-0.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground [&[data-state=open]>.chevron]:rotate-90">
         <Brain className={`h-3.5 w-3.5 shrink-0 ${isStreaming ? "animate-pulse" : ""}`} />
-        <span className="flex-1 truncate italic">{preview || t("thinking")}</span>
+        <span className="flex-1 italic">{isStreaming ? t("thinking") : t("reasoning")}</span>
         <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <p className="mt-1 mb-2 ml-[1.375rem] whitespace-pre-wrap text-[13px] italic leading-relaxed text-muted-foreground">
+        <p className="mt-1 mb-2 ml-[1.375rem] whitespace-pre-wrap text-[13px] italic leading-relaxed text-muted-foreground/80">
           {text}
         </p>
       </CollapsibleContent>
