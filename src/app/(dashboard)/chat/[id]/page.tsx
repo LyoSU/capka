@@ -50,6 +50,7 @@ export default async function ChatIdPage({
 
   return (
     <ChatPanel
+      key={chatId}
       chatId={chatId}
       defaultModel={defaultModel}
       projectId={projectId ?? undefined}

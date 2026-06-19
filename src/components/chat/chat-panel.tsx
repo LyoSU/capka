@@ -1,8 +1,12 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
+
+// useLayoutEffect warns during SSR; this client component is still rendered on
+// the server, so fall back to useEffect there. The choice is stable per render.
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Sparkles } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
@@ -26,10 +30,15 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   const t = useTranslations("chat");
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Track whether the user is pinned to the bottom. We only auto-follow new
-  // content when they already are — scrolling up to re-read shouldn't yank them
-  // back down on every token.
-  const atBottomRef = useRef(true);
+  // The latest user message ("the question"), the end of real content (before
+  // the spacer), and the spacer itself — together they let us pin a turn to the
+  // top the way ChatGPT/Claude do.
+  const lastUserMsgRef = useRef<HTMLDivElement>(null);
+  const contentEndRef = useRef<HTMLDivElement>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
+  // First paint of a chat snaps into place instantly; later sends animate. The
+  // page mounts ChatPanel with key={chatId}, so this resets per chat for free.
+  const seenFirstTurn = useRef(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
 
   const { messages, isLoading, error, sendMessage, stop, reload, taskInfo } = useBackgroundChat({
@@ -37,26 +46,76 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     projectId,
   });
 
-  const handleScroll = () => {
+  // The message that starts the latest turn. Changing this (a new send, or
+  // opening a chat) is what triggers the pin-to-top animation.
+  const lastUserId = messages.findLast((m) => m.role === "user")?.id;
+
+  // Show the "scroll to latest" button only when streamed content has grown
+  // past the visible reading area (the input bar floats over the bottom ~120px).
+  const updateScrollDown = () => {
     const el = scrollRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-    atBottomRef.current = nearBottom;
-    setShowScrollDown(!nearBottom);
+    const end = contentEndRef.current;
+    if (!el || !end) return;
+    const cRect = el.getBoundingClientRect();
+    const eRect = end.getBoundingClientRect();
+    setShowScrollDown(eRect.bottom > cRect.bottom - 120);
   };
 
-  const scrollToBottom = () => {
+  const scrollToLatest = () => {
     const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    atBottomRef.current = true;
-    setShowScrollDown(false);
+    const end = contentEndRef.current;
+    if (!el || !end) return;
+    const cRect = el.getBoundingClientRect();
+    const eRect = end.getBoundingClientRect();
+    el.scrollTo({ top: el.scrollTop + (eRect.bottom - cRect.bottom) + 120, behavior: "smooth" });
   };
 
+  // Size the spacer to exactly the room still missing for the latest user
+  // message to reach the top — i.e. one viewport minus whatever already sits
+  // below it (its reply + status). As the reply streams in, this shrinks toward
+  // zero, so a long answer leaves no dead space; a short one still pins to top.
+  const resizeSpacer = () => {
+    const el = scrollRef.current;
+    const userEl = lastUserMsgRef.current;
+    const end = contentEndRef.current;
+    const spacer = spacerRef.current;
+    if (!el || !userEl || !end || !spacer) return;
+    const contentBelowUser = end.getBoundingClientRect().top - userEl.getBoundingClientRect().top;
+    spacer.style.height = `${Math.max(0, el.clientHeight - contentBelowUser - 16)}px`;
+  };
+
+  // Pin the latest turn to the top. When a new user message appears we grow the
+  // bottom spacer (so a short reply can still be scrolled up), then bring the
+  // message to the top. The reply streams downward into the space below — we
+  // never auto-follow it, so the view stays calm while the model writes.
+  useIsomorphicLayoutEffect(() => {
+    if (!lastUserId) return;
+    const el = scrollRef.current;
+    const userEl = lastUserMsgRef.current;
+    if (!el || !userEl) return;
+
+    resizeSpacer(); // synchronous style write — layout is ready before we scroll
+    const cRect = el.getBoundingClientRect();
+    const uRect = userEl.getBoundingClientRect();
+    const top = el.scrollTop + (uRect.top - cRect.top) - 16;
+    // "instant" (not "auto") — "auto" defers to the CSS scroll-behavior, which
+    // would animate the very first positioning and read as a stray scroll.
+    el.scrollTo({ top, behavior: seenFirstTurn.current ? "smooth" : "instant" });
+    seenFirstTurn.current = true;
+    updateScrollDown();
+  }, [lastUserId]);
+
+  // Keep the spacer correct on viewport changes; refresh the button as the
+  // reply streams in (content grows, but we deliberately don't scroll).
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    const onResize = () => { resizeSpacer(); updateScrollDown(); };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // As the reply streams in, keep the spacer trimmed to just-enough and refresh
+  // the button. We never scroll here — the pinned message holds its position.
+  useEffect(() => { resizeSpacer(); updateScrollDown(); }, [messages]);
 
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<AttachedFile[]>([]);
@@ -154,25 +213,27 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
             </Button>
           </div>
 
-          <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto pb-40">
+          <div ref={scrollRef} onScroll={updateScrollDown} className="flex-1 overflow-y-auto pb-40">
             <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
               {messages.map((message, i) => {
                 const isLast = i === messages.length - 1;
                 const isStreamingMsg = isLoading && isLast && message.role === "assistant";
+                const isLatestUser = message.id === lastUserId;
                 return (
-                  <ChatMessage
-                    key={message.id}
-                    message={message as never}
-                    chatId={chatId}
-                    isAdmin={isAdmin}
-                    isStreaming={isStreamingMsg}
-                    statusSlot={isStreamingMsg ? (
-                      <TaskStatus
-                        startedAt={taskInfo.startedAt}
-                        currentTool={taskInfo.currentTool}
-                      />
-                    ) : undefined}
-                  />
+                  <div key={message.id} ref={isLatestUser ? lastUserMsgRef : undefined}>
+                    <ChatMessage
+                      message={message as never}
+                      chatId={chatId}
+                      isAdmin={isAdmin}
+                      isStreaming={isStreamingMsg}
+                      statusSlot={isStreamingMsg ? (
+                        <TaskStatus
+                          startedAt={taskInfo.startedAt}
+                          currentTool={taskInfo.currentTool}
+                        />
+                      ) : undefined}
+                    />
+                  </div>
                 );
               })}
               {isLoading && messages.length > 0 && messages[messages.length - 1].role === "user" && (
@@ -183,6 +244,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                   />
                 </div>
               )}
+              {/* End of real content (used to detect/scroll to the latest), then
+                  the spacer that lets the latest turn rise to the top. */}
+              <div ref={contentEndRef} />
+              <div ref={spacerRef} aria-hidden className="shrink-0" />
             </div>
           </div>
 
@@ -193,7 +258,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                   variant="outline"
                   size="icon"
                   className="pointer-events-auto h-9 w-9 rounded-full shadow-md"
-                  onClick={scrollToBottom}
+                  onClick={scrollToLatest}
                   aria-label={t("panel.scrollDown")}
                 >
                   <ArrowDown className="h-4 w-4" />
