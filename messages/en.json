@@ -606,6 +606,15 @@
   },
   "setup": {
     "back": "Back",
+    "brand": {
+      "wordmark": "unClaw",
+      "headline": "Calm access to AI for your whole team",
+      "sub": "Connect a provider once. After that everyone just opens a chat and works, in the browser or in Telegram.",
+      "point1": "One shared key for the whole company",
+      "point2": "You choose which models are available",
+      "point3": "The same assistant in the browser and Telegram",
+      "footnote": "Setup takes about a minute."
+    },
     "steps": {
       "account": "Account",
       "provider": "Provider",

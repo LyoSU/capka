@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Check, Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -17,42 +17,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ModelPicker } from "@/components/chat/model-picker";
+import { ClawMark } from "@/components/brand/claw-mark";
 import { iconForSlug } from "@/components/chat/provider-icons";
 import { PROVIDER_OPTIONS, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
 import { SETUP_STEPS, type SetupStep } from "@/lib/setup-steps";
 
 const STEPS = SETUP_STEPS;
 
-function Stepper({ current }: { current: number }) {
-  const t = useTranslations("setup.steps");
+const INPUT_CLASS =
+  "h-11 rounded-xl border-transparent bg-muted/60 px-3.5 text-[15px] focus-visible:border-ring focus-visible:bg-card";
+
+/** Minimal 2-step progress: a pair of bars that fill as the admin advances. */
+function StepBars({ current }: { current: number }) {
   return (
-    <div className="flex items-center gap-2 mb-8">
+    <div className="flex items-center gap-1.5" aria-hidden>
       {STEPS.map((label, i) => (
-        <div key={i} className="flex items-center gap-2 flex-1">
-          <div
-            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors ${
-              i <= current
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            {i < current ? <Check className="h-3.5 w-3.5" /> : i + 1}
-          </div>
-          <span
-            className={`text-xs font-medium hidden sm:inline ${
-              i === current ? "text-foreground" : "text-muted-foreground"
-            }`}
-          >
-            {t(label)}
-          </span>
-          {i < STEPS.length - 1 && (
-            <div
-              className={`flex-1 h-px transition-colors ${
-                i < current ? "bg-primary" : "bg-border"
-              }`}
-            />
-          )}
-        </div>
+        <span
+          key={label}
+          className={`h-1 flex-1 rounded-full transition-colors duration-500 ${i <= current ? "bg-primary" : "bg-border"}`}
+        />
       ))}
     </div>
   );
@@ -92,9 +75,6 @@ export function SetupWizard({
     setDefaultModel("");
     setBaseUrl(PROVIDER_META[next].defaultBaseUrl ?? "");
   }
-
-  // Step 3 - Telegram
-  const [botToken, setBotToken] = useState("");
 
   const [showApiKey, setShowApiKey] = useState(false);
 
@@ -176,7 +156,8 @@ export function SetupWizard({
         return;
       }
 
-      // Save provider
+      // Save provider, then mark setup complete — the provider is the last
+      // gate to getting started, so saving it finishes onboarding outright.
       const res = await fetch("/api/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -194,7 +175,18 @@ export function SetupWizard({
         return;
       }
 
-      setStep(2);
+      const done = await fetch("/api/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ step: "complete" }),
+      });
+      if (!done.ok) {
+        const data = await done.json();
+        toast.error(data.error || t("provider.saveError"));
+        return;
+      }
+
+      router.push("/chat");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("provider.verifyError"));
     } finally {
@@ -202,108 +194,84 @@ export function SetupWizard({
     }
   }
 
-  async function handleFinish(skip: boolean) {
-    setLoading(true);
-    try {
-      // Save telegram token + register webhook
-      if (!skip && botToken) {
-        const res = await fetch("/api/settings/telegram", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ botToken }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          toast.error(data.error || t("telegram.saveTokenError"));
-          return;
-        }
-        if (data.warning) {
-          toast.warning(data.warning);
-        }
-      }
-
-      // Mark setup complete
-      const res = await fetch("/api/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ step: "complete" }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || t("telegram.completeError"));
-        return;
-      }
-
-      router.push("/chat");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("telegram.finishError"));
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
-    <div className="space-y-6">
-      <Stepper current={step} />
+    <div className="relative min-h-screen overflow-hidden bg-background">
+      {/* Calm claw monogram, far behind. Solid stroke + element-level opacity so the
+          overlapping strokes flatten into one layer (no darker intersections), and the
+          opaque card on top keeps it a clean backdrop that never tangles with content. */}
+      <ClawMark className="pointer-events-none absolute left-1/2 top-1/2 h-[165vmin] w-[165vmin] -translate-x-1/2 -translate-y-1/2 text-foreground opacity-[0.03]" />
 
-      <div className="text-center space-y-1">
-        <h1 className="text-xl font-semibold">
-          {step === 0 && t("account.title")}
-          {step === 1 && t("provider.title")}
-          {step === 2 && t("telegram.title")}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {step === 0 && t("account.subtitle")}
-          {step === 1 && t("provider.subtitle")}
-          {step === 2 && t("telegram.subtitle")}
-        </p>
-      </div>
+      <div className="relative flex min-h-screen items-center justify-center px-5 py-12">
+        <div className="animate-card-morph w-full max-w-md rounded-[1.75rem] border border-border/60 bg-card p-7 shadow-[0_1px_2px_oklch(0_0_0/0.05),0_28px_60px_-32px_oklch(0.2_0.01_60/0.28)] sm:p-8">
+          <div className="flex flex-col items-center gap-2.5 text-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+              <ClawMark className="h-[22px] w-[22px]" />
+            </span>
+            <span className="text-sm font-medium tracking-tight text-muted-foreground">{t("brand.wordmark")}</span>
+          </div>
 
-      {step === 0 && (
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="name">{t("account.name")}</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("account.namePlaceholder")}
-            />
+          <div className="mt-7">
+            <StepBars current={step} />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="email">{t("account.email")}</Label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder={t("account.emailPlaceholder")}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password">{t("account.password")}</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={t("account.passwordPlaceholder")}
-            />
-          </div>
-          <Button className="w-full" onClick={handleAccount} disabled={loading}>
-            {loading ? t("account.submitting") : t("account.submit")}
-          </Button>
-        </div>
-      )}
 
-      {step === 1 && (
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>{t("provider.field")}</Label>
-            <Select value={provider} onValueChange={(v) => changeProvider(v as ProviderName)}>
-              <SelectTrigger className="w-full h-auto py-2">
-                <SelectValue />
-              </SelectTrigger>
+            <div key={step} className="animate-blur-rise mt-6 space-y-6">
+              <div className="space-y-1.5">
+                <h1 className="font-display text-[1.75rem] leading-tight tracking-tight text-balance">
+                  {step === 0 ? t("account.title") : t("provider.title")}
+                </h1>
+                <p className="text-sm leading-relaxed text-muted-foreground text-pretty">
+                  {step === 0 ? t("account.subtitle") : t("provider.subtitle")}
+                </p>
+              </div>
+
+              {step === 0 && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="name">{t("account.name")}</Label>
+                    <Input
+                      id="name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder={t("account.namePlaceholder")}
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email">{t("account.email")}</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={t("account.emailPlaceholder")}
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="password">{t("account.password")}</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={t("account.passwordPlaceholder")}
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+                  <Button className="h-11 w-full rounded-xl text-[15px]" onClick={handleAccount} disabled={loading}>
+                    {loading ? t("account.submitting") : t("account.submit")}
+                  </Button>
+                </div>
+              )}
+
+              {step === 1 && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label>{t("provider.field")}</Label>
+                    <Select value={provider} onValueChange={(v) => changeProvider(v as ProviderName)}>
+                      <SelectTrigger className="h-auto w-full rounded-xl border-transparent bg-muted/60 py-2.5">
+                        <SelectValue />
+                      </SelectTrigger>
               <SelectContent>
                 {PROVIDER_OPTIONS.map((p) => {
                   const Icon = iconForSlug(p.iconSlug);
@@ -328,115 +296,74 @@ export function SetupWizard({
             </Select>
           </div>
 
-          {meta.requiresKey && (
-            <div className="space-y-1.5">
-              <Label htmlFor="apiKey">{t("provider.apiKey")}</Label>
-              <div className="relative">
-                <Input
-                  id="apiKey"
-                  type={showApiKey ? "text" : "password"}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-..."
-                  className="pr-9"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey((v) => !v)}
-                  aria-label={showApiKey ? t("provider.hideKey") : t("provider.showKey")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+                  {meta.requiresKey && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="apiKey">{t("provider.apiKey")}</Label>
+                      <div className="relative">
+                        <Input
+                          id="apiKey"
+                          type={showApiKey ? "text" : "password"}
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          placeholder="sk-..."
+                          className={`${INPUT_CLASS} pr-10`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey((v) => !v)}
+                          aria-label={showApiKey ? t("provider.hideKey") : t("provider.showKey")}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        >
+                          {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {meta.requiresBaseUrl && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="baseUrl">{t("provider.baseUrl")}</Label>
+                      <Input
+                        id="baseUrl"
+                        value={baseUrl}
+                        onChange={(e) => setBaseUrl(e.target.value)}
+                        placeholder={meta.baseUrlPlaceholder}
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <Label>{t("provider.model")}</Label>
+                    <ModelPicker
+                      variant="field"
+                      value={defaultModel}
+                      onChange={setDefaultModel}
+                      provider={provider}
+                      apiKey={apiKey}
+                      baseUrl={baseUrl}
+                      disabled={(meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl)}
+                      placeholder={meta.requiresKey && !apiKey ? t("provider.enterKeyFirst") : t("provider.pickModel")}
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    {!signedIn && (
+                      <Button variant="ghost" className="h-11 rounded-xl" onClick={() => setStep(0)} disabled={loading}>
+                        {t("back")}
+                      </Button>
+                    )}
+                    <Button className="h-11 flex-1 rounded-xl text-[15px]" onClick={handleProvider} disabled={loading}>
+                      {loading ? t("provider.submitting") : t("provider.submit")}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
 
-          {meta.requiresBaseUrl && (
-            <div className="space-y-1.5">
-              <Label htmlFor="baseUrl">{t("provider.baseUrl")}</Label>
-              <Input
-                id="baseUrl"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder={meta.baseUrlPlaceholder}
-              />
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label>{t("provider.model")}</Label>
-            <ModelPicker
-              variant="field"
-              value={defaultModel}
-              onChange={setDefaultModel}
-              provider={provider}
-              apiKey={apiKey}
-              baseUrl={baseUrl}
-              disabled={(meta.requiresKey && !apiKey) || (meta.requiresBaseUrl && !baseUrl)}
-              placeholder={meta.requiresKey && !apiKey ? t("provider.enterKeyFirst") : t("provider.pickModel")}
-            />
-          </div>
-
-          <div className="flex gap-2">
-            {!signedIn && (
-              <Button
-                variant="ghost"
-                onClick={() => setStep(0)}
-                disabled={loading}
-              >
-                {t("back")}
-              </Button>
-            )}
-            <Button className="flex-1" onClick={handleProvider} disabled={loading}>
-              {loading ? t("provider.submitting") : t("provider.submit")}
-            </Button>
+            <p className="mt-7 text-center text-xs text-muted-foreground">{t("brand.footnote")}</p>
           </div>
         </div>
-      )}
-
-      {step === 2 && (
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="botToken">{t("telegram.botToken")}</Label>
-            <Input
-              id="botToken"
-              type="password"
-              value={botToken}
-              onChange={(e) => setBotToken(e.target.value)}
-              placeholder="123456:ABC-DEF..."
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("telegram.hint")}
-            </p>
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              variant="ghost"
-              onClick={() => setStep(1)}
-              disabled={loading}
-            >
-              {t("back")}
-            </Button>
-            <Button
-              variant="ghost"
-              className="text-muted-foreground"
-              onClick={() => handleFinish(true)}
-              disabled={loading}
-            >
-              {t("telegram.skip")}
-            </Button>
-            <Button
-              className="flex-1"
-              onClick={() => handleFinish(false)}
-              disabled={loading || !botToken}
-            >
-              {loading ? t("telegram.submitting") : t("telegram.submit")}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
+      </div>
   );
 }
