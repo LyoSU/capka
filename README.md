@@ -24,7 +24,8 @@ an isolated sandbox.
 |---|---|
 | **platform** | Next.js app + the in-process task worker (chat UI, APIs, agent loop). |
 | **postgres** | System of record **and** the task queue / realtime bus (LISTEN/NOTIFY). |
-| **sandbox-controller** | Small HTTP service with Docker-socket access that spawns and tears down per-session sandbox containers. **Root-equivalent on the host** — guarded by a shared secret. |
+| **sandbox-controller** | Small HTTP service that spawns and tears down per-session sandbox containers. Reaches the Docker daemon through a restricted socket-proxy (not the raw socket), guarded by a shared secret. See *Sandbox isolation* below. |
+| **socket-proxy** | Filters the Docker API down to container + exec endpoints; the host socket is mounted read-only here alone, on an isolated network. |
 | **sandbox** | The execution image (`Dockerfile.sandbox`), built once and reused per session. |
 
 The platform never touches the Docker socket directly; it calls the controller
@@ -85,6 +86,34 @@ npm run up                 # generate secrets if needed, then start
 
 The compose `build:` stanzas remain a fallback, so cloning and building still
 works with no images present.
+
+## Sandbox isolation & hardening
+
+Untrusted code runs in per-session containers that are locked down by a tested
+builder (`sandbox-controller/sandbox-spec.js`): never privileged,
+`no-new-privileges`, **all capabilities dropped**, non-root (`1000:1000`), memory
+/ CPU / PID limits, and **no network by default**. The controller never lets a
+caller specify container options — it only requests this fixed, safe shape.
+
+The controller reaches the Docker daemon through a **socket-proxy** that exposes
+only the container and exec endpoints (build, pull, image, network, volume, and
+swarm management are denied), so the raw host socket is never mounted into the
+controller itself.
+
+> **This is defense-in-depth, not a hard boundary.** A compromised controller
+> could still create a non-privileged sandbox. The only way to make a container
+> escape *not* equal host root is to run the Docker daemon **rootless** — the
+> recommended posture for any multi-tenant or internet-facing deployment:
+>
+> ```bash
+> # on the host, as a non-root user (see https://docs.docker.com/engine/security/rootless/)
+> dockerd-rootless-setuptool.sh install
+> export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
+> npm run up      # the stack now drives a rootless daemon; an escape lands as an unprivileged user
+> ```
+
+To allow sandboxes outbound network access (off by default), set
+`SANDBOX_ALLOW_NETWORK=true` in the environment.
 
 ## First run
 
