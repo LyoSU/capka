@@ -1,0 +1,31 @@
+# Scheduled-backup overlay. Layer it to run a daily pg_dump sidecar:
+#   docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
+# Dumps land in ./data/backups (host-mounted). Tune BACKUP_INTERVAL_SECONDS and
+# RETENTION_DAYS. For off-box durability, sync ./data/backups to remote storage.
+services:
+  pg-backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
+      - RETENTION_DAYS=${RETENTION_DAYS:-14}
+    volumes:
+      - ./data/backups:/backups
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "pg-backup: dumping every $$BACKUP_INTERVAL_SECONDS s, keeping $$RETENTION_DAYS days"
+        while true; do
+          STAMP=$$(date -u +%Y%m%dT%H%M%SZ)
+          pg_dump -h postgres -U unClaw -d unClaw --clean --if-exists \
+            | gzip > /backups/unclaw-$$STAMP.sql.gz \
+            && echo "pg-backup: wrote unclaw-$$STAMP.sql.gz" \
+            || echo "pg-backup: dump FAILED at $$STAMP"
+          find /backups -name 'unclaw-*.sql.gz' -mtime +$$RETENTION_DAYS -delete 2>/dev/null || true
+          sleep "$$BACKUP_INTERVAL_SECONDS"
+        done
