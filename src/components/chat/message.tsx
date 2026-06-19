@@ -183,13 +183,6 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   return (
     <div className="text-[15px] leading-relaxed">
       <Markdown isStreaming={isStreaming}>{text}</Markdown>
-      {isStreaming && (
-        // A soft blinking caret so the reply reads as "still being written".
-        <span
-          aria-hidden
-          className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] animate-pulse rounded-full bg-foreground/50"
-        />
-      )}
       {chatId && <WorkspaceLinks text={text} chatId={chatId} />}
     </div>
   );
