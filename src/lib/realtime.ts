@@ -86,7 +86,7 @@ class Realtime {
       await client.connect();
       this.sub = client;
       // (Re-)subscribe to every channel we still have listeners for.
-      for (const ch of this.chans.keys()) await client.query(`LISTEN ${ch}`);
+      for (const ch of this.chans.keys()) await client.query(`LISTEN "${ch}"`);
     })();
     try {
       await this.subConnecting;
@@ -100,14 +100,18 @@ class Realtime {
     if (!this.chans.has(ch)) this.chans.set(ch, new Set());
     this.chans.get(ch)!.add(cb);
     await this.ensureSub();
-    await this.sub!.query(`LISTEN ${ch}`);
+    // Quote the identifier: pg_notify() takes a case-SENSITIVE text channel,
+    // but an unquoted `LISTEN ident` is folded to lowercase by Postgres. With a
+    // mixed-case channel (user IDs contain uppercase) the two would never match
+    // and no event would ever be delivered. Quoting preserves case on both sides.
+    await this.sub!.query(`LISTEN "${ch}"`);
     return () => {
       const set = this.chans.get(ch);
       if (!set) return;
       set.delete(cb);
       if (set.size === 0) {
         this.chans.delete(ch);
-        this.sub?.query(`UNLISTEN ${ch}`).catch(() => {});
+        this.sub?.query(`UNLISTEN "${ch}"`).catch(() => {});
       }
     };
   }

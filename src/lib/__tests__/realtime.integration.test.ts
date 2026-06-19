@@ -17,6 +17,20 @@ run("realtime LISTEN/NOTIFY round-trip", () => {
     unsub();
   }, 20_000);
 
+  it("delivers to a MIXED-CASE channel (regression: LISTEN must not lowercase it)", async () => {
+    // Real user IDs (nanoid/better-auth) contain uppercase. An unquoted
+    // `LISTEN ident` folds to lowercase while pg_notify keeps the exact case,
+    // so without identifier quoting nothing would ever arrive.
+    const received: unknown[] = [];
+    const unsub = await realtime.subscribe("user:AbC123XyZ", (d) => received.push(d));
+
+    await realtime.publish("user:AbC123XyZ", { type: "ping", n: 2 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(received).toEqual([{ type: "ping", n: 2 }]);
+    unsub();
+  }, 20_000);
+
   it("collapses oversized payloads into a refresh marker", async () => {
     const received: Array<Record<string, unknown>> = [];
     const unsub = await realtime.subscribe("user:test-big", (d) => received.push(d as Record<string, unknown>));
