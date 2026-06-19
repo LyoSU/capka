@@ -8,6 +8,21 @@ import { toast } from "sonner";
 // the server, so fall back to useEffect there. The choice is stable per render.
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
+// Clearance below the floating gradient header where a pinned turn comes to
+// rest (kept in sync with the scroll container's pt-16). Content above this
+// line is what the header gradient fades out.
+const TOP_INSET = 64;
+
+/** Plain text of a message — the user turns feed the chat navigator. */
+function msgText(m: { parts?: { type: string; text?: string }[] }): string {
+  return (m.parts ?? [])
+    .filter((p) => p.type === "text")
+    .map((p) => p.text ?? "")
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Sparkles } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
@@ -18,6 +33,7 @@ import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { RecentChats } from "@/components/chat/recent-chats";
 import { Button } from "@/components/ui/button";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
+import { ChatNav } from "@/components/chat/chat-nav";
 import { haptic } from "@/lib/haptics";
 
 interface ChatPanelProps {
@@ -41,6 +57,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   // page mounts ChatPanel with key={chatId}, so this resets per chat for free.
   const seenFirstTurn = useRef(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  // The user turn currently at the top of the view — highlighted in the nav.
+  const [activeUserId, setActiveUserId] = useState<string | null>(null);
 
   const { messages, isLoading, error, sendMessage, regenerate, editMessage, stop, reload, taskInfo } = useBackgroundChat({
     chatId,
@@ -57,6 +75,11 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   // The message that starts the latest turn. Changing this (a new send, or
   // opening a chat) is what triggers the pin-to-top animation.
   const lastUserId = messages.findLast((m) => m.role === "user")?.id;
+
+  // One nav entry per user turn — the minimap down the right edge.
+  const navItems = messages
+    .filter((m) => m.role === "user")
+    .map((m) => ({ id: m.id, text: msgText(m as { parts?: { type: string; text?: string }[] }) }));
 
   // Show the "scroll to latest" button only when streamed content has grown
   // past the visible reading area (the input bar floats over the bottom ~120px).
@@ -78,6 +101,31 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     el.scrollTo({ top: el.scrollTop + (eRect.bottom - cRect.bottom) + 120, behavior: "smooth" });
   };
 
+  // Bring any message (by id) to rest just below the header — powers the nav.
+  const scrollToMessage = (id: string) => {
+    const el = scrollRef.current;
+    const target = el?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
+    if (!el || !target) return;
+    const top = el.scrollTop + (target.getBoundingClientRect().top - el.getBoundingClientRect().top) - TOP_INSET;
+    el.scrollTo({ top, behavior: "smooth" });
+  };
+
+  // The active turn is the last user message whose top has reached the header
+  // line — i.e. the one you're currently reading.
+  const updateActiveTurn = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const cTop = el.getBoundingClientRect().top;
+    const nodes = el.querySelectorAll<HTMLElement>('[data-role="user"]');
+    let active: string | null = nodes[0]?.dataset.msgId ?? null;
+    nodes.forEach((n) => {
+      if (n.getBoundingClientRect().top - cTop <= TOP_INSET + 8) active = n.dataset.msgId ?? active;
+    });
+    setActiveUserId(active);
+  };
+
+  const handleScroll = () => { updateScrollDown(); updateActiveTurn(); };
+
   // Size the spacer to exactly the room still missing for the latest user
   // message to reach the top — i.e. one viewport minus whatever already sits
   // below it (its reply + status). As the reply streams in, this shrinks toward
@@ -89,7 +137,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     const spacer = spacerRef.current;
     if (!el || !userEl || !end || !spacer) return;
     const contentBelowUser = end.getBoundingClientRect().top - userEl.getBoundingClientRect().top;
-    spacer.style.height = `${Math.max(0, el.clientHeight - contentBelowUser - 16)}px`;
+    spacer.style.height = `${Math.max(0, el.clientHeight - contentBelowUser - TOP_INSET)}px`;
   };
 
   // Pin the latest turn to the top. When a new user message appears we grow the
@@ -105,12 +153,13 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     resizeSpacer(); // synchronous style write — layout is ready before we scroll
     const cRect = el.getBoundingClientRect();
     const uRect = userEl.getBoundingClientRect();
-    const top = el.scrollTop + (uRect.top - cRect.top) - 16;
+    const top = el.scrollTop + (uRect.top - cRect.top) - TOP_INSET;
     // "instant" (not "auto") — "auto" defers to the CSS scroll-behavior, which
     // would animate the very first positioning and read as a stray scroll.
     el.scrollTo({ top, behavior: seenFirstTurn.current ? "smooth" : "instant" });
     seenFirstTurn.current = true;
     updateScrollDown();
+    updateActiveTurn();
   }, [lastUserId]);
 
   // Keep the spacer correct on viewport changes; refresh the button as the
@@ -122,8 +171,12 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   }, []);
 
   // As the reply streams in, keep the spacer trimmed to just-enough and refresh
-  // the button. We never scroll here — the pinned message holds its position.
-  useEffect(() => { resizeSpacer(); updateScrollDown(); }, [messages]);
+  // the button + active turn. Deferred to a frame so we measure after the new
+  // content has laid out (and so the state writes aren't synchronous in-effect).
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => { resizeSpacer(); updateScrollDown(); updateActiveTurn(); });
+    return () => cancelAnimationFrame(raf);
+  }, [messages]);
 
   // A gentle "done" buzz on the falling edge of loading (touch devices only).
   const wasLoading = useRef(false);
@@ -214,22 +267,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
         </div>
       ) : (
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-6 py-3">
-            <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
-              <ModelPicker variant="pill" value={model} onChange={setModel} />
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => setFilesOpen(!filesOpen)}
-              title={t("panel.workspaceFiles")}
-            >
-              <FolderOpen className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <div ref={scrollRef} onScroll={updateScrollDown} className="flex-1 overflow-y-auto pb-40">
+          {/* Scroll area fills the whole panel; the header and input float over
+              it as gradients, so messages slide behind a soft fade at both ends. */}
+          <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto pb-40 pt-16">
             <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
               {messages.map((message, i) => {
                 const isLast = i === messages.length - 1;
@@ -237,7 +277,12 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                 const isLatestUser = message.id === lastUserId;
                 const canRegenerate = !isLoading && i === lastAssistantIndex;
                 return (
-                  <div key={message.id} ref={isLatestUser ? lastUserMsgRef : undefined}>
+                  <div
+                    key={message.id}
+                    data-msg-id={message.id}
+                    data-role={message.role}
+                    ref={isLatestUser ? lastUserMsgRef : undefined}
+                  >
                     <ChatMessage
                       message={message as never}
                       chatId={chatId}
@@ -269,6 +314,31 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
               <div ref={spacerRef} aria-hidden className="shrink-0" />
             </div>
           </div>
+
+          {/* Floating header — fades to transparent so messages scroll up
+              behind it. pointer-events-none lets scroll-over pass through;
+              only the controls themselves are interactive. */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-background via-background to-transparent px-6 pb-8 pt-3">
+            <div className="pointer-events-auto inline-flex rounded-full border bg-card px-1 shadow-sm">
+              <ModelPicker variant="pill" value={model} onChange={setModel} />
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="pointer-events-auto h-8 w-8"
+              onClick={() => setFilesOpen(!filesOpen)}
+              title={t("panel.workspaceFiles")}
+            >
+              <FolderOpen className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <ChatNav
+            items={navItems}
+            activeId={activeUserId}
+            onJump={scrollToMessage}
+            label={t("panel.navigation")}
+          />
 
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
             <div
