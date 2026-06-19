@@ -116,7 +116,7 @@ export function ChatContextMenu({
           >
             <MoreHorizontal className="h-4 w-4" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent side="right" align="start" sideOffset={8}>
+          <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-auto">
             <DropdownMenuItem onClick={startRename}>
               <Pencil className="h-4 w-4" />
               {t("menu.rename")}
