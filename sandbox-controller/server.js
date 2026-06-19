@@ -7,8 +7,15 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import Docker from "dockerode";
 import { sanitize, safeJoin, safeRealPath } from "./path-safety.js";
 import { parseMultipart } from "./multipart.js";
+import { buildSandboxConfig, resolveNetworkMode } from "./sandbox-spec.js";
 
-const docker = new Docker({ socketPath: "/var/run/docker.sock" });
+// Talk to the Docker API via DOCKER_HOST when set (in compose this points at the
+// docker-socket-proxy, which exposes only the endpoints we need — the host
+// socket is never mounted into this container). Falls back to the raw host
+// socket for bare/dev runs.
+const docker = process.env.DOCKER_HOST
+  ? new Docker()
+  : new Docker({ socketPath: "/var/run/docker.sock" });
 const PORT = process.env.PORT || 3001;
 const SECRET = process.env.CONTROLLER_SECRET;
 
@@ -36,6 +43,8 @@ function safeEqual(a, b) {
 }
 
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "unclaw-sandbox";
+// Sandbox networking is off by default; the operator opts in per deployment.
+const ALLOW_NETWORK = process.env.SANDBOX_ALLOW_NETWORK === "true";
 const MEMORY_LIMIT = parseInt(process.env.SANDBOX_MEMORY_MB || "512") * 1024 * 1024;
 const CPU_LIMIT = parseFloat(process.env.SANDBOX_CPUS || "1.0") * 1e9;
 const EXEC_TIMEOUT = parseInt(process.env.SANDBOX_EXEC_TIMEOUT_MS || "30000");
@@ -142,34 +151,22 @@ async function dirSize(dir) {
 async function createSandbox(sessionId, userId, networkMode = "none") {
   sessionId = sanitize(sessionId);
   userId = sanitize(userId);
-  networkMode = networkMode === "bridge" ? "bridge" : "none";
+  networkMode = resolveNetworkMode(networkMode, { allowNetwork: ALLOW_NETWORK });
   const wsPath = await ensureMounts(userId, sessionId);
   const sharedPath = globalPath(userId);
 
-  const container = await docker.createContainer({
-    Image: SANDBOX_IMAGE,
-    name: `sandbox-${sessionId}`,
-    Env: ["DISPLAY=:99", "PYTHONUNBUFFERED=1", "LANG=C.UTF-8"],
-    HostConfig: {
-      Memory: MEMORY_LIMIT,
-      NanoCpus: CPU_LIMIT,
-      PidsLimit: 100,
-      SecurityOpt: ["no-new-privileges"],
-      CapDrop: ["ALL"],
-      CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
-      NetworkMode: networkMode,
-      Binds: [`${toHostPath(wsPath)}:/workspace`, `${toHostPath(sharedPath)}:/shared`],
-      Init: true,
-    },
-    User: "1000:1000",
-    WorkingDir: "/workspace",
-    Tty: false,
-    Labels: {
-      "unclaw.session": sessionId,
-      "unclaw.user": userId,
-      "unclaw.network": networkMode,
-    },
-  });
+  const container = await docker.createContainer(
+    buildSandboxConfig({
+      image: SANDBOX_IMAGE,
+      sessionId,
+      userId,
+      wsHostPath: toHostPath(wsPath),
+      sharedHostPath: toHostPath(sharedPath),
+      networkMode,
+      memoryBytes: MEMORY_LIMIT,
+      nanoCpus: CPU_LIMIT,
+    }),
+  );
 
   await container.start();
 
