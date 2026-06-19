@@ -14,7 +14,7 @@ Rules:
 
 Examples of good extractions:
 Uses TypeScript and prefers minimal code
-Works at a company called KNESS Group
+Works in the finance team at a mid-size company
 Prefers dark mode
 Building a project management tool with Next.js`;
 

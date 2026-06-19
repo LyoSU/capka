@@ -19,10 +19,9 @@ export async function loadSandboxTools(userId: string, sessionKey: string, netwo
   const tools = {
     execute_bash: tool({
       description:
-        "Execute a bash command in the sandbox. Available: Python 3.12, Node.js 22, Java 21, " +
-        "FFmpeg, ImageMagick, Graphviz, Pandoc, LibreOffice (headless), LaTeX, Playwright+Chromium, " +
-        "Tesseract OCR, ripgrep, git, curl, wget. Use for shell tasks, pipelines, system commands, " +
-        "file management, package installation (pip/npm).",
+        "Run a bash command in the Linux sandbox — shell tasks, pipelines, file management, " +
+        "running command-line tools, and installing packages (pip/npm). Common runtimes and CLI " +
+        "tools are preinstalled. No network by default.",
       inputSchema: z.object({
         command: z.string().describe("Bash command to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
@@ -36,11 +35,9 @@ export async function loadSandboxTools(userId: string, sessionKey: string, netwo
 
     execute_python: tool({
       description:
-        "Execute Python code in the sandbox. Available packages: numpy, pandas, scipy, scikit-learn, " +
-        "matplotlib, seaborn, plotly, pillow, opencv, pypdf, pikepdf, pdfplumber, reportlab, " +
-        "python-docx, python-pptx, openpyxl, xlsxwriter, requests, beautifulsoup4, flask, " +
-        "playwright, sympy, networkx, camelot-py, tabula-py, pytesseract, yt-dlp, and 100+ more. " +
-        "Use for data processing, file creation, analysis, scraping, ML tasks.",
+        "Run Python code in the sandbox — data processing, file creation, analysis, automation. " +
+        "Common scientific, document, image, PDF, and web libraries are preinstalled; install " +
+        "anything else with pip if needed.",
       inputSchema: z.object({
         code: z.string().describe("Python code to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
@@ -58,9 +55,8 @@ export async function loadSandboxTools(userId: string, sessionKey: string, netwo
 
     execute_node: tool({
       description:
-        "Execute Node.js/JavaScript code in the sandbox. Available packages: typescript, " +
-        "docx, pptxgenjs, pdf-lib, sharp, marked, mermaid-cli, playwright, react. " +
-        "Use for document generation, image processing, JS-specific tasks.",
+        "Run Node.js / JavaScript code in the sandbox — document generation, image processing, " +
+        "and other JS tasks. Common libraries are preinstalled; install anything else with npm if needed.",
       inputSchema: z.object({
         code: z.string().describe("JavaScript code to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
