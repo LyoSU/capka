@@ -308,17 +308,17 @@ export function SetupWizard({
                 {PROVIDER_OPTIONS.map((p) => {
                   const Icon = iconForSlug(p.iconSlug);
                   return (
-                    <SelectItem key={p.value} value={p.value}>
-                      <span className="flex items-center gap-2.5">
-                        <Icon size={16} className="shrink-0 text-muted-foreground" />
-                        <span className="flex flex-col">
-                          <span className="flex items-center gap-1.5 font-medium">
+                    <SelectItem key={p.value} value={p.value} className="py-2">
+                      <span className="flex items-start gap-2.5 whitespace-normal">
+                        <Icon size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span className="flex flex-wrap items-center gap-1.5 font-medium">
                             {p.label}
                             {p.recommended && (
                               <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("provider.recommended")}</span>
                             )}
                           </span>
-                          <span className="text-xs text-muted-foreground">{p.blurb}</span>
+                          <span className="text-xs leading-snug text-muted-foreground">{p.blurb}</span>
                         </span>
                       </span>
                     </SelectItem>

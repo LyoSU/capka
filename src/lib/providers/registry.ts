@@ -39,8 +39,8 @@ export interface ProviderMeta {
 
 export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
   litellm: {
-    label: "LiteLLM / Gateway",
-    blurb: "One OpenAI-compatible endpoint in front of any provider. Recommended.",
+    label: "OpenAI-compatible",
+    blurb: "Any OpenAI-style /v1 endpoint — LiteLLM, vLLM, or your own gateway in front of any provider.",
     recommended: true,
     iconSlug: "litellm",
     requiresKey: true,
