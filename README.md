@@ -44,6 +44,31 @@ Then open http://localhost:3000 and complete the first-run setup (see below).
 
 ## Deployment (production)
 
+**Turnkey, with HTTPS — one variable:**
+
+```bash
+git clone https://github.com/lyosu/unclaw && cd unclaw
+DOMAIN=unclaw.example.com ACME_EMAIL=you@example.com npm run up
+```
+
+Point `unclaw.example.com`'s DNS at the host first. Caddy fetches a Let's Encrypt
+certificate automatically; open `https://unclaw.example.com` and finish setup. No
+reverse proxy, certbot, or nginx to configure.
+
+Without `DOMAIN` the stack starts on `:3000` (HTTP) for you to front with your own
+proxy. Prebuilt images mean no build toolchain is needed — see *Prebuilt images*.
+
+### Which path is for me?
+
+| You are… | Do this |
+|---|---|
+| Trying it / non-technical | Use a one-click template (Coolify / Railway) — see *Templates* below. |
+| Solo / small, on your own box | `DOMAIN=… npm run up` (turnkey HTTPS above). |
+| A team | Same, plus backups + the upgrade runbook (`docs/UPGRADE.md`) and `SECURITY.md`. |
+| A company | External managed Postgres, rootless Docker, SSO — see `SECURITY.md` hardening table. |
+
+---
+
 The base `docker-compose.yml` publishes only the platform on `:3000`; Postgres and
 the controller stay on the internal network.
 
