@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately to **security@unclaw.dev**
+Please report suspected vulnerabilities privately to **ua.lyo.su@gmail.com**
 (or open a GitHub private security advisory). Do not file public issues for
 undisclosed vulnerabilities. We aim to acknowledge within 72 hours.
 
