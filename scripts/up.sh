@@ -58,13 +58,10 @@ if [ "${PUBLIC_URL:-}" != "" ] && ! grep -q '^PUBLIC_URL=' "$ENV_FILE"; then
   echo "  set PUBLIC_URL=$PUBLIC_URL"
 fi
 
-# DOMAIN is the turnkey HTTPS path: persist it, the ACME email, and derive
-# PUBLIC_URL=https://DOMAIN so auth callbacks and absolute links are correct.
+# DOMAIN is the turnkey HTTPS path: persist it and derive PUBLIC_URL=https://DOMAIN
+# so auth callbacks and absolute links are correct.
 if [ "${DOMAIN:-}" != "" ]; then
   grep -q '^DOMAIN=' "$ENV_FILE" || printf 'DOMAIN=%s\n' "$DOMAIN" >>"$ENV_FILE"
-  if [ "${ACME_EMAIL:-}" != "" ]; then
-    grep -q '^ACME_EMAIL=' "$ENV_FILE" || printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL" >>"$ENV_FILE"
-  fi
   grep -q '^PUBLIC_URL=' "$ENV_FILE" || printf 'PUBLIC_URL=https://%s\n' "$DOMAIN" >>"$ENV_FILE"
   echo "  configured HTTPS for $DOMAIN (Caddy will fetch a Let's Encrypt cert)"
 fi

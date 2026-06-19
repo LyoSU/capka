@@ -48,7 +48,7 @@ Then open http://localhost:3000 and complete the first-run setup (see below).
 
 ```bash
 git clone https://github.com/lyosu/unclaw && cd unclaw
-DOMAIN=unclaw.example.com ACME_EMAIL=you@example.com npm run up
+DOMAIN=unclaw.example.com npm run up
 ```
 
 Point `unclaw.example.com`'s DNS at the host first. Caddy fetches a Let's Encrypt

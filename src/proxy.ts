@@ -23,7 +23,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const sessionToken = request.cookies.get("better-auth.session_token");
+  // better-auth prefixes the cookie with `__Secure-` whenever secure cookies are
+  // on (any HTTPS deployment), and uses the bare name over plain HTTP. Check both
+  // — looking only for the bare name 401s every request on an HTTPS deploy.
+  const sessionToken =
+    request.cookies.get("better-auth.session_token") ??
+    request.cookies.get("__Secure-better-auth.session_token");
   if (!sessionToken) {
     // API clients want a status code, not an HTML login page.
     if (pathname.startsWith("/api/")) {

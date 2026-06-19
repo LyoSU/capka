@@ -14,12 +14,24 @@ let _auth: any = null;
 export async function getAuth() {
   if (_auth) return _auth as ReturnType<typeof betterAuth>;
   const secret = await getMasterKey();
+  const publicUrl = process.env.PUBLIC_URL?.trim() || process.env.BETTER_AUTH_URL?.trim();
   _auth = betterAuth({
     secret,
     // Runtime, not build-time: an explicit PUBLIC_URL (operator override) wins;
     // otherwise leave it unset so better-auth infers the origin per-request from
     // the (proxy-aware) headers. No domain is ever baked into the image.
-    baseURL: process.env.PUBLIC_URL?.trim() || process.env.BETTER_AUTH_URL?.trim() || undefined,
+    baseURL: publicUrl || undefined,
+    advanced: {
+      // Tie the Secure-cookie prefix to the PUBLIC origin scheme, NOT NODE_ENV.
+      // better-auth otherwise defaults secure cookies on in production even over
+      // plain HTTP — so a localhost / HTTP-only deploy sets a `__Secure-` session
+      // cookie the browser never sends back, and every authed request 401s
+      // (login AND the setup model picker break). HTTPS public URL → secure;
+      // localhost / HTTP-only / PUBLIC_URL unset → non-secure so auth works.
+      // Behind a TLS-terminating proxy, set PUBLIC_URL=https://… (the Caddy and
+      // Coolify paths do) to restore the Secure flag.
+      useSecureCookies: (publicUrl ?? "").startsWith("https://"),
+    },
     // CSRF check: trust whatever origin getPublicUrl resolves for this request
     // (PUBLIC_URL if set, else X-Forwarded-* / Host). Keeps the single domain in
     // one place instead of a second hardcoded constant.

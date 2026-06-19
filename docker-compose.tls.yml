@@ -12,8 +12,6 @@ services:
       - "443:443"
     environment:
       - DOMAIN=${DOMAIN}
-      # ACME registration email (optional but recommended for expiry notices).
-      - ACME_EMAIL=${ACME_EMAIL:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
