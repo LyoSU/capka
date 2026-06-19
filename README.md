@@ -126,9 +126,11 @@ works with no images present.
 ## Sandbox isolation & hardening
 
 Untrusted code runs in per-session containers that are never privileged, drop all
-capabilities, run non-root, and have no network by default; the controller reaches
-Docker only through a restricted socket-proxy. This is defense-in-depth — for a
-true "escape ≠ host root" boundary run a **rootless** Docker daemon.
+capabilities, run as an unprivileged user (the entrypoint drops to `1000:1000`
+after fixing workspace ownership, and every agent command is pinned to that uid),
+and have no network by default; the controller reaches Docker only through a
+restricted socket-proxy. This is defense-in-depth — for a true "escape ≠ host
+root" boundary run a **rootless** Docker daemon.
 
 See **[`SECURITY.md`](SECURITY.md)** for the full threat model, the rootless
 setup, the per-deployment hardening table, and how to report a vulnerability.

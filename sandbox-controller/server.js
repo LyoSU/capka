@@ -66,7 +66,8 @@ function toHostPath(internalPath) {
 const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
 const MAX_WORKSPACE_MB = parseInt(process.env.MAX_WORKSPACE_MB || "500");
 const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB || "100");
-// Must match the uid/gid the sandbox image runs as (User 1000:1000 below).
+// Must match the uid/gid the sandbox agent runs as: the entrypoint drops to this
+// user and every exec is pinned to it (User "1000:1000" in execInSandbox).
 const SANDBOX_UID = parseInt(process.env.SANDBOX_UID || "1000");
 const SANDBOX_GID = parseInt(process.env.SANDBOX_GID || "1000");
 
@@ -84,22 +85,25 @@ function globalPath(userId) {
   return resolve(DATA_ROOT, sanitize(userId), "_global", "sandbox");
 }
 
-/** Create + own the workspace and shared mount points for a session.
- *  The controller runs as root and creates dirs root-owned, but the sandbox
- *  container runs as a non-root user — chown the mounts so the agent can write
- *  to /workspace and /shared. Idempotent: also repairs pre-existing folders.
- *  (CapAdd DAC_OVERRIDE is not reliably effective for the non-root user, so we
- *  fix ownership rather than rely on it.) Returns the workspace path. */
+/** Create the workspace and shared mount points for a session and hand them to
+ *  the sandbox user. The authoritative ownership fix is the container entrypoint
+ *  (which chowns the mounts as root at startup, robust to however the host made
+ *  them); this controller-side chown is a best-effort head start. Idempotent —
+ *  also repairs pre-existing folders. Returns the workspace path. */
 async function ensureMounts(userId, sessionId) {
   const wsPath = workspacePath(userId, sessionId);
   const sharedPath = globalPath(userId);
   await mkdir(wsPath, { recursive: true });
   await mkdir(sharedPath, { recursive: true });
-  // On native Linux the controller creates these root-owned, so chown them to the
-  // sandbox user. On Docker Desktop the host-path bind already maps to the
-  // container user, and chown is a virtiofs no-op — harmless either way.
+  // Best-effort ownership repair from the controller side. The sandbox entrypoint
+  // ALSO chowns these mounts at container start (the authoritative fix), so this is
+  // belt-and-suspenders — but we no longer swallow failures silently: a chown that
+  // errors here is worth a log line, because it used to hide the exact reason the
+  // agent later couldn't write to /workspace.
   for (const dir of [wsPath, sharedPath]) {
-    await chown(dir, SANDBOX_UID, SANDBOX_GID).catch(() => {});
+    await chown(dir, SANDBOX_UID, SANDBOX_GID).catch((e) => {
+      console.warn(`[mounts] chown ${dir} -> ${SANDBOX_UID}:${SANDBOX_GID} failed: ${e.message}`);
+    });
   }
   return wsPath;
 }
@@ -500,6 +504,15 @@ const server = createServer(async (req, res) => {
       const ws = createWriteStream(destFile);
       ws.end(fileData);
       await new Promise((resolve, reject) => { ws.on("finish", resolve); ws.on("error", reject); });
+
+      // The controller writes as root, so the upload (and any directory it just
+      // created) lands root-owned — the agent runs as uid 1000 and could not then
+      // edit or overwrite it. Hand ownership to the sandbox user so uploaded files
+      // are immediately writable mid-session, without waiting for a container restart.
+      await chown(destFile, SANDBOX_UID, SANDBOX_GID).catch((e) => {
+        console.warn(`[upload] chown ${destFile} failed: ${e.message}`);
+      });
+      await chown(destDir, SANDBOX_UID, SANDBOX_GID).catch(() => {});
 
       return jsonRes(res, 200, { ok: true, path: targetPath === "." ? fileName : `${targetPath}/${fileName}`, name: fileName });
     }

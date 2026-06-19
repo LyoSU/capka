@@ -24,8 +24,22 @@ describe("buildSandboxConfig — locked security posture", () => {
     expect(buildSandboxConfig(base).HostConfig.CapDrop).toEqual(["ALL"]);
   });
 
-  it("runs as the non-root sandbox user", () => {
-    expect(buildSandboxConfig(base).User).toBe("1000:1000");
+  it("adds back only the minimal caps needed to fix mount ownership then drop privileges", () => {
+    // The entrypoint runs as root just long enough to chown the bind mounts to the
+    // sandbox user, then setpriv-drops to uid 1000. CHOWN = chown the mounts;
+    // SETUID/SETGID = drop to the unprivileged user. Nothing else is needed, so
+    // nothing else is granted. Pinning this set stops a future edit from quietly
+    // widening the container's privileges.
+    expect(buildSandboxConfig(base).HostConfig.CapAdd).toEqual(["CHOWN", "SETUID", "SETGID"]);
+  });
+
+  it("does NOT pin the container user — the entrypoint needs root to chown mounts, then drops to 1000", () => {
+    // The persistent process and every `docker exec` (the agent's actual commands)
+    // run as uid 1000 — that's enforced by the entrypoint's privilege drop and by
+    // execInSandbox's `User: "1000:1000"`. The container itself must start as the
+    // image's default (root) so the entrypoint can repair /workspace ownership;
+    // a fixed non-root User here would reintroduce the EACCES bug it exists to fix.
+    expect(buildSandboxConfig(base).User).toBeUndefined();
   });
 
   it("mounts exactly the per-session workspace and shared dir — no other host binds", () => {

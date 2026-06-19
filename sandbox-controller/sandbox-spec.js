@@ -37,12 +37,21 @@ export function buildSandboxConfig({
       Privileged: false,
       SecurityOpt: ["no-new-privileges"],
       CapDrop: ["ALL"],
-      CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
+      // Minimal caps for the boot sequence only: CHOWN lets the (root) entrypoint
+      // fix ownership of the bind-mounted /workspace + /shared, and SETUID/SETGID
+      // let it setpriv-drop to the unprivileged sandbox user. After the drop, and
+      // for every agent command (exec runs as uid 1000), these buy nothing.
+      CapAdd: ["CHOWN", "SETUID", "SETGID"],
       NetworkMode: networkMode,
       Binds: [`${wsHostPath}:/workspace`, `${sharedHostPath}:/shared`],
       Init: true,
     },
-    User: "1000:1000",
+    // Intentionally NO `User` pin. The container must start as the image default
+    // (root) so the entrypoint can chown the host-created bind mounts before the
+    // agent touches them — that repair is what makes /workspace reliably writable
+    // regardless of how the host created the mount source. The entrypoint then
+    // immediately drops to uid 1000, and execInSandbox pins every command to
+    // 1000:1000, so no agent code ever runs as root.
     WorkingDir: "/workspace",
     Tty: false,
     Labels: {

@@ -10,9 +10,18 @@ undisclosed vulnerabilities. We aim to acknowledge within 72 hours.
 
 Untrusted code runs in per-session containers locked down by a tested builder
 (`sandbox-controller/sandbox-spec.js`): never privileged, `no-new-privileges`,
-**all capabilities dropped**, non-root (`1000:1000`), memory / CPU / PID limits,
-and **no network by default**. The controller never lets a caller specify
-container options — it only requests this fixed, safe shape.
+**all capabilities dropped** (only `CHOWN`/`SETUID`/`SETGID` added back for the
+boot sequence), memory / CPU / PID limits, and **no network by default**. The
+container starts as root just long enough for its entrypoint to chown the
+bind-mounted workspace, then **drops to the unprivileged `1000:1000` user**;
+every command the agent runs is pinned to `1000:1000`, so no untrusted code ever
+runs as root. The controller never lets a caller specify container options — it
+only requests this fixed, safe shape.
+
+Each user gets their own per-user workspace and `/shared` directories, and a
+container only ever bind-mounts the requesting user's own paths — so the shared
+`1000` uid never crosses the isolation boundary (separation is by container +
+bind mount, not by uid).
 
 The controller reaches the Docker daemon through a **socket-proxy** that exposes
 only the container and exec endpoints (build, pull, image, network, volume, and
