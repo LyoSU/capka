@@ -1,0 +1,34 @@
+# TLS overlay — automatic HTTPS via Caddy. Layer it over the base:
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+# or just set DOMAIN and run `npm run up` (scripts/up.sh layers this automatically).
+#
+# Requires: ports 80+443 free, and DNS for $DOMAIN pointing at this host.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      # ACME registration email (optional but recommended for expiry notices).
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      platform:
+        condition: service_healthy
+
+  # With Caddy in front, the platform must not publish a raw host port — only
+  # Caddy's 80/443 should be reachable. `expose` keeps it on the compose network.
+  platform:
+    ports: !reset []
+    expose:
+      - "3000"
+
+volumes:
+  caddy-data:
+  caddy-config:

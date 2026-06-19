@@ -1,0 +1,15 @@
+# unClaw automatic-HTTPS reverse proxy.
+# {$DOMAIN} and {$ACME_EMAIL} are read from the environment at startup.
+# Caddy provisions and renews a Let's Encrypt cert for DOMAIN automatically.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	reverse_proxy platform:3000
+	# Allow large uploads (matches the host-nginx client_max_body_size in DEPLOY.md).
+	request_body {
+		max_size 100MB
+	}
+	encode zstd gzip
+}
