@@ -441,7 +441,10 @@ function CopyButton({ text }: { text: string }) {
 
 function autoGrow(ta: HTMLTextAreaElement) {
   ta.style.height = "auto";
-  ta.style.height = `${ta.scrollHeight}px`;
+  // scrollHeight covers content + padding but not borders; with border-box that
+  // leaves the box a couple px short (and the last line clipped). Add the border.
+  const borders = ta.offsetHeight - ta.clientHeight;
+  ta.style.height = `${ta.scrollHeight + borders}px`;
 }
 
 /** A user message bubble. With `onEdit` it gains an inline editor: click the
@@ -491,7 +494,7 @@ function UserBubble({
               if (e.key === "Escape") { e.preventDefault(); cancel(); }
             }}
             rows={1}
-            className="w-full resize-none rounded-2xl border border-border bg-card px-4 py-3 text-[15px] shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full resize-none overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-[15px] shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
           <div className="mt-2 flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={cancel}>{tCommon("cancel")}</Button>
