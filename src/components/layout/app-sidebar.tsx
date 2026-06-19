@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { MessageSquare, Plus, Settings, FolderKanban, Archive } from "lucide-react";
+import { Plus, Settings, FolderKanban, Archive } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -161,7 +161,6 @@ export function AppSidebar() {
                         render={<Link href={`/chat/${chat.id}`} />}
                         data-active={activeChatId === chat.id || undefined}
                       >
-                        <MessageSquare className="h-4 w-4 shrink-0" />
                         <span className="truncate">
                           {chat.title || t("newChat")}
                         </span>
@@ -186,7 +185,6 @@ export function AppSidebar() {
                         render={<Link href={`/chat/${chat.id}`} />}
                         data-active={activeChatId === chat.id || undefined}
                       >
-                        <MessageSquare className="h-4 w-4 shrink-0" />
                         <span className="truncate">
                           {chat.title || t("newChat")}
                         </span>
