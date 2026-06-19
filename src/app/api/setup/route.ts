@@ -52,12 +52,6 @@ export async function POST(req: Request) {
       return Response.json({ error: "Missing provider" }, { status: 400 });
     }
 
-    // Claim the admin email here too, so a session that resumed straight into
-    // the provider step (account step never re-run) still records it.
-    if (session.user.email && !(await getSetting("admin_email"))) {
-      await setSetting("admin_email", session.user.email);
-    }
-
     const masterKey = await getMasterKey();
     const encryptedKey = apiKey ? encrypt(apiKey, masterKey) : null;
 
