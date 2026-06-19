@@ -71,6 +71,8 @@ proxy. Prebuilt images mean no build toolchain is needed — see *Prebuilt image
 
 - **Railway** — `deploy/railway.json`. Chat/agent platform only (Railway has no
   Docker daemon, so sandboxed code execution is unavailable there).
+- **Fly.io** — see `deploy/fly.md` (`deploy/fly.toml`). Platform only, same
+  no-Docker-daemon caveat as Railway.
 - **Coolify** — see `deploy/coolify.md`. Full stack including the sandbox.
 
 For full sandboxed execution, prefer the compose stack on any host with Docker.
