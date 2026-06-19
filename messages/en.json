@@ -261,7 +261,9 @@
     "message": {
       "cancelled": "Response was cancelled",
       "genericError": "Something went wrong while generating a response. Please try again.",
-      "thinking": "Thinking"
+      "thinking": "Thinking",
+      "copy": "Copy",
+      "copied": "Copied"
     },
     "archived": {
       "title": "Archived chats",

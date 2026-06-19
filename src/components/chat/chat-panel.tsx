@@ -18,6 +18,7 @@ import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { RecentChats } from "@/components/chat/recent-chats";
 import { Button } from "@/components/ui/button";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
+import { haptic } from "@/lib/haptics";
 
 interface ChatPanelProps {
   chatId: string;
@@ -117,6 +118,13 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   // the button. We never scroll here — the pinned message holds its position.
   useEffect(() => { resizeSpacer(); updateScrollDown(); }, [messages]);
 
+  // A gentle "done" buzz on the falling edge of loading (touch devices only).
+  const wasLoading = useRef(false);
+  useEffect(() => {
+    if (wasLoading.current && !isLoading) haptic("success");
+    wasLoading.current = isLoading;
+  }, [isLoading]);
+
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<AttachedFile[]>([]);
 
@@ -124,6 +132,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     const text = input.trim();
     const attachedFiles = files.map((af) => af.file);
     if (!text && attachedFiles.length === 0) return;
+    haptic("tap"); // light confirmation that the message left
 
     // Save state for rollback on error
     const savedInput = input;
@@ -252,19 +261,25 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
           </div>
 
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
-            {showScrollDown && (
-              <div className="pointer-events-none mb-2 flex justify-center">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="pointer-events-auto h-9 w-9 rounded-full shadow-md"
-                  onClick={scrollToLatest}
-                  aria-label={t("panel.scrollDown")}
-                >
-                  <ArrowDown className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
+            <div
+              className={`pointer-events-none mb-2 flex justify-center transition-all duration-200 ${
+                showScrollDown ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
+              }`}
+            >
+              <Button
+                variant="outline"
+                size="icon"
+                tabIndex={showScrollDown ? 0 : -1}
+                aria-hidden={!showScrollDown}
+                className={`h-9 w-9 rounded-full shadow-md transition-transform hover:scale-105 ${
+                  showScrollDown ? "pointer-events-auto" : "pointer-events-none"
+                }`}
+                onClick={scrollToLatest}
+                aria-label={t("panel.scrollDown")}
+              >
+                <ArrowDown className="h-4 w-4" />
+              </Button>
+            </div>
             {error && !lastFailed && (
               <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
                 <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

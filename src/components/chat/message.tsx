@@ -1,9 +1,10 @@
 import { type UIMessage } from "ai";
 import {
-  Send, Download,
+  Send, Download, Copy, Check,
   ChevronRight, Loader2, AlertCircle, Brain,
 } from "lucide-react";
 import { Markdown } from "@/components/chat/markdown";
+import { haptic } from "@/lib/haptics";
 import { useState, useMemo, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -181,6 +182,13 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   return (
     <div className="text-[15px] leading-relaxed">
       <Markdown isStreaming={isStreaming}>{text}</Markdown>
+      {isStreaming && (
+        // A soft blinking caret so the reply reads as "still being written".
+        <span
+          aria-hidden
+          className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] animate-pulse rounded-full bg-foreground/50"
+        />
+      )}
       {chatId && <WorkspaceLinks text={text} chatId={chatId} />}
     </div>
   );
@@ -409,6 +417,34 @@ function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: s
   );
 }
 
+/** Hover-revealed "copy" action for an assistant reply. Swaps to a check for a
+ *  beat on success and fires a light haptic — quiet until the user reaches for it. */
+function CopyButton({ text }: { text: string }) {
+  const t = useTranslations("chat.message");
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      haptic("tap");
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked (insecure context / permissions) — fail quietly */
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      title={copied ? t("copied") : t("copy")}
+      aria-label={copied ? t("copied") : t("copy")}
+      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
 function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram: boolean }) {
   return (
     <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground opacity-60 sm:opacity-0 transition-opacity duration-200 sm:group-hover/msg:opacity-100">
@@ -449,7 +485,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
       .join("");
 
     return (
-      <div className="group/msg flex justify-end px-4 md:px-6 py-4">
+      <div className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4">
         <div className="max-w-[75%] lg:max-w-[65%]">
           <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
             {text || "…"}
@@ -535,7 +571,15 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
           />
         )}
         {statusSlot}
-        {!isStreaming && <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />}
+        {!isStreaming && (() => {
+          const copyText = groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n\n").trim();
+          return (
+            <div className="mt-1 flex items-center gap-1">
+              {copyText && <CopyButton text={copyText} />}
+              <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
