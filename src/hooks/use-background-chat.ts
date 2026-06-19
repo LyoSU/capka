@@ -354,6 +354,68 @@ export function useBackgroundChat({
     [chatId, projectId, uploadFiles, t],
   );
 
+  // ── Re-run the tail (regenerate / edit) ────────────────────
+  // Both share a shape: truncate the DB from a point, set the optimistic
+  // history, then POST to /api/chat. Omitting `model` lets the server reuse the
+  // chat's persisted model. An empty userMessage means "don't insert a new user
+  // row" (regenerate); a non-empty one re-inserts the edited message (edit).
+  const rerun = useCallback(
+    async (fromId: string, history: Message[], userMessage: string) => {
+      await fetch(`/api/chat/messages?chatId=${chatId}&fromId=${fromId}`, { method: "DELETE" }).catch(() => {});
+      setMessages(history);
+      setStatus("running");
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chatId,
+            projectId,
+            userMessage,
+            messages: history.map((m) => ({ id: m.id, role: m.role, parts: m.parts })),
+          }),
+        });
+        if (!res.ok) {
+          if (res.status === 429) throw new Error(t("rateLimited"));
+          const err = await res.json().catch(() => ({ error: t("requestFailed") }));
+          throw new Error(err.error || t("requestFailed"));
+        }
+        const { taskId: newTaskId } = await res.json();
+        setTaskId(newTaskId);
+      } catch (e) {
+        setStatus("idle");
+        loadHistory(); // the DB and UI may now disagree — resync from source
+        throw e;
+      }
+    },
+    [chatId, projectId, t, loadHistory],
+  );
+
+  // Regenerate: drop the latest assistant reply and re-run the same prompt.
+  const regenerate = useCallback(async () => {
+    const msgs = msgRef.current;
+    let lastAssistantIdx = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "assistant") { lastAssistantIdx = i; break; }
+    }
+    if (lastAssistantIdx === -1) return;
+    const history = msgs.slice(0, lastAssistantIdx);
+    if (!history.some((m) => m.role === "user")) return;
+    await rerun(msgs[lastAssistantIdx].id, history, "");
+  }, [rerun]);
+
+  // Edit: replace a user message's text and re-run from there.
+  const editMessage = useCallback(async (messageId: string, newText: string) => {
+    const text = newText.trim();
+    if (!text) return;
+    const msgs = msgRef.current;
+    const idx = msgs.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+    const history = msgs.slice(0, idx);
+    const edited: Message = { id: nanoid(), role: "user", parts: [{ type: "text", text }] };
+    await rerun(messageId, [...history, edited], text);
+  }, [rerun]);
+
   // ── Stop / Cancel ──────────────────────────────────────────
   const stop = useCallback(async () => {
     if (!taskId) return;
@@ -362,5 +424,5 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId]);
 
-  return { messages, status, error, sendMessage, stop, reload: loadHistory, isLoading: status === "running", taskInfo };
+  return { messages, status, error, sendMessage, regenerate, editMessage, stop, reload: loadHistory, isLoading: status === "running", taskInfo };
 }

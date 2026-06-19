@@ -1,11 +1,12 @@
 import { type UIMessage } from "ai";
 import {
-  Send, Download, Copy, Check,
+  Send, Download, Copy, Check, RotateCcw, Pencil,
   ChevronRight, Loader2, AlertCircle, Brain,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/chat/markdown";
 import { haptic } from "@/lib/haptics";
-import { useState, useMemo, memo } from "react";
+import { useState, useMemo, useEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { fileKind, extOf } from "@/lib/file-kinds";
@@ -445,6 +446,94 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function autoGrow(ta: HTMLTextAreaElement) {
+  ta.style.height = "auto";
+  ta.style.height = `${ta.scrollHeight}px`;
+}
+
+/** A user message bubble. With `onEdit` it gains an inline editor: click the
+ *  pencil to rewrite the message and re-run the conversation from that point
+ *  (⌘/Ctrl+Enter saves, Esc cancels) — the familiar ChatGPT gesture. */
+function UserBubble({
+  text, messageId, timestamp, isTelegram, onEdit,
+}: {
+  text: string;
+  messageId: string;
+  timestamp: string;
+  isTelegram: boolean;
+  onEdit?: (messageId: string, newText: string) => void;
+}) {
+  const tCommon = useTranslations("common");
+  const tMsg = useTranslations("chat.message");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    autoGrow(ta);
+  }, [editing]);
+
+  const save = () => {
+    const v = draft.trim();
+    if (v && v !== text) onEdit?.(messageId, v);
+    setEditing(false);
+  };
+  const cancel = () => { setDraft(text); setEditing(false); };
+
+  if (editing) {
+    return (
+      <div className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4">
+        <div className="w-full max-w-[85%]">
+          <textarea
+            ref={taRef}
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); autoGrow(e.target); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
+              if (e.key === "Escape") { e.preventDefault(); cancel(); }
+            }}
+            rows={1}
+            className="w-full resize-none rounded-2xl border border-border bg-card px-4 py-3 text-[15px] shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={cancel}>{tCommon("cancel")}</Button>
+            <Button size="sm" onClick={save}>{tCommon("save")}</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4">
+      <div className="flex max-w-[75%] flex-col items-end lg:max-w-[65%]">
+        <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
+          {text || "…"}
+        </div>
+        <div className="mt-1 flex items-center gap-1">
+          {onEdit && text && (
+            <button
+              type="button"
+              onClick={() => { setDraft(text); setEditing(true); }}
+              title={tMsg("edit")}
+              aria-label={tMsg("edit")}
+              className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground opacity-0 transition hover:bg-accent/50 hover:text-foreground group-hover/msg:opacity-100"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram: boolean }) {
   return (
     <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground opacity-60 sm:opacity-0 transition-opacity duration-200 sm:group-hover/msg:opacity-100">
@@ -462,9 +551,13 @@ interface ChatMessageProps {
   chatId?: string;
   statusSlot?: React.ReactNode;
   isAdmin?: boolean;
+  /** Provided only on the latest assistant reply — re-runs the same prompt. */
+  onRegenerate?: () => void;
+  /** Provided on user messages — replaces the text and re-runs from there. */
+  onEdit?: (messageId: string, newText: string) => void;
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin, onRegenerate, onEdit }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -485,16 +578,13 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
       .join("");
 
     return (
-      <div className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4">
-        <div className="max-w-[75%] lg:max-w-[65%]">
-          <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
-            {text || "…"}
-          </div>
-          <div className="mt-1 flex justify-end">
-            <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
-          </div>
-        </div>
-      </div>
+      <UserBubble
+        text={text}
+        messageId={message.id}
+        timestamp={timestamp}
+        isTelegram={isTelegram}
+        onEdit={onEdit}
+      />
     );
   }
 
@@ -576,6 +666,17 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
           return (
             <div className="mt-1 flex items-center gap-1">
               {copyText && <CopyButton text={copyText} />}
+              {onRegenerate && (
+                <button
+                  type="button"
+                  onClick={onRegenerate}
+                  title={t("regenerate")}
+                  aria-label={t("regenerate")}
+                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
               <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
             </div>
           );

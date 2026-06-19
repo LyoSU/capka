@@ -42,10 +42,17 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   const seenFirstTurn = useRef(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
 
-  const { messages, isLoading, error, sendMessage, stop, reload, taskInfo } = useBackgroundChat({
+  const { messages, isLoading, error, sendMessage, regenerate, editMessage, stop, reload, taskInfo } = useBackgroundChat({
     chatId,
     projectId,
   });
+
+  // The latest assistant reply is the only one that can be regenerated; editing
+  // is offered on any user message while nothing is streaming.
+  const lastAssistantIndex = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "assistant") return i;
+    return -1;
+  })();
 
   // The message that starts the latest turn. Changing this (a new send, or
   // opening a chat) is what triggers the pin-to-top animation.
@@ -228,6 +235,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                 const isLast = i === messages.length - 1;
                 const isStreamingMsg = isLoading && isLast && message.role === "assistant";
                 const isLatestUser = message.id === lastUserId;
+                const canRegenerate = !isLoading && i === lastAssistantIndex;
                 return (
                   <div key={message.id} ref={isLatestUser ? lastUserMsgRef : undefined}>
                     <ChatMessage
@@ -235,6 +243,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                       chatId={chatId}
                       isAdmin={isAdmin}
                       isStreaming={isStreamingMsg}
+                      onRegenerate={canRegenerate ? regenerate : undefined}
+                      onEdit={!isLoading ? editMessage : undefined}
                       statusSlot={isStreamingMsg ? (
                         <TaskStatus
                           startedAt={taskInfo.startedAt}

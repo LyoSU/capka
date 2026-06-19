@@ -263,7 +263,9 @@
       "genericError": "Something went wrong while generating a response. Please try again.",
       "thinking": "Thinking",
       "copy": "Copy",
-      "copied": "Copied"
+      "copied": "Copied",
+      "regenerate": "Regenerate",
+      "edit": "Edit"
     },
     "archived": {
       "title": "Archived chats",
