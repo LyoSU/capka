@@ -30,7 +30,7 @@ services:
       dockerfile: Dockerfile.sandbox
     # Prebuilt image (published by .github/workflows/publish-images.yml). `build:`
     # stays as a fallback so cloning + building works with no image present.
-    image: ghcr.io/lyosu/unclaw-sandbox:latest
+    image: ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
     entrypoint: ["echo", "sandbox image built"]
 
   # Narrows the Docker API the controller can reach: only container + exec
@@ -56,7 +56,7 @@ services:
     build: ./sandbox-controller
     # Prebuilt image (published by .github/workflows/publish-images.yml). `build:`
     # stays as a fallback — `up --build` builds locally, `pull` fetches the image.
-    image: ghcr.io/lyosu/unclaw-controller:latest
+    image: ghcr.io/lyosu/unclaw-controller:${UNCLAW_VERSION:-latest}
     expose:
       - "3001"
     # No host Docker socket here anymore — it reaches the daemon through the
@@ -71,7 +71,7 @@ services:
       # Real host path of ./data/storage — needed so sandbox bind mounts resolve
       # on the Docker daemon host (esp. Docker Desktop). Defaults to PWD-based.
       - HOST_DATA_ROOT=${PWD}/data/storage
-      - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:latest
+      - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
       # Sandbox networking is opt-in. Set to "true" to allow bridge-mode sandboxes.
       - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
     networks:
@@ -95,7 +95,7 @@ services:
     build: .
     # Prebuilt image (published on release tags). `build:` stays as a fallback so
     # cloning + building works with no image present; `pull` fetches the image.
-    image: ghcr.io/lyosu/unclaw-platform:latest
+    image: ghcr.io/lyosu/unclaw-platform:${UNCLAW_VERSION:-latest}
     ports:
       - "3000:3000"
     volumes:
