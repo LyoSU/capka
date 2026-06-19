@@ -76,7 +76,7 @@ deployment.
 
 ### Prebuilt images (skip the build)
 
-Release tags publish `platform` and `controller` images to GHCR
+Release tags publish `platform`, `controller`, and `sandbox` images to GHCR
 (`.github/workflows/publish-images.yml`), so a host with no build toolchain can
 fetch them instead of compiling:
 

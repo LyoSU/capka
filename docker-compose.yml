@@ -28,7 +28,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.sandbox
-    image: unclaw-sandbox
+    # Prebuilt image (published by .github/workflows/publish-images.yml). `build:`
+    # stays as a fallback so cloning + building works with no image present.
+    image: ghcr.io/lyosu/unclaw-sandbox:latest
     entrypoint: ["echo", "sandbox image built"]
 
   # Narrows the Docker API the controller can reach: only container + exec
@@ -69,7 +71,7 @@ services:
       # Real host path of ./data/storage — needed so sandbox bind mounts resolve
       # on the Docker daemon host (esp. Docker Desktop). Defaults to PWD-based.
       - HOST_DATA_ROOT=${PWD}/data/storage
-      - SANDBOX_IMAGE=unclaw-sandbox
+      - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:latest
       # Sandbox networking is opt-in. Set to "true" to allow bridge-mode sandboxes.
       - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
     networks:
