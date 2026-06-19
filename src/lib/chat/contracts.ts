@@ -13,6 +13,7 @@ export const chatRequestSchema = z.object({
 // Stored in messages.metadata.parts — the DB representation
 export const storedPartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("reasoning"), text: z.string() }),
   z.object({ type: z.literal("tool-call"), id: z.string(), name: z.string(), input: z.unknown() }),
   z.object({ type: z.literal("tool-result"), id: z.string(), name: z.string(), output: z.unknown() }),
   z.object({ type: z.literal("tool-error"), id: z.string(), name: z.string(), error: z.string() }),

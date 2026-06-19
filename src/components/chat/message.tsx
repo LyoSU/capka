@@ -1,7 +1,7 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download,
-  ChevronRight, Loader2, AlertCircle,
+  ChevronRight, Loader2, AlertCircle, Brain,
 } from "lucide-react";
 import { Markdown } from "@/components/chat/markdown";
 import { useState, useMemo, memo } from "react";
@@ -256,6 +256,28 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
 }
 
 
+/** The model's reasoning — a quiet, collapsible "thinking" block (shown only
+ *  when the provider streams reasoning). Brain glyph + a muted italic preview
+ *  that expands to the full thought, so it informs without shouting. */
+function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
+  const t = useTranslations("chat.message");
+  const preview = text.trim().replace(/\s+/g, " ");
+  return (
+    <Collapsible defaultOpen={false}>
+      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-2 py-0.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground [&[data-state=open]>.chevron]:rotate-90">
+        <Brain className={`h-3.5 w-3.5 shrink-0 ${isStreaming ? "animate-pulse" : ""}`} />
+        <span className="flex-1 truncate italic">{preview || t("thinking")}</span>
+        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <p className="mt-1 mb-2 ml-[1.375rem] whitespace-pre-wrap text-[13px] italic leading-relaxed text-muted-foreground">
+          {text}
+        </p>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function ToolCard({ part }: { part: ToolPart }) {
   const tSteps = useTranslations("steps");
   const t = useTranslations("chat.tool");
@@ -303,7 +325,7 @@ function ToolCard({ part }: { part: ToolPart }) {
         <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1 mb-2 ml-5 rounded-lg border border-border/40 bg-card p-3">
+        <div className="mt-1 mb-2 ml-[1.375rem] rounded-lg bg-muted/40 p-2.5">
           <ToolDetails toolName={rawName} output={part.output} errorText={part.errorText} />
         </div>
       </CollapsibleContent>
@@ -440,14 +462,25 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
     );
   }
 
-  // Assistant — group consecutive parts by kind
+  // Assistant — group consecutive parts by kind (text, the model's reasoning,
+  // and runs of tool calls), so the transcript reads as a sequence of steps.
   const parts = message.parts;
-  type Group = { kind: "text"; text: string } | { kind: "tools"; tools: ToolPart[] };
+  type Group =
+    | { kind: "text"; text: string }
+    | { kind: "tools"; tools: ToolPart[] }
+    | { kind: "reasoning"; text: string };
   const groups: Group[] = [];
   for (const part of parts) {
     if (part.type === "text") {
       const text = (part as { text: string }).text;
       if (text) groups.push({ kind: "text", text });
+    } else if (part.type === "reasoning") {
+      const text = (part as { text: string }).text;
+      if (text) {
+        const last = groups[groups.length - 1];
+        if (last?.kind === "reasoning") last.text += text;
+        else groups.push({ kind: "reasoning", text });
+      }
     } else if (isToolPart(part)) {
       const last = groups[groups.length - 1];
       if (last?.kind === "tools") last.tools.push(part as ToolPart);
@@ -455,23 +488,32 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin }: 
     }
   }
   const lastTextIdx = groups.reduce((acc, g, i) => g.kind === "text" ? i : acc, -1);
+  const lastIdx = groups.length - 1;
 
   return (
     <div className="group/msg px-4 md:px-6 py-4">
       <div className="max-w-none">
         {groups.length > 0 ? (
           groups.map((g, gi) => {
+            // Each part animates in on mount (blur-rise) — new steps and text
+            // surface live as they stream, so the message feels alive.
             if (g.kind === "text") {
-              const afterTools = gi > 0 && groups[gi - 1].kind === "tools";
+              const afterActivity = gi > 0 && groups[gi - 1].kind !== "text";
               return (
-                <div key={gi} className={afterTools ? "mt-3 pt-3 border-t border-border/30" : ""}>
+                <div key={gi} className={`animate-blur-rise ${afterActivity ? "mt-3 border-t border-border/30 pt-3" : gi > 0 ? "mt-3" : ""}`}>
                   <TextContent text={g.text} isStreaming={isStreaming && gi === lastTextIdx} chatId={chatId} />
                 </div>
               );
             }
-            const afterText = gi > 0 && groups[gi - 1].kind === "text";
+            if (g.kind === "reasoning") {
+              return (
+                <div key={gi} className={`animate-blur-rise ${gi > 0 ? "mt-1.5" : ""}`}>
+                  <ReasoningBlock text={g.text} isStreaming={isStreaming && gi === lastIdx} />
+                </div>
+              );
+            }
             return (
-              <div key={gi} className={`${afterText ? "mt-2" : ""} rounded-lg bg-muted/30 px-3 py-2`}>
+              <div key={gi} className={`animate-blur-rise ${gi > 0 ? "mt-1.5" : ""}`}>
                 <ToolGroup tools={g.tools} />
               </div>
             );

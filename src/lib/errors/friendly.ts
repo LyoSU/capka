@@ -104,6 +104,26 @@ export function isVisionUnsupportedError(raw: unknown): boolean {
 }
 
 /**
+ * A model that doesn't support reasoning/thinking rejects a request that asks
+ * for it. The runner enables reasoning optimistically (so it "just works" on
+ * capable models) and retries once WITHOUT it on a hit. Tied to thinking/
+ * reasoning phrasing so an unrelated capability error doesn't silently strip
+ * reasoning — it requires both a reasoning keyword and an "unsupported" verb.
+ */
+export function isReasoningUnsupportedError(raw: unknown): boolean {
+  const detail =
+    raw instanceof Error ? raw.message : typeof raw === "string" ? raw : String(raw ?? "");
+  return (
+    /\b(thinking|reasoning|reasoning_effort|reasoningeffort|budget_?tokens|reasoning_?summary)\b/i.test(
+      detail,
+    ) &&
+    /\b(not supported|unsupported|not available|invalid|unknown|unexpected|unrecognized|does ?n'?t support|do(es)? not support|cannot|not permitted|not allowed)\b/i.test(
+      detail,
+    )
+  );
+}
+
+/**
  * Server-enforced run deadline. Used directly (not via the regex rules, which
  * would mis-match a generic "timeout" as a network error) when a task exceeds
  * its wall-clock budget — a live worker stuck on a hung tool/LLM call.

@@ -17,6 +17,8 @@ export function toUIMessages(rows: { id: string; role: string; content: string; 
       for (const p of meta.parts) {
         if (p.type === "text") {
           if (p.text) parts.push({ type: "text", text: p.text });
+        } else if (p.type === "reasoning") {
+          if (p.text) parts.push({ type: "reasoning", text: p.text });
         } else if (p.type === "tool-call") {
           const tr = resultMap.get(p.id) as { output?: unknown } | undefined;
           const err = errorMap.get(p.id);

@@ -57,6 +57,11 @@ export async function GET() {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      // Defeat proxy buffering. Without this an upstream (nginx, and Caddy's
+      // `encode`) holds the chunks and the whole reply lands at once — the
+      // "I only see 'Processing' then all the text" symptom. `no-transform`
+      // above tells Caddy not to compress; this covers nginx-style proxies.
+      "X-Accel-Buffering": "no",
     },
   });
 }

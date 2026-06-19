@@ -260,7 +260,8 @@
     },
     "message": {
       "cancelled": "Response was cancelled",
-      "genericError": "Something went wrong while generating a response. Please try again."
+      "genericError": "Something went wrong while generating a response. Please try again.",
+      "thinking": "Thinking"
     },
     "archived": {
       "title": "Archived chats",
@@ -594,13 +595,28 @@
       "skills": "Skills",
       "connectors": "Connectors",
       "activity": "Activity",
-      "effect": { "allow": "Allow", "ask": "Ask", "deny": "Deny" },
+      "effect": {
+        "allow": "Allow",
+        "ask": "Ask",
+        "deny": "Deny"
+      },
       "askSoon": "Ask (human-in-the-loop) is coming soon — behaves as Allow for now.",
       "saveFailed": "Couldn’t save that change.",
       "actions": {
-        "plugin": { "install": "Installed plugin", "uninstall": "Removed plugin" },
-        "connector": { "add": "Added connector", "remove": "Removed connector", "enable": "Enabled connector", "disable": "Disabled connector" },
-        "policy": { "set": "Changed permission", "clear": "Reset permission" }
+        "plugin": {
+          "install": "Installed plugin",
+          "uninstall": "Removed plugin"
+        },
+        "connector": {
+          "add": "Added connector",
+          "remove": "Removed connector",
+          "enable": "Enabled connector",
+          "disable": "Disabled connector"
+        },
+        "policy": {
+          "set": "Changed permission",
+          "clear": "Reset permission"
+        }
       }
     }
   },

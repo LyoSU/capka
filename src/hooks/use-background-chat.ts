@@ -11,6 +11,7 @@ import type { TaskEvent } from "@/lib/tasks/events";
 
 type Part =
   | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
   | { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown };
 
 type Message = {
@@ -122,6 +123,25 @@ export function useBackgroundChat({
                   parts[parts.length - 1] = { type: "text", text: lastPart.text + data.delta };
                 } else {
                   parts.push({ type: "text", text: data.delta });
+                }
+                msgs[idx] = { ...msg, parts };
+                return msgs;
+              });
+              break;
+            }
+
+            case "task:reasoning-delta": {
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === data.messageId);
+                if (idx === -1) return prev;
+                const msgs = [...prev];
+                const msg = msgs[idx];
+                const parts = [...msg.parts];
+                const lastPart = parts[parts.length - 1];
+                if (lastPart?.type === "reasoning") {
+                  parts[parts.length - 1] = { type: "reasoning", text: lastPart.text + data.delta };
+                } else {
+                  parts.push({ type: "reasoning", text: data.delta });
                 }
                 msgs[idx] = { ...msg, parts };
                 return msgs;

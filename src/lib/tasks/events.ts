@@ -10,6 +10,7 @@ import { realtime } from "@/lib/realtime";
 export type TaskEvent =
   | { type: "task:start"; taskId: string; chatId: string; messageId: string }
   | { type: "task:text-delta"; taskId: string; chatId: string; messageId: string; delta: string }
+  | { type: "task:reasoning-delta"; taskId: string; chatId: string; messageId: string; delta: string }
   | { type: "task:tool-call"; taskId: string; chatId: string; messageId: string; toolCallId: string; toolName: string; args: unknown }
   | { type: "task:tool-result"; taskId: string; chatId: string; messageId: string; toolCallId: string; result: unknown }
   // messageId is absent when a task fails/cancels before an assistant message exists.

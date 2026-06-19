@@ -17,13 +17,50 @@ import { loadMcpTools } from "@/lib/mcp/load";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage } from "@/lib/usage";
 import { extractMemories } from "@/lib/memory/extract";
-import { classifyLLMError, isVisionUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isVisionUnsupportedError, isReasoningUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import type { StoredPart } from "@/lib/chat/contracts";
 import { log } from "@/lib/log";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Per-provider knobs that surface the model's reasoning ("thinking") in the
+ * stream. WITHOUT these the provider reasons silently — or not at all — so the
+ * SDK never emits `reasoning-delta` and the UI's thinking block stays empty.
+ * Returns undefined for providers with no standard knob (e.g. Ollama).
+ *
+ * Applied optimistically: a model that can't reason rejects the request and the
+ * runner retries once without this (see isReasoningUnsupportedError), so turning
+ * it on "always" never breaks non-reasoning models like gpt-4o / claude-3.5.
+ *
+ * Visibility caveat: OpenAI only returns a reasoning *summary* over the
+ * Responses API ("openai" provider). Through an OpenAI-compatible gateway
+ * ("litellm", Chat Completions) the summary is visible only if the upstream
+ * model echoes `reasoning_content` (Anthropic/DeepSeek do; OpenAI hides it).
+ */
+function reasoningConfig(provider: string):
+  | { providerOptions: Record<string, Record<string, unknown>>; maxOutputTokens?: number }
+  | undefined {
+  switch (provider) {
+    case "anthropic":
+      // budgetTokens must stay below maxOutputTokens, so raise the output cap to
+      // leave room for both the thought and the answer.
+      return {
+        providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 4000 } } },
+        maxOutputTokens: 16000,
+      };
+    case "openrouter":
+      return { providerOptions: { openrouter: { reasoning: { effort: "medium" } } } };
+    case "openai":
+      return { providerOptions: { openai: { reasoningSummary: "auto" } } };
+    case "litellm":
+      return { providerOptions: { openai: { reasoningEffort: "medium" } } };
+    default:
+      return undefined;
+  }
+}
 
 /** Everything persisted on the task so any worker can run it without the
  *  originating request's memory. Model/tools/prompt are re-resolved here. */
@@ -267,11 +304,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       injectedNative = true;
     }
 
+    // Reasoning is enabled optimistically; the fallback below clears this flag
+    // and re-streams without it if the model rejects thinking/reasoning.
+    const reasoning = reasoningConfig(provider);
+    let useReasoning = reasoning !== undefined;
     const makeStream = () =>
       streamText({
         model,
         ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25) } : {}),
         messages: [...systemMessages, ...modelMessages],
+        ...(useReasoning && reasoning
+          ? {
+              providerOptions: reasoning.providerOptions as never,
+              ...(reasoning.maxOutputTokens ? { maxOutputTokens: reasoning.maxOutputTokens } : {}),
+            }
+          : {}),
         abortSignal: ac.signal,
       });
 
@@ -283,22 +330,42 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       else parts.push({ type: "text", text: delta });
     };
 
+    const appendReasoning = (delta: string) => {
+      const last = parts[parts.length - 1];
+      if (last?.type === "reasoning") last.text += delta;
+      else parts.push({ type: "reasoning", text: delta });
+    };
+
     // Batch text deltas: one NOTIFY every ~100ms instead of per token, so a
     // long response is a handful of round-trips, not hundreds. Tool events
     // (rarer) publish immediately and flush any buffered text first to keep
     // ordering correct.
     let textBuf = "";
+    let reasonBuf = "";
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushReasoning = async () => {
+      if (!reasonBuf) return;
+      const delta = reasonBuf;
+      reasonBuf = "";
+      await publishTaskEvent(userId, { type: "task:reasoning-delta", taskId, chatId, messageId: msgId, delta });
+    };
     const flushText = async () => {
-      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       if (!textBuf) return;
       const delta = textBuf;
       textBuf = "";
       await publishTaskEvent(userId, { type: "task:text-delta", taskId, chatId, messageId: msgId, delta });
     };
+    // Flush reasoning before text so the live stream keeps the model's order
+    // (it reasons, then answers). The persisted `parts` array is the source of
+    // truth, so any minor live drift self-heals on the next save.
+    const flushBuffers = async () => {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      await flushReasoning();
+      await flushText();
+    };
     const scheduleFlush = () => {
       if (flushTimer) return;
-      flushTimer = setTimeout(() => { flushTimer = null; void flushText(); }, 100);
+      flushTimer = setTimeout(() => { flushTimer = null; void flushBuffers(); }, 100);
     };
 
     let retried = false;
@@ -306,13 +373,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;
         switch (event.type) {
+          case "reasoning-delta":
+            appendReasoning(event.text);
+            reasonBuf += event.text;
+            scheduleFlush();
+            break;
           case "text-delta":
             appendText(event.text);
             textBuf += event.text;
             scheduleFlush();
             break;
           case "tool-call":
-            await flushText();
+            await flushBuffers();
             parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
             await publishTaskEvent(userId, {
               type: "task:tool-call", taskId, chatId, messageId: msgId,
@@ -320,7 +392,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             });
             break;
           case "tool-result":
-            await flushText();
+            await flushBuffers();
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output: event.output });
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
@@ -328,7 +400,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             });
             break;
           case "tool-error":
-            await flushText();
+            await flushBuffers();
             parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: errMsg(event.error) });
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
@@ -340,7 +412,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             break;
           case "finish-step":
             // Flush buffered text, progressive save + lease renewal per step.
-            await flushText();
+            await flushBuffers();
             await db.update(messages).set({
               content: getFullText(),
               metadata: { taskId, status: "running", parts },
@@ -349,7 +421,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             break;
         }
       }
-      await flushText();
+      await flushBuffers();
     };
 
     try {
@@ -363,6 +435,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         if (lastUser && Array.isArray(lastUser.content)) {
           lastUser.content = lastUser.content.filter((p) => p.type !== "file");
         }
+        result = makeStream();
+        await consume();
+      } else if (useReasoning && isReasoningUnsupportedError(e)) {
+        // Model can't reason — re-stream without the reasoning knobs. The error
+        // fires at request build (before any delta), but reset parts defensively
+        // so a retry can't duplicate output.
+        log.info("reasoning unsupported — retrying without it", { taskId, chatId, userId });
+        useReasoning = false;
+        parts.length = 0;
         result = makeStream();
         await consume();
       } else {
