@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-onest), ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
   --font-heading: var(--font-sans);
   --font-display: var(--font-lora), Georgia, "Times New Roman", serif;
@@ -64,7 +64,9 @@
   --secondary: oklch(0.945 0.005 75);
   --secondary-foreground: oklch(0.22 0.008 285);
   --muted: oklch(0.945 0.005 75);
-  --muted-foreground: oklch(0.50 0.01 285);
+  /* 0.46, not 0.50 — clears WCAG AA (~4.5:1) for secondary text on the light
+     bg; the old value sat just under and failed for body-size captions. */
+  --muted-foreground: oklch(0.46 0.012 285);
   --accent: oklch(0.945 0.005 75);
   --accent-foreground: oklch(0.22 0.008 285);
   --destructive: oklch(0.577 0.245 27.33);
@@ -190,6 +192,23 @@
   }
 }
 
+/* Reading measure for assistant answers. Long prose past ~70ch tires the eye on
+   the line return, so cap only the flowing-text blocks. Code blocks, tables,
+   and images are intentionally excluded — they keep the full column width and
+   scroll internally. ch is relative to the element's own font ('0' width). */
+.chat-prose > p,
+.chat-prose > ul,
+.chat-prose > ol,
+.chat-prose > h1,
+.chat-prose > h2,
+.chat-prose > h3,
+.chat-prose > h4,
+.chat-prose > h5,
+.chat-prose > h6,
+.chat-prose > blockquote {
+  max-width: 70ch;
+}
+
 /* Respect the OS "reduce motion" setting. Single source of truth for the whole
    app: collapse every animation/transition to near-instant rather than chasing
    each component. New animated code is covered automatically. */
@@ -275,6 +294,99 @@
   font-weight: 600;
   font-size: 0.75rem;
   color: var(--muted-foreground);
+}
+
+/* Markdown reading polish for assistant answers. Streamdown ships utility
+   classes on each element; these unlayered rules refine them for sustained
+   reading: vertical rhythm, calm headings, hanging list indents, and a quote
+   panel instead of a banned side-stripe. Scoped to .chat-prose so file previews
+   keep Streamdown defaults. NB: avoid :is() with a child combinator here -
+   Tailwind v4 / Lightning CSS drops such a top-level rule, so selectors are
+   spelled out. */
+
+/* Vertical rhythm: even gaps between blocks, flush with the bubble edges. */
+.chat-prose p,
+.chat-prose ul,
+.chat-prose ol,
+.chat-prose pre,
+.chat-prose blockquote { margin-block: 0.75rem; }
+.chat-prose > :first-child { margin-top: 0; }
+.chat-prose > :last-child { margin-bottom: 0; }
+
+/* Headings: clear space above to mark a new section, tight below; balanced and
+   slightly tightened. Sizes are toned down from Streamdown defaults (h1 was
+   text-3xl) so a heading inside an answer guides rather than shouts. */
+.chat-prose h1,
+.chat-prose h2,
+.chat-prose h3,
+.chat-prose h4,
+.chat-prose h5,
+.chat-prose h6 {
+  margin: 1.5rem 0 0.5rem;
+  line-height: 1.25;
+  text-wrap: balance;
+  scroll-margin-top: 5rem;
+}
+.chat-prose h1 { font-size: 1.5rem; letter-spacing: -0.015em; }
+.chat-prose h2 { font-size: 1.25rem; letter-spacing: -0.01em; }
+.chat-prose h3 { font-size: 1.125rem; }
+.chat-prose h4 { font-size: 1rem; }
+.chat-prose h5,
+.chat-prose h6 { font-size: 0.9375rem; color: var(--muted-foreground); }
+
+/* Lists: markers outside for a clean hanging indent (wrapped lines align to the
+   text, not under the bullet), with quiet, muted markers. */
+.chat-prose ul,
+.chat-prose ol {
+  padding-left: 1.5rem;
+  list-style-position: outside;
+}
+.chat-prose ul { list-style-type: disc; }
+.chat-prose ol { list-style-type: decimal; }
+.chat-prose li { margin-block: 0.25rem; padding: 0; }
+.chat-prose li::marker { color: var(--muted-foreground); }
+.chat-prose li > ul,
+.chat-prose li > ol { margin-block: 0.25rem; }
+
+/* Blockquote: a calm tinted panel. Replaces Streamdown border-l-4 side-stripe
+   (a design ban) and its italic (Onest has no true italic, so faux-slanted
+   Cyrillic is avoided). */
+.chat-prose blockquote {
+  border-left: none;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-style: normal;
+}
+.chat-prose blockquote p { margin-block: 0.25rem; }
+
+/* Inline code: a quiet chip; em-relative so it tracks the surrounding text. */
+.chat-prose [data-streamdown="inline-code"] {
+  font-size: 0.875em;
+  padding: 0.1em 0.375em;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--muted);
+}
+
+/* Links: keep the underline (it is how a link is recognised) but refine it -
+   offset for legibility, soft at rest, full on hover. */
+.chat-prose a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--muted-foreground);
+  transition: text-decoration-color 150ms ease;
+}
+.chat-prose a:hover {
+  text-decoration-color: var(--primary);
+}
+
+/* Horizontal rule: a hairline with generous breathing room. */
+.chat-prose hr {
+  margin-block: 1.5rem;
+  border: none;
+  border-top: 1px solid var(--border);
 }
 
 /* Quick Look — Shiki code viewer. Shiki emits its own <pre class="shiki"> with

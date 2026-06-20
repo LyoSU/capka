@@ -182,8 +182,12 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
 
 
 function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
+  // `chat-prose` caps flowing text to a ~70ch measure (see globals.css) so long
+  // answers stay in the comfortable reading band; code blocks and tables are
+  // exempt and keep the full column width. 16px (text-base) is the readable
+  // floor — 15px sat just under it for Cyrillic body with tall diacritics.
   return (
-    <div className="text-[15px] leading-relaxed">
+    <div className="chat-prose text-base leading-relaxed">
       <Markdown isStreaming={isStreaming} chatId={chatId}>{text}</Markdown>
       {chatId && <WorkspaceLinks text={text} chatId={chatId} />}
     </div>
@@ -274,7 +278,7 @@ function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boole
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <p className="mb-2 ml-10 whitespace-pre-wrap text-[13px] italic leading-relaxed text-muted-foreground/80">
+        <p className="mb-2 ml-10 whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
           {text}
         </p>
       </CollapsibleContent>

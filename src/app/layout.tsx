@@ -1,14 +1,24 @@
 import type { Metadata } from "next";
 import Script from "next/script";
-import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
-import { Lora } from "next/font/google";
+import { Onest, Lora } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
+
+// Body + UI face. Onest is a humanist sans drawn with Latin and Cyrillic as
+// equal first-class scripts, so Ukrainian prose reads in a native typeface
+// (not a fallback) and long AI answers stay comfortable. Replaces Geist Sans,
+// whose grotesque, engineering character read as a developer tool. Geist Mono
+// is kept for code; Lora carries the serif display headings.
+const onest = Onest({
+  subsets: ["latin", "cyrillic"],
+  variable: "--font-onest",
+  display: "swap",
+});
 
 // Serif display face for hero headings. Cyrillic subset is required — the UI is
 // Ukrainian-first, and Latin-only display serifs (Instrument Serif, Fraunces)
@@ -40,7 +50,7 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`${GeistSans.variable} ${GeistMono.variable} ${lora.variable}`}
+      className={`${onest.variable} ${GeistMono.variable} ${lora.variable}`}
       suppressHydrationWarning
     >
       <head>
