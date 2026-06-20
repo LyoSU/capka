@@ -75,27 +75,27 @@ export const POST = apiHandler(async (req: Request) => {
     const uiMsgs = body.messages ?? [];
     const selfIdx = uiMsgs.findIndex((m) => m.id === newUserId);
     const parentId = selfIdx > 0 ? uiMsgs[selfIdx - 1].id : null;
-    await Promise.all([
-      db.insert(messages).values({
-        // Reuse the client's optimistic id so the rendered bubble keeps a stable
-        // React key when history reloads — otherwise it remounts and flashes.
-        id: newUserId,
-        chatId,
-        parentId,
-        role: "user",
-        content: text,
-        platform: "web",
-      }).onConflictDoNothing(),
-      db.update(chats).set({
-        ...(isNewChat ? { title: text.slice(0, 100) } : {}),
-        // Persist an explicit model switch so it sticks to this chat.
-        ...(requestModel && requestModel !== existingChat?.model ? { model: requestModel } : {}),
-        // Point the chat at the new message so a reload mid-flight shows this
-        // branch; the worker then advances it to the assistant reply.
-        activeLeafId: newUserId,
-        updatedAt: new Date(),
-      }).where(eq(chats.id, chatId)),
-    ]);
+    // Order matters: the message row must exist before the chat's
+    // active_leaf_id can reference it (FK), so these can't run in parallel.
+    await db.insert(messages).values({
+      // Reuse the client's optimistic id so the rendered bubble keeps a stable
+      // React key when history reloads — otherwise it remounts and flashes.
+      id: newUserId,
+      chatId,
+      parentId,
+      role: "user",
+      content: text,
+      platform: "web",
+    }).onConflictDoNothing();
+    await db.update(chats).set({
+      ...(isNewChat ? { title: text.slice(0, 100) } : {}),
+      // Persist an explicit model switch so it sticks to this chat.
+      ...(requestModel && requestModel !== existingChat?.model ? { model: requestModel } : {}),
+      // Point the chat at the new message so a reload mid-flight shows this
+      // branch; the worker then advances it to the assistant reply.
+      activeLeafId: newUserId,
+      updatedAt: new Date(),
+    }).where(eq(chats.id, chatId));
   }
 
   // Enqueue a durable task. The worker rebuilds model/tools/prompt from this
