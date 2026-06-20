@@ -40,7 +40,7 @@ export function TaskStatus({
   return (
     <div role="status" aria-live="polite" className="flex animate-in items-center gap-3 py-1 text-sm fade-in duration-300">
       <span
-        className="grid h-[27px] w-[27px] shrink-0 place-items-center rounded-full border border-foreground bg-card text-foreground"
+        className="grid h-[27px] w-[27px] shrink-0 place-items-center rounded-full border border-border bg-card text-foreground"
         aria-hidden="true"
       >
         <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />

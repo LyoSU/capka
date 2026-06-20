@@ -289,7 +289,7 @@ function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error"
     "absolute left-0 top-1/2 -translate-y-1/2 grid h-[27px] w-[27px] place-items-center overflow-hidden rounded-full border bg-card";
   if (state === "running") {
     return (
-      <span className={`${base} border-foreground text-foreground`}>
+      <span className={`${base} border-border text-foreground`}>
         <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />
       </span>
     );
