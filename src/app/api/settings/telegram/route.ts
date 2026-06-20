@@ -22,8 +22,10 @@ export const POST = apiHandler(async (req: Request) => {
     return Response.json({ error: "Invalid bot token" }, { status: 400 });
   }
 
-  // Save token (encrypted)
+  // Save token (encrypted) plus the bot's @username (public, non-secret) so the
+  // link UI can render a one-tap deep link for users of any role.
   await setSetting("telegram_bot_token", botToken.trim(), true);
+  await setSetting("telegram_bot_username", botInfo.username ?? "", false);
 
   // Start (or restart) long-polling with the new token — no public webhook
   // URL needed, so this works behind NAT/firewalls out of the box.

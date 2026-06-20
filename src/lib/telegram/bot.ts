@@ -1,9 +1,9 @@
 import { Bot, type Context } from "grammy";
 import { nanoid } from "nanoid";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages } from "@/lib/db/schema";
-import { getSetting } from "@/lib/settings";
+import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
 import { toUIMessages } from "@/lib/chat/presenter";
@@ -24,6 +24,15 @@ let _polling = false;
 let _token = "";
 
 const MAX_TELEGRAM_FILE_BYTES = 20 * 1024 * 1024; // getFile's hard download cap
+
+// The command menu Telegram shows behind the "/" hint. Registered under the
+// default scope — English only, by design: the set is tiny and the menu is the
+// one surface where per-locale upkeep isn't worth it (replies still localize to
+// the user's client language).
+const BOT_COMMANDS = [
+  { command: "start", description: "Show the welcome message" },
+  { command: "new", description: "Start a new chat" },
+];
 
 // Bot replies follow the user's own Telegram client language (falling back to
 // English), so a user never has to configure anything to be understood.
@@ -183,54 +192,24 @@ export async function getBot(): Promise<Bot | null> {
   _token = token;
   _bot = new Bot(token);
 
+  // A bare /start greets; /start CODE is the deep-link path — tapping
+  // `t.me/<bot>?start=CODE` in the web UI arrives here and links in one tap.
   _bot.command("start", async (ctx) => {
+    const code = ctx.match?.trim().toUpperCase();
+    if (code) {
+      await linkAccount(ctx, code);
+      return;
+    }
     await ctx.reply(tFor(ctx)("start"));
   });
 
   _bot.command("link", async (ctx) => {
-    const t = tFor(ctx);
-    // Throttle guessing attempts per Telegram user (defense-in-depth on top of
-    // the large code space).
-    if (!take(`tglink:${ctx.from!.id}`, 5).ok) {
-      await ctx.reply(t("tooManyAttempts"));
-      return;
-    }
     const code = ctx.match?.trim().toUpperCase();
     if (!code) {
-      await ctx.reply(t("linkUsage"));
+      await ctx.reply(tFor(ctx)("linkUsage"));
       return;
     }
-
-    const [lc] = await db
-      .select()
-      .from(linkCodes)
-      .where(eq(linkCodes.code, code))
-      .limit(1);
-    if (!lc || lc.expiresAt < new Date()) {
-      if (lc) await db.delete(linkCodes).where(eq(linkCodes.code, code));
-      await ctx.reply(t("invalidCode"));
-      return;
-    }
-
-    // This Telegram id may already be linked (re-running /link). The unique
-    // constraint on telegram_user_id would otherwise throw with no reply —
-    // re-point the existing link to the new account instead.
-    const existing = await findLink(ctx.from!.id);
-    if (existing) {
-      await db
-        .update(telegramLinks)
-        .set({ userId: lc.userId, telegramUsername: ctx.from?.username || null, activeChatId: null })
-        .where(eq(telegramLinks.id, existing.id));
-    } else {
-      await db.insert(telegramLinks).values({
-        id: nanoid(),
-        userId: lc.userId,
-        telegramUserId: ctx.from!.id,
-        telegramUsername: ctx.from?.username || null,
-      });
-    }
-    await db.delete(linkCodes).where(eq(linkCodes.code, code));
-    await ctx.reply(t("linked"));
+    await linkAccount(ctx, code);
   });
 
   _bot.command("new", async (ctx) => {
@@ -335,8 +314,19 @@ export async function startBot(): Promise<void> {
   _polling = true;
   // Drop any previously-registered webhook so getUpdates won't 409.
   await bot.api.deleteWebhook().catch(() => {});
+  // Publish the "/" command menu (English default scope). Best-effort: a hiccup
+  // here must not stop polling.
+  await bot.api.setMyCommands(BOT_COMMANDS).catch(() => {});
   // bot.start() resolves only when the bot stops, so never await it here.
-  void bot.start({ onStart: (info) => log.info("telegram polling started", { username: info.username }) });
+  void bot.start({
+    onStart: (info) => {
+      log.info("telegram polling started", { username: info.username });
+      // Cache the bot's @username (public, not a secret) so the web UI can build
+      // the one-tap link deep link without an admin-only token read. Also
+      // backfills installs whose token was saved before this field existed.
+      void setSetting("telegram_bot_username", info.username, false);
+    },
+  });
 }
 
 /** Stop polling and drop the singleton (so a new token takes effect). */
@@ -350,6 +340,54 @@ export async function stopBot(): Promise<void> {
 export async function restartBot(): Promise<void> {
   await stopBot();
   await startBot();
+}
+
+/**
+ * Bind a Telegram account to the platform user that owns `code`. Shared by the
+ * `/link CODE` command and the `t.me/<bot>?start=CODE` deep link (delivered as
+ * `/start CODE`), so one-tap and manual linking run identical, throttled logic.
+ */
+async function linkAccount(ctx: Context, code: string): Promise<void> {
+  const t = tFor(ctx);
+  // Throttle guessing attempts per Telegram user (defense-in-depth on top of
+  // the large code space).
+  if (!take(`tglink:${ctx.from!.id}`, 5).ok) {
+    await ctx.reply(t("tooManyAttempts"));
+    return;
+  }
+
+  const [lc] = await db.select().from(linkCodes).where(eq(linkCodes.code, code)).limit(1);
+  if (!lc || lc.expiresAt < new Date()) {
+    if (lc) await db.delete(linkCodes).where(eq(linkCodes.code, code));
+    await ctx.reply(t("invalidCode"));
+    return;
+  }
+
+  // This Telegram id may already be linked (re-running /link). The unique
+  // constraint on telegram_user_id would otherwise throw with no reply —
+  // re-point the existing link to the new account instead.
+  const existing = await findLink(ctx.from!.id);
+  if (existing) {
+    await db
+      .update(telegramLinks)
+      .set({ userId: lc.userId, telegramUsername: ctx.from?.username || null, activeChatId: null })
+      .where(eq(telegramLinks.id, existing.id));
+  } else {
+    await db.insert(telegramLinks).values({
+      id: nanoid(),
+      userId: lc.userId,
+      telegramUserId: ctx.from!.id,
+      telegramUsername: ctx.from?.username || null,
+    });
+  }
+  // One Telegram account per platform user: if they just linked from a new
+  // account (e.g. switching phones), drop any previous account so replies don't
+  // start arriving from two identities into the same profile.
+  await db
+    .delete(telegramLinks)
+    .where(and(eq(telegramLinks.userId, lc.userId), ne(telegramLinks.telegramUserId, ctx.from!.id)));
+  await db.delete(linkCodes).where(eq(linkCodes.code, code));
+  await ctx.reply(t("linked"));
 }
 
 async function findLink(telegramUserId: number) {

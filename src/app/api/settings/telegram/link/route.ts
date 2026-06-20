@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { linkCodes, telegramLinks } from "@/lib/db/schema";
+import { getSetting } from "@/lib/settings";
 
 export const POST = apiHandler(async () => {
   const { userId } = await requireRole("admin", "user");
@@ -30,9 +31,23 @@ export const GET = apiHandler(async () => {
     .where(eq(telegramLinks.userId, userId))
     .limit(1);
 
+  // Public, non-secret — lets the link UI build the t.me deep link / QR for any
+  // role without touching the admin-only token read.
+  const botUsername = await getSetting("telegram_bot_username");
+
   return Response.json({
     linked: !!link,
     username: link?.telegramUsername || null,
     linkedAt: link?.linkedAt?.toISOString() || null,
+    botUsername: botUsername || null,
   });
+});
+
+// Unlink the caller's Telegram account so they can connect a different one.
+// Also clears any pending link code so a stale code can't re-bind the old one.
+export const DELETE = apiHandler(async () => {
+  const { userId } = await requireRole("admin", "user");
+  await db.delete(telegramLinks).where(eq(telegramLinks.userId, userId));
+  await db.delete(linkCodes).where(eq(linkCodes.userId, userId));
+  return Response.json({ ok: true });
 });

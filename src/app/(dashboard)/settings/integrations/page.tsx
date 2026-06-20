@@ -2,12 +2,15 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Link2, Copy, Check } from "lucide-react";
+import { Loader2, Link2, Copy, Check, Send } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 export default function IntegrationsPage() {
   const t = useTranslations("settings.integrations");
@@ -20,11 +23,13 @@ export default function IntegrationsPage() {
   // Link state
   const [linked, setLinked] = useState(false);
   const [linkUsername, setLinkUsername] = useState<string | null>(null);
+  const [botUsername, setBotUsername] = useState<string | null>(null);
   const [linkCode, setLinkCode] = useState<string | null>(null);
   const [codeExpiry, setCodeExpiry] = useState<string | null>(null);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [linkLoading, setLinkLoading] = useState(true);
+  const [unlinking, setUnlinking] = useState(false);
 
   const fetchLinkStatus = useCallback(async () => {
     try {
@@ -33,6 +38,7 @@ export default function IntegrationsPage() {
         const data = await res.json();
         setLinked(data.linked);
         setLinkUsername(data.username);
+        setBotUsername(data.botUsername ?? null);
       }
     } finally {
       setLinkLoading(false);
@@ -69,6 +75,9 @@ export default function IntegrationsPage() {
         toast.success(t("botConnected", { username: data.botUsername }));
         if (data.warning) toast.warning(data.warning);
         setHasToken(true);
+        // Carry the freshly-validated username into the link section so its
+        // deep link / QR work immediately, without a page reload.
+        if (data.botUsername) setBotUsername(data.botUsername);
         setBotToken("");
       } else {
         toast.error(data.error || t("saveTokenFailed"));
@@ -91,6 +100,23 @@ export default function IntegrationsPage() {
       }
     } finally {
       setGeneratingCode(false);
+    }
+  };
+
+  const handleUnlink = async () => {
+    setUnlinking(true);
+    try {
+      const res = await fetch("/api/settings/telegram/link", { method: "DELETE" });
+      if (res.ok) {
+        setLinked(false);
+        setLinkUsername(null);
+        setLinkCode(null);
+        toast.success(t("link.unlinked"));
+      } else {
+        toast.error(t("link.unlinkFailed"));
+      }
+    } finally {
+      setUnlinking(false);
     }
   };
 
@@ -170,22 +196,61 @@ export default function IntegrationsPage() {
             {t("link.checkingStatus")}
           </div>
         ) : linked ? (
-          <div className="flex items-center gap-2 rounded-md border p-3">
-            <Link2 className="h-4 w-4 text-success" />
-            <span className="text-sm">
-              {linkUsername ? t("link.linkedAs", { username: linkUsername }) : t("link.linked")}
-            </span>
-            <Badge variant="outline" className="ml-auto text-xs">
-              {t("link.connected")}
-            </Badge>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 rounded-md border p-3">
+              <Link2 className="h-4 w-4 text-success" />
+              <span className="text-sm">
+                {linkUsername ? t("link.linkedAs", { username: linkUsername }) : t("link.linked")}
+              </span>
+              <Badge variant="outline" className="ml-auto text-xs">
+                {t("link.connected")}
+              </Badge>
+            </div>
+            <Button variant="ghost" size="sm" onClick={handleUnlink} disabled={unlinking}>
+              {unlinking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t("link.changeAccount")}
+            </Button>
           </div>
         ) : (
           <div className="space-y-3">
             {linkCode ? (
-              <div className="space-y-2 rounded-md border p-4">
-                <p className="text-sm text-muted-foreground">
-                  {t("link.sendCommand")}
-                </p>
+              <div className="space-y-3 rounded-md border p-4">
+                {botUsername ? (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      {t("link.openBotHint")}
+                    </p>
+                    <a
+                      href={`https://t.me/${botUsername}?start=${linkCode}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={cn(buttonVariants(), "w-full")}
+                    >
+                      <Send className="mr-2 h-4 w-4" />
+                      {t("link.openBot", { username: botUsername })}
+                    </a>
+                    <div className="flex flex-col items-center gap-2 pt-1">
+                      <div className="rounded-lg bg-white p-3">
+                        <QRCodeSVG
+                          value={`https://t.me/${botUsername}?start=${linkCode}`}
+                          size={148}
+                          marginSize={2}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("link.scanQr")}
+                      </p>
+                    </div>
+                    <Separator />
+                    <p className="text-xs text-muted-foreground">
+                      {t("link.orManually")}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("link.sendCommand")}
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <code className="flex-1 rounded-md bg-muted px-3 py-2 text-sm font-mono">
                     /link {linkCode}
@@ -223,7 +288,7 @@ export default function IntegrationsPage() {
               <Button
                 variant="outline"
                 onClick={handleGenerateCode}
-                disabled={generatingCode || !hasToken}
+                disabled={generatingCode || !botUsername}
               >
                 {generatingCode && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -232,7 +297,7 @@ export default function IntegrationsPage() {
                 {t("link.generateCode")}
               </Button>
             )}
-            {!hasToken && (
+            {!botUsername && (
               <p className="text-xs text-muted-foreground">
                 {t("link.configureFirst")}
               </p>
