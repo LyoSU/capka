@@ -10,6 +10,7 @@ import { useState, useMemo, useEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
+import { extractWorkspacePaths } from "@/lib/chat/artifacts";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
 
@@ -189,17 +190,13 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   );
 }
 
-const WORKSPACE_PATH_RE = /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
-
 function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
   const t = useTranslations("chat.tool");
   const tw = useTranslations("chat.workspace");
   // Re-scanning the message text on every render is wasteful; the artifact
-  // paths only change when the text does.
-  const paths = useMemo(
-    () => [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))],
-    [text],
-  );
+  // paths only change when the text does. Shared with the Telegram channel so
+  // both surface the same referenced files.
+  const paths = useMemo(() => extractWorkspacePaths(text), [text]);
   // Artifacts that open in Quick Look, in listed order, for ←/→ navigation.
   const viewable: PreviewFile[] = useMemo(
     () =>
