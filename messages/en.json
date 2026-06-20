@@ -250,6 +250,14 @@
       "empty": "No files yet.",
       "uploadFailed": "Failed to upload {name}"
     },
+    "preview": {
+      "prev": "Previous",
+      "next": "Next",
+      "download": "Download",
+      "close": "Close",
+      "loadError": "Couldn't open this file",
+      "tooLarge": "File too large to preview"
+    },
     "tool": {
       "done": "Done",
       "failed": "failed",

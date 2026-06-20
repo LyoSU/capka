@@ -9,8 +9,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { formatSize } from "@/lib/constants";
-import { fileKind } from "@/lib/file-kinds";
+import { fileKind, previewKind } from "@/lib/file-kinds";
 import { describeStep } from "./steps";
+import { FileThumb, usePreview, type PreviewFile } from "./file-preview";
 import type { AttachedFile } from "./chat-input";
 
 type FileEntry = { name: string; path: string; isDirectory: boolean; size: number; modifiedAt: string | null };
@@ -142,6 +143,7 @@ function ContextSection({ attachments }: { attachments: AttachedFile[] }) {
 function FilesSection({ chatId }: { chatId: string }) {
   const t = useTranslations("chat.workspace");
   const tc = useTranslations("common");
+  const { open } = usePreview();
   const [path, setPath] = useState(".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -169,6 +171,11 @@ function FilesSection({ chatId }: { chatId: string }) {
     .filter((e) => !e.name.startsWith("."))
     .sort((a, b) => (a.isDirectory !== b.isDirectory ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name)));
   const files = sorted.filter((e) => !e.isDirectory);
+  // The files that open in Quick Look, in display order — so ←/→ steps through
+  // exactly what's shown, skipping folders and download-only types.
+  const viewable: PreviewFile[] = files
+    .filter((e) => previewKind(e.name) !== null)
+    .map((e) => ({ path: e.path, name: e.name, chatId }));
 
   const downloadUrl = (p: string) => `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(p)}`;
   const downloadAll = () => {
@@ -246,28 +253,39 @@ function FilesSection({ chatId }: { chatId: string }) {
 
       <div className="space-y-0.5 px-3">
         {sorted.map((entry) => {
-          const { Icon, color, bg } = fileKind(entry.name, entry.isDirectory);
-          return (
-            <div key={entry.path} className="group flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-accent/40">
-              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${bg}`}>
-                <Icon className={`h-4 w-4 ${color}`} />
-              </div>
-              {entry.isDirectory ? (
+          if (entry.isDirectory) {
+            const { Icon, color, bg } = fileKind(entry.name, true);
+            return (
+              <div key={entry.path} className="group flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-accent/40">
+                <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${bg}`}>
+                  <Icon className={`h-4 w-4 ${color}`} />
+                </div>
                 <button onClick={() => setPath(entry.path)} className="min-w-0 flex-1 text-left">
                   <p className="truncate text-sm font-medium">{entry.name}</p>
                 </button>
-              ) : (
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-foreground/90">{entry.name}</p>
-                  <p className="text-[10px] tabular-nums text-muted-foreground">{formatSize(entry.size)}</p>
-                </div>
-              )}
-              {!entry.isDirectory && (
-                <a href={downloadUrl(entry.path)} download={entry.name}
-                  className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-all hover:bg-accent hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100">
-                  <Download className="h-3.5 w-3.5" />
-                </a>
-              )}
+              </div>
+            );
+          }
+          const file: PreviewFile = { path: entry.path, name: entry.name, chatId };
+          const canView = previewKind(entry.name) !== null;
+          return (
+            <div key={entry.path} className="group flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-accent/40">
+              <button
+                type="button"
+                disabled={!canView}
+                onClick={() => open(viewable, viewable.findIndex((v) => v.path === entry.path))}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left enabled:cursor-pointer"
+              >
+                <FileThumb file={file} className="h-9 w-9 shrink-0 rounded-lg" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-foreground/90">{entry.name}</span>
+                  <span className="block text-[10px] tabular-nums text-muted-foreground">{formatSize(entry.size)}</span>
+                </span>
+              </button>
+              <a href={downloadUrl(entry.path)} download={entry.name}
+                className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-all hover:bg-accent hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100">
+                <Download className="h-3.5 w-3.5" />
+              </a>
             </div>
           );
         })}

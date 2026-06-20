@@ -29,6 +29,7 @@ import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePanel, type ProgressStep } from "@/components/chat/workspace-panel";
+import { PreviewProvider } from "@/components/chat/file-preview";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { RecentChats } from "@/components/chat/recent-chats";
 import { Button } from "@/components/ui/button";
@@ -279,6 +280,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   );
 
   return (
+    <PreviewProvider>
     <div className="flex h-full">
       <div className="flex flex-1 flex-col">
       {isEmpty ? (
@@ -434,5 +436,6 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
         attachments={files}
       />
     </div>
+    </PreviewProvider>
   );
 }

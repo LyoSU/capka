@@ -38,6 +38,7 @@
     "grammy": "^1.41.1",
     "gray-matter": "^4.0.3",
     "lucide-react": "^0.577.0",
+    "mime-types": "^3.0.2",
     "nanoid": "^5.1.7",
     "next": "^16.2.7",
     "next-intl": "^4.13.0",
@@ -54,6 +55,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/adm-zip": "^0.5.8",
+    "@types/mime-types": "^3.0.1",
     "@types/node": "^20",
     "@types/pg": "^8.18.0",
     "@types/react": "^19",

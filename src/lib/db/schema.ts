@@ -1,5 +1,6 @@
 import {
   pgTable, text, boolean, timestamp, integer, jsonb, index, bigint, numeric,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const settings = pgTable("settings", {
@@ -77,6 +78,11 @@ export const chats = pgTable("chats", {
   model: text("model"),
   pinned: boolean("pinned").default(false),
   archived: boolean("archived").default(false),
+  // The leaf of the message tree currently shown. The visible conversation is
+  // the chain from this leaf up to the root — switching branches is just moving
+  // this pointer. Null = empty chat. FK is set-null so deleting a message never
+  // orphans the chat (the read path re-derives a leaf when this is stale).
+  activeLeafId: text("active_leaf_id").references((): AnyPgColumn => messages.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

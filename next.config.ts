@@ -17,6 +17,15 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         ],
       },
+      {
+        // Quick Look frames the inline file download (e.g. PDFs) same-origin.
+        // The blanket DENY above would block even our own iframe, so relax just
+        // this response to SAMEORIGIN. Listed AFTER the catch-all so it wins
+        // (Next applies the last matching header value).
+        source: "/api/sandbox/files/download",
+        has: [{ type: "query", key: "inline", value: "1" }],
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
     ];
   },
 };

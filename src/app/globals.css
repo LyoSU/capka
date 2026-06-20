@@ -276,3 +276,41 @@
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }
+
+/* Quick Look — Shiki code viewer. Shiki emits its own <pre class="shiki"> with
+   light colors inline plus a --shiki-dark var; swap to the dark var under .dark. */
+.ql-code .shiki {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  background: transparent !important;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  min-width: max-content;
+}
+.dark .ql-code .shiki,
+.dark .ql-code .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
+/* Gutter line numbers via a CSS counter over Shiki's per-line spans. */
+.ql-code .shiki code {
+  display: grid;
+  counter-reset: ql-line;
+}
+.ql-code .shiki .line {
+  counter-increment: ql-line;
+}
+.ql-code .shiki .line::before {
+  content: counter(ql-line);
+  display: inline-block;
+  width: 2rem;
+  margin-right: 1.25rem;
+  text-align: right;
+  color: var(--muted-foreground);
+  opacity: 0.35;
+  user-select: none;
+}
+.ql-plain {
+  white-space: pre;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}

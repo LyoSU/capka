@@ -9,7 +9,8 @@ import { haptic } from "@/lib/haptics";
 import { useState, useMemo, useEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { fileKind, extOf } from "@/lib/file-kinds";
+import { fileKind, extOf, previewKind } from "@/lib/file-kinds";
+import { FileThumb, usePreview, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
 
 // --- Helpers ---
@@ -193,11 +194,20 @@ const WORKSPACE_PATH_RE = /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІі
 function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
   const t = useTranslations("chat.tool");
   const tw = useTranslations("chat.workspace");
+  const { open } = usePreview();
   // Re-scanning the message text on every render is wasteful; the artifact
   // paths only change when the text does.
   const paths = useMemo(
     () => [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))],
     [text],
+  );
+  // Artifacts that open in Quick Look, in listed order, for ←/→ navigation.
+  const viewable: PreviewFile[] = useMemo(
+    () =>
+      paths
+        .filter((p) => previewKind(p.split("/").pop() || p) !== null)
+        .map((p) => ({ path: p, name: p.split("/").pop() || p, chatId })),
+    [paths, chatId],
   );
   if (paths.length === 0) return null;
 
@@ -233,21 +243,46 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
         {paths.map((p) => {
           const fileName = p.split("/").pop() || p;
           const ext = extOf(fileName);
-          const { label, Icon, color, bg } = fileKind(fileName);
-          return (
-            <a
-              key={p}
-              href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(p)}`}
-              download={fileName}
-              className="group/file flex items-center gap-3.5 px-4 py-3 no-underline transition-colors hover:bg-accent/50"
-            >
-              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${bg}`}>
-                <Icon className={`h-[18px] w-[18px] ${color}`} />
-              </div>
+          const { label } = fileKind(fileName);
+          const file: PreviewFile = { path: p, name: fileName, chatId };
+          const downloadHref = `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(p)}`;
+          const meta = (
+            <>
+              <FileThumb file={file} className="h-10 w-10 shrink-0 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium leading-snug text-foreground">{fileName}</p>
                 <p className="text-xs text-muted-foreground">{label} · {ext.toUpperCase()}</p>
               </div>
+            </>
+          );
+          if (previewKind(fileName) !== null) {
+            return (
+              <button
+                key={p}
+                type="button"
+                onClick={() => open(viewable, viewable.findIndex((v) => v.path === p))}
+                className="group/file flex w-full cursor-pointer items-center gap-3.5 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+              >
+                {meta}
+                <a
+                  href={downloadHref}
+                  download={fileName}
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0 rounded-md p-1 text-muted-foreground/20 transition-colors hover:text-muted-foreground group-hover/file:text-muted-foreground"
+                >
+                  <Download className="h-4 w-4" />
+                </a>
+              </button>
+            );
+          }
+          return (
+            <a
+              key={p}
+              href={downloadHref}
+              download={fileName}
+              className="group/file flex items-center gap-3.5 px-4 py-3 no-underline transition-colors hover:bg-accent/50"
+            >
+              {meta}
               <Download className="h-4 w-4 shrink-0 text-muted-foreground/20 transition-colors group-hover/file:text-muted-foreground" />
             </a>
           );
