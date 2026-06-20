@@ -1,7 +1,7 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
-  ChevronRight, AlertCircle, Lightbulb,
+  ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/chat/markdown";
@@ -497,6 +497,62 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** "‹ i/N ›" version switcher — shown only when a message has alternative
+ *  siblings (from an edit or a regenerate). Flips the visible branch. */
+function BranchSwitcher({
+  index, count, messageId, onSwitch,
+}: {
+  index: number;
+  count: number;
+  messageId: string;
+  onSwitch: (messageId: string, direction: "prev" | "next") => void;
+}) {
+  const t = useTranslations("chat.message");
+  if (count <= 1) return null;
+  return (
+    <div className="flex items-center gap-0.5 text-xs text-muted-foreground" aria-label={t("versions", { count })}>
+      <button
+        type="button"
+        onClick={() => onSwitch(messageId, "prev")}
+        disabled={index <= 0}
+        title={t("prevVersion")}
+        aria-label={t("prevVersion")}
+        className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+      >
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </button>
+      <span className="tabular-nums">{index + 1}/{count}</span>
+      <button
+        type="button"
+        onClick={() => onSwitch(messageId, "next")}
+        disabled={index >= count - 1}
+        title={t("nextVersion")}
+        aria-label={t("nextVersion")}
+        className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+      >
+        <ChevronRight className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/** Fork from this message into a new chat — explore an alternative path without
+ *  disturbing the current conversation. */
+function ForkButton({ messageId, onFork }: { messageId: string; onFork: (messageId: string) => void }) {
+  const t = useTranslations("chat.message");
+  return (
+    <button
+      type="button"
+      onClick={() => onFork(messageId)}
+      title={t("fork")}
+      aria-label={t("fork")}
+      className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+    >
+      <GitBranch className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
 function autoGrow(ta: HTMLTextAreaElement) {
   ta.style.height = "auto";
   // scrollHeight covers content + padding but not borders; with border-box that
@@ -509,13 +565,17 @@ function autoGrow(ta: HTMLTextAreaElement) {
  *  pencil to rewrite the message and re-run the conversation from that point
  *  (⌘/Ctrl+Enter saves, Esc cancels) — the familiar ChatGPT gesture. */
 function UserBubble({
-  text, messageId, timestamp, isTelegram, onEdit,
+  text, messageId, timestamp, isTelegram, siblingIndex, siblingCount, onEdit, onSwitchBranch, onFork,
 }: {
   text: string;
   messageId: string;
   timestamp: string;
   isTelegram: boolean;
+  siblingIndex: number;
+  siblingCount: number;
   onEdit?: (messageId: string, newText: string) => void;
+  onSwitchBranch?: (messageId: string, direction: "prev" | "next") => void;
+  onFork?: (messageId: string) => void;
 }) {
   const tCommon = useTranslations("common");
   const tMsg = useTranslations("chat.message");
@@ -570,6 +630,9 @@ function UserBubble({
           {text || "…"}
         </div>
         <div className="mt-1 flex items-center gap-1">
+          {onSwitchBranch && (
+            <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} />
+          )}
           {onEdit && text && (
             <button
               type="button"
@@ -580,6 +643,11 @@ function UserBubble({
             >
               <Pencil className="h-3.5 w-3.5" />
             </button>
+          )}
+          {onFork && (
+            <span className="opacity-0 transition group-hover/msg:opacity-100">
+              <ForkButton messageId={messageId} onFork={onFork} />
+            </span>
           )}
           <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
         </div>
@@ -608,21 +676,27 @@ interface ChatMessageProps {
   onRegenerate?: () => void;
   /** Provided on user messages — replaces the text and re-runs from there. */
   onEdit?: (messageId: string, newText: string) => void;
+  /** Flip between alternative versions of this message (edits/regenerations). */
+  onSwitchBranch?: (messageId: string, direction: "prev" | "next") => void;
+  /** Fork the conversation from this message into a new chat. */
+  onFork?: (messageId: string) => void;
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
   const timestamp = formatRelativeTime(createdAt, locale, tTime);
   const isTelegram = metadata?.platform === "telegram";
+  const siblingIndex = metadata?.siblingIndex ?? 0;
+  const siblingCount = metadata?.siblingCount ?? 1;
 
   if (isUser) {
     const text = message.parts
@@ -636,7 +710,11 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
         messageId={message.id}
         timestamp={timestamp}
         isTelegram={isTelegram}
+        siblingIndex={siblingIndex}
+        siblingCount={siblingCount}
         onEdit={onEdit}
+        onSwitchBranch={onSwitchBranch}
+        onFork={onFork}
       />
     );
   }
@@ -724,6 +802,9 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
           const copyText = groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n\n").trim();
           return (
             <div className="mt-1 flex items-center gap-1">
+              {onSwitchBranch && (
+                <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={message.id} onSwitch={onSwitchBranch} />
+              )}
               {copyText && <CopyButton text={copyText} />}
               {onRegenerate && (
                 <button
@@ -736,6 +817,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
                   <RotateCcw className="h-3.5 w-3.5" />
                 </button>
               )}
+              {onFork && <ForkButton messageId={message.id} onFork={onFork} />}
               <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
             </div>
           );

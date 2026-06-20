@@ -363,8 +363,9 @@ export function useBackgroundChat({
   // chat's persisted model. An empty userMessage means "don't insert a new user
   // row" (regenerate); a non-empty one re-inserts the edited message (edit).
   const rerun = useCallback(
-    async (fromId: string, history: Message[], userMessage: string, userMessageId?: string) => {
-      await fetch(`/api/chat/messages?chatId=${chatId}&fromId=${fromId}`, { method: "DELETE" }).catch(() => {});
+    async (history: Message[], userMessage: string, userMessageId?: string) => {
+      // Non-destructive: the server inserts a sibling branch keyed off the
+      // history we send, so the previous version stays reachable via ‹ i/N ›.
       setMessages(history);
       setStatus("running");
       try {
@@ -405,7 +406,7 @@ export function useBackgroundChat({
     if (lastAssistantIdx === -1) return;
     const history = msgs.slice(0, lastAssistantIdx);
     if (!history.some((m) => m.role === "user")) return;
-    await rerun(msgs[lastAssistantIdx].id, history, "");
+    await rerun(history, "");
   }, [rerun]);
 
   // Edit: replace a user message's text and re-run from there.
@@ -417,8 +418,32 @@ export function useBackgroundChat({
     if (idx === -1) return;
     const history = msgs.slice(0, idx);
     const edited: Message = { id: nanoid(), role: "user", parts: [{ type: "text", text }] };
-    await rerun(messageId, [...history, edited], text, edited.id);
+    await rerun([...history, edited], text, edited.id);
   }, [rerun]);
+
+  // ── Switch branch (‹ i/N › version arrows) ─────────────────
+  // Point the chat at another sibling's branch, then resync from the server,
+  // which returns that branch as the visible conversation.
+  const switchBranch = useCallback(async (messageId: string, direction: "prev" | "next") => {
+    await fetch("/api/chat", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId, messageId, direction }),
+    }).catch(() => {});
+    loadHistory();
+  }, [chatId, loadHistory]);
+
+  // ── Fork from a message into a new independent chat ─────────
+  const forkChat = useCallback(async (fromMessageId: string): Promise<string | null> => {
+    const res = await fetch("/api/chats/fork", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId, fromMessageId }),
+    }).catch(() => null);
+    if (!res || !res.ok) return null;
+    const { id } = (await res.json()) as { id: string };
+    return id;
+  }, [chatId]);
 
   // ── Stop / Cancel ──────────────────────────────────────────
   const stop = useCallback(async () => {
@@ -428,5 +453,5 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId]);
 
-  return { messages, status, error, sendMessage, regenerate, editMessage, stop, reload: loadHistory, isLoading: status === "running", taskInfo };
+  return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, reload: loadHistory, isLoading: status === "running", taskInfo };
 }

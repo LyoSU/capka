@@ -279,8 +279,13 @@
       "copied": "Copied",
       "regenerate": "Regenerate",
       "edit": "Edit",
-      "reasoning": "Reasoning"
+      "reasoning": "Reasoning",
+      "fork": "Fork into a new chat",
+      "prevVersion": "Previous version",
+      "nextVersion": "Next version",
+      "versions": "{count} versions"
     },
+    "forkFailed": "Could not fork the chat",
     "archived": {
       "title": "Archived chats",
       "back": "Back to chats",

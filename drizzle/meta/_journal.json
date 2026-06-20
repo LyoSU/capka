@@ -85,6 +85,13 @@
       "when": 1781544753935,
       "tag": "0011_lethal_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781949568340,
+      "tag": "0012_chat_message_tree",
+      "breakpoints": true
     }
   ]
 }

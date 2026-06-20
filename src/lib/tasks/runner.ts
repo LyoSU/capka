@@ -3,7 +3,7 @@ import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } fr
 import { eq, and, or, isNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { messages, memories, projects } from "@/lib/db/schema";
+import { chats, messages, memories, projects } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
 import { deliverTaskResult, type TaskOrigin } from "./delivery";
 import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
@@ -282,14 +282,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       systemMessages.push({ role: "system", content: prompt.volatile });
     }
 
+    // The reply hangs off the last message of the branch we're answering (the
+    // user message just sent, or the user turn being regenerated). Pointing the
+    // chat at this leaf makes the new branch the active one immediately.
+    const replyParentId = (payload.uiMessages ?? []).at(-1)?.id ?? null;
     await db.insert(messages).values({
       id: msgId,
       chatId,
+      parentId: replyParentId,
       role: "assistant",
       content: "",
       platform: payload.origin?.platform ?? "web",
       metadata: { taskId, status: "running", parts: [] },
     });
+    await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
     await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId });
 
     const hasTools = Object.keys(tools).length > 0;

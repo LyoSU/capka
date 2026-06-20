@@ -89,6 +89,6 @@ describe("toUIMessages", () => {
     const [msg] = toUIMessages([
       row({ content: "x", metadata: { status: "completed" }, platform: null, createdAt: null }),
     ]);
-    expect(msg.metadata).toEqual({ createdAt: null, platform: "web", taskStatus: "completed" });
+    expect(msg.metadata).toEqual({ createdAt: null, platform: "web", taskStatus: "completed", parentId: null, siblingIndex: 0, siblingCount: 1 });
   });
 });

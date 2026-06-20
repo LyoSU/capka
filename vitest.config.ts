@@ -9,5 +9,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // `data/` holds user sandbox workspaces — code the AI wrote for users, not
+    // our suite. Never let the runner descend into it (or build output).
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.next/**", "data/**"],
   },
 });

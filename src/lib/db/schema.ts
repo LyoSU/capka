@@ -93,6 +93,12 @@ export const chats = pgTable("chats", {
 export const messages = pgTable("messages", {
   id: text("id").primaryKey(),
   chatId: text("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  // Parent in the conversation tree. Null = root of the chat. Editing a message
+  // or regenerating a reply inserts a *sibling* (same parent) instead of
+  // deleting, so every version is preserved and reachable. Cascade so deleting a
+  // node prunes its whole subtree. The tree — not created_at — defines order;
+  // created_at only ranks siblings for the "‹ i/N ›" version switcher.
+  parentId: text("parent_id").references((): AnyPgColumn => messages.id, { onDelete: "cascade" }),
   role: text("role").notNull(),
   content: text("content").notNull(),
   platform: text("platform").default("web"),
@@ -102,6 +108,7 @@ export const messages = pgTable("messages", {
 }, (table) => [
   index("idx_messages_chat_id").on(table.chatId),
   index("idx_messages_created_at").on(table.createdAt),
+  index("idx_messages_parent_id").on(table.parentId),
 ]);
 
 export const telegramLinks = pgTable("telegram_links", {

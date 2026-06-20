@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useLayoutEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -64,10 +65,18 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   // The user turn currently at the top of the view — highlighted in the nav.
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
 
-  const { messages, isLoading, error, sendMessage, regenerate, editMessage, stop, reload, taskInfo } = useBackgroundChat({
+  const router = useRouter();
+  const { messages, isLoading, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, reload, taskInfo } = useBackgroundChat({
     chatId,
     projectId,
   });
+
+  // Fork the conversation from a message into a fresh chat, then jump to it.
+  const handleFork = async (messageId: string) => {
+    const newId = await forkChat(messageId);
+    if (newId) router.push(`/chat/${newId}`);
+    else toast.error(t("forkFailed"));
+  };
 
   // The latest assistant reply is the only one that can be regenerated; editing
   // is offered on any user message while nothing is streaming.
@@ -335,6 +344,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                       isStreaming={isStreamingMsg}
                       onRegenerate={canRegenerate ? regenerate : undefined}
                       onEdit={!isLoading ? editMessage : undefined}
+                      onSwitchBranch={!isLoading ? switchBranch : undefined}
+                      onFork={!isLoading ? handleFork : undefined}
                     />
                   </div>
                 );

@@ -1,4 +1,4 @@
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -9,6 +9,7 @@ import { enqueueTask } from "@/lib/tasks/queue";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
 import { toUIMessages } from "@/lib/chat/presenter";
+import { loadActivePath, switchSibling } from "@/lib/chat/tree";
 import { chatRequestSchema } from "@/lib/chat/contracts";
 import { take } from "@/lib/rate-limit";
 
@@ -67,12 +68,20 @@ export const POST = apiHandler(async (req: Request) => {
   const text = userMessage || "";
   if (text) {
     const isNewChat = !existingChat || existingChat.title === "New Chat";
+    const newUserId = userMessageId || nanoid();
+    // The user message's parent is whatever it follows in the visible path the
+    // client sent. Editing re-sends history ending at the *edited* message, so
+    // this naturally makes the edit a sibling of the original — no deletes.
+    const uiMsgs = body.messages ?? [];
+    const selfIdx = uiMsgs.findIndex((m) => m.id === newUserId);
+    const parentId = selfIdx > 0 ? uiMsgs[selfIdx - 1].id : null;
     await Promise.all([
       db.insert(messages).values({
         // Reuse the client's optimistic id so the rendered bubble keeps a stable
         // React key when history reloads — otherwise it remounts and flashes.
-        id: userMessageId || nanoid(),
+        id: newUserId,
         chatId,
+        parentId,
         role: "user",
         content: text,
         platform: "web",
@@ -81,6 +90,9 @@ export const POST = apiHandler(async (req: Request) => {
         ...(isNewChat ? { title: text.slice(0, 100) } : {}),
         // Persist an explicit model switch so it sticks to this chat.
         ...(requestModel && requestModel !== existingChat?.model ? { model: requestModel } : {}),
+        // Point the chat at the new message so a reload mid-flight shows this
+        // branch; the worker then advances it to the assistant reply.
+        activeLeafId: newUserId,
         updatedAt: new Date(),
       }).where(eq(chats.id, chatId)),
     ]);
@@ -107,14 +119,32 @@ export const GET = apiHandler(async (req: Request) => {
   const chatId = searchParams.get("chatId");
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
 
-  await requireOwned(chats, chatId, userId, "Chat");
+  const chat = await requireOwned(chats, chatId, userId, "Chat");
 
-  const rows = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.chatId, chatId))
-    .orderBy(asc(messages.createdAt))
-    .limit(100);
+  // The visible conversation is the active branch (root → active leaf), with
+  // each node carrying its "‹ i/N ›" sibling position for the version switcher.
+  const path = await loadActivePath(chatId, (chat.activeLeafId as string | null) ?? null);
+  const rows = path.map((p) => ({ ...p.node, siblingIndex: p.siblingIndex, siblingCount: p.siblingCount }));
 
   return Response.json(toUIMessages(rows));
+});
+
+// PATCH /api/chat — flip the visible branch to the prev/next version of a
+// message (the "‹ i/N ›" switcher), then descend to that branch's leaf.
+export const PATCH = apiHandler(async (req: Request) => {
+  const { userId } = await requireSession();
+  const { chatId, messageId, direction } = (await req.json()) as {
+    chatId?: string;
+    messageId?: string;
+    direction?: "prev" | "next";
+  };
+  if (!chatId || !messageId || (direction !== "prev" && direction !== "next")) {
+    return Response.json({ error: "Missing chatId, messageId, or direction" }, { status: 400 });
+  }
+
+  await requireOwned(chats, chatId, userId, "Chat");
+
+  const leafId = await switchSibling(chatId, messageId, direction);
+  if (!leafId) return Response.json({ error: "No sibling in that direction" }, { status: 404 });
+  return Response.json({ activeLeafId: leafId });
 });

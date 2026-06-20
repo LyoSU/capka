@@ -1,7 +1,18 @@
 import type { StoredPart, MessageMeta } from "./contracts";
 
 /** Convert DB message rows to UI message format */
-export function toUIMessages(rows: { id: string; role: string; content: string; metadata: unknown; createdAt: Date | null; platform: string | null }[]) {
+export function toUIMessages(rows: {
+  id: string;
+  role: string;
+  content: string;
+  metadata: unknown;
+  createdAt: Date | null;
+  platform: string | null;
+  parentId?: string | null;
+  /** Position among siblings (0-based) — drives the "‹ i/N ›" version switcher. */
+  siblingIndex?: number;
+  siblingCount?: number;
+}[]) {
   return rows.map((m) => {
     const meta = m.metadata as MessageMeta | null;
     const parts: unknown[] = [];
@@ -64,6 +75,9 @@ export function toUIMessages(rows: { id: string; role: string; content: string; 
         createdAt: m.createdAt?.toISOString() ?? null,
         platform: m.platform ?? "web",
         taskStatus: meta?.status,
+        parentId: m.parentId ?? null,
+        siblingIndex: m.siblingIndex ?? 0,
+        siblingCount: m.siblingCount ?? 1,
       },
     };
   });
