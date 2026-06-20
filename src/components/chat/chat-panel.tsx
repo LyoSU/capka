@@ -290,24 +290,24 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                       isStreaming={isStreamingMsg}
                       onRegenerate={canRegenerate ? regenerate : undefined}
                       onEdit={!isLoading ? editMessage : undefined}
-                      statusSlot={isStreamingMsg ? (
-                        <TaskStatus
-                          startedAt={taskInfo.startedAt}
-                          currentTool={taskInfo.currentTool}
-                        />
-                      ) : undefined}
                     />
                   </div>
                 );
               })}
-              {isLoading && messages.length > 0 && messages[messages.length - 1].role === "user" && (
-                <div className="px-4 py-3">
-                  <TaskStatus
-                    startedAt={taskInfo.startedAt}
-                    currentTool={taskInfo.currentTool}
-                  />
-                </div>
-              )}
+              {/* One persistent "working…" indicator, rendered in a single place
+                  so it never remounts (and flickers) as the turn progresses. It
+                  shows only while nothing has streamed yet — before the assistant
+                  message exists, or while it's still empty. Once the first part
+                  arrives, the rail's own running tail node takes over. */}
+              {isLoading && (() => {
+                const last = messages[messages.length - 1] as { role: string; parts?: unknown[] } | undefined;
+                const showStatus = !!last && (last.role === "user" || (last.role === "assistant" && (last.parts?.length ?? 0) === 0));
+                return showStatus ? (
+                  <div className="px-4 py-4 md:px-6">
+                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} />
+                  </div>
+                ) : null;
+              })()}
               {/* End of real content (used to detect/scroll to the latest), then
                   the spacer that lets the latest turn rise to the top. */}
               <div ref={contentEndRef} />

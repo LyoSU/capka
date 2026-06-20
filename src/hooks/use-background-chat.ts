@@ -328,6 +328,7 @@ export function useBackgroundChat({
             projectId,
             model,
             userMessage: displayText,
+            userMessageId: userMsg.id,
             attachedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
             messages: currentMessages.map((m) => ({
               id: m.id,
@@ -360,7 +361,7 @@ export function useBackgroundChat({
   // chat's persisted model. An empty userMessage means "don't insert a new user
   // row" (regenerate); a non-empty one re-inserts the edited message (edit).
   const rerun = useCallback(
-    async (fromId: string, history: Message[], userMessage: string) => {
+    async (fromId: string, history: Message[], userMessage: string, userMessageId?: string) => {
       await fetch(`/api/chat/messages?chatId=${chatId}&fromId=${fromId}`, { method: "DELETE" }).catch(() => {});
       setMessages(history);
       setStatus("running");
@@ -372,6 +373,7 @@ export function useBackgroundChat({
             chatId,
             projectId,
             userMessage,
+            userMessageId,
             messages: history.map((m) => ({ id: m.id, role: m.role, parts: m.parts })),
           }),
         });
@@ -413,7 +415,7 @@ export function useBackgroundChat({
     if (idx === -1) return;
     const history = msgs.slice(0, idx);
     const edited: Message = { id: nanoid(), role: "user", parts: [{ type: "text", text }] };
-    await rerun(messageId, [...history, edited], text);
+    await rerun(messageId, [...history, edited], text, edited.id);
   }, [rerun]);
 
   // ── Stop / Cancel ──────────────────────────────────────────

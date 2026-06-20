@@ -26,7 +26,7 @@ export const POST = apiHandler(async (req: Request) => {
   }
 
   const body = chatRequestSchema.parse(await req.json());
-  const { chatId: requestChatId, model: requestModel, projectId, userMessage, attachedFiles } = body;
+  const { chatId: requestChatId, model: requestModel, projectId, userMessage, userMessageId, attachedFiles } = body;
   const chatId = requestChatId || nanoid();
 
   const [chatRow, project] = await Promise.all([
@@ -69,7 +69,9 @@ export const POST = apiHandler(async (req: Request) => {
     const isNewChat = !existingChat || existingChat.title === "New Chat";
     await Promise.all([
       db.insert(messages).values({
-        id: nanoid(),
+        // Reuse the client's optimistic id so the rendered bubble keeps a stable
+        // React key when history reloads — otherwise it remounts and flashes.
+        id: userMessageId || nanoid(),
         chatId,
         role: "user",
         content: text,

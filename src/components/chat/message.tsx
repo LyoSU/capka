@@ -1,7 +1,7 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
-  ChevronRight, Loader2, AlertCircle, Lightbulb,
+  ChevronRight, AlertCircle, Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/chat/markdown";
@@ -305,7 +305,7 @@ function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error"
   if (state === "running") {
     return (
       <span className={`${base} border-foreground text-foreground`}>
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />
       </span>
     );
   }
@@ -568,7 +568,6 @@ interface ChatMessageProps {
   message: UIMessage;
   isStreaming?: boolean;
   chatId?: string;
-  statusSlot?: React.ReactNode;
   isAdmin?: boolean;
   /** Provided only on the latest assistant reply — re-runs the same prompt. */
   onRegenerate?: () => void;
@@ -576,7 +575,7 @@ interface ChatMessageProps {
   onEdit?: (messageId: string, newText: string) => void;
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin, onRegenerate, onEdit }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -639,6 +638,14 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin, on
   const lastTextIdx = groups.reduce((acc, g, i) => g.kind === "text" ? i : acc, -1);
   const lastIdx = groups.length - 1;
 
+  // An assistant turn that's still warming up (no parts yet) renders nothing —
+  // the single "working…" indicator in the panel owns that state. Rendering an
+  // empty padded bubble here would just shove the indicator down a notch the
+  // moment the row is created, then again when the first step replaces it.
+  if (!isUser && groups.length === 0 && isStreaming && metadata?.taskStatus !== "failed") {
+    return null;
+  }
+
   return (
     <div className="group/msg px-4 md:px-6 py-4">
       <div className="max-w-none">
@@ -678,10 +685,6 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin, on
             isAdmin={isAdmin}
           />
         )}
-        {/* The standalone "working…" indicator only while nothing has streamed
-            yet. Once steps exist, the rail's own running tail node is the live
-            indicator — showing both would duplicate the current action. */}
-        {groups.length === 0 ? statusSlot : null}
         {!isStreaming && (() => {
           const copyText = groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n\n").trim();
           return (

@@ -6,6 +6,10 @@ export const chatRequestSchema = z.object({
   model: z.string().optional(),
   projectId: z.string().optional(),
   userMessage: z.string().default(""),
+  // The client's optimistic user-message id. Persisting the row under this id
+  // keeps the React key stable across the optimistic → loaded transition, so the
+  // bubble doesn't remount (and visibly flash) when history reloads.
+  userMessageId: z.string().optional(),
   attachedFiles: z.array(z.object({ name: z.string(), type: z.string() })).optional(),
   messages: z.array(z.any()).optional(),
 });

@@ -156,6 +156,15 @@
 .animate-step-in { animation: step-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-step-badge-in { animation: step-badge-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
+/* A smooth "comet" spinner: a conic gradient fading from transparent to the
+   current text colour, masked into a thin ring. Premium-feeling alternative to a
+   segmented spinner; inherits colour via currentColor and spins via animate-spin. */
+.spinner-ring {
+  background: conic-gradient(from 90deg, transparent 0deg, currentColor 300deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+}
+
 /* "Working…" indicator: a soft highlight sweeps through the label text. The
    reduced-motion block below freezes it to a static, legible state. */
 @keyframes text-shimmer {
