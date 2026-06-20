@@ -7,7 +7,7 @@ import { chats, messages, memories, projects } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
 import { getTranslator } from "@/lib/i18n/translator";
-import { describeStep } from "@/components/chat/steps";
+import { describeStep } from "@/lib/chat/steps";
 import { extractWorkspacePaths } from "@/lib/chat/artifacts";
 import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
