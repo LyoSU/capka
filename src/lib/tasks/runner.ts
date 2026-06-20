@@ -274,10 +274,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   }, MAX_TASK_MS);
   const msgId = nanoid();
   const parts: StoredPart[] = [];
+  // Join distinct segments with a blank line, not "". The model emits text (and
+  // reasoning) in runs broken up by tool/reasoning steps, so each `text` part is
+  // its own paragraph — the web renders them apart, but a channel that flattens
+  // parts to one string (Telegram) would otherwise glue "…межі.Прав адміна…" into
+  // a run-on wall. A blank line restores the paragraph the web already shows.
   const getFullText = () =>
-    parts.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
+    parts.filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text.trim()).filter(Boolean).join("\n\n");
   const getReasoning = () =>
-    parts.filter((p): p is { type: "reasoning"; text: string } => p.type === "reasoning").map((p) => p.text).join("");
+    parts.filter((p): p is { type: "reasoning"; text: string } => p.type === "reasoning")
+      .map((p) => p.text.trim()).filter(Boolean).join("\n\n");
   let streamError: string | undefined;
   let closeMcp: (() => Promise<void>) | undefined;
 
@@ -604,7 +611,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
     await sink.finish({
-      status: finalStatus, text: getFullText(), error: failure?.userMessage,
+      status: finalStatus, text: getFullText(), reasoning: getReasoning(), error: failure?.userMessage,
       toolCount, elapsedMs: Date.now() - startedAt,
     });
     // Deliver any files the agent created/edited this run to the origin channel

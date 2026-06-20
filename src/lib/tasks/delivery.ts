@@ -22,6 +22,9 @@ export type TaskOrigin = { platform: "telegram"; telegramChatId: number; locale?
 export interface TaskResult {
   status: "completed" | "failed" | "cancelled";
   text: string;
+  /** The model's thinking, folded into a collapsed <details> block above the
+   *  answer (mirrors the web, which shows reasoning collapsed). */
+  reasoning?: string;
   /** Friendly, user-facing error (set when status is "failed"). */
   error?: string;
 }
@@ -114,14 +117,29 @@ export function composeDraft(text: string, status: StreamStatus, t: Translator):
   return { markdown: `> ${header}\n\n${text}` };
 }
 
-/** Final view: a collapsed one-line log (only when tools ran) above the answer.
- *  `doneLog` is an ICU plural string, so the tool-count grammar is correct in
- *  every locale. */
-export function composeFinal(body: string, toolCount: number, elapsedMs: number, t: Translator): string {
-  if (toolCount > 0) {
-    const line = t("doneLog", { count: toolCount, secs: Math.round(elapsedMs / 1000) });
-    return `> ${line}\n\n${body}`;
+/** Final view, mirroring the web: the model's thinking is folded into a
+ *  collapsed `<details>` block above the answer, summarized by the tool-count log
+ *  ("✅ N tools · Ts") when tools ran, or a plain "Reasoning" label otherwise.
+ *  Bot API 10.1 rich Markdown renders the `<details>` body as Markdown, so the
+ *  reasoning stays formatted and the answer below is sent verbatim — we only
+ *  HTML-escape the angle brackets that would otherwise be read as tags. With no
+ *  reasoning we keep the lighter one-line blockquote log (or nothing). `doneLog`
+ *  is an ICU plural string, so the tool-count grammar is correct in every locale. */
+export function composeFinal(
+  body: string,
+  reasoning: string,
+  toolCount: number,
+  elapsedMs: number,
+  t: Translator,
+): string {
+  const log = toolCount > 0 ? t("doneLog", { count: toolCount, secs: Math.round(elapsedMs / 1000) }) : null;
+  const think = reasoning.trim().slice(-THINKING_MAX_CHARS);
+  if (think) {
+    const summary = escapeHtml(log ?? t("reasoningLog"));
+    const block = `<details><summary>${summary}</summary>\n\n${escapeHtml(think)}\n\n</details>`;
+    return body ? `${block}\n\n${body}` : block;
   }
+  if (log) return `> ${log}\n\n${body}`;
   return body;
 }
 
@@ -237,7 +255,13 @@ class TelegramSink implements DeliverySink {
       result.status === "completed"
         ? result.text.trim() || `_${this.t("noText")}_`
         : result.error || this.t("genericError");
-    const markdown = composeFinal(body, result.toolCount, result.elapsedMs, this.t);
+    const markdown = composeFinal(
+      body,
+      result.status === "completed" ? result.reasoning ?? "" : "",
+      result.toolCount,
+      result.elapsedMs,
+      this.t,
+    );
 
     try {
       await bot.api.sendRichMessage(this.chatId, { markdown });

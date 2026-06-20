@@ -787,6 +787,7 @@
     "unsupported": "I can work with text, photos and files. Send me one of those and I'll get going.",
     "startError": "Couldn't start the assistant: {error}",
     "statusThinking": "thinking…",
+    "reasoningLog": "💭 Reasoning",
     "noText": "(the assistant returned no text)",
     "genericError": "Something went wrong. Please try again.",
     "doneLog": "✅ {count, plural, one {# tool} other {# tools}} · {secs}s"

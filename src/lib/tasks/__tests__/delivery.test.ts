@@ -41,16 +41,31 @@ describe("composeDraft", () => {
 
 describe("composeFinal", () => {
   it("adds a collapsed tool log with correct plural grammar (uk)", () => {
-    expect(composeFinal("Готово.", 1, 3000, uk)).toBe("> ✅ 1 інструмент · 3с\n\nГотово.");
-    expect(composeFinal("Готово.", 2, 12_300, uk)).toBe("> ✅ 2 інструменти · 12с\n\nГотово.");
-    expect(composeFinal("Готово.", 5, 9000, uk)).toBe("> ✅ 5 інструментів · 9с\n\nГотово.");
+    expect(composeFinal("Готово.", "", 1, 3000, uk)).toBe("> ✅ 1 інструмент · 3с\n\nГотово.");
+    expect(composeFinal("Готово.", "", 2, 12_300, uk)).toBe("> ✅ 2 інструменти · 12с\n\nГотово.");
+    expect(composeFinal("Готово.", "", 5, 9000, uk)).toBe("> ✅ 5 інструментів · 9с\n\nГотово.");
   });
   it("localizes the log for English", () => {
-    expect(composeFinal("Done.", 1, 3000, en)).toBe("> ✅ 1 tool · 3s\n\nDone.");
-    expect(composeFinal("Done.", 2, 12_000, en)).toBe("> ✅ 2 tools · 12s\n\nDone.");
+    expect(composeFinal("Done.", "", 1, 3000, en)).toBe("> ✅ 1 tool · 3s\n\nDone.");
+    expect(composeFinal("Done.", "", 2, 12_000, en)).toBe("> ✅ 2 tools · 12s\n\nDone.");
   });
-  it("returns the bare answer when no tools ran", () => {
-    expect(composeFinal("Just chatting.", 0, 4000, en)).toBe("Just chatting.");
+  it("returns the bare answer when no tools ran and there's no reasoning", () => {
+    expect(composeFinal("Just chatting.", "", 0, 4000, en)).toBe("Just chatting.");
+  });
+  it("folds reasoning into a collapsed <details>, summarized by the tool log", () => {
+    expect(composeFinal("Готово.", "Зважую варіанти", 2, 6000, uk)).toBe(
+      "<details><summary>✅ 2 інструменти · 6с</summary>\n\nЗважую варіанти\n\n</details>\n\nГотово.",
+    );
+  });
+  it("uses a plain reasoning summary when no tools ran", () => {
+    expect(composeFinal("Hi.", "thought it through", 0, 1000, en)).toBe(
+      "<details><summary>💭 Reasoning</summary>\n\nthought it through\n\n</details>\n\nHi.",
+    );
+  });
+  it("escapes angle brackets in the reasoning so they aren't read as tags", () => {
+    expect(composeFinal("ok", "a < b && </details> c", 0, 0, en)).toBe(
+      "<details><summary>💭 Reasoning</summary>\n\na &lt; b &amp;&amp; &lt;/details&gt; c\n\n</details>\n\nok",
+    );
   });
 });
 
