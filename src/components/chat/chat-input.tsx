@@ -6,8 +6,7 @@ import { ArrowUp, Paperclip, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatSize } from "@/lib/constants";
-import { fileKind } from "@/lib/file-kinds";
-import { FileTile } from "./file-preview";
+import { BinaryFileThumb, FileTile } from "./file-preview";
 
 /** Max single file size for upload (100MB) */
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
@@ -121,15 +120,12 @@ export function ChatInput({
           {files.length > 0 && (
             <div className="flex max-h-44 flex-wrap gap-3 overflow-y-auto px-3 pt-3 scrollbar-thin">
               {files.map((af) => {
-                const { Icon, color, bg } = fileKind(af.file.name);
                 const preview = previews.get(af.id);
                 const thumb = preview ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={preview} alt="" className="h-full w-full object-cover" />
                 ) : (
-                  <span className={`flex h-full w-full items-center justify-center ${bg}`}>
-                    <Icon className={`h-6 w-6 ${color}`} />
-                  </span>
+                  <BinaryFileThumb name={af.file.name} className="h-full w-full" />
                 );
                 return (
                   <FileTile

@@ -436,16 +436,48 @@ export function SandboxFileTile({ file, viewable, overlay }: { file: PreviewFile
  */
 export function FileThumb({ file, className }: { file: PreviewFile; className?: string }) {
   const kind = previewKind(file.name);
-  const { Icon, color, bg } = fileKind(file.name);
 
   if (kind === "image")
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={inlineUrl(file)} alt="" loading="lazy" className={cn("object-cover", className)} />;
   if (kind === "text" || kind === "markdown" || kind === "html") return <TextThumb file={file} className={className} />;
 
+  // Binaries with no in-app viewer (docx, xlsx, zip…): a document glyph instead
+  // of a bare icon, so a non-previewable file still reads as a real file.
+  return <BinaryFileThumb name={file.name} className={className} />;
+}
+
+/**
+ * The thumbnail for a file with no in-app preview: a folded-corner sheet tinted
+ * in the file type's accent color, with the extension on a badge — the
+ * macOS/Drive look. All-SVG so the same glyph stays crisp from a 36px row to an
+ * 88px tile. Shared by the chat tiles, the composer, and the workspace panel.
+ */
+export function BinaryFileThumb({ name, className }: { name: string; className?: string }) {
+  const { color } = fileKind(name);
+  const ext = (extOf(name) || "file").slice(0, 4).toUpperCase();
+  // Longer extensions get a smaller label so it never spills past the badge.
+  const fontSize = ext.length <= 2 ? 10 : ext.length === 3 ? 8 : 6.5;
   return (
-    <div className={cn("flex items-center justify-center", bg, className)}>
-      <Icon className={cn("h-4 w-4", color)} />
+    <div className={cn("flex items-center justify-center bg-muted/30", className)}>
+      <svg viewBox="0 0 40 48" fill="none" aria-hidden className={cn("h-[68%] w-auto", color)}>
+        {/* sheet */}
+        <path
+          d="M9.5 3.5H25L33 11.5V42a2.5 2.5 0 0 1-2.5 2.5h-21A2.5 2.5 0 0 1 7 42V6a2.5 2.5 0 0 1 2.5-2.5Z"
+          fill="currentColor" fillOpacity="0.12"
+          stroke="currentColor" strokeOpacity="0.4" strokeWidth="1.5" strokeLinejoin="round"
+        />
+        {/* folded corner */}
+        <path d="M25 3.5 33 11.5h-5.5A2.5 2.5 0 0 1 25 9V3.5Z" fill="currentColor" fillOpacity="0.3" />
+        {/* extension badge */}
+        <rect x="3.5" y="25" width="26" height="13" rx="3" fill="currentColor" />
+        <text
+          x="16.5" y="31.6" textAnchor="middle" dominantBaseline="central"
+          fontSize={fontSize} fontWeight="700" letterSpacing="0.4" fill="#fff"
+        >
+          {ext}
+        </text>
+      </svg>
     </div>
   );
 }

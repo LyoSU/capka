@@ -13,7 +13,7 @@ import {
   DropdownMenuCheckboxItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { formatSize } from "@/lib/constants";
-import { fileCategory, fileKind, previewKind, type FileCategory } from "@/lib/file-kinds";
+import { extOf, fileCategory, fileKind, previewKind, type FileCategory } from "@/lib/file-kinds";
 import { cn } from "@/lib/utils";
 import { FileThumb, FileTile, SandboxFileTile, usePreview, type PreviewFile } from "./file-preview";
 
@@ -216,7 +216,10 @@ export function WorkspacePanel({
           <FileThumb file={file} className="h-9 w-9 shrink-0 rounded-lg" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm text-foreground/90">{entry.name}</span>
-            <span className="block text-[10px] tabular-nums text-muted-foreground">{formatSize(entry.size)}</span>
+            <span className="block text-[10px] uppercase tabular-nums text-muted-foreground">
+              {extOf(entry.name) ? `${extOf(entry.name)} · ` : ""}
+              {formatSize(entry.size)}
+            </span>
           </span>
         </button>
         <a href={downloadUrl(entry.path)} download={entry.name}
