@@ -29,6 +29,13 @@ export type MessageMeta = {
   status?: string;
   error?: string;
   parts?: StoredPart[];
+  // Tech details for the (i) popover, captured at finalize (completed turns only).
+  // Denormalized copies of the usage table + elapsed time so the UI needs no JOIN
+  // and the numbers survive a page reload.
+  durationMs?: number;
+  model?: string;
+  usage?: { input: number; output: number; cached: number };
+  costUsd?: number;
   // Files the user attached to THIS message — reference metadata only (name +
   // type, no bytes). Same shape as FileRef / chatRequestSchema.attachedFiles.
   // Lets the chat history show what was attached; the bytes live in the sandbox

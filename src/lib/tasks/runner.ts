@@ -21,6 +21,7 @@ import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage } from "@/lib/usage";
+import { costUsd } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { classifyLLMError, isVisionUnsupportedError, isReasoningUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
 import { downloadFile } from "@/lib/sandbox/client";
@@ -686,11 +687,40 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
     const failure = deadlineHit ? TIMED_OUT_ERROR : streamError ? classifyLLMError(streamError) : undefined;
 
+    // Token usage + cost, computed once. Needed BOTH for the persisted message
+    // metadata (so the (i) details survive a reload — elapsedMs and the usage
+    // table are otherwise lost to the UI) and for the usage table below. Never
+    // fatal: a failure here just omits the numbers from metadata. `inputTokens`
+    // is the TOTAL input incl. cached reads, so split it — non-cached at the
+    // input rate, cached reads at the discounted rate (avoids double-counting).
+    let usageMeta: { input: number; output: number; cached: number } | undefined;
+    let costMeta: number | null = null;
+    try {
+      const u = await result.totalUsage;
+      if (u) {
+        const cached = u.inputTokenDetails?.cacheReadTokens ?? 0;
+        const input = u.inputTokenDetails?.noCacheTokens ?? Math.max(0, (u.inputTokens ?? 0) - cached);
+        usageMeta = { input, output: u.outputTokens ?? 0, cached };
+        costMeta = await costUsd(modelId, {
+          inputTokens: input, outputTokens: usageMeta.output, cachedInputTokens: cached,
+        });
+      }
+    } catch (e) {
+      log.error("usage compute failed", { taskId, err: String(e) });
+    }
+
     await db.update(messages).set({
       content: getFullText(),
       metadata: {
         taskId, status: finalStatus, parts: parts.length > 0 ? parts : undefined,
         ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
+        // Tech details for the (i) popover — only on a clean completion.
+        ...(finalStatus === "completed" ? {
+          durationMs: Date.now() - startedAt,
+          model: modelId,
+          ...(usageMeta ? { usage: usageMeta } : {}),
+          ...(costMeta != null ? { costUsd: costMeta } : {}),
+        } : {}),
       },
     }).where(eq(messages.id, msgId));
     await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
@@ -713,26 +743,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    // Record token usage/cost (never fatal). `inputTokens` is the TOTAL input
-    // including cached reads, so split it: charge non-cached at the input rate
-    // and cached reads at the discounted cache rate (avoids double-counting).
-    try {
-      const usage = await result.totalUsage;
-      if (usage) {
-        const cacheRead = usage.inputTokenDetails?.cacheReadTokens ?? 0;
-        const nonCachedInput =
-          usage.inputTokenDetails?.noCacheTokens ?? Math.max(0, (usage.inputTokens ?? 0) - cacheRead);
-        await recordUsage({
-          taskId, messageId: msgId, userId, provider, model: modelId,
-          usage: {
-            inputTokens: nonCachedInput,
-            outputTokens: usage.outputTokens ?? 0,
-            cachedInputTokens: cacheRead,
-          },
-        });
-      }
-    } catch (e) {
-      log.error("usage capture failed", { taskId, err: String(e) });
+    // Persist usage to the usage table (analytics). Reuses the split computed
+    // above; recordUsage never throws on its own.
+    if (usageMeta) {
+      await recordUsage({
+        taskId, messageId: msgId, userId, provider, model: modelId,
+        usage: {
+          inputTokens: usageMeta.input,
+          outputTokens: usageMeta.output,
+          cachedInputTokens: usageMeta.cached,
+        },
+      });
     }
 
     // Extract long-term memories (fire-and-forget). Facts are about the USER, so

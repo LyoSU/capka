@@ -105,4 +105,29 @@ describe("toUIMessages", () => {
     const [msg] = toUIMessages([row({ role: "user", content: "hi", metadata: { status: "completed" } })]);
     expect((msg.metadata as { attachedFiles?: unknown }).attachedFiles).toBeUndefined();
   });
+
+  it("surfaces tech details (duration/model/usage/cost) for the (i) popover", () => {
+    const meta: MessageMeta = {
+      status: "completed",
+      durationMs: 12345,
+      model: "anthropic/claude-opus-4.1",
+      usage: { input: 1230, output: 456, cached: 12480 },
+      costUsd: 0.0123,
+    };
+    const [msg] = toUIMessages([row({ content: "hi", metadata: meta })]);
+    expect(msg.metadata).toMatchObject({
+      durationMs: 12345,
+      model: "anthropic/claude-opus-4.1",
+      usage: { input: 1230, output: 456, cached: 12480 },
+      costUsd: 0.0123,
+    });
+  });
+
+  it("omits tech details when the turn never recorded them", () => {
+    const [msg] = toUIMessages([row({ content: "hi", metadata: { status: "completed" } })]);
+    const m = msg.metadata as { durationMs?: number; usage?: unknown; costUsd?: number };
+    expect(m.durationMs).toBeUndefined();
+    expect(m.usage).toBeUndefined();
+    expect(m.costUsd).toBeUndefined();
+  });
 });

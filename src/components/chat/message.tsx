@@ -1,9 +1,10 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
-  ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb,
+  ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb, Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Markdown } from "@/components/chat/markdown";
 import { haptic } from "@/lib/haptics";
 import { useState, useMemo, useEffect, useRef, memo } from "react";
@@ -648,6 +649,95 @@ function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram
   );
 }
 
+/** Token/timing/cost numbers an assistant turn carries. All optional — the (i)
+ *  affordance only appears when at least one of these is present (so messages
+ *  predating this feature stay clean). */
+type TechDetails = {
+  durationMs?: number;
+  model?: string;
+  usage?: { input: number; output: number; cached: number };
+  costUsd?: number;
+};
+
+/** Render the AI work time as "12.3s" under a minute, "1m 3s" beyond it. */
+function formatDuration(ms: number, t: TimeTranslator): string {
+  const sec = ms / 1000;
+  if (sec < 60) return t("durationSec", { s: sec.toFixed(1) });
+  return t("durationMin", { m: Math.floor(sec / 60), s: Math.round(sec % 60) });
+}
+
+/** One label/value line in the details popover; value is tabular for alignment. */
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-6">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="tabular-nums font-medium">{value}</span>
+    </div>
+  );
+}
+
+/** The (i) affordance beside an assistant reply's timestamp. Click opens a small
+ *  popover with model, tokens, work time and exact send time. Cost in $ is shown
+ *  to admins only — the deployment runs on a shared admin key, so per-message
+ *  spend is sensitive for ordinary staff. */
+function MessageDetails({
+  details, createdAt, isAdmin, steps,
+}: {
+  details: TechDetails;
+  createdAt: string;
+  isAdmin?: boolean;
+  /** Tool calls in this turn — a quick read of how much work the AI did. */
+  steps?: number;
+}) {
+  const t = useTranslations("chat.details");
+  const locale = useLocale();
+  const { durationMs, model, usage, costUsd } = details;
+  // Nothing meaningful to show (e.g. a failed/cancelled turn, or a message from
+  // before this feature) — don't render the icon at all.
+  if (durationMs == null && model == null && usage == null) return null;
+
+  const nf = new Intl.NumberFormat(locale);
+  const exactTime = new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium", timeStyle: "short",
+  }).format(new Date(createdAt));
+  // Output throughput — derived, only meaningful with both numbers and a turn
+  // long enough that the rate isn't noise.
+  const tokensPerSec =
+    usage && durationMs && durationMs >= 500 && usage.output > 0
+      ? Math.round(usage.output / (durationMs / 1000))
+      : null;
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground"
+        aria-label={t("show")}
+        title={t("show")}
+      >
+        <Info className="h-3.5 w-3.5" />
+      </PopoverTrigger>
+      <PopoverContent className="min-w-56 space-y-1.5 text-xs" side="top" align="start">
+        {model && <DetailRow label={t("model")} value={model} />}
+        {steps != null && steps > 0 && <DetailRow label={t("steps")} value={nf.format(steps)} />}
+        {usage && <DetailRow label={t("inputTokens")} value={nf.format(usage.input)} />}
+        {usage && <DetailRow label={t("outputTokens")} value={nf.format(usage.output)} />}
+        {usage && usage.cached > 0 && <DetailRow label={t("cache")} value={nf.format(usage.cached)} />}
+        {durationMs != null && <DetailRow label={t("duration")} value={formatDuration(durationMs, t)} />}
+        {tokensPerSec != null && <DetailRow label={t("speed")} value={t("speedValue", { n: nf.format(tokensPerSec) })} />}
+        {isAdmin && costUsd != null && (
+          <DetailRow
+            label={t("cost")}
+            value={new Intl.NumberFormat(locale, {
+              style: "currency", currency: "USD", maximumFractionDigits: 4,
+            }).format(costUsd)}
+          />
+        )}
+        <DetailRow label={t("sentAt")} value={exactTime} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // --- Main component ---
 
 interface ChatMessageProps {
@@ -672,7 +762,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[] }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -803,6 +893,12 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
                 </button>
               )}
               {onFork && <ForkButton messageId={message.id} onFork={onFork} />}
+              <MessageDetails
+                details={{ durationMs: metadata?.durationMs, model: metadata?.model, usage: metadata?.usage, costUsd: metadata?.costUsd }}
+                createdAt={createdAt}
+                isAdmin={isAdmin}
+                steps={parts.filter(isToolPart).length}
+              />
               <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
             </div>
           );

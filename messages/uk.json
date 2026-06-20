@@ -295,6 +295,21 @@
       "justNow": "щойно",
       "yesterday": "Вчора {time}"
     },
+    "details": {
+      "show": "Деталі повідомлення",
+      "model": "Модель",
+      "steps": "Кроків",
+      "inputTokens": "Вхідні токени",
+      "outputTokens": "Вихідні токени",
+      "cache": "Кеш",
+      "speed": "Швидкість",
+      "speedValue": "{n} ток/с",
+      "cost": "Вартість",
+      "duration": "Час роботи",
+      "durationSec": "{s} с",
+      "durationMin": "{m} хв {s} с",
+      "sentAt": "Надіслано"
+    },
     "message": {
       "cancelled": "Відповідь скасовано",
       "genericError": "Під час генерації відповіді сталася помилка. Спробуйте ще раз.",

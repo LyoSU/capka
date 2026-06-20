@@ -80,6 +80,11 @@ export function toUIMessages(rows: {
         siblingCount: m.siblingCount ?? 1,
         // Surfaced so the user bubble can render attachment thumbnails.
         attachedFiles: meta?.attachedFiles,
+        // Tech details for the assistant (i) popover.
+        durationMs: meta?.durationMs,
+        model: meta?.model,
+        usage: meta?.usage,
+        costUsd: meta?.costUsd,
       },
     };
   });

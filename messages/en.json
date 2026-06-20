@@ -295,6 +295,21 @@
       "justNow": "just now",
       "yesterday": "Yesterday {time}"
     },
+    "details": {
+      "show": "Message details",
+      "model": "Model",
+      "steps": "Steps",
+      "inputTokens": "Input tokens",
+      "outputTokens": "Output tokens",
+      "cache": "Cache",
+      "speed": "Speed",
+      "speedValue": "{n} tok/s",
+      "cost": "Cost",
+      "duration": "Work time",
+      "durationSec": "{s}s",
+      "durationMin": "{m}m {s}s",
+      "sentAt": "Sent"
+    },
     "message": {
       "cancelled": "Response was cancelled",
       "genericError": "Something went wrong while generating a response. Please try again.",
