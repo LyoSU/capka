@@ -61,7 +61,9 @@ export function ChatInput({
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if ((value.trim() || files.length > 0) && !isLoading) {
+      // Allow sending while a reply streams — the message queues and runs after
+      // the current turn (serialized per chat on the server).
+      if (value.trim() || files.length > 0) {
         onSubmit();
       }
     }
@@ -190,8 +192,9 @@ export function ChatInput({
               </Button>
             </div>
 
-            {/* Submit / Stop */}
-            {isLoading ? (
+            {/* While a reply streams: Send (queues the next turn) when there's
+                something to send, otherwise Stop. Idle: always Send. */}
+            {isLoading && !hasContent ? (
               <Button
                 size="icon"
                 variant="outline"
@@ -207,7 +210,7 @@ export function ChatInput({
                 className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl"
                 disabled={!hasContent}
                 onClick={onSubmit}
-                aria-label={t("send")}
+                aria-label={isLoading ? t("queue") : t("send")}
               >
                 <ArrowUp className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
               </Button>

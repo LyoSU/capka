@@ -236,6 +236,7 @@
       "attach": "Attach files",
       "stop": "Stop generation",
       "send": "Send message",
+      "queue": "Queue message",
       "remove": "Remove {name}",
       "tooLarge": "Too large (max {max}): {files}"
     },
