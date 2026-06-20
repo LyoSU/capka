@@ -55,9 +55,19 @@ export async function claimNextTask(workerId: string): Promise<TaskRow | null> {
             attempts = attempts + 1,
             updated_at = now()
       WHERE id = (
-        SELECT id FROM tasks
-         WHERE status = 'queued'
-         ORDER BY created_at
+        SELECT t.id FROM tasks t
+         WHERE t.status = 'queued'
+           -- Serialize per chat: don't start a turn while that chat's previous
+           -- turn is still live, so replies stay in order and a follow-up sees
+           -- the prior answer (like Claude Code queueing messages). A dead
+           -- worker's expired lease stops blocking the chat.
+           AND NOT EXISTS (
+             SELECT 1 FROM tasks r
+              WHERE r.chat_id = t.chat_id
+                AND r.status = 'running'
+                AND r.lease_expires_at > now()
+           )
+         ORDER BY t.created_at
          FOR UPDATE SKIP LOCKED
          LIMIT 1
       )
@@ -65,6 +75,20 @@ export async function claimNextTask(workerId: string): Promise<TaskRow | null> {
     [workerId, String(LEASE_SECONDS)],
   );
   return rows[0] ?? null;
+}
+
+/**
+ * Remove the other queued tasks for a chat, returning them. Used to batch a
+ * burst of follow-up messages: the turn that's about to run answers from the
+ * chat's latest message and absorbs the tasks those follow-ups created, so the
+ * whole burst becomes one reply instead of a reply each.
+ */
+export async function absorbQueuedTasks(chatId: string, exceptId: string): Promise<TaskRow[]> {
+  const { rows } = await pool.query<TaskRow>(
+    `DELETE FROM tasks WHERE chat_id = $1 AND status = 'queued' AND id <> $2 RETURNING *`,
+    [chatId, exceptId],
+  );
+  return rows;
 }
 
 /** Renew a running task's lease. Returns false if the task is no longer ours. */

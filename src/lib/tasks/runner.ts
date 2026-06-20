@@ -9,7 +9,9 @@ import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery
 import { getTranslator } from "@/lib/i18n/translator";
 import { describeStep } from "@/components/chat/steps";
 import { extractWorkspacePaths } from "@/lib/chat/artifacts";
-import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
+import { loadActivePath } from "@/lib/chat/tree";
+import { toUIMessages } from "@/lib/chat/presenter";
+import { heartbeat, isCancelRequested, finalizeTask, absorbQueuedTasks } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
@@ -333,7 +335,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // The reply hangs off the last message of the branch we're answering (the
     // user message just sent, or the user turn being regenerated). Pointing the
     // chat at this leaf makes the new branch the active one immediately.
-    const replyParentId = (payload.uiMessages ?? []).at(-1)?.id ?? null;
+    let replyParentId = (payload.uiMessages ?? []).at(-1)?.id ?? null;
+    // Telegram batching: answer from the chat's CURRENT leaf (every message that
+    // piled up while we were busy), and absorb the queued tasks those follow-ups
+    // created so the burst becomes one reply. Carry their attachments along.
+    let extraAttachedFiles: FileRef[] = [];
+    if (payload.origin?.platform === "telegram") {
+      const [row] = await db.select({ leaf: chats.activeLeafId }).from(chats).where(eq(chats.id, chatId)).limit(1);
+      if (row?.leaf) replyParentId = row.leaf;
+      const absorbed = await absorbQueuedTasks(chatId, taskId);
+      extraAttachedFiles = absorbed.flatMap((t) => (t.payload as TaskPayload | null)?.attachedFiles ?? []);
+    }
     await db.insert(messages).values({
       id: msgId,
       chatId,
@@ -352,10 +364,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     sink.push("", currentStatus);
 
     const hasTools = Object.keys(tools).length > 0;
-    const modelMessages = await convertToModelMessages(payload.uiMessages ?? []);
+    // Telegram chats are linear and serialized per chat, so a queued follow-up
+    // runs only after the previous turn finished. Its payload was snapshotted at
+    // enqueue time — when the prior reply was still empty — so rebuild the
+    // conversation from the live tree here to feed the model the real history.
+    let uiMessages = payload.uiMessages ?? [];
+    if (payload.origin?.platform === "telegram" && replyParentId) {
+      const path = await loadActivePath(chatId, replyParentId);
+      if (path.length) uiMessages = toUIMessages(path.map((p) => p.node));
+    }
+    const modelMessages = await convertToModelMessages(uiMessages);
 
     let injectedNative = false;
-    const { nativeFiles } = classifyFiles(payload.attachedFiles);
+    const { nativeFiles } = classifyFiles([...(payload.attachedFiles ?? []), ...extraAttachedFiles]);
     if (nativeFiles.length) {
       await injectNativeFiles(modelMessages, sessionKey, userId, nativeFiles);
       injectedNative = true;

@@ -14,15 +14,15 @@ beforeEach(() => generateTextMock.mockReset());
 
 describe("extractMemories", () => {
   it("feeds the USER message into the prompt as the primary signal", async () => {
-    generateTextMock.mockResolvedValue({ text: "Works at KNESS Group" });
+    generateTextMock.mockResolvedValue({ text: "Works at Acme Corp" });
     await extractMemories(
       model,
-      { userText: "Hi, I work at KNESS Group on energy stuff", assistantText: "Here is a Python script." },
+      { userText: "Hi, I work at Acme Corp on energy stuff", assistantText: "Here is a Python script." },
       [],
     );
     const call = generateTextMock.mock.calls[0][0];
     expect(call.prompt).toContain("User message:");
-    expect(call.prompt).toContain("I work at KNESS Group");
+    expect(call.prompt).toContain("I work at Acme Corp");
     // The assistant reply is included only as labelled context, never as the lead.
     expect(call.prompt.indexOf("User message:")).toBeLessThan(call.prompt.indexOf("Assistant reply"));
   });
@@ -35,14 +35,14 @@ describe("extractMemories", () => {
 
   it("deduplicates extracted facts against existing memories", async () => {
     generateTextMock.mockResolvedValue({
-      text: "Works at KNESS Group\nPrefers dark mode",
+      text: "Works at Acme Corp\nPrefers dark mode",
     });
     const out = await extractMemories(
       model,
-      { userText: "Reminder: I work at KNESS Group and I like dark themes" },
-      ["works at kness group"],
+      { userText: "Reminder: I work at Acme Corp and I like dark themes" },
+      ["works at acme corp"],
     );
     expect(out).toContain("Prefers dark mode");
-    expect(out).not.toContain("Works at KNESS Group");
+    expect(out).not.toContain("Works at Acme Corp");
   });
 });
