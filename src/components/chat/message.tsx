@@ -1,7 +1,7 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
-  ChevronRight, Loader2, AlertCircle, Brain,
+  ChevronRight, Loader2, AlertCircle, Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/chat/markdown";
@@ -10,7 +10,7 @@ import { useState, useMemo, useEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { fileKind, extOf } from "@/lib/file-kinds";
-import { describeStep } from "./steps";
+import { describeStep, type StepDescriptor } from "./steps";
 
 // --- Helpers ---
 
@@ -258,29 +258,38 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
 }
 
 
-/** The model's reasoning — a quiet, collapsible "thinking" block (shown only
- *  when the provider streams reasoning). The header is a stable label, NOT a
- *  preview of the text — the full thought lives only in the expanded body, so
- *  nothing is duplicated. Auto-opens while the model is thinking (the user
- *  watches it live) and collapses once the answer begins; a manual click takes
- *  over from the auto-follow. */
-function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
+/** The model's reasoning — a step on the same rail as the tool actions, marked
+ *  with a lightbulb. The label is a stable "Thinking…/Reasoning" tag, NOT a
+ *  preview of the text — the full thought lives only in the expanded body.
+ *  Auto-opens while the model is thinking (the user watches it live) and
+ *  collapses once the answer begins; a manual click takes over from auto-follow. */
+function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
   const t = useTranslations("chat.message");
+  const streaming = !!isStreaming;
   const [userToggled, setUserToggled] = useState(false);
-  const [open, setOpen] = useState(!!isStreaming);
-  useEffect(() => {
-    if (!userToggled) setOpen(!!isStreaming);
-  }, [isStreaming, userToggled]);
+  const [open, setOpen] = useState(streaming);
+  // Auto-follow the streaming state until the user takes manual control. Done by
+  // adjusting state during render (React's "store previous value" pattern), not
+  // in an effect — that avoids the cascading re-render the lint rule warns about.
+  const [prevStreaming, setPrevStreaming] = useState(streaming);
+  if (!userToggled && prevStreaming !== streaming) {
+    setPrevStreaming(streaming);
+    setOpen(streaming);
+  }
 
   return (
     <Collapsible open={open} onOpenChange={(v) => { setUserToggled(true); setOpen(v); }}>
-      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-2 py-0.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground [&[data-state=open]>.chevron]:rotate-90">
-        <Brain className={`h-3.5 w-3.5 shrink-0 ${isStreaming ? "animate-pulse" : ""}`} />
-        <span className="flex-1 italic">{isStreaming ? t("thinking") : t("reasoning")}</span>
-        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
+      <CollapsibleTrigger className="block w-full text-left transition-colors hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
+        <div className="animate-step-in relative flex min-h-[34px] items-center gap-3 py-1 pl-10 text-muted-foreground">
+          <span className="absolute left-0 top-1/2 grid h-[27px] w-[27px] -translate-y-1/2 place-items-center rounded-full border border-border bg-card text-muted-foreground">
+            <Lightbulb className={`animate-step-badge-in h-3.5 w-3.5 ${isStreaming ? "animate-pulse" : ""}`} />
+          </span>
+          <span className="text-sm italic">{isStreaming ? t("thinking") : t("reasoning")}</span>
+          <ChevronRight className="chevron ml-auto h-3.5 w-3.5 shrink-0 opacity-35 transition-transform" />
+        </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <p className="mt-1 mb-2 ml-[1.375rem] whitespace-pre-wrap text-[13px] italic leading-relaxed text-muted-foreground/80">
+        <p className="mb-2 ml-10 whitespace-pre-wrap text-[13px] italic leading-relaxed text-muted-foreground/80">
           {text}
         </p>
       </CollapsibleContent>
@@ -288,54 +297,82 @@ function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming?: boo
   );
 }
 
-function ToolCard({ part }: { part: ToolPart }) {
+/** The round node on the rail: a category icon, a branded chip for connected
+ *  apps (MCP), or a live spinner while the step runs. Centred on the rail line. */
+function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error" | "done" }) {
+  const base =
+    "absolute left-0 top-1/2 -translate-y-1/2 grid h-[27px] w-[27px] place-items-center overflow-hidden rounded-full border bg-card";
+  if (state === "running") {
+    return (
+      <span className={`${base} border-foreground text-foreground`}>
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      </span>
+    );
+  }
+  // Connected app with a known brand — a coloured letter chip, not a wrench.
+  if (d.category === "mcp" && d.brand?.color) {
+    return (
+      <span className={`${base} ${state === "error" ? "border-destructive/45" : "border-border"}`}>
+        <span
+          className="animate-step-badge-in grid h-full w-full place-items-center text-[11px] font-bold text-white"
+          style={{ backgroundColor: d.brand.color }}
+        >
+          {d.brand.letter}
+        </span>
+      </span>
+    );
+  }
+  const Icon = d.Icon;
+  const tone = state === "error" ? "border-destructive/45 text-destructive" : "border-border text-muted-foreground";
+  return (
+    <span className={`${base} ${tone}`}>
+      <Icon className="animate-step-badge-in h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+/** One step on the rail: badge + intent label + optional dim detail, with the
+ *  output/error tucked into a click-to-expand block beneath it. */
+function StepRow({ part }: { part: ToolPart }) {
   const tSteps = useTranslations("steps");
   const t = useTranslations("chat.tool");
   const rawName = getToolName(part);
-  const { label, activeLabel, detail, Icon } = describeStep(tSteps, rawName, part.input);
-  const isRunning = !part.state.startsWith("output-");
-  const isError = part.state === "output-error";
+  const d = describeStep(tSteps, rawName, part.input);
+  const state: "running" | "error" | "done" =
+    part.state === "output-error" ? "error" : part.state.startsWith("output-") ? "done" : "running";
+  const isRunning = state === "running";
+  const isError = state === "error";
+  const expandable = !isRunning && (isError ? !!part.errorText : !!formatValue(part.output));
 
-  // Running — subtle inline with spinner
-  if (isRunning) {
-    return (
-      <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        <span className="text-xs">{activeLabel}</span>
-        {detail && <span className="truncate max-w-40 font-mono text-[11px] text-muted-foreground">{detail}</span>}
-      </div>
-    );
-  }
+  const row = (
+    <div
+      className={`animate-step-in relative flex min-h-[34px] items-center gap-3 py-1 pl-10 ${
+        isError ? "text-destructive" : isRunning ? "text-foreground" : "text-muted-foreground"
+      }`}
+    >
+      <StepBadge d={d} state={state} />
+      <span className="text-sm">
+        {isRunning ? d.activeLabel : d.label}
+        {isError ? ` · ${t("failed")}` : ""}
+      </span>
+      {d.detail && (
+        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/80">{d.detail}</span>
+      )}
+      {expandable && (
+        <ChevronRight className="chevron ml-auto h-3.5 w-3.5 shrink-0 opacity-35 transition-transform" />
+      )}
+    </div>
+  );
 
-  // Error — expandable with real error text
-  if (isError) {
-    return (
-      <Collapsible defaultOpen={!!part.errorText}>
-        <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-destructive hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
-          <AlertCircle className="h-3 w-3 shrink-0" />
-          <span className="flex-1 text-left">{label} · {t("failed")}</span>
-          <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="mt-1 mb-2 ml-5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
-            {part.errorText || t("unknownError")}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    );
-  }
+  if (!expandable) return row;
 
-  // Done — full-width row, expandable
   return (
     <Collapsible defaultOpen={false}>
-      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
-        <Icon className="h-3 w-3 shrink-0" />
-        <span>{label}</span>
-        {detail && <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground">{detail}</span>}
-        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
+      <CollapsibleTrigger className="block w-full text-left transition-colors hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
+        {row}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1 mb-2 ml-[1.375rem] rounded-lg bg-muted/40 p-2.5">
+        <div className="mb-2 ml-10 rounded-lg bg-muted/40 p-2.5">
           <ToolDetails toolName={rawName} output={part.output} errorText={part.errorText} />
         </div>
       </CollapsibleContent>
@@ -343,52 +380,30 @@ function ToolCard({ part }: { part: ToolPart }) {
   );
 }
 
-/** Groups consecutive tool calls into a collapsible summary */
-function ToolGroup({ tools }: { tools: ToolPart[] }) {
-  const tSteps = useTranslations("steps");
-  const tTool = useTranslations("chat.tool");
-  const allDone = tools.every((t) => t.state.startsWith("output-"));
-  const hasError = tools.some((t) => t.state === "output-error");
-  const running = tools.filter((t) => !t.state.startsWith("output-"));
+/** A single unit of work on the rail — either the model thinking or a tool call. */
+type ActivityItem = { kind: "reasoning"; text: string } | { kind: "tool"; part: ToolPart };
 
-  // Single tool — render directly
-  if (tools.length === 1) return <ToolCard part={tools[0]} />;
+/** Renders an interleaved run of reasoning + tool calls as one vertical step
+ *  rail — a single thin line connecting each node, so thinking and actions read
+ *  as one quiet "here's what I did" timeline rather than two different styles. */
+function ActivityRail({ items, isStreaming }: { items: ActivityItem[]; isStreaming?: boolean }) {
+  const lastIdx = items.length - 1;
+  const rows = items.map((it, i) => {
+    const streaming = isStreaming && i === lastIdx;
+    return it.kind === "reasoning"
+      ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={streaming} />
+      : <StepRow key={it.part.toolCallId} part={it.part} />;
+  });
 
-  // Multiple tools still running
-  if (!allDone && running.length > 0) {
-    const last = running[running.length - 1];
-    const { activeLabel } = describeStep(tSteps, getToolName(last), last.input);
-    return (
-      <div className="my-1 flex items-center gap-2 py-0.5 text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        <span className="text-xs">{activeLabel}</span>
-        <span className="text-xs text-muted-foreground">({tTool("steps", { count: tools.length })})</span>
-      </div>
-    );
-  }
-
-  // All done — collapsible with inline step labels
-  const uniqueLabels = [...new Set(tools.map((t) => describeStep(tSteps, getToolName(t), t.input).label))];
-  const summaryText = uniqueLabels.length <= 3
-    ? uniqueLabels.join(", ")
-    : `${uniqueLabels.slice(0, 2).join(", ")} ${tTool("more", { count: uniqueLabels.length - 2 })}`;
+  // A lone step needs no connecting line.
+  if (items.length === 1) return <>{rows}</>;
 
   return (
-    <Collapsible defaultOpen={false}>
-      <CollapsibleTrigger className="my-0.5 flex w-full items-center gap-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors [&[data-state=open]>.chevron]:rotate-90">
-        {hasError && <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />}
-        <span>{summaryText}</span>
-        <span className="text-muted-foreground">{tTool("steps", { count: tools.length })}</span>
-        <ChevronRight className="chevron h-3 w-3 shrink-0 opacity-40 transition-transform" />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="ml-2 space-y-0">
-          {tools.map((t) => (
-            <ToolCard key={t.toolCallId} part={t} />
-          ))}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    <div className="relative my-0.5">
+      {/* the connecting line, centred under the 27px badges */}
+      <div className="pointer-events-none absolute bottom-4 left-[13px] top-4 w-px bg-border" aria-hidden="true" />
+      {rows}
+    </div>
   );
 }
 
@@ -592,13 +607,13 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin, on
     );
   }
 
-  // Assistant — group consecutive parts by kind (text, the model's reasoning,
-  // and runs of tool calls), so the transcript reads as a sequence of steps.
+  // Assistant — group consecutive parts: answer text stays on its own, while
+  // runs of reasoning + tool calls merge into one "activity" rail so thinking
+  // and actions read as a single timeline rather than two competing styles.
   const parts = message.parts;
   type Group =
     | { kind: "text"; text: string }
-    | { kind: "tools"; tools: ToolPart[] }
-    | { kind: "reasoning"; text: string };
+    | { kind: "activity"; items: ActivityItem[] };
   const groups: Group[] = [];
   for (const part of parts) {
     if (part.type === "text") {
@@ -606,15 +621,19 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin, on
       if (text) groups.push({ kind: "text", text });
     } else if (part.type === "reasoning") {
       const text = (part as { text: string }).text;
-      if (text) {
-        const last = groups[groups.length - 1];
-        if (last?.kind === "reasoning") last.text += text;
-        else groups.push({ kind: "reasoning", text });
+      if (!text) continue;
+      const last = groups[groups.length - 1];
+      if (last?.kind === "activity") {
+        const lastItem = last.items[last.items.length - 1];
+        if (lastItem?.kind === "reasoning") lastItem.text += text;
+        else last.items.push({ kind: "reasoning", text });
+      } else {
+        groups.push({ kind: "activity", items: [{ kind: "reasoning", text }] });
       }
     } else if (isToolPart(part)) {
       const last = groups[groups.length - 1];
-      if (last?.kind === "tools") last.tools.push(part as ToolPart);
-      else groups.push({ kind: "tools", tools: [part as ToolPart] });
+      if (last?.kind === "activity") last.items.push({ kind: "tool", part: part as ToolPart });
+      else groups.push({ kind: "activity", items: [{ kind: "tool", part: part as ToolPart }] });
     }
   }
   const lastTextIdx = groups.reduce((acc, g, i) => g.kind === "text" ? i : acc, -1);
@@ -635,16 +654,11 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin, on
                 </div>
               );
             }
-            if (g.kind === "reasoning") {
-              return (
-                <div key={gi} className={`animate-blur-rise ${gi > 0 ? "mt-1.5" : ""}`}>
-                  <ReasoningBlock text={g.text} isStreaming={isStreaming && gi === lastIdx} />
-                </div>
-              );
-            }
+            // No wrapper blur-rise here — each rail row animates itself in as it
+            // streams (see .animate-step-in), so steps surface one by one.
             return (
-              <div key={gi} className={`animate-blur-rise ${gi > 0 ? "mt-1.5" : ""}`}>
-                <ToolGroup tools={g.tools} />
+              <div key={gi} className={gi > 0 ? "mt-1.5" : ""}>
+                <ActivityRail items={g.items} isStreaming={isStreaming && gi === lastIdx} />
               </div>
             );
           })
@@ -664,7 +678,10 @@ function ChatMessageImpl({ message, isStreaming, chatId, statusSlot, isAdmin, on
             isAdmin={isAdmin}
           />
         )}
-        {statusSlot}
+        {/* The standalone "working…" indicator only while nothing has streamed
+            yet. Once steps exist, the rail's own running tail node is the live
+            indicator — showing both would duplicate the current action. */}
+        {groups.length === 0 ? statusSlot : null}
         {!isStreaming && (() => {
           const copyText = groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n\n").trim();
           return (

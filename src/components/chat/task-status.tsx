@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { Loader2 } from "lucide-react";
 import { describeStep } from "./steps";
 
 function formatElapsed(ms: number): string {
@@ -35,18 +36,18 @@ export function TaskStatus({
   const label = currentTool ? describeStep(tSteps, currentTool).activeLabel : t("thinking");
   const time = formatElapsed(elapsed);
 
+  // Mirrors a running rail node (27px circle + spinner) so the live status reads
+  // as the next step still being written, then a soft highlight sweeps the label.
   return (
-    <div role="status" aria-live="polite" className="flex items-center gap-2.5 px-5 py-3 text-sm text-muted-foreground animate-in fade-in duration-300">
-      <div className="inline-grid grid-cols-3 gap-[3px]" aria-hidden="true">
-        {Array.from({ length: 9 }).map((_, i) => (
-          <div
-            key={i}
-            className="h-1.5 w-1.5 rounded-full bg-foreground/40"
-            style={{ animation: `dot-chase 1.6s ease-in-out ${[0,1,2,5,8,7,6,3,4][i] * 0.15}s infinite` }}
-          />
-        ))}
-      </div>
-      <span>{label}{time ? ` · ${time}` : ""}</span>
+    <div role="status" aria-live="polite" className="flex animate-in items-center gap-3 px-5 py-3 text-sm fade-in duration-300">
+      <span
+        className="grid h-[27px] w-[27px] shrink-0 place-items-center rounded-full border border-foreground bg-card text-foreground"
+        aria-hidden="true"
+      >
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      </span>
+      <span className="text-shimmer font-medium">{label}</span>
+      {time ? <span className="text-muted-foreground">· {time}</span> : null}
     </div>
   );
 }

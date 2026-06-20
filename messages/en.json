@@ -102,6 +102,10 @@
     "searchingWeb": "Searching the web…",
     "fetchedPage": "Fetched a page",
     "fetchingPage": "Fetching a page…",
+    "usedSkill": "Skill “{name}”",
+    "usingSkill": "Loading skill “{name}”…",
+    "usedSkillGeneric": "Used a skill",
+    "usingSkillGeneric": "Loading a skill…",
     "usedTool": "Used a tool",
     "working": "Working…"
   },

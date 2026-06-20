@@ -102,6 +102,10 @@
     "searchingWeb": "Пошук в інтернеті…",
     "fetchedPage": "Завантажено сторінку",
     "fetchingPage": "Завантаження сторінки…",
+    "usedSkill": "Навичка «{name}»",
+    "usingSkill": "Застосування навички «{name}»…",
+    "usedSkillGeneric": "Навичку застосовано",
+    "usingSkillGeneric": "Застосування навички…",
     "usedTool": "Використано інструмент",
     "working": "Виконання…"
   },
