@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Streamdown, type PluginConfig } from "streamdown";
+import { useEffect, useMemo, useState } from "react";
+import { Streamdown, defaultRemarkPlugins, defaultUrlTransform, type Components, type PluginConfig, type UrlTransform } from "streamdown";
 import "streamdown/styles.css";
+import { remarkWorkspacePaths, makeWorkspaceComponents } from "./workspace-path";
+
+// Default remark pipeline + our /workspace path linker. Passing remarkPlugins
+// replaces Streamdown's defaults, so re-include them (gfm, codeMeta) to keep GFM
+// tables etc.; ours runs last so it sees plain text.
+const REMARK_WITH_PATHS = [...Object.values(defaultRemarkPlugins), remarkWorkspacePaths];
+
+// Keep relative /workspace links intact (the chip handles them); defer all other
+// URLs to Streamdown's normal sanitizing transform.
+const urlTransform: UrlTransform = (url, key, node) =>
+  url.startsWith("/workspace/") ? url : defaultUrlTransform(url, key, node);
 
 // Stable identities so Streamdown's React.memo actually holds — passing a fresh
 // array/object literal every render defeated the memo and re-rendered the whole
@@ -30,7 +41,7 @@ function loadPlugins(): Promise<PluginConfig> {
   return pluginsPromise;
 }
 
-export function Markdown({ children, isStreaming }: { children: string; isStreaming?: boolean }) {
+export function Markdown({ children, isStreaming, chatId }: { children: string; isStreaming?: boolean; chatId?: string }) {
   const [plugins, setPlugins] = useState<PluginConfig | undefined>(undefined);
 
   useEffect(() => {
@@ -41,11 +52,21 @@ export function Markdown({ children, isStreaming }: { children: string; isStream
     };
   }, []);
 
+  // Clickable /workspace file chips only in the chat transcript (where chatId is
+  // set and a PreviewProvider is mounted). Memoized so Streamdown's memo holds.
+  const components = useMemo<Components | undefined>(
+    () => (chatId ? makeWorkspaceComponents(chatId) : undefined),
+    [chatId],
+  );
+
   return (
     <Streamdown
       parseIncompleteMarkdown={isStreaming}
       controls={STREAMDOWN_CONTROLS}
       plugins={plugins}
+      remarkPlugins={chatId ? REMARK_WITH_PATHS : undefined}
+      components={components}
+      urlTransform={urlTransform}
     >
       {children}
     </Streamdown>

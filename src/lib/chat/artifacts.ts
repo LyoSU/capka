@@ -24,12 +24,22 @@ export const WORKSPACE_PATH_RE =
  * download endpoint. Reject traversal here, at the one shared source, so both
  * the web tiles and the Telegram documents stay anchored to the workspace.
  */
-function isInsideWorkspace(rel: string): boolean {
+export function isSafeWorkspaceRel(rel: string): boolean {
   if (rel.startsWith("/")) return false; // absolute — not workspace-relative
   return rel.split("/").every((seg) => seg !== ".." && seg !== ".");
 }
 
 /** Unique workspace-relative paths the text references, in first-seen order. */
 export function extractWorkspacePaths(text: string): string[] {
-  return [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))].filter(isInsideWorkspace);
+  return [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))].filter(isSafeWorkspaceRel);
+}
+
+/** The safe workspace-relative path for a `/workspace/…` href, or null if it
+ *  isn't one or would escape the workspace. Used to turn an inline `/workspace/`
+ *  link the model wrote into a clickable file chip. */
+export function workspaceRelFromHref(href: string): string | null {
+  const prefix = "/workspace/";
+  if (!href.startsWith(prefix)) return null;
+  const rel = href.slice(prefix.length);
+  return rel && isSafeWorkspaceRel(rel) ? rel : null;
 }

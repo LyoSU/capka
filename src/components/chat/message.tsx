@@ -184,7 +184,7 @@ function ToolDetails({ toolName, output, errorText }: { toolName: string; output
 function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
   return (
     <div className="text-[15px] leading-relaxed">
-      <Markdown isStreaming={isStreaming}>{text}</Markdown>
+      <Markdown isStreaming={isStreaming} chatId={chatId}>{text}</Markdown>
       {chatId && <WorkspaceLinks text={text} chatId={chatId} />}
     </div>
   );
