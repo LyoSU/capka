@@ -790,6 +790,7 @@
     "reasoningLog": "💭 Reasoning",
     "noText": "(the assistant returned no text)",
     "genericError": "Something went wrong. Please try again.",
+    "technicalDetails": "Technical details",
     "doneLog": "✅ {count, plural, one {# tool} other {# tools}} · {secs}s"
   }
 }

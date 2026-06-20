@@ -3,7 +3,7 @@ import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } fr
 import { eq, and, or, isNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { chats, messages, memories, projects } from "@/lib/db/schema";
+import { chats, messages, memories, projects, users } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
 import { getTranslator } from "@/lib/i18n/translator";
@@ -288,6 +288,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   let streamError: string | undefined;
   let closeMcp: (() => Promise<void>) | undefined;
 
+  // Admin role gates the raw technical detail an error shows in-chat. Looked up
+  // lazily and memoized — only failures need it, so a successful task pays nothing.
+  let _isAdmin: boolean | undefined;
+  const resolveIsAdmin = async (): Promise<boolean> => {
+    if (_isAdmin === undefined) {
+      const [u] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+      _isAdmin = u?.role === "admin";
+    }
+    return _isAdmin;
+  };
+
   // Outbound channel (e.g. Telegram). No-op for web — that UI streams over
   // realtime. Created up front so the catch path can still finalize it. We track
   // the live activity + tool count so the channel can show a status header while
@@ -429,6 +440,27 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       else parts.push({ type: "reasoning", text: delta });
     };
 
+    // Live-bubble delivery (Telegram): each answer run becomes its own bubble,
+    // committed the moment a tool/reasoning step ends it. `lastSealedIndex` is the
+    // index of the last `parts` entry already sent as a bubble.
+    let lastSealedIndex = -1;
+    const sealTrailingRun = async () => {
+      const i = parts.length - 1;
+      const p = parts[i];
+      if (i !== lastSealedIndex && p && p.type === "text" && p.text.trim()) {
+        lastSealedIndex = i;
+        await sink.seal(p.text);
+      }
+    };
+    // The still-open answer run — only the trailing, unsealed text part (earlier
+    // runs are already committed bubbles). This is what the live draft previews
+    // and what finish() persists as the final bubble.
+    const openSegment = () => {
+      const i = parts.length - 1;
+      const p = parts[i];
+      return i !== lastSealedIndex && p && p.type === "text" ? p.text : "";
+    };
+
     // Batch text deltas: one NOTIFY every ~100ms instead of per token, so a
     // long response is a handful of round-trips, not hundreds. Tool events
     // (rarer) publish immediately and flush any buffered text first to keep
@@ -455,9 +487,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       await flushReasoning();
       await flushText();
-      // Mirror progress to the outbound channel (Telegram). Throttled + coalesced
-      // inside the sink, so calling it on every flush is cheap.
-      sink.push(getFullText(), currentStatus);
+      // Mirror progress to the outbound channel (Telegram): only the OPEN run,
+      // since earlier runs are already committed as their own bubbles. Throttled
+      // + coalesced inside the sink, so calling it on every flush is cheap.
+      sink.push(openSegment(), currentStatus);
     };
     const scheduleFlush = () => {
       if (flushTimer) return;
@@ -469,7 +502,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;
         switch (event.type) {
-          case "reasoning-delta":
+          case "reasoning-delta": {
+            // Thinking resuming after answer text means that run is done — commit
+            // it as its own bubble before the reasoning block takes over.
+            const li = parts.length - 1;
+            const tp = parts[li];
+            if (li !== lastSealedIndex && tp && tp.type === "text" && tp.text.trim()) {
+              currentStatus = { kind: "thinking", reasoning: getReasoning() };
+              await flushBuffers();
+              await sealTrailingRun();
+            }
             appendReasoning(event.text);
             // Carry the live reasoning so the Telegram sink can fill a native
             // <tg-thinking> block (the web stream uses reasonBuf as before).
@@ -477,6 +519,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             reasonBuf += event.text;
             scheduleFlush();
             break;
+          }
           case "text-delta":
             // Answer is flowing — clear the transient "thinking/tool" header.
             currentStatus = undefined;
@@ -489,6 +532,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             const step = describeStep(stepsT, event.toolName, event.input);
             currentStatus = { kind: "tool", label: step.activeLabel, detail: step.detail };
             await flushBuffers();
+            // The narration before a tool call is a finished run — send it as its
+            // own bubble so the user sees it land before the tool runs.
+            await sealTrailingRun();
             parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
             await publishTaskEvent(userId, {
               type: "task:tool-call", taskId, chatId, messageId: msgId,
@@ -554,6 +600,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         retried = true;
         streamError = undefined;
         parts.length = 0;
+        lastSealedIndex = -1;
         stripNativeFilesWithNote();
         result = makeStream();
         await consume();
@@ -566,6 +613,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         useReasoning = false;
         streamError = undefined;
         parts.length = 0;
+        lastSealedIndex = -1;
         result = makeStream();
         await consume();
         return true;
@@ -587,6 +635,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (!hasContent) {
         log.info("empty response — retrying once", { taskId, chatId, userId });
         parts.length = 0;
+        lastSealedIndex = -1;
         result = makeStream();
         try {
           await consume();
@@ -611,7 +660,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
     await sink.finish({
-      status: finalStatus, text: getFullText(), reasoning: getReasoning(), error: failure?.userMessage,
+      // Only the final, unsealed run — earlier runs already arrived as bubbles.
+      status: finalStatus, text: openSegment(), reasoning: getReasoning(),
+      error: failure?.userMessage, errorDetail: failure?.adminDetail,
+      isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt,
     });
     // Deliver any files the agent created/edited this run to the origin channel
@@ -692,7 +744,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     ]);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
     await sink.finish({
-      status, text: getFullText(), error: failure?.userMessage,
+      status, text: getFullText(), error: failure?.userMessage, errorDetail: failure?.adminDetail,
+      isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt,
     });
   } finally {

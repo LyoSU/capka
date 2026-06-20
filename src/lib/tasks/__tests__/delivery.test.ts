@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { composeDraft, composeFinal, draftIdFrom, makeDeliverySink } from "../delivery";
+import { composeDraft, composeError, composeFinal, draftIdFrom, makeDeliverySink } from "../delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 
 const uk = getTranslator("uk", "telegram");
@@ -66,6 +66,23 @@ describe("composeFinal", () => {
     expect(composeFinal("ok", "a < b && </details> c", 0, 0, en)).toBe(
       "<details><summary>💭 Reasoning</summary>\n\na &lt; b &amp;&amp; &lt;/details&gt; c\n\n</details>\n\nok",
     );
+  });
+});
+
+describe("composeError", () => {
+  it("shows only the calm notice to non-admins", () => {
+    expect(composeError("The assistant is busy. Try again soon.", "429 rate limited", false, en)).toBe(
+      "⚠️ The assistant is busy. Try again soon.",
+    );
+  });
+  it("adds a collapsed, escaped technical detail for admins", () => {
+    expect(composeError("Couldn't reach the AI service.", "fetch failed <host> & port", true, en)).toBe(
+      "⚠️ Couldn't reach the AI service.\n\n<details><summary>Technical details</summary>\n\n```\nfetch failed &lt;host&gt; &amp; port\n```\n\n</details>",
+    );
+  });
+  it("omits the detail block when there's nothing extra to show", () => {
+    expect(composeError("Same thing", "Same thing", true, en)).toBe("⚠️ Same thing");
+    expect(composeError("No detail", undefined, true, en)).toBe("⚠️ No detail");
   });
 });
 
@@ -142,5 +159,52 @@ describe("TelegramSink streaming", () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 5, locale: "uk" });
     await sink.finish({ status: "cancelled", text: "", toolCount: 0, elapsedMs: 50 });
     expect(api.sendRichMessage).not.toHaveBeenCalled();
+  });
+
+  it("seal commits a trimmed intermediate bubble, silently", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 11, locale: "uk" });
+    await sink.seal("  Готую дані.  ");
+    expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("Готую дані.");
+    expect(api.sendRichMessage.mock.calls[0][2]).toEqual({ disable_notification: true });
+  });
+
+  it("seal ignores empty text", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 11 });
+    await sink.seal("   ");
+    expect(api.sendRichMessage).not.toHaveBeenCalled();
+  });
+
+  it("finish caps a tools-only reply with a notifying footer", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 12, locale: "uk" });
+    await sink.finish({ status: "completed", text: "", toolCount: 3, elapsedMs: 5000 });
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("> ✅ 3 інструменти · 5с");
+    expect(api.sendRichMessage.mock.calls[0][2]).toBeUndefined(); // final pings
+  });
+
+  it("finish adds nothing when the reply was already delivered as bubbles", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 13, locale: "uk" });
+    await sink.seal("Крок 1");
+    api.sendRichMessage.mockClear();
+    await sink.finish({ status: "completed", text: "", toolCount: 0, elapsedMs: 1000 });
+    expect(api.sendRichMessage).not.toHaveBeenCalled();
+  });
+
+  it("finish falls back to a no-text note when nothing was produced", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 14, locale: "uk" });
+    await sink.finish({ status: "completed", text: "", toolCount: 0, elapsedMs: 1000 });
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("_(асистент не повернув тексту)_");
+  });
+
+  it("delivers a failure in-chat, with admin detail collapsed", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 16, locale: "en" });
+    await sink.finish({
+      status: "failed", text: "", toolCount: 0, elapsedMs: 0,
+      error: "Couldn't reach the AI service. Please try again in a moment.",
+      errorDetail: "fetch failed: ECONNREFUSED", isAdmin: true,
+    });
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe(
+      "⚠️ Couldn't reach the AI service. Please try again in a moment.\n\n<details><summary>Technical details</summary>\n\n```\nfetch failed: ECONNREFUSED\n```\n\n</details>",
+    );
   });
 });

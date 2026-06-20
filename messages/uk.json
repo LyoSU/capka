@@ -790,6 +790,7 @@
     "reasoningLog": "💭 Міркування",
     "noText": "(асистент не повернув тексту)",
     "genericError": "Сталася помилка. Спробуйте ще раз.",
+    "technicalDetails": "Технічні деталі",
     "doneLog": "✅ {count, plural, one {# інструмент} few {# інструменти} other {# інструментів}} · {secs}с"
   }
 }

@@ -27,6 +27,11 @@ export interface TaskResult {
   reasoning?: string;
   /** Friendly, user-facing error (set when status is "failed"). */
   error?: string;
+  /** Raw technical detail of a failure — surfaced in-chat to admins only, in a
+   *  collapsed <details>, so they never have to open the web UI to diagnose. */
+  errorDetail?: string;
+  /** Whether the linked user is an admin (gates the technical error detail). */
+  isAdmin?: boolean;
 }
 
 /** The transient activity shown while the answer streams in. `reasoning` carries
@@ -59,18 +64,22 @@ export interface OutFile {
 
 /**
  * A channel the runner streams a task into. `push` is fire-and-forget and
- * coalesces internally (the runner calls it on every flush, ~10×/s); `finish`
- * persists the final message exactly once; `sendFiles` delivers any files the
- * run produced. The web sink is a no-op — the web UI already receives
- * everything over realtime and browses sandbox files directly.
+ * coalesces internally (the runner calls it on every flush, ~10×/s); `seal`
+ * commits one completed answer run as its own (silent) bubble the moment a tool
+ * or reasoning step interrupts it — so the user watches the reply land in pieces,
+ * like a person typing; `finish` persists the final (notifying) bubble exactly
+ * once; `sendFiles` delivers any files the run produced. The web sink is a no-op
+ * — the web UI already receives everything over realtime and browses sandbox
+ * files directly, and renders the whole turn as a single message.
  */
 export interface DeliverySink {
   push(text: string, status: StreamStatus): void;
+  seal(text: string): Promise<void>;
   finish(result: TaskResult & { toolCount: number; elapsedMs: number }): Promise<void>;
   sendFiles(files: OutFile[]): Promise<void>;
 }
 
-const NOOP_SINK: DeliverySink = { push() {}, async finish() {}, async sendFiles() {} };
+const NOOP_SINK: DeliverySink = { push() {}, async seal() {}, async finish() {}, async sendFiles() {} };
 
 export function makeDeliverySink(origin: TaskOrigin | undefined): DeliverySink {
   if (origin?.platform === "telegram") return new TelegramSink(origin.telegramChatId, origin.locale);
@@ -139,8 +148,26 @@ export function composeFinal(
     const block = `<details><summary>${summary}</summary>\n\n${escapeHtml(think)}\n\n</details>`;
     return body ? `${block}\n\n${body}` : block;
   }
-  if (log) return `> ${log}\n\n${body}`;
+  if (log) return body ? `> ${log}\n\n${body}` : `> ${log}`;
   return body;
+}
+
+/** A failure rendered entirely in-chat, so the user never has to open the web UI
+ *  to learn what went wrong. Everyone sees the calm `⚠️ userMessage`; an admin
+ *  additionally gets the raw provider detail in a collapsed `<details>` (a code
+ *  block, tail-capped) — the same role split the web shows, but self-contained
+ *  in Telegram. */
+export function composeError(
+  userMessage: string,
+  detail: string | undefined,
+  isAdmin: boolean,
+  t: Translator,
+): string {
+  const head = `⚠️ ${userMessage}`;
+  const raw = (detail ?? "").trim();
+  if (!isAdmin || !raw || raw === userMessage) return head;
+  const code = escapeHtml(raw.slice(-1500));
+  return `${head}\n\n<details><summary>${escapeHtml(t("technicalDetails"))}</summary>\n\n\`\`\`\n${code}\n\`\`\`\n\n</details>`;
 }
 
 class TelegramSink implements DeliverySink {
@@ -152,6 +179,13 @@ class TelegramSink implements DeliverySink {
   private lastSentAt = 0;
   private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
   private lastDraft: DraftBody | null = null;
+  // Last status pushed — so seal() can roll the live draft forward to "now
+  // thinking/running a tool" the instant a run is committed, instead of leaving
+  // the just-sealed text lingering in the preview.
+  private lastStatus: StreamStatus;
+  // How many intermediate runs we've already committed as their own bubbles —
+  // lets finish() know whether the reply has already been delivered in pieces.
+  private sealed = 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private bot: any = null;
 
@@ -170,6 +204,7 @@ class TelegramSink implements DeliverySink {
 
   push(text: string, status: StreamStatus): void {
     this.pending = { text, status };
+    this.lastStatus = status;
     this.schedule();
   }
 
@@ -235,6 +270,55 @@ class TelegramSink implements DeliverySink {
     }
   }
 
+  // Send one rich message, falling back to plain-text chunks if the Markdown is
+  // rejected (so a formatting quirk never drops the message). `plain` is the
+  // markup-free text for that fallback; `silent` suppresses the notification
+  // (used for intermediate bubbles — only the final reply pings).
+  private async sendRich(markdown: string, plain: string, silent: boolean): Promise<void> {
+    const bot = await this.getBot();
+    if (!bot) return;
+    const other = silent ? { disable_notification: true } : undefined;
+    try {
+      await bot.api.sendRichMessage(this.chatId, { markdown }, other);
+    } catch (e) {
+      log.warn("telegram rich send failed; falling back to plain", { chatId: this.chatId, err: String(e) });
+      try {
+        for (const part of chunk(plain, TELEGRAM_LIMIT)) {
+          await bot.api.sendMessage(this.chatId, part, other);
+        }
+      } catch (e2) {
+        log.error("telegram delivery failed", { chatId: this.chatId, err: String(e2) });
+      }
+    }
+  }
+
+  // Commit one finished answer run as its own silent bubble, then roll the live
+  // draft forward to the next step's status so the just-sealed text doesn't
+  // linger in the ephemeral preview as a duplicate.
+  async seal(text: string): Promise<void> {
+    const body = text.trim();
+    if (!body) return;
+    // Drop any queued draft: it still carries this now-sealed run's text and
+    // would re-show it as a duplicate after we commit and clear the preview.
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    this.pending = null;
+    await this.sendRich(body, body, true);
+    this.sealed += 1;
+    if (this.lastStatus) {
+      try {
+        const bot = await this.getBot();
+        if (bot) {
+          const draft = composeDraft("", this.lastStatus, this.t);
+          await bot.api.sendRichMessageDraft(this.chatId, this.draftId, draft);
+          this.lastDraft = draft;
+          this.lastSentAt = Date.now();
+        }
+      } catch (e) {
+        log.warn("telegram draft reset failed", { chatId: this.chatId, err: String(e) });
+      }
+    }
+  }
+
   async finish(result: TaskResult & { toolCount: number; elapsedMs: number }): Promise<void> {
     if (this.timer) {
       clearTimeout(this.timer);
@@ -248,35 +332,32 @@ class TelegramSink implements DeliverySink {
     this.lastDraft = null;
     if (result.status === "cancelled") return; // nothing useful to persist
 
-    const bot = await this.getBot();
-    if (!bot) return;
-
-    const body =
-      result.status === "completed"
-        ? result.text.trim() || `_${this.t("noText")}_`
-        : result.error || this.t("genericError");
-    const markdown = composeFinal(
-      body,
-      result.status === "completed" ? result.reasoning ?? "" : "",
-      result.toolCount,
-      result.elapsedMs,
-      this.t,
-    );
-
-    try {
-      await bot.api.sendRichMessage(this.chatId, { markdown });
-    } catch (e) {
-      // Malformed Markdown is rare but must never drop the message — fall back
-      // to plain text in safe chunks.
-      log.warn("telegram rich send failed; falling back to plain", { chatId: this.chatId, err: String(e) });
-      try {
-        for (const part of chunk(body, TELEGRAM_LIMIT)) {
-          await bot.api.sendMessage(this.chatId, part);
-        }
-      } catch (e2) {
-        log.error("telegram delivery failed", { chatId: this.chatId, err: String(e2) });
-      }
+    // A failure is delivered in-chat, never deferred to the web UI: a calm
+    // notice for everyone, plus a collapsed technical detail for admins.
+    if (result.status !== "completed") {
+      const userMessage = result.error || this.t("genericError");
+      const markdown = composeError(userMessage, result.errorDetail, result.isAdmin ?? false, this.t);
+      await this.sendRich(markdown, userMessage, false);
+      return;
     }
+
+    const body = result.text.trim();
+    const reasoning = result.reasoning ?? "";
+    let markdown: string | null;
+    if (body) {
+      // The final run — capped with the tool log + collapsed reasoning.
+      markdown = composeFinal(body, reasoning, result.toolCount, result.elapsedMs, this.t);
+    } else if (result.toolCount > 0 || reasoning.trim()) {
+      // Tools ran / it thought but wrote no closing text — still cap the reply
+      // with a "done" footer so it doesn't just trail off.
+      markdown = composeFinal("", reasoning, result.toolCount, result.elapsedMs, this.t);
+    } else if (this.sealed > 0) {
+      // Pure narration already delivered as bubbles; nothing left to add.
+      markdown = null;
+    } else {
+      markdown = `_${this.t("noText")}_`;
+    }
+    if (markdown) await this.sendRich(markdown, body || this.t("noText"), false);
   }
 
   async sendFiles(files: OutFile[]): Promise<void> {
