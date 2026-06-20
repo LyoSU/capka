@@ -34,12 +34,21 @@ export function extractWorkspacePaths(text: string): string[] {
   return [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))].filter(isSafeWorkspaceRel);
 }
 
-/** The safe workspace-relative path for a `/workspace/…` href, or null if it
- *  isn't one or would escape the workspace. Used to turn an inline `/workspace/`
- *  link the model wrote into a clickable file chip. */
+/** The safe, decoded workspace-relative path for a `/workspace/…` href, or null
+ *  if it isn't one or would escape the workspace. Used to turn an inline
+ *  `/workspace/` link the model wrote into a clickable file chip. Models often
+ *  percent-encode non-ASCII (Cyrillic) file names in link URLs, so decode first
+ *  — both to show a readable name and to address the real file. Decoding before
+ *  the safety check also stops an encoded `..` (e.g. `%2e%2e`) from slipping
+ *  past traversal rejection. */
 export function workspaceRelFromHref(href: string): string | null {
   const prefix = "/workspace/";
   if (!href.startsWith(prefix)) return null;
-  const rel = href.slice(prefix.length);
+  let rel = href.slice(prefix.length);
+  try {
+    rel = decodeURIComponent(rel);
+  } catch {
+    return null; // malformed encoding — reject rather than guess
+  }
   return rel && isSafeWorkspaceRel(rel) ? rel : null;
 }
