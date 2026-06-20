@@ -194,7 +194,9 @@
       "retry": "Повторити",
       "navigation": "Навігація чатом",
       "telegramReadOnly": "Це Telegram-чат — відповідайте в Telegram.",
-      "continueHere": "Продовжити у вебчаті"
+      "continueHere": "Продовжити у вебчаті",
+      "queuedFiles": "{count, plural, one {# файл} few {# файли} other {# файлів}}",
+      "cancelQueued": "Прибрати з черги"
     },
     "menu": {
       "rename": "Перейменувати",

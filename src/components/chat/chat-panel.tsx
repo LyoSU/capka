@@ -24,7 +24,7 @@ function msgText(m: { parts?: { type: string; text?: string }[] }): string {
     .trim();
 }
 
-import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Sparkles, Send } from "lucide-react";
+import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Sparkles, Send, Clock, X } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
@@ -251,27 +251,49 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
 
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<AttachedFile[]>([]);
+  // Messages typed while a reply is streaming wait here (shown above the
+  // composer, each cancellable) and are dispatched one-by-one as the chat frees
+  // up — held client-side so they can be edited/removed before they're sent.
+  const [queued, setQueued] = useState<{ id: string; text: string; files: AttachedFile[] }[]>([]);
+  const dispatchingRef = useRef(false);
 
-  const handleSubmit = async () => {
-    const text = input.trim();
-    const attachedFiles = files.map((af) => af.file);
-    if (!text && attachedFiles.length === 0) return;
-    haptic("tap"); // light confirmation that the message left
-
-    // Save state for rollback on error
-    const savedInput = input;
-    const savedFiles = files;
-    setInput("");
-    setFiles([]);
+  const send = async (text: string, sendFiles: AttachedFile[]) => {
     try {
-      await sendMessage(text, model, attachedFiles.length > 0 ? attachedFiles : undefined);
+      await sendMessage(text, model, sendFiles.length > 0 ? sendFiles.map((af) => af.file) : undefined);
     } catch (e) {
-      // Restore input so user doesn't lose their text
-      setInput(savedInput);
-      setFiles(savedFiles);
       toast.error(e instanceof Error ? e.message : t("panel.sendFailed"));
     }
   };
+
+  const handleSubmit = async () => {
+    const text = input.trim();
+    if (!text && files.length === 0) return;
+    haptic("tap"); // light confirmation that the message left
+    const currentFiles = files;
+    setInput("");
+    setFiles([]);
+    // A turn is already running (or queued items are still draining) — line this
+    // one up instead of sending now.
+    if (isLoading || queued.length > 0 || dispatchingRef.current) {
+      setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: currentFiles }]);
+      return;
+    }
+    await send(text, currentFiles);
+  };
+
+  // Drain the queue: when the chat frees up, send EVERYTHING queued as one turn
+  // (combined text + all files), not one message at a time. The ref guards the
+  // async gap before isLoading flips so we never fire twice.
+  useEffect(() => {
+    if (isLoading || dispatchingRef.current || queued.length === 0) return;
+    const batch = queued;
+    dispatchingRef.current = true;
+    setQueued([]);
+    const text = batch.map((q) => q.text).filter(Boolean).join("\n\n");
+    const batchFiles = batch.flatMap((q) => q.files);
+    void send(text, batchFiles).finally(() => { dispatchingRef.current = false; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, queued]);
 
   const isEmpty = messages.length === 0;
   const [filesOpen, setFilesOpen] = useState(false);
@@ -310,6 +332,32 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
       onFilesChange={setFiles}
     />
   );
+
+  // Pending messages waiting their turn, shown just above the composer. The ×
+  // removes one before it's sent; the clock makes clear it runs later.
+  const queuedEl = queued.length > 0 ? (
+    <div className="mx-auto mb-2 flex max-w-3xl flex-col gap-1.5 px-4 md:px-6 lg:max-w-4xl">
+      {queued.map((q) => (
+        <div
+          key={q.id}
+          className="flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-1.5 text-sm"
+        >
+          <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="flex-1 truncate text-muted-foreground">
+            {q.text || t("panel.queuedFiles", { count: q.files.length })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setQueued((qq) => qq.filter((x) => x.id !== q.id))}
+            aria-label={t("panel.cancelQueued")}
+            className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+    </div>
+  ) : null;
 
   return (
     <PreviewProvider>
@@ -456,6 +504,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
                 </div>
               </div>
             )}
+            {queuedEl}
             {inputEl}
           </div>
         </div>
