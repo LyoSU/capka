@@ -10,7 +10,7 @@ import { useState, useMemo, useEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
-import { FileCard, FileRow, type PreviewFile } from "./file-preview";
+import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
 
 // --- Helpers ---
@@ -223,9 +223,9 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
 
   return (
     <div className="mt-4">
-      <FileCard
-        title={t("artifacts", { count: paths.length })}
-        action={paths.length > 1 && (
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">{t("artifacts", { count: paths.length })}</span>
+        {paths.length > 1 && (
           <button
             type="button"
             onClick={downloadAll}
@@ -235,11 +235,12 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
             <span>{tw("downloadAll")}</span>
           </button>
         )}
-      >
+      </div>
+      <div className="flex flex-wrap gap-3">
         {paths.map((p) => (
-          <FileRow key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} />
+          <SandboxFileTile key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} />
         ))}
-      </FileCard>
+      </div>
     </div>
   );
 }
@@ -522,19 +523,16 @@ function autoGrow(ta: HTMLTextAreaElement) {
  * click. Bytes are fetched lazily from the sandbox, never re-sent to the model.
  */
 function MessageAttachments({ chatId, files }: { chatId: string; files: { name: string; type: string }[] }) {
-  const t = useTranslations("chat.message");
-  // Same card + rows the AI uses for the files it delivers — names visible, real
-  // thumbnails, Quick Look on click. Files live at /workspace root in the sandbox.
+  // Same square tiles the AI uses for delivered files — real thumbnail, visible
+  // name, Quick Look on click. Files live at /workspace root in the sandbox.
   const viewable: PreviewFile[] = files
     .filter((f) => previewKind(f.name) !== null)
     .map((f) => ({ path: f.name, name: f.name, chatId }));
   return (
-    <div className="mb-1.5 w-full max-w-sm">
-      <FileCard title={t("attachments", { count: files.length })}>
-        {files.map((f) => (
-          <FileRow key={f.name} file={{ path: f.name, name: f.name, chatId }} viewable={viewable} />
-        ))}
-      </FileCard>
+    <div className="mb-1.5 flex max-w-full flex-wrap justify-end gap-3">
+      {files.map((f) => (
+        <SandboxFileTile key={f.name} file={{ path: f.name, name: f.name, chatId }} viewable={viewable} />
+      ))}
     </div>
   );
 }

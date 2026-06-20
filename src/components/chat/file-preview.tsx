@@ -292,101 +292,64 @@ function CodeViewer({ name, text }: { name: string; text: string }) {
   return <div className="ql-code overflow-auto text-xs leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-// ── File rows & cards (shared everywhere) ─────────────────────────────────────
+// ── File tiles (shared everywhere) ────────────────────────────────────────────
 
 /**
- * Bordered file-list card — the shared chrome for any list of files: the ones
- * the AI delivers (artifacts), the ones the user attached in history, etc.
+ * A square file tile: a thumbnail with the filename captioned beneath, the way
+ * Finder/macOS and chat apps show attachments. One layout shared by the
+ * composer, chat history, and the AI's delivered files, so a file looks the same
+ * everywhere. Compact and wrap-friendly (vs. full-width rows that push the
+ * composer off-screen). The thumb is a slot — callers pass a sandbox FileThumb
+ * or a local object-URL preview (for files not yet uploaded).
  */
-export function FileCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+export function FileTile({
+  thumb, name, onClick, href, download, overlay,
+}: {
+  thumb: React.ReactNode;
+  name: string;
+  onClick?: () => void;
+  href?: string;
+  download?: string;
+  /** Corner action over the thumbnail (e.g. a remove button in the composer). */
+  overlay?: React.ReactNode;
+}) {
+  const surface = "block aspect-square w-full overflow-hidden rounded-xl ring-1 ring-border/60 bg-muted/40 transition hover:ring-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
+  const square = <div className={surface}>{thumb}</div>;
+  const clickable = href ? (
+    <a href={href} download={download} className={surface}>{thumb}</a>
+  ) : onClick ? (
+    <button type="button" onClick={onClick} className={cn(surface, "w-full cursor-pointer")}>{thumb}</button>
+  ) : (
+    square
+  );
   return (
-    <div className="overflow-hidden rounded-xl border border-border/50">
-      <div className="flex items-center justify-between bg-muted/30 px-4 py-2.5">
-        <span className="text-xs font-medium text-muted-foreground">{title}</span>
-        {action}
-      </div>
-      <div className="divide-y divide-border/25">{children}</div>
+    <div className="group/tile relative w-[88px] shrink-0">
+      {clickable}
+      {overlay}
+      <p title={name} className="mt-1 truncate text-center text-[11px] leading-tight text-muted-foreground">{name}</p>
     </div>
   );
 }
 
-const FILE_ROW_CLS = "group/file flex w-full items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent/50";
-
 /**
- * Presentational file row — one consistent layout used in chat history, the AI's
- * artifacts, and the composer's attachment preview, so a file looks the same
- * everywhere. Renders as a link, a button, or a plain row depending on props.
- * The thumb is a slot so callers can pass a sandbox FileThumb or a local
- * object-URL preview (for files not yet uploaded).
+ * A sandbox-backed file tile: real thumbnail, Quick Look on click (paging
+ * through `viewable`), download fallback for non-previewable kinds. For files
+ * addressable on the controller by chatId + path.
  */
-export function FileRowShell({
-  thumb, name, sublabel, trailing, onClick, href, download,
-}: {
-  thumb: React.ReactNode;
-  name: string;
-  sublabel?: React.ReactNode;
-  trailing?: React.ReactNode;
-  onClick?: () => void;
-  href?: string;
-  download?: string;
-}) {
-  const inner = (
-    <>
-      {thumb}
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium leading-snug text-foreground">{name}</p>
-        {sublabel != null && <p className="truncate text-xs text-muted-foreground">{sublabel}</p>}
-      </div>
-      {trailing}
-    </>
-  );
-  if (href) return <a href={href} download={download} className={cn(FILE_ROW_CLS, "no-underline")}>{inner}</a>;
-  if (onClick) return <button type="button" onClick={onClick} className={cn(FILE_ROW_CLS, "cursor-pointer text-left")}>{inner}</button>;
-  return <div className={FILE_ROW_CLS}>{inner}</div>;
-}
-
-/**
- * A sandbox-backed file row: real thumbnail, type label, Quick Look on click
- * (paging through `viewable`), with a download fallback for non-previewable
- * kinds. For files addressable on the controller by chatId + path.
- */
-export function FileRow({ file, viewable }: { file: PreviewFile; viewable: PreviewFile[] }) {
+export function SandboxFileTile({ file, viewable, overlay }: { file: PreviewFile; viewable: PreviewFile[]; overlay?: React.ReactNode }) {
   const { open } = usePreview();
-  const ext = extOf(file.name);
-  const { label } = fileKind(file.name);
-  const sublabel = `${label}${ext ? ` · ${ext.toUpperCase()}` : ""}`;
-  const thumb = <FileThumb file={file} className="h-10 w-10 shrink-0 rounded-lg" />;
-  const href = downloadUrl(file);
+  const thumb = <FileThumb file={file} className="h-full w-full" />;
   if (previewKind(file.name) !== null) {
     return (
-      <FileRowShell
+      <FileTile
         thumb={thumb}
         name={file.name}
-        sublabel={sublabel}
+        overlay={overlay}
         onClick={() => open(viewable, viewable.findIndex((v) => v.path === file.path))}
-        trailing={
-          <a
-            href={href}
-            download={file.name}
-            onClick={(e) => e.stopPropagation()}
-            className="shrink-0 rounded-md p-1 text-muted-foreground/20 transition-colors hover:text-muted-foreground group-hover/file:text-muted-foreground"
-          >
-            <Download className="h-4 w-4" />
-          </a>
-        }
       />
     );
   }
-  return (
-    <FileRowShell
-      thumb={thumb}
-      name={file.name}
-      sublabel={sublabel}
-      href={href}
-      download={file.name}
-      trailing={<Download className="h-4 w-4 shrink-0 text-muted-foreground/20 transition-colors group-hover/file:text-muted-foreground" />}
-    />
-  );
+  return <FileTile thumb={thumb} name={file.name} overlay={overlay} href={downloadUrl(file)} download={file.name} />;
 }
 
 // ── Thumbnails ───────────────────────────────────────────────────────────────

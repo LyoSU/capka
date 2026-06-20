@@ -78,6 +78,10 @@ const TELEGRAM_LIMIT = 4000; // plain-text fallback chunk size (under the 4096 c
 // Don't spam draft updates: Telegram animates same-id drafts, but flooding the
 // API risks 429s. One update per ~800ms is smooth and safe.
 const MIN_DRAFT_INTERVAL_MS = 800;
+// A streamed draft is an ephemeral ~30s preview. During a long silent step (a
+// slow tool with no output) no new push arrives, so re-send the last draft well
+// inside that window to keep the thinking block from vanishing mid-work.
+const DRAFT_KEEPALIVE_MS = 20_000;
 
 function chunk(text: string, size: number): string[] {
   const out: string[] = [];
@@ -128,6 +132,8 @@ class TelegramSink implements DeliverySink {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inflight = false;
   private lastSentAt = 0;
+  private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastDraft: DraftBody | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private bot: any = null;
 
@@ -168,8 +174,11 @@ class TelegramSink implements DeliverySink {
       if (!bot) return;
       if (!text.trim() && !status) return; // nothing to show yet
       // Ephemeral animated preview; the real message is sent on finish().
-      await bot.api.sendRichMessageDraft(this.chatId, this.draftId, composeDraft(text, status, this.t));
+      const draft = composeDraft(text, status, this.t);
+      await bot.api.sendRichMessageDraft(this.chatId, this.draftId, draft);
       this.lastSentAt = Date.now();
+      this.lastDraft = draft;
+      this.scheduleKeepalive();
     } catch (e) {
       // Non-fatal: the persisted finish() is what the user keeps.
       log.warn("telegram draft update failed", { chatId: this.chatId, err: String(e) });
@@ -179,12 +188,46 @@ class TelegramSink implements DeliverySink {
     }
   }
 
+  // Re-send the last draft before its ~30s preview lapses, so the thinking block
+  // stays put through long silent steps. Keeps rescheduling until finish().
+  private scheduleKeepalive(): void {
+    if (this.keepaliveTimer) clearTimeout(this.keepaliveTimer);
+    this.keepaliveTimer = setTimeout(() => {
+      this.keepaliveTimer = null;
+      void this.refresh();
+    }, DRAFT_KEEPALIVE_MS);
+  }
+
+  private async refresh(): Promise<void> {
+    // A queued push will send fresh content anyway — don't fight it.
+    if (!this.lastDraft || this.pending || this.inflight) {
+      this.scheduleKeepalive();
+      return;
+    }
+    try {
+      const bot = await this.getBot();
+      if (bot) {
+        await bot.api.sendRichMessageDraft(this.chatId, this.draftId, this.lastDraft);
+        this.lastSentAt = Date.now();
+      }
+    } catch (e) {
+      log.warn("telegram draft keepalive failed", { chatId: this.chatId, err: String(e) });
+    } finally {
+      this.scheduleKeepalive();
+    }
+  }
+
   async finish(result: TaskResult & { toolCount: number; elapsedMs: number }): Promise<void> {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    if (this.keepaliveTimer) {
+      clearTimeout(this.keepaliveTimer);
+      this.keepaliveTimer = null;
+    }
     this.pending = null;
+    this.lastDraft = null;
     if (result.status === "cancelled") return; // nothing useful to persist
 
     const bot = await this.getBot();
