@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models as modelsTable } from "@/lib/db/schema";
 import { iconForGroup, prettyName } from "@/lib/models/normalize";
@@ -76,33 +76,55 @@ export async function assertSafeProviderConfig(provider: string, baseUrl?: strin
 
 type CatalogRow = {
   id: string;
+  source: string;
+  displayName: string | null;
+  group: string | null;
+  icon: string | null;
   contextLength: number | null;
   inputPrice: string | null;
   outputPrice: string | null;
   capabilities: unknown;
 };
 
+const bareId = (id: string) => (id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id);
+
 /**
- * Enrich live provider ids with context/pricing/capabilities from the synced
- * catalog (our universal price book). Matched by exact id, then bare model
- * name. One query for the whole batch.
+ * Enrich live provider ids with the synced catalog (our universal price book +
+ * canonical names). A custom OpenAI-compatible endpoint reports a bare id like
+ * "glm-5.2"; OpenRouter stores it as "z-ai/glm-5.2", so we also match by suffix
+ * ("%/glm-5.2"), exactly like getModelPrice. When several rows share a bare id,
+ * the OpenRouter row wins — it carries the real display name/group/icon, while
+ * a LiteLLM row only has a slug-normalized name. One query for the whole batch.
  */
 async function catalogLookup(ids: string[]): Promise<(id: string) => CatalogRow | null> {
-  const bare = (id: string) => (id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id);
-  const all = Array.from(new Set([...ids, ...ids.map(bare)]));
-  if (!all.length) return () => null;
+  if (!ids.length) return () => null;
+  const exact = Array.from(new Set(ids));
+  const bares = Array.from(new Set(ids.map(bareId)));
   const rows = await db
     .select({
       id: modelsTable.id,
+      source: modelsTable.source,
+      displayName: modelsTable.displayName,
+      group: modelsTable.group,
+      icon: modelsTable.icon,
       contextLength: modelsTable.contextLength,
       inputPrice: modelsTable.inputPrice,
       outputPrice: modelsTable.outputPrice,
       capabilities: modelsTable.capabilities,
     })
     .from(modelsTable)
-    .where(inArray(modelsTable.id, all));
-  const map = new Map(rows.map((r) => [r.id, r]));
-  return (id: string) => map.get(id) ?? map.get(bare(id)) ?? null;
+    .where(or(inArray(modelsTable.id, exact), ...bares.map((b) => like(modelsTable.id, `%/${b}`))));
+
+  const byId = new Map<string, CatalogRow>();
+  const byBare = new Map<string, CatalogRow>();
+  for (const r of rows) {
+    byId.set(r.id, r);
+    const b = bareId(r.id);
+    const cur = byBare.get(b);
+    // Prefer the OpenRouter row for a bare id — it has the canonical name.
+    if (!cur || (cur.source !== "openrouter" && r.source === "openrouter")) byBare.set(b, r);
+  }
+  return (id: string) => byId.get(id) ?? byBare.get(bareId(id)) ?? null;
 }
 
 // When a model comes from the user's OWN endpoint (LiteLLM gateway, Ollama,
@@ -119,10 +141,18 @@ function toModelInfo(
   c: CatalogRow | null,
   assumeUsableIfUnknown = false,
 ): ModelInfo {
-  const { group, icon } = brandOf(id, fallbackGroup);
+  // When OpenRouter carries this model, prefer its canonical name/group/icon so
+  // a model served through a custom OpenAI-compatible endpoint renders exactly
+  // like the same model via OpenRouter (e.g. "Z.ai: GLM 5.2" under a "Z.ai"
+  // header, which the picker then trims to "GLM 5.2"). LiteLLM rows are skipped
+  // here — their displayName is only a slug-normalized fallback.
+  const canon = c?.source === "openrouter" ? c : null;
+  const brand = brandOf(id, fallbackGroup);
+  const group = canon?.group ?? brand.group;
+  const icon = canon?.icon ?? brand.icon;
   return {
     id,
-    name,
+    name: canon?.displayName ?? name,
     provider: group ?? "",
     context: c?.contextLength ?? 0,
     pricing: { prompt: perMillion(c?.inputPrice), completion: perMillion(c?.outputPrice) },

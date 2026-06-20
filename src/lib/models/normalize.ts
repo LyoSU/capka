@@ -98,12 +98,17 @@ const DATE_SUFFIX = /[-@:](20\d{2}-\d{2}-\d{2}|20\d{6}|20\d{2}|\d{4}|latest|prev
 /**
  * Turn a raw model id into a human label when no nice name is supplied.
  * "claude-3-5-haiku-20241022" → "Claude 3 5 Haiku".
+ * Version dots are preserved: "glm-5.2" → "Glm 5.2", "gpt-4.1" → "Gpt 4.1".
  */
 export function prettyName(id: string, rawName?: string | null): string {
   if (rawName && rawName.trim() && rawName !== id) return rawName.trim();
   let slug = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
   slug = slug.replace(DATE_SUFFIX, "");
-  return titleCase(slug.replace(/[-_.]+/g, " ").trim());
+  const spaced = slug
+    .replace(/[-_]+/g, " ")
+    // Dots become spaces unless they sit between digits (version numbers).
+    .replace(/(?<!\d)\.|\.(?!\d)/g, " ");
+  return titleCase(spaced.trim());
 }
 
 export function titleCase(s: string): string {
