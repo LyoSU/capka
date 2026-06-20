@@ -22,11 +22,14 @@ interface McpCallResult {
   isError?: boolean;
 }
 interface McpCaller {
+  // Return is `unknown` (not McpCallResult): the SDK's callTool resolves to a wider
+  // compatibility union (incl. a legacy `{ toolResult }` shape), so narrowing here
+  // would make the real Client unassignable. We cast at the call site instead.
   callTool(
     params: { name: string; arguments: Record<string, unknown> },
     resultSchema?: undefined,
     options?: { signal?: AbortSignal },
-  ): Promise<McpCallResult>;
+  ): Promise<unknown>;
 }
 
 export function mcpToolName(server: string, tool: string): string {
@@ -72,11 +75,11 @@ export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: Mcp
     description: mcpTool.description ?? `${serverName} ${mcpTool.name}`,
     inputSchema: jsonSchema((mcpTool.inputSchema ?? { type: "object", properties: {} }) as never),
     execute: async (input, { abortSignal }) => {
-      const result = await client.callTool(
+      const result = (await client.callTool(
         { name: mcpTool.name, arguments: (input ?? {}) as Record<string, unknown> },
         undefined,
         { signal: abortSignal },
-      );
+      )) as McpCallResult;
       if (result.isError) throw new Error(textOf(result) || `${serverName} ${mcpTool.name} failed`);
       return result;
     },

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { mcpToolName, adaptMcpTool } from "../adapt";
 
-const opts = { toolCallId: "1", messages: [] } as never;
+const opts = { toolCallId: "1", messages: [] };
 
 describe("mcpToolName", () => {
   it("namespaces server + tool", () => {
@@ -32,7 +32,7 @@ describe("adaptMcpTool", () => {
   it("throws on a tool-level isError result (so it surfaces as a tool error)", async () => {
     const client = { callTool: vi.fn().mockResolvedValue({ isError: true, content: [{ type: "text", text: "rate limited" }] }) };
     const t = adaptMcpTool(client as never, "grok", { name: "search" });
-    await expect(t.execute!({}, opts)).rejects.toThrow("rate limited");
+    await expect(t.execute!({}, opts as never)).rejects.toThrow("rate limited");
   });
 
   it("maps result content to model output parts (text + media)", async () => {
