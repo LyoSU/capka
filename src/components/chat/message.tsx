@@ -9,8 +9,8 @@ import { haptic } from "@/lib/haptics";
 import { useState, useMemo, useEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { fileKind, extOf, previewKind } from "@/lib/file-kinds";
-import { FileThumb, usePreview, type PreviewFile } from "./file-preview";
+import { previewKind } from "@/lib/file-kinds";
+import { FileCard, FileRow, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
 
 // --- Helpers ---
@@ -190,67 +190,6 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
 }
 
 const WORKSPACE_PATH_RE = /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
-
-/** Bordered file-list card — shared chrome for both the files the AI delivers
- *  (artifacts) and the files the user attached, so they read the same way. */
-function FileCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-xl border border-border/50">
-      <div className="flex items-center justify-between bg-muted/30 px-4 py-2.5">
-        <span className="text-xs font-medium text-muted-foreground">{title}</span>
-        {action}
-      </div>
-      <div className="divide-y divide-border/25">{children}</div>
-    </div>
-  );
-}
-
-/** One file row: thumbnail + name + type. Previewable kinds open Quick Look
- *  (paging through `viewable`); the rest are plain downloads. */
-function FileRow({ file, viewable }: { file: PreviewFile; viewable: PreviewFile[] }) {
-  const { open } = usePreview();
-  const ext = extOf(file.name);
-  const { label } = fileKind(file.name);
-  const downloadHref = `/api/sandbox/files/download?chatId=${file.chatId}&path=${encodeURIComponent(file.path)}`;
-  const meta = (
-    <>
-      <FileThumb file={file} className="h-10 w-10 shrink-0 rounded-lg" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium leading-snug text-foreground">{file.name}</p>
-        <p className="text-xs text-muted-foreground">{label}{ext ? ` · ${ext.toUpperCase()}` : ""}</p>
-      </div>
-    </>
-  );
-  if (previewKind(file.name) !== null) {
-    return (
-      <button
-        type="button"
-        onClick={() => open(viewable, viewable.findIndex((v) => v.path === file.path))}
-        className="group/file flex w-full cursor-pointer items-center gap-3.5 px-4 py-3 text-left transition-colors hover:bg-accent/50"
-      >
-        {meta}
-        <a
-          href={downloadHref}
-          download={file.name}
-          onClick={(e) => e.stopPropagation()}
-          className="shrink-0 rounded-md p-1 text-muted-foreground/20 transition-colors hover:text-muted-foreground group-hover/file:text-muted-foreground"
-        >
-          <Download className="h-4 w-4" />
-        </a>
-      </button>
-    );
-  }
-  return (
-    <a
-      href={downloadHref}
-      download={file.name}
-      className="group/file flex items-center gap-3.5 px-4 py-3 no-underline transition-colors hover:bg-accent/50"
-    >
-      {meta}
-      <Download className="h-4 w-4 shrink-0 text-muted-foreground/20 transition-colors group-hover/file:text-muted-foreground" />
-    </a>
-  );
-}
 
 function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
   const t = useTranslations("chat.tool");
@@ -578,10 +517,9 @@ function autoGrow(ta: HTMLTextAreaElement) {
  *  pencil to rewrite the message and re-run the conversation from that point
  *  (⌘/Ctrl+Enter saves, Esc cancels) — the familiar ChatGPT gesture. */
 /**
- * Thumbnails for the files a user attached to a message. Reuses the same
- * FileThumb + Quick Look primitives as the workspace panel, so a photo looks
- * like a photo here too. Bytes are fetched lazily from the sandbox — never
- * stored on the message or re-sent to the model.
+ * The files a user attached to a message, rendered with the same FileCard/FileRow
+ * the AI uses for delivered files — visible name, real thumbnail, Quick Look on
+ * click. Bytes are fetched lazily from the sandbox, never re-sent to the model.
  */
 function MessageAttachments({ chatId, files }: { chatId: string; files: { name: string; type: string }[] }) {
   const t = useTranslations("chat.message");

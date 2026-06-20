@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatSize } from "@/lib/constants";
 import { fileKind } from "@/lib/file-kinds";
+import { FileRowShell } from "./file-preview";
 
 /** Max single file size for upload (100MB) */
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
@@ -112,39 +113,39 @@ export function ChatInput({
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
         >
-          {/* Attached files preview */}
+          {/* Attached files preview — same FileRow layout used in chat history,
+              so a staged file looks identical to a sent one. Files aren't in the
+              sandbox yet, so the thumb is a local object-URL / typed icon. */}
           {files.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-3 pt-3">
+            <div className="divide-y divide-border/25 border-b border-border/50">
               {files.map((af) => {
                 const { Icon, color, bg } = fileKind(af.file.name);
                 const preview = previews.get(af.id);
+                const thumb = preview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={preview} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+                ) : (
+                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${bg}`}>
+                    <Icon className={`h-4 w-4 ${color}`} />
+                  </span>
+                );
                 return (
-                  <div
+                  <FileRowShell
                     key={af.id}
-                    className="group flex items-center gap-1.5 rounded-lg border bg-muted/50 py-1.5 pl-1.5 pr-2.5 text-xs"
-                  >
-                    {preview ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={preview} alt={af.file.name} className="h-7 w-7 shrink-0 rounded-md object-cover" />
-                    ) : (
-                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${bg}`}>
-                        <Icon className={`h-3.5 w-3.5 ${color}`} />
-                      </span>
-                    )}
-                    <div className="flex flex-col">
-                      <span className="max-w-32 truncate leading-tight">{af.file.name}</span>
-                      <span className="text-[10px] leading-tight text-muted-foreground">
-                        {preview ? tf("image") : tf("file")} · {formatSize(af.file.size)}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => removeFile(af.id)}
-                      className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                      aria-label={t("remove", { name: af.file.name })}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
+                    thumb={thumb}
+                    name={af.file.name}
+                    sublabel={`${preview ? tf("image") : tf("file")} · ${formatSize(af.file.size)}`}
+                    trailing={
+                      <button
+                        type="button"
+                        onClick={() => removeFile(af.id)}
+                        className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label={t("remove", { name: af.file.name })}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    }
+                  />
                 );
               })}
             </div>

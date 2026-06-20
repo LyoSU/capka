@@ -292,6 +292,103 @@ function CodeViewer({ name, text }: { name: string; text: string }) {
   return <div className="ql-code overflow-auto text-xs leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
+// ── File rows & cards (shared everywhere) ─────────────────────────────────────
+
+/**
+ * Bordered file-list card — the shared chrome for any list of files: the ones
+ * the AI delivers (artifacts), the ones the user attached in history, etc.
+ */
+export function FileCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/50">
+      <div className="flex items-center justify-between bg-muted/30 px-4 py-2.5">
+        <span className="text-xs font-medium text-muted-foreground">{title}</span>
+        {action}
+      </div>
+      <div className="divide-y divide-border/25">{children}</div>
+    </div>
+  );
+}
+
+const FILE_ROW_CLS = "group/file flex w-full items-center gap-3.5 px-4 py-3 transition-colors hover:bg-accent/50";
+
+/**
+ * Presentational file row — one consistent layout used in chat history, the AI's
+ * artifacts, and the composer's attachment preview, so a file looks the same
+ * everywhere. Renders as a link, a button, or a plain row depending on props.
+ * The thumb is a slot so callers can pass a sandbox FileThumb or a local
+ * object-URL preview (for files not yet uploaded).
+ */
+export function FileRowShell({
+  thumb, name, sublabel, trailing, onClick, href, download,
+}: {
+  thumb: React.ReactNode;
+  name: string;
+  sublabel?: React.ReactNode;
+  trailing?: React.ReactNode;
+  onClick?: () => void;
+  href?: string;
+  download?: string;
+}) {
+  const inner = (
+    <>
+      {thumb}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium leading-snug text-foreground">{name}</p>
+        {sublabel != null && <p className="truncate text-xs text-muted-foreground">{sublabel}</p>}
+      </div>
+      {trailing}
+    </>
+  );
+  if (href) return <a href={href} download={download} className={cn(FILE_ROW_CLS, "no-underline")}>{inner}</a>;
+  if (onClick) return <button type="button" onClick={onClick} className={cn(FILE_ROW_CLS, "cursor-pointer text-left")}>{inner}</button>;
+  return <div className={FILE_ROW_CLS}>{inner}</div>;
+}
+
+/**
+ * A sandbox-backed file row: real thumbnail, type label, Quick Look on click
+ * (paging through `viewable`), with a download fallback for non-previewable
+ * kinds. For files addressable on the controller by chatId + path.
+ */
+export function FileRow({ file, viewable }: { file: PreviewFile; viewable: PreviewFile[] }) {
+  const { open } = usePreview();
+  const ext = extOf(file.name);
+  const { label } = fileKind(file.name);
+  const sublabel = `${label}${ext ? ` · ${ext.toUpperCase()}` : ""}`;
+  const thumb = <FileThumb file={file} className="h-10 w-10 shrink-0 rounded-lg" />;
+  const href = downloadUrl(file);
+  if (previewKind(file.name) !== null) {
+    return (
+      <FileRowShell
+        thumb={thumb}
+        name={file.name}
+        sublabel={sublabel}
+        onClick={() => open(viewable, viewable.findIndex((v) => v.path === file.path))}
+        trailing={
+          <a
+            href={href}
+            download={file.name}
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0 rounded-md p-1 text-muted-foreground/20 transition-colors hover:text-muted-foreground group-hover/file:text-muted-foreground"
+          >
+            <Download className="h-4 w-4" />
+          </a>
+        }
+      />
+    );
+  }
+  return (
+    <FileRowShell
+      thumb={thumb}
+      name={file.name}
+      sublabel={sublabel}
+      href={href}
+      download={file.name}
+      trailing={<Download className="h-4 w-4 shrink-0 text-muted-foreground/20 transition-colors group-hover/file:text-muted-foreground" />}
+    />
+  );
+}
+
 // ── Thumbnails ───────────────────────────────────────────────────────────────
 
 /**
