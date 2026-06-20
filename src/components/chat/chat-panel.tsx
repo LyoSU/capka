@@ -281,17 +281,18 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
     await send(text, currentFiles);
   };
 
-  // Drain the queue: when the chat frees up, send EVERYTHING queued as one turn
-  // (combined text + all files), not one message at a time. The ref guards the
-  // async gap before isLoading flips so we never fire twice.
+  // Drain the queue when the chat frees up: send each queued message as its own
+  // message (separate bubbles, just as the user typed them) — the server folds
+  // the whole burst into a single reply. Sent sequentially so they chain in
+  // order; the ref guards the async gap before isLoading flips.
   useEffect(() => {
     if (isLoading || dispatchingRef.current || queued.length === 0) return;
     const batch = queued;
     dispatchingRef.current = true;
     setQueued([]);
-    const text = batch.map((q) => q.text).filter(Boolean).join("\n\n");
-    const batchFiles = batch.flatMap((q) => q.files);
-    void send(text, batchFiles).finally(() => { dispatchingRef.current = false; });
+    void (async () => {
+      for (const item of batch) await send(item.text, item.files);
+    })().finally(() => { dispatchingRef.current = false; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, queued]);
 

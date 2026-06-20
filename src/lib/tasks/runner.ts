@@ -336,15 +336,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // user message just sent, or the user turn being regenerated). Pointing the
     // chat at this leaf makes the new branch the active one immediately.
     let replyParentId = (payload.uiMessages ?? []).at(-1)?.id ?? null;
-    // Telegram batching: answer from the chat's CURRENT leaf (every message that
-    // piled up while we were busy), and absorb the queued tasks those follow-ups
-    // created so the burst becomes one reply. Carry their attachments along.
+    // Batch a burst of queued follow-ups (web or Telegram) into one reply: answer
+    // from the chat's CURRENT leaf — every message that piled up while we were
+    // busy — and absorb the queued tasks those follow-ups created, carrying their
+    // attachments along. Guarded to a USER leaf: a regenerate/edit leaves the
+    // active leaf on an assistant reply, and that reply must hang off the
+    // payload's user message instead, so we skip the override there.
     let extraAttachedFiles: FileRef[] = [];
-    if (payload.origin?.platform === "telegram") {
+    {
       const [row] = await db.select({ leaf: chats.activeLeafId }).from(chats).where(eq(chats.id, chatId)).limit(1);
-      if (row?.leaf) replyParentId = row.leaf;
-      const absorbed = await absorbQueuedTasks(chatId, taskId);
-      extraAttachedFiles = absorbed.flatMap((t) => (t.payload as TaskPayload | null)?.attachedFiles ?? []);
+      const leaf = row?.leaf ?? null;
+      const leafRole = leaf
+        ? (await db.select({ role: messages.role }).from(messages).where(eq(messages.id, leaf)).limit(1))[0]?.role
+        : undefined;
+      if (leaf && leafRole === "user") {
+        replyParentId = leaf;
+        const absorbed = await absorbQueuedTasks(chatId, taskId);
+        extraAttachedFiles = absorbed.flatMap((t) => (t.payload as TaskPayload | null)?.attachedFiles ?? []);
+      }
     }
     await db.insert(messages).values({
       id: msgId,
@@ -368,8 +377,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // runs only after the previous turn finished. Its payload was snapshotted at
     // enqueue time — when the prior reply was still empty — so rebuild the
     // conversation from the live tree here to feed the model the real history.
+    // Rebuild the conversation from the live tree at run time (not the payload
+    // snapshotted at enqueue): a queued/batched turn then sees the previous
+    // reply's final content and every message folded into this turn. The path is
+    // anchored at replyParentId, so regenerate/edit still answer their own leaf.
     let uiMessages = payload.uiMessages ?? [];
-    if (payload.origin?.platform === "telegram" && replyParentId) {
+    if (replyParentId) {
       const path = await loadActivePath(chatId, replyParentId);
       if (path.length) uiMessages = toUIMessages(path.map((p) => p.node));
     }
