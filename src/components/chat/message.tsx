@@ -573,21 +573,41 @@ function autoGrow(ta: HTMLTextAreaElement) {
 function MessageAttachments({ chatId, files }: { chatId: string; files: { name: string; type: string }[] }) {
   const t = useTranslations("chat.message");
   const { open } = usePreview();
-  const previewFiles: PreviewFile[] = files.map((f) => ({ path: f.name, name: f.name, chatId }));
+  // Same gating as the workspace panel: previewable kinds open Quick Look, the
+  // rest fall back to a download. Quick Look pages through the viewable subset.
+  const viewable: PreviewFile[] = files
+    .filter((f) => previewKind(f.name) !== null)
+    .map((f) => ({ path: f.name, name: f.name, chatId }));
+  const tile = "overflow-hidden rounded-xl ring-1 ring-border/60 transition hover:ring-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
   return (
     <div className="mb-1.5 flex max-w-full flex-wrap justify-end gap-2">
-      {previewFiles.map((f, i) => (
-        <button
-          key={f.path}
-          type="button"
-          onClick={() => open(previewFiles, i)}
-          title={f.name}
-          aria-label={t("attachment", { name: f.name })}
-          className="overflow-hidden rounded-xl ring-1 ring-border/60 transition hover:ring-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-        >
-          <FileThumb file={f} className="h-20 w-20" />
-        </button>
-      ))}
+      {files.map((f) => {
+        const file: PreviewFile = { path: f.name, name: f.name, chatId };
+        const canView = previewKind(f.name) !== null;
+        return canView ? (
+          <button
+            key={f.name}
+            type="button"
+            onClick={() => open(viewable, viewable.findIndex((v) => v.path === f.name))}
+            title={f.name}
+            aria-label={t("attachment", { name: f.name })}
+            className={tile}
+          >
+            <FileThumb file={file} className="h-20 w-20" />
+          </button>
+        ) : (
+          <a
+            key={f.name}
+            href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(f.name)}`}
+            download={f.name}
+            title={f.name}
+            aria-label={t("attachment", { name: f.name })}
+            className={tile}
+          >
+            <FileThumb file={file} className="h-20 w-20" />
+          </a>
+        );
+      })}
     </div>
   );
 }
