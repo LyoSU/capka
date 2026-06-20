@@ -191,10 +191,70 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
 
 const WORKSPACE_PATH_RE = /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
 
+/** Bordered file-list card — shared chrome for both the files the AI delivers
+ *  (artifacts) and the files the user attached, so they read the same way. */
+function FileCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/50">
+      <div className="flex items-center justify-between bg-muted/30 px-4 py-2.5">
+        <span className="text-xs font-medium text-muted-foreground">{title}</span>
+        {action}
+      </div>
+      <div className="divide-y divide-border/25">{children}</div>
+    </div>
+  );
+}
+
+/** One file row: thumbnail + name + type. Previewable kinds open Quick Look
+ *  (paging through `viewable`); the rest are plain downloads. */
+function FileRow({ file, viewable }: { file: PreviewFile; viewable: PreviewFile[] }) {
+  const { open } = usePreview();
+  const ext = extOf(file.name);
+  const { label } = fileKind(file.name);
+  const downloadHref = `/api/sandbox/files/download?chatId=${file.chatId}&path=${encodeURIComponent(file.path)}`;
+  const meta = (
+    <>
+      <FileThumb file={file} className="h-10 w-10 shrink-0 rounded-lg" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium leading-snug text-foreground">{file.name}</p>
+        <p className="text-xs text-muted-foreground">{label}{ext ? ` · ${ext.toUpperCase()}` : ""}</p>
+      </div>
+    </>
+  );
+  if (previewKind(file.name) !== null) {
+    return (
+      <button
+        type="button"
+        onClick={() => open(viewable, viewable.findIndex((v) => v.path === file.path))}
+        className="group/file flex w-full cursor-pointer items-center gap-3.5 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+      >
+        {meta}
+        <a
+          href={downloadHref}
+          download={file.name}
+          onClick={(e) => e.stopPropagation()}
+          className="shrink-0 rounded-md p-1 text-muted-foreground/20 transition-colors hover:text-muted-foreground group-hover/file:text-muted-foreground"
+        >
+          <Download className="h-4 w-4" />
+        </a>
+      </button>
+    );
+  }
+  return (
+    <a
+      href={downloadHref}
+      download={file.name}
+      className="group/file flex items-center gap-3.5 px-4 py-3 no-underline transition-colors hover:bg-accent/50"
+    >
+      {meta}
+      <Download className="h-4 w-4 shrink-0 text-muted-foreground/20 transition-colors group-hover/file:text-muted-foreground" />
+    </a>
+  );
+}
+
 function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
   const t = useTranslations("chat.tool");
   const tw = useTranslations("chat.workspace");
-  const { open } = usePreview();
   // Re-scanning the message text on every render is wasteful; the artifact
   // paths only change when the text does.
   const paths = useMemo(
@@ -223,12 +283,10 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
   };
 
   return (
-    <div className="mt-4 overflow-hidden rounded-xl border border-border/50">
-      <div className="flex items-center justify-between bg-muted/30 px-4 py-2.5">
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("artifacts", { count: paths.length })}
-        </span>
-        {paths.length > 1 && (
+    <div className="mt-4">
+      <FileCard
+        title={t("artifacts", { count: paths.length })}
+        action={paths.length > 1 && (
           <button
             type="button"
             onClick={downloadAll}
@@ -238,56 +296,11 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
             <span>{tw("downloadAll")}</span>
           </button>
         )}
-      </div>
-      <div className="divide-y divide-border/25">
-        {paths.map((p) => {
-          const fileName = p.split("/").pop() || p;
-          const ext = extOf(fileName);
-          const { label } = fileKind(fileName);
-          const file: PreviewFile = { path: p, name: fileName, chatId };
-          const downloadHref = `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(p)}`;
-          const meta = (
-            <>
-              <FileThumb file={file} className="h-10 w-10 shrink-0 rounded-lg" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium leading-snug text-foreground">{fileName}</p>
-                <p className="text-xs text-muted-foreground">{label} · {ext.toUpperCase()}</p>
-              </div>
-            </>
-          );
-          if (previewKind(fileName) !== null) {
-            return (
-              <button
-                key={p}
-                type="button"
-                onClick={() => open(viewable, viewable.findIndex((v) => v.path === p))}
-                className="group/file flex w-full cursor-pointer items-center gap-3.5 px-4 py-3 text-left transition-colors hover:bg-accent/50"
-              >
-                {meta}
-                <a
-                  href={downloadHref}
-                  download={fileName}
-                  onClick={(e) => e.stopPropagation()}
-                  className="shrink-0 rounded-md p-1 text-muted-foreground/20 transition-colors hover:text-muted-foreground group-hover/file:text-muted-foreground"
-                >
-                  <Download className="h-4 w-4" />
-                </a>
-              </button>
-            );
-          }
-          return (
-            <a
-              key={p}
-              href={downloadHref}
-              download={fileName}
-              className="group/file flex items-center gap-3.5 px-4 py-3 no-underline transition-colors hover:bg-accent/50"
-            >
-              {meta}
-              <Download className="h-4 w-4 shrink-0 text-muted-foreground/20 transition-colors group-hover/file:text-muted-foreground" />
-            </a>
-          );
-        })}
-      </div>
+      >
+        {paths.map((p) => (
+          <FileRow key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} />
+        ))}
+      </FileCard>
     </div>
   );
 }
@@ -572,42 +585,18 @@ function autoGrow(ta: HTMLTextAreaElement) {
  */
 function MessageAttachments({ chatId, files }: { chatId: string; files: { name: string; type: string }[] }) {
   const t = useTranslations("chat.message");
-  const { open } = usePreview();
-  // Same gating as the workspace panel: previewable kinds open Quick Look, the
-  // rest fall back to a download. Quick Look pages through the viewable subset.
+  // Same card + rows the AI uses for the files it delivers — names visible, real
+  // thumbnails, Quick Look on click. Files live at /workspace root in the sandbox.
   const viewable: PreviewFile[] = files
     .filter((f) => previewKind(f.name) !== null)
     .map((f) => ({ path: f.name, name: f.name, chatId }));
-  const tile = "overflow-hidden rounded-xl ring-1 ring-border/60 transition hover:ring-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
   return (
-    <div className="mb-1.5 flex max-w-full flex-wrap justify-end gap-2">
-      {files.map((f) => {
-        const file: PreviewFile = { path: f.name, name: f.name, chatId };
-        const canView = previewKind(f.name) !== null;
-        return canView ? (
-          <button
-            key={f.name}
-            type="button"
-            onClick={() => open(viewable, viewable.findIndex((v) => v.path === f.name))}
-            title={f.name}
-            aria-label={t("attachment", { name: f.name })}
-            className={tile}
-          >
-            <FileThumb file={file} className="h-20 w-20" />
-          </button>
-        ) : (
-          <a
-            key={f.name}
-            href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(f.name)}`}
-            download={f.name}
-            title={f.name}
-            aria-label={t("attachment", { name: f.name })}
-            className={tile}
-          >
-            <FileThumb file={file} className="h-20 w-20" />
-          </a>
-        );
-      })}
+    <div className="mb-1.5 w-full max-w-sm">
+      <FileCard title={t("attachments", { count: files.length })}>
+        {files.map((f) => (
+          <FileRow key={f.name} file={{ path: f.name, name: f.name, chatId }} viewable={viewable} />
+        ))}
+      </FileCard>
     </div>
   );
 }

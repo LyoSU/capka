@@ -290,7 +290,7 @@
       "prevVersion": "Попередня версія",
       "nextVersion": "Наступна версія",
       "versions": "{count} версій",
-      "attachment": "Вкладення {name}"
+      "attachments": "{count, plural, one {Вкладення} few {# вкладення} many {# вкладень} other {# вкладення}}"
     },
     "forkFailed": "Не вдалося відгалузити чат",
     "archived": {
