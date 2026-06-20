@@ -80,12 +80,15 @@ function isTextualMime(type: string): boolean {
  * plain text AND code (Shiki-highlighted in the viewer). Real binaries
  * (docx/xlsx/zip), video and audio return `null`.
  */
-export type PreviewKind = "image" | "pdf" | "markdown" | "text" | null;
+export type PreviewKind = "image" | "pdf" | "markdown" | "html" | "text" | null;
 
 export function previewKind(name: string): PreviewKind {
   const ext = extOf(name);
   // 1) Dev files first — MIME mislabels several (.ts → video/mp2t).
   if (ext === "md" || ext === "markdown") return "markdown";
+  // HTML is rendered (not just syntax-highlighted), so it must win over the code
+  // branch below — `html` is in CODE_EXTS for its icon, but its viewer differs.
+  if (ext === "html" || ext === "htm") return "html";
   if (CODE_EXTS.has(ext) || TEXT_EXTS.has(ext)) return "text";
   // 2) Everything else: let the MIME database decide — this is what lets the
   //    viewer cover formats (avif, heic, tiff, many text/*…) we never hand-listed.
@@ -93,6 +96,7 @@ export function previewKind(name: string): PreviewKind {
   if (type.startsWith("image/")) return "image";
   if (type === "application/pdf") return "pdf";
   if (type === "text/markdown") return "markdown";
+  if (type === "text/html" || type === "application/xhtml+xml") return "html";
   if (isTextualMime(type)) return "text";
   return null;
 }

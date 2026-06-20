@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { useTranslations } from "next-intl";
-import { ChevronLeft, ChevronRight, Download, Loader2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2, Maximize2, Minimize2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Markdown } from "./markdown";
 import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
@@ -98,6 +98,7 @@ function FilePreview({
   onClose: () => void;
 }) {
   const t = useTranslations("chat.preview");
+  const [fullscreen, setFullscreen] = useState(false);
   const file = files[index];
   const many = files.length > 1;
   const go = useCallback(
@@ -124,7 +125,12 @@ function FilePreview({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[85vh] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
+        className={cn(
+          "flex flex-col gap-0 overflow-hidden p-0 transition-[width,height] duration-200",
+          fullscreen
+            ? "h-screen w-screen max-w-none rounded-none ring-0 sm:max-w-none"
+            : "h-[85vh] max-w-5xl sm:max-w-5xl",
+        )}
       >
         {/* Header */}
         <div className="flex items-center gap-3 border-b bg-muted/30 px-4 py-2.5">
@@ -145,6 +151,9 @@ function FilePreview({
               </button>
             </div>
           )}
+          <button onClick={() => setFullscreen((f) => !f)} aria-label={fullscreen ? t("exitFullscreen") : t("fullscreen")} title={fullscreen ? t("exitFullscreen") : t("fullscreen")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
           <a href={downloadUrl(file)} download={file.name} aria-label={t("download")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
             <Download className="h-4 w-4" />
           </a>
@@ -176,10 +185,76 @@ function Viewer({ file, kind }: { file: PreviewFile; kind: ReturnType<typeof pre
     // 'self'); the response CSP default-src 'none' contains the document.
     return <iframe src={inlineUrl(file)} title={file.name} className="h-full w-full border-0" />;
   }
+  if (kind === "html") {
+    return <HtmlViewer file={file} />;
+  }
   if (kind === "markdown" || kind === "text") {
     return <TextViewer file={file} markdown={kind === "markdown"} />;
   }
   return null; // unreachable — only viewable kinds open the overlay
+}
+
+// ── HTML viewer (rendered in a sandboxed frame, with a source toggle) ──────────
+
+function HtmlViewer({ file }: { file: PreviewFile }) {
+  const t = useTranslations("chat.preview");
+  const [mode, setMode] = useState<"rendered" | "source">("rendered");
+  const loaded = useFileText(file);
+
+  if (loaded.state === "loading")
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" />
+      </div>
+    );
+  if (loaded.state === "error")
+    return <p className="p-6 text-center text-sm text-muted-foreground">{t("loadError")}</p>;
+  if (loaded.state === "too-large")
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-sm text-muted-foreground">{t("tooLarge")}</p>
+        <a href={downloadUrl(file)} download={file.name} className="text-sm font-medium text-primary hover:underline">
+          {t("download")}
+        </a>
+      </div>
+    );
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Rendered ⇄ source toggle — a peek at the markup without leaving Quick Look. */}
+      <div className="flex shrink-0 items-center gap-0.5 border-b bg-muted/20 px-3 py-1.5">
+        {(["rendered", "source"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            aria-pressed={mode === m}
+            className={cn("rounded-md px-2 py-0.5 text-xs transition-colors",
+              mode === m ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
+          >
+            {m === "rendered" ? t("rendered") : t("source")}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1">
+        {mode === "rendered" ? (
+          // sandbox WITHOUT allow-same-origin → scripts run in an opaque origin and
+          // can't reach our cookies, storage, or the parent window. srcDoc sidesteps
+          // the download route's script-blocking CSP (that applies to navigations,
+          // not to text we fetched and inject here).
+          <iframe
+            title={file.name}
+            srcDoc={loaded.text}
+            sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock"
+            className="h-full w-full border-0 bg-white"
+          />
+        ) : (
+          <div className="h-full overflow-auto">
+            <CodeViewer name={file.name} text={loaded.text} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── Text / code viewer ───────────────────────────────────────────────────────
@@ -366,7 +441,7 @@ export function FileThumb({ file, className }: { file: PreviewFile; className?: 
   if (kind === "image")
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={inlineUrl(file)} alt="" loading="lazy" className={cn("object-cover", className)} />;
-  if (kind === "text" || kind === "markdown") return <TextThumb file={file} className={className} />;
+  if (kind === "text" || kind === "markdown" || kind === "html") return <TextThumb file={file} className={className} />;
 
   return (
     <div className={cn("flex items-center justify-center", bg, className)}>
