@@ -76,6 +76,10 @@ export const chats = pgTable("chats", {
   projectId: text("project_id"),
   title: text("title"),
   model: text("model"),
+  // Where the conversation originates. "web" chats are fully interactive; a
+  // "telegram" chat is owned by the bot channel and is read-only in the web UI
+  // (you reply from Telegram, or fork it into a fresh web chat to take over).
+  source: text("source").default("web"),
   pinned: boolean("pinned").default(false),
   archived: boolean("archived").default(false),
   // The leaf of the message tree currently shown. The visible conversation is

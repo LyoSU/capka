@@ -68,6 +68,7 @@
     "newChat": "New Chat",
     "expandSidebar": "Expand sidebar",
     "pinned": "Pinned",
+    "telegram": "Telegram",
     "archived": "Archived",
     "projects": "Projects",
     "settings": "Settings",
@@ -189,7 +190,9 @@
       },
       "scrollDown": "Scroll to bottom",
       "retry": "Retry",
-      "navigation": "Chat navigation"
+      "navigation": "Chat navigation",
+      "telegramReadOnly": "This is a Telegram chat — reply from Telegram.",
+      "continueHere": "Continue in a web chat"
     },
     "menu": {
       "rename": "Rename",
@@ -757,5 +760,23 @@
       "disabledDescription": "New account registration is currently disabled by the administrator.",
       "backToSignIn": "Back to sign in"
     }
+  },
+  "telegram": {
+    "start": "Welcome to unClaw! Send /link CODE to connect your account.",
+    "tooManyAttempts": "Too many attempts. Please wait a minute and try again.",
+    "linkUsage": "Usage: /link CODE",
+    "invalidCode": "Invalid or expired code.",
+    "linked": "Account linked!",
+    "linkFirst": "Link your account first: /link CODE",
+    "newChat": "New chat started!",
+    "notLinked": "Account not linked. Send /link CODE",
+    "tooFast": "You're sending messages too fast — please wait a moment.",
+    "fileTooBig": "“{name}” is larger than 20 MB, so I can't fetch it from Telegram.",
+    "unsupported": "I can work with text, photos and files. Send me one of those and I'll get going.",
+    "startError": "Couldn't start the assistant: {error}",
+    "statusThinking": "thinking…",
+    "noText": "(the assistant returned no text)",
+    "genericError": "Something went wrong. Please try again.",
+    "doneLog": "✅ {count, plural, one {# tool} other {# tools}} · {secs}s"
   }
 }

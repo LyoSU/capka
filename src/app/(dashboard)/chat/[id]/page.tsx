@@ -24,7 +24,7 @@ export default async function ChatIdPage({
 
   // Load existing chat to check for projectId
   const [existingChat] = await db
-    .select({ projectId: chats.projectId, model: chats.model })
+    .select({ projectId: chats.projectId, model: chats.model, source: chats.source })
     .from(chats)
     .where(and(eq(chats.id, chatId), eq(chats.userId, session.user.id)))
     .limit(1);
@@ -55,6 +55,7 @@ export default async function ChatIdPage({
       defaultModel={defaultModel}
       projectId={projectId ?? undefined}
       isAdmin={userRow?.role === "admin"}
+      readOnly={existingChat?.source === "telegram"}
     />
   );
 }

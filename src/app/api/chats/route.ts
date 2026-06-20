@@ -37,6 +37,7 @@ export const GET = apiHandler(async (req: Request) => {
       pinned: chats.pinned,
       archived: chats.archived,
       projectId: chats.projectId,
+      source: chats.source,
       updatedAt: chats.updatedAt,
     })
     .from(chats)

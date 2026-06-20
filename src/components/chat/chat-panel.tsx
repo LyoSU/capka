@@ -24,7 +24,7 @@ function msgText(m: { parts?: { type: string; text?: string }[] }): string {
     .trim();
 }
 
-import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Sparkles, Send } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
@@ -43,9 +43,12 @@ interface ChatPanelProps {
   defaultModel: string;
   projectId?: string;
   isAdmin?: boolean;
+  /** Telegram-sourced chats are read-only on the web — no composer, no edits;
+   *  the user replies from Telegram or forks the chat to continue here. */
+  readOnly?: boolean;
 }
 
-export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }: ChatPanelProps) {
   const t = useTranslations("chat");
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -76,6 +79,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     const newId = await forkChat(messageId);
     if (newId) router.push(`/chat/${newId}`);
     else toast.error(t("forkFailed"));
+  };
+
+  // "Continue here": fork a read-only Telegram chat from its latest message into
+  // a fresh, fully-interactive web chat so the user can take the thread over.
+  const handleContinueHere = async () => {
+    const lastId = messages[messages.length - 1]?.id;
+    if (!lastId) return;
+    await handleFork(lastId);
   };
 
   // The latest assistant reply is the only one that can be regenerated; editing
@@ -276,7 +287,19 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   const lastMsg = messages[messages.length - 1];
   const lastFailed = (lastMsg?.metadata as { taskStatus?: string } | undefined)?.taskStatus === "failed";
 
-  const inputEl = (
+  const inputEl = readOnly ? (
+    <div className="mx-auto max-w-3xl px-4 pb-4 md:px-6 lg:max-w-4xl">
+      <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Send className="h-4 w-4 shrink-0" />
+          {t("panel.telegramReadOnly")}
+        </p>
+        <Button variant="outline" size="sm" onClick={handleContinueHere} disabled={messages.length === 0}>
+          {t("panel.continueHere")}
+        </Button>
+      </div>
+    </div>
+  ) : (
     <ChatInput
       value={input}
       onChange={setInput}
@@ -342,8 +365,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
                       chatId={chatId}
                       isAdmin={isAdmin}
                       isStreaming={isStreamingMsg}
-                      onRegenerate={canRegenerate ? regenerate : undefined}
-                      onEdit={!isLoading ? editMessage : undefined}
+                      onRegenerate={canRegenerate && !readOnly ? regenerate : undefined}
+                      onEdit={!isLoading && !readOnly ? editMessage : undefined}
                       onSwitchBranch={!isLoading ? switchBranch : undefined}
                       onFork={!isLoading ? handleFork : undefined}
                     />

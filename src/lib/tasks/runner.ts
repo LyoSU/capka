@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { chats, messages, memories, projects } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
-import { deliverTaskResult, type TaskOrigin } from "./delivery";
+import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
 import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
@@ -130,6 +130,43 @@ async function downloadBounded(
   return results;
 }
 
+const MAX_OUTPUT_FILES = 10;
+const MAX_OUTPUT_FILE_BYTES = 45 * 1024 * 1024; // under Telegram's 50 MB document cap
+const MAX_OUTPUT_TOTAL_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Files created or modified in the workspace since `sinceMs` — i.e. what the
+ * agent produced this run. Delivered to channels that can't browse the sandbox
+ * themselves (Telegram); the web UI lists files directly so it needs none of
+ * this. Excludes dotfiles, bounded in count and bytes, and always best-effort.
+ */
+async function collectOutputFiles(sessionKey: string, userId: string, sinceMs: number) {
+  const { execCommand } = await import("@/lib/sandbox/client");
+  const sinceSec = Math.floor(sinceMs / 1000);
+  const found = await execCommand(
+    sessionKey,
+    `find /workspace -type f -newermt @${sinceSec} -not -path '*/.*' | head -${MAX_OUTPUT_FILES}`,
+    5000,
+  ).catch(() => null);
+  const lines = found?.stdout?.trim() ? found.stdout.trim().split("\n") : [];
+  const out: { name: string; data: Buffer }[] = [];
+  let total = 0;
+  for (const line of lines) {
+    const rel = line.replace(/^\/workspace\/?/, "");
+    if (!rel) continue;
+    try {
+      const res = await downloadFile(sessionKey, rel, userId);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > MAX_OUTPUT_FILE_BYTES || total + buf.length > MAX_OUTPUT_TOTAL_BYTES) continue;
+      total += buf.length;
+      out.push({ name: rel.split("/").pop() || rel, data: buf });
+    } catch (e) {
+      log.warn("output file download failed", { userId, file: rel, err: String(e) });
+    }
+  }
+  return out;
+}
+
 /** Read multimodal files from sandbox and inject as FilePart in the last user message */
 async function injectNativeFiles(
   modelMessages: ModelMessage[],
@@ -242,6 +279,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     parts.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
   let streamError: string | undefined;
   let closeMcp: (() => Promise<void>) | undefined;
+
+  // Outbound channel (e.g. Telegram). No-op for web — that UI streams over
+  // realtime. Created up front so the catch path can still finalize it. We track
+  // the live activity + tool count so the channel can show a status header while
+  // streaming and a collapsed "✅ N tools · Ts" log once done.
+  const sink = makeDeliverySink(payload.origin);
+  const startedAt = Date.now();
+  let toolCount = 0;
+  let currentStatus: StreamStatus;
 
   // Renew lease + poll for cooperative cancellation cross-process.
   const monitor = setInterval(() => {
@@ -361,6 +407,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       await flushReasoning();
       await flushText();
+      // Mirror progress to the outbound channel (Telegram). Throttled + coalesced
+      // inside the sink, so calling it on every flush is cheap.
+      sink.push(getFullText(), currentStatus);
     };
     const scheduleFlush = () => {
       if (flushTimer) return;
@@ -373,16 +422,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         if (ac.signal.aborted) break;
         switch (event.type) {
           case "reasoning-delta":
+            currentStatus = { kind: "thinking" };
             appendReasoning(event.text);
             reasonBuf += event.text;
             scheduleFlush();
             break;
           case "text-delta":
+            // Answer is flowing — clear the transient "thinking/tool" header.
+            currentStatus = undefined;
             appendText(event.text);
             textBuf += event.text;
             scheduleFlush();
             break;
           case "tool-call":
+            toolCount += 1;
+            currentStatus = { kind: "tool", name: event.toolName };
             await flushBuffers();
             parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
             await publishTaskEvent(userId, {
@@ -479,8 +533,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }).where(eq(messages.id, msgId));
     await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
-    if (payload.origin) {
-      await deliverTaskResult(payload.origin, { status: finalStatus, text: getFullText(), error: failure?.userMessage });
+    await sink.finish({
+      status: finalStatus, text: getFullText(), error: failure?.userMessage,
+      toolCount, elapsedMs: Date.now() - startedAt,
+    });
+    // Deliver any files the agent created/edited this run to the origin channel
+    // (Telegram). Best-effort and only on success — never fail the task over it.
+    if (finalStatus === "completed" && payload.origin) {
+      try {
+        const outFiles = await collectOutputFiles(sessionKey, userId, startedAt);
+        if (outFiles.length) await sink.sendFiles(outFiles);
+      } catch (e) {
+        log.warn("output file delivery failed", { taskId, err: String(e) });
+      }
     }
 
     // Record token usage/cost (never fatal). `inputTokens` is the TOTAL input
@@ -549,9 +614,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }).where(eq(messages.id, msgId)).catch(() => {}),
     ]);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
-    if (payload.origin) {
-      await deliverTaskResult(payload.origin, { status, text: getFullText(), error: failure?.userMessage });
-    }
+    await sink.finish({
+      status, text: getFullText(), error: failure?.userMessage,
+      toolCount, elapsedMs: Date.now() - startedAt,
+    });
   } finally {
     clearTimeout(deadline);
     clearInterval(monitor);

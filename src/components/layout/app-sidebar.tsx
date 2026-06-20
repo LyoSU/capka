@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Plus, Settings, FolderKanban, Archive } from "lucide-react";
+import { Plus, Settings, FolderKanban, Archive, Send } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -34,6 +34,7 @@ type ChatItem = {
   pinned: boolean | null;
   archived: boolean | null;
   updatedAt: string | null;
+  source: string | null;
 };
 
 type DateGroupKey = "today" | "yesterday" | "thisWeek" | "older";
@@ -93,8 +94,12 @@ export function AppSidebar() {
     fetchChats();
   }, [fetchChats, pathname]);
 
-  const pinnedChats = chats.filter((c) => c.pinned && !c.archived);
-  const regularChats = chats.filter((c) => !c.pinned && !c.archived);
+  // Telegram chats are a distinct kind — read-only in the web UI — so they get
+  // their own section instead of mixing into the date-grouped web chats.
+  const telegramChats = chats.filter((c) => c.source === "telegram" && !c.archived);
+  const webChats = chats.filter((c) => c.source !== "telegram" && !c.archived);
+  const pinnedChats = webChats.filter((c) => c.pinned);
+  const regularChats = webChats.filter((c) => !c.pinned);
   const groups = groupByDate(regularChats);
   const activeChatId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
 
@@ -196,6 +201,31 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
+
+        {telegramChats.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>
+              <Send className="mr-1.5 h-3.5 w-3.5" />
+              {t("telegram")}
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {telegramChats.map((chat) => (
+                  <SidebarMenuItem key={chat.id}>
+                    <ChatContextMenu chat={chat} onUpdate={fetchChats}>
+                      <SidebarMenuButton
+                        render={<Link href={`/chat/${chat.id}`} />}
+                        data-active={activeChatId === chat.id || undefined}
+                      >
+                        <span className="truncate">{chat.title || t("newChat")}</span>
+                      </SidebarMenuButton>
+                    </ChatContextMenu>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {chats.length === 0 && (
           <div className="flex flex-col items-center px-4 py-10 text-center">

@@ -32,7 +32,7 @@ export const POST = apiHandler(async (req: Request) => {
 
   const [chatRow, project] = await Promise.all([
     requestChatId
-      ? db.select({ id: chats.id, userId: chats.userId, title: chats.title, model: chats.model }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
+      ? db.select({ id: chats.id, userId: chats.userId, title: chats.title, model: chats.model, source: chats.source }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
       : undefined,
     projectId
       ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
@@ -44,6 +44,13 @@ export const POST = apiHandler(async (req: Request) => {
     return Response.json({ error: "Chat not found" }, { status: 404 });
   }
   const existingChat = chatRow?.userId === userId ? chatRow : undefined;
+
+  // Telegram chats are owned by the bot channel and read-only on the web — you
+  // reply from Telegram, or fork the chat to take it over on the web. Block the
+  // write server-side too (defense in depth beyond the disabled composer).
+  if (existingChat?.source === "telegram") {
+    return Response.json({ error: "This is a Telegram chat — reply from Telegram." }, { status: 403 });
+  }
 
   // The chat's own model is the source of truth so the choice sticks across
   // reloads/turns; an explicit per-request model (user just switched) wins and

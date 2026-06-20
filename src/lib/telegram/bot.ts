@@ -1,4 +1,4 @@
-import { Bot } from "grammy";
+import { Bot, type Context } from "grammy";
 import { nanoid } from "nanoid";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -10,34 +10,182 @@ import { toUIMessages } from "@/lib/chat/presenter";
 import { loadActivePath } from "@/lib/chat/tree";
 import { take } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
+import { getTranslator } from "@/lib/i18n/translator";
+import { workspaceSessionKey } from "@/lib/sandbox/workspace";
+import { uploadFile } from "@/lib/sandbox/client";
+import type { FileRef } from "@/lib/constants";
 import type { TaskPayload } from "@/lib/tasks/runner";
 
 let _bot: Bot | null = null;
 let _polling = false;
+// Captured when the bot is built — needed to construct file download URLs
+// (`https://api.telegram.org/file/bot<token>/<path>`), the one place the Bot API
+// has no method wrapper for.
+let _token = "";
+
+const MAX_TELEGRAM_FILE_BYTES = 20 * 1024 * 1024; // getFile's hard download cap
+
+// Bot replies follow the user's own Telegram client language (falling back to
+// English), so a user never has to configure anything to be understood.
+const tFor = (ctx: Context) => getTranslator(ctx.from?.language_code, "telegram");
+
+type TgFile = { fileId: string; fileName: string; mime: string };
+
+/** Pull every usable file descriptor out of an incoming message. Photos arrive
+ *  as a size ladder — we take the largest. Names/MIME fall back to sensible
+ *  defaults so even nameless voice notes land as real files in the workspace. */
+function extractFiles(msg: NonNullable<Context["message"]>): TgFile[] {
+  const out: TgFile[] = [];
+  const d = msg.document;
+  if (d) out.push({ fileId: d.file_id, fileName: d.file_name || `file_${d.file_unique_id}`, mime: d.mime_type || "application/octet-stream" });
+  if (msg.photo?.length) {
+    const ph = msg.photo[msg.photo.length - 1];
+    out.push({ fileId: ph.file_id, fileName: `photo_${ph.file_unique_id}.jpg`, mime: "image/jpeg" });
+  }
+  const v = msg.video;
+  if (v) out.push({ fileId: v.file_id, fileName: v.file_name || `video_${v.file_unique_id}.mp4`, mime: v.mime_type || "video/mp4" });
+  const a = msg.audio;
+  if (a) out.push({ fileId: a.file_id, fileName: a.file_name || `audio_${a.file_unique_id}.mp3`, mime: a.mime_type || "audio/mpeg" });
+  if (msg.voice) out.push({ fileId: msg.voice.file_id, fileName: `voice_${msg.voice.file_unique_id}.ogg`, mime: msg.voice.mime_type || "audio/ogg" });
+  const an = msg.animation;
+  if (an) out.push({ fileId: an.file_id, fileName: an.file_name || `animation_${an.file_unique_id}.mp4`, mime: an.mime_type || "video/mp4" });
+  if (msg.video_note) out.push({ fileId: msg.video_note.file_id, fileName: `videonote_${msg.video_note.file_unique_id}.mp4`, mime: "video/mp4" });
+  return out;
+}
+
+/** Fetch a Telegram file's bytes as a `File` ready for the sandbox upload, or
+ *  null if it exceeds the Bot API's 20 MB download cap. */
+async function downloadTgFile(ctx: Context, f: TgFile): Promise<File | null> {
+  const info = await ctx.api.getFile(f.fileId);
+  if (!info.file_path || (info.file_size ?? 0) > MAX_TELEGRAM_FILE_BYTES) return null;
+  const res = await fetch(`https://api.telegram.org/file/bot${_token}/${info.file_path}`);
+  if (!res.ok) return null;
+  return new File([Buffer.from(await res.arrayBuffer())], f.fileName, { type: f.mime });
+}
+
+// Album (media-group) coalescing. Telegram sends each photo of an album as its
+// own update sharing a media_group_id, with the caption usually only on the
+// first. We collect parts and ingest once the burst settles.
+const ALBUM_DEBOUNCE_MS = 1500;
+const albums = new Map<string, { ctx: Context; text: string; files: TgFile[]; timer: ReturnType<typeof setTimeout> }>();
+
+function bufferAlbum(ctx: Context, groupId: string, text: string, files: TgFile[]): void {
+  const existing = albums.get(groupId);
+  if (existing) {
+    clearTimeout(existing.timer);
+    existing.files.push(...files);
+    if (text && !existing.text) existing.text = text;
+    existing.timer = setTimeout(() => void flushAlbum(groupId), ALBUM_DEBOUNCE_MS);
+    return;
+  }
+  albums.set(groupId, { ctx, text, files, timer: setTimeout(() => void flushAlbum(groupId), ALBUM_DEBOUNCE_MS) });
+}
+
+function flushAlbum(groupId: string): void {
+  const p = albums.get(groupId);
+  if (!p) return;
+  albums.delete(groupId);
+  void ingest(p.ctx, p.text, p.files);
+}
+
+/**
+ * The single entry point for an incoming user turn (text and/or files). Mirrors
+ * the web enqueue path: resolve the link's pinned Telegram chat, push any files
+ * into the sandbox, save the user message on the active branch, and enqueue a
+ * durable task whose result the runner streams back to this chat.
+ */
+async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void> {
+  const t = tFor(ctx);
+  const link = await findLink(ctx.from!.id);
+  if (!link) {
+    await ctx.reply(t("notLinked"));
+    return;
+  }
+  // Same per-user flood guard as the web enqueue path.
+  if (!take(`chat:${link.userId}`).ok) {
+    await ctx.reply(t("tooFast"));
+    return;
+  }
+
+  // Route into the link's pinned Telegram chat — NOT "whatever the user last
+  // touched on the web", which would mix Telegram replies into web/project
+  // chats and lose project context.
+  const title = (text || files[0]?.fileName || "Telegram Chat").slice(0, 100);
+  const chat = await resolveActiveChat(link, title);
+  const sessionKey = workspaceSessionKey({ id: chat.id, projectId: chat.projectId ?? null });
+
+  // Pull each Telegram file into the user's sandbox so the assistant can read,
+  // run or analyze it — passed through as attachedFiles, exactly like the web.
+  const attachedFiles: FileRef[] = [];
+  for (const f of files) {
+    try {
+      const file = await downloadTgFile(ctx, f);
+      if (!file) {
+        await ctx.reply(t("fileTooBig", { name: f.fileName }));
+        continue;
+      }
+      await uploadFile(sessionKey, ".", file, link.userId);
+      attachedFiles.push({ name: f.fileName, type: f.mime });
+    } catch (e) {
+      log.warn("telegram file ingest failed", { name: f.fileName, err: String(e) });
+    }
+  }
+
+  // Save user message — chained onto the chat's current leaf so the conversation
+  // tree stays linear and the web view shows full history.
+  const tgUserId = nanoid();
+  await db.insert(messages).values({
+    id: tgUserId,
+    chatId: chat.id,
+    parentId: chat.activeLeafId ?? null,
+    role: "user",
+    content: text,
+    platform: "telegram",
+    telegramMessageId: ctx.message?.message_id,
+  });
+  await db.update(chats).set({ activeLeafId: tgUserId, updatedAt: new Date() }).where(eq(chats.id, chat.id));
+  await publishTaskEvent(link.userId, { type: "new_message", chatId: chat.id });
+
+  try {
+    // Answer from the active branch (root → the message we just added).
+    const path = await loadActivePath(chat.id, tgUserId);
+    const payload: TaskPayload = {
+      requestModel: chat.model ?? undefined,
+      projectId: chat.projectId ?? undefined,
+      uiMessages: toUIMessages(path.map((p) => p.node)),
+      attachedFiles: attachedFiles.length ? attachedFiles : undefined,
+      origin: { platform: "telegram", telegramChatId: ctx.chat!.id, locale: ctx.from?.language_code },
+    };
+    await enqueueTask({ id: nanoid(), chatId: chat.id, userId: link.userId, payload });
+    await ctx.replyWithChatAction("typing").catch(() => {});
+  } catch (error: unknown) {
+    await ctx.reply(t("startError", { error: error instanceof Error ? error.message : "Unknown error" }));
+  }
+}
 
 export async function getBot(): Promise<Bot | null> {
   if (_bot) return _bot;
   const token = await getSetting("telegram_bot_token");
   if (!token) return null;
 
+  _token = token;
   _bot = new Bot(token);
 
   _bot.command("start", async (ctx) => {
-    await ctx.reply(
-      "Welcome to unClaw! Use /link CODE to connect your account.",
-    );
+    await ctx.reply(tFor(ctx)("start"));
   });
 
   _bot.command("link", async (ctx) => {
+    const t = tFor(ctx);
     // Throttle guessing attempts per Telegram user (defense-in-depth on top of
     // the large code space).
     if (!take(`tglink:${ctx.from!.id}`, 5).ok) {
-      await ctx.reply("Too many attempts. Please wait a minute and try again.");
+      await ctx.reply(t("tooManyAttempts"));
       return;
     }
     const code = ctx.match?.trim().toUpperCase();
     if (!code) {
-      await ctx.reply("Usage: /link CODE");
+      await ctx.reply(t("linkUsage"));
       return;
     }
 
@@ -48,7 +196,7 @@ export async function getBot(): Promise<Bot | null> {
       .limit(1);
     if (!lc || lc.expiresAt < new Date()) {
       if (lc) await db.delete(linkCodes).where(eq(linkCodes.code, code));
-      await ctx.reply("Invalid or expired code.");
+      await ctx.reply(t("invalidCode"));
       return;
     }
 
@@ -70,86 +218,47 @@ export async function getBot(): Promise<Bot | null> {
       });
     }
     await db.delete(linkCodes).where(eq(linkCodes.code, code));
-    await ctx.reply("Account linked!");
+    await ctx.reply(t("linked"));
   });
 
   _bot.command("new", async (ctx) => {
+    const t = tFor(ctx);
     const link = await findLink(ctx.from!.id);
     if (!link) {
-      await ctx.reply("Link your account first with /link CODE");
+      await ctx.reply(t("linkFirst"));
       return;
     }
     const id = nanoid();
     await db
       .insert(chats)
-      .values({ id, userId: link.userId, title: "Telegram Chat" });
+      .values({ id, userId: link.userId, title: "Telegram Chat", source: "telegram" });
     await db.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
-    await ctx.reply("New chat started!");
+    await ctx.reply(t("newChat"));
   });
 
-  _bot.on("message:text", async (ctx) => {
-    const link = await findLink(ctx.from!.id);
-    if (!link) {
-      await ctx.reply("Account not linked. Use /link CODE");
-      return;
-    }
+  // Plain text → straight into the engine.
+  _bot.on("message:text", (ctx) => ingest(ctx, ctx.message.text, []));
 
-    // Same per-user flood guard as the web enqueue path.
-    if (!take(`chat:${link.userId}`).ok) {
-      await ctx.reply("You're sending messages too fast — please wait a moment.");
-      return;
-    }
+  // Any message carrying a file the assistant can use: photo, document, video,
+  // audio, voice, animation, video note. The caption is the prompt. Telegram
+  // delivers an album (media group) as several updates sharing a
+  // `media_group_id`, so we buffer those and ingest them as one turn.
+  _bot.on(
+    ["message:photo", "message:document", "message:video", "message:audio", "message:voice", "message:animation", "message:video_note"],
+    async (ctx) => {
+      const files = extractFiles(ctx.message);
+      const text = ctx.message.caption ?? "";
+      if (ctx.message.media_group_id) {
+        bufferAlbum(ctx, ctx.message.media_group_id, text, files);
+        return;
+      }
+      await ingest(ctx, text, files);
+    },
+  );
 
-    // Route into the link's pinned Telegram chat — NOT "whatever the user last
-    // touched on the web", which would mix Telegram replies into web/project
-    // chats and lose project context.
-    const chat = await resolveActiveChat(link, ctx.message.text.slice(0, 100));
-
-    // Save user message — chained onto the chat's current leaf so the
-    // conversation tree stays linear and the web view shows full history.
-    // Telegram is linear: it always appends to the active branch.
-    const tgUserId = nanoid();
-    await db.insert(messages).values({
-      id: tgUserId,
-      chatId: chat.id,
-      parentId: chat.activeLeafId ?? null,
-      role: "user",
-      content: ctx.message.text,
-      platform: "telegram",
-      telegramMessageId: ctx.message.message_id,
-    });
-    await db
-      .update(chats)
-      .set({ activeLeafId: tgUserId, updatedAt: new Date() })
-      .where(eq(chats.id, chat.id));
-
-    // Tell any open web client a message landed in this chat.
-    await publishTaskEvent(link.userId, { type: "new_message", chatId: chat.id });
-
-    // Run through the SAME durable engine as the web: build the conversation
-    // from history and enqueue a task. The worker executes it (with memory,
-    // project context, usage and the sandbox) and the runner pushes the reply
-    // back to Telegram via the task origin — so it survives restarts and the
-    // two channels can never drift.
-    try {
-      // Answer from the active branch (root → the message we just added), not a
-      // flat dump of every row — otherwise branches created on the web would
-      // feed alternative versions of past turns into the model.
-      const path = await loadActivePath(chat.id, tgUserId);
-
-      const payload: TaskPayload = {
-        requestModel: chat.model ?? undefined,
-        projectId: chat.projectId ?? undefined,
-        uiMessages: toUIMessages(path.map((p) => p.node)),
-        origin: { platform: "telegram", telegramChatId: ctx.chat.id },
-      };
-      await enqueueTask({ id: nanoid(), chatId: chat.id, userId: link.userId, payload });
-      await ctx.replyWithChatAction("typing").catch(() => {});
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "Unknown error occurred";
-      await ctx.reply(`Couldn't start the assistant: ${msg}`);
-    }
-  });
+  // Everything else (stickers, locations, contacts, polls…). Rather than
+  // silently dropping it, tell the user what the bot can actually work with.
+  _bot.on("message", (ctx) => ctx.reply(tFor(ctx)("unsupported")).then(() => {}));
 
   // Without this, a throwing handler is either swallowed or crashes the polling
   // process depending on the runtime. Log it and keep the bot alive.
