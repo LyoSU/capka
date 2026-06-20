@@ -53,6 +53,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
   const lastUserMsgRef = useRef<HTMLDivElement>(null);
   const contentEndRef = useRef<HTMLDivElement>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
+  // Whether we're still holding the latest turn at the top. True right after a
+  // send; the user taking manual scroll control (wheel/touch/nav) releases it.
+  const pinnedRef = useRef(true);
   // First paint of a chat snaps into place instantly; later sends animate. The
   // page mounts ChatPanel with key={chatId}, so this resets per chat for free.
   const seenFirstTurn = useRef(false);
@@ -96,6 +99,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     const el = scrollRef.current;
     const end = contentEndRef.current;
     if (!el || !end) return;
+    pinnedRef.current = false; // explicit navigation — stop holding the turn at top
     const cRect = el.getBoundingClientRect();
     const eRect = end.getBoundingClientRect();
     el.scrollTo({ top: el.scrollTop + (eRect.bottom - cRect.bottom) + 120, behavior: "smooth" });
@@ -106,6 +110,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     const el = scrollRef.current;
     const target = el?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
     if (!el || !target) return;
+    pinnedRef.current = false; // user navigated to a specific turn — release the pin
     const top = el.scrollTop + (target.getBoundingClientRect().top - el.getBoundingClientRect().top) - TOP_INSET;
     el.scrollTo({ top, behavior: "smooth" });
   };
@@ -137,7 +142,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     const spacer = spacerRef.current;
     if (!el || !userEl || !end || !spacer) return;
     const contentBelowUser = end.getBoundingClientRect().top - userEl.getBoundingClientRect().top;
-    spacer.style.height = `${Math.max(0, el.clientHeight - contentBelowUser - TOP_INSET)}px`;
+    const h = `${Math.max(0, el.clientHeight - contentBelowUser - TOP_INSET)}px`;
+    // Only write when it actually changes — a no-op write would re-trigger the
+    // ResizeObserver that calls this, risking a feedback loop.
+    if (spacer.style.height !== h) spacer.style.height = h;
   };
 
   // Pin the latest turn to the top. When a new user message appears we grow the
@@ -158,9 +166,44 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin }: ChatPane
     // would animate the very first positioning and read as a stray scroll.
     el.scrollTo({ top, behavior: seenFirstTurn.current ? "smooth" : "instant" });
     seenFirstTurn.current = true;
+    pinnedRef.current = true; // a fresh turn re-arms the pin
     updateScrollDown();
     updateActiveTurn();
   }, [lastUserId]);
+
+  // Hold the latest turn at the top through ANY content height change — not just
+  // message additions. A long reasoning block collapsing on its own shrinks the
+  // reply; without this the browser clamps the scroll and the question visibly
+  // drops down the page. We keep the spacer sized and, while the pin is still
+  // held (the user hasn't grabbed scroll), re-seat the question at the header
+  // line. Wheel/touch release the pin so we never fight a deliberate scroll.
+  useIsomorphicLayoutEffect(() => {
+    const el = scrollRef.current;
+    const content = el?.firstElementChild as HTMLElement | null;
+    if (!el || !content) return;
+
+    const release = () => { pinnedRef.current = false; };
+    el.addEventListener("wheel", release, { passive: true });
+    el.addEventListener("touchmove", release, { passive: true });
+
+    const ro = new ResizeObserver(() => {
+      resizeSpacer(); // grow the spacer first so re-seating has room to scroll into
+      if (pinnedRef.current) {
+        const userEl = lastUserMsgRef.current;
+        if (userEl) {
+          const top = el.scrollTop + (userEl.getBoundingClientRect().top - el.getBoundingClientRect().top) - TOP_INSET;
+          if (Math.abs(top - el.scrollTop) > 1) el.scrollTop = top; // instant re-seat, no animation
+        }
+      }
+      updateScrollDown();
+    });
+    ro.observe(content);
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("wheel", release);
+      el.removeEventListener("touchmove", release);
+    };
+  }, []);
 
   // Keep the spacer correct on viewport changes; refresh the button as the
   // reply streams in (content grows, but we deliberately don't scroll).
