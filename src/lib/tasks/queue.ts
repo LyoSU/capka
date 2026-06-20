@@ -108,17 +108,39 @@ export async function isCancelRequested(id: string): Promise<boolean> {
 }
 
 /**
- * Fail any running task whose lease has expired (its worker died). Returns the
- * reconciled rows so the caller can notify clients to clear stuck "running" UI.
+ * User-facing text for a task whose worker died mid-flight. Shared by the
+ * persisted message metadata and the live SSE so a reload and a live tab show
+ * the exact same thing.
+ */
+export const INTERRUPTED_MESSAGE =
+  "The task was interrupted before it finished. Please try again.";
+
+/**
+ * Fail any running task whose lease has expired (its worker died), AND reconcile
+ * its abandoned assistant message in the same statement. The two live in
+ * separate tables (`tasks.status` vs `messages.metadata.status`) but represent
+ * one logical state — leaving the message at "running" makes the client revive a
+ * stuck spinner on every history reload, so both must move together atomically.
+ * Returns the reconciled task rows so the caller can notify connected clients.
  */
 export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "user_id" | "chat_id">>> {
   const { rows } = await pool.query<Pick<TaskRow, "id" | "user_id" | "chat_id">>(
-    `UPDATE tasks
-        SET status = 'failed',
-            error = 'worker lost (lease expired)',
-            updated_at = now()
-      WHERE status = 'running' AND lease_expires_at < now()
-      RETURNING id, user_id, chat_id`,
+    `WITH dead AS (
+        UPDATE tasks
+           SET status = 'failed',
+               error = 'worker lost (lease expired)',
+               updated_at = now()
+         WHERE status = 'running' AND lease_expires_at < now()
+         RETURNING id, user_id, chat_id
+     ), reconciled_messages AS (
+        UPDATE messages m
+           SET metadata = m.metadata || jsonb_build_object('status', 'failed', 'error', $1::text)
+          FROM dead
+         WHERE m.metadata->>'taskId' = dead.id
+           AND m.metadata->>'status' = 'running'
+     )
+     SELECT id, user_id, chat_id FROM dead`,
+    [INTERRUPTED_MESSAGE],
   );
   return rows;
 }

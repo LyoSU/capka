@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models } from "@/lib/db/schema";
 import { realtime } from "@/lib/realtime";
-import { claimNextTask, reconcileZombies } from "@/lib/tasks/queue";
+import { claimNextTask, reconcileZombies, INTERRUPTED_MESSAGE } from "@/lib/tasks/queue";
 import { runAgentTask } from "@/lib/tasks/runner";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { syncModelCatalog } from "@/lib/models/catalog";
@@ -67,7 +67,7 @@ async function reconcile(): Promise<void> {
     for (const t of dead) {
       await publishTaskEvent(t.user_id, {
         type: "task:finish", taskId: t.id, chatId: t.chat_id, status: "failed",
-        error: "The task was interrupted before it finished. Please try again.",
+        error: INTERRUPTED_MESSAGE,
       });
     }
     if (dead.length) log.info("reconciled zombie tasks", { count: dead.length, taskIds: dead.map((t) => t.id) });

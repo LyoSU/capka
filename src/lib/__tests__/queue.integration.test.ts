@@ -69,4 +69,47 @@ run("durable queue", () => {
     expect(rows[0].status).toBe("failed");
     expect(rows[0].error).toMatch(/lease expired/);
   });
+
+  it("reconciles the abandoned assistant message, not just the task", async () => {
+    await enqueueTask({ id: "qt4", chatId: C, userId: U, payload: {} });
+    await pool.query(
+      `UPDATE tasks SET status='running', worker_id='w1', lease_expires_at = now() - interval '1 minute' WHERE id='qt4'`,
+    );
+    // The worker wrote a placeholder assistant row, then died before finishing.
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','',$3)`,
+      ["qmsg4", C, JSON.stringify({ taskId: "qt4", status: "running", parts: [] })],
+    );
+
+    await reconcileZombies();
+
+    const { rows } = await pool.query<{ metadata: { status: string; error?: string; taskId: string; parts: unknown[] } }>(
+      `SELECT metadata FROM messages WHERE id='qmsg4'`,
+    );
+    // The message must no longer read as "running" — otherwise the client revives
+    // a stuck spinner on every history reload.
+    expect(rows[0].metadata.status).toBe("failed");
+    expect(rows[0].metadata.error).toBeTruthy();
+    // Existing fields (parts, taskId) are preserved, not clobbered.
+    expect(rows[0].metadata.parts).toEqual([]);
+    expect(rows[0].metadata.taskId).toBe("qt4");
+  });
+
+  it("leaves messages of healthy tasks untouched", async () => {
+    await enqueueTask({ id: "qt5", chatId: C, userId: U, payload: {} });
+    await pool.query(
+      `UPDATE tasks SET status='running', worker_id='w1', lease_expires_at = now() + interval '1 minute' WHERE id='qt5'`,
+    );
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','',$3)`,
+      ["qmsg5", C, JSON.stringify({ taskId: "qt5", status: "running", parts: [] })],
+    );
+
+    await reconcileZombies();
+
+    const { rows } = await pool.query<{ metadata: { status: string } }>(
+      `SELECT metadata FROM messages WHERE id='qmsg5'`,
+    );
+    expect(rows[0].metadata.status).toBe("running");
+  });
 });
