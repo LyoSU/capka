@@ -27,10 +27,12 @@ export interface TaskResult {
 }
 
 /** The transient activity shown while the answer streams in. `reasoning` carries
- *  the live thinking text so it can fill a native <tg-thinking> block. */
+ *  the live thinking text so it can fill a native <tg-thinking> block; `label`
+ *  is the same human-readable step text the web UI shows ("Running a command…",
+ *  "Creating logo.svg…"), with an optional dim `detail` (e.g. the command). */
 export type StreamStatus =
   | { kind: "thinking"; reasoning?: string }
-  | { kind: "tool"; name: string }
+  | { kind: "tool"; label: string; detail?: string }
   | undefined;
 
 /** A draft is sent as Markdown normally, but as HTML when it needs the native
@@ -100,13 +102,11 @@ export function composeDraft(text: string, status: StreamStatus, t: Translator):
     const inner =
       status.kind === "thinking"
         ? escapeHtml((status.reasoning ?? "").trim().slice(-THINKING_MAX_CHARS)) || t("statusThinking")
-        : `🔧 ${escapeHtml(status.name)}…`;
+        : `🔧 ${escapeHtml(status.label)}${status.detail ? ` — ${escapeHtml(status.detail)}` : ""}`;
     return { html: `<tg-thinking>${inner}</tg-thinking>` };
   }
   if (!status) return { markdown: text };
-  // Tool names contain underscores (execute_bash), so wrap them in code, not
-  // italics — `_execute_bash_` would mis-parse mid-name.
-  const header = status.kind === "thinking" ? `💭 _${t("statusThinking")}_` : `🔧 \`${status.name}\``;
+  const header = status.kind === "thinking" ? `💭 _${t("statusThinking")}_` : `🔧 ${status.label}`;
   return { markdown: `> ${header}\n\n${text}` };
 }
 

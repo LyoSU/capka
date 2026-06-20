@@ -18,17 +18,20 @@ describe("composeDraft", () => {
       html: "<tg-thinking>a &lt; b &amp; c</tg-thinking>",
     });
   });
-  it("names the running tool in the thinking block when nothing is written yet", () => {
-    expect(composeDraft("", { kind: "tool", name: "execute_bash" }, uk)).toEqual({
-      html: "<tg-thinking>🔧 execute_bash…</tg-thinking>",
+  it("shows the friendly tool label (and detail) in the thinking block when nothing is written yet", () => {
+    expect(composeDraft("", { kind: "tool", label: "Виконання команди…", detail: "ls -la" }, uk)).toEqual({
+      html: "<tg-thinking>🔧 Виконання команди… — ls -la</tg-thinking>",
+    });
+    expect(composeDraft("", { kind: "tool", label: "Створення logo.svg…" }, uk)).toEqual({
+      html: "<tg-thinking>🔧 Створення logo.svg…</tg-thinking>",
     });
   });
   it("switches to a Markdown status header once answer text is flowing", () => {
     expect(composeDraft("Привіт", { kind: "thinking", reasoning: "x" }, uk)).toEqual({
       markdown: "> 💭 _думаю…_\n\nПривіт",
     });
-    expect(composeDraft("partial", { kind: "tool", name: "execute_bash" }, uk)).toEqual({
-      markdown: "> 🔧 `execute_bash`\n\npartial",
+    expect(composeDraft("partial", { kind: "tool", label: "Виконання команди…" }, uk)).toEqual({
+      markdown: "> 🔧 Виконання команди…\n\npartial",
     });
   });
   it("shows just the answer once a status clears (answering)", () => {

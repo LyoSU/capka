@@ -6,6 +6,8 @@ import { db } from "@/lib/db";
 import { chats, messages, memories, projects } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
+import { getTranslator } from "@/lib/i18n/translator";
+import { describeStep } from "@/components/chat/steps";
 import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
@@ -287,6 +289,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // the live activity + tool count so the channel can show a status header while
   // streaming and a collapsed "✅ N tools · Ts" log once done.
   const sink = makeDeliverySink(payload.origin);
+  // Same human-readable step labels the web UI uses ("Running a command…"),
+  // localized to the originating channel's language.
+  const stepsT = getTranslator(payload.origin?.locale, "steps");
   const startedAt = Date.now();
   let toolCount = 0;
   let currentStatus: StreamStatus;
@@ -443,9 +448,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             textBuf += event.text;
             scheduleFlush();
             break;
-          case "tool-call":
+          case "tool-call": {
             toolCount += 1;
-            currentStatus = { kind: "tool", name: event.toolName };
+            const step = describeStep(stepsT, event.toolName, event.input);
+            currentStatus = { kind: "tool", label: step.activeLabel, detail: step.detail };
             await flushBuffers();
             parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
             await publishTaskEvent(userId, {
@@ -453,6 +459,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               toolCallId: event.toolCallId, toolName: event.toolName, args: event.input,
             });
             break;
+          }
           case "tool-result":
             await flushBuffers();
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output: event.output });
