@@ -29,6 +29,11 @@ export type MessageMeta = {
   status?: string;
   error?: string;
   parts?: StoredPart[];
+  // Files the user attached to THIS message — reference metadata only (name +
+  // type, no bytes). Same shape as FileRef / chatRequestSchema.attachedFiles.
+  // Lets the chat history show what was attached; the bytes live in the sandbox
+  // workspace and are fetched lazily by the client (never re-sent to the model).
+  attachedFiles?: { name: string; type: string }[];
   // Legacy format
   toolCalls?: { id: string; name: string; input: unknown }[];
   toolResults?: { id: string; name: string; output: unknown }[];

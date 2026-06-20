@@ -69,6 +69,8 @@
     "expandSidebar": "Розгорнути панель",
     "pinned": "Закріплені",
     "telegram": "Telegram",
+    "showMore": "Показати ще {count}",
+    "showLess": "Згорнути",
     "archived": "Архів",
     "projects": "Проєкти",
     "settings": "Налаштування",
@@ -287,7 +289,8 @@
       "fork": "Відгалузити в новий чат",
       "prevVersion": "Попередня версія",
       "nextVersion": "Наступна версія",
-      "versions": "{count} версій"
+      "versions": "{count} версій",
+      "attachment": "Вкладення {name}"
     },
     "forkFailed": "Не вдалося відгалузити чат",
     "archived": {

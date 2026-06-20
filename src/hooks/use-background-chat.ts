@@ -311,11 +311,14 @@ export function useBackgroundChat({
 
       const displayText = text.trim() || (uploadedFiles.length > 0 ? t("processFiles") : "");
 
-      // Optimistically add user message (clean text only, no file metadata)
+      // Optimistically add the user message. Carry the attachment refs in
+      // metadata so the bubble shows thumbnails immediately — before history
+      // reloads — matching what the server persists.
       const userMsg: Message = {
         id: nanoid(),
         role: "user",
         parts: [{ type: "text", text: displayText }],
+        metadata: uploadedFiles.length > 0 ? { attachedFiles: uploadedFiles } : undefined,
       };
       const currentMessages = [...msgRef.current, userMsg];
       setMessages(currentMessages);

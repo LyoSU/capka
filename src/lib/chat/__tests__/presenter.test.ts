@@ -91,4 +91,18 @@ describe("toUIMessages", () => {
     ]);
     expect(msg.metadata).toEqual({ createdAt: null, platform: "web", taskStatus: "completed", parentId: null, siblingIndex: 0, siblingCount: 1 });
   });
+
+  it("surfaces attachedFiles from metadata so the bubble can show them", () => {
+    const files = [
+      { name: "photo.png", type: "image/png" },
+      { name: "report.pdf", type: "application/pdf" },
+    ];
+    const [msg] = toUIMessages([row({ role: "user", content: "look", metadata: { attachedFiles: files } })]);
+    expect((msg.metadata as { attachedFiles?: unknown }).attachedFiles).toEqual(files);
+  });
+
+  it("leaves attachedFiles undefined when none were stored", () => {
+    const [msg] = toUIMessages([row({ role: "user", content: "hi", metadata: { status: "completed" } })]);
+    expect((msg.metadata as { attachedFiles?: unknown }).attachedFiles).toBeUndefined();
+  });
 });

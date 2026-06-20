@@ -72,6 +72,9 @@ export function AppSidebar() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  // Telegram chats can pile up; show the most recent and tuck the rest behind a
+  // toggle so the section stays compact at the top of the list.
+  const [showAllTelegram, setShowAllTelegram] = useState(false);
 
   // Debounce search by 300ms
   useEffect(() => {
@@ -96,7 +99,10 @@ export function AppSidebar() {
 
   // Telegram chats are a distinct kind — read-only in the web UI — so they get
   // their own section instead of mixing into the date-grouped web chats.
+  const TELEGRAM_COLLAPSED = 5;
   const telegramChats = chats.filter((c) => c.source === "telegram" && !c.archived);
+  const visibleTelegramChats = showAllTelegram ? telegramChats : telegramChats.slice(0, TELEGRAM_COLLAPSED);
+  const hiddenTelegramCount = telegramChats.length - visibleTelegramChats.length;
   const webChats = chats.filter((c) => c.source !== "telegram" && !c.archived);
   const pinnedChats = webChats.filter((c) => c.pinned);
   const regularChats = webChats.filter((c) => !c.pinned);
@@ -154,6 +160,43 @@ export function AppSidebar() {
 
         <ChatSearch value={search} onChange={setSearch} />
 
+        {telegramChats.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>
+              <Send className="mr-1.5 h-3.5 w-3.5" />
+              {t("telegram")}
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {visibleTelegramChats.map((chat) => (
+                  <SidebarMenuItem key={chat.id}>
+                    <ChatContextMenu chat={chat} onUpdate={fetchChats}>
+                      <SidebarMenuButton
+                        render={<Link href={`/chat/${chat.id}`} />}
+                        data-active={activeChatId === chat.id || undefined}
+                      >
+                        <span className="truncate">{chat.title || t("newChat")}</span>
+                      </SidebarMenuButton>
+                    </ChatContextMenu>
+                  </SidebarMenuItem>
+                ))}
+                {(hiddenTelegramCount > 0 || showAllTelegram) && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => setShowAllTelegram((v) => !v)}
+                      className="text-muted-foreground"
+                    >
+                      <span className="truncate">
+                        {showAllTelegram ? t("showLess") : t("showMore", { count: hiddenTelegramCount })}
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
         {pinnedChats.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>{t("pinned")}</SidebarGroupLabel>
@@ -201,31 +244,6 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
-
-        {telegramChats.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel>
-              <Send className="mr-1.5 h-3.5 w-3.5" />
-              {t("telegram")}
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {telegramChats.map((chat) => (
-                  <SidebarMenuItem key={chat.id}>
-                    <ChatContextMenu chat={chat} onUpdate={fetchChats}>
-                      <SidebarMenuButton
-                        render={<Link href={`/chat/${chat.id}`} />}
-                        data-active={activeChatId === chat.id || undefined}
-                      >
-                        <span className="truncate">{chat.title || t("newChat")}</span>
-                      </SidebarMenuButton>
-                    </ChatContextMenu>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
 
         {chats.length === 0 && (
           <div className="flex flex-col items-center px-4 py-10 text-center">

@@ -304,7 +304,7 @@ async function resolveActiveChat(
       if (existing) return existing;
     }
     const id = nanoid();
-    await tx.insert(chats).values({ id, userId: link.userId, title: firstMessage || "Telegram Chat" });
+    await tx.insert(chats).values({ id, userId: link.userId, title: firstMessage || "Telegram Chat", source: "telegram" });
     await tx.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
     const [created] = await tx.select().from(chats).where(eq(chats.id, id)).limit(1);
     return created;

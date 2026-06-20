@@ -78,6 +78,8 @@ export function toUIMessages(rows: {
         parentId: m.parentId ?? null,
         siblingIndex: m.siblingIndex ?? 0,
         siblingCount: m.siblingCount ?? 1,
+        // Surfaced so the user bubble can render attachment thumbnails.
+        attachedFiles: meta?.attachedFiles,
       },
     };
   });

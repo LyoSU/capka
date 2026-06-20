@@ -107,6 +107,9 @@ export const POST = apiHandler(async (req: Request) => {
       role: "user",
       content: text,
       platform: "web",
+      // Persist what was attached so the history bubble can show it (reference
+      // metadata only — the bytes stay in the sandbox workspace).
+      metadata: attachedFiles?.length ? { attachedFiles } : null,
     }).onConflictDoNothing();
     await db.update(chats).set({
       ...(isNewChat ? { title: text.slice(0, 100) } : {}),

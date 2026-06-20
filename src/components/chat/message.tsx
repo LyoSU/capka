@@ -564,8 +564,36 @@ function autoGrow(ta: HTMLTextAreaElement) {
 /** A user message bubble. With `onEdit` it gains an inline editor: click the
  *  pencil to rewrite the message and re-run the conversation from that point
  *  (⌘/Ctrl+Enter saves, Esc cancels) — the familiar ChatGPT gesture. */
+/**
+ * Thumbnails for the files a user attached to a message. Reuses the same
+ * FileThumb + Quick Look primitives as the workspace panel, so a photo looks
+ * like a photo here too. Bytes are fetched lazily from the sandbox — never
+ * stored on the message or re-sent to the model.
+ */
+function MessageAttachments({ chatId, files }: { chatId: string; files: { name: string; type: string }[] }) {
+  const t = useTranslations("chat.message");
+  const { open } = usePreview();
+  const previewFiles: PreviewFile[] = files.map((f) => ({ path: f.name, name: f.name, chatId }));
+  return (
+    <div className="mb-1.5 flex max-w-full flex-wrap justify-end gap-2">
+      {previewFiles.map((f, i) => (
+        <button
+          key={f.path}
+          type="button"
+          onClick={() => open(previewFiles, i)}
+          title={f.name}
+          aria-label={t("attachment", { name: f.name })}
+          className="overflow-hidden rounded-xl ring-1 ring-border/60 transition hover:ring-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        >
+          <FileThumb file={f} className="h-20 w-20" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function UserBubble({
-  text, messageId, timestamp, isTelegram, siblingIndex, siblingCount, onEdit, onSwitchBranch, onFork,
+  text, messageId, timestamp, isTelegram, siblingIndex, siblingCount, chatId, attachedFiles, onEdit, onSwitchBranch, onFork,
 }: {
   text: string;
   messageId: string;
@@ -573,6 +601,8 @@ function UserBubble({
   isTelegram: boolean;
   siblingIndex: number;
   siblingCount: number;
+  chatId?: string;
+  attachedFiles?: { name: string; type: string }[];
   onEdit?: (messageId: string, newText: string) => void;
   onSwitchBranch?: (messageId: string, direction: "prev" | "next") => void;
   onFork?: (messageId: string) => void;
@@ -623,12 +653,19 @@ function UserBubble({
     );
   }
 
+  const hasFiles = !!chatId && !!attachedFiles && attachedFiles.length > 0;
+
   return (
     <div className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4">
       <div className="flex max-w-[75%] flex-col items-end lg:max-w-[65%]">
-        <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
-          {text || "…"}
-        </div>
+        {hasFiles && <MessageAttachments chatId={chatId!} files={attachedFiles!} />}
+        {/* When the turn is files-only, the thumbnails are the content — skip the
+            empty "…" bubble. */}
+        {(text || !hasFiles) && (
+          <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
+            {text || "…"}
+          </div>
+        )}
         <div className="mt-1 flex items-center gap-1">
           {onSwitchBranch && (
             <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} />
@@ -689,7 +726,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[] }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -712,6 +749,8 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
         isTelegram={isTelegram}
         siblingIndex={siblingIndex}
         siblingCount={siblingCount}
+        chatId={chatId}
+        attachedFiles={metadata?.attachedFiles}
         onEdit={onEdit}
         onSwitchBranch={onSwitchBranch}
         onFork={onFork}
