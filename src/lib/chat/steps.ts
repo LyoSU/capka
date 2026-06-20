@@ -37,10 +37,11 @@ export interface StepInfo {
   brand?: StepBrand;
 }
 
+/** Last path segment, or "" when no usable path (e.g. args still streaming). */
 const basename = (p: unknown): string => {
   const s = typeof p === "string" ? p : "";
   const trimmed = s.replace(/\/+$/, "");
-  return trimmed.split("/").pop() || trimmed || "file";
+  return trimmed.split("/").pop() || trimmed || "";
 };
 
 const clip = (s: unknown, n = 48): string => {
@@ -140,15 +141,30 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
   switch (name) {
     case "write_file": {
       const file = basename(args.path);
-      return { iconKey: "file-plus", label: t("createdFile", { file }), activeLabel: t("creatingFile", { file }), category: "file" };
+      return {
+        iconKey: "file-plus",
+        label: file ? t("createdFile", { file }) : t("createdFileGeneric"),
+        activeLabel: file ? t("creatingFile", { file }) : t("creatingFileGeneric"),
+        category: "file",
+      };
     }
     case "str_replace": {
       const file = basename(args.path);
-      return { iconKey: "file-pen", label: t("editedFile", { file }), activeLabel: t("editingFile", { file }), category: "file" };
+      return {
+        iconKey: "file-pen",
+        label: file ? t("editedFile", { file }) : t("editedFileGeneric"),
+        activeLabel: file ? t("editingFile", { file }) : t("editingFileGeneric"),
+        category: "file",
+      };
     }
     case "read_file": {
       const file = basename(args.path);
-      return { iconKey: "file-text", label: t("readFile", { file }), activeLabel: t("readingFile", { file }), category: "file" };
+      return {
+        iconKey: "file-text",
+        label: file ? t("readFile", { file }) : t("readFileGeneric"),
+        activeLabel: file ? t("readingFile", { file }) : t("readingFileGeneric"),
+        category: "file",
+      };
     }
     case "list_files":
       return { iconKey: "folder", label: t("listedFiles"), activeLabel: t("listingFiles"), category: "file" };
