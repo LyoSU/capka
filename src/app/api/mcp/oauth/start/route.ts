@@ -4,17 +4,21 @@ import { getAccessibleServer } from "@/lib/mcp/service";
 import { McpOAuthProvider } from "@/lib/mcp/oauth/provider";
 import { createGuardedFetch, PROVIDER_FETCH_TIMEOUT_MS } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
+import { getPublicUrl } from "@/lib/url";
 
 /** Begin the OAuth sign-in for a connector: discover + (DCR) + PKCE, then 302 the
  *  user's browser to the provider's authorization page. On any failure we bounce
  *  back to the connectors page with a friendly error flag (no raw JSON). */
 export async function GET(req: Request) {
-  const settings = (q: string) => Response.redirect(new URL(`/settings/connectors${q}`, req.url), 302);
+  // Build redirects off the PUBLIC origin (PUBLIC_URL / X-Forwarded-Host), not
+  // req.url — behind a proxy the latter is the internal bind (e.g. 0.0.0.0:3000).
+  const base = getPublicUrl({ headers: req.headers });
+  const settings = (q: string) => Response.redirect(`${base}/settings/connectors${q}`, 302);
   let userId: string;
   try {
     ({ userId } = await requireSession());
   } catch {
-    return Response.redirect(new URL("/login", req.url), 302);
+    return Response.redirect(`${base}/login`, 302);
   }
   try {
     const serverId = new URL(req.url).searchParams.get("serverId");

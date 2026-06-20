@@ -9,9 +9,11 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { getClientInfo, saveClientInfo, getUserTokens, saveUserTokens, insertState } from "./store";
 
-/** Public base URL of this deployment — same source as better-auth. */
+/** Public base URL of this deployment — same precedence as better-auth (auth.ts):
+ *  PUBLIC_URL is the operator override, BETTER_AUTH_URL the legacy fallback. Used
+ *  for the OAuth redirect_uri, so it must match the deployment's real origin. */
 function appUrl(): string {
-  return (process.env.BETTER_AUTH_URL || "http://localhost:3000").replace(/\/+$/, "");
+  return (process.env.PUBLIC_URL?.trim() || process.env.BETTER_AUTH_URL || "http://localhost:3000").replace(/\/+$/, "");
 }
 
 export const OAUTH_CALLBACK_PATH = "/api/mcp/oauth/callback";

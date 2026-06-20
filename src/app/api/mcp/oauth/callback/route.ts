@@ -5,16 +5,20 @@ import { McpOAuthProvider } from "@/lib/mcp/oauth/provider";
 import { consumeState } from "@/lib/mcp/oauth/store";
 import { createGuardedFetch, PROVIDER_FETCH_TIMEOUT_MS } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
+import { getPublicUrl } from "@/lib/url";
 
 /** OAuth redirect target: exchange the authorization code for per-user tokens.
  *  Validates the single-use state and that it belongs to the signed-in user. */
 export async function GET(req: Request) {
-  const settings = (q: string) => Response.redirect(new URL(`/settings/connectors${q}`, req.url), 302);
+  // Build redirects off the PUBLIC origin (PUBLIC_URL / X-Forwarded-Host), not
+  // req.url — behind a proxy the latter is the internal bind (e.g. 0.0.0.0:3000).
+  const base = getPublicUrl({ headers: req.headers });
+  const settings = (q: string) => Response.redirect(`${base}/settings/connectors${q}`, 302);
   let userId: string;
   try {
     ({ userId } = await requireSession());
   } catch {
-    return Response.redirect(new URL("/login", req.url), 302);
+    return Response.redirect(`${base}/login`, 302);
   }
   try {
     const url = new URL(req.url);
