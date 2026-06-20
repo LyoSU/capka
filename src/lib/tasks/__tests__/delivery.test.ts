@@ -6,17 +6,33 @@ const uk = getTranslator("uk", "telegram");
 const en = getTranslator("en", "telegram");
 
 describe("composeDraft", () => {
-  it("prepends a localized thinking header as a quote block", () => {
-    expect(composeDraft("Привіт", { kind: "thinking" }, uk)).toBe("> 💭 _думаю…_\n\nПривіт");
-    expect(composeDraft("Hi", { kind: "thinking" }, en)).toBe("> 💭 _thinking…_\n\nHi");
+  it("uses a native <tg-thinking> block while reasoning with no answer yet", () => {
+    // No reasoning text yet → localized placeholder.
+    expect(composeDraft("", { kind: "thinking" }, uk)).toEqual({ html: "<tg-thinking>думаю…</tg-thinking>" });
+    // Live reasoning text fills the block.
+    expect(composeDraft("", { kind: "thinking", reasoning: "Зважую варіанти" }, uk)).toEqual({
+      html: "<tg-thinking>Зважую варіанти</tg-thinking>",
+    });
+    // HTML-significant chars in reasoning are escaped.
+    expect(composeDraft("", { kind: "thinking", reasoning: "a < b & c" }, uk)).toEqual({
+      html: "<tg-thinking>a &lt; b &amp; c</tg-thinking>",
+    });
   });
-  it("prepends the running tool name verbatim (not translated)", () => {
-    expect(composeDraft("partial", { kind: "tool", name: "execute_bash" }, uk)).toBe(
-      "> 🔧 _execute_bash…_\n\npartial",
-    );
+  it("names the running tool in the thinking block when nothing is written yet", () => {
+    expect(composeDraft("", { kind: "tool", name: "execute_bash" }, uk)).toEqual({
+      html: "<tg-thinking>🔧 execute_bash…</tg-thinking>",
+    });
+  });
+  it("switches to a Markdown status header once answer text is flowing", () => {
+    expect(composeDraft("Привіт", { kind: "thinking", reasoning: "x" }, uk)).toEqual({
+      markdown: "> 💭 _думаю…_\n\nПривіт",
+    });
+    expect(composeDraft("partial", { kind: "tool", name: "execute_bash" }, uk)).toEqual({
+      markdown: "> 🔧 `execute_bash`\n\npartial",
+    });
   });
   it("shows just the answer once a status clears (answering)", () => {
-    expect(composeDraft("the answer", undefined, uk)).toBe("the answer");
+    expect(composeDraft("the answer", undefined, uk)).toEqual({ markdown: "the answer" });
   });
 });
 

@@ -277,6 +277,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   const parts: StoredPart[] = [];
   const getFullText = () =>
     parts.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
+  const getReasoning = () =>
+    parts.filter((p): p is { type: "reasoning"; text: string } => p.type === "reasoning").map((p) => p.text).join("");
   let streamError: string | undefined;
   let closeMcp: (() => Promise<void>) | undefined;
 
@@ -343,6 +345,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     });
     await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
     await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId });
+
+    // Show a "Thinking…" block immediately — before the model emits its first
+    // token — so the channel reacts at once; reasoning text then streams into it.
+    currentStatus = { kind: "thinking" };
+    sink.push("", currentStatus);
 
     const hasTools = Object.keys(tools).length > 0;
     const modelMessages = await convertToModelMessages(payload.uiMessages ?? []);
@@ -422,8 +429,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         if (ac.signal.aborted) break;
         switch (event.type) {
           case "reasoning-delta":
-            currentStatus = { kind: "thinking" };
             appendReasoning(event.text);
+            // Carry the live reasoning so the Telegram sink can fill a native
+            // <tg-thinking> block (the web stream uses reasonBuf as before).
+            currentStatus = { kind: "thinking", reasoning: getReasoning() };
             reasonBuf += event.text;
             scheduleFlush();
             break;
@@ -477,31 +486,56 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       await flushBuffers();
     };
 
-    try {
-      await consume();
-    } catch (e) {
-      const isVisionError = injectedNative && !retried && isVisionUnsupportedError(e);
-      if (isVisionError) {
-        log.info("vision unsupported — retrying without native files", { taskId, chatId, userId });
+    // Drop the native image/file parts the model can't read, but leave a text
+    // note in their place — the model should KNOW the user attached an image and
+    // say it can't see it, not answer as if nothing was sent.
+    const stripNativeFilesWithNote = () => {
+      const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
+      if (!lastUser || !Array.isArray(lastUser.content)) return;
+      const removed = lastUser.content.filter((p) => p.type === "file" || p.type === "image").length;
+      lastUser.content = lastUser.content.filter((p) => p.type !== "file" && p.type !== "image");
+      if (removed > 0) {
+        lastUser.content.push({
+          type: "text",
+          text: `[The user attached ${removed === 1 ? "an image/file" : `${removed} images/files`}, but this model cannot view images. Tell the user you received the attachment but can't see its contents, and help with whatever text was provided.]`,
+        });
+      }
+    };
+
+    // Capability errors can arrive two ways: thrown from the stream, or as a
+    // `error` part (streamError) with the iterator finishing normally. Retry the
+    // same way for both. Returns true if a retry was launched.
+    const retryOnCapabilityError = async (err: unknown): Promise<boolean> => {
+      if (injectedNative && !retried && isVisionUnsupportedError(err)) {
+        log.info("vision unsupported — retrying with image stripped + note", { taskId, chatId, userId });
         retried = true;
-        const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
-        if (lastUser && Array.isArray(lastUser.content)) {
-          lastUser.content = lastUser.content.filter((p) => p.type !== "file");
-        }
+        streamError = undefined;
+        parts.length = 0;
+        stripNativeFilesWithNote();
         result = makeStream();
         await consume();
-      } else if (useReasoning && isReasoningUnsupportedError(e)) {
-        // Model can't reason — re-stream without the reasoning knobs. The error
-        // fires at request build (before any delta), but reset parts defensively
-        // so a retry can't duplicate output.
+        return true;
+      }
+      if (useReasoning && isReasoningUnsupportedError(err)) {
+        // Model can't reason — re-stream without the reasoning knobs. Reset parts
+        // defensively so a retry can't duplicate output.
         log.info("reasoning unsupported — retrying without it", { taskId, chatId, userId });
         useReasoning = false;
+        streamError = undefined;
         parts.length = 0;
         result = makeStream();
         await consume();
-      } else {
-        throw e;
+        return true;
       }
+      return false;
+    };
+
+    try {
+      await consume();
+      // Provider surfaced the error as a stream event, not a throw — same retry.
+      if (streamError && !ac.signal.aborted) await retryOnCapabilityError(streamError);
+    } catch (e) {
+      if (!(await retryOnCapabilityError(e))) throw e;
     }
 
     // Retry once if the model produced no content.

@@ -143,7 +143,15 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     platform: "telegram",
     telegramMessageId: ctx.message?.message_id,
   });
-  await db.update(chats).set({ activeLeafId: tgUserId, updatedAt: new Date() }).where(eq(chats.id, chat.id));
+  // Name the chat from its first real message — like the web does. The chat may
+  // have been created generically (/new, or a file-only first turn), so update
+  // the title while it's still the placeholder rather than only at creation.
+  const needsTitle = (!chat.title || chat.title === "Telegram Chat") && Boolean(text.trim());
+  await db.update(chats).set({
+    activeLeafId: tgUserId,
+    updatedAt: new Date(),
+    ...(needsTitle ? { title: text.slice(0, 100) } : {}),
+  }).where(eq(chats.id, chat.id));
   await publishTaskEvent(link.userId, { type: "new_message", chatId: chat.id });
 
   try {

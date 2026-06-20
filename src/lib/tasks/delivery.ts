@@ -26,11 +26,25 @@ export interface TaskResult {
   error?: string;
 }
 
-/** The transient activity shown as a header while the answer streams in. */
+/** The transient activity shown while the answer streams in. `reasoning` carries
+ *  the live thinking text so it can fill a native <tg-thinking> block. */
 export type StreamStatus =
-  | { kind: "thinking" }
+  | { kind: "thinking"; reasoning?: string }
   | { kind: "tool"; name: string }
   | undefined;
+
+/** A draft is sent as Markdown normally, but as HTML when it needs the native
+ *  <tg-thinking> block (which has no Markdown form and is draft-only). */
+type DraftBody = { markdown: string } | { html: string };
+
+// The native thinking block is the one place we emit HTML, so escape its text.
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Keep the thinking block tidy (and well under the rich-message char limit) by
+// showing only the tail of a long reasoning stream.
+const THINKING_MAX_CHARS = 3000;
 
 /** A file the assistant created or edited during the run, ready to deliver. */
 export interface OutFile {
@@ -77,15 +91,23 @@ export function draftIdFrom(seed: string): number {
   return (Math.abs(h) % 2_000_000_000) + 1;
 }
 
-/** Streaming view: a transient status header (quote block) above the answer.
- *  The tool name is a literal identifier, so only the "thinking" word is
- *  localized; everything else is universal markup. */
-export function composeDraft(text: string, status: StreamStatus, t: Translator): string {
-  if (!status) return text;
-  const header = status.kind === "thinking"
-    ? `💭 _${t("statusThinking")}_`
-    : `🔧 _${status.name}…_`;
-  return `> ${header}\n\n${text}`;
+/** Streaming view. While the agent is working with nothing written yet, use the
+ *  native <tg-thinking> block (HTML, draft-only) — for reasoning it shows the
+ *  live thinking text, for a tool it names the tool. Once answer text starts,
+ *  switch to Markdown with a small status header above it. */
+export function composeDraft(text: string, status: StreamStatus, t: Translator): DraftBody {
+  if (!text.trim() && status) {
+    const inner =
+      status.kind === "thinking"
+        ? escapeHtml((status.reasoning ?? "").trim().slice(-THINKING_MAX_CHARS)) || t("statusThinking")
+        : `🔧 ${escapeHtml(status.name)}…`;
+    return { html: `<tg-thinking>${inner}</tg-thinking>` };
+  }
+  if (!status) return { markdown: text };
+  // Tool names contain underscores (execute_bash), so wrap them in code, not
+  // italics — `_execute_bash_` would mis-parse mid-name.
+  const header = status.kind === "thinking" ? `💭 _${t("statusThinking")}_` : `🔧 \`${status.name}\``;
+  return { markdown: `> ${header}\n\n${text}` };
 }
 
 /** Final view: a collapsed one-line log (only when tools ran) above the answer.
@@ -143,11 +165,10 @@ class TelegramSink implements DeliverySink {
     this.inflight = true;
     try {
       const bot = await this.getBot();
-      if (!bot || !text.trim()) return;
+      if (!bot) return;
+      if (!text.trim() && !status) return; // nothing to show yet
       // Ephemeral animated preview; the real message is sent on finish().
-      await bot.api.sendRichMessageDraft(this.chatId, this.draftId, {
-        markdown: composeDraft(text, status, this.t),
-      });
+      await bot.api.sendRichMessageDraft(this.chatId, this.draftId, composeDraft(text, status, this.t));
       this.lastSentAt = Date.now();
     } catch (e) {
       // Non-fatal: the persisted finish() is what the user keeps.
