@@ -8,6 +8,7 @@ import { publishTaskEvent } from "./events";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 import { describeStep } from "@/components/chat/steps";
+import { extractWorkspacePaths } from "@/lib/chat/artifacts";
 import { heartbeat, isCancelRequested, finalizeTask } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
@@ -137,25 +138,17 @@ const MAX_OUTPUT_FILE_BYTES = 45 * 1024 * 1024; // under Telegram's 50 MB docume
 const MAX_OUTPUT_TOTAL_BYTES = 50 * 1024 * 1024;
 
 /**
- * Files created or modified in the workspace since `sinceMs` — i.e. what the
- * agent produced this run. Delivered to channels that can't browse the sandbox
- * themselves (Telegram); the web UI lists files directly so it needs none of
- * this. Excludes dotfiles, bounded in count and bytes, and always best-effort.
+ * The workspace files the agent's reply explicitly refers to by their
+ * `/workspace/…` path — the same "artifacts" the web transcript surfaces as file
+ * tiles. Delivered to channels that can't browse the sandbox (Telegram); we send
+ * what the model points at, not every file it happened to touch. Bounded in
+ * count and bytes, always best-effort.
  */
-async function collectOutputFiles(sessionKey: string, userId: string, sinceMs: number) {
-  const { execCommand } = await import("@/lib/sandbox/client");
-  const sinceSec = Math.floor(sinceMs / 1000);
-  const found = await execCommand(
-    sessionKey,
-    `find /workspace -type f -newermt @${sinceSec} -not -path '*/.*' | head -${MAX_OUTPUT_FILES}`,
-    5000,
-  ).catch(() => null);
-  const lines = found?.stdout?.trim() ? found.stdout.trim().split("\n") : [];
+async function collectReferencedFiles(sessionKey: string, userId: string, text: string) {
+  const paths = extractWorkspacePaths(text).slice(0, MAX_OUTPUT_FILES);
   const out: { name: string; data: Buffer }[] = [];
   let total = 0;
-  for (const line of lines) {
-    const rel = line.replace(/^\/workspace\/?/, "");
-    if (!rel) continue;
+  for (const rel of paths) {
     try {
       const res = await downloadFile(sessionKey, rel, userId);
       const buf = Buffer.from(await res.arrayBuffer());
@@ -163,7 +156,9 @@ async function collectOutputFiles(sessionKey: string, userId: string, sinceMs: n
       total += buf.length;
       out.push({ name: rel.split("/").pop() || rel, data: buf });
     } catch (e) {
-      log.warn("output file download failed", { userId, file: rel, err: String(e) });
+      // A referenced path might be a directory or only mentioned, not a real
+      // downloadable file — skip it quietly.
+      log.warn("referenced file download failed", { userId, file: rel, err: String(e) });
     }
   }
   return out;
@@ -582,7 +577,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // (Telegram). Best-effort and only on success — never fail the task over it.
     if (finalStatus === "completed" && payload.origin) {
       try {
-        const outFiles = await collectOutputFiles(sessionKey, userId, startedAt);
+        const outFiles = await collectReferencedFiles(sessionKey, userId, getFullText());
         if (outFiles.length) await sink.sendFiles(outFiles);
       } catch (e) {
         log.warn("output file delivery failed", { taskId, err: String(e) });

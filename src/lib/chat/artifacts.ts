@@ -16,7 +16,20 @@
 export const WORKSPACE_PATH_RE =
   /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
 
+/**
+ * A captured path is safe only if it stays inside the workspace: relative, with
+ * no `..` (or bare `.`) segments. The text is the model's reply — a prompt-
+ * injected or buggy turn could emit `/workspace/../../etc/passwd.txt`, which
+ * would otherwise become a clickable tile that reads a host file through the
+ * download endpoint. Reject traversal here, at the one shared source, so both
+ * the web tiles and the Telegram documents stay anchored to the workspace.
+ */
+function isInsideWorkspace(rel: string): boolean {
+  if (rel.startsWith("/")) return false; // absolute — not workspace-relative
+  return rel.split("/").every((seg) => seg !== ".." && seg !== ".");
+}
+
 /** Unique workspace-relative paths the text references, in first-seen order. */
 export function extractWorkspacePaths(text: string): string[] {
-  return [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))];
+  return [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))].filter(isInsideWorkspace);
 }

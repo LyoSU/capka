@@ -142,6 +142,10 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     content: text,
     platform: "telegram",
     telegramMessageId: ctx.message?.message_id,
+    // Record the attachments (reference metadata only — bytes live in the
+    // sandbox) so the web transcript shows them on the user bubble, exactly like
+    // a file sent from the web chat.
+    metadata: attachedFiles.length ? { attachedFiles } : null,
   });
   // Name the chat from its first real message — like the web does. The chat may
   // have been created generically (/new, or a file-only first turn), so update
