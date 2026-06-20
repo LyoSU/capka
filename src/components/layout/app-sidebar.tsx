@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Plus, Settings, FolderKanban, Archive, Send } from "lucide-react";
 import {
@@ -96,6 +96,45 @@ export function AppSidebar() {
   useEffect(() => {
     fetchChats();
   }, [fetchChats, pathname]);
+
+  // Keep the list live: a brand-new chat only hits the DB once its first message
+  // is sent (no route change fires then), and titles are generated a moment after
+  // a task finishes. Subscribe to the same task event stream the chat panel uses
+  // and refetch (debounced) when a chat appears, finishes, or arrives externally.
+  const fetchChatsRef = useRef(fetchChats);
+  useEffect(() => { fetchChatsRef.current = fetchChats; }, [fetchChats]);
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let reconnect: ReturnType<typeof setTimeout>;
+    let debounce: ReturnType<typeof setTimeout>;
+    let delay = 1000;
+    const refresh = () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => fetchChatsRef.current(), 400);
+    };
+    const connect = () => {
+      es = new EventSource("/api/events");
+      es.onopen = () => { delay = 1000; };
+      es.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data) as { type?: string };
+          if (d.type === "task:start" || d.type === "task:finish" || d.type === "new_message") refresh();
+        } catch { /* ignore parse errors */ }
+      };
+      es.onerror = () => {
+        es?.close();
+        clearTimeout(reconnect);
+        reconnect = setTimeout(connect, delay);
+        delay = Math.min(delay * 2, 30000);
+      };
+    };
+    connect();
+    return () => {
+      clearTimeout(reconnect);
+      clearTimeout(debounce);
+      es?.close();
+    };
+  }, []);
 
   // Telegram chats are a distinct kind — read-only in the web UI — so they get
   // their own section instead of mixing into the date-grouped web chats.

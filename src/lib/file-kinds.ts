@@ -97,6 +97,21 @@ export function previewKind(name: string): PreviewKind {
   return null;
 }
 
+/**
+ * A coarse bucket for grouping files in the workspace panel — kept deliberately
+ * small (Images / Documents / Other) so a non-technical user sees "my pictures"
+ * and "my docs", not a dozen MIME categories. Derived from `fileKind` so the
+ * buckets never drift from the icons.
+ */
+export type FileCategory = "image" | "document" | "other";
+
+export function fileCategory(name: string): FileCategory {
+  const k = fileKind(name);
+  if (k === KIND.image) return "image";
+  if (k === KIND.doc || k === KIND.sheet || k === KIND.code) return "document";
+  return "other";
+}
+
 export function fileKind(name: string, isDir = false): FileKind {
   if (isDir) return KIND.folder;
   const ext = extOf(name);

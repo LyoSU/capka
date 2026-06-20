@@ -29,7 +29,7 @@ import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
 import { ModelPicker } from "@/components/chat/model-picker";
-import { WorkspacePanel, type ProgressStep } from "@/components/chat/workspace-panel";
+import { WorkspacePanel } from "@/components/chat/workspace-panel";
 import { PreviewProvider } from "@/components/chat/file-preview";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { RecentChats } from "@/components/chat/recent-chats";
@@ -299,11 +299,17 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
   const isEmpty = messages.length === 0;
   const [filesOpen, setFilesOpen] = useState(false);
 
-  // Progress steps for the panel = the latest assistant message's tool parts.
-  const lastAssistant = messages.findLast((m) => m.role === "assistant");
-  const steps: ProgressStep[] = (lastAssistant?.parts ?? [])
-    .filter((p): p is { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown } => p.type === "dynamic-tool")
-    .map((p) => ({ toolName: p.toolName, state: p.state, input: p.input }));
+  // A monotonically-rising count of completed tool calls across the whole thread.
+  // It ticks up the moment a tool finishes — exactly when the agent may have
+  // written or changed files — so the workspace panel refreshes in real time.
+  const toolRevision = messages.reduce(
+    (n, m) =>
+      n +
+      ((m.parts as { type: string; state?: string }[] | undefined)?.filter(
+        (p) => p.type === "dynamic-tool" && (p.state === "output-available" || p.state === "output-error"),
+      ).length ?? 0),
+    0,
+  );
 
   // A failed assistant message renders its own ErrorNotice — don't also show
   // the bottom banner for the same failure (the banner stays for load errors).
@@ -363,7 +369,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
   return (
     <PreviewProvider>
     <div className="flex h-full">
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
       {isEmpty ? (
         <div className="relative flex flex-1 flex-col items-center justify-center py-10">
           <div className="w-full">
@@ -453,9 +459,13 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
             <Button
               variant="ghost"
               size="icon"
-              className="pointer-events-auto h-8 w-8"
-              onClick={() => setFilesOpen(!filesOpen)}
+              className={`h-8 w-8 transition-all duration-200 ${
+                filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
+              }`}
+              onClick={() => setFilesOpen(true)}
               title={t("panel.workspaceFiles")}
+              aria-hidden={filesOpen}
+              tabIndex={filesOpen ? -1 : 0}
             >
               <FolderOpen className="h-4 w-4" />
             </Button>
@@ -515,9 +525,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
         chatId={chatId}
         open={filesOpen}
         onClose={() => setFilesOpen(false)}
-        steps={steps}
         running={isLoading}
-        attachments={files}
+        revision={toolRevision}
       />
     </div>
     </PreviewProvider>
