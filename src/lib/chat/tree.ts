@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
 
@@ -108,6 +108,15 @@ export function activePath<T extends TreeNode>(rows: T[], activeLeafId: string |
 type MessageRow = typeof messages.$inferSelect;
 export type PathRow = PathEntry<MessageRow>;
 
+/** Strip live-task fields when copying a message into a fork. */
+function sanitizeForkedMeta(metadata: unknown): unknown {
+  if (!metadata || typeof metadata !== "object") return metadata;
+  const rest: Record<string, unknown> = { ...(metadata as Record<string, unknown>) };
+  delete rest.taskId;
+  if (rest.status === "running") rest.status = "completed";
+  return rest;
+}
+
 /** All messages of a chat — small, bounded set; the graph math runs in memory. */
 async function loadMessages(chatId: string): Promise<MessageRow[]> {
   return db.select().from(messages).where(eq(messages.chatId, chatId));
@@ -166,7 +175,13 @@ export async function forkChat(opts: {
   userId: string;
 }): Promise<string | null> {
   const { sourceChatId, fromMessageId, userId } = opts;
-  const [source] = await db.select().from(chats).where(eq(chats.id, sourceChatId)).limit(1);
+  // Scope to the owner here too, not just at the route — this function takes a
+  // userId and must be safe by construction (no forking someone else's chat).
+  const [source] = await db
+    .select()
+    .from(chats)
+    .where(and(eq(chats.id, sourceChatId), eq(chats.userId, userId)))
+    .limit(1);
   if (!source) return null;
 
   const rows = await loadMessages(sourceChatId);
@@ -196,7 +211,9 @@ export async function forkChat(opts: {
       role: node.role,
       content: node.content,
       platform: node.platform,
-      metadata: node.metadata,
+      // A copy is never the live task — strip the source taskId and never
+      // inherit a "running" spinner (e.g. forking the tail mid-stream).
+      metadata: sanitizeForkedMeta(node.metadata),
     };
   });
 

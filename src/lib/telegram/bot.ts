@@ -1,12 +1,13 @@
 import { Bot } from "grammy";
 import { nanoid } from "nanoid";
-import { eq, asc, and } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
 import { toUIMessages } from "@/lib/chat/presenter";
+import { loadActivePath } from "@/lib/chat/tree";
 import { take } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -104,10 +105,14 @@ export async function getBot(): Promise<Bot | null> {
     // chats and lose project context.
     const chat = await resolveActiveChat(link, ctx.message.text.slice(0, 100));
 
-    // Save user message
+    // Save user message — chained onto the chat's current leaf so the
+    // conversation tree stays linear and the web view shows full history.
+    // Telegram is linear: it always appends to the active branch.
+    const tgUserId = nanoid();
     await db.insert(messages).values({
-      id: nanoid(),
+      id: tgUserId,
       chatId: chat.id,
+      parentId: chat.activeLeafId ?? null,
       role: "user",
       content: ctx.message.text,
       platform: "telegram",
@@ -115,7 +120,7 @@ export async function getBot(): Promise<Bot | null> {
     });
     await db
       .update(chats)
-      .set({ updatedAt: new Date() })
+      .set({ activeLeafId: tgUserId, updatedAt: new Date() })
       .where(eq(chats.id, chat.id));
 
     // Tell any open web client a message landed in this chat.
@@ -127,20 +132,15 @@ export async function getBot(): Promise<Bot | null> {
     // back to Telegram via the task origin — so it survives restarts and the
     // two channels can never drift.
     try {
-      const rows = await db
-        .select({
-          id: messages.id, role: messages.role, content: messages.content,
-          metadata: messages.metadata, createdAt: messages.createdAt, platform: messages.platform,
-        })
-        .from(messages)
-        .where(eq(messages.chatId, chat.id))
-        .orderBy(asc(messages.createdAt))
-        .limit(100);
+      // Answer from the active branch (root → the message we just added), not a
+      // flat dump of every row — otherwise branches created on the web would
+      // feed alternative versions of past turns into the model.
+      const path = await loadActivePath(chat.id, tgUserId);
 
       const payload: TaskPayload = {
         requestModel: chat.model ?? undefined,
         projectId: chat.projectId ?? undefined,
-        uiMessages: toUIMessages(rows),
+        uiMessages: toUIMessages(path.map((p) => p.node)),
         origin: { platform: "telegram", telegramChatId: ctx.chat.id },
       };
       await enqueueTask({ id: nanoid(), chatId: chat.id, userId: link.userId, payload });

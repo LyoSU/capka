@@ -20,7 +20,7 @@ import { describeStep, type StepDescriptor } from "./steps";
 // rendered here (localized) instead of the English string baked in at runtime.
 const LLM_ERROR_CATEGORIES = new Set([
   "out_of_credits", "invalid_key", "rate_limited", "model_unavailable",
-  "context_too_long", "network", "timed_out", "unknown",
+  "context_too_long", "network", "timed_out", "interrupted", "unknown",
 ]);
 
 type TimeTranslator = (key: string, values?: Record<string, string | number>) => string;

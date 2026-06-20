@@ -75,6 +75,20 @@ export const POST = apiHandler(async (req: Request) => {
     const uiMsgs = body.messages ?? [];
     const selfIdx = uiMsgs.findIndex((m) => m.id === newUserId);
     const parentId = selfIdx > 0 ? uiMsgs[selfIdx - 1].id : null;
+    // The parent comes from the client's view of the conversation; never trust
+    // it blind. It must be a real message *in this chat* — otherwise a stale or
+    // tampered client would 500 on the FK, or (with a real id from another
+    // chat) silently graft this turn onto a foreign branch.
+    if (parentId) {
+      const [parent] = await db
+        .select({ id: messages.id })
+        .from(messages)
+        .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
+        .limit(1);
+      if (!parent) {
+        return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
+      }
+    }
     // Order matters: the message row must exist before the chat's
     // active_leaf_id can reference it (FK), so these can't run in parallel.
     await db.insert(messages).values({

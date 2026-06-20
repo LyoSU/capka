@@ -134,7 +134,7 @@ export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "us
          RETURNING id, user_id, chat_id
      ), reconciled_messages AS (
         UPDATE messages m
-           SET metadata = m.metadata || jsonb_build_object('status', 'failed', 'error', $1::text)
+           SET metadata = m.metadata || jsonb_build_object('status', 'failed', 'error', $1::text, 'errorCategory', 'interrupted')
           FROM dead
          WHERE m.metadata->>'taskId' = dead.id
            AND m.metadata->>'status' = 'running'

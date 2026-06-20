@@ -44,6 +44,7 @@
       "context_too_long": "This conversation got too long for the model. Start a new chat or shorten your message and try again.",
       "network": "Couldn't reach the AI service. Please try again in a moment.",
       "timed_out": "This task took too long and was stopped. Please try again, or break it into smaller steps.",
+      "interrupted": "The task was interrupted before it finished. Please try again.",
       "unknown": "Something went wrong while generating a response. Please try again — if it keeps happening, let your administrator know."
     }
   },
