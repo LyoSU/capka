@@ -88,6 +88,18 @@ export interface ClaimedTask {
 const MAX_CONCURRENT_DOWNLOADS = 5;
 
 /**
+ * Cap on a tool result's serialized size when streamed over realtime. Postgres
+ * NOTIFY tops out at 8 KB, and the realtime layer replaces any oversized payload
+ * with a `_truncated` marker that strips the body — including the `toolCallId`
+ * the client needs to flip the step from "running" to "done". A loaded skill's
+ * full text easily blows that cap, which is why such steps used to spin forever.
+ * So we never ship a big result live: it is persisted to the DB and the client
+ * fills it in on the next history load (every `task:finish` triggers one). The
+ * realtime event then carries only what flips the step's state.
+ */
+const MAX_REALTIME_RESULT_BYTES = 6000;
+
+/**
  * Hard wall-clock ceiling for a single task. The lease/heartbeat only catches a
  * DEAD worker; a LIVE worker stuck on a hung tool or LLM call keeps renewing its
  * lease forever and would hold a concurrency slot indefinitely. This deadline
@@ -527,6 +539,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             textBuf += event.text;
             scheduleFlush();
             break;
+          case "tool-input-start": {
+            // The model has begun a tool call but its args haven't streamed in
+            // yet. Surface the step at once (a spinner with a generic label) so
+            // the user sees what's happening the moment it starts; `tool-call`
+            // refines the label once the parsed args arrive. Not persisted — the
+            // `tool-call` part below is the durable record. The narration before
+            // it is a finished run, so seal it now (tool-call then won't re-seal).
+            // `event.id` is the toolCallId on this chunk type.
+            const step = describeStep(stepsT, event.toolName);
+            currentStatus = { kind: "tool", label: step.activeLabel };
+            await flushBuffers();
+            await sealTrailingRun();
+            await publishTaskEvent(userId, {
+              type: "task:tool-input-start", taskId, chatId, messageId: msgId,
+              toolCallId: event.id, toolName: event.toolName,
+            });
+            break;
+          }
           case "tool-call": {
             toolCount += 1;
             const step = describeStep(stepsT, event.toolName, event.input);
@@ -542,14 +572,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             });
             break;
           }
-          case "tool-result":
+          case "tool-result": {
             await flushBuffers();
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output: event.output });
+            // The full output is in `parts` (saved to the DB at finish-step). Over
+            // realtime we ship it only if it fits NOTIFY's budget; an oversized
+            // body (e.g. a loaded skill) is dropped here so the small state-flip
+            // event survives intact — the client backfills the body from the DB.
+            const fits = Buffer.byteLength(JSON.stringify(event.output ?? null)) <= MAX_REALTIME_RESULT_BYTES;
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId, result: event.output,
+              toolCallId: event.toolCallId, result: fits ? event.output : undefined,
             });
             break;
+          }
           case "tool-error":
             await flushBuffers();
             parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: errMsg(event.error) });

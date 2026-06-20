@@ -83,6 +83,7 @@ export function useBackgroundChat({
   useEffect(() => {
     let es: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout>;
+    let truncReloadTimer: ReturnType<typeof setTimeout>;
     let retryDelay = 1000; // exponential backoff: 1s, 2s, 4s, 8s, max 30s
 
     const connect = () => {
@@ -96,6 +97,18 @@ export function useBackgroundChat({
 
           // Only handle events for this chat
           if ("chatId" in data && data.chatId !== chatId) return;
+
+          // A NOTIFY payload too big for Postgres (e.g. an oversized text burst)
+          // arrives as a stripped marker carrying only `_truncated: true` plus the
+          // ids — its body (delta/result) is gone. Honour the contract the realtime
+          // layer promises and re-read this message from the DB, which holds the
+          // full part. Debounced so a burst collapses into one reload. (Big tool
+          // results are already capped server-side, so this is a rare safety net.)
+          if ((data as { _truncated?: boolean })._truncated) {
+            clearTimeout(truncReloadTimer);
+            truncReloadTimer = setTimeout(loadHistory, 250);
+            return;
+          }
 
           switch (data.type) {
             case "task:start": {
@@ -149,6 +162,33 @@ export function useBackgroundChat({
               break;
             }
 
+            case "task:tool-input-start": {
+              // The model began a tool call; args haven't arrived yet. Show the
+              // step immediately as a spinner with a generic label — `tool-call`
+              // refines it once the parsed args land.
+              setTaskInfo((prev) => ({ ...prev, currentTool: data.toolName }));
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === data.messageId);
+                if (idx === -1) return prev;
+                const msg = prev[idx];
+                // A reconnect may replay it — don't add the same step twice.
+                if (msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId)) return prev;
+                const msgs = [...prev];
+                msgs[idx] = {
+                  ...msg,
+                  parts: [...msg.parts, {
+                    type: "dynamic-tool",
+                    toolCallId: data.toolCallId,
+                    toolName: data.toolName,
+                    // AI SDK 6 state for a call whose args are still streaming in.
+                    state: "input-streaming",
+                  }],
+                };
+                return msgs;
+              });
+              break;
+            }
+
             case "task:tool-call": {
               setTaskInfo((prev) => ({ ...prev, currentTool: data.toolName }));
               setMessages((prev) => {
@@ -156,16 +196,26 @@ export function useBackgroundChat({
                 if (idx === -1) return prev;
                 const msgs = [...prev];
                 const msg = msgs[idx];
-                const parts = [...msg.parts];
-                parts.push({
-                  type: "dynamic-tool",
-                  toolCallId: data.toolCallId,
-                  toolName: data.toolName,
-                  // Valid AI SDK 6 state — input is here, output pending.
-                  state: "input-available",
-                  input: data.args,
-                });
-                msgs[idx] = { ...msg, parts };
+                const existing = msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId);
+                msgs[idx] = {
+                  ...msg,
+                  // Refine the step opened by tool-input-start: fill the parsed
+                  // args and mark the input complete (output still pending). If no
+                  // input-start was seen (older worker / missed event), add it.
+                  parts: existing
+                    ? msg.parts.map((p) =>
+                        p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
+                          ? { ...p, state: "input-available", input: data.args }
+                          : p,
+                      )
+                    : [...msg.parts, {
+                        type: "dynamic-tool",
+                        toolCallId: data.toolCallId,
+                        toolName: data.toolName,
+                        state: "input-available",
+                        input: data.args,
+                      }],
+                };
                 return msgs;
               });
               break;
@@ -224,6 +274,7 @@ export function useBackgroundChat({
     return () => {
       sseHealthyRef.current = false;
       clearTimeout(reconnectTimer);
+      clearTimeout(truncReloadTimer);
       es?.close();
     };
   }, [chatId, loadHistory]);

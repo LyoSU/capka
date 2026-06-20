@@ -11,6 +11,11 @@ export type TaskEvent =
   | { type: "task:start"; taskId: string; chatId: string; messageId: string }
   | { type: "task:text-delta"; taskId: string; chatId: string; messageId: string; delta: string }
   | { type: "task:reasoning-delta"; taskId: string; chatId: string; messageId: string; delta: string }
+  // Fired the instant the model STARTS emitting a tool call — before its
+  // arguments have streamed in. Lets the UI surface the step (a spinner with a
+  // generic label) immediately, then refine it once `task:tool-call` carries the
+  // parsed args. Purely a liveness affordance: nothing is persisted for it.
+  | { type: "task:tool-input-start"; taskId: string; chatId: string; messageId: string; toolCallId: string; toolName: string }
   | { type: "task:tool-call"; taskId: string; chatId: string; messageId: string; toolCallId: string; toolName: string; args: unknown }
   // isError marks a genuine tool failure (the AI SDK tool-error event). The
   // result shape alone can't be trusted — successful tools like read_file return
