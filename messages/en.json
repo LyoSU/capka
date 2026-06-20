@@ -289,8 +289,7 @@
       "fork": "Fork into a new chat",
       "prevVersion": "Previous version",
       "nextVersion": "Next version",
-      "versions": "{count} versions",
-      "attachments": "{count, plural, one {Attachment} other {# attachments}}"
+      "versions": "{count} versions"
     },
     "forkFailed": "Could not fork the chat",
     "archived": {

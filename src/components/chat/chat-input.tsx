@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatSize } from "@/lib/constants";
 import { fileKind } from "@/lib/file-kinds";
-import { FileRowShell } from "./file-preview";
+import { FileTile } from "./file-preview";
 
 /** Max single file size for upload (100MB) */
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
@@ -37,7 +37,6 @@ export function ChatInput({
   onFilesChange,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
-  const tf = useTranslations("chat.fileType");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -113,36 +112,36 @@ export function ChatInput({
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
         >
-          {/* Attached files preview — same FileRow layout used in chat history,
+          {/* Attached files preview — same square FileTile used in chat history,
               so a staged file looks identical to a sent one. Files aren't in the
-              sandbox yet, so the thumb is a local object-URL / typed icon. */}
+              sandbox yet, so the thumb is a local object-URL / typed icon. Wraps
+              and scrolls so many files never push the textarea off-screen. */}
           {files.length > 0 && (
-            <div className="divide-y divide-border/25 border-b border-border/50">
+            <div className="flex max-h-44 flex-wrap gap-3 overflow-y-auto px-3 pt-3 scrollbar-thin">
               {files.map((af) => {
                 const { Icon, color, bg } = fileKind(af.file.name);
                 const preview = previews.get(af.id);
                 const thumb = preview ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={preview} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+                  <img src={preview} alt="" className="h-full w-full object-cover" />
                 ) : (
-                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${bg}`}>
-                    <Icon className={`h-4 w-4 ${color}`} />
+                  <span className={`flex h-full w-full items-center justify-center ${bg}`}>
+                    <Icon className={`h-6 w-6 ${color}`} />
                   </span>
                 );
                 return (
-                  <FileRowShell
+                  <FileTile
                     key={af.id}
                     thumb={thumb}
                     name={af.file.name}
-                    sublabel={`${preview ? tf("image") : tf("file")} · ${formatSize(af.file.size)}`}
-                    trailing={
+                    overlay={
                       <button
                         type="button"
                         onClick={() => removeFile(af.id)}
-                        className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition hover:bg-foreground/80"
                         aria-label={t("remove", { name: af.file.name })}
                       >
-                        <X className="h-4 w-4" />
+                        <X className="h-3 w-3" />
                       </button>
                     }
                   />

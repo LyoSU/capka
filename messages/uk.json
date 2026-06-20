@@ -289,8 +289,7 @@
       "fork": "Відгалузити в новий чат",
       "prevVersion": "Попередня версія",
       "nextVersion": "Наступна версія",
-      "versions": "{count} версій",
-      "attachments": "{count, plural, one {Вкладення} few {# вкладення} many {# вкладень} other {# вкладення}}"
+      "versions": "{count} версій"
     },
     "forkFailed": "Не вдалося відгалузити чат",
     "archived": {
