@@ -397,7 +397,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: errMsg(event.error) });
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId, result: { error: errMsg(event.error) },
+              toolCallId: event.toolCallId, result: { error: errMsg(event.error) }, isError: true,
             });
             break;
           case "error":

@@ -12,7 +12,10 @@ export type TaskEvent =
   | { type: "task:text-delta"; taskId: string; chatId: string; messageId: string; delta: string }
   | { type: "task:reasoning-delta"; taskId: string; chatId: string; messageId: string; delta: string }
   | { type: "task:tool-call"; taskId: string; chatId: string; messageId: string; toolCallId: string; toolName: string; args: unknown }
-  | { type: "task:tool-result"; taskId: string; chatId: string; messageId: string; toolCallId: string; result: unknown }
+  // isError marks a genuine tool failure (the AI SDK tool-error event). The
+  // result shape alone can't be trusted — successful tools like read_file return
+  // an `error: null` field, which the client must NOT read as a failure.
+  | { type: "task:tool-result"; taskId: string; chatId: string; messageId: string; toolCallId: string; result: unknown; isError?: boolean }
   // messageId is absent when a task fails/cancels before an assistant message exists.
   | { type: "task:finish"; taskId: string; chatId: string; messageId?: string; status: string; error?: string }
   | { type: "new_message"; chatId: string };

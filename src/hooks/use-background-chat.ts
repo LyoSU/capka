@@ -178,8 +178,10 @@ export function useBackgroundChat({
                 if (idx === -1) return prev;
                 const msgs = [...prev];
                 const msg = msgs[idx];
-                const result = data.result as Record<string, unknown> | undefined;
-                const isError = result && typeof result === "object" && "error" in result;
+                // Trust the server's explicit failure flag — a successful tool can
+                // legitimately carry an `error: null` field, which must not read
+                // as a failure (otherwise it flashes red mid-stream).
+                const isError = data.isError === true;
                 const parts = msg.parts.map((p) =>
                   p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
                     ? { ...p, state: isError ? "output-error" : "output-available", output: data.result }
