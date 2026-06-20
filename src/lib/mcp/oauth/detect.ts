@@ -1,5 +1,5 @@
 import { discoverOAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/client/auth.js";
-import { createGuardedFetch } from "@/lib/net/ssrf";
+import { createGuardedFetch, PROVIDER_FETCH_TIMEOUT_MS } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
 
 export type AuthKind = "token" | "oauth";
@@ -10,7 +10,7 @@ export type AuthKind = "token" | "oauth";
  *  user-supplied and this runs before the row is persisted/validated). Never throws. */
 export async function detectAuthKind(url: string): Promise<AuthKind> {
   try {
-    const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls() });
+    const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), timeoutMs: PROVIDER_FETCH_TIMEOUT_MS });
     const meta = await discoverOAuthProtectedResourceMetadata(url, undefined, fetchFn);
     return meta ? "oauth" : "token";
   } catch {

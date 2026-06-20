@@ -33,6 +33,18 @@ describe("createGuardedFetch", () => {
     await expect(guarded("https://api.example.com/mcp")).rejects.toThrow(/isn't allowed/i);
   });
 
+  it("aborts a hung request once timeoutMs elapses", async () => {
+    // Mimic a provider that accepts the connection but never answers: resolve only
+    // if the caller's abort signal fires. Without timeoutMs this would hang forever.
+    globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      }),
+    ) as never;
+    const guarded = createGuardedFetch({ blockPrivate: false, timeoutMs: 20 });
+    await expect(guarded("https://api.example.com/mcp")).rejects.toThrow();
+  });
+
   it("follows a safe redirect and injects headers", async () => {
     const calls: { url: string; auth: string | null }[] = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

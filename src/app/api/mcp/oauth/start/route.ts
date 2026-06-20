@@ -2,7 +2,7 @@ import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { requireSession } from "@/lib/auth";
 import { getAccessibleServer } from "@/lib/mcp/service";
 import { McpOAuthProvider } from "@/lib/mcp/oauth/provider";
-import { createGuardedFetch } from "@/lib/net/ssrf";
+import { createGuardedFetch, PROVIDER_FETCH_TIMEOUT_MS } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
 
 /** Begin the OAuth sign-in for a connector: discover + (DCR) + PKCE, then 302 the
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
     if (!server || !server.url || server.authKind !== "oauth") return settings("?error=oauth");
 
     const provider = new McpOAuthProvider(userId, server.id, "flow");
-    const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls() });
+    const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), timeoutMs: PROVIDER_FETCH_TIMEOUT_MS });
     const result = await auth(provider, { serverUrl: server.url, fetchFn });
     if (result === "REDIRECT" && provider.capturedAuthUrl) {
       return Response.redirect(provider.capturedAuthUrl.toString(), 302);

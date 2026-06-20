@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/auth";
 import { getAccessibleServer } from "@/lib/mcp/service";
 import { McpOAuthProvider } from "@/lib/mcp/oauth/provider";
 import { consumeState } from "@/lib/mcp/oauth/store";
-import { createGuardedFetch } from "@/lib/net/ssrf";
+import { createGuardedFetch, PROVIDER_FETCH_TIMEOUT_MS } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
 
 /** OAuth redirect target: exchange the authorization code for per-user tokens.
@@ -30,7 +30,7 @@ export async function GET(req: Request) {
     if (!server || !server.url) return settings("?error=oauth");
 
     const provider = new McpOAuthProvider(userId, server.id, "callback", flight.codeVerifier);
-    const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls() });
+    const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), timeoutMs: PROVIDER_FETCH_TIMEOUT_MS });
     const result = await auth(provider, { serverUrl: server.url, authorizationCode: code, fetchFn });
     if (result !== "AUTHORIZED") return settings("?error=oauth");
     return settings(`?connected=${encodeURIComponent(server.name)}`);

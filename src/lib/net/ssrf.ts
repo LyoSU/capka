@@ -1,6 +1,12 @@
 import { isIPv4 } from "node:net";
 import { lookup } from "node:dns/promises";
 
+/** Per-request ceiling for OAuth discovery / DCR / token fetches to a user-supplied
+ *  provider. Without it, a host that accepts the connection but never answers stalls
+ *  the request on undici's ~5-min default — long enough to look like an infinite hang
+ *  (e.g. a "Sign in" page that loads forever, or an add that never persists). */
+export const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
+
 /**
  * SSRF guard for user-supplied URLs (provider base URLs, MCP server URLs).
  * Link-local / cloud-metadata (169.254/16, fe80::/10) are ALWAYS blocked.
