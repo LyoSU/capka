@@ -14,6 +14,14 @@ export interface ConnectedMcp {
  *  the stream starts, so a hung connect would otherwise delay every task start. */
 const CONNECT_TIMEOUT_MS = 5000;
 
+/** Per-request ceiling for the live transport once connected. The transport reuses
+ *  one fetch for the whole session, so this also bounds every tool call — and a real
+ *  tool (web/X search, a long job) legitimately runs for many seconds. Capping it at
+ *  CONNECT_TIMEOUT_MS aborted slow calls with "operation was aborted due to timeout";
+ *  the handshake stall is already bounded by withTimeout below. This stays only as an
+ *  SSRF-safe backstop, well above the SDK's own 60s request timeout. */
+const REQUEST_TIMEOUT_MS = 120_000;
+
 /** Reject if `p` doesn't settle within `ms`. The label names what timed out so a
  *  skipped connector is identifiable in the logs. */
 export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -43,7 +51,9 @@ export async function connectMcpServer(
   // the guarded fetch re-validate every request + redirect hop. Static auth headers
   // are injected; each request is bounded so a stalled host can't hang the run.
   await assertSafeUrl(cfg.url, blockPrivate);
-  const authedFetch = createGuardedFetch({ blockPrivate, timeoutMs, headers });
+  // The handshake is bounded by withTimeout (below); the fetch timeout is the
+  // per-tool-call backstop, so it must be generous — not the connect ceiling.
+  const authedFetch = createGuardedFetch({ blockPrivate, timeoutMs: REQUEST_TIMEOUT_MS, headers });
 
   const client = new Client({ name: "unclaw", version: "0.1.0" });
   // OAuth connectors attach `authProvider` (per-user tokens + auto-refresh); token
