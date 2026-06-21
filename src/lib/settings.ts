@@ -192,7 +192,16 @@ export async function getTelegramOidcConfig(): Promise<TelegramOidcConfig> {
   };
 }
 
-/** Admin-chosen policy for brand-new Telegram sign-ups. Defaults to closed. */
+/**
+ * The single registration policy for the whole instance — governs BOTH email
+ * and Telegram sign-ups (open / approval / closed). Reads the unified
+ * `registration_mode` key; for instances that predate it, derives from the
+ * legacy `registration_enabled` boolean (true → open, otherwise closed) so
+ * upgrades keep their existing behavior. Default for a fresh instance is closed
+ * (secure default — only existing accounts sign in until an admin opens it).
+ */
 export async function getRegistrationMode(): Promise<RegistrationMode> {
-  return parseRegistrationMode(await getSetting("telegram_registration_mode"));
+  const explicit = await getSetting("registration_mode");
+  if (explicit) return parseRegistrationMode(explicit);
+  return (await getSetting("registration_enabled")) === "true" ? "open" : "closed";
 }

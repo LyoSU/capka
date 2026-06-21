@@ -61,11 +61,10 @@ export default function GeneralSettingsPage() {
 
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");
-  const registration = useSetting("registration_enabled", "false");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
 
   const settingsLoading =
-    minCtx.loading || sandbox.loading || registration.loading || blockPrivate.loading;
+    minCtx.loading || sandbox.loading || blockPrivate.loading;
 
   // Optimistic toggle with rollback — flip immediately, but restore the previous
   // value if the save fails so the UI never lies about persisted state.
@@ -187,28 +186,6 @@ export default function GeneralSettingsPage() {
             <Switch
               checked={sandbox.value === "true"}
               onCheckedChange={(checked) => toggle(sandbox, "sandbox_enabled", checked, t("sandboxEnabled"), t("sandboxDisabled"))}
-            />
-          </div>
-
-          <Separator />
-
-          {/* Registration — admin only */}
-          <div>
-            <h2 className="text-base font-medium">{t("registration")}</h2>
-            <p className="text-sm text-muted-foreground">
-              {t("registrationDesc")}
-            </p>
-          </div>
-          <div className="flex items-center justify-between rounded-lg border p-4">
-            <div>
-              <p className="text-sm font-medium">{t("allowRegistration")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("allowRegistrationHint")}
-              </p>
-            </div>
-            <Switch
-              checked={registration.value === "true"}
-              onCheckedChange={(checked) => toggle(registration, "registration_enabled", checked, t("registrationEnabled"), t("registrationDisabled"))}
             />
           </div>
 

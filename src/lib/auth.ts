@@ -103,11 +103,15 @@ export async function getAuth() {
     databaseHooks: {
       user: {
         create: {
-          // Registration policy for brand-new Telegram identities. Only fires on
-          // the OAuth callback path; email sign-up keeps its own gate (see the
-          // /api/auth/[...all] route), and the first account ever is the admin.
+          // Single registration policy for BOTH new Telegram identities (OAuth
+          // callback) and email sign-ups: open → active, approval → pending,
+          // closed → rejected (email is also blocked earlier in the [...all]
+          // route; this is defense-in-depth). The first account ever is always
+          // the active admin, regardless of mode (bootstrap).
           before: async (user, ctx) => {
-            if (!ctx?.path?.includes("callback")) return;
+            const isOAuth = !!ctx?.path?.includes("callback");
+            const isEmailSignup = ctx?.path === "/sign-up/email";
+            if (!isOAuth && !isEmailSignup) return;
             const [first] = await db.select({ id: schema.users.id }).from(schema.users).limit(1);
             const decision = resolveRegistration({
               mode: await getRegistrationMode(),

@@ -749,7 +749,7 @@
     },
     "authentication": {
       "title": "Authentication",
-      "subtitle": "How people sign in and who's allowed to join.",
+      "subtitle": "How people sign in, and who is allowed to create an account.",
       "save": "Save changes",
       "saved": "Saved",
       "saveFailed": "Couldn't save. Please try again.",
@@ -773,7 +773,7 @@
       },
       "mode": {
         "title": "Who can register",
-        "desc": "What happens when a new person signs in with Telegram for the first time.",
+        "desc": "What happens when someone creates an account — via email or Telegram — for the first time.",
         "open": {
           "label": "Open",
           "desc": "Anyone can sign in and start using the app right away."

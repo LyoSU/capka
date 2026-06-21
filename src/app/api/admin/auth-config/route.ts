@@ -41,7 +41,7 @@ export const POST = apiHandler(async (req: Request) => {
   if (body.clientId !== undefined) await setSetting("telegram_oidc_client_id", body.clientId, false);
   if (body.clientSecret) await setSetting("telegram_oidc_client_secret", body.clientSecret, true);
   if (body.enabled !== undefined) await setSetting("telegram_login_enabled", body.enabled ? "true" : "false", false);
-  if (body.registrationMode !== undefined) await setSetting("telegram_registration_mode", body.registrationMode, false);
+  if (body.registrationMode !== undefined) await setSetting("registration_mode", body.registrationMode, false);
 
   // The better-auth instance caches its plugin config — drop it so the next
   // request rebuilds with the new credentials/toggle.
