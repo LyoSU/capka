@@ -132,6 +132,22 @@ and have no network by default; the controller reaches Docker only through a
 restricted socket-proxy. This is defense-in-depth — for a true "escape ≠ host
 root" boundary run a **rootless** Docker daemon.
 
+### gVisor (opt-in hardening)
+
+By default sandboxes run on the standard `runc` runtime, so the stack boots on
+any Docker host with no extra setup. For untrusted or multi-tenant workloads,
+opt into **gVisor** — a user-space kernel that gives a much stronger
+container↔host boundary and needs **no KVM** (so it works on ordinary VPS hosts,
+unlike Kata/Firecracker):
+
+1. On the Docker host, run `sudo sh scripts/install-gvisor.sh` (downloads `runsc`,
+   registers the runtime, enables `userns-remap`), then `sudo systemctl restart docker`.
+2. Set `SANDBOX_RUNTIME=runsc` in the environment and redeploy.
+
+The secure profile is then **fail-closed**: the controller refuses to boot if
+`runsc` isn't registered on the daemon — it never silently downgrades to `runc`.
+Until you opt in, the controller logs an `isolation.unhardened` warning at boot.
+
 See **[`SECURITY.md`](SECURITY.md)** for the full threat model, the rootless
 setup, the per-deployment hardening table, and how to report a vulnerability.
 

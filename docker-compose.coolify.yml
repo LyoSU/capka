@@ -66,9 +66,10 @@ services:
       - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD}@postgres:5432/unClaw
       - COMPUTE_BACKEND=docker
       - WORKSPACE_STORE=local
-      # gVisor by default, fail-closed. Requires runsc on the host (scripts/install-gvisor.sh).
-      # Set SANDBOX_RUNTIME=runc ONLY for a trusted/dev deploy.
-      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runsc}
+      # Isolation runtime. Default runc — boots immediately. gVisor is OPT-IN: set
+      # SANDBOX_RUNTIME=runsc AND install gVisor on the host (scripts/install-gvisor.sh)
+      # for the hardened, fail-closed secure profile (untrusted/multi-tenant use).
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runc}
       # NOTE: no HOST_DATA_ROOT here. Docker resolves sibling-container bind sources
       # on the daemon host, and the controller now auto-detects that host path by
       # inspecting its own /data mount at startup (robust under Coolify, where ${PWD}

@@ -14,6 +14,7 @@ import { makeWorkspaceStore } from "./stores/workspace-factory.js";
 import { detectHostDataRoot } from "./stores/local-fs-store.js";
 import { PostgresSessionStore } from "./session-store.js";
 import { assertRuntimeAvailable } from "./runtime-check.js";
+import { resolveRuntimeProfile } from "./profile.js";
 import { reconcile } from "./reconcile.js";
 import { gcOrphanWorkspaces, findOverQuota } from "./gc.js";
 import { notReadyGuard } from "./readiness.js";
@@ -53,9 +54,12 @@ const SANDBOX_GID = parseInt(process.env.SANDBOX_GID || "1000");
 const GC_GRACE_MS = parseInt(process.env.GC_GRACE_MS || "3600000"); // 1h
 const FLUSH_INTERVAL_MS = parseInt(process.env.FLUSH_INTERVAL_MS || "60000");
 
-// Isolation profile: "secure" (gVisor, fail-closed) default; "dev" allows runc.
-const RUNTIME = process.env.SANDBOX_RUNTIME || "runsc";
-const PROFILE = process.env.SANDBOX_PROFILE || (RUNTIME === "runc" ? "dev" : "secure");
+// Isolation: gVisor is OPT-IN. Default runtime is runc (boots on any Docker host);
+// set SANDBOX_RUNTIME=runsc to opt into the fail-closed "secure" profile.
+const { runtime: RUNTIME, profile: PROFILE } = resolveRuntimeProfile({
+  runtime: process.env.SANDBOX_RUNTIME,
+  profile: process.env.SANDBOX_PROFILE,
+});
 const COMPUTE_BACKEND = process.env.COMPUTE_BACKEND || "docker";
 const WORKSPACE_STORE = process.env.WORKSPACE_STORE || "local";
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -330,8 +334,18 @@ async function boot() {
   workspace = makeWorkspaceStore({ kind: WORKSPACE_STORE, dataRoot: DATA_ROOT, hostDataRoot, uid: SANDBOX_UID, gid: SANDBOX_GID });
   backend = makeComputeBackend({ kind: COMPUTE_BACKEND, docker, image: SANDBOX_IMAGE, runtime: RUNTIME });
 
-  // Fail-closed: refuse to boot if the secure runtime isn't on the daemon.
+  // Fail-closed: if the secure profile was opted into, refuse to boot unless the
+  // gVisor runtime is on the daemon. The dev profile (default) skips this.
   await assertRuntimeAvailable(docker, { profile: PROFILE, runtime: RUNTIME });
+
+  // Make the weaker default posture loud rather than silent: a dev-profile deploy
+  // runs untrusted code with standard Docker isolation only.
+  if (PROFILE !== "secure") {
+    log("isolation.unhardened", {
+      profile: PROFILE, runtime: RUNTIME,
+      hint: "Set SANDBOX_RUNTIME=runsc + install gVisor (scripts/install-gvisor.sh) for untrusted/multi-tenant workloads.",
+    }, "warn");
+  }
 
   // Serve early so the orchestrator can probe /health (503 elsewhere until ready).
   server.listen(PORT, () => log("listening", { port: PORT, profile: PROFILE, runtime: RUNTIME }));
