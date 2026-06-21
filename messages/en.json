@@ -708,7 +708,16 @@
         "system": "Shared",
         "user": "Personal",
         "project": "Project"
-      }
+      },
+      "kind": {
+        "remote": "Remote",
+        "local": "Local"
+      },
+      "commandPlaceholder": "npx -y @playwright/mcp",
+      "commandHint": "Runs inside the sandbox. The package installs itself on first use (e.g. npx, uvx).",
+      "envPlaceholder": "KEY=value (one per line)",
+      "localBadge": "Local",
+      "localRuns": "Runs in the sandbox"
     },
     "marketplace": {
       "title": "Marketplace",

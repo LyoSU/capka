@@ -53,12 +53,24 @@ export async function listEnabledServerConfigs(userId: string, projectId?: strin
   const key = await getMasterKey();
   const out: McpServerConfig[] = [];
   for (const r of rows) {
-    if (!winnerIds.has(r.id) || r.transport !== "http" || !r.url) continue;
+    if (!winnerIds.has(r.id)) continue;
+    const isHttp = r.transport === "http" && r.url;
+    const isStdio = r.transport === "stdio" && r.command;
+    if (!isHttp && !isStdio) continue; // sse not served yet
     let secrets: McpSecrets | undefined;
     if (r.secrets) {
       try { secrets = JSON.parse(decrypt(r.secrets, key)) as McpSecrets; } catch { secrets = undefined; }
     }
-    out.push({ id: r.id, name: r.name, transport: "http", url: r.url, secrets, authKind: r.authKind as McpAuthKind });
+    out.push({
+      id: r.id,
+      name: r.name,
+      transport: r.transport as McpServerConfig["transport"],
+      url: r.url ?? "",
+      command: r.command ?? undefined,
+      args: (r.args as string[] | null) ?? undefined,
+      secrets,
+      authKind: r.authKind as McpAuthKind,
+    });
   }
   return out;
 }
@@ -115,6 +127,47 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
     name, transport: "http" as const, url: input.url,
     secrets: input.secrets ? encrypt(JSON.stringify(input.secrets), key) : null,
     ...(input.authKind ? { authKind: input.authKind } : {}),
+    ...(input.source ? { source: input.source } : {}),
+    updatedAt: new Date(),
+  };
+  const existing = input.id
+    ? await db.select({ id: mcpServers.id }).from(mcpServers).where(eq(mcpServers.id, input.id)).limit(1)
+    : [];
+  if (existing[0]) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
+  else await db.insert(mcpServers).values(values);
+  return id;
+}
+
+export interface UpsertStdioInput {
+  id?: string;
+  scope: McpScope;
+  userId: string | null;
+  projectId: string | null;
+  name: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  source?: string;
+}
+
+/**
+ * Create/update a stdio MCP server (command + args + env). The process runs inside
+ * the session sandbox at run time (see load.ts), never on the host — so there's no
+ * URL and no SSRF check; the trust boundary is the sandbox. Admin-only at the route.
+ */
+export async function upsertStdioServer(input: UpsertStdioInput): Promise<string> {
+  const name = slugifyName(input.name);
+  if (!NAME_RE.test(name)) throw new ValidationError("Use letters or numbers in the connector name.");
+  if (!input.command.trim()) throw new ValidationError("A command is required for a local connector.");
+  const key = await getMasterKey();
+  const id = input.id ?? nanoid();
+  const values = {
+    id, scope: input.scope, userId: input.userId, projectId: input.projectId,
+    name, transport: "stdio" as const, url: null,
+    command: input.command.trim(),
+    args: input.args ?? [],
+    secrets: input.env && Object.keys(input.env).length ? encrypt(JSON.stringify({ env: input.env } satisfies McpSecrets), key) : null,
+    authKind: "token" as const,
     ...(input.source ? { source: input.source } : {}),
     updatedAt: new Date(),
   };

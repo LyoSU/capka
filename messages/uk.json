@@ -708,7 +708,16 @@
         "system": "Спільні",
         "user": "Особисті",
         "project": "Проєкт"
-      }
+      },
+      "kind": {
+        "remote": "Віддалений",
+        "local": "Локальний"
+      },
+      "commandPlaceholder": "npx -y @playwright/mcp",
+      "commandHint": "Виконується в сендбоксі. Пакет встановлюється сам під час першого запуску (напр. npx, uvx).",
+      "envPlaceholder": "KEY=значення (по одному в рядку)",
+      "localBadge": "Локальний",
+      "localRuns": "Виконується в сендбоксі"
     },
     "marketplace": {
       "title": "Маркетплейс",

@@ -38,4 +38,7 @@ export interface InstallManifest {
   connectors: string[];
   ignored: { type: string; count: number }[];
   notes: string[];
+  /** From .claude-plugin/plugin.json, when present. */
+  version?: string;
+  displayName?: string;
 }

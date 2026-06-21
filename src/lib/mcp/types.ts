@@ -11,12 +11,16 @@ export interface McpSecrets {
 
 export type McpAuthKind = "token" | "oauth";
 
-/** Runtime config after decryption — what connectMcpServer needs. */
+/** Runtime config after decryption — what connectMcpServer needs.
+ *  http/sse: `url` is set. stdio: `command` (+ optional `args`, `secrets.env`) is
+ *  set and the server is reached by bridging through the session sandbox. */
 export interface McpServerConfig {
   id?: string;
   name: string;
   transport: McpTransport;
   url: string;
+  command?: string;
+  args?: string[];
   secrets?: McpSecrets;
   authKind?: McpAuthKind;
 }

@@ -6,7 +6,7 @@ import { createGuardedFetch } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls, getSetting } from "@/lib/settings";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
 import { ingestSkill } from "@/lib/skills/service";
-import { upsertServer, setEnabled } from "@/lib/mcp/service";
+import { upsertServer, upsertStdioServer, setEnabled } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghTree, ghRaw, type TreeEntry } from "./fetch";
@@ -24,7 +24,7 @@ async function ghFetch(): Promise<typeof fetch> {
 }
 
 /** Tolerate a missing `mcpServers` wrapper (some real .mcp.json files omit it). */
-function extractServers(json: unknown): Record<string, { type?: string; url?: string; headers?: Record<string, string>; command?: string }> {
+function extractServers(json: unknown): Record<string, { type?: string; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string> }> {
   if (json && typeof json === "object") {
     const o = json as Record<string, unknown>;
     if (o.mcpServers && typeof o.mcpServers === "object") return o.mcpServers as never;
@@ -58,27 +58,59 @@ async function applyPlugin(gh: GitHubRef, tag: string): Promise<InstallManifest>
   const manifest: InstallManifest = { skills: [], connectors: [], ignored: [], notes: [] };
   const raw = (path: string) => ghRaw(gh.owner, gh.repo, gh.ref, path, fetchFn);
 
-  // ── Remote MCP connectors (.mcp.json) ──────────────────────────────────────
+  // ── Plugin manifest (.claude-plugin/plugin.json) — better metadata + inline MCP ──
+  let inlineServers: ReturnType<typeof extractServers> = {};
+  const pjPath = `${prefix}.claude-plugin/plugin.json`;
+  if (tree.some((t) => t.path === pjPath)) {
+    try {
+      const pj = JSON.parse((await raw(pjPath)) ?? "{}") as Record<string, unknown>;
+      if (typeof pj.version === "string") manifest.version = pj.version;
+      if (typeof pj.displayName === "string") manifest.displayName = pj.displayName;
+      if (pj.mcpServers && typeof pj.mcpServers === "object" && !Array.isArray(pj.mcpServers)) {
+        inlineServers = extractServers({ mcpServers: pj.mcpServers });
+      }
+    } catch { /* tolerate a malformed manifest */ }
+  }
+
+  // ── MCP connectors (.mcp.json + inline plugin.json mcpServers) ──────────────
+  async function routeServer(sname: string, def: ReturnType<typeof extractServers>[string]) {
+    if (!def || typeof def !== "object") return;
+    // Local (stdio) server — runs inside the session sandbox. We route bare-command
+    // servers (npx/uvx/etc.); bundled-binary ones pointing at ${CLAUDE_PLUGIN_ROOT}
+    // need files we don't materialize yet, so skip those.
+    if (def.command || def.type === "stdio") {
+      if (!def.command) { manifest.notes.push(`${sname}: local server has no command, skipped`); return; }
+      const refsPluginRoot = [def.command, ...(def.args ?? [])].some((s) => typeof s === "string" && s.includes("${CLAUDE_PLUGIN_ROOT}"));
+      if (refsPluginRoot) { manifest.notes.push(`${sname}: bundled local server not supported yet (needs plugin files)`); return; }
+      const envHasPlaceholder = def.env ? JSON.stringify(def.env).includes("${") : false;
+      const env = def.env && !envHasPlaceholder ? def.env : undefined;
+      const sid = await upsertStdioServer({ scope: "system", userId: null, projectId: null, name: sname, command: def.command, args: def.args, env, source: tag });
+      if (envHasPlaceholder) { await setEnabled(sid, false); manifest.notes.push(`${sname}: needs configuration — open Connectors to finish`); }
+      manifest.connectors.push(sname);
+      return;
+    }
+    if (!def.url) { manifest.notes.push(`${sname}: no URL, skipped`); return; }
+    const hasPlaceholder = def.headers ? JSON.stringify(def.headers).includes("${") : false;
+    const secrets = def.headers && !hasPlaceholder ? { headers: def.headers } : undefined;
+    let authKind: "token" | "oauth" = "token";
+    try { authKind = await detectAuthKind(def.url); } catch { /* default token */ }
+    const id = await upsertServer({ scope: "system", userId: null, projectId: null, name: sname, url: def.url, secrets, authKind, source: tag });
+    if (hasPlaceholder) { await setEnabled(id, false); manifest.notes.push(`${sname}: needs an access key — open Connectors to add it`); }
+    manifest.connectors.push(sname);
+  }
+
+  let fileServers: ReturnType<typeof extractServers> = {};
   if (tree.some((t) => t.path === `${prefix}.mcp.json`)) {
     try {
       const mcpRaw = await raw(`${prefix}.mcp.json`);
-      const servers = extractServers(mcpRaw ? JSON.parse(mcpRaw) : {});
-      for (const [sname, def] of Object.entries(servers)) {
-        if (!def || typeof def !== "object") continue;
-        if (def.command || def.type === "stdio") { manifest.notes.push(`${sname}: local (stdio) server — not supported yet`); continue; }
-        if (!def.url) { manifest.notes.push(`${sname}: no URL, skipped`); continue; }
-        const hasPlaceholder = def.headers ? JSON.stringify(def.headers).includes("${") : false;
-        const secrets = def.headers && !hasPlaceholder ? { headers: def.headers } : undefined;
-        let authKind: "token" | "oauth" = "token";
-        try { authKind = await detectAuthKind(def.url); } catch { /* default token */ }
-        const id = await upsertServer({ scope: "system", userId: null, projectId: null, name: sname, url: def.url, secrets, authKind, source: tag });
-        if (hasPlaceholder) { await setEnabled(id, false); manifest.notes.push(`${sname}: needs an access key — open Connectors to add it`); }
-        manifest.connectors.push(sname);
-      }
+      fileServers = extractServers(mcpRaw ? JSON.parse(mcpRaw) : {});
     } catch (e) {
       manifest.notes.push(`.mcp.json could not be read: ${e instanceof Error ? e.message : "error"}`);
     }
   }
+  // .mcp.json wins over inline on a name clash.
+  const servers = { ...inlineServers, ...fileServers };
+  for (const [sname, def] of Object.entries(servers)) await routeServer(sname, def);
 
   // ── Skills (skills/<name>/SKILL.md + bundled files) ────────────────────────
   const skillMds = tree.filter((t) => t.type === "blob" && t.path.startsWith(`${prefix}skills/`) && t.path.endsWith("/SKILL.md"));
@@ -131,7 +163,7 @@ export async function installPlugin(opts: { marketplaceId: string; pluginName: s
 
   await db.insert(pluginInstalls).values({
     id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
-    version: gh.ref, scope: "system", manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
+    version: manifest.version ?? gh.ref, scope: "system", manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
   });
   return manifest;
 }
@@ -160,7 +192,7 @@ export async function upgradePlugin(installId: string): Promise<InstallManifest>
   }
 
   await db.update(pluginInstalls)
-    .set({ version: gh.ref, manifest: manifest as unknown as Record<string, unknown> })
+    .set({ version: manifest.version ?? gh.ref, manifest: manifest as unknown as Record<string, unknown> })
     .where(eq(pluginInstalls.id, installId));
   return manifest;
 }
