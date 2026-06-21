@@ -120,7 +120,11 @@ export async function downloadFile(sessionId: string, filePath: string, userId?:
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Download failed" }));
     log.error("sandbox download failed", { err: String(err.error) });
-    throw new SandboxError("File download failed", "download", res.status >= 500);
+    // Pass a client condition (e.g. 404 missing file) through unchanged; collapse a
+    // real upstream failure (5xx) into 502 so it reads as a gateway error, not the
+    // controller's raw internal status.
+    const status = res.status >= 500 ? 502 : res.status;
+    throw new SandboxError("File download failed", "download", res.status >= 500, status);
   }
   return res;
 }

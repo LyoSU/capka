@@ -276,6 +276,7 @@
       "download": "Download",
       "close": "Close",
       "loadError": "Couldn't open this file",
+      "gone": "This file is no longer in the chat's workspace",
       "tooLarge": "File too large to preview",
       "rendered": "Preview",
       "source": "Source",

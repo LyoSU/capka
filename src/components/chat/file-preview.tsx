@@ -207,6 +207,8 @@ function HtmlViewer({ file }: { file: PreviewFile }) {
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" />
       </div>
     );
+  if (loaded.state === "gone")
+    return <p className="p-6 text-center text-sm text-muted-foreground">{t("gone")}</p>;
   if (loaded.state === "error")
     return <p className="p-6 text-center text-sm text-muted-foreground">{t("loadError")}</p>;
   if (loaded.state === "too-large")
@@ -259,7 +261,7 @@ function HtmlViewer({ file }: { file: PreviewFile }) {
 
 // ── Text / code viewer ───────────────────────────────────────────────────────
 
-type Loaded = { state: "loading" } | { state: "error" } | { state: "too-large" } | { state: "ok"; text: string };
+type Loaded = { state: "loading" } | { state: "error" } | { state: "gone" } | { state: "too-large" } | { state: "ok"; text: string };
 
 function useFileText(file: PreviewFile): Loaded {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
@@ -269,6 +271,13 @@ function useFileText(file: PreviewFile): Loaded {
     (async () => {
       try {
         const res = await fetch(inlineUrl(file));
+        // The workspace is scratch space — an old chat's file may be gone. That's a
+        // 404, not a real failure, so show "no longer here", not a scary error.
+        if (res.status === 404) {
+          await res.body?.cancel().catch(() => {});
+          if (alive) setLoaded({ state: "gone" });
+          return;
+        }
         if (!res.ok) throw new Error("fetch failed");
         const len = Number(res.headers.get("Content-Length") || 0);
         if (len > MAX_TEXT_BYTES) {
@@ -299,6 +308,8 @@ function TextViewer({ file, markdown }: { file: PreviewFile; markdown: boolean }
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" />
       </div>
     );
+  if (loaded.state === "gone")
+    return <p className="p-6 text-center text-sm text-muted-foreground">{t("gone")}</p>;
   if (loaded.state === "error")
     return <p className="p-6 text-center text-sm text-muted-foreground">{t("loadError")}</p>;
   if (loaded.state === "too-large")

@@ -50,8 +50,11 @@ export class SandboxError extends AppError {
   readonly operation: string;
   readonly retryable: boolean;
 
-  constructor(message: string, operation: string, retryable = false) {
-    super(message, 502, "SANDBOX_ERROR");
+  // `status` defaults to 502 (a genuine gateway failure — controller unreachable),
+  // but callers pass the controller's real status through so an expected client
+  // condition (e.g. a missing file → 404) isn't disguised as a "Bad gateway".
+  constructor(message: string, operation: string, retryable = false, status = 502) {
+    super(message, status, "SANDBOX_ERROR");
     this.operation = operation;
     this.retryable = retryable;
   }
