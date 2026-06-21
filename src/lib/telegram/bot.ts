@@ -1,4 +1,4 @@
-import { Bot, type Context } from "grammy";
+import { Bot, InlineKeyboard, type Context } from "grammy";
 import { nanoid } from "nanoid";
 import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -13,6 +13,7 @@ import { loadActivePath } from "@/lib/chat/tree";
 import { take } from "@/lib/rate-limit";
 import { log } from "@/lib/log";
 import { getTranslator } from "@/lib/i18n/translator";
+import { getPublicUrl } from "@/lib/url";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { uploadFile } from "@/lib/sandbox/client";
 import type { FileRef } from "@/lib/constants";
@@ -39,6 +40,61 @@ const BOT_COMMANDS = [
 // Bot replies follow the user's own Telegram client language (falling back to
 // English), so a user never has to configure anything to be understood.
 const tFor = (ctx: Context) => getTranslator(ctx.from?.language_code, "telegram");
+
+/** Each interpolated value lands inside a backtick code span in the catalog
+ *  (e.g. a filename or error), so the one character that could break out of it
+ *  is the backtick. Swap it for a typographic quote — code spans render the rest
+ *  literally, so no other Markdown escaping is needed. */
+const escapeCode = (s: string) => s.replace(/`/g, "ʼ");
+
+/** A localized URL button. `label` is a catalog key (so the button text follows
+ *  the user's client language); `url` is absolute. */
+type Button = { label: string; url: string };
+
+/** Public-origin link builders, resolved at call time so a runtime PUBLIC_URL
+ *  (or proxy origin) is always reflected. The bot polls outside any request, so
+ *  there are no headers — getPublicUrl falls back to PUBLIC_URL / localhost. */
+const openAppButton = (): Button => ({ label: "openApp", url: getPublicUrl() });
+const openChatButton = (chatId?: string): Button => ({
+  label: "openInBrowser",
+  url: chatId ? `${getPublicUrl()}/chat/${chatId}` : `${getPublicUrl()}/chat`,
+});
+
+/**
+ * Send a localized reply as a Bot API 10.1 Rich Message (the same Markdown
+ * channel the runner delivers answers through, so the whole bot speaks one
+ * formatting dialect), with an optional URL button. Interpolated values are
+ * escaped for the code span they sit in. If Telegram rejects the button URL — a
+ * localhost dev origin has no TLD and gets a BUTTON_URL_INVALID — we retry
+ * without the keyboard so the text always lands.
+ */
+async function reply(
+  ctx: Context,
+  key: string,
+  opts: { values?: Record<string, string | number>; button?: Button } = {},
+): Promise<void> {
+  const t = tFor(ctx);
+  const values = opts.values
+    ? Object.fromEntries(
+        Object.entries(opts.values).map(([k, v]) => [k, typeof v === "string" ? escapeCode(v) : v]),
+      )
+    : undefined;
+  const markdown = t(key, values);
+  // Button labels are plain text in Telegram's UI — no Markdown is rendered there.
+  const keyboard = opts.button ? new InlineKeyboard().url(t(opts.button.label), opts.button.url) : undefined;
+  try {
+    await ctx.replyWithRichMessage({ markdown }, keyboard ? { reply_markup: keyboard } : undefined);
+  } catch (e) {
+    if (!keyboard) {
+      log.warn("telegram reply failed", { key, err: String(e) });
+      return;
+    }
+    // A bad button URL must not eat the message — resend it without the keyboard.
+    await ctx
+      .replyWithRichMessage({ markdown })
+      .catch((e2) => log.warn("telegram reply failed", { key, err: String(e2) }));
+  }
+}
 
 type TgFile = { fileId: string; fileName: string; mime: string };
 
@@ -106,10 +162,9 @@ function flushAlbum(groupId: string): void {
  * durable task whose result the runner streams back to this chat.
  */
 async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void> {
-  const t = tFor(ctx);
   const link = await findLink(ctx.from!.id);
   if (!link) {
-    await ctx.reply(t("notLinked"));
+    await reply(ctx, "notLinked", { button: openAppButton() });
     return;
   }
   // Approval gate: a pending account must not spend the shared key from Telegram
@@ -117,12 +172,12 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   // approval, so without this a pending user could DM the bot to slip past it.)
   const [u] = await db.select({ status: users.status }).from(users).where(eq(users.id, link.userId)).limit(1);
   if (u?.status === "pending") {
-    await ctx.reply(t("pendingApproval"));
+    await reply(ctx, "pendingApproval", { button: { label: "openApp", url: `${getPublicUrl()}/pending` } });
     return;
   }
   // Same per-user flood guard as the web enqueue path.
   if (!take(`chat:${link.userId}`).ok) {
-    await ctx.reply(t("tooFast"));
+    await reply(ctx, "tooFast");
     return;
   }
 
@@ -131,7 +186,7 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   const config = await resolveProviderConfig(link.userId);
   const budget = await checkBudget(link.userId, config?.isShared ?? false);
   if (!budget.allowed) {
-    await ctx.reply(t("budgetReached"));
+    await reply(ctx, "budgetReached");
     return;
   }
 
@@ -149,7 +204,7 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     try {
       const file = await downloadTgFile(ctx, f);
       if (!file) {
-        await ctx.reply(t("fileTooBig", { name: f.fileName }));
+        await reply(ctx, "fileTooBig", { values: { name: f.fileName } });
         continue;
       }
       await uploadFile(sessionKey, ".", file, link.userId);
@@ -199,7 +254,7 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     await enqueueTask({ id: nanoid(), chatId: chat.id, userId: link.userId, payload });
     await ctx.replyWithChatAction("typing").catch(() => {});
   } catch (error: unknown) {
-    await ctx.reply(t("startError", { error: error instanceof Error ? error.message : "Unknown error" }));
+    await reply(ctx, "startError", { values: { error: error instanceof Error ? error.message : "Unknown error" } });
   }
 }
 
@@ -219,23 +274,30 @@ export async function getBot(): Promise<Bot | null> {
       await linkAccount(ctx, code);
       return;
     }
-    await ctx.reply(tFor(ctx)("start"));
+    // A bare /start greets — but tailor it: an already-linked user gets a "you're
+    // set, just message me" nudge to the web UI, a stranger gets the onboarding
+    // path to sign in.
+    const link = await findLink(ctx.from!.id);
+    if (link) {
+      await reply(ctx, "startLinked", { button: openChatButton() });
+    } else {
+      await reply(ctx, "start", { button: openAppButton() });
+    }
   });
 
   _bot.command("link", async (ctx) => {
     const code = ctx.match?.trim().toUpperCase();
     if (!code) {
-      await ctx.reply(tFor(ctx)("linkUsage"));
+      await reply(ctx, "linkUsage");
       return;
     }
     await linkAccount(ctx, code);
   });
 
   _bot.command("new", async (ctx) => {
-    const t = tFor(ctx);
     const link = await findLink(ctx.from!.id);
     if (!link) {
-      await ctx.reply(t("linkFirst"));
+      await reply(ctx, "linkFirst", { button: openAppButton() });
       return;
     }
     const id = nanoid();
@@ -243,7 +305,7 @@ export async function getBot(): Promise<Bot | null> {
       .insert(chats)
       .values({ id, userId: link.userId, title: "Telegram Chat", source: "telegram" });
     await db.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
-    await ctx.reply(t("newChat"));
+    await reply(ctx, "newChat", { button: openChatButton(id) });
   });
 
   // Plain text → straight into the engine.
@@ -268,7 +330,7 @@ export async function getBot(): Promise<Bot | null> {
 
   // Everything else (stickers, locations, contacts, polls…). Rather than
   // silently dropping it, tell the user what the bot can actually work with.
-  _bot.on("message", (ctx) => ctx.reply(tFor(ctx)("unsupported")).then(() => {}));
+  _bot.on("message", (ctx) => reply(ctx, "unsupported"));
 
   // Without this, a throwing handler is either swallowed or crashes the polling
   // process depending on the runtime. Log it and keep the bot alive.
@@ -383,18 +445,17 @@ export async function restartBot(): Promise<void> {
  * `/start CODE`), so one-tap and manual linking run identical, throttled logic.
  */
 async function linkAccount(ctx: Context, code: string): Promise<void> {
-  const t = tFor(ctx);
   // Throttle guessing attempts per Telegram user (defense-in-depth on top of
   // the large code space).
   if (!take(`tglink:${ctx.from!.id}`, 5).ok) {
-    await ctx.reply(t("tooManyAttempts"));
+    await reply(ctx, "tooManyAttempts");
     return;
   }
 
   const [lc] = await db.select().from(linkCodes).where(eq(linkCodes.code, code)).limit(1);
   if (!lc || lc.expiresAt < new Date()) {
     if (lc) await db.delete(linkCodes).where(eq(linkCodes.code, code));
-    await ctx.reply(t("invalidCode"));
+    await reply(ctx, "invalidCode", { button: openAppButton() });
     return;
   }
 
@@ -427,7 +488,7 @@ async function linkAccount(ctx: Context, code: string): Promise<void> {
   // numeric Telegram id (what the OIDC id_token returns).
   await upsertTelegramAccountRow(lc.userId, ctx.from!.id);
   await db.delete(linkCodes).where(eq(linkCodes.code, code));
-  await ctx.reply(t("linked"));
+  await reply(ctx, "linked", { button: openChatButton() });
 }
 
 /**
