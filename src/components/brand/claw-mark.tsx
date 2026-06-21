@@ -14,7 +14,7 @@
 export function ClawMark({ className, animated }: { className?: string; animated?: boolean }) {
   return (
     <svg
-      viewBox="0 0 512 512"
+      viewBox="116 118 280 280"
       fill="currentColor"
       className={animated ? `claw-reveal ${className ?? ""}` : className}
       aria-hidden
