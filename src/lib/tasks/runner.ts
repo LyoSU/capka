@@ -19,6 +19,7 @@ import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
+import { getSandboxNetworkDefault } from "@/lib/settings";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage } from "@/lib/usage";
 import { costUsd } from "@/lib/pricing";
@@ -235,10 +236,14 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   // position-0 tools prefix stays cache-stable turn-to-turn.
   // Governance: an admin `deny` removes a skill/connector from the agent entirely.
   const policy = await resolvePolicies(userId, payload.projectId ?? null);
-  const sandbox = await loadSandboxTools(userId, sessionKey, project?.sandboxNetwork ?? undefined);
+  // Egress: a project may force "bridge"; otherwise fall back to the org default.
+  // The controller still gates bridge on SANDBOX_ALLOW_NETWORK.
+  const networkMode = project?.sandboxNetwork === "bridge" ? "bridge" : await getSandboxNetworkDefault();
+  const sandbox = await loadSandboxTools(userId, sessionKey, networkMode);
   const mcp = await loadMcpTools({
     userId,
     projectId: payload.projectId ?? null,
+    sessionKey,
     isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
   });
   const availableSkills = (await listAvailableSkills(userId, payload.projectId ?? null))

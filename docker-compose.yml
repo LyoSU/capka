@@ -94,8 +94,8 @@ services:
       # (the old ${PWD} guess broke under Coolify/systemd/non-repo-root launches).
       # Set HOST_DATA_ROOT only to override the auto-detected value.
       - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
-      # Sandbox networking is opt-in. Set to "true" to allow bridge-mode sandboxes.
-      - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
+      # Sandbox egress is controlled in the admin panel (Security → Internet access),
+      # per run, with a per-project override — no env flag.
     networks:
       - default
       - docker-proxy

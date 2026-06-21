@@ -19,6 +19,7 @@ import { reconcile } from "./reconcile.js";
 import { gcOrphanWorkspaces, findOverQuota } from "./gc.js";
 import { notReadyGuard } from "./readiness.js";
 import { withRetry } from "./retry.js";
+import { createMcpBridge } from "./mcp-bridge.js";
 import { log } from "./log.js";
 
 // --- Talk to the Docker API via DOCKER_HOST (socket-proxy) when set. ---
@@ -40,7 +41,6 @@ if (!SECRET || (SECRET === DEFAULT_SECRET && process.env.ALLOW_DEFAULT_SECRET !=
 }
 
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "unclaw-sandbox";
-const ALLOW_NETWORK = process.env.SANDBOX_ALLOW_NETWORK === "true";
 const MEMORY_LIMIT = parseInt(process.env.SANDBOX_MEMORY_MB || "512") * 1024 * 1024;
 const CPU_LIMIT = parseFloat(process.env.SANDBOX_CPUS || "1.0") * 1e9;
 const EXEC_TIMEOUT = parseInt(process.env.SANDBOX_EXEC_TIMEOUT_MS || "30000");
@@ -67,6 +67,8 @@ const DATABASE_URL = process.env.DATABASE_URL;
 // --- Wiring (set during boot) ---
 const pool = new pg.Pool({ connectionString: DATABASE_URL });
 const store = new PostgresSessionStore({ pool });
+// Bridges stdio MCP servers (run via `docker exec` inside the sandbox) to the platform.
+const mcpBridge = createMcpBridge(docker, { user: `${SANDBOX_UID}:${SANDBOX_GID}` });
 let workspace;
 let backend;
 let ready = false;
@@ -156,7 +158,7 @@ const server = createServer(async (req, res) => {
       }
 
       const { wsHostPath, sharedHostPath } = await workspace.ensure(uid, sid);
-      const net = resolveNetworkMode(networkMode, { allowNetwork: ALLOW_NETWORK });
+      const net = resolveNetworkMode(networkMode);
       const { handle } = await backend.create({
         sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
         networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
@@ -188,6 +190,37 @@ const server = createServer(async (req, res) => {
           return jsonRes(res, 409, { error: "Sandbox is gone; recreate the session" });
         }
         throw e;
+      }
+    }
+
+    // POST /sessions/:id/mcp/:name/start — launch a stdio MCP server in the sandbox
+    const mcpStartMatch = path.match(/^\/sessions\/([^/]+)\/mcp\/([^/]+)\/start$/);
+    if (method === "POST" && mcpStartMatch) {
+      const session = await store.get(mcpStartMatch[1]);
+      if (!session) return jsonRes(res, 404, { error: "Session not found" });
+      const { command, args, env } = await parseBody(req);
+      if (!command || typeof command !== "string") return jsonRes(res, 400, { error: "Missing command" });
+      store.touch(session.sessionId);
+      try {
+        await mcpBridge.start(session.handle, mcpStartMatch[2], { command, args, env });
+        return jsonRes(res, 200, { ok: true });
+      } catch (e) {
+        return jsonRes(res, 502, { error: `mcp start failed: ${e.message}` });
+      }
+    }
+
+    // POST /sessions/:id/mcp/:name/rpc — one JSON-RPC round-trip to that server
+    const mcpRpcMatch = path.match(/^\/sessions\/([^/]+)\/mcp\/([^/]+)\/rpc$/);
+    if (method === "POST" && mcpRpcMatch) {
+      const session = await store.get(mcpRpcMatch[1]);
+      if (!session) return jsonRes(res, 404, { error: "Session not found" });
+      const { message } = await parseBody(req);
+      store.touch(session.sessionId);
+      try {
+        const response = await mcpBridge.rpc(session.handle, mcpRpcMatch[2], message);
+        return jsonRes(res, 200, { message: response });
+      } catch (e) {
+        return jsonRes(res, 502, { error: `mcp rpc failed: ${e.message}` });
       }
     }
 
@@ -269,6 +302,7 @@ const server = createServer(async (req, res) => {
     if (method === "DELETE" && deleteMatch) {
       const s = await store.get(deleteMatch[1]);
       if (s) {
+        mcpBridge.stopAll(s.handle);
         await backend.destroy(s.handle);
         await store.delete(s.sessionId);
         liveCount = Math.max(0, liveCount - 1);

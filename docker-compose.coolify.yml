@@ -79,8 +79,7 @@ services:
       # Keep test resource usage modest on a shared, RAM-tight host.
       - SANDBOX_MEMORY_MB=384
       - MAX_SESSIONS_PER_USER=2
-      # Sandbox networking is opt-in.
-      - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
+      # Sandbox egress is controlled in the admin panel (Security → Internet access).
     networks:
       - default
       - docker-proxy

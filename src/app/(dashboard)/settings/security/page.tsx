@@ -14,9 +14,23 @@ export default function SecuritySettingsPage() {
   const t = useTranslations("settings.security");
 
   const sandbox = useSetting("sandbox_enabled", "false");
+  const sandboxNet = useSetting("sandbox_network", "none");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
 
-  const loading = sandbox.loading || blockPrivate.loading;
+  const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading;
+
+  // The network setting stores "bridge"/"none", not "true"/"false".
+  const toggleNet = (checked: boolean) => {
+    const prev = sandboxNet.value;
+    const next = checked ? "bridge" : "none";
+    sandboxNet.update(next);
+    sandboxNet.persist(next)
+      .then((ok) => {
+        if (ok) toast.success(checked ? t("netEnabled") : t("netDisabled"));
+        else { sandboxNet.setValue(prev); toast.error(t("updateFailed")); }
+      })
+      .catch(() => { sandboxNet.setValue(prev); toast.error(t("updateFailed")); });
+  };
 
   // Optimistic toggle with rollback — flip immediately, but restore the previous
   // value if the save fails so the UI never lies about persisted state.
@@ -81,6 +95,13 @@ export default function SecuritySettingsPage() {
           checked={sandbox.value === "true"}
           onCheckedChange={(checked) => toggle(sandbox, "sandbox_enabled", checked, t("sandboxEnabled"), t("sandboxDisabled"))}
         />
+      </div>
+      <div className="flex items-center justify-between rounded-lg border p-4">
+        <div className="pr-4">
+          <p className="text-sm font-medium">{t("sandboxNet")}</p>
+          <p className="text-xs text-muted-foreground">{t("sandboxNetHint")}</p>
+        </div>
+        <Switch checked={sandboxNet.value === "bridge"} onCheckedChange={toggleNet} />
       </div>
 
       <Separator />

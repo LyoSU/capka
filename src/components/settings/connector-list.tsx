@@ -14,7 +14,7 @@ import { useIsAdmin } from "@/hooks/use-is-admin";
 
 interface Server { id: string; name: string; url: string | null; scope: "system" | "user" | "project"; enabled: boolean; authKind: "token" | "oauth"; transport: "http" | "sse" | "stdio" }
 type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
-interface Health { status: ProbeStatus; toolCount?: number }
+interface Health { status: ProbeStatus; toolCount?: number; detail?: string }
 
 /** Mirror of the server-side slugify so the user sees the saved name live. */
 function slugify(raw: string): string {
@@ -80,8 +80,13 @@ function HealthLine({ h, loading, t }: { h?: Health; loading: boolean; t: Return
     );
   }
   return (
-    <span className="flex items-center gap-1 text-xs text-destructive">
-      <XCircle className="h-3 w-3" />{t("health.unreachable")}
+    <span className="flex flex-col gap-0.5 text-xs text-destructive">
+      <span className="flex items-center gap-1"><XCircle className="h-3 w-3" />{t("health.unreachable")}</span>
+      {h.detail && (
+        <code className="block max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded bg-destructive/5 px-1.5 py-1 font-mono text-[11px] leading-snug text-destructive/80">
+          {h.detail}
+        </code>
+      )}
     </span>
   );
 }

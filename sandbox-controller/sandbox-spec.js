@@ -4,12 +4,12 @@
 // regress. server.js composes the runtime values and calls these.
 
 /**
- * Bridge networking is opt-in: a sandbox gets real network access ONLY when the
- * operator explicitly enabled it (SANDBOX_ALLOW_NETWORK). Everything else — and
- * any unrecognized request — resolves to "none" (no network).
+ * The platform decides egress per run (admin setting + per-project override) and
+ * sends the requested mode. Only "bridge" grants network; anything else — and any
+ * unrecognized request (e.g. "host") — resolves to "none" (no network).
  */
-export function resolveNetworkMode(requested, { allowNetwork = false } = {}) {
-  return allowNetwork && requested === "bridge" ? "bridge" : "none";
+export function resolveNetworkMode(requested) {
+  return requested === "bridge" ? "bridge" : "none";
 }
 
 /** Build the full dockerode createContainer config for a sandbox.
@@ -60,7 +60,14 @@ export function buildSandboxConfig({
       // disk via /workspace; the controller's MAX_WORKSPACE_MB only bounds uploads
       // routed through it. Enforce disk at the host (XFS project quota on DATA_ROOT
       // or a per-session sized volume); the controller logs `workspace.over_quota`.
-      Tmpfs: { "/tmp": "rw,nosuid,nodev,size=64m" },
+      // /tmp stays noexec (can't drop+run a binary there). /opt/mcp is a separate
+      // exec-allowed tmpfs for stdio MCP servers that self-install (npx/uvx need to
+      // execute the fetched binary). It's ephemeral (dies with the session) and
+      // outside the agent's /workspace, so it never pollutes the user's files.
+      Tmpfs: {
+        "/tmp": "rw,nosuid,nodev,noexec,size=64m",
+        "/opt/mcp": "rw,nosuid,nodev,size=256m,mode=1777",
+      },
       // Hard, non-negotiable isolation. Privileged is set explicitly so the
       // test pins it and a future edit can't omit it into a truthy default.
       Privileged: false,

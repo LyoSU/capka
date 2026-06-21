@@ -99,17 +99,14 @@ describe("buildSandboxConfig — resource exhaustion limits", () => {
   });
 });
 
-describe("resolveNetworkMode — bridge is opt-in, default deny", () => {
-  it("denies bridge by default (no network)", () => {
-    expect(resolveNetworkMode("bridge", { allowNetwork: false })).toBe("none");
+describe("resolveNetworkMode — platform decides; only bridge grants network", () => {
+  it("grants bridge when the platform requests it", () => {
+    expect(resolveNetworkMode("bridge")).toBe("bridge");
   });
 
-  it("permits bridge only when the operator opted in", () => {
-    expect(resolveNetworkMode("bridge", { allowNetwork: true })).toBe("bridge");
-  });
-
-  it("never grants anything but none for unknown modes", () => {
-    expect(resolveNetworkMode("host", { allowNetwork: true })).toBe("none");
-    expect(resolveNetworkMode(undefined, { allowNetwork: true })).toBe("none");
+  it("never grants anything but none for other/unknown modes", () => {
+    expect(resolveNetworkMode("none")).toBe("none");
+    expect(resolveNetworkMode("host")).toBe("none");
+    expect(resolveNetworkMode(undefined)).toBe("none");
   });
 });

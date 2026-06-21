@@ -858,7 +858,11 @@
       "blockPrivateHint": "Prevents provider URLs (LiteLLM, Ollama) from pointing at private or loopback addresses. Leave off if you self-host a gateway on your local network. Cloud-metadata addresses are always blocked.",
       "strictEnabled": "Strict mode enabled",
       "strictDisabled": "Strict mode disabled",
-      "updateFailed": "Failed to update"
+      "updateFailed": "Failed to update",
+      "sandboxNet": "Internet access",
+      "sandboxNetHint": "Let sandboxed code and local (stdio) connectors reach the internet. Required for tools that install or fetch on first use (e.g. npx).",
+      "netEnabled": "Internet access on for the sandbox.",
+      "netDisabled": "Internet access off for the sandbox."
     }
   },
   "setup": {

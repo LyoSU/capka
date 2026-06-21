@@ -3,6 +3,7 @@ import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { connectMcpServer, disconnectMcp, type ConnectedMcp } from "./client";
 import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
+import { recordConnectError, clearConnectError } from "./connect-errors";
 import { McpOAuthProvider } from "./oauth/provider";
 
 const MAX_CONCURRENT = 4;
@@ -14,6 +15,8 @@ const MAX_CONCURRENT = 4;
 export async function loadMcpTools(opts: {
   userId: string;
   projectId: string | null;
+  /** The run's sandbox session — required to bridge stdio connectors. */
+  sessionKey?: string;
   /** Governance gate — a denied connector is never connected (G1). */
   isServerAllowed?: (name: string) => boolean;
 }): Promise<{
@@ -38,14 +41,17 @@ export async function loadMcpTools(opts: {
       const authProvider = c.authKind === "oauth" && c.id
         ? new McpOAuthProvider(opts.userId, c.id, "runtime")
         : undefined;
-      return connectMcpServer(c, { blockPrivate, authProvider });
+      return connectMcpServer(c, { blockPrivate, authProvider, sessionKey: opts.sessionKey });
     }));
     settled.forEach((r, idx) => {
       const cfg = batch[idx];
       if (r.status === "rejected") {
-        console.warn(`[mcp] connect failed for "${cfg.name}":`, r.reason);
+        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        console.warn(`[mcp] connect failed for "${cfg.name}":`, reason);
+        recordConnectError(cfg.id, reason);
         return;
       }
+      clearConnectError(cfg.id);
       connected.push(r.value);
       for (const mt of [...r.value.tools].sort((a, b) => a.name.localeCompare(b.name))) {
         tools[mcpToolName(cfg.name, mt.name)] = adaptMcpTool(r.value.client, cfg.name, mt);

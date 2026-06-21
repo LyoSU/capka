@@ -134,6 +134,16 @@ export async function getBlockPrivateProviderUrls(): Promise<boolean> {
 }
 
 /**
+ * Org-wide default for sandbox egress. "bridge" lets sandboxed code (and stdio MCP
+ * servers, which self-install via npx) reach the internet; "none" cuts it. A
+ * project may upgrade to "bridge" on its own. The controller still gates bridge on
+ * SANDBOX_ALLOW_NETWORK, so this can't open egress a deployment forbade.
+ */
+export async function getSandboxNetworkDefault(): Promise<"none" | "bridge"> {
+  return (await getSetting("sandbox_network")) === "bridge" ? "bridge" : "none";
+}
+
+/**
  * How provider keys are sourced across the instance (admin-chosen):
  *  - shared_plus_own: admin's key is the shared default; users MAY add their own
  *  - shared_only:     everyone uses the admin's key; users cannot add their own

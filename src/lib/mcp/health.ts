@@ -4,6 +4,7 @@ import { mcpServers } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { connectMcpServer, disconnectMcp } from "./client";
+import { getConnectError } from "./connect-errors";
 import { McpOAuthProvider } from "./oauth/provider";
 import { hasUserTokens } from "./oauth/store";
 import type { McpAuthKind, McpSecrets } from "./types";
@@ -13,6 +14,8 @@ export type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
 export interface ServerHealth {
   status: ProbeStatus;
   toolCount?: number;
+  /** Last connect error (e.g. the npx failure for a stdio server) — shown in the UI. */
+  detail?: string;
 }
 
 const PROBE_CONCURRENCY = 4;
@@ -73,6 +76,13 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
   const blockPrivate = await getBlockPrivateProviderUrls();
   const now = Date.now();
   const out: Record<string, ServerHealth> = {};
+
+  // stdio servers can't be probed here (they need a live sandbox session), but if a
+  // recent run recorded a connect failure, surface it so the UI explains the silence.
+  for (const r of rows.filter((r) => r.transport === "stdio")) {
+    const detail = getConnectError(r.id);
+    if (detail) out[r.id] = { status: "unreachable", detail };
+  }
 
   // Split into cache hits vs rows needing a live probe.
   const toProbe: { id: string; cacheKey: string; name: string; url: string; secrets?: McpSecrets; authKind: McpAuthKind }[] = [];

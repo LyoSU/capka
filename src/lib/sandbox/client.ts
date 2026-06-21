@@ -86,6 +86,28 @@ export async function destroySession(sessionId: string) {
   return request(`/sessions/${sanitizeId(sessionId)}`, "DELETE");
 }
 
+// ── stdio MCP bridge (server runs inside the sandbox, controller relays frames) ─
+
+const mcpName = (n: string) => n.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+
+/** Launch a stdio MCP server inside the session sandbox. Idempotent per name. */
+export async function mcpStart(
+  sessionId: string,
+  name: string,
+  spec: { command: string; args?: string[]; env?: Record<string, string> },
+): Promise<void> {
+  await request(`/sessions/${sanitizeId(sessionId)}/mcp/${mcpName(name)}/start`, "POST", spec);
+}
+
+/** One JSON-RPC round-trip to a started stdio MCP server. Returns the response
+ *  message, or null for a notification (no id). */
+export async function mcpRpc(sessionId: string, name: string, message: unknown): Promise<unknown> {
+  const data = (await request(`/sessions/${sanitizeId(sessionId)}/mcp/${mcpName(name)}/rpc`, "POST", { message })) as {
+    message: unknown;
+  };
+  return data.message ?? null;
+}
+
 // ── File operations (native controller endpoints) ────────────
 
 type FileEntry = {
