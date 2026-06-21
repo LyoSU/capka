@@ -44,11 +44,13 @@ export const GET = apiHandler(async (req: Request) => {
   }
 
   const controllerRes = await downloadFile(key, archiveName, userId);
-  return new Response(controllerRes.body, {
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": controllerRes.headers.get("Content-Length") || "",
-      "Content-Disposition": `attachment; filename="${displayName}"`,
-    },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": contentType,
+    "Content-Disposition": `attachment; filename="${displayName}"`,
+  };
+  // Forward Content-Length only when present; "" is an invalid header the proxy
+  // turns into a 502 (the controller streams the archive chunked).
+  const contentLength = controllerRes.headers.get("Content-Length");
+  if (contentLength) headers["Content-Length"] = contentLength;
+  return new Response(controllerRes.body, { headers });
 });

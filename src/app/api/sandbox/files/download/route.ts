@@ -30,11 +30,16 @@ export const GET = apiHandler(async (req: Request) => {
 
   const headers: Record<string, string> = {
     "Content-Type": controllerRes.headers.get("Content-Type") || "application/octet-stream",
-    "Content-Length": controllerRes.headers.get("Content-Length") || "",
     "Content-Disposition": disposition,
     // Sandbox files are user/AI-supplied; never let the browser MIME-sniff them.
     "X-Content-Type-Options": "nosniff",
   };
+  // Only forward Content-Length when the controller actually sent one. It streams
+  // chunked (no length), and a fallback of "" produces an invalid empty header
+  // that the upstream proxy rejects as a 502 — so omit it and let the body be
+  // chunked through.
+  const contentLength = controllerRes.headers.get("Content-Length");
+  if (contentLength) headers["Content-Length"] = contentLength;
   // Inline content renders from our own origin — lock it down so a malicious
   // file (e.g. an SVG/HTML opened directly) can't execute against the app.
   // `default-src 'none'` neuters scripts; `frame-ancestors 'self'` allows only
