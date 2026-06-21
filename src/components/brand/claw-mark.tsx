@@ -8,7 +8,7 @@
  * edge. Tracing the silhouette as a few béziers (rather than embedding the
  * icon's verbose point clouds) keeps the source legible and the shape crisp.
  *
- * `animated` grows the blades downward from their tops on mount (see `.claw-draw`
+ * `animated` wipes the blades in from top to tip on mount (see `.claw-reveal`
  * in globals.css), staggered so the claw reads as drawing itself in.
  */
 export function ClawMark({ className, animated }: { className?: string; animated?: boolean }) {
@@ -16,7 +16,7 @@ export function ClawMark({ className, animated }: { className?: string; animated
     <svg
       viewBox="0 0 512 512"
       fill="currentColor"
-      className={animated ? `claw-draw ${className ?? ""}` : className}
+      className={animated ? `claw-reveal ${className ?? ""}` : className}
       aria-hidden
     >
       <path d="M176 150 Q182 260 216 366 Q210 250 203 150 Z" />

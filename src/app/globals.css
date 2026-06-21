@@ -164,23 +164,39 @@
 .animate-step-in { animation: step-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-step-badge-in { animation: step-badge-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
-/* Claw "draw-in": the three-claw mark grows its tapered blades downward from
-   their tops, staggered left to right, so the claw reads as drawing in. The one
-   signature flourish in the product — calm, on-brand, and used sparingly
-   (greeting + auth monogram). transform-box: fill-box anchors each blade's
-   scale to its own bounding box so they extend from their own top edge. */
-@keyframes claw-draw {
-  from { transform: scaleY(0); opacity: 0; }
-  to   { transform: scaleY(1); opacity: 1; }
+/* Claw reveal: each tapered blade wipes in from its top to its tip via
+   clip-path, staggered left to right, then settles with one delicate flash.
+   Unlike scaleY, clip-path doesn't deform the geometry — the sharp tip stays
+   crisp on every frame, it's only progressively uncovered. The one signature
+   flourish in the product — calm, on-brand, used sparingly (greeting + auth
+   monogram). transform-box: fill-box scopes the inset to each blade's own
+   bounding box, so 100% covers exactly that blade and nothing else. */
+@keyframes claw-reveal {
+  from { clip-path: inset(0 0 100% 0); }
+  to   { clip-path: inset(0 0 0 0); }
 }
-.claw-draw path {
+@keyframes claw-flash {
+  0%, 55% { fill-opacity: 1; }
+  68%     { fill-opacity: 0.5; }
+  100%    { fill-opacity: 1; }
+}
+.claw-reveal path {
   transform-box: fill-box;
-  transform-origin: top center;
-  animation: claw-draw 1.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  clip-path: inset(0 0 100% 0);
+  animation:
+    claw-reveal 0.9s cubic-bezier(0.16, 1, 0.3, 1) both,
+    claw-flash 1.4s ease both;
 }
-.claw-draw path:nth-child(1) { animation-delay: 0.05s; }
-.claw-draw path:nth-child(2) { animation-delay: 0.18s; }
-.claw-draw path:nth-child(3) { animation-delay: 0.31s; }
+.claw-reveal path:nth-child(1) { animation-delay: 0.05s; }
+.claw-reveal path:nth-child(2) { animation-delay: 0.20s; }
+.claw-reveal path:nth-child(3) { animation-delay: 0.35s; }
+
+/* Greeting copy floats up just after the claw lands. */
+@keyframes claw-greet {
+  from { opacity: 0; transform: translateY(8px); filter: blur(6px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+.animate-claw-greet { animation: claw-greet 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.7s both; }
 
 /* Quiet page entrance: a short opacity+rise for route content (settings,
    projects). Fast (≤300ms) per product-motion guidance — life, not a sequence

@@ -24,7 +24,7 @@ function msgText(m: { parts?: { type: string; text?: string }[] }): string {
     .trim();
 }
 
-import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Sparkles, Send, Clock, X } from "lucide-react";
+import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
@@ -386,16 +386,19 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       <div className="flex min-w-0 flex-1 flex-col">
       {showGreeting ? (
         <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden py-10">
-          {/* Quiet brand monogram, sketched in on mount — the one signature
-              flourish, far behind the content so it reads as a watermark. */}
-          <ClawMark
-            animated
-            className="pointer-events-none absolute left-1/2 top-1/2 h-[118vmin] w-[118vmin] -translate-x-1/2 -translate-y-1/2 text-foreground opacity-[0.025]"
-          />
           <div className="relative z-10 w-full">
-            <div className="animate-blur-rise mb-8 flex items-center justify-center gap-3 px-6">
-              <Sparkles className="h-6 w-6 shrink-0 text-primary md:h-7 md:w-7" />
-              <h1 className="font-display text-balance text-center text-3xl font-medium tracking-tight text-foreground md:text-[2.75rem] md:leading-[1.1]">
+            {/* The brand claw reveals on mount — the one signature flourish — with
+                a soft halo lifting it off the surface, then the greeting floats up
+                just behind it. */}
+            <div className="mb-8 flex flex-col items-center px-6">
+              <div className="relative">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute left-1/2 top-1/2 h-44 w-44 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklch,var(--foreground)_8%,transparent),transparent_70%)]"
+                />
+                <ClawMark animated className="relative h-20 w-20 text-foreground md:h-24 md:w-24" />
+              </div>
+              <h1 className="animate-claw-greet mt-6 font-display text-balance text-center text-3xl font-medium tracking-tight text-foreground md:text-[2.75rem] md:leading-[1.1]">
                 {t("panel.greeting")}
               </h1>
             </div>
