@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useLayoutEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
 
 // useLayoutEffect warns during SSR; this client component is still rendered on
@@ -38,6 +38,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
 import { ChatNav } from "@/components/chat/chat-nav";
 import { ClawMark } from "@/components/brand/claw-mark";
+import { pickGreeting, type GreetingLocale } from "@/lib/chat/greeting";
 import { haptic } from "@/lib/haptics";
 
 interface ChatPanelProps {
@@ -54,11 +55,23 @@ interface ChatPanelProps {
   /** Server-rendered recent chats for the greeting's quick-resume list, so it
    *  paints correct immediately instead of fetching and popping in. */
   recentChats?: { id: string; title: string | null; updatedAt: string | null }[];
+  /** The signed-in user's display name — woven into the new-chat greeting. */
+  userName?: string | null;
 }
 
-export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, initialHasHistory, recentChats }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, initialHasHistory, recentChats, userName }: ChatPanelProps) {
   const t = useTranslations("chat");
+  const locale = useLocale();
   const [model, setModel] = useState(defaultModel);
+
+  // The new-chat greeting varies by local time and weaves in the user's name,
+  // so it's random + timezone-dependent — compute it on the client after mount
+  // to avoid an SSR hydration mismatch (the static fallback shows until then).
+  // Keyed on chatId so each fresh chat is re-picked and feels freshly addressed.
+  const [greeting, setGreeting] = useState<string | null>(null);
+  useEffect(() => {
+    setGreeting(pickGreeting({ name: userName, locale: locale as GreetingLocale }));
+  }, [chatId, userName, locale]);
   const scrollRef = useRef<HTMLDivElement>(null);
   // The latest user message ("the question"), the end of real content (before
   // the spacer), and the spacer itself — together they let us pin a turn to the
@@ -408,7 +421,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                 <ClawMark animated className="relative h-20 w-20 text-foreground md:h-24 md:w-24" />
               </div>
               <h1 className="animate-claw-greet mt-6 font-display text-balance text-center text-3xl font-medium tracking-tight text-foreground md:text-[2.75rem] md:leading-[1.1]">
-                {t("panel.greeting")}
+                {greeting ?? t("panel.greeting")}
               </h1>
             </div>
 
