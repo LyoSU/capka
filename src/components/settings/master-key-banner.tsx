@@ -19,7 +19,7 @@ interface SecurityStatus {
  * secure-with-leftover (env set but stale DB copy, offer cleanup), fully secure.
  */
 export function MasterKeyBanner() {
-  const t = useTranslations("settings.general.masterKey");
+  const t = useTranslations("settings.security.masterKey");
   const tc = useTranslations("common");
   const [status, setStatus] = useState<SecurityStatus | null>(null);
   const [copied, setCopied] = useState(false);

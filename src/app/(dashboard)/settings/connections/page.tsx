@@ -19,6 +19,9 @@ import { ModelPicker } from "@/components/chat/model-picker";
 import { iconForSlug } from "@/components/chat/provider-icons";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { PROVIDER_OPTIONS, PROVIDER_META, providerLabel, type ProviderName } from "@/lib/providers/registry";
+import { useIsAdmin } from "@/hooks/use-is-admin";
+import { useSetting } from "@/hooks/use-setting";
+import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
 
 interface ProviderConfig {
   id: string;
@@ -31,6 +34,8 @@ interface ProviderConfig {
 export default function ConnectionsPage() {
   const t = useTranslations("settings.connections");
   const tc = useTranslations("common");
+  const isAdmin = useIsAdmin();
+  const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -177,6 +182,19 @@ export default function ConnectionsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const contextLabel = (val: string) => {
+    const n = parseInt(val, 10);
+    if (!n || n <= 0) return "";
+    if (n >= 1_000_000) return t("tokensM", { value: (n / 1_000_000).toFixed(1) });
+    return t("tokensK", { value: (n / 1_000).toFixed(0) });
+  };
+
+  const saveMinCtx = async () => {
+    const ok = await minCtx.persist(minCtx.value);
+    if (ok) toast.success(tc("saved"));
+    else toast.error(t("minContextSaveFailed"));
   };
 
   return (
@@ -358,6 +376,39 @@ export default function ConnectionsPage() {
           <Plus className="mr-2 h-4 w-4" />
           {t("addProvider")}
         </Button>
+      )}
+
+      {/* Model filter — global governance, admin only. Lives here because it
+          shapes which models the picker offers across every connection. */}
+      {isAdmin && !minCtx.loading && (
+        <>
+          <Separator />
+          <div>
+            <h2 className="text-base font-medium">{t("modelFilter")}</h2>
+            <p className="text-sm text-muted-foreground">{t("modelFilterDesc")}</p>
+          </div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">{t("minContext")}</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={minCtx.value}
+                  onChange={(e) => minCtx.update(e.target.value)}
+                  placeholder="100000"
+                  className="w-40"
+                />
+                <span className="text-sm text-muted-foreground">
+                  {contextLabel(minCtx.value)}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("minContextHint")}</p>
+            </div>
+            {minCtx.dirty && (
+              <Button size="sm" onClick={saveMinCtx}>{tc("save")}</Button>
+            )}
+          </div>
+        </>
       )}
 
       <ConfirmDialog
