@@ -262,6 +262,7 @@
       "files": "Files",
       "upload": "Upload files",
       "downloadAll": "Download all",
+      "notCreated": "File wasn't created",
       "createHint": "Send a message to create the workspace.",
       "loadError": "Failed to load files",
       "empty": "No files yet.",

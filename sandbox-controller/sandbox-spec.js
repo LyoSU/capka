@@ -36,7 +36,14 @@ export function buildSandboxConfig({
   return {
     Image: image,
     name: `sandbox-${sessionId}`,
-    Env: ["DISPLAY=:99", "PYTHONUNBUFFERED=1", "LANG=C.UTF-8"],
+    // When egress is on (bridge), tell the entrypoint to install the egress
+    // firewall that blocks private/internal ranges (see sandbox-entrypoint.sh).
+    Env: [
+      "DISPLAY=:99",
+      "PYTHONUNBUFFERED=1",
+      "LANG=C.UTF-8",
+      ...(networkMode === "bridge" ? ["SANDBOX_EGRESS_FILTER=1"] : []),
+    ],
     HostConfig: {
       Memory: memoryBytes,
       // Pin total memory+swap to Memory so a process can't spill past the RAM cap
@@ -77,9 +84,11 @@ export function buildSandboxConfig({
       CapDrop: ["ALL"],
       // Minimal caps for the boot sequence only: CHOWN lets the (root) entrypoint
       // fix ownership of the bind-mounted /workspace + /shared, and SETUID/SETGID
-      // let it setpriv-drop to the unprivileged sandbox user. After the drop, and
-      // for every agent command (exec runs as uid 1000), these buy nothing.
-      CapAdd: ["CHOWN", "SETUID", "SETGID"],
+      // let it setpriv-drop to the unprivileged sandbox user. NET_ADMIN (only when
+      // egress is on) lets the entrypoint install the egress firewall before the
+      // drop. After the setpriv-drop, and for every agent command (exec runs as
+      // uid 1000 with no caps), these buy nothing — the rules can't be undone.
+      CapAdd: ["CHOWN", "SETUID", "SETGID", ...(networkMode === "bridge" ? ["NET_ADMIN"] : [])],
       NetworkMode: networkMode,
       Binds: [`${wsHostPath}:/workspace`, `${sharedHostPath}:/shared`],
       Init: true,

@@ -91,11 +91,16 @@ useful with internet. Recommendation: **default-on egress, private ranges blocke
   directly (`resolveNetworkMode` — only `bridge` grants network). The old
   `SANDBOX_ALLOW_NETWORK` env gate was **removed** (redundant once the admin setting
   exists). A future `filtered` mode (private-range egress firewall) slots in here.
-- `filtered` = bridge networking on a dedicated Docker network whose egress drops
-  RFC1918 / link-local / `169.254.169.254` (cloud metadata) / ULA, allowing only
-  public destinations. Implementation: an iptables/nft egress chain on the sandbox
-  network (or a gVisor netstack policy), applied by the controller/compose. This is
-  the network-layer analogue of the existing `assertSafeUrl` SSRF guard.
+- **SHIPPED — in-container egress firewall (no host config).** When network is on,
+  the sandbox boots with `NET_ADMIN` (added only then) and the entrypoint installs
+  iptables OUTPUT rules BEFORE dropping to uid 1000: ACCEPT loopback (covers Docker's
+  embedded resolver 127.0.0.11), DROP the private/internal ranges (10/8, 172.16/12,
+  192.168/16, 169.254/16 incl. cloud metadata, 100.64/10 CGNAT, 192.0.0.0/24,
+  198.18/15) + IPv6 ULA/link-local, ACCEPT the rest (public). No conntrack (return
+  traffic is INPUT, untouched) so it works under gVisor's limited netfilter. The
+  agent (uid 1000, no caps) and MCP (uid 1001) can't undo the rules. Self-contained
+  per container — no host iptables/network setup, matching the zero-host-config
+  philosophy. `bridge` now MEANS filtered; there's no wide-open mode in the UI.
 - `off` keeps today's hard isolation for high-security deployments.
 - Per-session override stays possible (a sensitive project can force `off`).
 
