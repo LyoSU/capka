@@ -67,8 +67,13 @@ const DATABASE_URL = process.env.DATABASE_URL;
 // --- Wiring (set during boot) ---
 const pool = new pg.Pool({ connectionString: DATABASE_URL });
 const store = new PostgresSessionStore({ pool });
-// Bridges stdio MCP servers (run via `docker exec` inside the sandbox) to the platform.
-const mcpBridge = createMcpBridge(docker, { user: `${SANDBOX_UID}:${SANDBOX_GID}` });
+// Bridges stdio MCP servers (run via `docker exec` inside the sandbox) to the
+// platform. They run under a SEPARATE uid from the agent (1000) so agent code
+// can't read an MCP server's secret env via /proc/<pid>/environ. The `mcp` user
+// (1001) is baked into the sandbox image.
+const MCP_UID = parseInt(process.env.SANDBOX_MCP_UID || "1001");
+const MCP_GID = parseInt(process.env.SANDBOX_MCP_GID || "1001");
+const mcpBridge = createMcpBridge(docker, { user: `${MCP_UID}:${MCP_GID}` });
 let workspace;
 let backend;
 let ready = false;

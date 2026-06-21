@@ -48,7 +48,7 @@ function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
   // would just be noise. Only the capabilities that actually vary are shown,
   // with plain-language meaning on hover and for screen readers.
   return (
-    <>
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-1.5 py-0.5">
       {caps.vision && (
         <span title={t("caps.vision")} className="inline-flex">
           <Eye className="h-3.5 w-3.5" aria-label={t("caps.vision")} />
@@ -59,7 +59,44 @@ function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
           <Brain className="h-3.5 w-3.5" aria-label={t("caps.reasoning")} />
         </span>
       )}
-    </>
+    </span>
+  );
+}
+
+// Map a model's USD price (per 1M completion tokens) to a 0–4 tier. These
+// thresholds are the one genuinely tunable bit of product judgement here —
+// adjust the boundaries to taste; everything downstream just reads `tier`.
+function priceTier(pricing: ModelInfo["pricing"]): number {
+  const p = pricing?.completion ?? 0;
+  if (p <= 0) return 0; // free / unknown
+  if (p < 2) return 1;
+  if (p < 8) return 2;
+  if (p < 30) return 3;
+  return 4;
+}
+
+/** A compact "$ $ ·" cost meter — three slots, filled by tier, "+" for the top. */
+function PriceMeter({ pricing }: { pricing: ModelInfo["pricing"] }) {
+  const t = useTranslations("chat.model");
+  const tier = priceTier(pricing);
+  const filled = Math.min(tier, 3);
+  const label =
+    tier === 0 ? t("price.free") : `${"$".repeat(filled)}${tier >= 4 ? "+" : ""}`;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center font-medium tabular-nums leading-none"
+      title={`${t("price.label")}: ${label}`}
+      aria-label={`${t("price.label")}: ${label}`}
+    >
+      {[0, 1, 2].map((i) =>
+        i < filled ? (
+          <span key={i} className="text-emerald-500">$</span>
+        ) : (
+          <span key={i} className="text-muted-foreground/40">·</span>
+        ),
+      )}
+      {tier >= 4 && <span className="text-emerald-500">+</span>}
+    </span>
   );
 }
 
@@ -182,6 +219,99 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
 
 // ── List ─────────────────────────────────────────────────────────────────
 
+// The left rail's "Featured" tab — a synthetic group that gathers every
+// starred model across providers, so the user's curated picks are one click
+// away regardless of which company they came from.
+const FEATURED_TAB = "__featured__";
+
+interface GroupEntry {
+  group: string;
+  icon?: string | null;
+  models: ModelInfo[];
+}
+
+/** Group a flat model list into provider sections, ordered by GROUP_PRIORITY
+ *  then alphabetically, each sorted featured-first. Shared by the rail (built
+ *  from all models) and the right pane (built from the filtered set). */
+function buildGroups(list: ModelInfo[]): GroupEntry[] {
+  const map = new Map<string, ModelInfo[]>();
+  for (const m of list) {
+    const g = groupOf(m);
+    const arr = map.get(g) ?? [];
+    arr.push(m);
+    map.set(g, arr);
+  }
+  for (const arr of map.values()) {
+    arr.sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name));
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => {
+      const ai = GROUP_PRIORITY.indexOf(a);
+      const bi = GROUP_PRIORITY.indexOf(b);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b);
+    })
+    .map(([group, models]) => ({ group, icon: models[0]?.icon, models }));
+}
+
+/** Vertical (desktop) / horizontal (mobile) strip of provider glyphs that
+ *  drives which company's models the right pane shows. */
+function ProviderRail({
+  groups,
+  hasFeatured,
+  active,
+  onSelect,
+  orientation,
+}: {
+  groups: GroupEntry[];
+  hasFeatured: boolean;
+  active: string | null;
+  onSelect: (tab: string) => void;
+  orientation: "vertical" | "horizontal";
+}) {
+  const t = useTranslations("chat.model");
+  const vertical = orientation === "vertical";
+  const item = (key: string, title: string, glyph: React.ReactNode) => {
+    const isActive = active === key;
+    return (
+      <button
+        key={key}
+        type="button"
+        title={title}
+        aria-label={title}
+        aria-pressed={isActive}
+        onClick={() => onSelect(key)}
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${
+          isActive
+            ? "bg-background text-foreground ring-1 ring-border shadow-sm"
+            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+        }`}
+      >
+        {glyph}
+      </button>
+    );
+  };
+  return (
+    <div
+      className={`flex shrink-0 gap-1 ${
+        vertical
+          ? "flex-col items-center overflow-y-auto overscroll-contain border-r p-2"
+          : "flex-row items-center overflow-x-auto border-b p-2"
+      }`}
+    >
+      {hasFeatured && (
+        <>
+          {item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
+          <span className={vertical ? "my-1 h-px w-6 bg-border" : "mx-1 h-6 w-px bg-border"} />
+        </>
+      )}
+      {groups.map((g) => item(g.group, g.group, <BrandIcon slug={g.icon} size={18} />))}
+    </div>
+  );
+}
+
 function ModelList({
   state,
   search,
@@ -192,6 +322,7 @@ function ModelList({
   onActiveIndex,
   listRef,
   onClose,
+  orientation = "vertical",
 }: {
   state: ModelsState;
   search: string;
@@ -202,57 +333,85 @@ function ModelList({
   onActiveIndex: (i: number) => void;
   listRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
+  orientation?: "vertical" | "horizontal";
 }) {
   const t = useTranslations("chat.model");
   const listboxId = useId();
   const optionId = (i: number) => `${listboxId}-opt-${i}`;
+  const searching = search.trim().length > 0;
+
   // Only tool-capable models are usable here, so they're the only ones listed.
   const models = useMemo(() => state.models.filter(hasTools), [state.models]);
+  // Rail is built from the full set so it stays stable while searching/filtering.
+  const railGroups = useMemo(() => buildGroups(models), [models]);
+  const hasFeatured = useMemo(() => models.some((m) => m.featured), [models]);
+
   const filtered = useMemo(() => {
-    if (!search) return models;
-    const q = search.toLowerCase();
+    if (!searching) return models;
+    const q = search.trim().toLowerCase();
     return models.filter(
       (m) =>
         m.id.toLowerCase().includes(q) ||
         m.name.toLowerCase().includes(q) ||
         groupOf(m).toLowerCase().includes(q),
     );
-  }, [models, search]);
+  }, [models, search, searching]);
 
-  const indexMap = useMemo(() => new Map(filtered.map((m, i) => [m.id, i])), [filtered]);
+  // Which company's models fill the right pane. Until the user clicks the rail
+  // (`tab` stays null), it falls back to the current model's provider — derived,
+  // not stored, so it tracks the catalog loading without a state-syncing effect.
+  const [tab, setTab] = useState<string | null>(null);
+  const defaultTab = useMemo(() => {
+    if (railGroups.length === 0) return null;
+    const cur = models.find((m) => m.id === currentModelId);
+    return cur ? groupOf(cur) : railGroups[0].group;
+  }, [railGroups, models, currentModelId]);
+  const activeTab = tab ?? defaultTab;
 
-  const groups = useMemo(() => {
-    const map = new Map<string, ModelInfo[]>();
-    for (const m of filtered) {
-      const g = groupOf(m);
-      const list = map.get(g) ?? [];
-      list.push(m);
-      map.set(g, list);
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name));
-    }
-    return [...map.entries()].sort(([a], [b]) => {
-      const ai = GROUP_PRIORITY.indexOf(a);
-      const bi = GROUP_PRIORITY.indexOf(b);
-      if (ai !== -1 && bi !== -1) return ai - bi;
-      if (ai !== -1) return -1;
-      if (bi !== -1) return 1;
-      return a.localeCompare(b);
-    });
-  }, [filtered]);
+  // The right pane shows: search results (across all providers) when searching,
+  // the featured set on the Featured tab, otherwise the active provider only.
+  const sections = useMemo<GroupEntry[]>(() => {
+    if (searching) return buildGroups(filtered);
+    if (activeTab === FEATURED_TAB) return buildGroups(filtered.filter((m) => m.featured));
+    return buildGroups(filtered.filter((m) => groupOf(m) === activeTab));
+  }, [searching, filtered, activeTab]);
 
-  return (
-    <>
+  // Multi-provider views need headers to tell companies apart; a single
+  // provider's list doesn't (the rail already names it).
+  const showHeaders = searching || activeTab === FEATURED_TAB;
+
+  // Flatten the visible models for keyboard navigation + active-index math.
+  const visible = useMemo(() => sections.flatMap((s) => s.models), [sections]);
+  const indexMap = useMemo(() => new Map(visible.map((m, i) => [m.id, i])), [visible]);
+
+  const pickTab = (next: string) => {
+    onSearch("");
+    onActiveIndex(0);
+    setTab(next);
+  };
+
+  // When a single company fills the pane (no per-group sticky headers), name it
+  // up top so the user always knows which provider they're looking at.
+  const paneHeading = !showHeaders ? sections[0] : null;
+
+  const right = (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {paneHeading && (
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          <BrandIcon slug={paneHeading.icon} size={15} />
+          <span className="text-sm font-medium">{paneHeading.group}</span>
+          <span className="text-[10px] text-muted-foreground tabular-nums">{paneHeading.models.length}</span>
+        </div>
+      )}
       <div className="flex items-center gap-2 border-b px-3 py-2.5">
         <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <input
           value={search}
           onChange={(e) => { onSearch(e.target.value); onActiveIndex(0); }}
           onKeyDown={(e) => {
-            if (e.key === "ArrowDown") { e.preventDefault(); onActiveIndex(Math.min(activeIndex + 1, filtered.length - 1)); }
+            if (e.key === "ArrowDown") { e.preventDefault(); onActiveIndex(Math.min(activeIndex + 1, visible.length - 1)); }
             else if (e.key === "ArrowUp") { e.preventDefault(); onActiveIndex(Math.max(activeIndex - 1, 0)); }
-            else if (e.key === "Enter" && filtered[activeIndex]) { e.preventDefault(); onSelect(filtered[activeIndex]); }
+            else if (e.key === "Enter" && visible[activeIndex]) { e.preventDefault(); onSelect(visible[activeIndex]); }
             else if (e.key === "Escape") { onClose(); }
           }}
           placeholder={t("search")}
@@ -260,11 +419,11 @@ function ModelList({
           role="combobox"
           aria-expanded
           aria-controls={listboxId}
-          aria-activedescendant={filtered.length ? optionId(activeIndex) : undefined}
+          aria-activedescendant={visible.length ? optionId(activeIndex) : undefined}
           aria-label={t("search")}
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
-        {search && <span className="text-[10px] text-muted-foreground tabular-nums">{filtered.length}</span>}
+        {searching && <span className="text-[10px] text-muted-foreground tabular-nums">{visible.length}</span>}
       </div>
 
       <div ref={listRef} id={listboxId} role="listbox" aria-label={t("selectModel")} className="flex-1 overflow-y-auto overscroll-contain">
@@ -274,7 +433,7 @@ function ModelList({
           </div>
         )}
 
-        {!state.loading && filtered.length === 0 && (
+        {!state.loading && visible.length === 0 && (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">
             {state.syncing ? (
               <span className="flex flex-col items-center gap-1.5"><Loader2 className="h-4 w-4 animate-spin" />{t("syncing")}</span>
@@ -282,7 +441,7 @@ function ModelList({
               <span className="flex flex-col items-center gap-1.5"><KeyRound className="h-4 w-4" />{t("needKey")}</span>
             ) : state.error ? (
               <span className="flex flex-col items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{state.error}</span>
-            ) : search ? (
+            ) : searching ? (
               t("noneFound")
             ) : (
               t("noneAvailable")
@@ -290,49 +449,68 @@ function ModelList({
           </div>
         )}
 
-        {groups.map(([group, groupModels]) => {
-          return (
-            <div key={group}>
+        {sections.map(({ group, icon, models: groupModels }) => (
+          <div key={group}>
+            {showHeaders && (
               <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border/50">
-                <BrandIcon slug={groupModels[0]?.icon} size={12} />
+                <BrandIcon slug={icon} size={12} />
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{group}</span>
                 <span className="text-[10px] text-muted-foreground tabular-nums">{groupModels.length}</span>
               </div>
+            )}
 
-              {groupModels.map((model) => {
-                const globalIdx = indexMap.get(model.id) ?? -1;
-                const isActive = globalIdx === activeIndex;
-                const isCurrent = model.id === currentModelId;
-                return (
-                  <button
-                    key={model.id}
-                    id={optionId(globalIdx)}
-                    role="option"
-                    aria-selected={isActive}
-                    data-index={globalIdx}
-                    onClick={() => onSelect(model)}
-                    onMouseEnter={() => onActiveIndex(globalIdx)}
-                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
-                  >
-                    {model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
-                    <span className="min-w-0 flex-1 truncate text-sm">{stripGroup(model.name, group)}</span>
-                    {isCurrent && (
-                      <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
+            {groupModels.map((model) => {
+              const globalIdx = indexMap.get(model.id) ?? -1;
+              const isActive = globalIdx === activeIndex;
+              const isCurrent = model.id === currentModelId;
+              return (
+                <button
+                  key={model.id}
+                  id={optionId(globalIdx)}
+                  role="option"
+                  aria-selected={isActive}
+                  data-index={globalIdx}
+                  onClick={() => onSelect(model)}
+                  onMouseEnter={() => onActiveIndex(globalIdx)}
+                  className={`flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
+                >
+                  {model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
+                  <span className="min-w-0 flex-1 truncate text-sm">{stripGroup(model.name, group)}</span>
+                  <PriceMeter pricing={model.pricing} />
+                  {isCurrent && (
+                    <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
+                  )}
+                  <span className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+                    {model.context > 0 && (
+                      <span className="tabular-nums" title={t("context")}>{formatContext(model.context)}</span>
                     )}
-                    <span className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
-                      {model.context > 0 && (
-                        <span className="tabular-nums" title={t("context")}>{formatContext(model.context)}</span>
-                      )}
-                      <Caps caps={model.capabilities} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })}
+                    <Caps caps={model.capabilities} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
-    </>
+    </div>
+  );
+
+  // No companies to choose between (loading, error, single provider) → skip the
+  // rail entirely and let the list use the full width.
+  const showRail = railGroups.length > 1 || hasFeatured;
+  if (!showRail) return right;
+
+  return (
+    <div className={`flex min-h-0 flex-1 ${orientation === "vertical" ? "flex-row" : "flex-col"}`}>
+      <ProviderRail
+        groups={railGroups}
+        hasFeatured={hasFeatured}
+        active={searching ? null : activeTab}
+        onSelect={pickTab}
+        orientation={orientation}
+      />
+      {right}
+    </div>
   );
 }
 
@@ -436,7 +614,7 @@ export function ModelPicker({
   const displayName = stripGroup(currentModel?.name || (value ? displayModelName(value) : ""), groupLabel);
   const placeholderText = placeholder ?? t("placeholder");
 
-  const list = (
+  const renderList = (orientation: "vertical" | "horizontal") => (
     <ModelList
       state={state}
       search={search}
@@ -447,6 +625,7 @@ export function ModelPicker({
       onActiveIndex={setActiveIndex}
       listRef={listRef}
       onClose={close}
+      orientation={orientation}
     />
   );
 
@@ -511,11 +690,11 @@ export function ModelPicker({
       {open && !isMobile && (
         <div
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
-          className={`absolute top-full mt-1 z-50 flex max-h-96 flex-col overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 ${
-            variant === "field" ? "inset-x-0 w-full" : "left-0 w-80"
+          className={`absolute top-full mt-1 z-50 flex h-96 overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 max-w-[calc(100vw-1rem)] ${
+            variant === "field" ? "left-0 w-[28rem] min-w-full" : "left-0 w-[28rem]"
           }`}
         >
-          {list}
+          {renderList("vertical")}
         </div>
       )}
 
@@ -530,7 +709,7 @@ export function ModelPicker({
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="flex flex-1 flex-col min-h-0">{list}</div>
+          <div className="flex flex-1 flex-col min-h-0">{renderList("horizontal")}</div>
         </div>
       )}
     </div>

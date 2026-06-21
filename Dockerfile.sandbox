@@ -86,7 +86,9 @@ RUN pip install --break-system-packages --no-cache-dir \
     playwright \
     # Utils
     cryptography pyyaml python-dotenv tabulate chardet psutil \
-    yt-dlp graphviz
+    yt-dlp graphviz \
+    # uv/uvx — runs Python-based stdio MCP servers (e.g. `uvx some-mcp-server`)
+    uv
 
 # ---------------------------------------------------------------------------
 # 7. Node.js global packages
@@ -111,6 +113,12 @@ RUN npx playwright install chromium \
 # Ubuntu 24.04 ships with 'ubuntu' user at UID 1000 — rename to 'sandbox'
 RUN usermod -l sandbox -d /home/sandbox -m ubuntu 2>/dev/null || true && \
     groupmod -n sandbox ubuntu 2>/dev/null || true
+
+# Separate, unprivileged user (UID 1001) for stdio MCP servers. Running them under
+# a different uid than the agent (1000) means agent code can't read an MCP server's
+# secret env via /proc/<pid>/environ. A real passwd entry keeps os.userInfo()-style
+# lookups from crashing; HOME is overridden to the writable /opt/mcp tmpfs at runtime.
+RUN useradd -u 1001 -m -d /home/mcp -s /usr/sbin/nologin mcp
 
 # Entrypoint: start Xvfb (needed by LibreOffice, wkhtmltopdf, Playwright) then idle
 COPY --chmod=755 sandbox-entrypoint.sh /entrypoint.sh

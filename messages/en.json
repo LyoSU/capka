@@ -238,7 +238,12 @@
         "tools": "Can use tools",
         "reasoning": "Thinks step by step"
       },
-      "close": "Close"
+      "close": "Close",
+      "featured": "Featured",
+      "price": {
+        "label": "Approx. cost",
+        "free": "free"
+      }
     },
     "input": {
       "placeholder": "Assign a task or ask anything",

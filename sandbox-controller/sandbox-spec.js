@@ -66,7 +66,9 @@ export function buildSandboxConfig({
       // outside the agent's /workspace, so it never pollutes the user's files.
       Tmpfs: {
         "/tmp": "rw,nosuid,nodev,noexec,size=64m",
-        "/opt/mcp": "rw,nosuid,nodev,size=256m,mode=1777",
+        // `exec` is REQUIRED and explicit — Docker adds noexec to tmpfs by default,
+        // which would stop npx/uvx-installed server binaries from running here.
+        "/opt/mcp": "rw,nosuid,nodev,exec,size=256m,mode=1777",
       },
       // Hard, non-negotiable isolation. Privileged is set explicitly so the
       // test pins it and a future edit can't omit it into a truthy default.
