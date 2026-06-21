@@ -29,6 +29,7 @@ export function buildSandboxConfig({
   memoryBytes,
   nanoCpus,
   pidsLimit = 100,
+  nofileLimit = 65536,
   runtime,
   readonlyRootfs = true,
 }) {
@@ -38,8 +39,15 @@ export function buildSandboxConfig({
     Env: ["DISPLAY=:99", "PYTHONUNBUFFERED=1", "LANG=C.UTF-8"],
     HostConfig: {
       Memory: memoryBytes,
+      // Pin total memory+swap to Memory so a process can't spill past the RAM cap
+      // into swap and dodge the OOM limit (Docker otherwise defaults swap to 2×).
+      MemorySwap: memoryBytes,
       NanoCpus: nanoCpus,
       PidsLimit: pidsLimit,
+      // Cap open file descriptors. The image default (~1M) lets a malicious
+      // process open hundreds of thousands of FDs and destabilize the container's
+      // own processes (Xvfb, the runner) and starve sibling sandboxes on the host.
+      Ulimits: [{ Name: "nofile", Soft: nofileLimit, Hard: nofileLimit }],
       // OCI runtime: gVisor ("runsc") in the secure profile. Omitted when unset so
       // the daemon default applies (dev/bare runs). Fail-closed availability is
       // enforced at boot by runtime-check.js, not here.

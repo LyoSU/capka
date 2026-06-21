@@ -74,6 +74,31 @@ describe("buildSandboxConfig — isolation hardening", () => {
   });
 });
 
+describe("buildSandboxConfig — resource exhaustion limits", () => {
+  it("caps open file descriptors (nofile) to contain FD-exhaustion DoS", () => {
+    // Default ulimit -n is ~1M; a malicious process can open hundreds of
+    // thousands of FDs and destabilize the container's own processes (Xvfb,
+    // the runner) and starve sibling sandboxes on the host.
+    const nofile = (buildSandboxConfig(base).HostConfig.Ulimits || []).find((u) => u.Name === "nofile");
+    expect(nofile).toBeDefined();
+    expect(nofile.Hard).toBeLessThanOrEqual(65536);
+    expect(nofile.Soft).toBeLessThanOrEqual(nofile.Hard);
+  });
+
+  it("allows tuning the nofile limit", () => {
+    const nofile = buildSandboxConfig({ ...base, nofileLimit: 1024 }).HostConfig.Ulimits.find((u) => u.Name === "nofile");
+    expect(nofile.Soft).toBe(1024);
+    expect(nofile.Hard).toBe(1024);
+  });
+
+  it("pins MemorySwap to Memory so swap can't be used to exceed the RAM cap", () => {
+    // Without this, Docker defaults memory+swap to 2× memory, letting a process
+    // spill past the 384MB cap into swap and evade the OOM limit.
+    const c = buildSandboxConfig(base);
+    expect(c.HostConfig.MemorySwap).toBe(base.memoryBytes);
+  });
+});
+
 describe("resolveNetworkMode — bridge is opt-in, default deny", () => {
   it("denies bridge by default (no network)", () => {
     expect(resolveNetworkMode("bridge", { allowNetwork: false })).toBe("none");
