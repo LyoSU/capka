@@ -75,6 +75,12 @@ export function toUIMessages(rows: {
         createdAt: m.createdAt?.toISOString() ?? null,
         platform: m.platform ?? "web",
         taskStatus: meta?.status,
+        // Forward the failure shape so a failed turn's ErrorNotice shows the real
+        // message after a reload (not the generic fallback). message.tsx reads
+        // these to pick a localized, role-aware error.
+        error: meta?.error,
+        errorDetail: meta?.errorDetail,
+        errorCategory: meta?.errorCategory,
         parentId: m.parentId ?? null,
         siblingIndex: m.siblingIndex ?? 0,
         siblingCount: m.siblingCount ?? 1,

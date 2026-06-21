@@ -27,7 +27,14 @@ export type StoredPart = z.infer<typeof storedPartSchema>;
 export type MessageMeta = {
   taskId?: string;
   status?: string;
+  // Failure shape (role-aware): `error` is the friendly user-facing message,
+  // `errorDetail` the raw text admins can expand, `errorCategory` the LLM error
+  // class used to pick a localized message. Written by the runner on a failed
+  // turn; the presenter forwards all three so the message's ErrorNotice survives
+  // a reload with the real error, not a generic placeholder.
   error?: string;
+  errorDetail?: string;
+  errorCategory?: string;
   parts?: StoredPart[];
   // Tech details for the (i) popover, captured at finalize (completed turns only).
   // Denormalized copies of the usage table + elapsed time so the UI needs no JOIN

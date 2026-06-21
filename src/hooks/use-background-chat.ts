@@ -247,7 +247,13 @@ export function useBackgroundChat({
               setStatus("idle");
               setTaskId(null);
               setTaskInfo({ startedAt: 0, currentTool: null });
-              if (data.error) setError(data.error);
+              // Don't surface a failure via the bottom banner here: the server
+              // has already persisted it on the message row (taskStatus:"failed"
+              // + error), so the reload below brings it back as the message's own
+              // durable ErrorNotice. Setting `error` would only flash the banner
+              // for the one render before loadHistory() clears it again — an
+              // unreadable red blink above the composer. The banner is reserved
+              // for load errors (loadHistory's own catch).
               loadHistory();
               break;
             }
