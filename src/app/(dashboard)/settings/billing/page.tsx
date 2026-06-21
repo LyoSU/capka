@@ -150,7 +150,7 @@ export default function BillingPage() {
           </p>
         ) : (
           <>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {([
                 ["limit5h", limit5h, setLimit5h, t("limits.window.h5")],
                 ["limitWeek", limitWeek, setLimitWeek, t("limits.window.d7")],

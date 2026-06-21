@@ -50,8 +50,18 @@ export function CommandPalette() {
       }
     }
 
+    // The sidebar footer (and anywhere else) can open the palette by click
+    // without reaching into this component's state — it just fires the event.
+    function open() {
+      setOpen(true);
+    }
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("open-command-palette", open);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("open-command-palette", open);
+    };
   }, [router]);
 
   function run(fn: () => void) {

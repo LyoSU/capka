@@ -34,6 +34,7 @@ import { PreviewProvider } from "@/components/chat/file-preview";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { RecentChats } from "@/components/chat/recent-chats";
 import { Button } from "@/components/ui/button";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
 import { ChatNav } from "@/components/chat/chat-nav";
 import { ClawMark } from "@/components/brand/claw-mark";
@@ -331,7 +332,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const lastFailed = (lastMsg?.metadata as { taskStatus?: string } | undefined)?.taskStatus === "failed";
 
   const inputEl = readOnly ? (
-    <div className="mx-auto max-w-3xl px-4 pb-4 md:px-6 lg:max-w-4xl">
+    <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
       <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Send className="h-4 w-4 shrink-0" />
@@ -386,6 +387,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       <div className="flex min-w-0 flex-1 flex-col">
       {showGreeting ? (
         <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden py-10">
+          {/* No header in the greeting state, so the sidebar handle lives in the
+              top-left corner on mobile (the area above the centered composer). */}
+          <SidebarTrigger className="absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20 size-9 rounded-full border bg-card shadow-sm md:hidden" />
           <div className="relative z-10 w-full">
             {/* The brand claw reveals on mount — the one signature flourish — with
                 a soft halo lifting it off the surface, then the greeting floats up
@@ -494,9 +498,12 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
           {/* Floating header — fades to transparent so messages scroll up
               behind it. pointer-events-none lets scroll-over pass through;
               only the controls themselves are interactive. */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-background via-background to-transparent px-6 pb-8 pt-3">
-            <div className="pointer-events-auto inline-flex rounded-full border bg-card px-1 shadow-sm">
-              <ModelPicker variant="pill" value={model} onChange={setModel} />
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 bg-gradient-to-b from-background via-background to-transparent px-4 pb-8 pt-3 md:px-6">
+            <div className="flex items-center gap-2">
+              <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full border bg-card shadow-sm md:hidden" />
+              <div className="pointer-events-auto inline-flex rounded-full border bg-card px-1 shadow-sm">
+                <ModelPicker variant="pill" value={model} onChange={setModel} />
+              </div>
             </div>
             <Button
               variant="ghost"

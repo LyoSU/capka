@@ -28,7 +28,9 @@ import { PanelLeftIcon } from "lucide-react"
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "18rem"
-const SIDEBAR_WIDTH_MOBILE = "20rem"
+// Full-screen on mobile: the nav opens as a whole page, not a half-width drawer
+// peeking over the content — reads as a proper screen on a phone.
+const SIDEBAR_WIDTH_MOBILE = "100dvw"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
@@ -187,10 +189,15 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          className="border-0 bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          // Inline width/maxWidth beat SheetContent's built-in `w-3/4` +
+          // `sm:max-w-sm` (whose `[data-side=left]` variant out-specifies any
+          // class we'd add), so the mobile nav truly fills the screen.
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+              width: SIDEBAR_WIDTH_MOBILE,
+              maxWidth: "none",
             } as React.CSSProperties
           }
           side={side}

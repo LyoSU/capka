@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Markdown } from "@/components/chat/markdown";
 import { haptic } from "@/lib/haptics";
+import { useLongPress } from "@/hooks/use-long-press";
 import { useState, useMemo, useEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -560,6 +561,25 @@ function UserBubble({
   const [draft, setDraft] = useState(text);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
+  // The edit/fork actions sit hidden until hover on the web; on touch there's no
+  // hover, so a long-press reveals them. A following tap or scroll hides them.
+  const [revealed, setRevealed] = useState(false);
+  const longPress = useLongPress(() => { setRevealed(true); haptic("tap"); });
+  useEffect(() => {
+    if (!revealed) return;
+    const close = () => setRevealed(false);
+    // Defer arming so the press that opened it doesn't immediately close it.
+    const id = setTimeout(() => {
+      document.addEventListener("pointerdown", close, { once: true, capture: true });
+      window.addEventListener("scroll", close, { once: true, capture: true });
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [revealed]);
+
   useEffect(() => {
     if (!editing) return;
     const ta = taRef.current;
@@ -603,8 +623,12 @@ function UserBubble({
   const hasFiles = !!chatId && !!attachedFiles && attachedFiles.length > 0;
 
   return (
-    <div className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4">
-      <div className="flex max-w-[75%] flex-col items-end lg:max-w-[65%]">
+    <div
+      className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4"
+      data-revealed={revealed || undefined}
+      {...longPress}
+    >
+      <div className="flex max-w-[75%] flex-col items-end lg:max-w-[65%] [-webkit-touch-callout:none]">
         {hasFiles && <MessageAttachments chatId={chatId!} files={attachedFiles!} />}
         {/* When the turn is files-only, the thumbnails are the content — skip the
             empty "…" bubble. */}
@@ -623,13 +647,13 @@ function UserBubble({
               onClick={() => { setDraft(text); setEditing(true); }}
               title={tMsg("edit")}
               aria-label={tMsg("edit")}
-              className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground opacity-0 transition hover:bg-accent/50 hover:text-foreground group-hover/msg:opacity-100"
+              className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground opacity-0 transition hover:bg-accent/50 hover:text-foreground group-hover/msg:opacity-100 group-data-[revealed]/msg:opacity-100"
             >
               <Pencil className="h-3.5 w-3.5" />
             </button>
           )}
           {onFork && (
-            <span className="opacity-0 transition group-hover/msg:opacity-100">
+            <span className="opacity-0 transition group-hover/msg:opacity-100 group-data-[revealed]/msg:opacity-100">
               <ForkButton messageId={messageId} onFork={onFork} />
             </span>
           )}

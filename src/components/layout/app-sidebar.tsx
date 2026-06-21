@@ -4,7 +4,19 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { Plus, Settings, FolderKanban, Archive, Send, LogOut } from "lucide-react";
+import {
+  Plus,
+  Settings,
+  FolderKanban,
+  Archive,
+  Send,
+  LogOut,
+  Search,
+  ChevronsUpDown,
+  Monitor,
+  Sun,
+  Moon,
+} from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import {
   Sidebar,
@@ -21,8 +33,22 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ClawMark } from "@/components/brand/claw-mark";
-import { ThemeSwitcher } from "@/components/layout/theme-switcher";
+import { useTheme } from "@/components/providers";
+import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { ProjectSelector } from "@/components/projects/project-selector";
 import { ChatSearch } from "@/components/chat/chat-search";
 import { ChatContextMenu } from "@/components/chat/chat-context-menu";
@@ -65,11 +91,21 @@ function groupByDate(chats: ChatItem[]) {
   return groups.filter((g) => g.chats.length > 0);
 }
 
+// Up-to-two-letter monogram for the avatar fallback when a user has no photo.
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const t = useTranslations("nav");
-  const { toggleSidebar, state: sidebarState } = useSidebar();
+  const tTheme = useTranslations("theme");
+  const { toggleSidebar, state: sidebarState, setOpenMobile, openMobile, isMobile } = useSidebar();
+  const { theme, setTheme } = useTheme();
+  const { data: session } = authClient.useSession();
   const signOut = useCallback(async () => {
     await authClient.signOut();
     router.push("/login");
@@ -108,6 +144,17 @@ export function AppSidebar() {
   useEffect(() => {
     fetchChats();
   }, [fetchChats, pathname]);
+
+  // On mobile the sidebar is a full-screen sheet; once the user navigates it
+  // must get out of the way. A route change covers most cases — the explicit
+  // close on the "new chat" links handles tapping it while already on /chat
+  // (same pathname, so this effect wouldn't fire).
+  useEffect(() => {
+    setOpenMobile(false);
+  }, [pathname, setOpenMobile]);
+
+  // Full-screen on mobile → the Back gesture should close the nav, not navigate.
+  useBackDismiss(isMobile && openMobile, () => setOpenMobile(false));
 
   // Keep the list live: a brand-new chat only hits the DB once its first message
   // is sent (no route change fires then), and titles are generated a moment after
@@ -164,6 +211,10 @@ export function AppSidebar() {
     ? `/chat?projectId=${selectedProject}`
     : "/chat";
 
+  const user = session?.user;
+  const displayName = user?.name || user?.email || t("account");
+  const avatarUrl = user?.image;
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-2">
@@ -202,7 +253,7 @@ export function AppSidebar() {
             </div>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href={newChatHref} />}>
+                <SidebarMenuButton render={<Link href={newChatHref} />} onClick={() => setOpenMobile(false)}>
                   <Plus className="h-4 w-4" />
                   <span>{t("newChat")}</span>
                 </SidebarMenuButton>
@@ -323,50 +374,98 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="mt-auto p-2">
-        <div className="flex items-center justify-between group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1">
-          <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
-            <ThemeSwitcher />
-            <kbd className="pointer-events-none select-none text-[10px] text-muted-foreground/60 font-mono" suppressHydrationWarning>
-              {typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘K" : "Ctrl+K"}
-            </kbd>
-          </div>
-          <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
-            <Link
-              href="/chat/archived"
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-              title={t("archived")}
-              aria-label={t("archived")}
+      <SidebarFooter className="p-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label={t("account")}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md p-1.5 text-left outline-none transition-colors",
+              "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[popup-open]:bg-sidebar-accent",
+              "group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0"
+            )}
+          >
+            <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-sidebar-accent text-xs font-medium text-foreground">
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarUrl} alt="" className="size-full object-cover" />
+              ) : (
+                initials(displayName)
+              )}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium group-data-[collapsible=icon]:hidden">
+              {displayName}
+            </span>
+            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" />
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent
+            side="top"
+            align="start"
+            sideOffset={8}
+            className="w-56"
+          >
+            <DropdownMenuItem
+              onClick={() => window.dispatchEvent(new Event("open-command-palette"))}
             >
-              <Archive className="h-4 w-4" />
-            </Link>
-            <Link
-              href="/projects"
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-              title={t("projects")}
-              aria-label={t("projects")}
-            >
-              <FolderKanban className="h-4 w-4" />
-            </Link>
-            <Link
-              href="/settings"
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-              title={t("settings")}
-              aria-label={t("settings")}
-            >
-              <Settings className="h-4 w-4" />
-            </Link>
-            <button
-              type="button"
-              onClick={signOut}
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 text-muted-foreground hover:text-destructive")}
-              title={t("signOut")}
-              aria-label={t("signOut")}
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+              <Search className="size-4" />
+              {t("search")}
+              <DropdownMenuShortcut>
+                {typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘K" : "Ctrl+K"}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem render={<Link href="/projects" />}>
+              <FolderKanban className="size-4" />
+              {t("projects")}
+            </DropdownMenuItem>
+            <DropdownMenuItem render={<Link href="/chat/archived" />}>
+              <Archive className="size-4" />
+              {t("archived")}
+            </DropdownMenuItem>
+
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                {theme === "light" ? (
+                  <Sun className="size-4" />
+                ) : theme === "dark" ? (
+                  <Moon className="size-4" />
+                ) : (
+                  <Monitor className="size-4" />
+                )}
+                {t("theme")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-44">
+                <DropdownMenuRadioGroup
+                  value={theme}
+                  onValueChange={(value) => setTheme(value as "light" | "dark" | "system")}
+                >
+                  <DropdownMenuRadioItem value="system">
+                    <Monitor className="size-4" />
+                    {tTheme("system")}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="light">
+                    <Sun className="size-4" />
+                    {tTheme("light")}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="dark">
+                    <Moon className="size-4" />
+                    {tTheme("dark")}
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem render={<Link href="/settings" />}>
+              <Settings className="size-4" />
+              {t("settings")}
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={signOut}>
+              <LogOut className="size-4" />
+              {t("signOut")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </SidebarFooter>
     </Sidebar>
   );

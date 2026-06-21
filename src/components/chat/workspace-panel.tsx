@@ -12,6 +12,8 @@ import {
   DropdownMenuRadioGroup, DropdownMenuRadioItem,
   DropdownMenuCheckboxItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { formatSize } from "@/lib/constants";
 import { extOf, fileCategory, fileKind, previewKind, type FileCategory } from "@/lib/file-kinds";
 import { cn } from "@/lib/utils";
@@ -77,6 +79,10 @@ export function WorkspacePanel({
   const t = useTranslations("chat.workspace");
   const tc = useTranslations("common");
   const { open: openPreview } = usePreview();
+  const isMobile = useIsMobile();
+  // On phones the panel is a full-screen sheet, so the Back gesture should close
+  // it rather than leave the chat.
+  useBackDismiss(open && isMobile, onClose);
   const [path, setPath] = useState(".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -301,14 +307,16 @@ export function WorkspacePanel({
       aria-hidden={!open}
       className={cn(
         "z-40 h-full shrink-0 overflow-hidden border-l bg-card shadow-lg transition-[width,transform] duration-300 ease-out",
-        "fixed inset-y-0 right-0 w-80 md:static md:z-auto md:shadow-none",
+        // Mobile: full-screen sheet sliding from the right. Desktop: a flex item
+        // that grows 0 → 20rem, pushing the chat instead of overlaying it.
+        "fixed inset-y-0 right-0 w-full md:static md:z-auto md:w-80 md:shadow-none",
         open
           ? "translate-x-0 md:w-80"
           : "pointer-events-none translate-x-full md:w-0 md:translate-x-0 md:border-l-0",
       )}
     >
-    <div className="flex h-full w-80 flex-col">
-      <div className="flex items-center gap-2 border-b border-border/50 bg-muted/20 px-4 py-3">
+    <div className="flex h-full w-full flex-col md:w-80">
+      <div className="flex items-center gap-2 border-b border-border/50 bg-muted/20 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:pt-3">
         <h3 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold tracking-tight">
           <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{t("title")}</span>

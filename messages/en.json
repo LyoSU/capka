@@ -82,7 +82,10 @@
       "thisWeek": "This week",
       "older": "Older"
     },
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "search": "Search",
+    "theme": "Theme",
+    "account": "Account"
   },
   "steps": {
     "createdFile": "Created {file}",
@@ -867,7 +870,7 @@
       "strictDisabled": "Strict mode disabled",
       "updateFailed": "Failed to update",
       "sandboxNet": "Internet access",
-      "sandboxNetHint": "Let sandboxed code and local (stdio) connectors reach the internet. Required for tools that install or fetch on first use (e.g. npx).",
+      "sandboxNetHint": "Let sandboxed code and local (stdio) connectors reach the public internet. Tools that self-install on first use (e.g. npx) need this. Private/internal ranges and cloud metadata stay blocked.",
       "netEnabled": "Internet access on for the sandbox.",
       "netDisabled": "Internet access off for the sandbox."
     }

@@ -16,6 +16,7 @@ import {
   CardFooter,
 } from "@/components/ui/card";
 import { ProjectDialog, type Project } from "@/components/projects/project-dialog";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function ProjectsPage() {
   const t = useTranslations("projects");
@@ -77,14 +78,17 @@ export default function ProjectsPage() {
 
   return (
     <div className="animate-fade-in mx-auto max-w-4xl px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t("subtitle")}
-          </p>
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <div className="flex min-w-0 items-center gap-2">
+          <SidebarTrigger className="-ml-1 size-9 shrink-0 md:hidden" />
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold">{t("title")}</h1>
+            <p className="text-sm text-muted-foreground">
+              {t("subtitle")}
+            </p>
+          </div>
         </div>
-        <Button size="sm" onClick={handleCreate}>
+        <Button size="sm" className="shrink-0" onClick={handleCreate}>
           <Plus className="h-4 w-4" />
           {t("new")}
         </Button>

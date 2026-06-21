@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback, useId, createElement } from "react";
+import { createPortal } from "react-dom";
+import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
 import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
@@ -571,6 +573,9 @@ export function ModelPicker({
     triggerRef.current?.focus();
   }, []);
 
+  // The mobile picker is a full-screen overlay — Back should close it, not leave.
+  useBackDismiss(open && isMobile, close);
+
   const source: Source = provider
     ? { mode: "credentials", provider, apiKey, baseUrl }
     : configId
@@ -713,19 +718,25 @@ export function ModelPicker({
         </div>
       )}
 
-      {open && isMobile && (
+      {open && isMobile && typeof document !== "undefined" && createPortal(
+        // Portaled to <body>: rendered inline, an animated/transformed ancestor
+        // (the greeting's blur-rise) becomes the containing block for this
+        // `fixed` overlay, so `inset-0` no longer means the viewport and the
+        // background fails to cover the page. As a direct body child it spans
+        // the full screen again.
         <div
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
           className="fixed inset-0 z-50 flex flex-col bg-background"
         >
-          <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="flex items-center justify-between border-b px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <span className="text-sm font-medium">{t("selectModel")}</span>
             <button onClick={close} aria-label={t("close")} className="rounded-md p-1 hover:bg-muted">
               <X className="h-4 w-4" />
             </button>
           </div>
           <div className="flex flex-1 flex-col min-h-0">{renderList("horizontal")}</div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

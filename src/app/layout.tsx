@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { GeistMono } from "geist/font/mono";
 import { Onest, Lora } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
@@ -40,6 +40,18 @@ export const metadata: Metadata = {
   },
 };
 
+// `viewportFit: "cover"` lets the app draw into the notch / home-indicator area
+// so `env(safe-area-inset-*)` becomes non-zero — the chat composer and mobile
+// headers pad themselves off those insets. themeColor moves here from manual
+// <head> tags (Next dedupes it) to tint the mobile browser chrome per scheme.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f0ede8" },
+    { media: "(prefers-color-scheme: dark)", color: "#1f1e1d" },
+  ],
+  viewportFit: "cover",
+};
+
 // Applies the persisted (or system) theme to <html> BEFORE first paint, so a
 // reload never flashes the wrong theme. Inlined in <head> rather than loaded as
 // next/script `beforeInteractive`: in App Router that renders a literal <script>
@@ -64,8 +76,6 @@ export default async function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#f0ede8" media="(prefers-color-scheme: light)" />
-        <meta name="theme-color" content="#1f1e1d" media="(prefers-color-scheme: dark)" />
       </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
         <NextIntlClientProvider>
