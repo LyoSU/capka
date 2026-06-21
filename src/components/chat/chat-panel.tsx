@@ -50,9 +50,12 @@ interface ChatPanelProps {
   /** Server-known: does this chat already have messages? Lets first paint pick
    *  the message-stream shell over the new-chat greeting while history loads. */
   initialHasHistory?: boolean;
+  /** Server-rendered recent chats for the greeting's quick-resume list, so it
+   *  paints correct immediately instead of fetching and popping in. */
+  recentChats?: { id: string; title: string | null; updatedAt: string | null }[];
 }
 
-export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, initialHasHistory }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, initialHasHistory, recentChats }: ChatPanelProps) {
   const t = useTranslations("chat");
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -424,7 +427,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                   <div className="animate-blur-rise pt-2.5 [animation-delay:200ms]">
                     <p className="text-center text-xs text-muted-foreground">{t("panel.greetingHint")}</p>
                     <div className="mt-8 space-y-6">
-                      <RecentChats />
+                      <RecentChats initial={recentChats} />
                       <FileTypeSuggestions onPick={setInput} />
                     </div>
                   </div>

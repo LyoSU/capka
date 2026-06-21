@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne, desc } from "drizzle-orm";
 
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -51,6 +51,20 @@ export default async function ChatIdPage({
     db.select({ role: users.role }).from(users).where(eq(users.id, session.user.id)).limit(1).then((r) => r[0]),
   ]);
 
+  // The new-chat greeting shows a quick-resume list. Fetch it here so it paints
+  // with the page instead of fetching client-side and popping in (which shifted
+  // the centered composer). Skipped once the chat has history — no greeting then.
+  const recentChats = existingChat?.activeLeafId
+    ? undefined
+    : (
+        await db
+          .select({ id: chats.id, title: chats.title, updatedAt: chats.updatedAt })
+          .from(chats)
+          .where(and(eq(chats.userId, session.user.id), eq(chats.archived, false), ne(chats.id, chatId)))
+          .orderBy(desc(chats.pinned), desc(chats.updatedAt))
+          .limit(4)
+      ).map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt ? c.updatedAt.toISOString() : null }));
+
   return (
     <ChatPanel
       key={chatId}
@@ -60,6 +74,7 @@ export default async function ChatIdPage({
       isAdmin={userRow?.role === "admin"}
       readOnly={existingChat?.source === "telegram"}
       initialHasHistory={!!existingChat?.activeLeafId}
+      recentChats={recentChats}
     />
   );
 }

@@ -11,19 +11,23 @@ interface ChatRow {
   updatedAt: string | null;
 }
 
-/** Quick-resume list of the user's most recent chats on the empty home screen. */
-export function RecentChats() {
+/** Quick-resume list of the user's most recent chats on the empty home screen.
+ *  `initial` is the server-rendered list (from the chat page) so the section is
+ *  correct on first paint and never pops in late — only when it's omitted do we
+ *  fall back to a client fetch. */
+export function RecentChats({ initial }: { initial?: ChatRow[] }) {
   const t = useTranslations("chat.panel");
   const tn = useTranslations("nav");
   const locale = useLocale();
-  const [chats, setChats] = useState<ChatRow[] | null>(null);
+  const [chats, setChats] = useState<ChatRow[] | null>(initial ?? null);
 
   useEffect(() => {
+    if (initial) return; // seeded from the server — no client flash/jump
     fetch("/api/chats")
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: ChatRow[]) => setChats(rows.slice(0, 4)))
       .catch(() => setChats([]));
-  }, []);
+  }, [initial]);
 
   if (!chats || chats.length === 0) return null;
 

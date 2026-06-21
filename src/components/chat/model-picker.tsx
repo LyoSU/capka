@@ -464,15 +464,22 @@ export function ModelPicker({
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0">
             <BrandIcon slug={currentModel?.icon} size={14} />
           </span>
-          <span className="flex items-baseline gap-1.5 min-w-0">
-            <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholderText}</span>
-            {currentModel && currentModel.context > 0 && (
-              <span className="text-xs text-muted-foreground tabular-nums hidden md:inline" title={t("context")}>{formatContext(currentModel.context)}</span>
-            )}
-            {state.isShared && (
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title={t("sharedTooltip")}>{t("shared")}</span>
-            )}
-          </span>
+          {/* Until the catalog resolves the friendly name, show a skeleton rather
+              than the raw model id — it would otherwise flash "glm-5.2" before
+              snapping to "GLM 5.2". */}
+          {state.loading && !currentModel ? (
+            <span className="h-4 w-28 animate-pulse rounded-md bg-muted" />
+          ) : (
+            <span className="flex items-baseline gap-1.5 min-w-0">
+              <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholderText}</span>
+              {currentModel && currentModel.context > 0 && (
+                <span className="text-xs text-muted-foreground tabular-nums hidden md:inline" title={t("context")}>{formatContext(currentModel.context)}</span>
+              )}
+              {state.isShared && (
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title={t("sharedTooltip")}>{t("shared")}</span>
+              )}
+            </span>
+          )}
           <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       ) : (
@@ -486,9 +493,13 @@ export function ModelPicker({
           className="flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <BrandIcon slug={currentModel?.icon} size={15} className="shrink-0 text-muted-foreground" />
-          <span className={`flex-1 truncate text-left ${displayName ? "" : "text-muted-foreground"}`}>
-            {displayName || placeholderText}
-          </span>
+          {state.loading && !currentModel ? (
+            <span className="h-4 flex-1 animate-pulse rounded-md bg-muted" />
+          ) : (
+            <span className={`flex-1 truncate text-left ${displayName ? "" : "text-muted-foreground"}`}>
+              {displayName || placeholderText}
+            </span>
+          )}
           {state.loading || state.syncing ? (
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/50" />
           ) : (
