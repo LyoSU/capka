@@ -7,6 +7,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "dockerode": "^4.0.4"
+    "dockerode": "^4.0.4",
+    "pg": "^8.20.0"
   }
 }
