@@ -11,6 +11,19 @@ import { BinaryFileThumb, FileTile } from "./file-preview";
 /** Max single file size for upload (100MB) */
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
+/**
+ * Pasted plain text at or above this length becomes a .txt attachment instead of
+ * landing inline in the textarea — same as Claude. Keeps the composer readable
+ * when someone dumps a log, a long doc, or a big code block.
+ */
+const PASTE_AS_FILE_CHARS = 2000;
+
+/** Turn a big paste into a named .txt File. Timestamped so repeat pastes don't collide. */
+function pastedTextFile(text: string): File {
+  const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "-"); // HH-MM-SS
+  return new File([text], `pasted-text-${stamp}.txt`, { type: "text/plain" });
+}
+
 export type AttachedFile = {
   file: File;
   id: string;
@@ -99,6 +112,13 @@ export function ChatInput({
     if (pastedFiles.length > 0) {
       e.preventDefault();
       addFiles(pastedFiles);
+      return;
+    }
+    // Big text paste → .txt attachment, so a wall of text doesn't flood the input.
+    const text = e.clipboardData.getData("text/plain");
+    if (text.length >= PASTE_AS_FILE_CHARS) {
+      e.preventDefault();
+      addFiles([pastedTextFile(text)]);
     }
   };
 
