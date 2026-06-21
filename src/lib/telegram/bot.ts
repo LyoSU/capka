@@ -2,7 +2,7 @@ import { Bot, type Context } from "grammy";
 import { nanoid } from "nanoid";
 import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { telegramLinks, linkCodes, chats, messages, users } from "@/lib/db/schema";
+import { telegramLinks, linkCodes, chats, messages, users, accounts } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
@@ -350,12 +350,28 @@ export async function startBot(): Promise<void> {
 
 /** Stop polling and drop the singleton (so a new token takes effect). */
 export async function stopBot(): Promise<void> {
-  if (_bot && _polling) await _bot.stop().catch(() => {});
-  _polling = false;
+  const bot = _bot;
+  // Clear the singleton up front so a concurrent startBot() can't observe the
+  // old instance, then stop the previous poller. Crucially we do NOT swallow a
+  // stop() failure silently: if it throws, the old getUpdates loop keeps running
+  // and would answer on the OLD token alongside the new bot — exactly the
+  // "previous bot still works after switching" bug. Surface it loudly.
   _bot = null;
+  _polling = false;
+  _token = "";
+  if (bot) {
+    try {
+      await bot.stop();
+      log.info("telegram polling stopped");
+    } catch (e) {
+      log.error("telegram bot.stop() failed — the old poller may still be running", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
 }
 
-/** Apply a newly-saved token: stop the old bot, start a fresh one. */
+/** Apply a newly-saved token: fully stop the old bot, then start a fresh one. */
 export async function restartBot(): Promise<void> {
   await stopBot();
   await startBot();
@@ -405,8 +421,41 @@ async function linkAccount(ctx: Context, code: string): Promise<void> {
   await db
     .delete(telegramLinks)
     .where(and(eq(telegramLinks.userId, lc.userId), ne(telegramLinks.telegramUserId, ctx.from!.id)));
+  // Mirror the binding into better-auth's account table so a later "Sign in with
+  // Telegram" (OIDC) resolves to THIS user instead of minting a duplicate — the
+  // two linking systems must agree on who owns a Telegram id. Account id is the
+  // numeric Telegram id (what the OIDC id_token returns).
+  await upsertTelegramAccountRow(lc.userId, ctx.from!.id);
   await db.delete(linkCodes).where(eq(linkCodes.code, code));
   await ctx.reply(t("linked"));
+}
+
+/**
+ * Ensure a better-auth account row exists binding `telegramUserId` to `userId`,
+ * and that no stale row binds that Telegram id to a different user. Tokenless —
+ * better-auth fills tokens on the next OIDC sign-in; it only needs the
+ * provider+accountId→user mapping to avoid creating a duplicate user.
+ */
+async function upsertTelegramAccountRow(userId: string, telegramUserId: number): Promise<void> {
+  const accountId = String(telegramUserId);
+  // Re-point any existing telegram account for this id (it may belong to a stale
+  // duplicate); then guarantee one exists for this user.
+  await db
+    .delete(accounts)
+    .where(and(eq(accounts.providerId, "telegram"), eq(accounts.accountId, accountId), ne(accounts.userId, userId)));
+  const [mine] = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.providerId, "telegram"), eq(accounts.accountId, accountId), eq(accounts.userId, userId)))
+    .limit(1);
+  if (!mine) {
+    await db.insert(accounts).values({
+      id: nanoid(),
+      accountId,
+      providerId: "telegram",
+      userId,
+    });
+  }
 }
 
 async function findLink(telegramUserId: number) {

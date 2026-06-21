@@ -127,6 +127,13 @@
       "when": 1782403200001,
       "tag": "0017_add_user_status",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1782403200002,
+      "tag": "0018_backfill_telegram_accounts",
+      "breakpoints": true
     }
   ]
 }
