@@ -28,14 +28,14 @@ function applyTheme(theme: Theme) {
 export function Providers({ children }: { children: React.ReactNode }) {
   // Read the stored preference in the lazy initializer instead of calling
   // setState inside an effect (which would render twice and trip react-hooks).
-  // The pre-hydration theme-init.js already set the <html> class, so this only
-  // seeds the context value.
+  // The pre-hydration theme script (inlined in the root layout's <head>) already
+  // set the <html> class, so this only seeds the context value.
   const [theme, setThemeState] = useState<Theme>(() =>
     typeof window === "undefined" ? "system" : ((localStorage.getItem("theme") as Theme | null) ?? "system"),
   );
 
-  // The initial <html> class is set pre-hydration by theme-init.js, so we only
-  // need to track later system-theme changes while on "system".
+  // The initial <html> class is set pre-hydration by the inline theme script, so
+  // we only need to track later system-theme changes while on "system".
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {

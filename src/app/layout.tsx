@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Script from "next/script";
 import { GeistMono } from "geist/font/mono";
 import { Onest, Lora } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
@@ -41,6 +40,15 @@ export const metadata: Metadata = {
   },
 };
 
+// Applies the persisted (or system) theme to <html> BEFORE first paint, so a
+// reload never flashes the wrong theme. Inlined in <head> rather than loaded as
+// next/script `beforeInteractive`: in App Router that renders a literal <script>
+// React refuses to execute on the client (and never re-runs across navigations),
+// so the persisted theme was silently lost on reload. A raw inline script runs
+// synchronously here, every load. (CSP is not set yet — see next.config.ts; when
+// it is, this needs a hash/nonce.)
+const THEME_INIT = `try{var t=localStorage.getItem("theme");if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")}catch(e){}`;
+
 export default async function RootLayout({
   children,
 }: {
@@ -54,12 +62,12 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#f0ede8" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#1f1e1d" media="(prefers-color-scheme: dark)" />
       </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
-        <Script src="/theme-init.js" strategy="beforeInteractive" />
         <NextIntlClientProvider>
           <Providers>
             {children}
