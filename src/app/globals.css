@@ -133,13 +133,19 @@
 /* Modern "speed morph" reveal: content decelerates out of a soft blur. Used for
    onboarding step transitions and card entrance. The global prefers-reduced-
    motion block below collapses these to near-instant automatically. */
+/* The `to` states intentionally omit `filter` (rather than ending on blur(0)).
+   With animation-fill-mode: both, a final `filter: blur(0)` lingers forever —
+   and any filter value other than `none` creates a stacking context, which
+   would trap absolutely-positioned descendants (e.g. the model-picker dropdown)
+   beneath later siblings. Omitting it lets filter return to `none` on finish, so
+   no stacking context persists; the blur still animates out from the `from`. */
 @keyframes blur-rise {
   from { opacity: 0; filter: blur(12px); transform: translateY(10px) scale(0.99); }
-  to   { opacity: 1; filter: blur(0); transform: none; }
+  to   { opacity: 1; transform: none; }
 }
 @keyframes card-morph {
   from { opacity: 0; filter: blur(18px); transform: translateY(18px) scale(0.965); }
-  to   { opacity: 1; filter: blur(0); transform: none; }
+  to   { opacity: 1; transform: none; }
 }
 .animate-blur-rise { animation: blur-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-card-morph { animation: card-morph 0.65s cubic-bezier(0.16, 1, 0.3, 1) both; }
@@ -149,7 +155,7 @@
    timeline assembling itself rather than text popping into place. */
 @keyframes step-in {
   from { opacity: 0; filter: blur(8px); transform: translateY(6px); }
-  to   { opacity: 1; filter: blur(0); transform: none; }
+  to   { opacity: 1; transform: none; }
 }
 @keyframes step-badge-in {
   from { transform: scale(0.45); }

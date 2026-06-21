@@ -400,20 +400,36 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             <div className="animate-blur-rise [animation-delay:80ms]">{inputEl}</div>
 
             <div className="mx-auto max-w-3xl px-4 md:px-6 lg:max-w-4xl">
-              <div className="animate-blur-rise -mt-3 flex flex-col items-center gap-2.5 [animation-delay:140ms]">
+              {/* relative z-20 keeps the picker (and its absolute dropdown) in a
+                  stacking context above the starters block below — otherwise the
+                  later sibling paints over the open dropdown. */}
+              <div className="animate-blur-rise relative z-20 -mt-3 flex justify-center [animation-delay:140ms]">
                 <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
                   <ModelPicker variant="pill" value={model} onChange={setModel} />
                 </div>
-                {!input && (
-                  <p className="text-center text-xs text-muted-foreground">{t("panel.greetingHint")}</p>
-                )}
               </div>
-              {!input && (
-                <div className="animate-blur-rise mt-8 space-y-6 [animation-delay:200ms]">
-                  <RecentChats />
-                  <FileTypeSuggestions onPick={setInput} />
+              {/* Hint + recent + starters collapse away the moment the user starts
+                  typing. Animating grid-rows 1fr→0fr (not unmounting) shrinks the
+                  height over 300ms, so the centered composer above glides to its
+                  new center instead of snapping. `inert` drops the hidden controls
+                  from tab/click order; the global reduced-motion rule flattens the
+                  transition to instant. */}
+              <div
+                className={`grid transition-all duration-300 ease-out ${
+                  input ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100"
+                }`}
+                inert={input ? true : undefined}
+              >
+                <div className="overflow-hidden">
+                  <div className="animate-blur-rise pt-2.5 [animation-delay:200ms]">
+                    <p className="text-center text-xs text-muted-foreground">{t("panel.greetingHint")}</p>
+                    <div className="mt-8 space-y-6">
+                      <RecentChats />
+                      <FileTypeSuggestions onPick={setInput} />
+                    </div>
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
