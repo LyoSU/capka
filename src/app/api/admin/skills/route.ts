@@ -1,11 +1,7 @@
-import AdmZip from "adm-zip";
 import { requireAdmin, apiHandler } from "@/lib/auth";
-import { parseSkillMarkdown } from "@/lib/skills/parse";
-import { sanitizeBundlePath } from "@/lib/skills/paths";
-import { ingestSkill } from "@/lib/skills/service";
+import { ingestSkillZip, MAX_SKILL_ZIP_BYTES, SkillZipError } from "@/lib/skills/ingest-zip";
+import { deleteSkill, getSkillMeta, setSkillEnabled } from "@/lib/skills/service";
 import { SkillParseError, type SkillScope } from "@/lib/skills/types";
-
-const MAX_ZIP_BYTES = 5 * 1024 * 1024;
 
 export const POST = apiHandler(async (req: Request) => {
   await requireAdmin();
@@ -13,42 +9,48 @@ export const POST = apiHandler(async (req: Request) => {
   const file = form.get("file");
   const scope = (form.get("scope") as string) || "system";
   if (!(file instanceof File)) return Response.json({ error: "Missing file" }, { status: 400 });
-  if (file.size > MAX_ZIP_BYTES) return Response.json({ error: "Zip too large" }, { status: 413 });
-  if (!["system", "user", "project"].includes(scope)) {
+  if (file.size > MAX_SKILL_ZIP_BYTES) return Response.json({ error: "Zip too large" }, { status: 413 });
+  if (!["system", "project"].includes(scope)) {
     return Response.json({ error: "Bad scope" }, { status: 400 });
   }
 
-  const zip = new AdmZip(Buffer.from(await file.arrayBuffer()));
-  const entries = zip.getEntries();
-
-  // Find SKILL.md (allow it nested one level: <skill>/SKILL.md).
-  const skillEntry = entries.find((e) => !e.isDirectory && /(^|\/)SKILL\.md$/.test(e.entryName));
-  if (!skillEntry) return Response.json({ error: "No SKILL.md in zip" }, { status: 400 });
-  const basePrefix = skillEntry.entryName.replace(/SKILL\.md$/, "");
-
-  let parsed;
   try {
-    parsed = parseSkillMarkdown(skillEntry.getData().toString("utf8"));
+    const res = await ingestSkillZip(Buffer.from(await file.arrayBuffer()), {
+      scope: scope as SkillScope,
+      userId: null,
+      projectId: null,
+      source: "manual",
+    });
+    return Response.json({ ok: true, ...res });
   } catch (e) {
-    if (e instanceof SkillParseError) return Response.json({ error: e.message }, { status: 400 });
+    if (e instanceof SkillParseError || e instanceof SkillZipError) {
+      return Response.json({ error: e.message }, { status: 400 });
+    }
     throw e;
   }
+});
 
-  const files: { path: string; content: string }[] = [];
-  for (const e of entries) {
-    if (e.isDirectory) continue;
-    if (!e.entryName.startsWith(basePrefix)) continue;
-    const rel = e.entryName.slice(basePrefix.length);
-    const safe = sanitizeBundlePath(rel);
-    if (!safe || safe === "SKILL.md") continue;
-    files.push({ path: safe, content: e.getData().toString("base64") });
+/** Admin toggles a shared (system/project) skill. User-scope skills are owner-managed via /api/skills. */
+export const PATCH = apiHandler(async (req: Request) => {
+  await requireAdmin();
+  const { id, enabled } = await req.json();
+  if (typeof id !== "string" || typeof enabled !== "boolean") {
+    return Response.json({ error: "Bad request" }, { status: 400 });
   }
+  const skill = await getSkillMeta(id);
+  if (!skill || skill.scope === "user") return Response.json({ error: "Not found" }, { status: 404 });
+  await setSkillEnabled(id, enabled);
+  return Response.json({ ok: true });
+});
 
-  const id = await ingestSkill(parsed, files, {
-    scope: scope as SkillScope,
-    userId: null,
-    projectId: null,
-    source: "manual",
-  });
-  return Response.json({ ok: true, id, name: parsed.name, files: files.length });
+/** Admin deletes a shared (system/project) skill. If it came from a plugin it may
+ *  reappear on the next install/update — uninstall the plugin to remove it for good. */
+export const DELETE = apiHandler(async (req: Request) => {
+  await requireAdmin();
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return Response.json({ error: "id required" }, { status: 400 });
+  const skill = await getSkillMeta(id);
+  if (!skill || skill.scope === "user") return Response.json({ error: "Not found" }, { status: 404 });
+  await deleteSkill(id);
+  return Response.json({ ok: true });
 });

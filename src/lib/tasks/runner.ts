@@ -257,7 +257,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   const prompt = buildSystemPrompt({
     project,
     memories: userMemories,
-    skills: availableSkills.map((s) => ({ name: s.name, description: s.description })),
+    skills: availableSkills.map((s) => ({ name: s.name, description: s.description, body: s.body })),
     workspaceSnapshot,
     attachedFiles: payload.attachedFiles,
     user: user ? { name: user.name, timezone: user.timezone } : null,

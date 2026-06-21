@@ -10,7 +10,7 @@ import { upsertServer, setEnabled } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghTree, ghRaw, type TreeEntry } from "./fetch";
-import type { CatalogItem, InstallManifest } from "./types";
+import type { CatalogItem, GitHubRef, InstallManifest } from "./types";
 
 const IGNORED_DIRS = ["agents", "hooks", "lspServers", "outputStyles"];
 const MAX_SKILL_FILES = 50;
@@ -33,21 +33,24 @@ function extractServers(json: unknown): Record<string, { type?: string; url?: st
   return {};
 }
 
-/** Install one plugin from an added marketplace into A (skills) + B (connectors),
- *  tagging every routed row `catalog:<installId>` for clean uninstall. */
-export async function installPlugin(opts: { marketplaceId: string; pluginName: string; installedBy: string }): Promise<InstallManifest> {
-  const mkRow = (await db.select().from(pluginMarketplaces).where(eq(pluginMarketplaces.id, opts.marketplaceId)).limit(1))[0];
+/** Resolve a (marketplace, plugin) to its GitHub location + catalog entry. */
+async function resolvePlugin(marketplaceId: string, pluginName: string) {
+  const mkRow = (await db.select().from(pluginMarketplaces).where(eq(pluginMarketplaces.id, marketplaceId)).limit(1))[0];
   if (!mkRow) throw new Error("Marketplace not found");
   const mktRepo = parseGitHubUrl(mkRow.url);
   if (!mktRepo) throw new Error("Marketplace is not a GitHub repo");
-
-  const item = ((mkRow.catalog ?? []) as CatalogItem[]).find((c) => c.name === opts.pluginName);
+  const item = ((mkRow.catalog ?? []) as CatalogItem[]).find((c) => c.name === pluginName);
   if (!item) throw new Error("Plugin not found in this marketplace");
   const gh = resolveGitHub(item.source, mktRepo);
   if (!gh) throw new Error("This plugin's source isn't installable yet (non-GitHub).");
+  return { gh };
+}
 
-  const installId = nanoid();
-  const tag = `catalog:${installId}`;
+/** Pull a plugin's files from GitHub and route them into skills + connectors,
+ *  tagging every row `catalog:<installId>`. Idempotent per name: ingestSkill /
+ *  upsertServer upsert by name, so re-running with the same tag updates in place
+ *  (the basis of upgrade). Returns what the current tree produced. */
+async function applyPlugin(gh: GitHubRef, tag: string): Promise<InstallManifest> {
   const prefix = gh.subdir ? `${gh.subdir}/` : "";
   const fetchFn = await ghFetch();
   const tree = await ghTree(gh.owner, gh.repo, gh.ref, fetchFn);
@@ -116,10 +119,49 @@ export async function installPlugin(opts: { marketplaceId: string; pluginName: s
     if (count) manifest.ignored.push({ type: d, count });
   }
 
+  return manifest;
+}
+
+/** Install one plugin from an added marketplace into A (skills) + B (connectors),
+ *  tagging every routed row `catalog:<installId>` for clean uninstall. */
+export async function installPlugin(opts: { marketplaceId: string; pluginName: string; installedBy: string }): Promise<InstallManifest> {
+  const { gh } = await resolvePlugin(opts.marketplaceId, opts.pluginName);
+  const installId = nanoid();
+  const manifest = await applyPlugin(gh, `catalog:${installId}`);
+
   await db.insert(pluginInstalls).values({
     id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
     version: gh.ref, scope: "system", manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
   });
+  return manifest;
+}
+
+/** Re-pull an installed plugin from its source, keeping the same installId/tag so
+ *  rows update in place. Skills/connectors removed upstream are pruned; the
+ *  pluginInstalls row gets the fresh version + manifest. */
+export async function upgradePlugin(installId: string): Promise<InstallManifest> {
+  const row = (await db.select().from(pluginInstalls).where(eq(pluginInstalls.id, installId)).limit(1))[0];
+  if (!row) throw new Error("Install not found");
+  const { gh } = await resolvePlugin(row.marketplaceId, row.pluginName);
+  const tag = `catalog:${installId}`;
+
+  const manifest = await applyPlugin(gh, tag);
+
+  // Prune rows this install owns that the new tree no longer produces.
+  const keepSkills = new Set(manifest.skills);
+  const keepConnectors = new Set(manifest.connectors);
+  const ownedSkills = await db.select({ id: skills.id, name: skills.name }).from(skills).where(eq(skills.source, tag));
+  for (const s of ownedSkills) {
+    if (!keepSkills.has(s.name)) await db.delete(skills).where(eq(skills.id, s.id));
+  }
+  const ownedConnectors = await db.select({ id: mcpServers.id, name: mcpServers.name }).from(mcpServers).where(eq(mcpServers.source, tag));
+  for (const c of ownedConnectors) {
+    if (!keepConnectors.has(c.name)) await db.delete(mcpServers).where(eq(mcpServers.id, c.id));
+  }
+
+  await db.update(pluginInstalls)
+    .set({ version: gh.ref, manifest: manifest as unknown as Record<string, unknown> })
+    .where(eq(pluginInstalls.id, installId));
   return manifest;
 }
 

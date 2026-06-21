@@ -9,6 +9,7 @@ const s = (over: Partial<SkillInfo>): SkillInfo => ({
   description: null,
   body: "",
   enabled: true,
+  source: "manual",
   ...over,
 });
 

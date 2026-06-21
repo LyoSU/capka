@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   // Build redirects off the PUBLIC origin (PUBLIC_URL / X-Forwarded-Host), not
   // req.url — behind a proxy the latter is the internal bind (e.g. 0.0.0.0:3000).
   const base = getPublicUrl({ headers: req.headers });
-  const settings = (q: string) => Response.redirect(`${base}/settings/connectors${q}`, 302);
+  const settings = (q: string) => Response.redirect(`${base}/settings/skills?tab=connectors${q.replace("?", "&")}`, 302);
   let userId: string;
   try {
     ({ userId } = await requireSession());

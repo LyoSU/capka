@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginMarketplaces, pluginInstalls } from "@/lib/db/schema";
 import { createGuardedFetch } from "@/lib/net/ssrf";
@@ -68,6 +68,29 @@ export async function getCatalog(marketplaceId: string): Promise<(CatalogItem & 
 
 export async function listInstalls() {
   return db.select().from(pluginInstalls);
+}
+
+/** Display metadata for a set of install ids (for attributing routed skills to
+ *  their plugin: name, author, homepage). Keyed by installId. */
+export async function getInstallMeta(
+  installIds: string[],
+): Promise<Map<string, { pluginName: string; author: string | null; homepage: string | null }>> {
+  const out = new Map<string, { pluginName: string; author: string | null; homepage: string | null }>();
+  if (installIds.length === 0) return out;
+  const installs = await db
+    .select({ id: pluginInstalls.id, pluginName: pluginInstalls.pluginName, marketplaceId: pluginInstalls.marketplaceId })
+    .from(pluginInstalls)
+    .where(inArray(pluginInstalls.id, installIds));
+  const mktIds = [...new Set(installs.map((i) => i.marketplaceId))];
+  const markets = mktIds.length
+    ? await db.select({ id: pluginMarketplaces.id, catalog: pluginMarketplaces.catalog }).from(pluginMarketplaces).where(inArray(pluginMarketplaces.id, mktIds))
+    : [];
+  const catalogByMkt = new Map(markets.map((m) => [m.id, (m.catalog ?? []) as CatalogItem[]]));
+  for (const i of installs) {
+    const item = catalogByMkt.get(i.marketplaceId)?.find((c) => c.name === i.pluginName);
+    out.set(i.id, { pluginName: i.pluginName, author: item?.author ?? null, homepage: item?.homepage ?? null });
+  }
+  return out;
 }
 
 /** The install id for a (marketplace, plugin), or null. */

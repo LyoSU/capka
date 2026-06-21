@@ -25,7 +25,7 @@ export interface PolicyMatcher {
 }
 
 export type AuditAction =
-  | "plugin.install" | "plugin.uninstall"
+  | "plugin.install" | "plugin.uninstall" | "plugin.update"
   | "connector.add" | "connector.remove" | "connector.enable" | "connector.disable"
   | "policy.set" | "policy.clear";
 

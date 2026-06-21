@@ -66,7 +66,7 @@ export function buildSessionContext(opts: {
 export function buildSystemPrompt(opts: {
   project?: { systemPrompt?: string | null } | null;
   memories: { content: string }[];
-  skills?: { name: string; description: string | null }[];
+  skills?: { name: string; description: string | null; body?: string | null }[];
   workspaceSnapshot?: string;
   attachedFiles?: FileRef[];
   user?: { name?: string | null; timezone?: string | null } | null;

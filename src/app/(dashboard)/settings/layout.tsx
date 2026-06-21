@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, Plug, Store, ShieldCheck, Wallet, KeyRound, Lock } from "lucide-react";
+import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, ShieldCheck, Wallet, KeyRound, Lock } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
@@ -22,7 +22,6 @@ const navSections: NavSection[] = [
       { key: "connections", href: "/settings/connections", icon: Link2 },
       { key: "memory", href: "/settings/memory", icon: Brain },
       { key: "skills", href: "/settings/skills", icon: Sparkles },
-      { key: "connectors", href: "/settings/connectors", icon: Plug },
     ],
   },
   {
@@ -32,7 +31,6 @@ const navSections: NavSection[] = [
       { key: "integrations", href: "/settings/integrations", icon: Puzzle, adminOnly: true },
       { key: "authentication", href: "/settings/authentication", icon: KeyRound, adminOnly: true },
       { key: "permissions", href: "/settings/permissions", icon: ShieldCheck, adminOnly: true },
-      { key: "marketplace", href: "/settings/marketplace", icon: Store, adminOnly: true },
       { key: "billing", href: "/settings/billing", icon: Wallet, adminOnly: true },
       { key: "usage", href: "/settings/usage", icon: BarChart3, adminOnly: true },
       { key: "users", href: "/settings/users", icon: Users, adminOnly: true },

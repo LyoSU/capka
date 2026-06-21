@@ -395,7 +395,7 @@
       "memory": "Memory",
       "usage": "Usage",
       "users": "Users",
-      "skills": "Skills",
+      "skills": "Customize",
       "connectors": "Connectors",
       "marketplace": "Marketplace",
       "permissions": "Permissions",
@@ -619,22 +619,52 @@
       "empty": "No usage recorded yet."
     },
     "skills": {
-      "title": "Skills",
-      "subtitle": "Reusable instructions your assistant can load on demand.",
-      "empty": "No skills available yet.",
+      "title": "Customize",
+      "subtitle": "Everything that extends what your assistant can do: skills, connectors, and plugins.",
+      "tab": {
+        "library": "Library",
+        "marketplace": "Marketplace",
+        "connectors": "Connectors"
+      },
       "loadError": "Couldn’t load skills.",
       "toggleFailed": "Couldn’t update the skill.",
       "toggleAria": "Toggle {name}",
-      "scope": {
-        "system": "Shared",
-        "user": "Personal",
-        "project": "Project"
-      },
-      "add": "Add skill",
-      "addTitle": "Add a skill",
-      "addHint": "Upload a .zip containing SKILL.md (and optional scripts). Available to everyone in the organization.",
+      "add": "Add",
+      "addPersonal": "Personal skill",
+      "addShared": "Shared skill",
       "addSuccess": "Added “{name}”.",
-      "addFailed": "Couldn’t add the skill."
+      "addFailed": "Couldn’t add the skill.",
+      "searchPlaceholder": "Search skills…",
+      "sortAria": "Sort skills",
+      "sort": {
+        "name": "Name",
+        "status": "On first"
+      },
+      "group": {
+        "personal": "Your skills",
+        "team": "Added by your team",
+        "teamHint": "Uploaded for everyone in the organization."
+      },
+      "reach": {
+        "personal": "Just you",
+        "shared": "Everyone"
+      },
+      "by": "by {author}",
+      "noMatches": "Nothing matches “{query}”.",
+      "emptyTitle": "No skills yet",
+      "emptyHint": "Skills are reusable instructions the assistant loads when they fit a task. Upload one, or install a plugin from the marketplace.",
+      "browseMarketplace": "Browse marketplace",
+      "summary": "{enabled} of {total} enabled",
+      "noDescription": "No description",
+      "noDescriptionHint": "No description — add one so the assistant knows when to use this.",
+      "deleted": "Deleted “{name}”.",
+      "deleteFailed": "Couldn’t delete the skill.",
+      "deleteAria": "Delete {name}",
+      "deleteTitle": "Delete “{name}”?",
+      "deleteWarn": "This removes the skill for everyone it’s available to. This can’t be undone.",
+      "deletePluginWarn": "This skill came from the “{plugin}” plugin and may return next time that plugin is installed or updated. To remove it for good, uninstall the plugin.",
+      "cancel": "Cancel",
+      "delete": "Delete"
     },
     "connectors": {
       "title": "Connectors",
@@ -702,7 +732,13 @@
       "installFailed": "Couldn’t install that plugin.",
       "uninstalled": "Uninstalled.",
       "uninstallFailed": "Couldn’t uninstall.",
-      "unsupportedSource": "This plugin’s source isn’t installable yet."
+      "unsupportedSource": "This plugin’s source isn’t installable yet.",
+      "searchPlaceholder": "Search plugins…",
+      "uncategorized": "Other",
+      "noMatches": "Nothing matches “{query}”.",
+      "update": "Update",
+      "updated": "Updated · {skills} skills, {connectors} connectors.",
+      "updateFailed": "Couldn’t update that plugin."
     },
     "permissions": {
       "title": "Permissions",

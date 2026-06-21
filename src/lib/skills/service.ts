@@ -14,6 +14,7 @@ function toInfo(row: typeof skills.$inferSelect): SkillInfo {
     description: row.description,
     body: row.body,
     enabled: row.enabled,
+    source: row.source,
   };
 }
 
@@ -58,6 +59,26 @@ export async function getSkillForRun(
     .from(skillFiles)
     .where(eq(skillFiles.skillId, info.id));
   return { info, files };
+}
+
+/** Owner-relevant metadata for one skill, or null if it doesn't exist. */
+export async function getSkillMeta(
+  id: string,
+): Promise<{ id: string; scope: SkillScope; userId: string | null } | null> {
+  const row = (
+    await db.select({ id: skills.id, scope: skills.scope, userId: skills.userId }).from(skills).where(eq(skills.id, id)).limit(1)
+  )[0];
+  return row ? { id: row.id, scope: row.scope as SkillScope, userId: row.userId } : null;
+}
+
+/** Flip a skill's enabled flag. Authorization is the caller's responsibility. */
+export async function setSkillEnabled(id: string, enabled: boolean): Promise<void> {
+  await db.update(skills).set({ enabled, updatedAt: new Date() }).where(eq(skills.id, id));
+}
+
+/** Delete a skill (FK cascade drops its bundle files). Authorization is the caller's. */
+export async function deleteSkill(id: string): Promise<void> {
+  await db.delete(skills).where(eq(skills.id, id));
 }
 
 export interface IngestTarget {

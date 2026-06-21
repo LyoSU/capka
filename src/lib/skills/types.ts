@@ -31,6 +31,8 @@ export interface SkillInfo {
   description: string | null;
   body: string;
   enabled: boolean;
+  /** "manual" for hand-uploaded, "catalog:<installId>" for marketplace-installed. */
+  source: string;
 }
 
 export class SkillParseError extends Error {
