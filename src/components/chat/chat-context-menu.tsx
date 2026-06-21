@@ -98,7 +98,7 @@ export function ChatContextMenu({
           onKeyDown={(e) => {
             if (e.key === "Escape") setRenaming(false);
           }}
-          className="h-6 text-sm px-1.5"
+          className="h-6 px-1.5 text-base md:text-sm"
           autoFocus
         />
       </form>

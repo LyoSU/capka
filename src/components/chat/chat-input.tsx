@@ -180,7 +180,7 @@ export function ChatInput({
               onPaste={handlePaste}
               placeholder={files.length > 0 ? t("placeholderFiles") : t("placeholder")}
               rows={1}
-              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-[15px] leading-relaxed placeholder:text-muted-foreground focus-visible:outline-none"
+              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-base leading-relaxed placeholder:text-muted-foreground focus-visible:outline-none md:text-[15px]"
             />
           </div>
           <div className="flex items-center justify-between px-3 pb-2.5">

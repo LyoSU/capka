@@ -609,7 +609,7 @@ function UserBubble({
               if (e.key === "Escape") { e.preventDefault(); cancel(); }
             }}
             rows={1}
-            className="w-full resize-none overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-[15px] shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full resize-none overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40 md:text-[15px]"
           />
           <div className="mt-2 flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={cancel}>{tCommon("cancel")}</Button>

@@ -289,7 +289,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
             <div className="space-y-1">
               <Input placeholder={t("commandPlaceholder")} value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono" />
               <p className="text-xs text-muted-foreground">{t("commandHint")}</p>
-              <Textarea placeholder={t("envPlaceholder")} value={envText} onChange={(e) => setEnvText(e.target.value)} className="mt-2 font-mono text-xs" rows={3} />
+              <Textarea placeholder={t("envPlaceholder")} value={envText} onChange={(e) => setEnvText(e.target.value)} className="mt-2 font-mono text-base md:text-xs" rows={3} />
             </div>
           ) : (
             <>

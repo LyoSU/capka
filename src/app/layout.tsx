@@ -50,6 +50,10 @@ export const viewport: Viewport = {
     { media: "(prefers-color-scheme: dark)", color: "#1f1e1d" },
   ],
   viewportFit: "cover",
+  // The on-screen keyboard shrinks the layout viewport (so `dvh` and a
+  // bottom-pinned composer ride above it) on Chrome/Android. iOS ignores this,
+  // so `useKeyboardInset` covers it there via the visualViewport API.
+  interactiveWidget: "resizes-content",
 };
 
 // Applies the persisted (or system) theme to <html> BEFORE first paint, so a

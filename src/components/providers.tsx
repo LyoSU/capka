@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 type Theme = "light" | "dark" | "system";
 
@@ -33,6 +34,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() =>
     typeof window === "undefined" ? "system" : ((localStorage.getItem("theme") as Theme | null) ?? "system"),
   );
+
+  // Track the on-screen keyboard so bottom-pinned UI can lift above it (iOS).
+  useKeyboardInset();
 
   // The initial <html> class is set pre-hydration by the inline theme script, so
   // we only need to track later system-theme changes while on "system".

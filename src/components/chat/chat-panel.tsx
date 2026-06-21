@@ -386,7 +386,12 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
       {showGreeting ? (
-        <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden py-10">
+        <div
+          className="relative flex flex-1 flex-col items-center justify-center overflow-hidden py-10 transition-[padding] duration-200 ease-out"
+          // Keyboard inset as bottom padding so the centered composer rises above
+          // the keyboard instead of being covered (iOS).
+          style={{ paddingBottom: "calc(2.5rem + var(--kb, 0px))" }}
+        >
           {/* No header in the greeting state, so the sidebar handle lives in the
               top-left corner on mobile (the area above the centered composer). */}
           <SidebarTrigger className="absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20 size-9 rounded-full border bg-card shadow-sm md:hidden" />
@@ -447,7 +452,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
         <div className="relative flex flex-1 flex-col overflow-hidden">
           {/* Scroll area fills the whole panel; the header and input float over
               it as gradients, so messages slide behind a soft fade at both ends. */}
-          <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto pb-40 pt-16">
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto pt-16"
+            // Extra bottom room equal to the keyboard inset so the last message
+            // can still scroll clear of the lifted composer.
+            style={{ paddingBottom: "calc(10rem + var(--kb, 0px))" }}
+          >
             <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
               {messages.map((message, i) => {
                 const isLast = i === messages.length - 1;
@@ -527,7 +539,11 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             label={t("panel.navigation")}
           />
 
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6">
+          <div
+            className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6 transition-transform duration-200 ease-out"
+            // Lift the composer above the on-screen keyboard (iOS; ~0 elsewhere).
+            style={{ transform: "translateY(calc(-1 * var(--kb, 0px)))" }}
+          >
             <div
               className={`pointer-events-none mb-2 flex justify-center transition-all duration-200 ${
                 showScrollDown ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
