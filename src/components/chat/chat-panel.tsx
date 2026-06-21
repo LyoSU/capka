@@ -36,6 +36,7 @@ import { RecentChats } from "@/components/chat/recent-chats";
 import { Button } from "@/components/ui/button";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
 import { ChatNav } from "@/components/chat/chat-nav";
+import { ClawMark } from "@/components/brand/claw-mark";
 import { haptic } from "@/lib/haptics";
 
 interface ChatPanelProps {
@@ -381,25 +382,34 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
       {showGreeting ? (
-        <div className="relative flex flex-1 flex-col items-center justify-center py-10">
-          <div className="w-full">
-            <div className="mb-8 flex items-center justify-center gap-3 px-6">
+        <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden py-10">
+          {/* Quiet brand monogram, sketched in on mount — the one signature
+              flourish, far behind the content so it reads as a watermark. */}
+          <ClawMark
+            animated
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[118vmin] w-[118vmin] -translate-x-1/2 -translate-y-1/2 text-foreground opacity-[0.025]"
+          />
+          <div className="relative z-10 w-full">
+            <div className="animate-blur-rise mb-8 flex items-center justify-center gap-3 px-6">
               <Sparkles className="h-6 w-6 shrink-0 text-primary md:h-7 md:w-7" />
               <h1 className="font-display text-balance text-center text-3xl font-medium tracking-tight text-foreground md:text-[2.75rem] md:leading-[1.1]">
                 {t("panel.greeting")}
               </h1>
             </div>
 
-            {inputEl}
+            <div className="animate-blur-rise [animation-delay:80ms]">{inputEl}</div>
 
             <div className="mx-auto max-w-3xl px-4 md:px-6 lg:max-w-4xl">
-              <div className="-mt-3 flex justify-center">
+              <div className="animate-blur-rise -mt-3 flex flex-col items-center gap-2.5 [animation-delay:140ms]">
                 <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
                   <ModelPicker variant="pill" value={model} onChange={setModel} />
                 </div>
+                {!input && (
+                  <p className="text-center text-xs text-muted-foreground">{t("panel.greetingHint")}</p>
+                )}
               </div>
               {!input && (
-                <div className="mt-8 space-y-6">
+                <div className="animate-blur-rise mt-8 space-y-6 [animation-delay:200ms]">
                   <RecentChats />
                   <FileTypeSuggestions onPick={setInput} />
                 </div>

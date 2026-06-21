@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
-import { Plus, Pencil, Trash2, MessageSquare } from "lucide-react";
+import { Plus, Pencil, Trash2, FolderKanban } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -76,7 +76,7 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className="animate-fade-in mx-auto max-w-4xl px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold">{t("title")}</h1>
@@ -91,14 +91,14 @@ export default function ProjectsPage() {
       </div>
 
       {projects.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="rounded-full bg-muted p-3 mb-3">
-            <MessageSquare className="h-6 w-6 text-muted-foreground" />
+        <div className="animate-blur-rise flex flex-col items-center justify-center py-20 text-center">
+          <div className="mb-4 grid h-14 w-14 place-items-center rounded-2xl border bg-card shadow-sm">
+            <FolderKanban className="h-6 w-6 text-muted-foreground" />
           </div>
-          <p className="text-sm text-muted-foreground mb-4">
+          <p className="mb-5 max-w-sm text-sm text-muted-foreground text-pretty">
             {t("empty")}
           </p>
-          <Button size="sm" variant="outline" onClick={handleCreate}>
+          <Button size="sm" onClick={handleCreate}>
             <Plus className="h-4 w-4" />
             {t("create")}
           </Button>

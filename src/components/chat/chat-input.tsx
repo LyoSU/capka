@@ -179,7 +179,7 @@ export function ChatInput({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground hover:text-foreground"
+                className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90"
                 onClick={() => fileInputRef.current?.click()}
                 title={t("attach")}
                 aria-label={t("attach")}
@@ -194,7 +194,7 @@ export function ChatInput({
               <Button
                 size="icon"
                 variant="outline"
-                className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl"
+                className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
                 onClick={onStop}
                 aria-label={t("stop")}
               >
@@ -203,12 +203,12 @@ export function ChatInput({
             ) : (
               <Button
                 size="icon"
-                className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl"
+                className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
                 disabled={!hasContent}
                 onClick={onSubmit}
                 aria-label={isLoading ? t("queue") : t("send")}
               >
-                <ArrowUp className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                <ArrowUp className="h-4.5 w-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:h-4 sm:w-4" />
               </Button>
             )}
           </div>

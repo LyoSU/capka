@@ -128,6 +128,7 @@
     },
     "panel": {
       "greeting": "What can I help with?",
+      "greetingHint": "Drop a file here, or just describe what you need",
       "workspaceFiles": "Workspace files",
       "sendFailed": "Failed to send message",
       "recent": "Recent",

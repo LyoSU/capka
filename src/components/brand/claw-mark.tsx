@@ -6,8 +6,12 @@
  * Opacity is applied at the element level by the caller (e.g. `opacity-[0.03]`)
  * rather than via a translucent stroke color, so overlapping strokes flatten
  * into a single layer instead of darkening at their intersections.
+ *
+ * `animated` sketches the strokes in on mount (see `.claw-draw` in globals.css);
+ * `pathLength={1}` normalizes every stroke to a single-dash length so the draw
+ * keyframe works regardless of the real path geometry.
  */
-export function ClawMark({ className }: { className?: string }) {
+export function ClawMark({ className, animated }: { className?: string; animated?: boolean }) {
   return (
     <svg
       viewBox="0 0 512 512"
@@ -16,13 +20,13 @@ export function ClawMark({ className }: { className?: string }) {
       strokeWidth={26}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={className}
+      className={animated ? `claw-draw ${className ?? ""}` : className}
       aria-hidden
     >
-      <path d="M175 140 Q180 265 200 382" />
-      <path d="M256 120 Q256 255 256 388" />
-      <path d="M337 140 Q332 265 312 382" />
-      <path d="M160 370 Q256 420 352 370" />
+      <path pathLength={1} d="M175 140 Q180 265 200 382" />
+      <path pathLength={1} d="M256 120 Q256 255 256 388" />
+      <path pathLength={1} d="M337 140 Q332 265 312 382" />
+      <path pathLength={1} d="M160 370 Q256 420 352 370" />
     </svg>
   );
 }

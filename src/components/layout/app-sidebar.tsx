@@ -21,6 +21,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { buttonVariants } from "@/components/ui/button";
+import { ClawMark } from "@/components/brand/claw-mark";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
 import { ProjectSelector } from "@/components/projects/project-selector";
 import { ChatSearch } from "@/components/chat/chat-search";
@@ -285,12 +286,8 @@ export function AppSidebar() {
         ))}
 
         {chats.length === 0 && (
-          <div className="flex flex-col items-center px-4 py-10 text-center">
-            <div className="mb-3 grid grid-cols-3 gap-1 opacity-20">
-              {Array.from({ length: 9 }).map((_, i) => (
-                <div key={i} className="h-2 w-2 rounded-sm bg-foreground" />
-              ))}
-            </div>
+          <div className="animate-blur-rise flex flex-col items-center px-4 py-10 text-center">
+            <ClawMark className="mb-3 h-9 w-9 text-foreground opacity-15" />
             <p className="text-xs text-muted-foreground">
               {debouncedSearch ? t("noChatsFound") : t("startNewChat")}
             </p>
@@ -311,6 +308,7 @@ export function AppSidebar() {
               href="/chat/archived"
               className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
               title={t("archived")}
+              aria-label={t("archived")}
             >
               <Archive className="h-4 w-4" />
             </Link>
@@ -318,6 +316,7 @@ export function AppSidebar() {
               href="/projects"
               className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
               title={t("projects")}
+              aria-label={t("projects")}
             >
               <FolderKanban className="h-4 w-4" />
             </Link>
@@ -325,6 +324,7 @@ export function AppSidebar() {
               href="/settings"
               className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
               title={t("settings")}
+              aria-label={t("settings")}
             >
               <Settings className="h-4 w-4" />
             </Link>
