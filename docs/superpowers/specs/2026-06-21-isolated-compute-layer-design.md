@@ -1,7 +1,7 @@
 # Дизайн: ізольований виконавчий шар sandbox-контролера
 
 **Дата:** 2026-06-21
-**Статус:** затверджено до планування (v2 — враховано зовнішнє рев'ю)
+**Статус:** затверджено до планування (v3)
 **Автор:** обговорення LyoSU + Claude
 
 > v2 інкорпорує чотири незалежні рев'ю: додано таблицю альтернатив, секції
@@ -9,6 +9,10 @@
 > формальний reconcile, GC workspace'ів, observability; чесно знижено заяву
 > «port-ready для Managed/K8s»; версіонування образу винесено з відкритих питань
 > у рішення.
+> v3: `WorkspaceStore` піднято в scope етапу 1 **як порт** (реалізація `LocalFsStore`
+> = поточна поведінка за інтерфейсом); файлові ендпоінти йдуть через порт. Реалізація
+> `S3Store` (об'єктне сховище, sync-модель, storage-agnostic S3 API) — окремий етап 2.
+> MinIO виключено (архівовано 02.2026); self-host default — Garage/RustFS.
 
 ---
 
@@ -74,58 +78,62 @@ KVM (лишаємо opt-in tier, де KVM є); Sysbox слабший за gVisor
 ## 4. Цілі та не-цілі
 
 ### Цілі
-- Єдиний внутрішній інтерфейс `ComputeBackend`; ядро контролера не міняється при зміні рантайму/бекенду.
+- Два внутрішні порти: `ComputeBackend` (виконання) і `WorkspaceStore` (файли); ядро контролера не
+  міняється при зміні рантайму/бекенду чи сховища.
 - Сильна ізоляція виконання untrusted-коду за замовчуванням (Docker + gVisor + hardening), fail-closed.
 - Усунути prune-баг структурно (`ensureRuntime()` як передумова `create()`) + не допустити latency-спайку (boot-прогрів).
 - Durable-стан сесій (Postgres) без regресії latency на hot-path.
 - HTTP-контракт платформа↔контролер не міняється.
 
 ### Не-цілі (свідомо, за YAGNI)
-- `WorkspaceStore`/`ObjectStore` — лишаємо локальний bind.
+- Реалізація `S3Store` — окремий **етап 2** (порт `WorkspaceStore` готуємо зараз, S3-реалізацію — потім).
 - `KubernetesBackend`, реалізація `ManagedBackend`.
 - per-tenant `CONTROLLER_SECRET`, egress-allowlist — named follow-up (§11).
 - Firecracker-snapshotting / instant-fork.
 
-### Чесна межа готовності (виправлено за рев'ю)
-Цей етап робить готовим лише **DockerBackend**. `SandboxSpec` несе локальний host-path, а файлові
-ендпоінти працюють над локальним fs (§7) — тому Managed/K8s **не** «port-ready»: їх увімкнення додатково
-потребує `WorkspaceStore` і перепису `/files`,`/upload`,`/download`. Порт лишається правильним швом для
-*виконавчої* частини; файлова частина — наступний шар.
+### Чесна межа готовності
+Цей етап робить готовим **DockerBackend** + **`LocalFsStore`** (поточна локальна поведінка за портом
+`WorkspaceStore`). Файлові ендпоінти (`/files`,`/upload`,`/download`) перенесено **за порт** — тож для
+Managed/K8s лишається додати реалізацію `S3Store` (етап 2), а не переписувати ядро. `SandboxSpec` поки
+несе локальний host-path (Docker-специфіка); перехід на opaque `workspaceRef` робиться разом зі `S3Store`.
 
 ---
 
 ## 5. Архітектура
 
 Hexagonal (Ports & Adapters) всередині наявного контролера. Контролер лишається єдиним мережевим швом;
-усе змінне у виконавчій частині ізольоване в один порт.
+усе змінне ізольоване в два порти: `ComputeBackend` (виконання) і `WorkspaceStore` (файли).
 
 ```
   platform ── HTTP (контракт незмінний) ──> CONTROLLER CORE
                                             (HTTP API · auth/HMAC · quotas ·
                                              idle · eviction · recovery ·
                                              SessionStore[Postgres] · GC)
-                                                      |
-                                              ComputeBackend  (єдиний порт)
-                                                      |
-            +-----------------------+-----------------+------------------+
-       DockerBackend          (Kata/Firecracker        ManagedBackend
-       + gVisor(runsc)         через Runtime,           (E2B/Fly) — потребує ще
-       + hardening             opt-in де є KVM)         WorkspaceStore; не зараз
+                                                 |                  |
+                                         ComputeBackend       WorkspaceStore
+                                                 |                  |
+            +------------------+-----------------+        +---------+---------+
+       DockerBackend     (Kata/Firecracker        LocalFsStore        S3Store
+       + gVisor(runsc)    через Runtime,          <-- ЕТАП 1          (sync-модель,
+       + hardening        opt-in де є KVM)                            S3 API) — ЕТАП 2
        <-- ДЕФОЛТ
+                          ManagedBackend (E2B/Fly) — потребує S3Store; не зараз
 ```
 
-Усе спільне пишеться раз і живе над портом; кожен майбутній виконавчий бекенд — один файл.
+Усе спільне пишеться раз і живе над портами; кожен майбутній бекенд/сховище — один файл.
 
 ---
 
-## 6. Порт `ComputeBackend`
+## 6. Порти
+
+### 6.1 `ComputeBackend` (виконання)
 
 ```ts
 interface SandboxSpec {
   sessionId: string;
   userId: string;
-  // NB: host-local шлях — Docker-специфіка. Для Managed/K8s тут згодом буде
-  // opaque workspaceRef + WorkspaceStore (не цей етап, див. §4 «межа готовності»).
+  // NB: host-local шлях — Docker-специфіка. Разом зі S3Store (етап 2) тут стане
+  // opaque workspaceRef, який бекенд резолвить через WorkspaceStore.
   wsHostPath: string;
   sharedHostPath: string;
   networkMode: "none" | "bridge";
@@ -146,14 +154,39 @@ interface ComputeBackend {
 
 Вибір реалізації — `COMPUTE_BACKEND=docker` (поки лише `docker`).
 
+### 6.2 `WorkspaceStore` (файли)
+
+Усі файлові операції ядра йдуть **тільки** через цей порт — ядро не торкається fs/S3 напряму.
+
+```ts
+interface FileEntry { name: string; path: string; isDirectory: boolean; size: number; modifiedAt: string; }
+
+interface WorkspaceStore {
+  // Підготувати робочий простір сесії (створити директорії/префікс, виставити власника).
+  // Повертає wsHostPath для bind у sandbox (LocalFs) або scratch-кеш (S3, етап 2).
+  ensure(userId: string, sessionId: string): Promise<{ wsHostPath: string; sharedHostPath: string }>;
+  list(userId: string, sessionId: string, path: string): Promise<FileEntry[]>;
+  read(userId: string, sessionId: string, path: string): Promise<NodeJS.ReadableStream>;
+  write(userId: string, sessionId: string, path: string, data: Buffer): Promise<void>;
+  size(userId: string, sessionId: string): Promise<number>;         // для квоти
+  remove(userId: string, sessionId: string): Promise<void>;         // для GC
+}
+```
+
+- **Етап 1 — `LocalFsStore`:** реалізація = поточна логіка (`ensureMounts`, нативний fs, `safeRealPath`,
+  `detectHostDataRoot`/`toHostPath`), перенесена за інтерфейс без зміни поведінки. `WORKSPACE_STORE=local`.
+- **Етап 2 — `S3Store`:** sync-модель (S3 — джерело істини; на `ensure` — викачати у scratch-кеш для bind,
+  на flush/destroy — залити назад). Storage-agnostic S3 API; self-host default Garage/RustFS, хмара — R2/B2/S3.
+  FUSE-монт **виключено** (конфлікт із gVisor + `cap_drop: ALL`, §9). `WORKSPACE_STORE=s3`.
+
 ---
 
 ## 7. Ядро контролера (спільне)
 
 Переноситься з теперішнього `server.js` майже дослівно: HTTP-роутинг та API, авторизація
 (`safeEqual` bearer + HMAC `workspaceToken`), квоти, eviction LRU, idle-cleanup, recovery/reconcile,
-GC. Файлові ендпоінти (`/files`,`/download`,`/upload`) поки працюють нативним fs над локальним
-workspace — це свідомо лишається в ядрі (не за портом), з наслідком для готовності Managed/K8s (§4).
+GC. Файлові ендпоінти (`/files`,`/download`,`/upload`) викликають **`WorkspaceStore`** (§6.2), а не fs
+напряму — тож перехід на S3 (етап 2) не чіпає ядро.
 
 ---
 
@@ -313,8 +346,8 @@ idle-cleanup не потрібна. Durable-записи (`upsert` при `creat
 
 - `destroy` прибирає контейнер; workspace на диску лишається (переживає idle/eviction) — навмисно.
 - **Наслідок:** без прибирання директорії осиротілих сесій накопичуються → переповнення диска на
-  мультитенант-VPS. Додаємо **background GC**: періодично видаляти `wsHostPath` для сесій, яких немає в
-  Postgres і старших за поріг (grace). GC — окремий таймер у контролері, ідемпотентний, з логуванням.
+  мультитенант-VPS. Додаємо **background GC**: періодично кликати `workspace.remove()` для сесій, яких
+  немає в Postgres і старших за поріг (grace). GC — окремий таймер у контролері, ідемпотентний, з логуванням.
 - **Контракт ephemeral-стану:** усе всередині контейнера (tmpfs, rootfs) — ephemeral; персист лише у
   workspace. Документуємо для платформи/користувачів, щоб idle-TTL не сприймався як «втрата роботи».
 
@@ -322,10 +355,10 @@ idle-cleanup не потрібна. Durable-записи (`upsert` при `creat
 
 ## 16. Потік даних
 
-- **create:** core → `ensureRuntime()` → `ensureMounts()` → `backend.create(spec)` → `store.upsert()`.
-- **exec:** core → `store.get` → `backend.exec(handle, cmd)` → in-process `lastActivity`.
-- **files:** core → нативний fs над workspace (живий контейнер не потрібен), захист HMAC-токеном.
-- **idle/evict/GC:** `backend.destroy(handle)` + `store.delete()`; GC прибирає диск пізніше.
+- **create:** core → `ensureRuntime()` → `workspace.ensure()` → `backend.create(spec)` → `sessions.upsert()`.
+- **exec:** core → `sessions.get` → `backend.exec(handle, cmd)` → in-process `lastActivity`.
+- **files:** core → `workspace.list/read/write()` (живий контейнер не потрібен), захист HMAC-токеном.
+- **idle/evict/GC:** `backend.destroy(handle)` + `sessions.delete()`; GC → `workspace.remove()` пізніше.
 
 ---
 
@@ -333,10 +366,10 @@ idle-cleanup не потрібна. Durable-записи (`upsert` при `creat
 
 | Топологія | Профіль | Backend | Runtime | Workspace | Готовність |
 |---|---|---|---|---|---|
-| Docker Compose self-host | `docker-local` | Docker | `runsc` (дефолт) | локальний bind | **цей етап** |
-| Coolify / PaaS | `docker-local` | Docker | `runsc` | локальний bind | **цей етап** |
-| Kubernetes | `k8s` | K8s Pods | RuntimeClass | PVC/Object | потребує WorkspaceStore |
-| Managed | `managed` | E2B/Fly | вендор | вендор | потребує WorkspaceStore |
+| Docker Compose self-host | `docker-local` | Docker | `runsc` (дефолт) | `LocalFsStore` (bind) | **цей етап** |
+| Coolify / PaaS | `docker-local` | Docker | `runsc` | `LocalFsStore` (bind) | **цей етап** |
+| Kubernetes | `k8s` | K8s Pods | RuntimeClass | `S3Store` | потребує `S3Store` (етап 2) |
+| Managed | `managed` | E2B/Fly | вендор | `S3Store` | потребує `S3Store` (етап 2) |
 
 ---
 
@@ -360,21 +393,25 @@ idle-cleanup не потрібна. Durable-записи (`upsert` при `creat
 ## 20. План міграції (мінімальний diff)
 
 1. Винести `createSandbox`/`execInSandbox`/`destroySandbox`/`recoverSessions` у `DockerBackend`.
-2. Перенести `detectHostDataRoot`/`toHostPath`/bind-логіку всередину `DockerBackend`.
-3. `ensureRuntime()` (pull-if-missing) + дедуп/atomic-reset + boot-прогрів.
-4. Hardening-поля + `Runtime` у `buildSandboxConfig`; профілі `secure`/`dev`; fail-closed + userns-перевірка при boot.
-5. `PostgresSessionStore` + in-process `lastActivity` flush; reconcile за таблицею §14 + boot-gate.
-6. Background GC workspace'ів.
-7. Фабрика бекенда за `COMPUTE_BACKEND`.
-8. `socket-proxy`: `IMAGES=1` (+ перевірка `/images/load`). Compose `docker-local`: ghcr-pull, пін
+2. Винести `ensureMounts`/`workspacePath`/`globalPath`/`dirSize`/нативні fs-операції у `LocalFsStore`
+   (порт `WorkspaceStore`); `detectHostDataRoot`/`toHostPath`/bind-логіку — у `DockerBackend`.
+3. Файлові ендпоінти ядра (`/files`,`/download`,`/upload`) перевести на виклики `WorkspaceStore`.
+4. `ensureRuntime()` (pull-if-missing) + дедуп/atomic-reset + boot-прогрів.
+5. Hardening-поля + `Runtime` у `buildSandboxConfig`; профілі `secure`/`dev`; fail-closed + userns-перевірка при boot.
+6. `PostgresSessionStore` + in-process `lastActivity` flush; reconcile за таблицею §14 + boot-gate.
+7. Background GC через `workspace.remove()`.
+8. Фабрики за `COMPUTE_BACKEND` і `WORKSPACE_STORE`.
+9. `socket-proxy`: `IMAGES=1` (+ перевірка `/images/load`). Compose `docker-local`: ghcr-pull, пін
    `UNCLAW_VERSION`/digest; `scripts/install-gvisor.sh`.
-9. Observability/health (§18–19). HTTP-хендлери лишаються; прямі виклики dockerode → порт/стор.
+10. Observability/health (§18–19). HTTP-хендлери лишаються; прямі виклики dockerode/fs → порти/стор.
 
 ---
 
 ## 21. Тестування
 
 - **Contract-test `ComputeBackend`** — один набір проти кожної реалізації (пріоритет №1: тримає порт чесним).
+- **Contract-test `WorkspaceStore`** — один набір (ensure/list/read/write/size/remove + traversal-захист)
+  проти кожної реалізації; `LocalFsStore` зараз, `S3Store` мусить пройти той самий набір на етапі 2.
 - **gVisor isolation-проби:** доступ до host-PID/девайсів, запис поза read-only rootfs, мережа при `none` — мають падати.
 - **gVisor workload-compatibility matrix** (§9.1) + бенчмарки (§9.2).
 - **`PostgresSessionStore` + reconcile:** усі рядки таблиці §14, mid-op invalidation, відсутність втрати `networkMode`.
@@ -389,8 +426,8 @@ idle-cleanup не потрібна. Durable-записи (`upsert` при `creat
 
 - **gVisor сумісність/перф (найбільший ризик етапу):** мітигація — workload-matrix + бенчмарки до того,
   як `runsc` стане дефолтом; чесна failure-policy без silent-downgrade.
-- **Workspace stateful:** контролер stateless щодо стану сесій, але workspace на локальному диску → фактично
-  single-instance. Multi-instance потребує `WorkspaceStore` (поза цим етапом).
+- **Workspace stateful:** на етапі 1 `LocalFsStore` тримає файли на локальному диску → фактично
+  single-instance. Multi-instance/multi-node вмикає `S3Store` (етап 2) без зміни ядра — порт уже на місці.
 - **Мультитенант не закритий повністю:** §11 (secret/egress) — named follow-up.
 - **Host-prereq gVisor:** тертя для zero-config; мітигація — інсталятор + fail-closed.
 - **`socket-proxy IMAGES=1`:** ширший периметр; верифікувати `/images/load`.
@@ -402,6 +439,8 @@ idle-cleanup не потрібна. Durable-записи (`upsert` при `creat
 ## 23. Рішення (закриті колишні відкриті питання) та залишкові питання
 
 **Рішення:**
+- Сховище файлів: порт `WorkspaceStore` + `LocalFsStore` зараз (етап 1); `S3Store` (sync-модель, S3 API,
+  storage-agnostic, self-host default Garage/RustFS) — етап 2. MinIO виключено (архівовано 02.2026).
 - Версіонування образу: пін `UNCLAW_VERSION`/digest, `latest` лише dev (§12).
 - `sandbox_sessions`: окрема таблиця в наявній схемі платформи (спрощує бекап/деплой; `userId` уже зав'язаний на користувачів).
 - Egress: дефолт `none`; `bridge` opt-in із задокументованим ризиком; allowlist — named follow-up (§11).
