@@ -70,6 +70,11 @@ export function AppSidebar() {
   const t = useTranslations("nav");
   const { toggleSidebar, state: sidebarState } = useSidebar();
   const [chats, setChats] = useState<ChatItem[]>([]);
+  // Distinguishes "still loading" from "loaded, genuinely empty" so the first
+  // paint shows skeleton rows instead of flashing the empty state before the
+  // list arrives. Stays true after the first load, so search/SSE refetches
+  // never re-flash the skeleton.
+  const [loaded, setLoaded] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -91,7 +96,8 @@ export function AppSidebar() {
     fetch(url)
       .then((r) => (r.ok ? r.json() : []))
       .then(setChats)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, [selectedProject, debouncedSearch]);
 
   useEffect(() => {
@@ -200,6 +206,21 @@ export function AppSidebar() {
 
         <ChatSearch value={search} onChange={setSearch} />
 
+        {/* First-load placeholder: skeleton rows hold the list's shape until the
+            fetch resolves, so the panel never flashes the empty state and the
+            chats don't pop in. Varied widths read as titles. */}
+        {!loaded && (
+          <div className="space-y-1 px-2 py-1" aria-hidden>
+            {[88, 72, 80, 64, 84, 70, 58].map((w, i) => (
+              <div
+                key={i}
+                className="h-8 animate-pulse rounded-md bg-sidebar-accent/70"
+                style={{ width: `${w}%` }}
+              />
+            ))}
+          </div>
+        )}
+
         {telegramChats.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel>
@@ -285,7 +306,7 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
 
-        {chats.length === 0 && (
+        {loaded && chats.length === 0 && (
           <div className="animate-blur-rise flex flex-col items-center px-4 py-10 text-center">
             <ClawMark className="mb-3 h-9 w-9 text-foreground opacity-15" />
             <p className="text-xs text-muted-foreground">
