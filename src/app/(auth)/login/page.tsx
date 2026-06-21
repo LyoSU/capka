@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthShell, AUTH_FIELD } from "@/components/auth/auth-shell";
+import { TelegramSignIn, AuthDivider } from "@/components/auth/telegram-sign-in";
 import { toast } from "sonner";
 
 export default function LoginPage() {
@@ -17,6 +18,20 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [telegramEnabled, setTelegramEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/registration-status")
+      .then((r) => r.json())
+      .then((d) => setTelegramEnabled(!!d.telegram?.enabled))
+      .catch(() => setTelegramEnabled(false));
+    // Surface a failed Telegram round-trip (the error callback redirects here).
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("error") === "telegram") {
+      toast.error(t("telegram.failed"));
+      window.history.replaceState({}, "", "/login");
+    }
+  }, [t]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,6 +64,12 @@ export default function LoginPage() {
         </>
       }
     >
+      {telegramEnabled && (
+        <div className="mb-4 space-y-4">
+          <TelegramSignIn enabled={telegramEnabled} />
+          <AuthDivider label={t("orContinueWithEmail")} />
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="email">{t("emailLabel")}</Label>

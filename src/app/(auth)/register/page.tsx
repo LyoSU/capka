@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthShell, AUTH_FIELD } from "@/components/auth/auth-shell";
+import { TelegramSignIn, AuthDivider } from "@/components/auth/telegram-sign-in";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,13 +21,17 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [registrationEnabled, setRegistrationEnabled] = useState<boolean | null>(null);
+  const [telegramEnabled, setTelegramEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     // Check if registration is enabled (public — no auth needed)
     fetch("/api/auth/registration-status")
       .then((r) => r.json())
-      .then((data) => setRegistrationEnabled(data.enabled !== false))
-      .catch(() => setRegistrationEnabled(true));
+      .then((data) => {
+        setRegistrationEnabled(data.enabled !== false);
+        setTelegramEnabled(!!data.telegram?.enabled);
+      })
+      .catch(() => { setRegistrationEnabled(true); setTelegramEnabled(false); });
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -57,18 +62,20 @@ export default function RegisterPage() {
     );
   }
 
+  // Email sign-up is closed — but Telegram may still be the open path in. Offer
+  // it rather than dead-ending; fall back to the plain disabled notice otherwise.
   if (registrationEnabled === false) {
     return (
       <AuthShell
-        title={t("register.disabledTitle")}
-        description={t("register.disabledDescription")}
+        title={telegramEnabled ? t("register.title") : t("register.disabledTitle")}
+        description={telegramEnabled ? t("telegram.registerHint") : t("register.disabledDescription")}
         footer={
           <Link href="/login" className="font-medium text-foreground hover:underline">
             {t("register.backToSignIn")}
           </Link>
         }
       >
-        <></>
+        {telegramEnabled ? <TelegramSignIn enabled={telegramEnabled} /> : <></>}
       </AuthShell>
     );
   }
@@ -86,6 +93,12 @@ export default function RegisterPage() {
         </>
       }
     >
+      {telegramEnabled && (
+        <div className="mb-4 space-y-4">
+          <TelegramSignIn enabled={telegramEnabled} />
+          <AuthDivider label={t("orContinueWithEmail")} />
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="name">{t("register.nameLabel")}</Label>

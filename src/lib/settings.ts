@@ -3,6 +3,7 @@ import { db } from "./db";
 import { settings } from "./db/schema";
 import { encrypt, decrypt, generateSecret } from "./crypto";
 import { checkMasterKey, CANARY_PLAINTEXT } from "./master-key";
+import { parseRegistrationMode, type RegistrationMode } from "./auth/telegram-oidc";
 
 let masterKeyCache: string | null = null;
 
@@ -163,4 +164,35 @@ export async function sharedKeyEnabled(): Promise<boolean> {
 /** Whether users are allowed to add their own provider key. */
 export async function ownKeysAllowed(): Promise<boolean> {
   return (await getProviderKeyMode()) !== "shared_only";
+}
+
+/**
+ * Telegram "Login with Telegram" (OIDC) configuration, sourced at runtime from
+ * the DB so nothing is baked into the image. The secret is encrypted at rest
+ * with the master key, exactly like provider keys. `enabled` requires BOTH the
+ * admin toggle and a usable client id — a half-configured provider should never
+ * surface a broken button on the login page.
+ */
+export interface TelegramOidcConfig {
+  enabled: boolean;
+  clientId: string | null;
+  clientSecret: string | null;
+}
+
+export async function getTelegramOidcConfig(): Promise<TelegramOidcConfig> {
+  const [clientId, clientSecret, toggle] = await Promise.all([
+    getSetting("telegram_oidc_client_id"),
+    getSetting("telegram_oidc_client_secret"),
+    getSetting("telegram_login_enabled"),
+  ]);
+  return {
+    enabled: toggle === "true" && !!clientId && !!clientSecret,
+    clientId: clientId || null,
+    clientSecret: clientSecret || null,
+  };
+}
+
+/** Admin-chosen policy for brand-new Telegram sign-ups. Defaults to closed. */
+export async function getRegistrationMode(): Promise<RegistrationMode> {
+  return parseRegistrationMode(await getSetting("telegram_registration_mode"));
 }

@@ -120,6 +120,13 @@
       "when": 1782403200000,
       "tag": "0016_add_user_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1782403200001,
+      "tag": "0017_add_user_status",
+      "breakpoints": true
     }
   ]
 }

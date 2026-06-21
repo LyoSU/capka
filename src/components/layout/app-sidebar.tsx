@@ -2,10 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { Plus, Settings, FolderKanban, Archive, Send } from "lucide-react";
+import { Plus, Settings, FolderKanban, Archive, Send, LogOut } from "lucide-react";
+import { authClient } from "@/lib/auth-client";
 import {
   Sidebar,
   SidebarContent,
@@ -67,8 +68,13 @@ function groupByDate(chats: ChatItem[]) {
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const t = useTranslations("nav");
   const { toggleSidebar, state: sidebarState } = useSidebar();
+  const signOut = useCallback(async () => {
+    await authClient.signOut();
+    router.push("/login");
+  }, [router]);
   const [chats, setChats] = useState<ChatItem[]>([]);
   // Distinguishes "still loading" from "loaded, genuinely empty" so the first
   // paint shows skeleton rows instead of flashing the empty state before the
@@ -349,6 +355,15 @@ export function AppSidebar() {
             >
               <Settings className="h-4 w-4" />
             </Link>
+            <button
+              type="button"
+              onClick={signOut}
+              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 text-muted-foreground hover:text-destructive")}
+              title={t("signOut")}
+              aria-label={t("signOut")}
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </SidebarFooter>

@@ -1,20 +1,50 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { genericOAuth } from "better-auth/plugins";
+import { APIError } from "better-auth/api";
+import { and, eq, ne } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { db } from "./db";
 import * as schema from "./db/schema";
-import { getMasterKey } from "./settings";
+import { getMasterKey, getTelegramOidcConfig, getRegistrationMode } from "./settings";
 import { getPublicUrl } from "./url";
+import {
+  decodeTelegramClaims,
+  resolveRegistration,
+  syntheticTelegramEmail,
+  telegramDisplayName,
+} from "./auth/telegram-oidc";
 import { ZodError } from "zod";
 import { AppError, isAppError, UnauthorizedError, ForbiddenError } from "./errors";
 
+export const TELEGRAM_PROVIDER_ID = "telegram";
+const TELEGRAM_DISCOVERY = "https://oauth.telegram.org/.well-known/openid-configuration";
+
+/** The exact redirect URI an admin must register in BotFather → Web Login. */
+export function telegramRedirectUri(origin: string): string {
+  return `${origin.replace(/\/$/, "")}/api/auth/oauth2/callback/${TELEGRAM_PROVIDER_ID}`;
+}
+
+// Best-effort carry of the Telegram @username from the id_token (which better-
+// auth's account row doesn't persist) into the telegram_links upsert that runs
+// in the account.create.after hook, within the same sign-in request.
+const pendingUsernames = new Map<number, string | null>();
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _auth: any = null;
+
+/** Drop the cached instance so the next getAuth() rebuilds with fresh settings
+ *  (called after an admin changes the Telegram login credentials/toggle). */
+export function resetAuth(): void {
+  _auth = null;
+}
 
 export async function getAuth() {
   if (_auth) return _auth as ReturnType<typeof betterAuth>;
   const secret = await getMasterKey();
   const publicUrl = process.env.PUBLIC_URL?.trim() || process.env.BETTER_AUTH_URL?.trim();
+  const telegram = await getTelegramOidcConfig();
   _auth = betterAuth({
     secret,
     // Runtime, not build-time: an explicit PUBLIC_URL (operator override) wins;
@@ -49,20 +79,144 @@ export async function getAuth() {
     user: {
       additionalFields: {
         role: { type: "string", defaultValue: "user", input: false },
+        // Lifecycle gate for the approval-based registration mode. input:false so
+        // it can never be set from a client payload — only our hooks decide it.
+        status: { type: "string", defaultValue: "active", input: false },
+      },
+    },
+    // Account linking is enabled so an already-signed-in user can explicitly link
+    // Telegram via /oauth2/link (an authenticated action, gated by the session).
+    // Telegram is deliberately NOT a trustedProvider: trustedProviders would
+    // auto-link a Telegram sign-in to any existing account whose email matches —
+    // and our synthetic tg<id>@telegram.local addresses are predictable, so a
+    // pre-registered email/password account could hijack a victim's Telegram
+    // login. Auto-link-by-email has no legitimate use here (real users never own
+    // an @telegram.local address), so we drop the root cause entirely. The
+    // synthetic domain is also reserved against email sign-up (see the
+    // /api/auth/[...all] gate) so it can't be squatted.
+    account: {
+      accountLinking: {
+        enabled: true,
+        updateUserInfoOnLink: true,
+      },
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          // Registration policy for brand-new Telegram identities. Only fires on
+          // the OAuth callback path; email sign-up keeps its own gate (see the
+          // /api/auth/[...all] route), and the first account ever is the admin.
+          before: async (user, ctx) => {
+            if (!ctx?.path?.includes("callback")) return;
+            const [first] = await db.select({ id: schema.users.id }).from(schema.users).limit(1);
+            const decision = resolveRegistration({
+              mode: await getRegistrationMode(),
+              isFirstUser: !first,
+            });
+            if (!decision.allow) {
+              throw new APIError("FORBIDDEN", {
+                code: "REGISTRATION_CLOSED",
+                message: "Registration is disabled. Ask an administrator for access.",
+              });
+            }
+            return { data: { ...user, role: decision.role, status: decision.status } };
+          },
+        },
+      },
+      account: {
+        create: {
+          // A Telegram account row appears both on first sign-in and when an
+          // existing user links Telegram. Either way, mirror the binding into
+          // telegram_links so the bot can DM this user with no /link CODE dance.
+          after: async (account) => {
+            if (account.providerId !== TELEGRAM_PROVIDER_ID) return;
+            const telegramUserId = Number(account.accountId);
+            if (!Number.isFinite(telegramUserId)) return;
+            await upsertTelegramLink(account.userId, telegramUserId, pendingUsernames.get(telegramUserId) ?? null);
+            pendingUsernames.delete(telegramUserId);
+          },
+        },
       },
     },
     session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
-    plugins: [nextCookies()],
+    plugins: [
+      nextCookies(),
+      ...(telegram.enabled
+        ? [
+            genericOAuth({
+              config: [
+                {
+                  providerId: TELEGRAM_PROVIDER_ID,
+                  clientId: telegram.clientId!,
+                  clientSecret: telegram.clientSecret!,
+                  discoveryUrl: TELEGRAM_DISCOVERY,
+                  scopes: ["openid", "profile", "telegram:bot_access"],
+                  pkce: true,
+                  // Telegram has no userinfo endpoint — every claim is in the
+                  // id_token. Decode it ourselves and map onto a better-auth user.
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  getUserInfo: async (tokens: any) => {
+                    const claims = decodeTelegramClaims(tokens?.idToken);
+                    if (!claims) return null;
+                    pendingUsernames.set(claims.telegramUserId, claims.username);
+                    return {
+                      id: String(claims.telegramUserId),
+                      name: telegramDisplayName(claims),
+                      email: syntheticTelegramEmail(claims.telegramUserId),
+                      emailVerified: false,
+                      image: claims.picture ?? undefined,
+                      createdAt: new Date(),
+                      updatedAt: new Date(),
+                    };
+                  },
+                },
+              ],
+            }),
+          ]
+        : []),
+    ],
   });
   return _auth as ReturnType<typeof betterAuth>;
 }
 
+/**
+ * Bind a Telegram numeric id to a platform user in telegram_links — the table
+ * the bot delivery layer reads. Mirrors the bot's /link handler: re-point an
+ * existing link instead of violating the unique constraint, and keep it
+ * one-Telegram-per-user by dropping the user's other links.
+ */
+async function upsertTelegramLink(userId: string, telegramUserId: number, username: string | null) {
+  const [existing] = await db
+    .select({ id: schema.telegramLinks.id })
+    .from(schema.telegramLinks)
+    .where(eq(schema.telegramLinks.telegramUserId, telegramUserId))
+    .limit(1);
+  if (existing) {
+    await db
+      .update(schema.telegramLinks)
+      .set({ userId, telegramUsername: username })
+      .where(eq(schema.telegramLinks.id, existing.id));
+  } else {
+    await db.insert(schema.telegramLinks).values({
+      id: nanoid(),
+      userId,
+      telegramUserId,
+      telegramUsername: username,
+    });
+  }
+  await db
+    .delete(schema.telegramLinks)
+    .where(and(eq(schema.telegramLinks.userId, userId), ne(schema.telegramLinks.telegramUserId, telegramUserId)));
+}
+
 export type Role = "admin" | "user" | "viewer";
+export type AccountStatus = "active" | "pending";
 
 /** Require authenticated session — throws UnauthorizedError. */
 export async function requireSession(): Promise<{
   userId: string;
   role: Role;
+  status: AccountStatus;
   session: Awaited<ReturnType<Awaited<ReturnType<typeof getAuth>>["api"]["getSession"]>>;
 }> {
   const { headers } = await import("next/headers");
@@ -77,13 +231,24 @@ export async function requireSession(): Promise<{
   if (!session) throw new UnauthorizedError();
   const rawRole = (session.user as Record<string, unknown>).role;
   const role: Role = rawRole === "admin" || rawRole === "viewer" ? rawRole : "user";
-  return { userId: session.user.id, role, session };
+  const status: AccountStatus = (session.user as Record<string, unknown>).status === "pending" ? "pending" : "active";
+  return { userId: session.user.id, role, status, session };
 }
 
 /** Require a minimum role — throws ForbiddenError if insufficient. */
 export async function requireRole(...allowed: Role[]) {
   const ctx = await requireSession();
   if (!allowed.includes(ctx.role)) throw new ForbiddenError();
+  return ctx;
+}
+
+/** Require an approved (non-pending) account — gates pending users out of any
+ *  feature that spends the shared key or exposes data. Admins are always active. */
+export async function requireActive() {
+  const ctx = await requireSession();
+  if (ctx.status === "pending") {
+    throw new ForbiddenError("Your account is awaiting administrator approval.");
+  }
   return ctx;
 }
 

@@ -81,7 +81,8 @@
       "yesterday": "Yesterday",
       "thisWeek": "This week",
       "older": "Older"
-    }
+    },
+    "signOut": "Sign out"
   },
   "steps": {
     "createdFile": "Created {file}",
@@ -397,7 +398,8 @@
       "skills": "Skills",
       "connectors": "Connectors",
       "marketplace": "Marketplace",
-      "permissions": "Permissions"
+      "permissions": "Permissions",
+      "authentication": "Authentication"
     },
     "usersPage": {
       "title": "Users",
@@ -522,7 +524,9 @@
         "codeExpires": "Code expires in 5 minutes",
         "doneRefresh": "Done / Refresh status",
         "generateCode": "Generate Link Code",
-        "configureFirst": "Configure the bot token above before linking your account."
+        "configureFirst": "Configure the bot token above before linking your account.",
+        "oidcLink": "Connect with Telegram",
+        "oidcFailed": "Couldn't connect to Telegram. Please try again."
       },
       "linkMovedHint": "Users link their own Telegram accounts from Settings → General."
     },
@@ -742,6 +746,54 @@
           "clear": "Reset permission"
         }
       }
+    },
+    "authentication": {
+      "title": "Authentication",
+      "subtitle": "How people sign in and who's allowed to join.",
+      "save": "Save changes",
+      "saved": "Saved",
+      "saveFailed": "Couldn't save. Please try again.",
+      "copied": "Copied",
+      "approved": "Account approved",
+      "rejected": "Account removed",
+      "actionFailed": "Something went wrong. Please try again.",
+      "telegram": {
+        "title": "Login with Telegram",
+        "desc": "Let people sign in with one tap using their Telegram account.",
+        "active": "Active",
+        "incomplete": "Needs credentials",
+        "toggleAria": "Toggle Telegram login",
+        "botFatherHint": "In @BotFather open your bot → Bot Settings → Web Login. Add the redirect URI below to Allowed URLs, then copy the Client ID and Secret here.",
+        "clientId": "Client ID",
+        "clientSecret": "Client Secret",
+        "secretStored": "•••••••• (stored — leave blank to keep)",
+        "secretPlaceholder": "Paste the secret from BotFather",
+        "redirectUri": "Redirect URI",
+        "redirectHint": "Paste this into BotFather → Web Login → Allowed URLs."
+      },
+      "mode": {
+        "title": "Who can register",
+        "desc": "What happens when a new person signs in with Telegram for the first time.",
+        "open": {
+          "label": "Open",
+          "desc": "Anyone can sign in and start using the app right away."
+        },
+        "approval": {
+          "label": "By approval",
+          "desc": "Anyone can sign in, but an admin must approve them before they get access."
+        },
+        "closed": {
+          "label": "Closed",
+          "desc": "Only existing accounts can sign in. No new sign-ups."
+        }
+      },
+      "pending": {
+        "title": "Waiting for approval",
+        "desc": "People who signed in and need your go-ahead.",
+        "empty": "No one is waiting right now.",
+        "approve": "Approve",
+        "reject": "Reject"
+      }
     }
   },
   "setup": {
@@ -856,6 +908,19 @@
       "disabledTitle": "Registration disabled",
       "disabledDescription": "New account registration is currently disabled by the administrator.",
       "backToSignIn": "Back to sign in"
+    },
+    "orContinueWithEmail": "or continue with email",
+    "telegram": {
+      "signIn": "Sign in with Telegram",
+      "failed": "Telegram sign-in didn't go through. Please try again.",
+      "registerHint": "Sign in with your Telegram account to get started."
+    },
+    "pending": {
+      "title": "Almost there",
+      "description": "Your account was created and is waiting for approval.",
+      "hint": "An administrator needs to approve your account before you can start. You'll be able to sign in as soon as they do.",
+      "recheck": "Check again",
+      "signOut": "Sign out"
     }
   },
   "telegram": {
@@ -877,6 +942,7 @@
     "noText": "(the assistant returned no text)",
     "genericError": "Something went wrong. Please try again.",
     "technicalDetails": "Technical details",
-    "doneLog": "✅ {count, plural, one {# tool} other {# tools}} · {secs}s"
+    "doneLog": "✅ {count, plural, one {# tool} other {# tools}} · {secs}s",
+    "pendingApproval": "Your account is waiting for an administrator to approve it. You'll be able to chat as soon as they do."
   }
 }

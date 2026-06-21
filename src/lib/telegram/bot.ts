@@ -2,7 +2,7 @@ import { Bot, type Context } from "grammy";
 import { nanoid } from "nanoid";
 import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { telegramLinks, linkCodes, chats, messages } from "@/lib/db/schema";
+import { telegramLinks, linkCodes, chats, messages, users } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
@@ -110,6 +110,14 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   const link = await findLink(ctx.from!.id);
   if (!link) {
     await ctx.reply(t("notLinked"));
+    return;
+  }
+  // Approval gate: a pending account must not spend the shared key from Telegram
+  // either — mirror the web /api/chat guard. (A Telegram login auto-links before
+  // approval, so without this a pending user could DM the bot to slip past it.)
+  const [u] = await db.select({ status: users.status }).from(users).where(eq(users.id, link.userId)).limit(1);
+  if (u?.status === "pending") {
+    await ctx.reply(t("pendingApproval"));
     return;
   }
   // Same per-user flood guard as the web enqueue path.

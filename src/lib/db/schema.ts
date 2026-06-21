@@ -17,6 +17,9 @@ export const users = pgTable("user", {
   emailVerified: boolean("email_verified").default(false),
   image: text("image"),
   role: text("role").notNull().default("user"), // "admin" | "user" | "viewer"
+  // Account lifecycle. "active" can use the app; "pending" signed in but awaiting
+  // admin approval (registration_mode = "approval") — gated out of chat/key use.
+  status: text("status").notNull().default("active"), // "active" | "pending"
   locale: text("locale"), // "en" | "uk" | null (null = follow browser/default)
   // IANA tz (e.g. "Europe/Kyiv"), auto-detected from the browser. null → UTC.
   // Fed into the agent's volatile prompt so it knows the user's local date/time.

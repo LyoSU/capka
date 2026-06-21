@@ -10,6 +10,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { authClient } from "@/lib/auth-client";
 
 /**
  * Personal Telegram account linking — visible to every role. The bot *token* is
@@ -30,6 +31,10 @@ export function TelegramLinkCard() {
   const [copied, setCopied] = useState(false);
   const [linkLoading, setLinkLoading] = useState(true);
   const [unlinking, setUnlinking] = useState(false);
+  // When Telegram login is configured, an existing user can link in one tap via
+  // the OIDC flow instead of the manual /link CODE dance (kept as a fallback).
+  const [oidcEnabled, setOidcEnabled] = useState(false);
+  const [linkingOidc, setLinkingOidc] = useState(false);
 
   const fetchLinkStatus = useCallback(async () => {
     try {
@@ -47,7 +52,20 @@ export function TelegramLinkCard() {
 
   useEffect(() => {
     fetchLinkStatus();
+    fetch("/api/auth/registration-status")
+      .then((r) => r.json())
+      .then((d) => setOidcEnabled(!!d.telegram?.enabled))
+      .catch(() => setOidcEnabled(false));
   }, [fetchLinkStatus]);
+
+  const handleOidcLink = async () => {
+    setLinkingOidc(true);
+    const { error } = await authClient.oauth2.link({ providerId: "telegram", callbackURL: "/settings?linked=1" });
+    if (error) {
+      toast.error(t("link.oidcFailed"));
+      setLinkingOidc(false);
+    }
+  };
 
   const handleGenerateCode = async () => {
     setGeneratingCode(true);
@@ -121,6 +139,16 @@ export function TelegramLinkCard() {
         </div>
       ) : (
         <div className="space-y-3">
+          {oidcEnabled && !linkCode && (
+            <div className="space-y-3">
+              <Button onClick={handleOidcLink} disabled={linkingOidc} className="bg-[#229ED9] text-white hover:bg-[#1c8dc2]">
+                {linkingOidc ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                {t("link.oidcLink")}
+              </Button>
+              <Separator />
+              <p className="text-xs text-muted-foreground">{t("link.orManually")}</p>
+            </div>
+          )}
           {linkCode ? (
             <div className="space-y-3 rounded-md border p-4">
               {botUsername ? (
