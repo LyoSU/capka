@@ -23,6 +23,9 @@ export type TaskEvent =
   | { type: "task:tool-result"; taskId: string; chatId: string; messageId: string; toolCallId: string; result: unknown; isError?: boolean }
   // messageId is absent when a task fails/cancels before an assistant message exists.
   | { type: "task:finish"; taskId: string; chatId: string; messageId?: string; status: string; error?: string }
+  // A freshly-generated title for a new chat, pushed once after its first turn
+  // so the sidebar can swap the placeholder in place (and animate) without a refetch.
+  | { type: "chat:title"; chatId: string; title: string }
   | { type: "new_message"; chatId: string };
 
 /** The per-user realtime channel name. Centralized so it never drifts. */

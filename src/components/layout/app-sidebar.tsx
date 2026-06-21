@@ -98,6 +98,18 @@ function initials(name: string) {
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
+/** A chat's title that softly de-blurs in when it changes after mount — i.e.
+ *  when a new chat's placeholder is replaced by its generated title (or a manual
+ *  rename). Stays still on first render and on refetches that don't change it,
+ *  so only a genuine title change animates. */
+function ChatTitle({ title, fallback }: { title: string | null; fallback: string }) {
+  const display = title || fallback;
+  // Keying the span by its text makes a title change (placeholder → generated
+  // title, or a rename) remount a fresh element, which replays the CSS de-blur.
+  // A refetch that returns the same text keeps the key, so it never re-animates.
+  return <span key={display} className="truncate animate-title-swap">{display}</span>;
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -176,8 +188,16 @@ export function AppSidebar() {
       es.onopen = () => { delay = 1000; };
       es.onmessage = (e) => {
         try {
-          const d = JSON.parse(e.data) as { type?: string };
-          if (d.type === "task:start" || d.type === "task:finish" || d.type === "new_message") refresh();
+          const d = JSON.parse(e.data) as { type?: string; chatId?: string; title?: string };
+          // A generated title arrives once, after a new chat's first turn. Swap it
+          // in place (ChatTitle animates the change) instead of a full refetch —
+          // no flicker, and it lands even if the chat isn't in the fetched window.
+          if (d.type === "chat:title" && d.chatId && d.title) {
+            const { chatId: cid, title } = d;
+            setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, title } : c)));
+          } else if (d.type === "task:start" || d.type === "task:finish" || d.type === "new_message") {
+            refresh();
+          }
         } catch { /* ignore parse errors */ }
       };
       es.onerror = () => {
@@ -242,7 +262,12 @@ export function AppSidebar() {
         </Link>
       </SidebarHeader>
 
-      <SidebarContent className="group-data-[collapsible=icon]:hidden">
+      {/* Keep SidebarContent in the layout when collapsed so its `flex-1`
+          still pushes the footer (avatar) to the bottom; hide only the
+          contents. `contents` adds no box when expanded, `hidden` removes
+          the children when collapsed. */}
+      <SidebarContent>
+       <div className="contents group-data-[collapsible=icon]:hidden">
         <SidebarGroup>
           <SidebarGroupContent>
             <div className="px-2 pb-1">
@@ -294,7 +319,7 @@ export function AppSidebar() {
                         render={<Link href={`/chat/${chat.id}`} />}
                         data-active={activeChatId === chat.id || undefined}
                       >
-                        <span className="truncate">{chat.title || t("newChat")}</span>
+                        <ChatTitle title={chat.title} fallback={t("newChat")} />
                       </SidebarMenuButton>
                     </ChatContextMenu>
                   </SidebarMenuItem>
@@ -328,9 +353,7 @@ export function AppSidebar() {
                         render={<Link href={`/chat/${chat.id}`} />}
                         data-active={activeChatId === chat.id || undefined}
                       >
-                        <span className="truncate">
-                          {chat.title || t("newChat")}
-                        </span>
+                        <ChatTitle title={chat.title} fallback={t("newChat")} />
                       </SidebarMenuButton>
                     </ChatContextMenu>
                   </SidebarMenuItem>
@@ -352,9 +375,7 @@ export function AppSidebar() {
                         render={<Link href={`/chat/${chat.id}`} />}
                         data-active={activeChatId === chat.id || undefined}
                       >
-                        <span className="truncate">
-                          {chat.title || t("newChat")}
-                        </span>
+                        <ChatTitle title={chat.title} fallback={t("newChat")} />
                       </SidebarMenuButton>
                     </ChatContextMenu>
                   </SidebarMenuItem>
@@ -372,6 +393,7 @@ export function AppSidebar() {
             </p>
           </div>
         )}
+       </div>
       </SidebarContent>
 
       <SidebarFooter className="p-2">

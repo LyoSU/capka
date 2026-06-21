@@ -24,6 +24,7 @@ import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage } from "@/lib/usage";
 import { costUsd } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
+import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isVisionUnsupportedError, isReasoningUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
@@ -798,6 +799,22 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           }
         })
         .catch((e) => log.error("memory extraction failed", { taskId, userId, err: String(e) }));
+    }
+
+    // Auto-title the chat on its FIRST completed turn. "First turn" = no prior
+    // assistant message in the history — a migration-free sentinel for "new chat"
+    // that also never clobbers a title the user renamed by hand on a later turn.
+    // The slice-of-first-message placeholder set by /api/chat stays visible until
+    // this lands, so the sidebar always shows *something* in the meantime.
+    const isFirstTurn = !modelMessages.some((m) => m.role === "assistant");
+    if (finalStatus === "completed" && isFirstTurn && lastUserText.trim()) {
+      generateChatTitle(model, lastUserText, getFullText())
+        .then(async (title) => {
+          if (!title) return;
+          await db.update(chats).set({ title }).where(eq(chats.id, chatId));
+          await publishTaskEvent(userId, { type: "chat:title", chatId, title });
+        })
+        .catch((e) => log.error("chat title generation failed", { taskId, userId, err: String(e) }));
     }
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";
