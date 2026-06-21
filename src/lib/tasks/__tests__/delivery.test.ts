@@ -193,7 +193,7 @@ describe("TelegramSink streaming", () => {
   it("finish falls back to a no-text note when nothing was produced", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 14, locale: "uk" });
     await sink.finish({ status: "completed", text: "", toolCount: 0, elapsedMs: 1000 });
-    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("_(асистент не повернув тексту)_");
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("_(асистент нічого не відповів)_");
   });
 
   it("delivers a failure in-chat, with admin detail collapsed", async () => {
