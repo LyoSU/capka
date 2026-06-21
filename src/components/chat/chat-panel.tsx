@@ -46,9 +46,12 @@ interface ChatPanelProps {
   /** Telegram-sourced chats are read-only on the web — no composer, no edits;
    *  the user replies from Telegram or forks the chat to continue here. */
   readOnly?: boolean;
+  /** Server-known: does this chat already have messages? Lets first paint pick
+   *  the message-stream shell over the new-chat greeting while history loads. */
+  initialHasHistory?: boolean;
 }
 
-export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, initialHasHistory }: ChatPanelProps) {
   const t = useTranslations("chat");
   const [model, setModel] = useState(defaultModel);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -296,7 +299,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, queued]);
 
-  const isEmpty = messages.length === 0;
+  // Show the new-chat greeting ONLY for a genuinely fresh chat. `messages` start
+  // empty until the hook's history fetch resolves, so `messages.length === 0`
+  // alone can't tell a new chat from an existing one mid-load — that conflation
+  // is what flashed the greeting on direct navigation. `initialHasHistory` is the
+  // server's authoritative answer (chat.activeLeafId != null), so an existing
+  // chat renders the stream shell from first paint; the `messages.length` guard
+  // keeps the greeting from lingering after the first send on a truly new chat.
+  const showGreeting = !initialHasHistory && messages.length === 0;
   const [filesOpen, setFilesOpen] = useState(false);
 
   // A monotonically-rising count of completed tool calls across the whole thread.
@@ -370,7 +380,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly }
     <PreviewProvider>
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
-      {isEmpty ? (
+      {showGreeting ? (
         <div className="relative flex flex-1 flex-col items-center justify-center py-10">
           <div className="w-full">
             <div className="mb-8 flex items-center justify-center gap-3 px-6">

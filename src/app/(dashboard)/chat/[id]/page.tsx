@@ -22,9 +22,12 @@ export default async function ChatIdPage({
   const { id: chatId } = await params;
   const { projectId: qsProjectId } = await searchParams;
 
-  // Load existing chat to check for projectId
+  // Load existing chat to check for projectId. activeLeafId tells us, on the
+  // server, whether this chat already has messages (null = empty) — the client
+  // uses it to render the right shell on first paint instead of flashing the
+  // new-chat greeting while history is still being fetched.
   const [existingChat] = await db
-    .select({ projectId: chats.projectId, model: chats.model, source: chats.source })
+    .select({ projectId: chats.projectId, model: chats.model, source: chats.source, activeLeafId: chats.activeLeafId })
     .from(chats)
     .where(and(eq(chats.id, chatId), eq(chats.userId, session.user.id)))
     .limit(1);
@@ -56,6 +59,7 @@ export default async function ChatIdPage({
       projectId={projectId ?? undefined}
       isAdmin={userRow?.role === "admin"}
       readOnly={existingChat?.source === "telegram"}
+      initialHasHistory={!!existingChat?.activeLeafId}
     />
   );
 }
