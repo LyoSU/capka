@@ -28,6 +28,23 @@ only the container and exec endpoints (build, pull, image, network, volume, and
 swarm management are denied), so the raw host socket is never mounted into the
 controller itself. The platform never touches the Docker socket directly.
 
+### Isolation runtime: runc by default, gVisor opt-in
+
+The hardening above always applies. The OCI **runtime** is a separate, explicit knob:
+
+- **`runc` (default)** — standard Docker isolation. The stack boots anywhere with
+  no host setup; suitable for single-operator and trusted-user deployments. The
+  controller logs an `isolation.unhardened` warning at boot so the posture is visible.
+- **`runsc` (gVisor, opt-in)** — a user-space kernel that intercepts container
+  syscalls, giving a far stronger container↔host boundary with **no KVM required**
+  (so it runs on ordinary VPS hosts, unlike Kata/Firecracker). Enable it with
+  `sudo sh scripts/install-gvisor.sh` on the host (also turns on `userns-remap`)
+  plus `SANDBOX_RUNTIME=runsc`. The resulting "secure" profile is **fail-closed**:
+  the controller refuses to boot if `runsc` isn't registered on the daemon — it
+  never silently falls back to `runc`.
+
+For untrusted or multi-tenant code, combine gVisor with rootless Docker (below).
+
 ### This is defense-in-depth, not a hard boundary
 
 A compromised controller could still create a non-privileged sandbox. The only
