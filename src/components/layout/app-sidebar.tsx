@@ -253,7 +253,7 @@ export function AppSidebar() {
             </div>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href={newChatHref} />} onClick={() => setOpenMobile(false)}>
+                <SidebarMenuButton render={<Link href={newChatHref} />}>
                   <Plus className="h-4 w-4" />
                   <span>{t("newChat")}</span>
                 </SidebarMenuButton>
