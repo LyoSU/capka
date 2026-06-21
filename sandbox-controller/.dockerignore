@@ -1,2 +1,6 @@
 node_modules
-*.test.js
+# Recursive: bare `*.test.js` only matches the root, so subdir tests (backends/,
+# stores/) leaked into the image. Exclude tests and test-only contract helpers
+# (they import vitest, which isn't installed in the prod image) at any depth.
+**/*.test.js
+**/*.contract.js
