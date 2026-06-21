@@ -1,0 +1,146 @@
+import { buildSandboxConfig } from "../sandbox-spec.js";
+
+/** ComputeBackend implementation over the Docker daemon (via dockerode).
+ *  Lifts createSandbox/execInSandbox/destroySandbox/recoverSessions out of the
+ *  old server.js. The workspace bind paths arrive already host-resolved in the
+ *  spec (the core builds them via WorkspaceStore.ensure). */
+export class DockerBackend {
+  constructor({ docker, image, runtime, execTimeoutMs = 30000, sandboxUser = "1000:1000" }) {
+    this.docker = docker;
+    this.image = image;
+    this.runtime = runtime;
+    this.execTimeoutMs = execTimeoutMs;
+    this.sandboxUser = sandboxUser;
+    this._ensured = false;
+    this._ensuring = null;
+  }
+
+  /** Guarantee the sandbox image exists before create. Idempotent; dedups
+   *  concurrent calls into one pull. Self-heals after an image prune. */
+  async ensureRuntime() {
+    if (this._ensured) return;
+    if (this._ensuring) return this._ensuring;
+    this._ensuring = (async () => {
+      try {
+        await this.docker.getImage(this.image).inspect();
+      } catch (e) {
+        if (e.statusCode !== 404) throw e;
+        const stream = await this.docker.pull(this.image);
+        await new Promise((res, rej) =>
+          this.docker.modem.followProgress(stream, (err) => (err ? rej(err) : res())));
+      }
+      this._ensured = true;
+    })().finally(() => { this._ensuring = null; });
+    return this._ensuring;
+  }
+
+  async create(spec) {
+    await this.ensureRuntime();
+    const config = buildSandboxConfig({
+      image: this.image,
+      runtime: this.runtime,
+      sessionId: spec.sessionId,
+      userId: spec.userId,
+      wsHostPath: spec.wsHostPath,
+      sharedHostPath: spec.sharedHostPath,
+      networkMode: spec.networkMode,
+      memoryBytes: spec.memoryBytes,
+      nanoCpus: spec.nanoCpus,
+    });
+
+    let container;
+    try {
+      container = await this.docker.createContainer(config);
+    } catch (e) {
+      // Self-heal: image vanished between ensureRuntime and create (prune race).
+      if (/no such image/i.test(e.message)) {
+        this._ensured = false;
+        await this.ensureRuntime();
+        container = await this.docker.createContainer(config);
+      } else {
+        throw e;
+      }
+    }
+    await container.start();
+    return { handle: container.id };
+  }
+
+  async exec(handle, command, timeoutMs = this.execTimeoutMs) {
+    const container = this.docker.getContainer(handle);
+
+    // Run the command in its own session so a timeout kills the whole process
+    // group (forked children included). base64 keeps the command verbatim.
+    const secs = Math.max(1, Math.ceil(timeoutMs / 1000));
+    const b64 = Buffer.from(command).toString("base64");
+    const wrapper =
+      `__cmd=$(echo ${b64} | base64 -d); ` +
+      `setsid bash -c "$__cmd" & __pid=$!; ` +
+      `( sleep ${secs}; kill -KILL -"$__pid" 2>/dev/null ) & __killer=$!; ` +
+      `wait "$__pid"; __rc=$?; ` +
+      `kill "$__killer" 2>/dev/null; wait "$__killer" 2>/dev/null; ` +
+      `exit $__rc`;
+
+    const execObj = await container.exec({
+      Cmd: ["bash", "-c", wrapper],
+      AttachStdout: true,
+      AttachStderr: true,
+      User: this.sandboxUser,
+      WorkingDir: "/workspace",
+    });
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Command timed out after ${timeoutMs}ms`)), timeoutMs + 5000);
+      execObj.start({ hijack: true }, (err, stream) => {
+        if (err) { clearTimeout(timer); return reject(err); }
+        let stdout = "";
+        let stderr = "";
+        stream.on("data", (chunk) => {
+          let offset = 0;
+          while (offset < chunk.length) {
+            if (offset + 8 > chunk.length) break;
+            const type = chunk[offset];
+            const size = chunk.readUInt32BE(offset + 4);
+            offset += 8;
+            if (offset + size > chunk.length) break;
+            const text = chunk.slice(offset, offset + size).toString("utf8");
+            if (type === 1) stdout += text;
+            else if (type === 2) stderr += text;
+            offset += size;
+          }
+        });
+        stream.on("end", async () => {
+          clearTimeout(timer);
+          try {
+            const info = await execObj.inspect();
+            resolve({ stdout: stdout.slice(0, 100_000), stderr: stderr.slice(0, 50_000), exitCode: info.ExitCode });
+          } catch {
+            resolve({ stdout, stderr, exitCode: -1 });
+          }
+        });
+        stream.on("error", (e) => { clearTimeout(timer); reject(e); });
+      });
+    });
+  }
+
+  async destroy(handle) {
+    try {
+      const container = this.docker.getContainer(handle);
+      await container.stop({ t: 5 }).catch(() => {});
+      await container.remove({ force: true }).catch(() => {});
+    } catch { /* already gone */ }
+  }
+
+  /** Sandboxes labeled by the controller, keyed by sessionId for reconcile. */
+  async list() {
+    const containers = await this.docker.listContainers({
+      all: true,
+      filters: { label: ["unclaw.session"] },
+    });
+    return containers.map((c) => ({
+      sessionId: c.Labels["unclaw.session"],
+      userId: c.Labels["unclaw.user"],
+      handle: c.Id,
+      running: c.State === "running",
+    }));
+  }
+}
