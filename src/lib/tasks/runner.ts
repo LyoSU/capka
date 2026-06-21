@@ -211,19 +211,22 @@ async function injectNativeFiles(
 /** Re-resolve everything needed to run the task from its persisted payload.
  *  `sessionKey` is the project (shared folder) or the chat itself — see
  *  workspaceSessionKey. Memory is scoped to the project plus user-global facts. */
-async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload) {
+async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string) {
   // A project chat sees its project memory + user-global (unscoped) memory.
   // A standalone chat sees only user-global memory, so projects don't leak.
   const memoryFilter = payload.projectId
     ? and(eq(memories.userId, userId), or(eq(memories.projectId, payload.projectId), isNull(memories.projectId)))
     : and(eq(memories.userId, userId), isNull(memories.projectId));
 
-  const [{ model, provider, modelId, isShared }, project, userMemories] = await Promise.all([
+  const [{ model, provider, modelId, isShared }, project, userMemories, user, chat] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
     db.select().from(memories).where(memoryFilter).orderBy(desc(memories.createdAt)).limit(50),
+    db.select({ name: users.name, timezone: users.timezone, locale: users.locale })
+      .from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]),
+    db.select({ createdAt: chats.createdAt }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
   ]);
 
   // Sandbox tools (execute_bash, read_file, …) + MCP connector tools (sub-project
@@ -257,6 +260,9 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     skills: availableSkills.map((s) => ({ name: s.name, description: s.description })),
     workspaceSnapshot,
     attachedFiles: payload.attachedFiles,
+    user: user ? { name: user.name, timezone: user.timezone } : null,
+    conversationStartedAt: chat?.createdAt ?? null,
+    locale: user?.locale ?? payload.origin?.locale ?? null,
   });
 
   // Dispose both sandbox and MCP clients when the run ends.
@@ -344,21 +350,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
 
     const { model, provider, modelId, isShared, tools, closeMcp: close, prompt, userMemories } =
-      await prepareRun(userId, sessionKey, payload);
+      await prepareRun(userId, sessionKey, payload, chatId);
     closeMcp = close;
 
-    // Prompt caching: the stable prefix (persona + sandbox + project + skills)
-    // carries an ephemeral cache breakpoint; the volatile suffix (memories,
-    // workspace snapshot, attached files) follows it uncached so per-run churn
-    // never invalidates the cached prefix. Two consecutive system messages.
+    // Prompt caching, three tiers of system messages (see buildSystemPrompt):
+    //  1. stable  — persona+sandbox+project+skills, identical for everyone →
+    //     first ephemeral breakpoint, reused across all users/chats.
+    //  2. session — name + conversation-start date, constant for this chat →
+    //     its own breakpoint, reused on every turn of the conversation.
+    //  3. volatile — memories/workspace/files, per-run, sent uncached last so
+    //     churn never invalidates the cached prefixes.
     // `providerOptions.anthropic` is namespaced — non-Anthropic providers ignore it.
+    const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
     const systemMessages: ModelMessage[] = [
-      {
-        role: "system",
-        content: prompt.stable,
-        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-      },
+      { role: "system", content: prompt.stable, providerOptions: ephemeral },
     ];
+    if (prompt.session) {
+      systemMessages.push({ role: "system", content: prompt.session, providerOptions: ephemeral });
+    }
     if (prompt.volatile) {
       systemMessages.push({ role: "system", content: prompt.volatile });
     }

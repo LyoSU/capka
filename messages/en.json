@@ -278,6 +278,7 @@
       "close": "Close",
       "loadError": "Couldn't open this file",
       "gone": "This file is no longer in the chat's workspace",
+      "temporary": "This file is temporarily unavailable — try again in a moment",
       "tooLarge": "File too large to preview",
       "rendered": "Preview",
       "source": "Source",

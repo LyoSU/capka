@@ -3,6 +3,7 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { ProviderStatusBanner } from "@/components/layout/provider-status-banner";
+import { TimezoneSync } from "@/components/layout/timezone-sync";
 import { isSetupComplete } from "@/lib/settings";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -21,6 +22,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {children}
       </SidebarInset>
       <CommandPalette />
+      <TimezoneSync />
     </SidebarProvider>
   );
 }

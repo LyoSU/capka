@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { useTranslations } from "next-intl";
-import { ChevronLeft, ChevronRight, Download, Loader2, Maximize2, Minimize2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, ImageOff, Loader2, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Markdown } from "./markdown";
 import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
@@ -173,12 +173,7 @@ function FilePreview({
 
 function Viewer({ file, kind }: { file: PreviewFile; kind: ReturnType<typeof previewKind> }) {
   if (kind === "image") {
-    return (
-      <div className="flex h-full items-center justify-center p-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={inlineUrl(file)} alt={file.name} className="max-h-full max-w-full object-contain" />
-      </div>
-    );
+    return <ImageViewer file={file} />;
   }
   if (kind === "pdf") {
     // Framed same-origin (allowed via the route's SAMEORIGIN + frame-ancestors
@@ -192,6 +187,85 @@ function Viewer({ file, kind }: { file: PreviewFile; kind: ReturnType<typeof pre
     return <TextViewer file={file} markdown={kind === "markdown"} />;
   }
   return null; // unreachable — only viewable kinds open the overlay
+}
+
+// ── Image viewer ───────────────────────────────────────────────────────────
+
+// The workspace is scratch space, so a thumbnail/preview can resolve to a
+// missing or unreachable file. The download route returns 404 (file deleted),
+// a 5xx (controller temporarily down — retryable), or other errors. A raw <img>
+// would just render the browser's broken-image glyph for all of these, so we
+// fetch first to learn *why* it failed and show an honest notice instead.
+type ImgState =
+  | { state: "loading" }
+  | { state: "ok"; url: string }
+  | { state: "gone" }       // 404 → file is permanently gone
+  | { state: "temporary" }  // 5xx / network → try again shortly
+  | { state: "error" };     // anything else
+
+function useFileImage(file: PreviewFile): ImgState {
+  const [img, setImg] = useState<ImgState>({ state: "loading" });
+  useEffect(() => {
+    let alive = true;
+    let url: string | null = null;
+    // No synchronous reset to "loading" here — the overlay keys <Viewer> by
+    // file.path, so this hook remounts (and useState re-inits) per file.
+    (async () => {
+      try {
+        const res = await fetch(inlineUrl(file));
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {});
+          const state = res.status === 404 ? "gone" : res.status >= 500 ? "temporary" : "error";
+          if (alive) setImg({ state });
+          return;
+        }
+        url = URL.createObjectURL(await res.blob());
+        if (alive) setImg({ state: "ok", url });
+        else URL.revokeObjectURL(url);
+      } catch {
+        // Network blip / aborted fetch — treat as retryable, not a hard error.
+        if (alive) setImg({ state: "temporary" });
+      }
+    })();
+    return () => {
+      alive = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [file]);
+  return img;
+}
+
+function ImageViewer({ file }: { file: PreviewFile }) {
+  const img = useFileImage(file);
+
+  if (img.state === "loading")
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" />
+      </div>
+    );
+  if (img.state === "ok")
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={img.url} alt={file.name} className="max-h-full max-w-full object-contain" />
+      </div>
+    );
+  return <UnavailableNotice state={img.state} />;
+}
+
+/** Friendly full-pane notice for a file that couldn't be shown, wording the
+ *  cause: gone for good, briefly unavailable, or a generic open error. */
+function UnavailableNotice({ state }: { state: "gone" | "temporary" | "error" }) {
+  const t = useTranslations("chat.preview");
+  const Icon = state === "temporary" ? RefreshCw : ImageOff;
+  const msg = state === "gone" ? t("gone") : state === "temporary" ? t("temporary") : t("loadError");
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <Icon className="h-8 w-8 text-muted-foreground/30" aria-hidden />
+      <p className="max-w-xs text-sm text-muted-foreground">{msg}</p>
+    </div>
+  );
 }
 
 // ── HTML viewer (rendered in a sandboxed frame, with a source toggle) ──────────
@@ -448,9 +522,7 @@ export function SandboxFileTile({ file, viewable, overlay }: { file: PreviewFile
 export function FileThumb({ file, className }: { file: PreviewFile; className?: string }) {
   const kind = previewKind(file.name);
 
-  if (kind === "image")
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={inlineUrl(file)} alt="" loading="lazy" className={cn("object-cover", className)} />;
+  if (kind === "image") return <ImageThumb file={file} className={className} />;
   if (kind === "text" || kind === "markdown" || kind === "html") return <TextThumb file={file} className={className} />;
 
   // Binaries with no in-app viewer (docx, xlsx, zip…): a document glyph instead
@@ -490,6 +562,34 @@ export function BinaryFileThumb({ name, className }: { name: string; className?:
         </text>
       </svg>
     </div>
+  );
+}
+
+/**
+ * Image thumbnail with a graceful fallback. A bare <img> renders the browser's
+ * broken-image glyph when the file is gone or the controller is down; instead we
+ * catch the load error and show a neutral "image unavailable" placeholder. The
+ * full reason (gone vs temporary) is surfaced in Quick Look — see ImageViewer.
+ */
+function ImageThumb({ file, className }: { file: PreviewFile; className?: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed)
+    return (
+      <div className={cn("flex items-center justify-center bg-muted/30", className)}>
+        <ImageOff className="h-1/3 w-1/3 text-muted-foreground/30" aria-hidden />
+      </div>
+    );
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={inlineUrl(file)}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className={cn("object-cover", className)}
+    />
   );
 }
 

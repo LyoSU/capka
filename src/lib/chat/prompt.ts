@@ -3,17 +3,64 @@ import { isNativeMultimodal, type FileRef } from "@/lib/constants";
 import { formatAvailableSkills } from "@/lib/skills/fmt";
 
 /**
- * The system prompt split into a cache-stable prefix and a volatile suffix.
+ * The system prompt split into THREE cache tiers, rendered as consecutive
+ * system messages (see runner.ts):
  *
- * `stable` (base persona + sandbox + project instructions + available skills)
- * changes rarely, so it carries the prompt-cache breakpoint. `volatile`
- * (memories, workspace snapshot, just-attached files) changes per run and is
- * sent AFTER the breakpoint so it never invalidates the cached prefix. The
- * caller renders them as two consecutive system messages — see runner.ts.
+ * 1. `stable`  — base persona + sandbox + project instructions + skills.
+ *    Identical across every user and chat, so it carries the first cache
+ *    breakpoint and is reused by everyone (highest hit rate).
+ * 2. `session` — who the user is + when THIS conversation started. Constant
+ *    for the whole conversation, so it carries its own breakpoint and is reused
+ *    on every turn of that chat. CACHE-CRITICAL: it must be derived from the
+ *    conversation start time, never a live clock — a per-turn value here would
+ *    change the prefix and bust the cache for everything after it.
+ * 3. `volatile` — memories, workspace snapshot, just-attached files. Changes
+ *    per run, sent uncached after the breakpoints so churn never invalidates
+ *    the cached prefixes.
  */
 export interface BuiltPrompt {
   stable: string;
+  session: string;
   volatile: string;
+}
+
+/**
+ * Per-conversation context block (tier 2). Fixed for the whole conversation.
+ *
+ * Returning "" is safe — the caller then skips the breakpoint and the extra
+ * system message entirely.
+ *
+ * CACHE RULE: only feed values that are constant across the conversation.
+ * `startedAt` is the chat's creation time, NOT `new Date()` — see BuiltPrompt.
+ */
+export function buildSessionContext(opts: {
+  user?: { name?: string | null; timezone?: string | null } | null;
+  startedAt?: Date | null;
+  locale?: string | null;
+}): string {
+  const name = opts.user?.name?.trim();
+  const startedAt = opts.startedAt ?? null;
+  // Nothing worth a whole cached system message → let the caller skip it.
+  if (!name && !startedAt) return "";
+
+  const tz = opts.user?.timezone || "UTC";
+  const locale = opts.locale || "en";
+
+  const lines: string[] = [];
+  if (name) lines.push(`- Name: ${name}`);
+  if (startedAt) {
+    // Friendly local date+time. dateStyle/timeStyle can't carry a tz label, so
+    // we append the IANA id — unambiguous and stable. A stored-but-invalid tz
+    // would make Intl throw, so fall back to UTC rather than crash a run.
+    let when: string;
+    try {
+      when = new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "short", timeZone: tz }).format(startedAt);
+    } catch {
+      when = new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "short", timeZone: "UTC" }).format(startedAt);
+    }
+    lines.push(`- This conversation started on ${when} (${tz}). Treat that as the current date/time unless the user indicates otherwise.`);
+  }
+  return `## Who you're talking to\n${lines.join("\n")}`;
 }
 
 export function buildSystemPrompt(opts: {
@@ -22,6 +69,9 @@ export function buildSystemPrompt(opts: {
   skills?: { name: string; description: string | null }[];
   workspaceSnapshot?: string;
   attachedFiles?: FileRef[];
+  user?: { name?: string | null; timezone?: string | null } | null;
+  conversationStartedAt?: Date | null;
+  locale?: string | null;
 }): BuiltPrompt {
   // ── Stable prefix (cacheable) ───────────────────────────────────────────
   let stable = `${SYSTEM_PROMPT}\n\n${SANDBOX_PROMPT}`;
@@ -34,6 +84,13 @@ export function buildSystemPrompt(opts: {
   if (skillsBlock) {
     stable += `\n\n${skillsBlock}`;
   }
+
+  // ── Session tier (cacheable, conversation-stable) ───────────────────────
+  const session = buildSessionContext({
+    user: opts.user,
+    startedAt: opts.conversationStartedAt,
+    locale: opts.locale,
+  });
 
   // ── Volatile suffix (not cached) ────────────────────────────────────────
   let volatile = "";
@@ -60,7 +117,7 @@ export function buildSystemPrompt(opts: {
     if (hasToolOnly) volatile += `\nOpen non-native files with tools as needed.`;
   }
 
-  return { stable, volatile };
+  return { stable, session, volatile };
 }
 
 /** Classify attached files into native multimodal vs tool-only */

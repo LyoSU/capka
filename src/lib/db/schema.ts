@@ -18,6 +18,9 @@ export const users = pgTable("user", {
   image: text("image"),
   role: text("role").notNull().default("user"), // "admin" | "user" | "viewer"
   locale: text("locale"), // "en" | "uk" | null (null = follow browser/default)
+  // IANA tz (e.g. "Europe/Kyiv"), auto-detected from the browser. null → UTC.
+  // Fed into the agent's volatile prompt so it knows the user's local date/time.
+  timezone: text("timezone"),
   // Spend tier governing this user's budget on the SHARED key. null → the
   // instance default tier (see tiers.isDefault). tierSource is a forward-looking
   // hook: today only "manual" (admin-assigned), later "auto" / "api".
