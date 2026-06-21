@@ -37,7 +37,7 @@
       "home": "Go to home"
     },
     "llm": {
-      "out_of_credits": "The assistant is temporarily unavailable — the AI account is out of credit. Your administrator needs to top it up.",
+      "out_of_credits": "The assistant is paused: the AI account is out of credit. Ask your administrator to top it up.",
       "invalid_key": "The assistant isn't connected right now. Your administrator needs to check the AI provider settings.",
       "rate_limited": "The assistant is busy right now. Please try again in a few moments.",
       "model_unavailable": "The selected AI model isn't available right now. Try a different model, or ask your administrator.",
@@ -45,7 +45,7 @@
       "network": "Couldn't reach the AI service. Please try again in a moment.",
       "timed_out": "This task took too long and was stopped. Please try again, or break it into smaller steps.",
       "interrupted": "The task was interrupted before it finished. Please try again.",
-      "unknown": "Something went wrong while generating a response. Please try again — if it keeps happening, let your administrator know."
+      "unknown": "Something went wrong while generating a response. Please try again. If it keeps happening, let your administrator know."
     }
   },
   "providerStatus": {
@@ -201,7 +201,7 @@
       "scrollDown": "Scroll to bottom",
       "retry": "Retry",
       "navigation": "Chat navigation",
-      "telegramReadOnly": "This is a Telegram chat — reply from Telegram.",
+      "telegramReadOnly": "This is a Telegram chat. Reply there.",
       "continueHere": "Continue in a web chat",
       "queuedFiles": "{count, plural, one {# file} other {# files}}",
       "cancelQueued": "Remove from queue"
@@ -285,7 +285,7 @@
       "close": "Close",
       "loadError": "Couldn't open this file",
       "gone": "This file is no longer in the chat's workspace",
-      "temporary": "This file is temporarily unavailable — try again in a moment",
+      "temporary": "This file is temporarily unavailable, try again in a moment",
       "tooLarge": "File too large to preview",
       "rendered": "Preview",
       "source": "Source",
@@ -346,10 +346,10 @@
     },
     "hook": {
       "loadFailed": "Failed to load messages.",
-      "uploadFailed": "Upload failed: {files} — message not sent.",
+      "uploadFailed": "Couldn't upload {files}. Message not sent.",
       "processFiles": "Process these files",
       "requestFailed": "Request failed.",
-      "rateLimited": "Too many messages — please wait a moment.",
+      "rateLimited": "Too many messages, please wait a moment.",
       "budgetReached": "Spending limit reached. Please contact your admin."
     },
     "clearSearch": "Clear search"
@@ -505,7 +505,7 @@
         "changeAccount": "Connect a different account",
         "unlinked": "Telegram account unlinked",
         "unlinkFailed": "Couldn't unlink the account",
-        "openBotHint": "One tap and you're connected — no copying needed.",
+        "openBotHint": "One tap and you're connected, no copying needed.",
         "openBot": "Open @{username} & link",
         "scanQr": "…or scan this from another device",
         "orManually": "Not working? Send this to the bot by hand:",
@@ -549,7 +549,7 @@
         },
         "own_only": {
           "label": "Own only",
-          "desc": "No shared key — every user connects their own."
+          "desc": "No shared key, every user connects their own."
         }
       },
       "limits": {
@@ -632,14 +632,14 @@
         "marketplace": "Marketplace",
         "connectors": "Connectors"
       },
-      "loadError": "Couldn’t load skills.",
-      "toggleFailed": "Couldn’t update the skill.",
+      "loadError": "Couldn't load skills.",
+      "toggleFailed": "Couldn't update the skill.",
       "toggleAria": "Toggle {name}",
       "add": "Add",
       "addPersonal": "Personal skill",
       "addShared": "Shared skill",
       "addSuccess": "Added “{name}”.",
-      "addFailed": "Couldn’t add the skill.",
+      "addFailed": "Couldn't add the skill.",
       "searchPlaceholder": "Search skills…",
       "sortAria": "Sort skills",
       "sort": {
@@ -662,12 +662,12 @@
       "browseMarketplace": "Browse marketplace",
       "summary": "{enabled} of {total} enabled",
       "noDescription": "No description",
-      "noDescriptionHint": "No description — add one so the assistant knows when to use this.",
+      "noDescriptionHint": "No description. Add one so the assistant knows when to use this.",
       "deleted": "Deleted “{name}”.",
-      "deleteFailed": "Couldn’t delete the skill.",
+      "deleteFailed": "Couldn't delete the skill.",
       "deleteAria": "Delete {name}",
       "deleteTitle": "Delete “{name}”?",
-      "deleteWarn": "This removes the skill for everyone it’s available to. This can’t be undone.",
+      "deleteWarn": "This removes the skill for everyone it's available to. This can't be undone.",
       "deletePluginWarn": "This skill came from the “{plugin}” plugin and may return next time that plugin is installed or updated. To remove it for good, uninstall the plugin.",
       "cancel": "Cancel",
       "delete": "Delete"
@@ -681,25 +681,25 @@
       "namePlaceholder": "Name (e.g. Notion)",
       "tokenPlaceholder": "Access token (optional)",
       "nameHint": "Will be saved as: {slug}",
-      "tokenHint": "If the service needs an access key, paste it here — it’s stored encrypted.",
+      "tokenHint": "If the service needs an access key, paste it here. It's stored encrypted.",
       "advanced": "Advanced settings",
-      "advancedHint": "OAuth Client ID / Secret — only for services that require a pre-registered client. Leave blank for the usual sign-in.",
+      "advancedHint": "OAuth Client ID / Secret are only for services that require a pre-registered client. Leave blank for the usual sign-in.",
       "clientIdPlaceholder": "OAuth Client ID (optional)",
       "clientSecretPlaceholder": "OAuth Client Secret (optional)",
       "test": "Test",
       "testOk": "Works · {count} tools found",
-      "testOauth": "This connector uses sign-in — save it, then click Sign in.",
+      "testOauth": "This connector uses sign-in. Save it, then click Sign in.",
       "signIn": "Sign in",
       "signOut": "Sign out",
       "signedIn": "Connected to {name}.",
       "signInFailed": "Sign-in failed. Please try again.",
       "signedOut": "Signed out.",
-      "signOutFailed": "Couldn’t sign out.",
+      "signOutFailed": "Couldn't sign out.",
       "added": "Connector added.",
-      "addFailed": "Couldn’t add the connector.",
-      "toggleFailed": "Couldn’t update the connector.",
+      "addFailed": "Couldn't add the connector.",
+      "toggleFailed": "Couldn't update the connector.",
       "deleted": "Connector removed.",
-      "deleteFailed": "Couldn’t remove the connector.",
+      "deleteFailed": "Couldn't remove the connector.",
       "empty": "No connectors yet.",
       "toggleAria": "Toggle {name}",
       "delete": "Remove connector",
@@ -707,8 +707,8 @@
         "checking": "Checking connection…",
         "ok": "Connected · {count} tools",
         "needsLogin": "Sign-in needed",
-        "unauthorized": "Token rejected — check the access key",
-        "unreachable": "Couldn’t connect — check the address"
+        "unauthorized": "Token rejected, check the access key",
+        "unreachable": "Couldn't connect, check the address"
       },
       "scope": {
         "system": "Shared",
@@ -732,28 +732,28 @@
       "urlPlaceholder": "GitHub marketplace URL (e.g. anthropics/claude-plugins)",
       "add": "Add",
       "added": "Marketplace added.",
-      "addFailed": "Couldn’t add that marketplace.",
+      "addFailed": "Couldn't add that marketplace.",
       "empty": "No marketplaces yet. Add one above to browse plugins.",
       "refresh": "Refresh",
       "refreshed": "Marketplace refreshed.",
-      "refreshFailed": "Couldn’t refresh.",
+      "refreshFailed": "Couldn't refresh.",
       "remove": "Remove",
       "removed": "Marketplace removed.",
-      "removeFailed": "Couldn’t remove.",
+      "removeFailed": "Couldn't remove.",
       "by": "by {author}",
       "install": "Install",
       "installed": "Installed · {skills} skills, {connectors} connectors.",
       "installedLabel": "Installed",
-      "installFailed": "Couldn’t install that plugin.",
+      "installFailed": "Couldn't install that plugin.",
       "uninstalled": "Uninstalled.",
-      "uninstallFailed": "Couldn’t uninstall.",
-      "unsupportedSource": "This plugin’s source isn’t installable yet.",
+      "uninstallFailed": "Couldn't uninstall.",
+      "unsupportedSource": "This plugin's source isn't installable yet.",
       "searchPlaceholder": "Search plugins…",
       "uncategorized": "Other",
       "noMatches": "Nothing matches “{query}”.",
       "update": "Update",
       "updated": "Updated · {skills} skills, {connectors} connectors.",
-      "updateFailed": "Couldn’t update that plugin."
+      "updateFailed": "Couldn't update that plugin."
     },
     "permissions": {
       "title": "Permissions",
@@ -769,8 +769,8 @@
         "ask": "Ask",
         "deny": "Deny"
       },
-      "askSoon": "Ask (human-in-the-loop) is coming soon — behaves as Allow for now.",
-      "saveFailed": "Couldn’t save that change.",
+      "askSoon": "Ask (human-in-the-loop) is coming soon. For now it behaves as Allow.",
+      "saveFailed": "Couldn't save that change.",
       "actions": {
         "plugin": {
           "install": "Installed plugin",
@@ -807,14 +807,14 @@
         "botFatherHint": "In @BotFather open your bot → Bot Settings → Web Login. Add the redirect URI below to Allowed URLs, then copy the Client ID and Secret here.",
         "clientId": "Client ID",
         "clientSecret": "Client Secret",
-        "secretStored": "•••••••• (stored — leave blank to keep)",
+        "secretStored": "•••••••• (stored, leave blank to keep)",
         "secretPlaceholder": "Paste the secret from BotFather",
         "redirectUri": "Redirect URI",
         "redirectHint": "Paste this into BotFather → Web Login → Allowed URLs."
       },
       "mode": {
         "title": "Who can register",
-        "desc": "What happens when someone creates an account — via email or Telegram — for the first time.",
+        "desc": "What happens when someone first creates an account, via email or Telegram.",
         "open": {
           "label": "Open",
           "desc": "Anyone can sign in and start using the app right away."
@@ -1007,7 +1007,7 @@
     "linkFirst": "Link your account first: /link CODE",
     "newChat": "New chat started!",
     "notLinked": "Account not linked. Send /link CODE",
-    "tooFast": "You're sending messages too fast — please wait a moment.",
+    "tooFast": "You're sending messages too fast, please wait a moment.",
     "budgetReached": "Spending limit reached. Please contact your admin.",
     "fileTooBig": "“{name}” is larger than 20 MB, so I can't fetch it from Telegram.",
     "unsupported": "I can work with text, photos and files. Send me one of those and I'll get going.",
