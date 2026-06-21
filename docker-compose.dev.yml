@@ -12,6 +12,12 @@ services:
   sandbox-controller:
     environment:
       - CONTROLLER_SECRET=unclaw-sandbox-secret
+      # Pin to the dev default password too. The base compose interpolates
+      # ${POSTGRES_PASSWORD} (from .env) into the controller's DATABASE_URL, but
+      # dev initialises the postgres volume with `unClaw` (above). Without this
+      # override the controller auths with the .env password and crash-loops
+      # against a postgres that only knows the dev one.
+      - DATABASE_URL=postgresql://unClaw:unClaw@postgres:5432/unClaw
       # Opt-in escape hatch — lets the controller boot with the default secret.
       # NEVER set this outside local development.
       - ALLOW_DEFAULT_SECRET=true
