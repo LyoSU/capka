@@ -242,7 +242,8 @@
       "featured": "Featured",
       "price": {
         "label": "Approx. cost",
-        "free": "free"
+        "free": "free",
+        "io": "in {in} / out {out} per 1M tokens"
       }
     },
     "input": {

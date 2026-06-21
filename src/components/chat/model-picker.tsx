@@ -75,18 +75,33 @@ function priceTier(pricing: ModelInfo["pricing"]): number {
   return 4;
 }
 
-/** A compact "$ $ ·" cost meter — three slots, filled by tier, "+" for the top. */
+/** Render a USD-per-1M-tokens figure compactly (e.g. "$0.50", "$15"). */
+function formatPrice(v: number): string {
+  if (v <= 0) return "$0";
+  if (v < 1) return `$${v.toFixed(2)}`;
+  return `$${v % 1 === 0 ? v.toFixed(0) : v.toFixed(2)}`;
+}
+
+/** A compact "$ $ ·" cost meter — three slots, filled by tier, "+" for the top.
+ *  The exact in/out prices live in the tooltip so the glance stays simple. */
 function PriceMeter({ pricing }: { pricing: ModelInfo["pricing"] }) {
   const t = useTranslations("chat.model");
   const tier = priceTier(pricing);
   const filled = Math.min(tier, 3);
   const label =
     tier === 0 ? t("price.free") : `${"$".repeat(filled)}${tier >= 4 ? "+" : ""}`;
+  const title =
+    tier === 0
+      ? t("price.free")
+      : `${label} · ${t("price.io", {
+          in: formatPrice(pricing?.prompt ?? 0),
+          out: formatPrice(pricing?.completion ?? 0),
+        })}`;
   return (
     <span
       className="inline-flex shrink-0 items-center font-medium tabular-nums leading-none"
-      title={`${t("price.label")}: ${label}`}
-      aria-label={`${t("price.label")}: ${label}`}
+      title={title}
+      aria-label={title}
     >
       {[0, 1, 2].map((i) =>
         i < filled ? (
