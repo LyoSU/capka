@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { chats, messages, projects } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
+import { checkBudget } from "@/lib/billing/limits";
+import { BudgetExceededError } from "@/lib/errors";
 import { enqueueTask } from "@/lib/tasks/queue";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
@@ -59,7 +61,15 @@ export const POST = apiHandler(async (req: Request) => {
 
   // Validate the provider/model up front so the user gets immediate feedback
   // instead of a task that fails in the background. The worker re-resolves it.
-  await resolveUserModelInfo(userId, effectiveModel);
+  const { isShared } = await resolveUserModelInfo(userId, effectiveModel);
+
+  // Budget gate: block NEW shared-key requests once a spend window is exhausted.
+  // Already-running tasks finish (this only guards new enqueues); own-key users
+  // are never throttled.
+  const budget = await checkBudget(userId, isShared);
+  if (!budget.allowed) {
+    throw new BudgetExceededError(budget.window ?? "d30");
+  }
 
   if (!existingChat) {
     await db.insert(chats).values({

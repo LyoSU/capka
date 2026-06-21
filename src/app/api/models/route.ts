@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
-import { getMasterKey } from "@/lib/settings";
+import { getMasterKey, getProviderKeyMode } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { resolveProviderConfig } from "@/lib/providers/resolve";
 import { listProviderModels, type ModelInfo } from "@/lib/providers/list-models";
@@ -62,7 +62,11 @@ export const GET = apiHandler(async (req: Request) => {
 
   const config = await resolveProviderConfig(userId);
   if (!config) return empty();
-  return respond(config.provider, await decryptKey(config.apiKey), config.baseUrl, config.isShared);
+  // In shared_only there's no "own key" to switch to, so the "shared" badge is
+  // just noise — suppress it by reporting the key as non-shared to the picker.
+  const mode = await getProviderKeyMode();
+  const showShared = config.isShared && mode !== "shared_only";
+  return respond(config.provider, await decryptKey(config.apiKey), config.baseUrl, showShared);
 });
 
 /**

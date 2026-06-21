@@ -12,6 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { MasterKeyBanner } from "@/components/settings/master-key-banner";
+import { TelegramLinkCard } from "@/components/settings/telegram-link-card";
+import { UsageLimitCard } from "@/components/settings/usage-limit-card";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
 
 function useSetting(key: string, fallback: string) {
@@ -60,11 +62,10 @@ export default function GeneralSettingsPage() {
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const sandbox = useSetting("sandbox_enabled", "false");
   const registration = useSetting("registration_enabled", "false");
-  const shareProviders = useSetting("share_admin_providers", "false");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
 
   const settingsLoading =
-    minCtx.loading || sandbox.loading || registration.loading || shareProviders.loading || blockPrivate.loading;
+    minCtx.loading || sandbox.loading || registration.loading || blockPrivate.loading;
 
   // Optimistic toggle with rollback — flip immediately, but restore the previous
   // value if the save fails so the UI never lies about persisted state.
@@ -122,6 +123,15 @@ export default function GeneralSettingsPage() {
         <label className="text-sm font-medium">{tLang("label")}</label>
         <LanguageSwitcher />
       </div>
+
+      {/* Personal budget status (% only) — renders itself away when there's no
+          shared-key limit to show. Visible to every role. */}
+      <UsageLimitCard />
+
+      {/* Personal Telegram linking — open to every role; the bot token itself is
+          configured by an admin in Settings → Integrations. */}
+      <Separator />
+      <TelegramLinkCard />
 
       {isAdmin && (
         <>
@@ -199,19 +209,6 @@ export default function GeneralSettingsPage() {
             <Switch
               checked={registration.value === "true"}
               onCheckedChange={(checked) => toggle(registration, "registration_enabled", checked, t("registrationEnabled"), t("registrationDisabled"))}
-            />
-          </div>
-
-          <div className="flex items-center justify-between rounded-lg border p-4">
-            <div className="pr-4">
-              <p className="text-sm font-medium">{t("shareProviders")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("shareProvidersHint")}
-              </p>
-            </div>
-            <Switch
-              checked={shareProviders.value === "true"}
-              onCheckedChange={(checked) => toggle(shareProviders, "share_admin_providers", checked, t("shareEnabled"), t("shareDisabled"))}
             />
           </div>
 

@@ -4,7 +4,8 @@ import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
-import { getMasterKey } from "@/lib/settings";
+import { getMasterKey, ownKeysAllowed } from "@/lib/settings";
+import { ForbiddenError } from "@/lib/errors";
 import { PROVIDERS } from "@/lib/providers";
 import { invalidateModelsCache } from "@/lib/providers/list-models";
 
@@ -27,7 +28,13 @@ export const GET = apiHandler(async () => {
 });
 
 export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireRole("admin", "user");
+  const { userId, role } = await requireRole("admin", "user");
+
+  // In shared_only, regular users may not add their own key — the admin's shared
+  // key is the only one. Admins always may (they configure that shared key here).
+  if (role !== "admin" && !(await ownKeysAllowed())) {
+    throw new ForbiddenError("Adding your own provider key is disabled on this instance.");
+  }
 
   const { provider, apiKey, baseUrl, defaultModel } = await req.json();
   if (!provider || !PROVIDERS.includes(provider)) {

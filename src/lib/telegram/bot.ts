@@ -6,6 +6,8 @@ import { telegramLinks, linkCodes, chats, messages } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
+import { resolveProviderConfig } from "@/lib/providers/resolve";
+import { checkBudget } from "@/lib/billing/limits";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { loadActivePath } from "@/lib/chat/tree";
 import { take } from "@/lib/rate-limit";
@@ -113,6 +115,15 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   // Same per-user flood guard as the web enqueue path.
   if (!take(`chat:${link.userId}`).ok) {
     await ctx.reply(t("tooFast"));
+    return;
+  }
+
+  // Same shared-key budget gate as the web enqueue path — a user must not be able
+  // to sidestep their spending limit by switching to Telegram.
+  const config = await resolveProviderConfig(link.userId);
+  const budget = await checkBudget(link.userId, config?.isShared ?? false);
+  if (!budget.allowed) {
+    await ctx.reply(t("budgetReached"));
     return;
   }
 

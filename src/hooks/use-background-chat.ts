@@ -401,9 +401,12 @@ export function useBackgroundChat({
         });
 
         if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          // Budget exhaustion shares the 429 status with rate limiting — tell
+          // them apart by code so the user gets the right message.
+          if (err?.code === "BUDGET_EXCEEDED") throw new Error(t("budgetReached"));
           if (res.status === 429) throw new Error(t("rateLimited"));
-          const err = await res.json().catch(() => ({ error: t("requestFailed") }));
-          throw new Error(err.error || t("requestFailed"));
+          throw new Error(err?.error || t("requestFailed"));
         }
 
         const { taskId: newTaskId } = await res.json();
@@ -441,9 +444,12 @@ export function useBackgroundChat({
           }),
         });
         if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          // Budget exhaustion shares the 429 status with rate limiting — tell
+          // them apart by code so the user gets the right message.
+          if (err?.code === "BUDGET_EXCEEDED") throw new Error(t("budgetReached"));
           if (res.status === 429) throw new Error(t("rateLimited"));
-          const err = await res.json().catch(() => ({ error: t("requestFailed") }));
-          throw new Error(err.error || t("requestFailed"));
+          throw new Error(err?.error || t("requestFailed"));
         }
         const { taskId: newTaskId } = await res.json();
         setTaskId(newTaskId);

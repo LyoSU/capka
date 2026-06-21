@@ -46,6 +46,16 @@ export class UnauthorizedError extends AppError {
   }
 }
 
+export class BudgetExceededError extends AppError {
+  readonly window: string;
+  // 429: the request is well-formed but the user's shared-key spend cap is hit.
+  // Carries the window so the UI can say which limit (5h / week / month) tripped.
+  constructor(window: string, message = "Spending limit reached") {
+    super(message, 429, "BUDGET_EXCEEDED");
+    this.window = window;
+  }
+}
+
 export class SandboxError extends AppError {
   readonly operation: string;
   readonly retryable: boolean;

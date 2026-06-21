@@ -3,17 +3,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, Plug, Store, ShieldCheck } from "lucide-react";
+import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, Plug, Store, ShieldCheck, Wallet } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { useBilling } from "@/hooks/use-billing";
 
 type NavItem = { key: string; href: string; icon: typeof Settings; adminOnly?: boolean };
 
 const navItems: NavItem[] = [
   { key: "general", href: "/settings", icon: Settings },
-  { key: "connections", href: "/settings/connections", icon: Link2, adminOnly: true },
+  // Connections is personal (each user's own provider keys). Visibility is mode-
+  // gated below: hidden only when the instance forbids own keys (shared_only).
+  { key: "connections", href: "/settings/connections", icon: Link2 },
   { key: "integrations", href: "/settings/integrations", icon: Puzzle, adminOnly: true },
+  { key: "billing", href: "/settings/billing", icon: Wallet, adminOnly: true },
   { key: "memory", href: "/settings/memory", icon: Brain },
   { key: "skills", href: "/settings/skills", icon: Sparkles },
   { key: "connectors", href: "/settings/connectors", icon: Plug },
@@ -27,8 +31,15 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
   const t = useTranslations("settings");
   const isAdmin = useIsAdmin();
+  const { billing } = useBilling();
+  // Non-admins see Connections only when the instance lets them bring their own
+  // key; admins always need it (they configure the shared key there).
+  const showConnections = isAdmin || (billing?.ownKeysAllowed ?? false);
 
-  const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
+  const visibleItems = navItems.filter((item) => {
+    if (item.key === "connections") return showConnections;
+    return !item.adminOnly || isAdmin;
+  });
 
   return (
     <>

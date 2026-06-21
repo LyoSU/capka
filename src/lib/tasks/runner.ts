@@ -218,7 +218,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     ? and(eq(memories.userId, userId), or(eq(memories.projectId, payload.projectId), isNull(memories.projectId)))
     : and(eq(memories.userId, userId), isNull(memories.projectId));
 
-  const [{ model, provider, modelId }, project, userMemories] = await Promise.all([
+  const [{ model, provider, modelId, isShared }, project, userMemories] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
@@ -261,7 +261,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
 
   // Dispose both sandbox and MCP clients when the run ends.
   const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
-  return { model, provider, modelId, tools, closeMcp: closeAll, prompt, userMemories };
+  return { model, provider, modelId, isShared, tools, closeMcp: closeAll, prompt, userMemories };
 }
 
 /**
@@ -343,7 +343,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, tools, closeMcp: close, prompt, userMemories } =
+    const { model, provider, modelId, isShared, tools, closeMcp: close, prompt, userMemories } =
       await prepareRun(userId, sessionKey, payload);
     closeMcp = close;
 
@@ -747,7 +747,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // above; recordUsage never throws on its own.
     if (usageMeta) {
       await recordUsage({
-        taskId, messageId: msgId, userId, provider, model: modelId,
+        taskId, messageId: msgId, userId, provider, model: modelId, onSharedKey: isShared,
         usage: {
           inputTokens: usageMeta.input,
           outputTokens: usageMeta.output,

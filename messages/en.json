@@ -341,7 +341,8 @@
       "uploadFailed": "Upload failed: {files} — message not sent.",
       "processFiles": "Process these files",
       "requestFailed": "Request failed.",
-      "rateLimited": "Too many messages — please wait a moment."
+      "rateLimited": "Too many messages — please wait a moment.",
+      "budgetReached": "Spending limit reached. Please contact your admin."
     },
     "clearSearch": "Clear search"
   },
@@ -388,6 +389,7 @@
       "general": "General",
       "connections": "Connections",
       "integrations": "Integrations",
+      "billing": "Billing",
       "memory": "Memory",
       "usage": "Usage",
       "users": "Users",
@@ -520,6 +522,56 @@
         "doneRefresh": "Done / Refresh status",
         "generateCode": "Generate Link Code",
         "configureFirst": "Configure the bot token above before linking your account."
+      },
+      "linkMovedHint": "Users link their own Telegram accounts from Settings → General."
+    },
+    "limits": {
+      "title": "Your limit",
+      "usedPct": "{pct}%",
+      "details": "Details",
+      "hideDetails": "Hide",
+      "reached": "Limit reached",
+      "hint": "Shows how much of your shared-key budget you've used.",
+      "window": {
+        "h5": "Last 5 hours",
+        "d7": "Last 7 days",
+        "d30": "Last 30 days"
+      }
+    },
+    "billing": {
+      "title": "Keys & limits",
+      "subtitle": "Control where provider keys come from and how much users may spend on the shared key.",
+      "saveFailed": "Couldn't save",
+      "mode": {
+        "title": "Provider key mode",
+        "desc": "Decides whether users run on the admin's shared key, their own, or both.",
+        "shared_plus_own": {
+          "label": "Shared + own",
+          "desc": "The admin key is the default for everyone. Users may add their own and run on it."
+        },
+        "shared_only": {
+          "label": "Shared only",
+          "desc": "Everyone uses the admin key. Users cannot add their own."
+        },
+        "own_only": {
+          "label": "Own only",
+          "desc": "No shared key — every user connects their own."
+        }
+      },
+      "limits": {
+        "title": "Shared-key spending limits",
+        "desc": "Per-user budget across three windows. Leave a field empty for no limit. Own keys are never limited.",
+        "hint": "Amounts in $. When a window is exhausted, new requests are blocked while running ones finish.",
+        "ownOnlyNote": "In own-only mode there's no shared key, so limits don't apply.",
+        "window": {
+          "h5": "Last 5 hours",
+          "d7": "Last 7 days",
+          "d30": "Last 30 days"
+        }
+      },
+      "tiers": {
+        "title": "User tiers",
+        "soon": "Limits are the same for everyone for now (the default tier). Per-user tiers are coming later."
       }
     },
     "connections": {
@@ -815,6 +867,7 @@
     "newChat": "New chat started!",
     "notLinked": "Account not linked. Send /link CODE",
     "tooFast": "You're sending messages too fast — please wait a moment.",
+    "budgetReached": "Spending limit reached. Please contact your admin.",
     "fileTooBig": "“{name}” is larger than 20 MB, so I can't fetch it from Telegram.",
     "unsupported": "I can work with text, photos and files. Send me one of those and I'll get going.",
     "startError": "Couldn't start the assistant: {error}",

@@ -10,6 +10,8 @@ export interface RecordUsageInput {
   provider: string;
   model: string;
   usage: TokenUsage;
+  /** True when this spend hit the shared (admin) key — counts toward budgets. */
+  onSharedKey?: boolean;
 }
 
 /**
@@ -30,6 +32,7 @@ export async function recordUsage(input: RecordUsageInput): Promise<void> {
       outputTokens: input.usage.outputTokens ?? 0,
       cachedInputTokens: input.usage.cachedInputTokens ?? 0,
       costUsd: cost === null ? null : String(cost),
+      onSharedKey: input.onSharedKey ?? false,
     });
   } catch (err) {
     console.error("[usage] failed to record usage (non-fatal):", err);

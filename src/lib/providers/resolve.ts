@@ -1,7 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
-import { getMasterKey, getSetting } from "@/lib/settings";
+import { getMasterKey, sharedKeyEnabled } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel, parseModelId } from "@/lib/providers";
 import { assertSafeProviderConfig } from "@/lib/providers/list-models";
@@ -18,9 +18,10 @@ export async function resolveProviderConfig(userId: string) {
   if (config) return { ...config, isShared: false };
 
   // Falling back to an admin's provider key (and thus their budget + sandbox)
-  // for users without their own is an explicit opt-in, not the default — a
-  // stray account must not silently spend the admin's credits.
-  if ((await getSetting("share_admin_providers")) !== "true") return null;
+  // for users without their own happens only when the instance mode allows a
+  // shared key (shared_plus_own / shared_only) — never in own_only, so a stray
+  // account can't silently spend the admin's credits.
+  if (!(await sharedKeyEnabled())) return null;
 
   const rows = await db
     .select({ config: providerConfigs })
@@ -64,7 +65,7 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
   });
-  return { model, provider, modelId };
+  return { model, provider, modelId, isShared: config.isShared };
 }
 
 export async function resolveUserModel(userId: string, requestModel?: string) {

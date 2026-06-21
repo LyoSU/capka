@@ -131,3 +131,36 @@ export async function isSetupComplete(): Promise<boolean> {
 export async function getBlockPrivateProviderUrls(): Promise<boolean> {
   return (await getSetting("block_private_provider_urls")) === "true";
 }
+
+/**
+ * How provider keys are sourced across the instance (admin-chosen):
+ *  - shared_plus_own: admin's key is the shared default; users MAY add their own
+ *  - shared_only:     everyone uses the admin's key; users cannot add their own
+ *  - own_only:        no sharing; every user must bring their own key
+ */
+export type ProviderKeyMode = "shared_plus_own" | "shared_only" | "own_only";
+
+/**
+ * Resolve the active mode. Reads the new `provider_key_mode` setting and falls
+ * back to the legacy `share_admin_providers` boolean for instances that predate
+ * it (true → shared_plus_own, false → own_only). Default for a fresh instance is
+ * shared_plus_own — the friendliest for non-technical teams on one admin key.
+ */
+export async function getProviderKeyMode(): Promise<ProviderKeyMode> {
+  const mode = await getSetting("provider_key_mode");
+  if (mode === "shared_plus_own" || mode === "shared_only" || mode === "own_only") return mode;
+  // Legacy compatibility: derive from the old boolean if the new key is unset.
+  const legacy = await getSetting("share_admin_providers");
+  if (legacy === "false") return "own_only";
+  return "shared_plus_own";
+}
+
+/** Whether the shared (admin) key may back users who have no key of their own. */
+export async function sharedKeyEnabled(): Promise<boolean> {
+  return (await getProviderKeyMode()) !== "own_only";
+}
+
+/** Whether users are allowed to add their own provider key. */
+export async function ownKeysAllowed(): Promise<boolean> {
+  return (await getProviderKeyMode()) !== "shared_only";
+}

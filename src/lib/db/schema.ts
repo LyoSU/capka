@@ -18,6 +18,11 @@ export const users = pgTable("user", {
   image: text("image"),
   role: text("role").notNull().default("user"), // "admin" | "user" | "viewer"
   locale: text("locale"), // "en" | "uk" | null (null = follow browser/default)
+  // Spend tier governing this user's budget on the SHARED key. null → the
+  // instance default tier (see tiers.isDefault). tierSource is a forward-looking
+  // hook: today only "manual" (admin-assigned), later "auto" / "api".
+  tierId: text("tier_id"),
+  tierSource: text("tier_source").notNull().default("manual"), // "manual" | "auto" | "api"
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -170,11 +175,31 @@ export const usage = pgTable("usage", {
   outputTokens: integer("output_tokens").default(0),
   cachedInputTokens: integer("cached_input_tokens").default(0),
   costUsd: numeric("cost_usd"),
+  // Whether this spend hit the shared (admin) key vs the user's own key. Only
+  // shared-key spend counts against a user's budget — own-key users pay their
+  // own provider directly, so they're never throttled.
+  onSharedKey: boolean("on_shared_key").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => [
   index("idx_usage_user_created").on(t.userId, t.createdAt),
   index("idx_usage_model").on(t.model),
 ]);
+
+// ── Spend tiers ──────────────────────────────────────────────
+// A named set of budget caps applied per-user to SHARED-key spend, evaluated
+// over three rolling windows (5h / 7d / 30d). A null cap means "unlimited" for
+// that window. Exactly one row is the instance default (isDefault), used for any
+// user without an explicit tierId. Today the admin edits the default tier and
+// may hand-assign others; multi-tier management is a later iteration.
+export const tiers = pgTable("tiers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  limit5h: numeric("limit_5h"), // USD cap over the last 5 hours (null = unlimited)
+  limitWeek: numeric("limit_week"), // USD cap over the last 7 days
+  limitMonth: numeric("limit_month"), // USD cap over the last 30 days
+  isDefault: boolean("is_default").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("idx_tiers_is_default").on(t.isDefault)]);
 
 // ── Model catalog ────────────────────────────────────────────
 // Synced from OpenRouter (primary) + LiteLLM (fallback) so models, names,
