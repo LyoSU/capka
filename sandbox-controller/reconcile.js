@@ -1,7 +1,8 @@
 /** Reconcile durable session records (Postgres) against the live backend on boot.
  *  Implements the spec §14 table. Returns a summary for logging. `backend.list()`
- *  throwing (daemon unreachable) propagates so the caller leaves readiness false
- *  and retries — we never delete records on a transient backend failure. */
+ *  throwing (daemon unreachable) propagates BEFORE any record is touched, so the
+ *  caller (boot's withRetry) retries with readiness still false — we never delete
+ *  records on a transient backend failure. */
 export async function reconcile({ store, backend, destroy }) {
   const doDestroy = destroy || ((handle) => backend.destroy(handle));
   const records = await store.all();

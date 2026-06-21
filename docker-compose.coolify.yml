@@ -41,6 +41,9 @@ services:
       # Lets the controller inspect + pull the sandbox image (ensureRuntime).
       # DELETE stays off; see docker-compose.yml note re POST /images/load.
       - IMAGES=1
+      # INFO (read-only GET /info) — required by the fail-closed gVisor runtime
+      # probe at boot; without it the secure profile gets 403 and crash-loops.
+      - INFO=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:

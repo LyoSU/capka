@@ -52,6 +52,10 @@ services:
       # POST /images/load (tar image-injection); the controller never calls it, but
       # treat this as a deliberate, audited widening of the proxy surface.
       - IMAGES=1
+      # INFO exposes GET /info (read-only daemon metadata). REQUIRED: the fail-closed
+      # secure profile probes /info to confirm the gVisor runtime is registered before
+      # booting; without it the probe gets 403 and the controller crash-loops.
+      - INFO=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:

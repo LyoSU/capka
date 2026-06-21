@@ -2,11 +2,11 @@ import { createServer } from "node:http";
 import { createWriteStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
 import Docker from "dockerode";
 import pg from "pg";
 import { sanitize } from "./path-safety.js";
+import { resolveOwnerDecision, safeEqual } from "./owner.js";
 import { parseMultipart } from "./multipart.js";
 import { resolveNetworkMode } from "./sandbox-spec.js";
 import { makeComputeBackend } from "./backends/backend-factory.js";
@@ -15,8 +15,9 @@ import { detectHostDataRoot } from "./stores/local-fs-store.js";
 import { PostgresSessionStore } from "./session-store.js";
 import { assertRuntimeAvailable } from "./runtime-check.js";
 import { reconcile } from "./reconcile.js";
-import { gcOrphanWorkspaces } from "./gc.js";
+import { gcOrphanWorkspaces, findOverQuota } from "./gc.js";
 import { notReadyGuard } from "./readiness.js";
+import { withRetry } from "./retry.js";
 import { log } from "./log.js";
 
 // --- Talk to the Docker API via DOCKER_HOST (socket-proxy) when set. ---
@@ -67,30 +68,12 @@ let backend;
 let ready = false;
 let liveCount = 0;
 
-// --- Auth ---
-function safeEqual(a, b) {
-  const ab = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
-/** Sign a userId+sessionId pair so file ops can trust a workspace owner even with
- *  no running container; the platform derives the same HMAC from the shared secret. */
-function workspaceToken(userId, sessionId) {
-  return createHmac("sha256", SECRET)
-    .update(`${sanitize(userId)}|${sanitize(sessionId)}`)
-    .digest("hex");
-}
-
-/** Resolve the owner of a file op: a live session's owner, else a platform-supplied
- *  userId backed by a valid HMAC token. Returns { userId, sessionId } | { missing } | { forbidden }. */
+/** Resolve the owner of a file op: a live session's owner (cross-checked against
+ *  any supplied userId), else a platform-supplied userId backed by a valid HMAC
+ *  token. Decision logic is pure + unit-tested in owner.js. */
 async function resolveOwner(sessionId, fallbackUserId, token) {
-  const s = await store.get(sessionId);
-  if (s) return { userId: s.userId, sessionId };
-  if (!fallbackUserId) return { missing: true };
-  if (!token || !safeEqual(workspaceToken(fallbackUserId, sessionId), token)) return { forbidden: true };
-  return { userId: sanitize(fallbackUserId), sessionId: sanitize(sessionId) };
+  const session = await store.get(sessionId);
+  return resolveOwnerDecision({ session, sessionId, fallbackUserId, token, secret: SECRET });
 }
 
 // --- On-disk workspace listing (for GC). Skips the per-user _global shared dir. ---
@@ -326,6 +309,11 @@ async function flushAndGc() {
   try {
     await store.flush();
     await gcOrphanWorkspaces({ store, workspace, listOnDisk: listWorkspacesOnDisk, graceMs: GC_GRACE_MS, log });
+    // Soft quota is advisory only — the sandbox can write to its bind mount past
+    // MAX_WORKSPACE_MB. Surface the breach for ops; real enforcement is host-level.
+    for (const o of await findOverQuota({ store, workspace, limitBytes: MAX_WORKSPACE_MB * 1024 * 1024 })) {
+      log("workspace.over_quota", { ...o, mb: Math.round(o.bytes / 1048576), limitMb: MAX_WORKSPACE_MB }, "warn");
+    }
   } catch (e) {
     console.error("[gc] failed:", e.message);
   }
@@ -336,6 +324,8 @@ async function boot() {
   await store.init();
   const hostDataRoot = await detectHostDataRoot(docker, {
     dataRoot: DATA_ROOT, hostname: hostname(), override: process.env.HOST_DATA_ROOT,
+    // Remote daemon ⇒ binds need the real host path; refuse to boot on a wrong guess.
+    failClosed: !!process.env.DOCKER_HOST,
   });
   workspace = makeWorkspaceStore({ kind: WORKSPACE_STORE, dataRoot: DATA_ROOT, hostDataRoot, uid: SANDBOX_UID, gid: SANDBOX_GID });
   backend = makeComputeBackend({ kind: COMPUTE_BACKEND, docker, image: SANDBOX_IMAGE, runtime: RUNTIME });
@@ -346,8 +336,14 @@ async function boot() {
   // Serve early so the orchestrator can probe /health (503 elsewhere until ready).
   server.listen(PORT, () => log("listening", { port: PORT, profile: PROFILE, runtime: RUNTIME }));
 
-  await backend.ensureRuntime(); // boot prewarm — first user doesn't pay the pull
-  const summary = await reconcile({ store, backend });
+  // Recovery (image prewarm + reconcile) needs the daemon. A transient blip here
+  // shouldn't crash-loop the process: retry with backoff while readiness stays
+  // false (so /health reports 503 and the orchestrator holds traffic), and only
+  // give up — exit, letting the restart policy take over — after the budget.
+  const summary = await withRetry(async () => {
+    await backend.ensureRuntime(); // first user doesn't pay the image pull
+    return reconcile({ store, backend });
+  }, { attempts: 5, baseMs: 3000, label: "recover", log });
   liveCount = summary.kept.length;
   log("recover", summary);
 

@@ -47,6 +47,11 @@ export function buildSandboxConfig({
       // Immutable rootfs + a small writable /tmp. The agent's writable surface is
       // the bind-mounted /workspace (+ /shared); everything else is read-only.
       ReadonlyRootfs: readonlyRootfs,
+      // NOTE: /tmp is size-capped, but the bind-mounted /workspace is NOT — Docker
+      // bind mounts can't carry a size limit. A sandbox can fill the shared host's
+      // disk via /workspace; the controller's MAX_WORKSPACE_MB only bounds uploads
+      // routed through it. Enforce disk at the host (XFS project quota on DATA_ROOT
+      // or a per-session sized volume); the controller logs `workspace.over_quota`.
       Tmpfs: { "/tmp": "rw,nosuid,nodev,size=64m" },
       // Hard, non-negotiable isolation. Privileged is set explicitly so the
       // test pins it and a future edit can't omit it into a truthy default.

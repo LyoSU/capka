@@ -1,5 +1,5 @@
-import { createReadStream } from "node:fs";
-import { readdir, stat, mkdir, chown, rm, writeFile } from "node:fs/promises";
+import { createReadStream, constants as FS } from "node:fs";
+import { readdir, stat, mkdir, chown, rm, open } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { sanitize, safeRealPath } from "../path-safety.js";
 
@@ -71,8 +71,16 @@ export class LocalFsStore {
     const base = this.#wsPath(userId, sessionId);
     const full = await safeRealPath(base, relPath);
     await mkdir(dirname(full), { recursive: true }).catch(() => {});
-    await writeFile(full, data);
-    await chown(full, this.uid, this.gid).catch(() => {});
+    // O_NOFOLLOW closes the residual TOCTOU window: even if a symlink is planted
+    // at the leaf between safeRealPath() and open(), the write refuses to follow
+    // it (ELOOP). Overwriting an existing *regular* file still works.
+    const fh = await open(full, FS.O_WRONLY | FS.O_CREAT | FS.O_TRUNC | FS.O_NOFOLLOW, 0o644);
+    try {
+      await fh.writeFile(data);
+      await fh.chown(this.uid, this.gid).catch(() => {});
+    } finally {
+      await fh.close();
+    }
   }
 
   async size(userId, sessionId) {
@@ -95,17 +103,35 @@ export class LocalFsStore {
 }
 
 /** Resolve the daemon-host path backing dataRoot by inspecting our own container.
- *  Lifted from server.js; an explicit override wins. Returns the host path string. */
-export async function detectHostDataRoot(docker, { dataRoot, hostname, override }) {
+ *  An explicit override wins. Returns the host path string.
+ *
+ *  `failClosed` (set when the daemon is remote, i.e. DOCKER_HOST is configured):
+ *  if resolution fails we THROW instead of silently returning the internal
+ *  dataRoot. On a remote daemon a wrong value produces sandbox bind mounts that
+ *  point at a non-existent host path — mounts that "succeed" but back an empty or
+ *  wrong directory. Better to refuse to boot than to mount garbage. For a local
+ *  daemon (failClosed off) the container and host share a filesystem, so dataRoot
+ *  is itself the correct host path and the fallback is sound. */
+export async function detectHostDataRoot(docker, { dataRoot, hostname, override, failClosed = false }) {
   if (override) return override;
+  let reason;
   try {
     const self = await docker.getContainer(hostname).inspect();
     const backing = (self.Mounts || [])
       .filter((m) => m.Destination === dataRoot || dataRoot.startsWith(m.Destination + "/"))
       .sort((a, b) => b.Destination.length - a.Destination.length)[0];
     if (backing) return backing.Source + dataRoot.slice(backing.Destination.length);
+    reason = `no mount backs ${dataRoot}`;
   } catch (e) {
-    console.warn(`[host-path] self-inspect failed (${e.message}); using ${dataRoot}`);
+    reason = `self-inspect failed (${e.message})`;
   }
+  if (failClosed) {
+    throw new Error(
+      `FATAL: could not resolve the daemon-host path for ${dataRoot}: ${reason}.\n` +
+      `  The daemon is remote (DOCKER_HOST set), so sandbox bind mounts need the real\n` +
+      `  host path. Set HOST_DATA_ROOT explicitly to override.`,
+    );
+  }
+  console.warn(`[host-path] ${reason}; using ${dataRoot} (local daemon)`);
   return dataRoot;
 }

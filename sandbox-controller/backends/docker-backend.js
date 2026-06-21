@@ -1,4 +1,5 @@
 import { buildSandboxConfig } from "../sandbox-spec.js";
+import { createFrameDemux } from "../docker-frames.js";
 
 /** ComputeBackend implementation over the Docker daemon (via dockerode).
  *  Lifts createSandbox/execInSandbox/destroySandbox/recoverSessions out of the
@@ -92,29 +93,17 @@ export class DockerBackend {
       const timer = setTimeout(() => reject(new Error(`Command timed out after ${timeoutMs}ms`)), timeoutMs + 5000);
       execObj.start({ hijack: true }, (err, stream) => {
         if (err) { clearTimeout(timer); return reject(err); }
-        let stdout = "";
-        let stderr = "";
-        stream.on("data", (chunk) => {
-          let offset = 0;
-          while (offset < chunk.length) {
-            if (offset + 8 > chunk.length) break;
-            const type = chunk[offset];
-            const size = chunk.readUInt32BE(offset + 4);
-            offset += 8;
-            if (offset + size > chunk.length) break;
-            const text = chunk.slice(offset, offset + size).toString("utf8");
-            if (type === 1) stdout += text;
-            else if (type === 2) stderr += text;
-            offset += size;
-          }
-        });
+        // Buffer frames across 'data' events — they are NOT chunk-aligned.
+        const demux = createFrameDemux();
+        stream.on("data", (chunk) => demux.push(chunk));
         stream.on("end", async () => {
           clearTimeout(timer);
+          const { stdout, stderr } = demux.result();
           try {
             const info = await execObj.inspect();
             resolve({ stdout: stdout.slice(0, 100_000), stderr: stderr.slice(0, 50_000), exitCode: info.ExitCode });
           } catch {
-            resolve({ stdout, stderr, exitCode: -1 });
+            resolve({ stdout: stdout.slice(0, 100_000), stderr: stderr.slice(0, 50_000), exitCode: -1 });
           }
         });
         stream.on("error", (e) => { clearTimeout(timer); reject(e); });

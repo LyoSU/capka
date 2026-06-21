@@ -90,4 +90,19 @@ describe("safeRealPath", () => {
   it("still blocks lexical traversal before touching the filesystem", async () => {
     await expect(safeRealPath(base, "../outside/secret.txt")).rejects.toThrow(/traversal/i);
   });
+
+  it("blocks a write whose PARENT is a symlink out of base, even if the leaf doesn't exist", async () => {
+    // The dangerous case: `escape` is a symlink to outside/, and the leaf
+    // `new.txt` does not exist yet (a fresh upload). A naive realpath-the-leaf
+    // check returns the lexical path on ENOENT and the write follows the
+    // symlinked parent out of the workspace. The parent must be resolved too.
+    await expect(safeRealPath(base, "escape/new.txt")).rejects.toThrow(/symlink escape/i);
+  });
+
+  it("resolves a non-existent target under a DEEP chain of not-yet-created dirs", async () => {
+    // Several path components don't exist yet (mkdir -p will create them as real
+    // dirs); the deepest existing ancestor is base/sub, which is contained.
+    const p = await safeRealPath(base, "sub/a/b/c/new.txt");
+    expect(p).toBe(resolve(base, "sub/a/b/c/new.txt"));
+  });
 });
