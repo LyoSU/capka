@@ -24,27 +24,23 @@ services:
       retries: 5
     restart: unless-stopped
 
-  sandbox:
-    build:
-      context: .
-      dockerfile: Dockerfile.sandbox
-    image: unclaw-sandbox
-    entrypoint: ["echo", "sandbox image built"]
-    # One-shot image-builder: must NOT restart. Coolify injects
-    # `restart: unless-stopped` into every service otherwise, which turns the
-    # instant `echo` exit into a restart loop and races the controller's
-    # `service_completed_successfully` wait below.
-    restart: "no"
+  # NOTE: the one-shot `sandbox` image-builder service was removed. The controller
+  # now pulls the sandbox image on demand (ensureRuntime, pull-if-missing), so a
+  # Coolify image prune is self-healing instead of fatal — which is exactly the
+  # incident this design fixes. The image comes from ghcr (pinned via UNCLAW_VERSION).
 
-  # Restricts the Docker API the controller can reach (container + exec only);
-  # the raw host socket is mounted read-only here alone, on an isolated network.
-  # Defense-in-depth, not a hard root boundary — see README for rootless Docker.
+  # Restricts the Docker API the controller can reach (container + exec + image
+  # inspect/pull); the raw host socket is mounted read-only here alone, on an
+  # isolated network. Defense-in-depth, not a hard root boundary — see README.
   socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
     environment:
       - CONTAINERS=1
       - EXEC=1
       - POST=1
+      # Lets the controller inspect + pull the sandbox image (ensureRuntime).
+      # DELETE stays off; see docker-compose.yml note re POST /images/load.
+      - IMAGES=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -63,11 +59,19 @@ services:
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - DOCKER_HOST=tcp://socket-proxy:2375
       - DATA_ROOT=/data/storage
+      # Durable session state (replaces in-memory Map); reconciles on boot.
+      - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD}@postgres:5432/unClaw
+      - COMPUTE_BACKEND=docker
+      - WORKSPACE_STORE=local
+      # gVisor by default, fail-closed. Requires runsc on the host (scripts/install-gvisor.sh).
+      # Set SANDBOX_RUNTIME=runc ONLY for a trusted/dev deploy.
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runsc}
       # NOTE: no HOST_DATA_ROOT here. Docker resolves sibling-container bind sources
       # on the daemon host, and the controller now auto-detects that host path by
       # inspecting its own /data mount at startup (robust under Coolify, where ${PWD}
       # was unreliable). Only set HOST_DATA_ROOT to override the auto-detected value.
-      - SANDBOX_IMAGE=unclaw-sandbox
+      # Pinned ghcr image; controller pulls it on demand (ensureRuntime).
+      - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
       # Keep test resource usage modest on a shared, RAM-tight host.
       - SANDBOX_MEMORY_MB=384
       - MAX_SESSIONS_PER_USER=2
@@ -82,8 +86,6 @@ services:
       timeout: 5s
       retries: 5
     depends_on:
-      sandbox:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       socket-proxy:

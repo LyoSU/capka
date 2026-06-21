@@ -46,6 +46,12 @@ services:
       - CONTAINERS=1
       - EXEC=1
       - POST=1
+      # IMAGES enables inspect + pull so the controller's ensureRuntime() can
+      # self-heal a pruned sandbox image. DELETE stays off (unset) — the controller
+      # can pull/inspect images but not remove them. NOTE: IMAGES also exposes
+      # POST /images/load (tar image-injection); the controller never calls it, but
+      # treat this as a deliberate, audited widening of the proxy surface.
+      - IMAGES=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -68,6 +74,14 @@ services:
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - DOCKER_HOST=tcp://socket-proxy:2375
       - DATA_ROOT=/data/storage
+      # Durable session state (replaces the old in-memory Map): controller survives
+      # restarts and reconciles against the daemon on boot.
+      - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD}@postgres:5432/unClaw
+      - COMPUTE_BACKEND=docker
+      - WORKSPACE_STORE=local
+      # Isolation runtime: gVisor by default, fail-closed (boot refuses if runsc is
+      # absent). Set SANDBOX_RUNTIME=runc ONLY for a trusted/dev deploy.
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runsc}
       # NOTE: no HOST_DATA_ROOT here. The controller auto-detects the daemon-host
       # path backing ./data by inspecting its own mount at startup, so sandbox bind
       # mounts resolve correctly regardless of the launcher's working directory
