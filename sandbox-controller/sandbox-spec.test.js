@@ -50,6 +50,30 @@ describe("buildSandboxConfig — locked security posture", () => {
   });
 });
 
+describe("buildSandboxConfig — isolation hardening", () => {
+  it("sets the configured runtime", () => {
+    expect(buildSandboxConfig({ ...base, runtime: "runsc" }).HostConfig.Runtime).toBe("runsc");
+  });
+
+  it("omits Runtime when unset (daemon default)", () => {
+    expect(buildSandboxConfig(base).HostConfig.Runtime).toBeUndefined();
+  });
+
+  it("read-only rootfs with a writable /tmp tmpfs by default", () => {
+    const c = buildSandboxConfig({ ...base, runtime: "runsc" });
+    expect(c.HostConfig.ReadonlyRootfs).toBe(true);
+    expect(c.HostConfig.Tmpfs).toHaveProperty("/tmp");
+  });
+
+  it("allows opting out of read-only rootfs (for images that need a writable rootfs)", () => {
+    expect(buildSandboxConfig({ ...base, readonlyRootfs: false }).HostConfig.ReadonlyRootfs).toBe(false);
+  });
+
+  it("applies the configured pids limit", () => {
+    expect(buildSandboxConfig({ ...base, pidsLimit: 256 }).HostConfig.PidsLimit).toBe(256);
+  });
+});
+
 describe("resolveNetworkMode — bridge is opt-in, default deny", () => {
   it("denies bridge by default (no network)", () => {
     expect(resolveNetworkMode("bridge", { allowNetwork: false })).toBe("none");

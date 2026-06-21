@@ -12,7 +12,13 @@ export function resolveNetworkMode(requested, { allowNetwork = false } = {}) {
   return allowNetwork && requested === "bridge" ? "bridge" : "none";
 }
 
-/** Build the full dockerode createContainer config for a sandbox. */
+/** Build the full dockerode createContainer config for a sandbox.
+ *  `runtime` selects the OCI runtime (gVisor "runsc" by default in the secure
+ *  profile; "runc" only for trusted/dev). `readonlyRootfs` makes the container's
+ *  root filesystem immutable with a writable tmpfs at /tmp — strong hardening, but
+ *  workflows that write into the image rootfs (e.g. `pip install` into system
+ *  site-packages) must use /workspace or a venv; validate via the §9 workload matrix
+ *  before assuming a given image tolerates it. */
 export function buildSandboxConfig({
   image,
   sessionId,
@@ -23,6 +29,8 @@ export function buildSandboxConfig({
   memoryBytes,
   nanoCpus,
   pidsLimit = 100,
+  runtime,
+  readonlyRootfs = true,
 }) {
   return {
     Image: image,
@@ -32,6 +40,14 @@ export function buildSandboxConfig({
       Memory: memoryBytes,
       NanoCpus: nanoCpus,
       PidsLimit: pidsLimit,
+      // OCI runtime: gVisor ("runsc") in the secure profile. Omitted when unset so
+      // the daemon default applies (dev/bare runs). Fail-closed availability is
+      // enforced at boot by runtime-check.js, not here.
+      ...(runtime ? { Runtime: runtime } : {}),
+      // Immutable rootfs + a small writable /tmp. The agent's writable surface is
+      // the bind-mounted /workspace (+ /shared); everything else is read-only.
+      ReadonlyRootfs: readonlyRootfs,
+      Tmpfs: { "/tmp": "rw,nosuid,nodev,size=64m" },
       // Hard, non-negotiable isolation. Privileged is set explicitly so the
       // test pins it and a future edit can't omit it into a truthy default.
       Privileged: false,
