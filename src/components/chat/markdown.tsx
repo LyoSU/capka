@@ -53,10 +53,12 @@ export function Markdown({ children, isStreaming, chatId }: { children: string; 
   }, []);
 
   // Clickable /workspace file chips only in the chat transcript (where chatId is
-  // set and a PreviewProvider is mounted). Memoized so Streamdown's memo holds.
+  // set and a PreviewProvider is mounted). Memoized so Streamdown's memo holds;
+  // `isStreaming` is a dep so chips switch from optimistic to existence-verified
+  // exactly once, when the reply finalizes (not on every streamed token).
   const components = useMemo<Components | undefined>(
-    () => (chatId ? makeWorkspaceComponents(chatId) : undefined),
-    [chatId],
+    () => (chatId ? makeWorkspaceComponents(chatId, isStreaming) : undefined),
+    [chatId, isStreaming],
   );
 
   return (

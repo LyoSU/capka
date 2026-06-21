@@ -190,12 +190,12 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   return (
     <div className="chat-prose text-base leading-relaxed">
       <Markdown isStreaming={isStreaming} chatId={chatId}>{text}</Markdown>
-      {chatId && <WorkspaceLinks text={text} chatId={chatId} />}
+      {chatId && <WorkspaceLinks text={text} chatId={chatId} live={isStreaming} />}
     </div>
   );
 }
 
-function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
+function WorkspaceLinks({ text, chatId, live }: { text: string; chatId: string; live?: boolean }) {
   const t = useTranslations("chat.tool");
   const tw = useTranslations("chat.workspace");
   // Re-scanning the message text on every render is wasteful; the artifact
@@ -240,7 +240,7 @@ function WorkspaceLinks({ text, chatId }: { text: string; chatId: string }) {
       </div>
       <div className="flex flex-wrap gap-3">
         {paths.map((p) => (
-          <SandboxFileTile key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} />
+          <SandboxFileTile key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} verify live={live} />
         ))}
       </div>
     </div>
