@@ -609,7 +609,7 @@ function UserBubble({
         {/* When the turn is files-only, the thumbnails are the content — skip the
             empty "…" bubble. */}
         {(text || !hasFiles) && (
-          <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-primary text-primary-foreground px-5 py-3 text-[15px]">
+          <div className="inline-block whitespace-pre-wrap break-words rounded-2xl border border-border bg-card text-card-foreground px-5 py-3 text-[15px] shadow-sm">
             {text || "…"}
           </div>
         )}
