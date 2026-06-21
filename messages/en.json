@@ -1005,7 +1005,7 @@
   "telegram": {
     "start": "👋 **Welcome to unClaw!**\n\nI'm your AI assistant right here in Telegram — I answer questions and work with text, photos and files.\n\nTo get started, open unClaw and sign in with Telegram — your account will be linked automatically.\n\nAlready have a connection code? Send `/link CODE`.",
     "startLinked": "👋 **Welcome back!** Your account is already connected.\n\nJust message me and I'll get going. You can send text, photos and files, and /new opens a fresh chat.",
-    "openApp": "🚀 Open unClaw",
+    "openApp": "🦀 Open unClaw",
     "openInBrowser": "💬 Open in browser",
     "tooManyAttempts": "⏳ Too many attempts. Please wait a minute and try again.",
     "linkUsage": "Send the code right after the command: `/link CODE`\n\nYou'll find your connection code in unClaw's settings.",
