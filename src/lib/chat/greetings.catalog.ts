@@ -79,7 +79,7 @@ export const GREETINGS: Greeting[] = [
   { id: "sunday-evening", weekdays: [0], time: ["evening"], weight: 1.4, text: { uk: "Недільний вечір. Розганяємось перед тижнем?", en: "Sunday evening. Spinning up for the week?" } },
   { id: "winter-monday-morning", weekdays: [1], time: ["morning"], seasons: ["winter"], weight: 1.8, text: { uk: "Зимовий понеділок. Найважче позаду — далі легше", en: "Winter Monday. The hard part's done — easy from here" } },
   { id: "summer-friday-eve", weekdays: [5], time: ["evening"], seasons: ["summer"], weight: 1.8, text: { uk: "Літня п'ятниця, а ви тут. Швидко закругляємось?", en: "Summer Friday, and here you are. Quick wrap-up?" } },
-  { id: "deep-night-name", weekdays: [1, 2, 3, 4, 5], time: ["night"], weight: 1.5, text: { uk: "Робочий тиждень, глупа ніч, а {name} не здається", en: "Weeknight this late, and {name} won't quit" } },
+  { id: "deep-night-name", weekdays: [1, 2, 3, 4, 5], time: ["night"], weight: 1.5, text: { uk: "Робочий тиждень, глуха ніч, а {name} не здається", en: "Weeknight this late, and {name} won't quit" } },
 
   // ── Minimal / any-time floor (low weight, rare) ────────────────────────────
   { id: "minimal-1", weight: 0.4, text: { uk: "Чим можу допомогти?", en: "How can I help?" } },
