@@ -29,6 +29,7 @@ import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
 import { useFileAttach } from "@/components/chat/use-file-attach";
+import { useChatDraft } from "@/components/chat/use-chat-draft";
 import { FileDropZone } from "@/components/chat/file-drop-zone";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
@@ -272,7 +273,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     wasLoading.current = isLoading;
   }, [isLoading]);
 
-  const [input, setInput] = useState("");
+  // Composer text is a per-chat draft persisted to localStorage, so a
+  // typed-but-unsent message survives a reload, a closed tab, or a failed send.
+  const { draft: input, setDraft: setInput, clearDraft } = useChatDraft(chatId);
   const [files, setFiles] = useState<AttachedFile[]>([]);
   // Drop a file anywhere over the chat — greeting screen or message stream — and
   // it stages onto the composer, same as picking it via the paperclip.
@@ -287,6 +290,20 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     try {
       await sendMessage(text, model, sendFiles.length > 0 ? sendFiles.map((af) => af.file) : undefined);
     } catch (e) {
+      // The send failed and the hook already rolled back its optimistic bubble —
+      // put the user's words back in the composer so nothing they typed is lost.
+      // If they've since started a new message, keep both: the failed text goes
+      // on top (filter drops empties so a files-only failure adds no blank lines).
+      // Files (still in memory) come back too, deduped against any the user
+      // re-attached. The updater reads the live draft, not this closure's stale
+      // snapshot (matters for queued sends).
+      setInput((cur) => [text, cur].filter(Boolean).join("\n\n"));
+      if (sendFiles.length > 0) {
+        setFiles((prev) => {
+          const seen = new Set(prev.map((f) => f.id));
+          return [...sendFiles.filter((f) => !seen.has(f.id)), ...prev];
+        });
+      }
       toast.error(e instanceof Error ? e.message : t("panel.sendFailed"));
     }
   };
@@ -296,7 +313,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     if (!text && files.length === 0) return;
     haptic("tap"); // light confirmation that the message left
     const currentFiles = files;
-    setInput("");
+    clearDraft(); // sent — drop the persisted draft so a reload won't restore it
     setFiles([]);
     // A turn is already running (or queued items are still draining) — line this
     // one up instead of sending now.
