@@ -177,9 +177,14 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
   });
-  // Per-model native input modalities (OpenRouter catalog), so file gating knows
-  // exactly what THIS model takes; null falls back to the provider's static caps.
-  const modelInput = await getModelInputModalities(modelId);
+  // Per-model native input modalities, ONLY for OpenRouter: its catalog's
+  // `input_modalities` describe exactly what OpenRouter serves for this model.
+  // For direct providers the same catalog row (matched by bare id) would
+  // UNDER-report (it reflects OpenRouter's serving, not the direct API — e.g. it
+  // omits the audio/video that Gemini-direct accepts), so they use their own
+  // static `nativeInput` instead. null → fall back to those static caps.
+  const modelInput =
+    config.provider === "openrouter" ? await getModelInputModalities(modelId) : null;
   return { model, provider: config.provider, modelId, modelInput, isShared: config.isShared };
 }
 

@@ -88,9 +88,10 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     requiresBaseUrl: true,
     baseUrlPlaceholder: "https://your-litellm-host/v1",
     hasCatalog: false,
-    // Generic OpenAI-compatible endpoint: images + audio serialize, but the
-    // backend is unknown so we don't assume the `{type:"file"}` PDF block.
-    nativeInput: ["image", "audio"],
+    // Generic OpenAI-compatible endpoint — backend unknown. Only images are
+    // near-universal (image_url); PDF/audio depend on the backend and there's no
+    // audio-unsupported retry, so don't speculatively send them.
+    nativeInput: ["image"],
   },
   openrouter: {
     label: "OpenRouter",
@@ -99,9 +100,11 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     requiresKey: true,
     requiresBaseUrl: false,
     hasCatalog: true,
-    // Fallback only — per-model `input_modalities` from the catalog normally
-    // decide. The SDK provider has no video_url, so video is never native here.
-    nativeInput: ["image", "pdf", "audio"],
+    // Fallback only — per-model `input_modalities` from the catalog decide once
+    // synced. PDF is safe (OpenRouter parses it for any model); audio is NOT
+    // (model-specific, no retry) so it's left to per-model data. Never video
+    // (the SDK provider has no video_url).
+    nativeInput: ["image", "pdf"],
   },
   openai: {
     label: "OpenAI",
@@ -110,7 +113,10 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     requiresKey: true,
     requiresBaseUrl: false,
     hasCatalog: false,
-    nativeInput: ["image", "pdf", "audio"],
+    // Image + PDF are safe across the chat models. Audio is only on the
+    // gpt-4o-audio family, and we can't tell per model here (no audio retry), so
+    // it stays tool-only rather than risking a hard error on a non-audio model.
+    nativeInput: ["image", "pdf"],
   },
   anthropic: {
     label: "Anthropic",

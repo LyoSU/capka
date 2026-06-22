@@ -36,10 +36,13 @@ describe("acceptsNativeFile (provider fallback caps)", () => {
     expect(acceptsNativeFile("application/pdf", "ollama")).toBe(false);
   });
 
-  it("accepts audio where the SDK serializes it, not on Anthropic", () => {
+  it("accepts audio via static caps only on Gemini (all multimodal); elsewhere it needs per-model data", () => {
+    // Gemini's whole family takes audio, so the static fallback allows it.
     expect(acceptsNativeFile("audio/mpeg", "google")).toBe(true);
-    expect(acceptsNativeFile("audio/mpeg", "openai")).toBe(true);
-    expect(acceptsNativeFile("audio/mpeg", "openrouter")).toBe(true);
+    // openai/openrouter are model-specific for audio + have no audio-unsupported
+    // retry, so the static fallback withholds it (per-model data re-enables it).
+    expect(acceptsNativeFile("audio/mpeg", "openai")).toBe(false);
+    expect(acceptsNativeFile("audio/mpeg", "openrouter")).toBe(false);
     expect(acceptsNativeFile("audio/mpeg", "anthropic")).toBe(false);
   });
 
