@@ -6,6 +6,7 @@ import { encrypt, decrypt } from "@/lib/crypto";
 import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import { ValidationError } from "@/lib/errors";
+import { mutedIds } from "@/lib/muted-resources";
 import type { McpAuthKind, McpScope, McpSecrets, McpServerConfig, McpServerInfo } from "./types";
 
 const SCOPE_RANK: Record<McpScope, number> = { system: 0, user: 1, project: 2 };
@@ -47,7 +48,11 @@ export async function listEnabledServerConfigs(userId: string, projectId?: strin
         eq(mcpServers.scope, "system"),
         and(eq(mcpServers.scope, "user"), eq(mcpServers.userId, userId), isNull(mcpServers.projectId)),
       );
-  const rows = await db.select().from(mcpServers).where(and(eq(mcpServers.enabled, true), filter));
+  const allRows = await db.select().from(mcpServers).where(and(eq(mcpServers.enabled, true), filter));
+  // Runtime enforcement of the per-user opt-out: a shared connector this user
+  // muted never connects (only shared ids are ever muted, so own rows are safe).
+  const muted = await mutedIds(userId, "mcp");
+  const rows = allRows.filter((r) => !muted.has(r.id));
   const winners = dedupeServersByPrecedence(rows.map(toInfo));
   const winnerIds = new Set(winners.map((w) => w.id));
   const key = await getMasterKey();
@@ -96,7 +101,14 @@ export async function listServers(userId: string, projectId?: string | null): Pr
           and(eq(mcpServers.userId, userId), isNull(mcpServers.projectId)),
           eq(mcpServers.scope, "system"),
         ));
-  return rows.map(toInfo);
+  // Effective per-user state: a shared connector the user muted shows as off
+  // (and `mine` lets the UI choose a global toggle vs a personal mute).
+  const muted = await mutedIds(userId, "mcp");
+  return rows.map((r) => {
+    const info = toInfo(r);
+    const mine = r.scope === "user";
+    return { ...info, mine, enabled: mine ? info.enabled : info.enabled && !muted.has(r.id) };
+  });
 }
 
 export interface UpsertServerInput {

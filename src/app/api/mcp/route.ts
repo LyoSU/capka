@@ -2,6 +2,7 @@ import { apiHandler, requireSession } from "@/lib/auth";
 import { listServers, upsertServer, setEnabled, deleteServer } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { saveOAuthClientFromInput } from "@/lib/mcp/oauth/admin-client";
+import { setMuted } from "@/lib/muted-resources";
 import { db } from "@/lib/db";
 import { mcpServers } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -31,10 +32,20 @@ export const PATCH = apiHandler(async (req: Request) => {
   if (typeof id !== "string" || typeof enabled !== "boolean") {
     return Response.json({ error: "Bad request" }, { status: 400 });
   }
-  const owned = await db.select({ id: mcpServers.id }).from(mcpServers)
-    .where(and(eq(mcpServers.id, id), eq(mcpServers.userId, userId), eq(mcpServers.scope, "user"))).limit(1);
-  if (!owned[0]) return Response.json({ error: "Not found or not yours" }, { status: 404 });
-  await setEnabled(id, enabled);
+  const [row] = await db.select({ scope: mcpServers.scope, userId: mcpServers.userId })
+    .from(mcpServers).where(eq(mcpServers.id, id)).limit(1);
+  if (!row) return Response.json({ error: "Not found" }, { status: 404 });
+
+  if (row.scope === "user") {
+    if (row.userId !== userId) return Response.json({ error: "Not yours" }, { status: 404 });
+    await setEnabled(id, enabled);
+  } else if (row.scope === "system") {
+    // Shared connector: mute/unmute for this user only (admins flip the global
+    // flag via /api/admin/mcp). enabled=false → muted.
+    await setMuted(userId, "mcp", id, !enabled);
+  } else {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
   return Response.json({ ok: true });
 });
 

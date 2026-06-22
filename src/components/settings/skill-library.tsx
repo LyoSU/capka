@@ -98,7 +98,9 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
   const toggle = async (s: Skill, enabled: boolean) => {
     const prev = skills;
     setSkills((list) => list.map((x) => (x.id === s.id ? { ...x, enabled } : x)));
-    const url = s.mine ? "/api/skills" : "/api/admin/skills";
+    // Own skill or a non-admin muting a shared one → /api/skills (personal).
+    // An admin flipping a shared skill's global state → /api/admin/skills.
+    const url = s.mine || !isAdmin ? "/api/skills" : "/api/admin/skills";
     const res = await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -382,7 +384,7 @@ function SkillGroup({
       />
       <CollapsibleContent className="space-y-2 overflow-hidden">
         {group.skills.map((s) => (
-          <SkillRow key={s.id} skill={s} canManage={s.mine || isAdmin} onToggle={onToggle} onRemove={onRemove} t={t} />
+          <SkillRow key={s.id} skill={s} canDelete={s.mine || isAdmin} onToggle={onToggle} onRemove={onRemove} t={t} />
         ))}
       </CollapsibleContent>
     </Collapsible>
@@ -391,13 +393,13 @@ function SkillGroup({
 
 function SkillRow({
   skill,
-  canManage,
+  canDelete,
   onToggle,
   onRemove,
   t,
 }: {
   skill: Skill;
-  canManage: boolean;
+  canDelete: boolean;
   onToggle: (s: Skill, enabled: boolean) => void;
   onRemove: (s: Skill) => void;
   t: ReturnType<typeof useTranslations>;
@@ -424,11 +426,10 @@ function SkillRow({
       <div className="flex shrink-0 items-center gap-1">
         <Switch
           checked={skill.enabled}
-          disabled={!canManage}
           onCheckedChange={(v) => onToggle(skill, v)}
           aria-label={t("toggleAria", { name: skill.name })}
         />
-        {canManage && (
+        {canDelete && (
           <AlertDialog>
             <AlertDialogTrigger
               render={

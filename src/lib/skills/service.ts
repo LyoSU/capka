@@ -2,6 +2,7 @@ import { and, eq, or, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { skills, skillFiles } from "@/lib/db/schema";
+import { mutedIds } from "@/lib/muted-resources";
 import type { SkillInfo, SkillScope, ParsedSkill } from "./types";
 
 const SCOPE_RANK: Record<SkillScope, number> = { system: 0, user: 1, project: 2 };
@@ -42,7 +43,59 @@ export async function listAvailableSkills(userId: string, projectId?: string | n
       );
 
   const rows = await db.select().from(skills).where(and(eq(skills.enabled, true), scopeFilter));
-  return dedupeByPrecedence(rows.map(toInfo));
+  // Drop shared skills this user has muted for themselves — runtime enforcement
+  // of the per-user opt-out (only shared ids are ever muted, so own skills,
+  // governed by their own `enabled`, are unaffected).
+  const muted = await mutedIds(userId, "skill");
+  return dedupeByPrecedence(rows.filter((r) => !muted.has(r.id)).map(toInfo));
+}
+
+export interface ManagedSkill {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: SkillScope;
+  source: string;
+  /** The caller owns this (a personal, user-scope skill). */
+  mine: boolean;
+  /** Effective state for this user: own → its own flag; shared → global flag
+   *  AND not muted by this user. */
+  enabled: boolean;
+}
+
+/**
+ * Skills for the management UI — unlike the run-time list, this KEEPS items the
+ * user has turned off (so they can turn them back on): the caller's own skills
+ * in any state, plus shared (system) skills, with their per-user effective
+ * state. Globally-disabled shared skills are hidden from regular users (the
+ * admin turned them off for everyone) but shown to admins to manage.
+ */
+export async function listManagedSkills(userId: string, includeDisabledShared: boolean): Promise<ManagedSkill[]> {
+  const rows = await db
+    .select()
+    .from(skills)
+    .where(
+      or(
+        and(eq(skills.scope, "user"), eq(skills.userId, userId), isNull(skills.projectId)),
+        eq(skills.scope, "system"),
+      ),
+    );
+  const muted = await mutedIds(userId, "skill");
+  const out: ManagedSkill[] = [];
+  for (const r of rows) {
+    const mine = r.scope === "user";
+    if (!mine && !r.enabled && !includeDisabledShared) continue;
+    out.push({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      scope: r.scope as SkillScope,
+      source: r.source,
+      mine,
+      enabled: mine ? r.enabled : r.enabled && !muted.has(r.id),
+    });
+  }
+  return out;
 }
 
 /** The winning skill by name for this run, with its bundle files. */

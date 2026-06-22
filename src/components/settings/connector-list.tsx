@@ -218,14 +218,18 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
   };
 
   // Own user-scope connectors go through /api/mcp; shared (system/project) ones
-  // are admin-managed via /api/admin/mcp.
+  // are admin-managed via /api/admin/mcp. Delete/edit follow ownership.
   const endpointFor = (srv: Server) => (srv.scope === "user" ? "/api/mcp" : "/api/admin/mcp");
   const canManage = (srv: Server) => srv.scope === "user" || isAdmin;
 
+  // Toggling is for everyone: own → its global flag, a non-admin on a shared
+  // connector → a personal mute (/api/mcp), an admin on a shared one → the
+  // global flag (/api/admin/mcp).
   const toggle = async (srv: Server, enabled: boolean) => {
     const prev = servers;
     setServers((s) => s.map((x) => x.id === srv.id ? { ...x, enabled } : x));
-    const res = await fetch(endpointFor(srv), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: srv.id, enabled }) });
+    const endpoint = srv.scope === "user" || !isAdmin ? "/api/mcp" : "/api/admin/mcp";
+    const res = await fetch(endpoint, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: srv.id, enabled }) });
     if (!res.ok) { setServers(prev); toast.error(t("toggleFailed")); }
     else if (enabled) loadHealth();
   };
@@ -380,7 +384,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
               {isOauth && s.enabled && h?.status === "ok" && (
                 <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => signOut(s.id)}>{t("signOut")}</Button>
               )}
-              <Switch checked={s.enabled} disabled={!canManage(s)} onCheckedChange={(v) => toggle(s, v)} aria-label={t("toggleAria", { name: s.name })} />
+              <Switch checked={s.enabled} onCheckedChange={(v) => toggle(s, v)} aria-label={t("toggleAria", { name: s.name })} />
               {canManage(s) && (
                 <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-destructive" onClick={() => remove(s)} aria-label={t("delete")}>
                   <Trash2 className="h-4 w-4" />

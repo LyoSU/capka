@@ -32,8 +32,12 @@ export interface McpServerInfo {
   name: string;
   transport: McpTransport;
   url: string | null;
+  /** Effective state for the requesting user: a shared connector reads its
+   *  global flag AND this user's mute; an own connector reads its own flag. */
   enabled: boolean;
   authKind: McpAuthKind;
+  /** The requesting user owns this (a personal, user-scope connector). */
+  mine?: boolean;
 }
 
 /** Forward-compat seam: connectors declare required secrets for the catalog. */

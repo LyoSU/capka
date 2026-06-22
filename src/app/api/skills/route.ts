@@ -1,14 +1,15 @@
 import { apiHandler, requireSession } from "@/lib/auth";
 import { ingestSkillZip, MAX_SKILL_ZIP_BYTES, SkillZipError } from "@/lib/skills/ingest-zip";
-import { deleteSkill, getSkillMeta, listAvailableSkills, setSkillEnabled } from "@/lib/skills/service";
+import { deleteSkill, getSkillMeta, listManagedSkills, setSkillEnabled } from "@/lib/skills/service";
+import { setMuted } from "@/lib/muted-resources";
 import { getInstallMeta } from "@/lib/marketplace/service";
 import { SkillParseError } from "@/lib/skills/types";
 
 const installIdOf = (source: string) => (source.startsWith("catalog:") ? source.slice("catalog:".length) : null);
 
 export const GET = apiHandler(async () => {
-  const { userId } = await requireSession();
-  const list = await listAvailableSkills(userId, null);
+  const { userId, role } = await requireSession();
+  const list = await listManagedSkills(userId, role === "admin");
 
   // Attribute plugin-installed skills to their plugin (name + author + homepage),
   // so the UI can group "a plugin installs a group of skills" the way it really works.
@@ -25,7 +26,7 @@ export const GET = apiHandler(async () => {
         description: s.description,
         scope: s.scope,
         enabled: s.enabled,
-        mine: s.scope === "user",
+        mine: s.mine,
         plugin: plugin ? { name: plugin.pluginName, author: plugin.author, homepage: plugin.homepage } : null,
       };
     }),
@@ -56,7 +57,11 @@ export const POST = apiHandler(async (req: Request) => {
   }
 });
 
-/** Toggle one of the caller's own personal skills. Shared skills are admin-managed. */
+/**
+ * Toggle a skill for the caller. Own (user-scope) skill → flips its global flag.
+ * Shared (system/project) skill → records the caller's personal mute, leaving
+ * it on for everyone else (admins manage the global flag via /api/admin/skills).
+ */
 export const PATCH = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
   const { id, enabled } = await req.json();
@@ -64,10 +69,15 @@ export const PATCH = apiHandler(async (req: Request) => {
     return Response.json({ error: "Bad request" }, { status: 400 });
   }
   const skill = await getSkillMeta(id);
-  if (!skill || skill.scope !== "user" || skill.userId !== userId) {
-    return Response.json({ error: "Not found or not yours" }, { status: 404 });
+  if (!skill) return Response.json({ error: "Not found" }, { status: 404 });
+
+  if (skill.scope === "user") {
+    if (skill.userId !== userId) return Response.json({ error: "Not yours" }, { status: 404 });
+    await setSkillEnabled(id, enabled);
+  } else {
+    // Shared skill: mute/unmute for this user only (enabled=false → muted).
+    await setMuted(userId, "skill", id, !enabled);
   }
-  await setSkillEnabled(id, enabled);
   return Response.json({ ok: true });
 });
 

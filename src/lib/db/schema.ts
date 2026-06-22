@@ -1,6 +1,6 @@
 import {
   pgTable, text, boolean, timestamp, integer, jsonb, index, bigint, numeric,
-  type AnyPgColumn,
+  primaryKey, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const settings = pgTable("settings", {
@@ -298,6 +298,19 @@ export const skills = pgTable("skills", {
   index("idx_skills_user_id").on(table.userId),
   index("idx_skills_project_id").on(table.projectId),
   index("idx_skills_scope").on(table.scope),
+]);
+
+// Per-user opt-out of a SHARED resource (a system/project skill or connector).
+// A row means "this user turned this shared item off for themselves" — the
+// admin's global enable stays on for everyone else. Absence = on. Users can't
+// force-enable something the admin disabled globally; this only mutes.
+export const userMutedResources = pgTable("user_muted_resources", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // 'skill' | 'mcp'
+  resourceId: text("resource_id").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.kind, table.resourceId] }),
+  index("idx_user_muted_user").on(table.userId),
 ]);
 
 // Bundled files (scripts/, references) — base64 content. SKILL.md body lives in
