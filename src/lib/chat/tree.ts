@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
+import { isShared } from "./sharing";
 
 /**
  * The conversation tree.
@@ -225,6 +226,60 @@ export async function forkChat(opts: {
       title: `${source.title ?? "Chat"} (копія)`,
       model: source.model,
     });
+    if (copies.length > 0) {
+      await tx.insert(messages).values(copies);
+      await tx.update(chats)
+        .set({ activeLeafId: copies[copies.length - 1].id })
+        .where(eq(chats.id, newChatId));
+    }
+  });
+
+  return newChatId;
+}
+
+/**
+ * Copy a shared chat's visible conversation (root → active leaf) into a brand-new
+ * chat owned by `userId`, so a reader can take a published conversation into their
+ * own account and continue it. Unlike forkChat this crosses ownership, so it is
+ * gated on the chat actually being shared (the token alone is not enough — an
+ * unpublished chat keeps its token). The clone is always a standalone web chat:
+ * the owner's projectId is intentionally dropped, since the cloner has no access
+ * to that project's workspace. Returns the new chat id, or null if the token
+ * resolves to nothing shareable.
+ */
+export async function cloneSharedChat(opts: {
+  token: string;
+  userId: string;
+}): Promise<string | null> {
+  const { token, userId } = opts;
+  const [source] = await db
+    .select()
+    .from(chats)
+    .where(eq(chats.shareToken, token))
+    .limit(1);
+  if (!source || !isShared(source.visibility)) return null;
+
+  const path = activePath(await loadMessages(source.id), source.activeLeafId ?? null);
+  const newChatId = nanoid();
+  const title = `${source.title ?? "Chat"} (копія)`;
+
+  const idMap = new Map<string, string>();
+  const copies = path.map(({ node }) => {
+    const newId = nanoid();
+    idMap.set(node.id, newId);
+    return {
+      id: newId,
+      chatId: newChatId,
+      parentId: node.parentId ? idMap.get(node.parentId) ?? null : null,
+      role: node.role,
+      content: node.content,
+      platform: node.platform,
+      metadata: sanitizeForkedMeta(node.metadata),
+    };
+  });
+
+  await db.transaction(async (tx) => {
+    await tx.insert(chats).values({ id: newChatId, userId, title, model: source.model });
     if (copies.length > 0) {
       await tx.insert(messages).values(copies);
       await tx.update(chats)

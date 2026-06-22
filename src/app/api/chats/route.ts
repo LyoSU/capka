@@ -38,6 +38,8 @@ export const GET = apiHandler(async (req: Request) => {
       archived: chats.archived,
       projectId: chats.projectId,
       source: chats.source,
+      visibility: chats.visibility,
+      shareToken: chats.shareToken,
       updatedAt: chats.updatedAt,
     })
     .from(chats)

@@ -93,6 +93,16 @@ export const chats = pgTable("chats", {
   source: text("source").default("web"),
   pinned: boolean("pinned").default(false),
   archived: boolean("archived").default(false),
+  // Sharing. "private" (default) = owner-only, the historical behaviour. "link"
+  // = anyone holding the shareToken URL, including anonymous visitors. "users" =
+  // only signed-in accounts of this instance. Enforced server-side on the public
+  // route — never trust the client. Unpublishing flips this back to "private";
+  // the token is kept so re-sharing reactivates the same URL.
+  visibility: text("visibility").notNull().default("private"), // "private" | "link" | "users"
+  // Unguessable public handle, minted on first publish and then stable. Null
+  // until the chat has ever been shared. Unique so the public route can look a
+  // chat up by token alone without exposing the owner's chat id.
+  shareToken: text("share_token").unique(),
   // The leaf of the message tree currently shown. The visible conversation is
   // the chain from this leaf up to the root — switching branches is just moving
   // this pointer. Null = empty chat. FK is set-null so deleting a message never

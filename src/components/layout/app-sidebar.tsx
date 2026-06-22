@@ -62,6 +62,8 @@ type ChatItem = {
   archived: boolean | null;
   updatedAt: string | null;
   source: string | null;
+  visibility: string | null;
+  shareToken: string | null;
 };
 
 type DateGroupKey = "today" | "yesterday" | "thisWeek" | "older";

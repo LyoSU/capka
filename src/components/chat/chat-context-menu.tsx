@@ -11,6 +11,12 @@ import {
   Trash2,
   Download,
   MoreVertical,
+  Share2,
+  Lock,
+  Globe,
+  Users,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,13 +35,18 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
 type ChatItem = {
   id: string;
   title: string | null;
   pinned: boolean | null;
   archived: boolean | null;
+  visibility?: string | null;
+  shareToken?: string | null;
 };
+
+type Visibility = "private" | "link" | "users";
 
 export function ChatContextMenu({
   chat,
@@ -52,6 +63,18 @@ export function ChatContextMenu({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
+  const [visibility, setVisibility] = useState<Visibility>(
+    (chat.visibility as Visibility) ?? "private",
+  );
+  const [shareToken, setShareToken] = useState<string | null>(chat.shareToken ?? null);
+  const [copied, setCopied] = useState(false);
+  const [savingVisibility, setSavingVisibility] = useState(false);
+
+  const shareUrl =
+    shareToken && typeof window !== "undefined"
+      ? `${window.location.origin}/share/${shareToken}`
+      : "";
 
   async function patchChat(data: Record<string, unknown>) {
     await fetch(`/api/chats/${chat.id}`, {
@@ -60,6 +83,38 @@ export function ChatContextMenu({
       body: JSON.stringify(data),
     });
     onUpdate();
+  }
+
+  // Publish/unpublish. The PATCH mints (and returns) a stable share token the
+  // first time the chat is shared, so we adopt whatever the server settles on
+  // rather than guessing the URL client-side.
+  async function changeVisibility(next: Visibility) {
+    setSavingVisibility(true);
+    setVisibility(next);
+    try {
+      const res = await fetch(`/api/chats/${chat.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility: next }),
+      });
+      if (!res.ok) throw new Error("visibility update failed");
+      const data = (await res.json()) as { visibility?: Visibility; shareToken?: string | null };
+      if (data.visibility) setVisibility(data.visibility);
+      if (data.shareToken) setShareToken(data.shareToken);
+      onUpdate();
+    } catch {
+      toast.error(t("share.updateFailed"));
+    } finally {
+      setSavingVisibility(false);
+    }
+  }
+
+  async function copyShareUrl() {
+    if (!shareUrl) return;
+    await navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    toast.success(t("share.copied"));
+    setTimeout(() => setCopied(false), 2000);
   }
 
   async function deleteChat() {
@@ -150,6 +205,10 @@ export function ChatContextMenu({
               <Download className="h-4 w-4" />
               {t("menu.export")}
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShareOpen(true)}>
+              <Share2 className="h-4 w-4" />
+              {t("menu.share")}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
@@ -177,6 +236,61 @@ export function ChatContextMenu({
               {tc("delete")}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("share.title")}</DialogTitle>
+            <DialogDescription>{t("share.description")}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            {([
+              { value: "private", icon: Lock, label: t("share.private"), hint: t("share.privateHint") },
+              { value: "link", icon: Globe, label: t("share.link"), hint: t("share.linkHint") },
+              { value: "users", icon: Users, label: t("share.users"), hint: t("share.usersHint") },
+            ] as const).map((opt) => {
+              const Icon = opt.icon;
+              const active = visibility === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={savingVisibility}
+                  onClick={() => changeVisibility(opt.value)}
+                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-60 ${
+                    active ? "border-primary bg-accent" : "border-border hover:bg-accent/50"
+                  }`}
+                >
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">{opt.label}</span>
+                    <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                  </span>
+                  {active && <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {visibility !== "private" && shareUrl && (
+            <div className="flex items-center gap-2">
+              <Input readOnly value={shareUrl} onFocus={(e) => e.target.select()} className="text-xs" />
+              <Button type="button" variant="outline" size="icon" onClick={copyShareUrl} aria-label={t("share.copy")}>
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+          )}
+
+          {visibility !== "private" && (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => changeVisibility("private")} disabled={savingVisibility}>
+                {t("share.unpublish")}
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </>

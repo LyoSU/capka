@@ -5,6 +5,11 @@ const PUBLIC_PATHS = [
   "/login",
   "/register",
   "/setup",
+  // Shared chats are viewable without a session. The page itself enforces the
+  // per-chat visibility gate (anyone-with-link vs signed-in-only vs private),
+  // so the middleware must let anonymous visitors reach it instead of bouncing
+  // them to /login.
+  "/share",
   "/api/auth",
   "/api/setup",
 ];

@@ -218,7 +218,30 @@
       "export": "Export",
       "deleteTitle": "Delete chat",
       "deleteDescription": "This will permanently delete “{title}” and all its messages.",
-      "options": "Chat actions"
+      "options": "Chat actions",
+      "share": "Share"
+    },
+    "share": {
+      "title": "Share chat",
+      "description": "Choose who can view this chat via the link.",
+      "private": "Private",
+      "privateHint": "Only you",
+      "link": "Anyone with the link",
+      "linkHint": "Viewable by everyone, even without an account",
+      "users": "Signed-in users only",
+      "usersHint": "Only people with an account here",
+      "copy": "Copy",
+      "copied": "Link copied",
+      "unpublish": "Unpublish",
+      "updateFailed": "Could not update access",
+      "readOnly": "Read-only",
+      "clone": "Clone to my account",
+      "cloning": "Cloning…",
+      "cloneFailed": "Could not clone chat",
+      "signInToClone": "Sign in to clone",
+      "gateTitle": "This chat is for signed-in users only",
+      "gateDescription": "Sign in to your account to view this conversation.",
+      "signIn": "Sign in"
     },
     "taskStatus": {
       "thinking": "Thinking…"
