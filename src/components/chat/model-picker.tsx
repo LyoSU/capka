@@ -93,19 +93,38 @@ function formatPrice(v: number): string {
 
 /** A compact "$ $ ·" cost meter — three slots, filled by tier, "+" for the top.
  *  The exact in/out prices live in the tooltip so the glance stays simple. */
-function PriceMeter({ pricing }: { pricing: ModelInfo["pricing"] }) {
+/** An explicit free tier — the OpenRouter ":free" variant. A zero `priceTier`
+ *  alone is ambiguous (it also means "price unknown"), so we badge "Free" only
+ *  for this unmistakable signal and leave the neutral dots for the rest. */
+function isFreeModel(m: ModelInfo): boolean {
+  return /:free$/i.test(m.id);
+}
+
+function PriceMeter({ model }: { model: ModelInfo }) {
   const t = useTranslations("chat.model");
+  const pricing = model.pricing;
   const tier = priceTier(pricing);
   const filled = Math.min(tier, 3);
-  const label =
-    tier === 0 ? t("price.free") : `${"$".repeat(filled)}${tier >= 4 ? "+" : ""}`;
-  const title =
-    tier === 0
-      ? t("price.free")
-      : `${label} · ${t("price.io", {
-          in: formatPrice(pricing?.prompt ?? 0),
-          out: formatPrice(pricing?.completion ?? 0),
-        })}`;
+
+  // A genuinely free model deserves a glanceable badge, not three muted dots
+  // that read as "cheapest/unknown". Render the word, tinted like the meter.
+  if (isFreeModel(model)) {
+    return (
+      <span
+        className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase leading-none tracking-wide text-emerald-600 dark:text-emerald-400"
+        title={t("price.free")}
+        aria-label={t("price.free")}
+      >
+        {t("price.free")}
+      </span>
+    );
+  }
+
+  const label = `${"$".repeat(filled)}${tier >= 4 ? "+" : ""}`;
+  const title = `${label} · ${t("price.io", {
+    in: formatPrice(pricing?.prompt ?? 0),
+    out: formatPrice(pricing?.completion ?? 0),
+  })}`;
   return (
     <span
       className="inline-flex shrink-0 items-center font-medium tabular-nums leading-none"
@@ -576,7 +595,7 @@ function ModelList({
                 >
                   {model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
                   <span className="min-w-0 flex-1 truncate text-sm">{stripGroup(model.name, group)}</span>
-                  <PriceMeter pricing={model.pricing} />
+                  <PriceMeter model={model} />
                   {isCurrent && (
                     <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
                   )}
