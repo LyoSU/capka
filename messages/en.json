@@ -655,7 +655,12 @@
       "maxPriceHint": "Pricier models are hidden and blocked on the shared key. 0 means no cap.",
       "perMillion": "${value} per 1M tokens",
       "noPriceCap": "no cap",
-      "maxPriceSaveFailed": "Failed to save price filter"
+      "maxPriceSaveFailed": "Failed to save price filter",
+      "resyncModels": "Model catalog",
+      "resyncModelsHint": "Refresh the model list and metadata (prices, context, capabilities) from OpenRouter. Runs automatically every 12h — use this to pull updates now.",
+      "resyncModelsButton": "Re-sync now",
+      "resyncDone": "Catalog re-synced — {count} models from OpenRouter.",
+      "resyncFailed": "Failed to re-sync the model catalog"
     },
     "usage": {
       "title": "Usage & cost",

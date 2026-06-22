@@ -82,6 +82,7 @@ export default function ConnectionsPage() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [resyncing, setResyncing] = useState(false);
 
   // Form state
   const [provider, setProvider] = useState<ProviderName>("litellm");
@@ -282,6 +283,20 @@ export default function ConnectionsPage() {
     const ok = await maxPrice.persist(maxPrice.value);
     if (ok) toast.success(tc("saved"));
     else toast.error(t("maxPriceSaveFailed"));
+  };
+
+  const handleResync = async () => {
+    setResyncing(true);
+    try {
+      const res = await fetch("/api/admin/models/resync", { method: "POST" });
+      if (!res.ok) throw new Error();
+      const { openrouter } = await res.json();
+      toast.success(t("resyncDone", { count: openrouter ?? 0 }));
+    } catch {
+      toast.error(t("resyncFailed"));
+    } finally {
+      setResyncing(false);
+    }
   };
 
   return (
@@ -600,6 +615,15 @@ export default function ConnectionsPage() {
             {maxPrice.dirty && (
               <Button size="sm" onClick={saveMaxPrice}>{tc("save")}</Button>
             )}
+
+            <div className="space-y-1.5 pt-2">
+              <label className="text-sm font-medium">{t("resyncModels")}</label>
+              <p className="text-xs text-muted-foreground">{t("resyncModelsHint")}</p>
+              <Button size="sm" variant="outline" onClick={handleResync} disabled={resyncing}>
+                {resyncing && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("resyncModelsButton")}
+              </Button>
+            </div>
           </div>
         </>
       )}
