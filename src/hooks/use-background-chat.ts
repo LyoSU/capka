@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { inferMimeType, type FileRef } from "@/lib/constants";
 import type { TaskEvent } from "@/lib/tasks/events";
+import { mergePendingMessages, pendingStillUnknown } from "@/lib/chat/optimistic";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -37,6 +38,11 @@ export function useBackgroundChat({
   const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null }>({ startedAt: 0, currentTool: null });
   const msgRef = useRef(messages);
   msgRef.current = messages;
+  // Optimistic user messages whose POST is still in flight. A task:finish for a
+  // PRIOR turn can reload history before a just-queued message has committed —
+  // the reloaded path wouldn't include it, so loadHistory re-appends these and
+  // drops each one only once a reload actually returns its id (durably saved).
+  const pendingRef = useRef<Message[]>([]);
   // Whether the SSE stream is currently connected — drives how hard the polling
   // fallback works (aggressive only when SSE is down).
   const sseHealthyRef = useRef(false);
@@ -52,7 +58,13 @@ export function useBackgroundChat({
         return r.json();
       })
       .then((history: Message[]) => {
-        if (history.length > 0) setMessages(history);
+        if (history.length > 0) {
+          // The server now owns any pending message it returns — stop preserving
+          // those, then keep re-appending the ones still mid-flight so a queued
+          // message never blinks out between turns.
+          pendingRef.current = pendingStillUnknown(history, pendingRef.current);
+          setMessages(mergePendingMessages(history, pendingRef.current));
+        }
         setError(null);
         const last = history[history.length - 1];
         const meta = last?.metadata as { taskStatus?: string } | undefined;
@@ -380,6 +392,9 @@ export function useBackgroundChat({
       const currentMessages = [...msgRef.current, userMsg];
       setMessages(currentMessages);
       setStatus("running");
+      // Preserve this message across any reload until it's durably persisted —
+      // a prior turn finishing mid-POST would otherwise reload it away.
+      pendingRef.current = [...pendingRef.current, userMsg];
 
       try {
         const res = await fetch("/api/chat", {
@@ -412,6 +427,7 @@ export function useBackgroundChat({
         const { taskId: newTaskId } = await res.json();
         setTaskId(newTaskId);
       } catch (e) {
+        pendingRef.current = pendingRef.current.filter((m) => m.id !== userMsg.id);
         setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
         setStatus("idle");
         throw e;
