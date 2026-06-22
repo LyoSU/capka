@@ -60,7 +60,7 @@ async function respondAggregated(
       const apiKey = await decryptKey(c.apiKey);
       try {
         const models = await listProviderModels({ provider: c.provider, apiKey, baseUrl: c.baseUrl ?? undefined });
-        const configIcon = PROVIDER_META[c.provider].iconSlug;
+        const configIcon = c.iconSlug || PROVIDER_META[c.provider].iconSlug;
         const tagged = models.map((m) => ({ ...m, configId: c.id, configLabel: labels.get(c.id), configIcon }));
         return { models: tagged, provider: c.provider };
       } catch (e) {

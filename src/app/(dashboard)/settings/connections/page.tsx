@@ -16,7 +16,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { ModelPicker } from "@/components/chat/model-picker";
-import { iconForSlug } from "@/components/chat/provider-icons";
+import { iconForSlug, BRAND_ICON_SLUGS } from "@/components/chat/provider-icons";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { PROVIDER_OPTIONS, PROVIDER_META, providerLabel, type ProviderName } from "@/lib/providers/registry";
 import { useIsAdmin } from "@/hooks/use-is-admin";
@@ -29,6 +29,43 @@ interface ProviderConfig {
   defaultModel: string | null;
   baseUrl: string | null;
   isActive: boolean | null;
+  label: string | null;
+  iconSlug: string | null;
+}
+
+/** A compact grid of brand glyphs for naming a custom connection. The first
+ *  cell ("default") clears the override back to the provider's own glyph. */
+function IconGrid({
+  value,
+  onChange,
+  fallback,
+}: {
+  value: string | null;
+  onChange: (slug: string | null) => void;
+  fallback: string;
+}) {
+  const options: (string | null)[] = [null, ...BRAND_ICON_SLUGS];
+  return (
+    <div className="flex flex-wrap gap-1">
+      {options.map((slug) => {
+        const Icon = iconForSlug(slug ?? fallback);
+        const active = (value ?? null) === slug;
+        return (
+          <button
+            key={slug ?? "_default"}
+            type="button"
+            onClick={() => onChange(slug)}
+            aria-pressed={active}
+            className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${
+              active ? "border-primary bg-primary/10 text-foreground" : "border-transparent text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            <Icon size={16} />
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function ConnectionsPage() {
@@ -49,6 +86,8 @@ export default function ConnectionsPage() {
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
+  const [label, setLabel] = useState("");
+  const [iconSlug, setIconSlug] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
 
   const meta = PROVIDER_META[provider];
@@ -57,6 +96,8 @@ export default function ConnectionsPage() {
     setProvider(next);
     setApiKey("");
     setDefaultModel("");
+    setLabel("");
+    setIconSlug(null);
     setBaseUrl(PROVIDER_META[next].defaultBaseUrl ?? "");
   }
 
@@ -82,7 +123,20 @@ export default function ConnectionsPage() {
     setApiKey("");
     setBaseUrl("");
     setDefaultModel("");
+    setLabel("");
+    setIconSlug(null);
     setShowForm(false);
+  };
+
+  // Persist a custom name/glyph on an existing connection. State is updated
+  // optimistically by the caller; this just saves and surfaces failures.
+  const handleUpdateMeta = async (id: string, patch: { label?: string | null; iconSlug?: string | null }) => {
+    const res = await fetch("/api/settings/providers", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...patch }),
+    });
+    if (!res.ok) toast.error(t("toggleError"));
   };
 
   const handleToggle = async (id: string, enabled: boolean) => {
@@ -170,6 +224,8 @@ export default function ConnectionsPage() {
           apiKey: meta.requiresKey ? apiKey : undefined,
           baseUrl: effectiveBaseUrl,
           defaultModel: modelId,
+          label: meta.requiresBaseUrl ? label : undefined,
+          iconSlug: meta.requiresBaseUrl ? iconSlug : undefined,
         }),
       });
 
@@ -247,10 +303,14 @@ export default function ConnectionsPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {(() => {
-                  const Icon = iconForSlug(PROVIDER_META[c.provider as ProviderName]?.iconSlug);
+                  const Icon = iconForSlug(c.iconSlug || PROVIDER_META[c.provider as ProviderName]?.iconSlug);
                   return <Icon size={16} className="text-muted-foreground" />;
                 })()}
-                <span className="text-sm font-semibold">{providerLabel(c.provider)}</span>
+                <span className="text-sm font-semibold">{c.label?.trim() || providerLabel(c.provider)}</span>
+                {/* When a custom name overrides it, still show the underlying provider. */}
+                {c.label?.trim() && (
+                  <span className="text-[10px] text-muted-foreground">{providerLabel(c.provider)}</span>
+                )}
                 {c.isActive && (
                   <Badge variant="outline" className="text-[10px]">{t("enabled")}</Badge>
                 )}
@@ -288,6 +348,33 @@ export default function ConnectionsPage() {
                 placeholder={t("pickModel")}
               />
             </div>
+
+            {/* Naming + glyph only for base-URL providers (LiteLLM/Ollama),
+                where the connection's real identity isn't fixed by the choice. */}
+            {PROVIDER_META[c.provider as ProviderName]?.requiresBaseUrl && (
+              <>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">{t("connectionName")}</label>
+                  <Input
+                    value={c.label ?? ""}
+                    onChange={(e) => setConfigs((prev) => prev.map((x) => (x.id === c.id ? { ...x, label: e.target.value } : x)))}
+                    onBlur={() => handleUpdateMeta(c.id, { label: c.label })}
+                    placeholder={providerLabel(c.provider)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">{t("connectionIcon")}</label>
+                  <IconGrid
+                    value={c.iconSlug ?? null}
+                    fallback={PROVIDER_META[c.provider as ProviderName].iconSlug}
+                    onChange={(slug) => {
+                      setConfigs((prev) => prev.map((x) => (x.id === c.id ? { ...x, iconSlug: slug } : x)));
+                      handleUpdateMeta(c.id, { iconSlug: slug });
+                    }}
+                  />
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -372,6 +459,19 @@ export default function ConnectionsPage() {
               placeholder={meta.requiresKey && !apiKey ? t("enterKeyFirst") : t("pickModel")}
             />
           </div>
+
+          {meta.requiresBaseUrl && (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-sm">{t("connectionName")}</label>
+                <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("connectionNamePlaceholder")} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm">{t("connectionIcon")}</label>
+                <IconGrid value={iconSlug} fallback={meta.iconSlug} onChange={setIconSlug} />
+              </div>
+            </>
+          )}
 
           <div className="flex gap-2">
             <Button onClick={handleTestAndSave} disabled={saving}>

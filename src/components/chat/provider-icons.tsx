@@ -20,6 +20,10 @@ import Zhipu from "@lobehub/icons/es/Zhipu";
 import Moonshot from "@lobehub/icons/es/Moonshot";
 import Ollama from "@lobehub/icons/es/Ollama";
 import OpenRouter from "@lobehub/icons/es/OpenRouter";
+import OpenCode from "@lobehub/icons/es/OpenCode";
+import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
+import OpenHands from "@lobehub/icons/es/OpenHands";
+import Cursor from "@lobehub/icons/es/Cursor";
 
 export type IconComponent = ComponentType<{ size?: number; className?: string }>;
 
@@ -46,8 +50,17 @@ const ICONS: Record<string, IconComponent> = {
   moonshot: Moonshot,
   ollama: Ollama,
   openrouter: OpenRouter,
+  opencode: OpenCode,
+  claudecode: ClaudeCode,
+  openhands: OpenHands,
+  cursor: Cursor,
 };
 
 export function iconForSlug(slug?: string | null): IconComponent {
   return (slug && ICONS[slug]) || Sparkles;
 }
+
+/** Brand glyphs offered when naming a custom connection. Display labels are
+ *  best-effort title-cased slugs; the picker shows the glyph, which is what
+ *  actually matters. The empty option means "use the provider's default". */
+export const BRAND_ICON_SLUGS = Object.keys(ICONS);

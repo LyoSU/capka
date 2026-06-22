@@ -77,6 +77,11 @@ export const providerConfigs = pgTable("provider_configs", {
   baseUrl: text("base_url"),
   defaultModel: text("default_model"),
   isActive: boolean("is_active").default(true),
+  // Optional user-given identity for the connection — lets two configs of the
+  // same provider (e.g. two LiteLLM proxies) be told apart in the picker by a
+  // friendly name + brand glyph instead of an opaque host.
+  label: text("label"),
+  iconSlug: text("icon_slug"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_provider_configs_user_id").on(table.userId)]);

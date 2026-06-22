@@ -45,7 +45,7 @@ export async function resolveEnabledConfigs(
  * endpoint host, falling back to a stable ordinal so they're never identical.
  */
 export function labelEnabledConfigs(
-  configs: { id: string; provider: string; baseUrl: string | null }[],
+  configs: { id: string; provider: string; baseUrl: string | null; label?: string | null }[],
 ): Map<string, string> {
   const count = new Map<string, number>();
   for (const c of configs) count.set(c.provider, (count.get(c.provider) ?? 0) + 1);
@@ -53,6 +53,12 @@ export function labelEnabledConfigs(
   const ordinal = new Map<string, number>();
   const out = new Map<string, string>();
   for (const c of configs) {
+    // A user-given name always wins — that's the whole point of letting them
+    // name a connection.
+    if (c.label?.trim()) {
+      out.set(c.id, c.label.trim());
+      continue;
+    }
     const base = providerLabel(c.provider);
     if ((count.get(c.provider) ?? 0) <= 1) {
       out.set(c.id, base);
