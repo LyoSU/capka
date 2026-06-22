@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback, useId, createElement } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useId, createElement } from "react";
 import { createPortal } from "react-dom";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
@@ -518,7 +518,7 @@ function ModelList({
   if (!showRail) return right;
 
   return (
-    <div className={`flex min-h-0 flex-1 ${orientation === "vertical" ? "flex-row" : "flex-col"}`}>
+    <div className={`flex min-h-0 min-w-0 flex-1 ${orientation === "vertical" ? "flex-row" : "flex-col"}`}>
       <ProviderRail
         groups={railGroups}
         hasFeatured={hasFeatured}
@@ -568,6 +568,15 @@ export function ModelPicker({
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
+  // The desktop pill panel is portaled to <body> with position:fixed and
+  // measured coords. It can't be `absolute`: the greeting wraps the trigger in
+  // `animate-blur-rise`, whose transform makes it the visual containing block
+  // and drags/clips any descendant — including absolutely-positioned ones. As a
+  // body child with fixed coords it escapes that subtree and clamps to the
+  // viewport cleanly (same reason the mobile overlay is portaled below).
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
   const close = useCallback(() => {
     setOpen(false);
     triggerRef.current?.focus();
@@ -594,7 +603,16 @@ export function ModelPicker({
   useEffect(() => {
     if (!open || isMobile) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // The panel is portaled outside containerRef, so it must be excluded too —
+      // otherwise clicking a model would register as an "outside" click and the
+      // panel would close before the option's onClick fires.
+      if (
+        containerRef.current && !containerRef.current.contains(target) &&
+        (!popoverRef.current || !popoverRef.current.contains(target))
+      ) {
+        setOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -611,6 +629,39 @@ export function ModelPicker({
     const el = listRef.current?.querySelector(`[data-index="${activeIndex}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
+
+  // Measure the trigger and place the fixed, viewport-clamped desktop panel
+  // before paint. Recompute on resize/scroll so it tracks the trigger while open.
+  useLayoutEffect(() => {
+    if (!open || isMobile || variant !== "pill") {
+      setPos(null);
+      return;
+    }
+    const compute = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const margin = 8;
+      const gap = 4; // matches the old mt-1
+      const panelH = 384; // h-96
+      const vw = document.documentElement.clientWidth;
+      const vh = document.documentElement.clientHeight;
+      const width = Math.min(448 /* 28rem */, vw - margin * 2);
+      const r = trigger.getBoundingClientRect();
+      const left = Math.max(margin, Math.min(r.left, vw - width - margin));
+      // Open downward; flip above the trigger if it would run off the bottom.
+      const top = r.bottom + gap + panelH <= vh - margin
+        ? r.bottom + gap
+        : Math.max(margin, r.top - gap - panelH);
+      setPos({ top, left, width });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    window.addEventListener("scroll", compute, true);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("scroll", compute, true);
+    };
+  }, [open, isMobile, variant]);
 
   const toggleOpen = useCallback(() => {
     if (disabled) return;
@@ -707,15 +758,29 @@ export function ModelPicker({
         </button>
       )}
 
-      {open && !isMobile && (
+      {/* Field variant: anchored under its full-width trigger (forms have no
+          transformed ancestor, so absolute is fine and matches the trigger width). */}
+      {open && !isMobile && variant === "field" && (
         <div
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
-          className={`absolute top-full mt-1 z-50 flex h-96 overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 max-w-[calc(100vw-1rem)] ${
-            variant === "field" ? "left-0 w-[28rem] min-w-full" : "left-0 w-[28rem]"
-          }`}
+          className="absolute top-full left-0 mt-1 z-50 flex h-96 w-[28rem] min-w-full overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 max-w-[calc(100vw-1rem)]"
         >
           {renderList("vertical")}
         </div>
+      )}
+
+      {/* Pill variant: portaled to <body> with fixed coords so the greeting's
+          animate-blur-rise transform can't drag or clip it. */}
+      {open && !isMobile && variant === "pill" && pos && typeof document !== "undefined" && createPortal(
+        <div
+          ref={popoverRef}
+          onKeyDown={(e) => { if (e.key === "Escape") close(); }}
+          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+          className="z-50 flex h-96 overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
+        >
+          {renderList("vertical")}
+        </div>,
+        document.body,
       )}
 
       {open && isMobile && typeof document !== "undefined" && createPortal(
