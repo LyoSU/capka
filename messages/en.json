@@ -725,6 +725,8 @@
       "namePlaceholder": "Name (e.g. Notion)",
       "tokenPlaceholder": "Access token (optional)",
       "nameHint": "Will be saved as: {slug}",
+      "shareWithUsers": "Available to users",
+      "shareWithUsersHint": "A shared connector for everyone. Turn off to keep it private.",
       "tokenHint": "If the service needs an access key, paste it here. It's stored encrypted.",
       "advanced": "Advanced settings",
       "advancedHint": "OAuth Client ID / Secret are only for services that require a pre-registered client. Leave blank for the usual sign-in.",

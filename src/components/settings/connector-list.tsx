@@ -111,6 +111,8 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
   const [clientSecret, setClientSecret] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<Health | null>(null);
+  // Admin only, remote connectors: shared (system scope) vs private (user scope).
+  const [shared, setShared] = useState(true);
 
   const loadHealth = useCallback(async () => {
     setHealthLoading(true);
@@ -192,15 +194,17 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
 
   const resetForm = () => {
     setName(""); setUrl(""); setToken(""); setClientId(""); setClientSecret(""); setCommand(""); setEnvText(""); setKind("remote");
-    setTestResult(null); setShowAdvanced(false); setShowForm(false);
+    setTestResult(null); setShowAdvanced(false); setShowForm(false); setShared(true);
   };
 
   const add = async () => {
     if (!canSubmit) return;
     setSaving(true);
     try {
-      // Local (stdio) connectors are admin-managed and run in the sandbox.
-      const endpoint = isLocal ? "/api/admin/mcp" : "/api/mcp";
+      // Local (stdio) connectors are always admin-managed (system scope). A
+      // remote connector is shared (system) when an admin keeps the toggle on,
+      // otherwise private to the adder (user scope).
+      const endpoint = isLocal || (isAdmin && shared) ? "/api/admin/mcp" : "/api/mcp";
       const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildBody()) });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -321,6 +325,16 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                   : testResult.status === "unauthorized"
                     ? <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"><AlertTriangle className="h-3 w-3" />{t("health.unauthorized")}</span>
                     : <span className="flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" />{t("health.unreachable")}</span>}
+            </div>
+          )}
+
+          {isAdmin && !isLocal && (
+            <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{t("shareWithUsers")}</p>
+                <p className="text-xs text-muted-foreground">{t("shareWithUsersHint")}</p>
+              </div>
+              <Switch checked={shared} onCheckedChange={setShared} aria-label={t("shareWithUsers")} />
             </div>
           )}
 
