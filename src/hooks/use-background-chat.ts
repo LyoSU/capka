@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { nanoid } from "nanoid";
-import { toast } from "sonner";
-import { inferMimeType, type FileRef } from "@/lib/constants";
+import { type FileRef } from "@/lib/constants";
 import type { TaskEvent } from "@/lib/tasks/events";
 import { mergePendingMessages, pendingStillUnknown } from "@/lib/chat/optimistic";
 
@@ -337,48 +336,15 @@ export function useBackgroundChat({
     }).catch(() => {}); // ignore conflict (chat already exists)
   }, [chatId, projectId]);
 
-  // ── Upload files to sandbox workspace (parallel) ─────────────
-  const uploadFiles = useCallback(
-    async (files: File[]): Promise<FileRef[]> => {
-      await ensureChat();
-      const results = await Promise.allSettled(
-        files.map(async (file) => {
-          const form = new FormData();
-          form.append("chatId", chatId);
-          form.append("path", ".");
-          form.append("file", file);
-          const res = await fetch("/api/sandbox/files/upload", { method: "POST", body: form });
-          if (!res.ok) throw new Error("upload failed");
-          const data: { name?: string } = await res.json();
-          return { name: data.name || file.name, type: inferMimeType(file.name, file.type) };
-        }),
-      );
-      return results
-        .filter((r): r is PromiseFulfilledResult<FileRef> => r.status === "fulfilled")
-        .map((r) => r.value);
-    },
-    [chatId, ensureChat],
-  );
-
   // ── Send message ───────────────────────────────────────────
+  // Attachments arrive already uploaded (the composer uploads eagerly on attach,
+  // so the bytes are in the sandbox before send) — we only carry their refs here.
   const sendMessage = useCallback(
-    async (text: string, model: string, files?: File[]) => {
-      if (!text.trim() && (!files || files.length === 0)) return;
+    async (text: string, model: string, attachedFiles?: FileRef[]) => {
+      const files = attachedFiles ?? [];
+      if (!text.trim() && files.length === 0) return;
 
-      // Upload files first — AI needs them in workspace before processing
-      let uploadedFiles: FileRef[] = [];
-      if (files && files.length > 0) {
-        uploadedFiles = await uploadFiles(files);
-        const failed = files.length - uploadedFiles.length;
-        if (failed > 0) {
-          const uploadedNames = new Set(uploadedFiles.map((f) => f.name));
-          const names = files.filter((f) => !uploadedNames.has(f.name)).map((f) => f.name).join(", ");
-          toast.error(t("uploadFailed", { files: names || `${failed}` }));
-          return;
-        }
-      }
-
-      const displayText = text.trim() || (uploadedFiles.length > 0 ? t("processFiles") : "");
+      const displayText = text.trim() || (files.length > 0 ? t("processFiles") : "");
 
       // Optimistically add the user message. Carry the attachment refs in
       // metadata so the bubble shows thumbnails immediately — before history
@@ -387,7 +353,7 @@ export function useBackgroundChat({
         id: nanoid(),
         role: "user",
         parts: [{ type: "text", text: displayText }],
-        metadata: uploadedFiles.length > 0 ? { attachedFiles: uploadedFiles } : undefined,
+        metadata: files.length > 0 ? { attachedFiles: files } : undefined,
       };
       const currentMessages = [...msgRef.current, userMsg];
       setMessages(currentMessages);
@@ -406,7 +372,7 @@ export function useBackgroundChat({
             model,
             userMessage: displayText,
             userMessageId: userMsg.id,
-            attachedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+            attachedFiles: files.length > 0 ? files : undefined,
             messages: currentMessages.map((m) => ({
               id: m.id,
               role: m.role,
@@ -433,7 +399,7 @@ export function useBackgroundChat({
         throw e;
       }
     },
-    [chatId, projectId, uploadFiles, t],
+    [chatId, projectId, t],
   );
 
   // ── Re-run the tail (regenerate / edit) ────────────────────
@@ -535,5 +501,5 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId]);
 
-  return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, reload: loadHistory, isLoading: status === "running", taskInfo };
+  return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", taskInfo };
 }

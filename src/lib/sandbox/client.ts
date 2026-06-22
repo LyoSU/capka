@@ -151,6 +151,16 @@ export async function downloadFile(sessionId: string, filePath: string, userId?:
   return res;
 }
 
+export async function deleteFile(sessionId: string, filePath: string, userId?: string): Promise<{ ok: boolean }> {
+  const id = sanitizeId(sessionId);
+  const params = new URLSearchParams({ path: filePath });
+  if (userId) {
+    params.set("userId", userId);
+    params.set("token", workspaceToken(userId, sessionId));
+  }
+  return request(`/sessions/${id}/files?${params}`, "DELETE");
+}
+
 export async function uploadFile(sessionId: string, path: string, file: File, userId?: string): Promise<{ ok: boolean; path: string; name: string }> {
   const id = sanitizeId(sessionId);
   const form = new FormData();

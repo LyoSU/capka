@@ -2,10 +2,10 @@
 
 import { useRef, useCallback, useMemo, useEffect, type KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowUp, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Loader2, Paperclip, RotateCw, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BinaryFileThumb, FileTile } from "./file-preview";
-import { useFileAttach } from "./use-file-attach";
+import { BinaryFileThumb, FileTile, SandboxFileTile, type PreviewFile } from "./file-preview";
+import type { FileRef } from "@/lib/constants";
 
 /**
  * Pasted plain text at or above this length becomes a .txt attachment instead of
@@ -20,9 +20,20 @@ function pastedTextFile(text: string): File {
   return new File([text], `pasted-text-${stamp}.txt`, { type: "text/plain" });
 }
 
+/**
+ * A composer attachment. Uploaded eagerly on attach, so it carries its own
+ * lifecycle: `uploading` while in flight, `ready` once it's in the sandbox (with
+ * its server `ref`), or `error` (retryable). `file` holds the local bytes for a
+ * freshly-staged attachment; it's absent for one restored from a saved draft,
+ * where only the `ref` survives and the thumbnail comes from the sandbox.
+ */
 export type AttachedFile = {
-  file: File;
   id: string;
+  status: "uploading" | "ready" | "error";
+  name: string;
+  type: string;
+  file?: File;
+  ref?: FileRef;
 };
 
 interface ChatInputProps {
@@ -31,8 +42,11 @@ interface ChatInputProps {
   onSubmit: () => void;
   onStop: () => void;
   isLoading: boolean;
+  chatId: string;
   files: AttachedFile[];
-  onFilesChange: (files: AttachedFile[]) => void;
+  onAddFiles: (files: FileList | File[]) => void;
+  onRemoveFile: (id: string) => void;
+  onRetryFile: (id: string) => void;
 }
 
 export function ChatInput({
@@ -41,19 +55,23 @@ export function ChatInput({
   onSubmit,
   onStop,
   isLoading,
+  chatId,
   files,
-  onFilesChange,
+  onAddFiles,
+  onRemoveFile,
+  onRetryFile,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const addFiles = useFileAttach(files, onFilesChange);
 
-  // Thumbnails for image attachments so a photo is obviously a photo.
+  // Thumbnails for locally-staged image attachments (uploading / error), so a
+  // photo is obviously a photo before it lands in the sandbox. Ready chips render
+  // their thumbnail straight from the sandbox instead, so they need no object-URL.
   const previews = useMemo(() => {
     const m = new Map<string, string>();
     for (const af of files) {
-      if (af.file.type.startsWith("image/")) m.set(af.id, URL.createObjectURL(af.file));
+      if (af.file && af.file.type.startsWith("image/")) m.set(af.id, URL.createObjectURL(af.file));
     }
     return m;
   }, [files]);
@@ -66,73 +84,103 @@ export function ChatInput({
     el.style.height = `${el.scrollHeight}px`;
   }, []);
 
+  // Something is uploading → hold the send until it settles, so we never send a
+  // message whose attachment isn't in the sandbox yet.
+  const uploading = files.some((f) => f.status === "uploading");
+  const hasReady = files.some((f) => f.status === "ready");
+  const hasContent = Boolean(value.trim()) || hasReady;
+  const canSend = hasContent && !uploading;
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       // Allow sending while a reply streams — the message queues and runs after
       // the current turn (serialized per chat on the server).
-      if (value.trim() || files.length > 0) {
-        onSubmit();
-      }
+      if (canSend) onSubmit();
     }
-  };
-
-  const removeFile = (id: string) => {
-    onFilesChange(files.filter((f) => f.id !== id));
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
     const pastedFiles = Array.from(e.clipboardData.files);
     if (pastedFiles.length > 0) {
       e.preventDefault();
-      addFiles(pastedFiles);
+      onAddFiles(pastedFiles);
       return;
     }
     // Big text paste → .txt attachment, so a wall of text doesn't flood the input.
     const text = e.clipboardData.getData("text/plain");
     if (text.length >= PASTE_AS_FILE_CHARS) {
       e.preventDefault();
-      addFiles([pastedTextFile(text)]);
+      onAddFiles([pastedTextFile(text)]);
     }
   };
 
-  const hasContent = value.trim() || files.length > 0;
+  const removeButton = (af: AttachedFile) => (
+    <button
+      type="button"
+      onClick={() => onRemoveFile(af.id)}
+      className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition hover:bg-foreground/80"
+      aria-label={t("remove", { name: af.name })}
+    >
+      <X className="h-3 w-3" />
+    </button>
+  );
 
   return (
     <div className="px-4 md:px-6 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto max-w-3xl lg:max-w-4xl">
         <div className="overflow-hidden rounded-2xl border bg-card shadow-sm transition-all focus-within:shadow-md">
-          {/* Attached files preview — same square FileTile used in chat history,
-              so a staged file looks identical to a sent one. Files aren't in the
-              sandbox yet, so the thumb is a local object-URL / typed icon. Wraps
-              and scrolls so many files never push the textarea off-screen. */}
+          {/* Attached files preview — same square FileTile used in chat history, so
+              a staged file looks identical to a sent one. A ready file shows its
+              real sandbox thumbnail; one still uploading (or failed) shows its local
+              preview with a status overlay. Wraps and scrolls so many files never
+              push the textarea off-screen. */}
           {files.length > 0 && (
             <div className="flex max-h-44 flex-wrap gap-3 overflow-y-auto px-3 pt-3 scrollbar-thin">
               {files.map((af) => {
+                // Ready & in the sandbox → real thumbnail tile (works for restored
+                // chips too, whose bytes are no longer in memory).
+                if (af.status === "ready" && af.ref) {
+                  const pf: PreviewFile = { path: af.ref.name, name: af.ref.name, chatId };
+                  return <SandboxFileTile key={af.id} file={pf} viewable={[pf]} overlay={removeButton(af)} />;
+                }
+
                 const preview = previews.get(af.id);
                 const thumb = preview ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={preview} alt="" className="h-full w-full object-cover" />
                 ) : (
-                  <BinaryFileThumb name={af.file.name} className="h-full w-full" />
+                  <BinaryFileThumb name={af.name} className="h-full w-full" />
                 );
-                return (
-                  <FileTile
-                    key={af.id}
-                    thumb={thumb}
-                    name={af.file.name}
-                    overlay={
+
+                // Uploading → dim + spinner; error → dim + retry, with a red ring.
+                const overlay =
+                  af.status === "error" ? (
+                    <>
+                      {removeButton(af)}
                       <button
                         type="button"
-                        onClick={() => removeFile(af.id)}
-                        className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition hover:bg-foreground/80"
-                        aria-label={t("remove", { name: af.file.name })}
+                        onClick={() => onRetryFile(af.id)}
+                        className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-destructive/25 text-destructive-foreground ring-1 ring-destructive transition hover:bg-destructive/35"
+                        aria-label={t("retryUpload", { name: af.name })}
+                        title={t("uploadFailed", { files: af.name })}
                       >
-                        <X className="h-3 w-3" />
+                        <RotateCw className="h-5 w-5" />
                       </button>
-                    }
-                  />
-                );
+                    </>
+                  ) : (
+                    <>
+                      {removeButton(af)}
+                      <div
+                        aria-hidden
+                        className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-background/55"
+                      >
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      </div>
+                    </>
+                  );
+
+                return <FileTile key={af.id} thumb={thumb} name={af.name} overlay={overlay} />;
               })}
             </div>
           )}
@@ -161,7 +209,7 @@ export function ChatInput({
                 multiple
                 className="hidden"
                 onChange={(e) => {
-                  if (e.target.files) addFiles(e.target.files);
+                  if (e.target.files) onAddFiles(e.target.files);
                   e.target.value = "";
                 }}
               />
@@ -178,7 +226,8 @@ export function ChatInput({
             </div>
 
             {/* While a reply streams: Send (queues the next turn) when there's
-                something to send, otherwise Stop. Idle: always Send. */}
+                something to send, otherwise Stop. Idle: always Send. Send stays
+                disabled until any in-flight upload settles. */}
             {isLoading && !hasContent ? (
               <Button
                 size="icon"
@@ -193,11 +242,15 @@ export function ChatInput({
               <Button
                 size="icon"
                 className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
-                disabled={!hasContent}
+                disabled={!canSend}
                 onClick={onSubmit}
                 aria-label={isLoading ? t("queue") : t("send")}
               >
-                <ArrowUp className="h-4.5 w-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:h-4 sm:w-4" />
+                {uploading ? (
+                  <Loader2 className="h-4.5 w-4.5 animate-spin sm:h-4 sm:w-4" />
+                ) : (
+                  <ArrowUp className="h-4.5 w-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:h-4 sm:w-4" />
+                )}
               </Button>
             )}
           </div>

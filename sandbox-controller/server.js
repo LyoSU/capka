@@ -240,6 +240,24 @@ const server = createServer(async (req, res) => {
       return jsonRes(res, 200, { entries });
     }
 
+    // DELETE /sessions/:id/files?path=  — remove one file (composer attachment
+    // the user detached, or staged uploads being cleaned up).
+    const fileDelMatch = path.match(/^\/sessions\/([^/]+)\/files$/);
+    if (method === "DELETE" && fileDelMatch) {
+      const r = await resolveOwner(fileDelMatch[1], url.searchParams.get("userId"), url.searchParams.get("token"));
+      if (r.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (r.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
+      const filePath = url.searchParams.get("path");
+      if (!filePath) return jsonRes(res, 400, { error: "Missing path" });
+      store.touch(r.sessionId);
+      try {
+        await workspace.delete(r.userId, r.sessionId, filePath);
+      } catch (e) {
+        return jsonRes(res, 400, { error: e.message });
+      }
+      return jsonRes(res, 200, { ok: true });
+    }
+
     // GET /sessions/:id/download
     const dlMatch = path.match(/^\/sessions\/([^/]+)\/download$/);
     if (method === "GET" && dlMatch) {

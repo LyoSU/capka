@@ -27,9 +27,10 @@ function msgText(m: { parts?: { type: string; text?: string }[] }): string {
 import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
-import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
-import { useFileAttach } from "@/components/chat/use-file-attach";
+import { ChatInput } from "@/components/chat/chat-input";
+import { useComposerAttachments } from "@/components/chat/use-composer-attachments";
 import { useChatDraft } from "@/components/chat/use-chat-draft";
+import type { FileRef } from "@/lib/constants";
 import { FileDropZone } from "@/components/chat/file-drop-zone";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
@@ -93,10 +94,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
 
   const router = useRouter();
-  const { messages, isLoading, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, reload, taskInfo } = useBackgroundChat({
+  const { messages, isLoading, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, taskInfo } = useBackgroundChat({
     chatId,
     projectId,
   });
+  // Composer attachments upload eagerly on attach (so send is instant and a
+  // retry never re-uploads) and persist their refs per chat — they survive a
+  // reload just like the text draft.
+  const attachments = useComposerAttachments({ chatId, ensureChat });
 
   // Fork the conversation from a message into a fresh chat, then jump to it.
   const handleFork = async (messageId: string) => {
@@ -276,52 +281,47 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // Composer text is a per-chat draft persisted to localStorage, so a
   // typed-but-unsent message survives a reload, a closed tab, or a failed send.
   const { draft: input, setDraft: setInput, clearDraft } = useChatDraft(chatId);
-  const [files, setFiles] = useState<AttachedFile[]>([]);
-  // Drop a file anywhere over the chat — greeting screen or message stream — and
-  // it stages onto the composer, same as picking it via the paperclip.
-  const addFiles = useFileAttach(files, setFiles);
   // Messages typed while a reply is streaming wait here (shown above the
   // composer, each cancellable) and are dispatched one-by-one as the chat frees
   // up — held client-side so they can be edited/removed before they're sent.
-  const [queued, setQueued] = useState<{ id: string; text: string; files: AttachedFile[] }[]>([]);
+  // Attachments are already-uploaded refs (eager upload), so a queued turn just
+  // carries its refs.
+  const [queued, setQueued] = useState<{ id: string; text: string; refs: FileRef[] }[]>([]);
   const dispatchingRef = useRef(false);
 
-  const send = async (text: string, sendFiles: AttachedFile[]) => {
+  const send = async (text: string, refs: FileRef[]) => {
     try {
-      await sendMessage(text, model, sendFiles.length > 0 ? sendFiles.map((af) => af.file) : undefined);
+      await sendMessage(text, model, refs.length > 0 ? refs : undefined);
     } catch (e) {
       // The send failed and the hook already rolled back its optimistic bubble —
       // put the user's words back in the composer so nothing they typed is lost.
       // If they've since started a new message, keep both: the failed text goes
       // on top (filter drops empties so a files-only failure adds no blank lines).
-      // Files (still in memory) come back too, deduped against any the user
-      // re-attached. The updater reads the live draft, not this closure's stale
-      // snapshot (matters for queued sends).
+      // The attachments are still in the sandbox, so restore re-adds them as ready
+      // chips (deduped). The updater reads the live draft, not this closure's
+      // stale snapshot (matters for queued sends).
       setInput((cur) => [text, cur].filter(Boolean).join("\n\n"));
-      if (sendFiles.length > 0) {
-        setFiles((prev) => {
-          const seen = new Set(prev.map((f) => f.id));
-          return [...sendFiles.filter((f) => !seen.has(f.id)), ...prev];
-        });
-      }
+      attachments.restore(refs);
       toast.error(e instanceof Error ? e.message : t("panel.sendFailed"));
     }
   };
 
   const handleSubmit = async () => {
     const text = input.trim();
-    if (!text && files.length === 0) return;
+    const refs = attachments.readyRefs;
+    // Nothing to send, or an attachment is still uploading (send is disabled in
+    // the composer while uploading, but guard here too).
+    if ((!text && refs.length === 0) || attachments.hasUploading) return;
     haptic("tap"); // light confirmation that the message left
-    const currentFiles = files;
     clearDraft(); // sent — drop the persisted draft so a reload won't restore it
-    setFiles([]);
+    attachments.clear(); // forget the chips; the sent message owns the files now
     // A turn is already running (or queued items are still draining) — line this
     // one up instead of sending now.
     if (isLoading || queued.length > 0 || dispatchingRef.current) {
-      setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: currentFiles }]);
+      setQueued((q) => [...q, { id: crypto.randomUUID(), text, refs }]);
       return;
     }
-    await send(text, currentFiles);
+    await send(text, refs);
   };
 
   // Drain the queue when the chat frees up: send each queued message as its own
@@ -334,7 +334,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     dispatchingRef.current = true;
     setQueued([]);
     void (async () => {
-      for (const item of batch) await send(item.text, item.files);
+      for (const item of batch) await send(item.text, item.refs);
     })().finally(() => { dispatchingRef.current = false; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, queued]);
@@ -385,8 +385,11 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       onSubmit={handleSubmit}
       onStop={stop}
       isLoading={isLoading}
-      files={files}
-      onFilesChange={setFiles}
+      chatId={chatId}
+      files={attachments.files}
+      onAddFiles={attachments.add}
+      onRemoveFile={attachments.remove}
+      onRetryFile={attachments.retry}
     />
   );
 
@@ -401,7 +404,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
         >
           <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="flex-1 truncate text-muted-foreground">
-            {q.text || t("panel.queuedFiles", { count: q.files.length })}
+            {q.text || t("panel.queuedFiles", { count: q.refs.length })}
           </span>
           <button
             type="button"
@@ -419,7 +422,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   return (
     <PreviewProvider>
     {/* Full-window drop target — disabled for read-only Telegram chats (no composer). */}
-    <FileDropZone onFiles={addFiles} disabled={readOnly} />
+    <FileDropZone onFiles={attachments.add} disabled={readOnly} />
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
       {showGreeting ? (

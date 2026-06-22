@@ -100,6 +100,20 @@ export class LocalFsStore {
   async remove(userId, sessionId) {
     await rm(this.#wsPath(userId, sessionId), { recursive: true, force: true });
   }
+
+  /** Delete a single file. safeRealPath guarantees the target stays inside the
+   *  workspace (a planted symlink either resolves in-bounds or throws), so the
+   *  rm can never escape. Missing file is a no-op (idempotent — a detach racing a
+   *  prior delete must not error); a directory is refused so this endpoint can't
+   *  be turned into a recursive wipe. */
+  async delete(userId, sessionId, relPath) {
+    const base = this.#wsPath(userId, sessionId);
+    const full = await safeRealPath(base, relPath);
+    const s = await stat(full).catch(() => null);
+    if (!s) return;
+    if (s.isDirectory()) throw Object.assign(new Error("Cannot delete a directory"), { code: "EISDIR" });
+    await rm(full, { force: true });
+  }
 }
 
 /** Resolve the daemon-host path backing dataRoot by inspecting our own container.

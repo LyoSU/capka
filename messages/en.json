@@ -284,7 +284,9 @@
       "queue": "Queue message",
       "remove": "Remove {name}",
       "tooLarge": "Too large (max {max}): {files}",
-      "dropHere": "Drop files to attach"
+      "dropHere": "Drop files to attach",
+      "uploadFailed": "Upload failed: {files}",
+      "retryUpload": "Retry upload of {name}"
     },
     "workspace": {
       "title": "Files",

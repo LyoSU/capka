@@ -44,6 +44,26 @@ export function runWorkspaceStoreContract(makeStore) {
       await expect(store.list("u1", "s1", ".")).resolves.toEqual([]);
     });
 
+    it("delete() removes a single file, leaving the rest", async () => {
+      await store.ensure("u1", "s1");
+      await store.write("u1", "s1", "keep.txt", Buffer.from("k"));
+      await store.write("u1", "s1", "drop.txt", Buffer.from("d"));
+      await store.delete("u1", "s1", "drop.txt");
+      const names = (await store.list("u1", "s1", ".")).map((e) => e.name).sort();
+      expect(names).toEqual(["keep.txt"]);
+    });
+
+    it("delete() is idempotent for a missing file", async () => {
+      await store.ensure("u1", "s1");
+      await expect(store.delete("u1", "s1", "ghost.txt")).resolves.toBeUndefined();
+    });
+
+    it("delete() refuses to remove a directory", async () => {
+      await store.ensure("u1", "s1");
+      await store.write("u1", "s1", "dir/inner.txt", Buffer.from("x"));
+      await expect(store.delete("u1", "s1", "dir")).rejects.toBeTruthy();
+    });
+
     it("rejects path traversal", async () => {
       await store.ensure("u1", "s1");
       await expect(store.read("u1", "s1", "../../etc/passwd")).rejects.toBeTruthy();
