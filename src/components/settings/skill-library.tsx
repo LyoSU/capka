@@ -316,11 +316,16 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
         <p className="py-8 text-center text-sm text-muted-foreground">{t("noMatches", { query })}</p>
       )}
 
-      {/* Grouped library */}
+      {/* Grouped library — collapsed by default; a search expands groups so matches
+          show. Folding `searching` into the key remounts groups only when search mode
+          flips (not per keystroke), so defaultOpen re-applies. */}
       <div className="space-y-5">
-        {groups.map((g) => (
-          <SkillGroup key={g.key} group={g} isAdmin={isAdmin} onToggle={toggle} onRemove={remove} t={t} />
-        ))}
+        {groups.map((g) => {
+          const searching = query.trim().length > 0;
+          return (
+            <SkillGroup key={`${g.key}:${searching}`} group={g} defaultOpen={searching} isAdmin={isAdmin} onToggle={toggle} onRemove={remove} t={t} />
+          );
+        })}
       </div>
 
       {!loading && total > 0 && (
@@ -343,18 +348,20 @@ function GroupAvatar({ group }: { group: Group }) {
 function SkillGroup({
   group,
   isAdmin,
+  defaultOpen = false,
   onToggle,
   onRemove,
   t,
 }: {
   group: Group;
   isAdmin: boolean;
+  defaultOpen?: boolean;
   onToggle: (s: Skill, enabled: boolean) => void;
   onRemove: (s: Skill) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
-    <Collapsible defaultOpen className="space-y-2">
+    <Collapsible defaultOpen={defaultOpen} className="space-y-2">
       <CollapsibleTrigger
         render={
           <button className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left transition-colors hover:bg-accent/40 [&[data-state=open]_.chevron]:rotate-180">
