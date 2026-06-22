@@ -257,7 +257,8 @@
       "send": "Send message",
       "queue": "Queue message",
       "remove": "Remove {name}",
-      "tooLarge": "Too large (max {max}): {files}"
+      "tooLarge": "Too large (max {max}): {files}",
+      "dropHere": "Drop files to attach"
     },
     "workspace": {
       "title": "Files",

@@ -28,6 +28,8 @@ import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X } from "l
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
+import { useFileAttach } from "@/components/chat/use-file-attach";
+import { FileDropZone } from "@/components/chat/file-drop-zone";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
 import { PreviewProvider } from "@/components/chat/file-preview";
@@ -272,6 +274,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
 
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<AttachedFile[]>([]);
+  // Drop a file anywhere over the chat — greeting screen or message stream — and
+  // it stages onto the composer, same as picking it via the paperclip.
+  const addFiles = useFileAttach(files, setFiles);
   // Messages typed while a reply is streaming wait here (shown above the
   // composer, each cancellable) and are dispatched one-by-one as the chat frees
   // up — held client-side so they can be edited/removed before they're sent.
@@ -396,6 +401,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
 
   return (
     <PreviewProvider>
+    {/* Full-window drop target — disabled for read-only Telegram chats (no composer). */}
+    <FileDropZone onFiles={addFiles} disabled={readOnly} />
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
       {showGreeting ? (

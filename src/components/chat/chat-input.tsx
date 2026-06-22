@@ -1,15 +1,11 @@
 "use client";
 
-import { useRef, useState, useCallback, useMemo, useEffect, type KeyboardEvent, type DragEvent } from "react";
+import { useRef, useCallback, useMemo, useEffect, type KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
 import { ArrowUp, Paperclip, Square, X } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { formatSize } from "@/lib/constants";
 import { BinaryFileThumb, FileTile } from "./file-preview";
-
-/** Max single file size for upload (100MB) */
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
+import { useFileAttach } from "./use-file-attach";
 
 /**
  * Pasted plain text at or above this length becomes a .txt attachment instead of
@@ -51,7 +47,7 @@ export function ChatInput({
   const t = useTranslations("chat.input");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [dragOver, setDragOver] = useState(false);
+  const addFiles = useFileAttach(files, onFilesChange);
 
   // Thumbnails for image attachments so a photo is obviously a photo.
   const previews = useMemo(() => {
@@ -81,30 +77,8 @@ export function ChatInput({
     }
   };
 
-  const addFiles = (newFiles: FileList | File[]) => {
-    const valid: AttachedFile[] = [];
-    const rejected: string[] = [];
-    for (const file of Array.from(newFiles)) {
-      if (file.size > MAX_FILE_SIZE) {
-        rejected.push(`${file.name} (${formatSize(file.size)})`);
-      } else {
-        valid.push({ file, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
-      }
-    }
-    if (rejected.length > 0) {
-      toast.error(t("tooLarge", { max: formatSize(MAX_FILE_SIZE), files: rejected.join(", ") }));
-    }
-    if (valid.length > 0) onFilesChange([...files, ...valid]);
-  };
-
   const removeFile = (id: string) => {
     onFilesChange(files.filter((f) => f.id !== id));
-  };
-
-  const handleDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -127,12 +101,7 @@ export function ChatInput({
   return (
     <div className="px-4 md:px-6 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto max-w-3xl lg:max-w-4xl">
-        <div
-          className={`overflow-hidden rounded-2xl border bg-card shadow-sm transition-all focus-within:shadow-md ${dragOver ? "ring-2 ring-primary/30 border-primary/30" : ""}`}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-        >
+        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm transition-all focus-within:shadow-md">
           {/* Attached files preview — same square FileTile used in chat history,
               so a staged file looks identical to a sent one. Files aren't in the
               sandbox yet, so the thumb is a local object-URL / typed icon. Wraps
