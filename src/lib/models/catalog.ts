@@ -9,6 +9,7 @@ import {
   isDatedSlug,
   prettyName,
 } from "./normalize";
+import { MODELS_DEV_URL, parseModelsDevModels, matchModelsDev } from "./modelsdev";
 
 export interface CatalogModel {
   // Integration the model is served through. Open-ended on purpose: more
@@ -152,9 +153,10 @@ async function fetchJson(url: string): Promise<unknown> {
  * preserved across syncs — only metadata/prices are updated for existing rows.
  * Returns the number of rows upserted. Never throws.
  */
-export async function syncModelCatalog(): Promise<{ openrouter: number; litellm: number }> {
+export async function syncModelCatalog(): Promise<{ openrouter: number; litellm: number; modelsdev: number }> {
   let or = 0;
   let ll = 0;
+  let md = 0;
   // OpenRouter first so its rich names/grouping win for shared ids; LiteLLM
   // then fills in any ids OpenRouter doesn't carry.
   try {
@@ -171,9 +173,15 @@ export async function syncModelCatalog(): Promise<{ openrouter: number; litellm:
   } catch (err) {
     console.error("[catalog] LiteLLM sync failed (non-fatal):", err);
   }
+  // Models.dev last: enriches the rows the two sources just produced.
+  try {
+    md = await enrichFromModelsDev();
+  } catch (err) {
+    console.error("[catalog] Models.dev enrichment failed (non-fatal):", err);
+  }
   priceCache.clear();
-  console.log(`[catalog] synced ${or} OpenRouter + ${ll} LiteLLM models`);
-  return { openrouter: or, litellm: ll };
+  console.log(`[catalog] synced ${or} OpenRouter + ${ll} LiteLLM models, enriched ${md} from Models.dev`);
+  return { openrouter: or, litellm: ll, modelsdev: md };
 }
 
 const CHUNK = 500; // keep well under Postgres' parameter limit
@@ -222,6 +230,45 @@ async function upsertModels(list: CatalogModel[], opts?: { skipExisting?: boolea
       });
     }
   }
+}
+
+/**
+ * Enrich existing catalog rows with Models.dev metadata (knowledge cutoff,
+ * open-weights). Updates ONLY those two columns and ONLY rows that already
+ * exist — never inserts, never touches price/curation. Matched by canonical
+ * bare id so OpenRouter's dotted ids line up with Models.dev's hyphenated ones.
+ * Returns the number of rows enriched. Never throws.
+ */
+export async function enrichFromModelsDev(): Promise<number> {
+  let metas;
+  try {
+    metas = parseModelsDevModels(await fetchJson(MODELS_DEV_URL));
+  } catch (err) {
+    console.error("[catalog] Models.dev fetch failed (non-fatal):", err);
+    return 0;
+  }
+  if (!metas.length) return 0;
+
+  const existing = await db.select({ id: models.id }).from(models);
+  const updates = matchModelsDev(metas, existing.map((r) => r.id));
+  if (!updates.length) return 0;
+
+  // Batched VALUES-join update: one round-trip per chunk instead of per row.
+  // Casts pin the column types so an all-null first row can't be inferred wrong.
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const batch = updates.slice(i, i + CHUNK);
+    const values = sql.join(
+      batch.map((u) => sql`(${u.id}, ${u.cutoff}, ${u.openWeights})`),
+      sql`, `,
+    );
+    await db.execute(sql`
+      update ${models} as m
+      set cutoff = v.cutoff::text, open_weights = v.ow::boolean
+      from (values ${values}) as v(id, cutoff, ow)
+      where m.id = v.id
+    `);
+  }
+  return updates.length;
 }
 
 // ── Price lookup ─────────────────────────────────────────────

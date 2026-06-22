@@ -23,5 +23,9 @@ run("catalog integration (real network + dev DB)", () => {
     expect(price?.input).toBeGreaterThan(0);
     const cost = await costUsd("anthropic/claude-opus-4.1", { inputTokens: 1_000_000, outputTokens: 0 });
     expect(cost).toBeGreaterThan(0);
+
+    const { isNotNull } = await import("drizzle-orm");
+    const enriched = await db.select().from(models).where(isNotNull(models.cutoff));
+    expect(enriched.length).toBeGreaterThan(0);
   }, 180_000);
 });
