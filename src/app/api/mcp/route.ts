@@ -14,13 +14,16 @@ export const GET = apiHandler(async () => {
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
-  const { name, url, headers, oauthClientId, oauthClientSecret } = await req.json();
+  const { name, url, headers, oauthClientId, oauthClientSecret, authKind: pick } = await req.json();
   if (typeof name !== "string" || typeof url !== "string") {
     return Response.json({ error: "name and url required" }, { status: 400 });
   }
   const secrets = headers && typeof headers === "object" ? { headers } : undefined;
-  // A pre-registered client (advanced) forces OAuth; otherwise auto-detect.
-  const authKind = oauthClientId ? "oauth" : await detectAuthKind(url);
+  // A pre-registered client (advanced) forces OAuth; an explicit method from the form
+  // is authoritative ('none' is stored as 'token' with no secrets = open). We only
+  // fall back to probing when the caller didn't say.
+  const authKind =
+    oauthClientId ? "oauth" : pick === "oauth" || pick === "token" ? pick : await detectAuthKind(url);
   const id = await upsertServer({ scope: "user", userId, projectId: null, name, url, secrets, authKind });
   await saveOAuthClientFromInput(id, oauthClientId, oauthClientSecret);
   return Response.json({ ok: true, id, authKind });

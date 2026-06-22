@@ -14,6 +14,9 @@ export type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
 export interface ServerHealth {
   status: ProbeStatus;
   toolCount?: number;
+  /** The server's own advertised name (MCP `initialize` → serverInfo.name), when the
+   *  handshake succeeds. Used to auto-fill the connector name in the add form. */
+  serverName?: string;
   /** Last connect error (e.g. the npx failure for a stdio server) — shown in the UI. */
   detail?: string;
 }
@@ -56,7 +59,10 @@ export async function probeConfig(
     return { status: classify(e) };
   }
   try {
-    return { status: "ok", toolCount: connected.tools.length };
+    // The handshake recorded the server's serverInfo; surface its name so the add
+    // form can auto-fill the connector name instead of leaving it blank.
+    const serverName = connected.client.getServerVersion()?.name;
+    return { status: "ok", toolCount: connected.tools.length, ...(serverName ? { serverName } : {}) };
   } finally {
     await disconnectMcp(connected).catch(() => {});
   }

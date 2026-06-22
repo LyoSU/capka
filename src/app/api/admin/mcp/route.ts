@@ -7,7 +7,7 @@ import { audit } from "@/lib/governance/audit";
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireAdmin();
   const body = await req.json();
-  const { name, url, headers, scope, projectId, oauthClientId, oauthClientSecret, command, args, env } = body;
+  const { name, url, headers, scope, projectId, oauthClientId, oauthClientSecret, command, args, env, authKind: pick } = body;
   const s = scope === "project" ? "project" : "system";
 
   // Local (stdio) connector — admin only; runs inside the session sandbox.
@@ -27,7 +27,9 @@ export const POST = apiHandler(async (req: Request) => {
     return Response.json({ error: "name and url required" }, { status: 400 });
   }
   const secrets = headers && typeof headers === "object" ? { headers } : undefined;
-  const authKind = oauthClientId ? "oauth" : await detectAuthKind(url);
+  // Explicit method from the form wins; pre-registered client forces OAuth; else probe.
+  const authKind =
+    oauthClientId ? "oauth" : pick === "oauth" || pick === "token" ? pick : await detectAuthKind(url);
   const id = await upsertServer({
     scope: s, userId: null, projectId: s === "project" ? (projectId ?? null) : null, name, url, secrets, authKind,
   });

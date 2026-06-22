@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2, Plug, Plus, Trash2, CheckCircle2, AlertTriangle, XCircle, LogIn, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +21,41 @@ function slugify(raw: string): string {
   return raw.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
 }
 const looksLikeUrl = (s: string) => /^https?:\/\/.+/i.test(s.trim());
+
+/** How a remote connector authenticates. `none` = open server, `token` = static
+ *  bearer key, `oauth` = the sign-in flow. The form auto-detects this on URL entry;
+ *  the user can override. `none`/`token` both persist as authKind "token" server-side
+ *  (no secrets = open), so only `oauth` needs special save handling. */
+type AuthMethod = "none" | "token" | "oauth";
+
+/** Mirror of the server's nameFromHost so the name auto-fills the instant a valid URL
+ *  is typed — before the network probe returns. `https://mcp.notion.com/sse` → "notion". */
+function nameFromHost(raw: string): string {
+  try {
+    const host = new URL(raw.trim()).hostname.replace(/^(api|mcp|www)\./, "");
+    return host.split(".")[0] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+const COMMAND_RUNNERS = new Set(["npx", "uvx", "bunx", "pnpm", "dlx", "node", "deno", "python", "python3", "-m", "run", "-y"]);
+
+/** Guess a friendly name from a local connector's command so the user needn't type it.
+ *  Picks the package token (past the runner/flags), drops a leading @scope when the
+ *  rest is meaningful, and trims generic mcp/server affixes:
+ *  `npx -y @playwright/mcp` → "playwright", `uvx mcp-server-git` → "git". */
+function nameFromCommand(raw: string): string {
+  const parts = raw.trim().split(/\s+/).filter(Boolean);
+  const pkg = parts.find((p) => !p.startsWith("-") && !COMMAND_RUNNERS.has(p)) ?? "";
+  let s = pkg.replace(/^@/, "");
+  if (s.includes("/")) {
+    const [scope, nm] = s.split("/");
+    s = /^(mcp|server|cli|core)$/i.test(nm) ? scope : nm;
+  }
+  s = s.replace(/[-_]?(mcp|server)[-_]?/gi, "").replace(/^[-_]+|[-_]+$/g, "");
+  return s || pkg.replace(/^@/, "").split("/")[0] || "";
+}
 
 /** Site favicon for the connector's host — gives the list an App-Store feel.
  *  Loaded client-side (no server SSRF surface); falls back to the Plug glyph if
@@ -103,14 +138,20 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
   const [saving, setSaving] = useState(false);
   const [kind, setKind] = useState<"remote" | "local">("remote");
   const [name, setName] = useState("");
+  const [nameError, setNameError] = useState(false);
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
   const [command, setCommand] = useState("");
   const [envText, setEnvText] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [method, setMethod] = useState<AuthMethod>("none");
+  const [inspecting, setInspecting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<Health | null>(null);
+  // Once the user edits these by hand, auto-detection stops overwriting them.
+  const nameTouched = useRef(false);
+  const methodTouched = useRef(false);
   // Admin only, remote connectors: shared (system scope) vs private (user scope).
   const [shared, setShared] = useState(true);
 
@@ -144,7 +185,44 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
 
   const slug = slugify(name);
   const isLocal = kind === "local";
-  const canSubmit = slug.length > 0 && (isLocal ? command.trim().length > 0 : looksLikeUrl(url));
+  // Live as soon as the destination is valid — the name auto-fills, and if it's still
+  // empty we validate on click rather than leaving a silently-dead button (see add()).
+  const canSubmit = isLocal ? command.trim().length > 0 : looksLikeUrl(url);
+
+  // Auto-inspect a remote URL once typing settles: probe the server to preselect the
+  // auth method, auto-fill the name, and report reachability — so the user mostly just
+  // pastes a URL and saves. The user's manual edits (nameTouched/methodTouched) win.
+  useEffect(() => {
+    if (isLocal || !looksLikeUrl(url)) { setInspecting(false); return; }
+    const ctrl = new AbortController();
+    const timer = setTimeout(async () => {
+      setInspecting(true);
+      try {
+        const res = await fetch("/api/mcp/test", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: url.trim() }), signal: ctrl.signal,
+        });
+        if (!res.ok) { setTestResult({ status: "unreachable" }); return; }
+        const data: Health & { method?: AuthMethod; serverName?: string } = await res.json();
+        setTestResult({ status: data.status, toolCount: data.toolCount, detail: data.detail });
+        if (data.method && !methodTouched.current) setMethod(data.method);
+        if (!nameTouched.current) {
+          const suggested = data.serverName?.trim() || nameFromHost(url);
+          if (suggested) { setName(suggested); setNameError(false); }
+        }
+      } catch { /* aborted or offline — leave the manual choice intact */ }
+      finally { setInspecting(false); }
+    }, 600);
+    return () => { clearTimeout(timer); ctrl.abort(); };
+  }, [url, isLocal]);
+
+  // Local connectors: derive the name straight from the command (no network), the same
+  // "type less" idea as the remote probe. The user's manual edit still wins.
+  useEffect(() => {
+    if (!isLocal || nameTouched.current) return;
+    const guess = nameFromCommand(command);
+    if (guess) { setName(guess); setNameError(false); }
+  }, [command, isLocal]);
 
   // "npx -y @playwright/mcp" → command "npx", args ["-y","@playwright/mcp"].
   const parseCommand = (raw: string) => {
@@ -171,10 +249,15 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
       if (Object.keys(env).length) body.env = env;
       return body;
     }
-    const body: Record<string, unknown> = { name: slug, url: url.trim() };
-    if (token.trim()) body.headers = { Authorization: `Bearer ${token.trim()}` };
-    if (clientId.trim()) body.oauthClientId = clientId.trim();
-    if (clientSecret.trim()) body.oauthClientSecret = clientSecret.trim();
+    // The explicit method is authoritative server-side: 'none'/'token' → authKind
+    // "token" (no secrets = open); 'oauth' → the sign-in flow. Only send the fields
+    // that belong to the chosen method so a stale token/client can't leak in.
+    const body: Record<string, unknown> = { name: slug, url: url.trim(), authKind: method === "oauth" ? "oauth" : "token" };
+    if (method === "token" && token.trim()) body.headers = { Authorization: `Bearer ${token.trim()}` };
+    if (method === "oauth") {
+      if (clientId.trim()) body.oauthClientId = clientId.trim();
+      if (clientSecret.trim()) body.oauthClientSecret = clientSecret.trim();
+    }
     return body;
   };
 
@@ -193,12 +276,16 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
   };
 
   const resetForm = () => {
-    setName(""); setUrl(""); setToken(""); setClientId(""); setClientSecret(""); setCommand(""); setEnvText(""); setKind("remote");
-    setTestResult(null); setShowAdvanced(false); setShowForm(false); setShared(true);
+    setName(""); setNameError(false); setUrl(""); setToken(""); setClientId(""); setClientSecret(""); setCommand(""); setEnvText(""); setKind("remote");
+    setMethod("none"); setTestResult(null); setShowAdvanced(false); setShowForm(false); setShared(true);
+    nameTouched.current = false; methodTouched.current = false;
   };
 
   const add = async () => {
     if (!canSubmit) return;
+    // Name is the one field auto-fill can miss; instead of a dead Save button, point
+    // the user at it on click.
+    if (!slug) { setNameError(true); document.getElementById("connector-name")?.focus(); return; }
     setSaving(true);
     try {
       // Local (stdio) connectors are always admin-managed (system scope). A
@@ -250,6 +337,25 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
 
   const scopeLabel: Record<Server["scope"], string> = { system: t("scope.system"), user: t("scope.user"), project: t("scope.project") };
 
+  // The name field — shown upfront for local connectors, but for remote ones only
+  // after a URL is entered (it auto-fills from the URL, so asking first is noise).
+  const nameField = (
+    <div className="space-y-1">
+      <Input
+        id="connector-name"
+        placeholder={t("namePlaceholder")}
+        value={name}
+        onChange={(e) => { setName(e.target.value); nameTouched.current = true; if (e.target.value.trim()) setNameError(false); }}
+        aria-invalid={nameError}
+      />
+      {nameError ? (
+        <p className="text-xs text-destructive">{t("nameRequired")}</p>
+      ) : name.trim() && slug && slug !== name.trim() ? (
+        <p className="text-xs text-muted-foreground">{t("nameHint", { slug })}</p>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       {chrome && (
@@ -268,12 +374,6 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
 
       {showForm && (
         <div className="space-y-3 rounded-md border p-4">
-          <div className="space-y-1">
-            <Input placeholder={t("namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
-            {name.trim() && slug && slug !== name.trim() && (
-              <p className="text-xs text-muted-foreground">{t("nameHint", { slug })}</p>
-            )}
-          </div>
           {/* Remote (URL) vs Local (sandbox command) — local is admin-only. */}
           {isAdmin && (
             <div className="inline-flex rounded-md border bg-muted/40 p-0.5 text-sm">
@@ -294,29 +394,80 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
           )}
 
           {isLocal ? (
-            <div className="space-y-1">
-              <Input placeholder={t("commandPlaceholder")} value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono" />
-              <p className="text-xs text-muted-foreground">{t("commandHint")}</p>
-              <Textarea placeholder={t("envPlaceholder")} value={envText} onChange={(e) => setEnvText(e.target.value)} className="mt-2 font-mono text-base md:text-xs" rows={3} />
-            </div>
+            <>
+              <div className="space-y-1">
+                <Input placeholder={t("commandPlaceholder")} value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono" />
+                <p className="text-xs text-muted-foreground">{t("commandHint")}</p>
+              </div>
+              {/* Name + env appear once a command is in — the name auto-fills from it. */}
+              {command.trim() && <>
+                {nameField}
+                <div className="space-y-1">
+                  <Textarea placeholder={t("envPlaceholder")} value={envText} onChange={(e) => setEnvText(e.target.value)} className="font-mono text-base md:text-xs" rows={3} />
+                  <p className="text-xs text-muted-foreground">{t("envHint")}</p>
+                </div>
+              </>}
+            </>
           ) : (
             <>
-              <Input placeholder="https://mcp.example.com/mcp" value={url} onChange={(e) => { setUrl(e.target.value); setTestResult(null); }} />
               <div className="space-y-1">
-                <Input placeholder={t("tokenPlaceholder")} value={token} onChange={(e) => { setToken(e.target.value); setTestResult(null); }} type="password" />
-                <p className="text-xs text-muted-foreground">{t("tokenHint")}</p>
+                <Input placeholder="https://mcp.example.com/mcp" value={url} onChange={(e) => { setUrl(e.target.value); setTestResult(null); }} />
+                {inspecting && (
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />{t("inspecting")}</p>
+                )}
               </div>
 
-              <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{t("advanced")}
-              </button>
-              {showAdvanced && (
-                <div className="space-y-2 rounded-md bg-muted/40 p-3">
-                  <p className="text-xs text-muted-foreground">{t("advancedHint")}</p>
-                  <Input placeholder={t("clientIdPlaceholder")} value={clientId} onChange={(e) => setClientId(e.target.value)} />
-                  <Input placeholder={t("clientSecretPlaceholder")} value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} type="password" />
+              {/* Name + auth method appear once a URL is in — both derive from it. */}
+              {looksLikeUrl(url) && <>
+              {nameField}
+
+              {/* Auth method — auto-detected from the URL, user can override. */}
+              <div className="space-y-2 pt-1">
+                <label className="block text-xs text-muted-foreground">{t("method.label")}</label>
+                <div className="inline-flex rounded-md border bg-muted/40 p-0.5 text-sm">
+                  {(["none", "token", "oauth"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => { setMethod(m); methodTouched.current = true; setTestResult(null); }}
+                      className={cn(
+                        "rounded px-2.5 py-1 transition-colors",
+                        method === m ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {t(`method.${m}`)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {method === "none" && (
+                <p className="text-xs text-muted-foreground">{t("method.noneHint")}</p>
+              )}
+
+              {method === "token" && (
+                <div className="space-y-1">
+                  <Input placeholder={t("tokenPlaceholder")} value={token} onChange={(e) => { setToken(e.target.value); setTestResult(null); }} type="password" />
+                  <p className="text-xs text-muted-foreground">{t("tokenHint")}</p>
                 </div>
               )}
+
+              {method === "oauth" && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">{t("method.oauthHint")}</p>
+                  <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                    {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{t("advanced")}
+                  </button>
+                  {showAdvanced && (
+                    <div className="space-y-2 rounded-md bg-muted/40 p-3">
+                      <p className="text-xs text-muted-foreground">{t("advancedHint")}</p>
+                      <Input placeholder={t("clientIdPlaceholder")} value={clientId} onChange={(e) => setClientId(e.target.value)} />
+                      <Input placeholder={t("clientSecretPlaceholder")} value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} type="password" />
+                    </div>
+                  )}
+                </div>
+              )}
+              </>}
             </>
           )}
 
@@ -343,8 +494,8 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
           )}
 
           <div className="flex gap-2">
-            <Button size="sm" onClick={add} disabled={saving || !canSubmit}>{saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{t("save")}</Button>
-            {!isLocal && (
+            <Button size="sm" onClick={add} disabled={saving || !canSubmit}>{saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{!isLocal && method === "oauth" ? t("saveAndSignIn") : t("save")}</Button>
+            {!isLocal && method === "token" && (
               <Button variant="outline" size="sm" onClick={test} disabled={testing || !looksLikeUrl(url)}>{testing && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{t("test")}</Button>
             )}
             <Button variant="ghost" size="sm" onClick={resetForm}>{t("cancel")}</Button>

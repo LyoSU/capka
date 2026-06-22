@@ -723,8 +723,19 @@
       "save": "Save",
       "cancel": "Cancel",
       "namePlaceholder": "Name (e.g. Notion)",
-      "tokenPlaceholder": "Access token (optional)",
+      "tokenPlaceholder": "Access token",
       "nameHint": "Will be saved as: {slug}",
+      "nameRequired": "Give the connector a name.",
+      "inspecting": "Detecting settings…",
+      "saveAndSignIn": "Save & sign in",
+      "method": {
+        "label": "Authentication",
+        "none": "No auth",
+        "token": "Token",
+        "oauth": "Sign-in (OAuth)",
+        "noneHint": "This service needs no access key — just save.",
+        "oauthHint": "You'll sign in after saving: we'll open the service's page to confirm."
+      },
       "shareWithUsers": "Available to users",
       "shareWithUsersHint": "A shared connector for everyone. Turn off to keep it private.",
       "tokenHint": "If the service needs an access key, paste it here. It's stored encrypted.",
@@ -768,6 +779,7 @@
       "commandPlaceholder": "npx -y @playwright/mcp",
       "commandHint": "Runs inside the sandbox. The package installs itself on first use (e.g. npx, uvx).",
       "envPlaceholder": "KEY=value (one per line)",
+      "envHint": "Environment variables (e.g. access keys), if the package needs any. Optional.",
       "localBadge": "Local",
       "localRuns": "Runs in the sandbox"
     },
