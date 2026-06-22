@@ -54,6 +54,13 @@ export async function generateChatTitle(
 export function sanitizeTitle(raw: string): string | null {
   let t = (raw ?? "").trim();
   if (!t) return null;
+  // Reasoning models (DeepSeek-R1 et al. via OpenRouter) inline their chain of
+  // thought as <think>…</think> in the content. Drop closed blocks, then any
+  // dangling unclosed tag — with maxOutputTokens=32 the model is usually cut
+  // off mid-thought, so the remainder is all reasoning and nothing to title.
+  t = t.replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1>/gi, "").trim();
+  t = t.replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*$/i, "").trim();
+  if (!t) return null;
   // Models sometimes wrap titles in quotes (incl. Ukrainian «») or add a
   // leading dash/bullet.
   t = t.replace(/^["'“”‘’`«»‹›]+|["'“”‘’`«»‹›]+$/g, "").trim();

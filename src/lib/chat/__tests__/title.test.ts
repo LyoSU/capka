@@ -36,6 +36,21 @@ describe("sanitizeTitle", () => {
     const long = "word ".repeat(40).trim();
     expect(sanitizeTitle(long)!.length).toBeLessThanOrEqual(80);
   });
+
+  it("strips a closed reasoning block and keeps the real title", () => {
+    expect(sanitizeTitle("<think>the user said hi, topic is login</think>Fix login bug")).toBe(
+      "Fix login bug",
+    );
+    expect(sanitizeTitle("<thinking>\nlet me think\n</thinking>\nDeploy script")).toBe(
+      "Deploy script",
+    );
+  });
+
+  it("abstains when the output is an unclosed reasoning tag (token-truncated)", () => {
+    // Reasoning models token-truncated mid-thought: no usable title remains.
+    expect(sanitizeTitle('<think> The user just said "Привіт')).toBeNull();
+    expect(sanitizeTitle("<reasoning>the topic seems to be")).toBeNull();
+  });
 });
 
 describe("generateChatTitle", () => {
