@@ -293,11 +293,14 @@ export function invalidateModelsCache(): void {
 }
 
 /**
- * Org-wide governance filter, applied to every served list. Keeps a model with
- * unknown context/price (0) so missing metadata never hides an option; only a
- * known-too-small context or known-too-expensive completion price is dropped.
+ * Admin governance for a SHARED offering: hide models below a minimum context
+ * or above a maximum price, so users spending the admin's key/budget can't
+ * reach tiny-context or budget-busting models. Applied only where the served
+ * list is shared (the owner sees everything). A model with unknown context or
+ * price (0) is always kept — missing metadata never hides an option. Read fresh
+ * each call so a settings change takes effect without waiting on the cache TTL.
  */
-async function applyGovernance(models: ModelInfo[]): Promise<ModelInfo[]> {
+export async function applySharedGovernance(models: ModelInfo[]): Promise<ModelInfo[]> {
   const [minContext, maxPrice] = await Promise.all([getModelMinContext(), getModelMaxPrice()]);
   return models.filter((m) => {
     if (minContext > 0 && m.context > 0 && m.context < minContext) return false;
@@ -306,16 +309,26 @@ async function applyGovernance(models: ModelInfo[]): Promise<ModelInfo[]> {
   });
 }
 
+/** The model's completion price in USD per 1M tokens from the synced catalog,
+ *  or 0 when unknown (a generic gateway with no metadata) — used to enforce the
+ *  shared price cap on the inference path. */
+export async function getModelCompletionPriceUsdPerM(modelId: string): Promise<number> {
+  const lookup = await catalogLookup([modelId]);
+  const row = lookup(modelId);
+  return row ? perMillion(row.outputPrice) : 0;
+}
+
 export async function listProviderModels(opts: {
   provider: ProviderName;
   apiKey?: string;
   baseUrl?: string;
 }): Promise<ModelInfo[]> {
-  return applyGovernance(await listProviderModelsCached(opts));
+  // Governance is NOT applied here — it's scoped to shared offerings by the
+  // caller (see applySharedGovernance). Own/owner lists are unfiltered.
+  return listProviderModelsCached(opts);
 }
 
-/** The raw list (cached per credential set); governance is layered on top so a
- *  settings change takes effect immediately without waiting for the cache TTL. */
+/** The raw list, cached per credential set. */
 async function listProviderModelsCached(opts: {
   provider: ProviderName;
   apiKey?: string;

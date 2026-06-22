@@ -5,7 +5,7 @@ import { providerConfigs } from "@/lib/db/schema";
 import { getMasterKey, getProviderKeyMode } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { resolveEnabledConfigs, labelEnabledConfigs } from "@/lib/providers/resolve";
-import { listProviderModels, type ModelInfo } from "@/lib/providers/list-models";
+import { listProviderModels, applySharedGovernance, type ModelInfo } from "@/lib/providers/list-models";
 import { isProviderName, PROVIDER_META } from "@/lib/providers/registry";
 import { syncModelCatalog } from "@/lib/models/catalog";
 
@@ -69,7 +69,12 @@ async function respondAggregated(
     }),
   );
 
-  const models = results.flatMap((r) => r.models);
+  // Shared offering → enforce the admin's min-context / max-price caps on what
+  // users may pick (independent of the badge, which is hidden in shared_only).
+  // The owner's own list is untouched.
+  const shared = configs.length > 0 && !!configs[0].isShared;
+  const merged = results.flatMap((r) => r.models);
+  const models = shared ? await applySharedGovernance(merged) : merged;
 
   // First-run safety net: an empty OpenRouter config means its catalog hasn't
   // synced — kick a background sync so the picker fills in shortly.

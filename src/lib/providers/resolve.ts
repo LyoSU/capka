@@ -1,10 +1,10 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
-import { getMasterKey, sharedKeyEnabled } from "@/lib/settings";
+import { getMasterKey, sharedKeyEnabled, getModelMaxPrice } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel, parseModelId, splitModelRef, providerLabel } from "@/lib/providers";
-import { assertSafeProviderConfig } from "@/lib/providers/list-models";
+import { assertSafeProviderConfig, getModelCompletionPriceUsdPerM } from "@/lib/providers/list-models";
 import { ValidationError } from "@/lib/errors";
 
 type ProviderConfigRow = typeof providerConfigs.$inferSelect;
@@ -144,6 +144,22 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
   }
 
   if (!modelId) throw new ValidationError("No default model set. Configure one in Settings → Connections.");
+
+  // Budget guard: when spending a SHARED (admin) key, the admin's max-price cap
+  // is enforced here too — not just hidden in the picker — so a stale or
+  // hand-set expensive model can't slip through. Unknown price (a generic
+  // gateway) isn't comparable, so it passes. Own/owner keys are never capped.
+  if (config.isShared) {
+    const maxPrice = await getModelMaxPrice();
+    if (maxPrice > 0) {
+      const price = await getModelCompletionPriceUsdPerM(modelId);
+      if (price > maxPrice) {
+        throw new ValidationError(
+          "This model costs more than your administrator allows on the shared key. Please choose a less expensive one.",
+        );
+      }
+    }
+  }
 
   let apiKey = config.apiKey;
   if (apiKey) {
