@@ -134,6 +134,13 @@
       "when": 1782403200002,
       "tag": "0018_backfill_telegram_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1782114969601,
+      "tag": "0019_little_pixie",
+      "breakpoints": true
     }
   ]
 }

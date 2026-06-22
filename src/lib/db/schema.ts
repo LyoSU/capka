@@ -222,6 +222,8 @@ export const models = pgTable("models", {
   outputPrice: numeric("output_price"),
   cacheReadPrice: numeric("cache_read_price"),
   capabilities: jsonb("capabilities"), // { vision, tools, reasoning }
+  cutoff: text("cutoff"), // knowledge cutoff, e.g. "2025-03" (from Models.dev)
+  openWeights: boolean("open_weights"), // open-weights model? (from Models.dev)
   enabled: boolean("enabled").default(false), // visible in picker (curated)
   featured: boolean("featured").default(false), // pinned to the top
   updatedAt: timestamp("updated_at").defaultNow(),
