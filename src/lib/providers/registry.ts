@@ -107,6 +107,30 @@ export function providerLabel(provider: string): string {
   return isProviderName(provider) ? PROVIDER_META[provider].label : provider;
 }
 
+/**
+ * Whether a provider's chat API accepts this file as a native, inline content
+ * block. Used to gate `injectNativeFiles`: anything this returns `false` for is
+ * left in /workspace for the agent to open with sandbox tools (tool-only)
+ * instead of being pushed into the message `content` array.
+ *
+ * - Images → the near-universal `image_url` block, accepted everywhere a vision
+ *   model exists (a non-vision model erroring is a model-choice problem, not an
+ *   API-shape one, so we don't gate it here).
+ * - PDF → the AI SDK serializes it as an OpenAI-specific `{type:"file"}` block.
+ *   Only the first-party APIs (Anthropic, OpenAI) and the OpenRouter gateway
+ *   accept that shape. Generic OpenAI-compatible endpoints (Z.ai, vLLM, a
+ *   LiteLLM proxy in front of an arbitrary backend) and Ollama reject it with a
+ *   `messages[N].content[k].type` validation error — so PDFs degrade to
+ *   tool-only there.
+ */
+export function providerAcceptsNativeFile(provider: string, mimeType: string): boolean {
+  if (mimeType.startsWith("image/")) return true;
+  if (mimeType === "application/pdf") {
+    return provider === "anthropic" || provider === "openai" || provider === "openrouter";
+  }
+  return false;
+}
+
 // ── Model id encoding ──────────────────────────────────────────────────────
 //
 // A model is stored as a bare model id (e.g. `openai/gpt-5.2` for OpenRouter,

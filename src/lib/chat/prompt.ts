@@ -1,5 +1,6 @@
 import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
-import { isNativeMultimodal, type FileRef } from "@/lib/constants";
+import { type FileRef } from "@/lib/constants";
+import { providerAcceptsNativeFile } from "@/lib/providers/registry";
 import { formatAvailableSkills } from "@/lib/skills/fmt";
 
 /**
@@ -69,6 +70,8 @@ export function buildSystemPrompt(opts: {
   skills?: { name: string; description: string | null; body?: string | null }[];
   workspaceSnapshot?: string;
   attachedFiles?: FileRef[];
+  /** Resolved provider — gates which attachments are presented as native. */
+  provider?: string;
   user?: { name?: string | null; timezone?: string | null } | null;
   conversationStartedAt?: Date | null;
   locale?: string | null;
@@ -108,7 +111,7 @@ export function buildSystemPrompt(opts: {
   const promptLines: string[] = [];
   let hasToolOnly = false;
   for (const f of opts.attachedFiles ?? []) {
-    const native = isNativeMultimodal(f.type);
+    const native = providerAcceptsNativeFile(opts.provider ?? "", f.type);
     if (!native) hasToolOnly = true;
     promptLines.push(`  - /workspace/${f.name}${native ? " (attached natively — you can see/read it directly)" : ""}`);
   }
@@ -120,12 +123,21 @@ export function buildSystemPrompt(opts: {
   return { stable, session, volatile };
 }
 
-/** Classify attached files into native multimodal vs tool-only */
-export function classifyFiles(files?: FileRef[]): { nativeFiles: FileRef[]; hasToolOnly: boolean } {
+/**
+ * Classify attached files into native multimodal vs tool-only, gated by what
+ * the resolved provider's API actually accepts inline (see
+ * `providerAcceptsNativeFile`). An unknown/empty provider falls back to the safe
+ * side — images stay native, PDFs degrade to tool-only — so a missing provider
+ * never reintroduces the `content[].type` rejection.
+ */
+export function classifyFiles(
+  files?: FileRef[],
+  provider?: string,
+): { nativeFiles: FileRef[]; hasToolOnly: boolean } {
   const nativeFiles: FileRef[] = [];
   let hasToolOnly = false;
   for (const f of files ?? []) {
-    if (isNativeMultimodal(f.type)) nativeFiles.push(f);
+    if (providerAcceptsNativeFile(provider ?? "", f.type)) nativeFiles.push(f);
     else hasToolOnly = true;
   }
   return { nativeFiles, hasToolOnly };

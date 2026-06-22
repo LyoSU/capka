@@ -36,11 +36,6 @@ export function inferMimeType(filename: string, browserType: string): string {
   return EXT_MIME[ext] ?? "";
 }
 
-/** Can the model consume this MIME type natively (vision / PDF reading)? */
-export function isNativeMultimodal(mimeType: string): boolean {
-  return mimeType.startsWith("image/") || mimeType === "application/pdf";
-}
-
 /** Default model list filter — overridable via settings UI */
 export const DEFAULT_MODEL_MIN_CONTEXT = 100_000;
 export type MemoryType = (typeof MEMORY_TYPES)[number];

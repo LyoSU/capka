@@ -266,6 +266,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     skills: availableSkills.map((s) => ({ name: s.name, description: s.description, body: s.body })),
     workspaceSnapshot,
     attachedFiles: payload.attachedFiles,
+    provider,
     user: user ? { name: user.name, timezone: user.timezone } : null,
     conversationStartedAt: chat?.createdAt ?? null,
     locale: user?.locale ?? payload.origin?.locale ?? null,
@@ -435,7 +436,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const modelMessages = await convertToModelMessages(uiMessages);
 
     let injectedNative = false;
-    const { nativeFiles } = classifyFiles([...(payload.attachedFiles ?? []), ...extraAttachedFiles]);
+    const { nativeFiles } = classifyFiles(
+      [...(payload.attachedFiles ?? []), ...extraAttachedFiles],
+      provider,
+    );
     if (nativeFiles.length) {
       await injectNativeFiles(modelMessages, sessionKey, userId, nativeFiles);
       injectedNative = true;
