@@ -2,6 +2,17 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Streamdown emits its layout + syntax-highlighting classes inside its compiled
+   JS under node_modules, which Tailwind v4 does not scan by default. Without
+   these @source directives the utilities never get generated: table control
+   bars lose their flex layout (buttons overlap the table) and code tokens never
+   receive their `text-[var(--sdm-c)]` / `dark:…-[var(--shiki-dark…)]` colours
+   (code renders unhighlighted). One @source per installed plugin. */
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/code/dist/*.js";
+@source "../../node_modules/@streamdown/math/dist/*.js";
+@source "../../node_modules/@streamdown/mermaid/dist/*.js";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -34,6 +45,7 @@
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
+  --color-link: var(--link);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
@@ -67,6 +79,10 @@
   /* 0.46, not 0.50 — clears WCAG AA (~4.5:1) for secondary text on the light
      bg; the old value sat just under and failed for body-size captions. */
   --muted-foreground: oklch(0.46 0.012 285);
+  /* The one non-neutral hue in an otherwise monochrome palette: a restrained
+     blue reserved for links, so a link reads as clickable without an underline.
+     Tuned to clear WCAG AA (~4.5:1) on the light background. */
+  --link: oklch(0.50 0.14 250);
   --accent: oklch(0.945 0.005 75);
   --accent-foreground: oklch(0.22 0.008 285);
   --destructive: oklch(0.577 0.245 27.33);
@@ -106,6 +122,8 @@
   --secondary-foreground: oklch(0.93 0 0);
   --muted: oklch(0.20 0.006 285);
   --muted-foreground: oklch(0.60 0.008 285);
+  /* Lighter, slightly less saturated blue so it stays legible on the dark bg. */
+  --link: oklch(0.72 0.12 245);
   --accent: oklch(0.20 0.006 285);
   --accent-foreground: oklch(0.93 0 0);
   --destructive: oklch(0.577 0.245 27.33);
@@ -308,25 +326,27 @@
   display: none;
 }
 
-/* Streamdown — flatten code block: remove outer card wrapper */
+/* Streamdown — flatten code block: remove outer card wrapper. Keep the wrapper's
+   gap so the copy button lands correctly: Streamdown floats the actions pill up
+   with a -mt-10 that assumes the header row's height sits above it. */
 [data-streamdown="code-block"] {
   border: none;
   background: transparent;
   box-shadow: none;
   padding: 0;
-  gap: 0;
   margin: 0.75rem 0;
   border-radius: 0;
 }
+/* Hide the language label but keep the row's height: `display:none` would
+   collapse the space the copy button's -mt-10 anchors to, floating the pill up
+   over the code (or the text above the block). `visibility:hidden` keeps the
+   anchor so the pill overlays an empty top-right, the way Streamdown intends. */
 [data-streamdown="code-block-header"] {
-  display: none;
+  visibility: hidden;
 }
 [data-streamdown="code-block-body"] {
   border-radius: 0.5rem;
   font-size: 0.8125rem;
-}
-[data-streamdown="code-block-actions"] {
-  margin: 0.5rem 0.5rem 0 0;
 }
 
 /* Streamdown — flatten table wrapper */
@@ -428,16 +448,18 @@
   background: var(--muted);
 }
 
-/* Links: keep the underline (it is how a link is recognised) but refine it -
-   offset for legibility, soft at rest, full on hover. */
+/* Links: a distinct colour (the one accent hue in the palette) carries the
+   "clickable" signal — no underline at rest, which would clutter dense prose.
+   The underline appears only on hover as the affordance confirmation. */
 .chat-prose a {
-  text-decoration-thickness: 1px;
+  color: var(--link);
+  text-decoration: none;
   text-underline-offset: 2px;
-  text-decoration-color: var(--muted-foreground);
-  transition: text-decoration-color 150ms ease;
+  transition: color 150ms ease;
 }
 .chat-prose a:hover {
-  text-decoration-color: var(--primary);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
 }
 
 /* Horizontal rule: a hairline with generous breathing room. */

@@ -1,8 +1,23 @@
+import { lookup } from "mime-types";
 import { requireSession, apiHandler } from "@/lib/auth";
 import { downloadFile } from "@/lib/sandbox/client";
 import { requireOwned } from "@/lib/db/ownership";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { chats } from "@/lib/db/schema";
+
+// The controller serves every file as application/octet-stream. For inline
+// previews that's fine for raster images (the browser sniffs them from magic
+// bytes even under nosniff) but breaks SVG and PDF, which only render when
+// labelled with their real type. Derive a type from the extension, but only for
+// the formats actually loaded by URL in <img>/<iframe> — images and PDF — so an
+// arbitrary file can't be coaxed into rendering as text/html. Everything else
+// stays octet-stream. Safe to serve inline: the response CSP below neuters
+// scripts, and an <img>-loaded SVG never executes them regardless.
+function inlineContentType(filename: string): string | null {
+  const mime = lookup(filename);
+  if (mime && (mime.startsWith("image/") || mime === "application/pdf")) return mime;
+  return null;
+}
 
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
@@ -29,7 +44,10 @@ export const GET = apiHandler(async (req: Request) => {
     : `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`;
 
   const headers: Record<string, string> = {
-    "Content-Type": controllerRes.headers.get("Content-Type") || "application/octet-stream",
+    "Content-Type":
+      (inline ? inlineContentType(filename) : null) ||
+      controllerRes.headers.get("Content-Type") ||
+      "application/octet-stream",
     "Content-Disposition": disposition,
     // Sandbox files are user/AI-supplied; never let the browser MIME-sniff them.
     "X-Content-Type-Options": "nosniff",
@@ -43,9 +61,17 @@ export const GET = apiHandler(async (req: Request) => {
   // Inline content renders from our own origin — lock it down so a malicious
   // file (e.g. an SVG/HTML opened directly) can't execute against the app.
   // `default-src 'none'` neuters scripts; `frame-ancestors 'self'` allows only
-  // our own Quick Look iframe. No `sandbox` token — it can break the browser's
-  // native PDF viewer, and the directives above already contain the risk.
-  if (inline) headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'self'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'";
+  // our own Quick Look iframe.
+  if (inline) {
+    let csp = "default-src 'none'; frame-ancestors 'self'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'";
+    // An SVG served inline can carry an inline <script>. `default-src 'none'`
+    // already blocks it (and an <img>-loaded SVG never executes scripts at all),
+    // but add the `sandbox` directive as defense-in-depth for a direct navigation
+    // to the URL: it forces an opaque origin with scripts/forms disabled. Scoped
+    // to SVG only — a blanket `sandbox` can break the browser's native PDF viewer.
+    if (headers["Content-Type"] === "image/svg+xml") csp += "; sandbox";
+    headers["Content-Security-Policy"] = csp;
+  }
 
   return new Response(controllerRes.body, { headers });
 });

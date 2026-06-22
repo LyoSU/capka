@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Streamdown, defaultRemarkPlugins, defaultUrlTransform, type Components, type PluginConfig, type UrlTransform } from "streamdown";
 import "streamdown/styles.css";
+// KaTeX ships its own stylesheet (fonts + layout). Without it the math plugin
+// renders raw, unstyled spans instead of typeset formulas — Streamdown does not
+// bundle it, so import it here where the math plugin is wired in.
+import "katex/dist/katex.min.css";
 import { remarkWorkspacePaths, makeWorkspaceComponents } from "./workspace-path";
 
 // Default remark pipeline + our /workspace path linker. Passing remarkPlugins
