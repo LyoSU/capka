@@ -406,15 +406,22 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
       {showGreeting ? (
-        <div
-          className="relative flex flex-1 flex-col items-center justify-center overflow-hidden py-10 transition-[padding] duration-200 ease-out"
-          // Keyboard inset as bottom padding so the centered composer rises above
-          // the keyboard instead of being covered (iOS).
-          style={{ paddingBottom: "calc(2.5rem + var(--kb, 0px))" }}
-        >
+        <div className="relative flex flex-1 flex-col overflow-hidden">
           {/* No header in the greeting state, so the sidebar handle lives in the
-              top-left corner on mobile (the area above the centered composer). */}
+              top-left corner on mobile. Pinned outside the scroll area so it
+              stays put while the greeting scrolls under it on short screens. */}
           <SidebarTrigger className="absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20 size-9 rounded-full border bg-card shadow-sm md:hidden" />
+          {/* Scroll wrapper: the inner block centers when it fits (min-h-full +
+              justify-center) and scrolls when the greeting is taller than the
+              viewport — otherwise centering clips the logo off the top with no
+              way to scroll back to it (mobile, keyboard open). */}
+          <div
+            className="flex-1 overflow-y-auto overflow-x-hidden"
+            // Keyboard inset as bottom padding so the centered composer rises above
+            // the keyboard instead of being covered (iOS).
+            style={{ paddingBottom: "calc(2.5rem + var(--kb, 0px))" }}
+          >
+          <div className="flex min-h-full flex-col items-center justify-center py-10">
           <div className="relative z-10 w-full">
             {/* The brand claw reveals on mount — the one signature flourish — with
                 a soft halo lifting it off the surface, then the greeting floats up
@@ -466,6 +473,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                 </div>
               </div>
             </div>
+          </div>
+          </div>
           </div>
         </div>
       ) : (
