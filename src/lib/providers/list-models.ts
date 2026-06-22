@@ -81,6 +81,7 @@ type CatalogRow = {
   group: string | null;
   icon: string | null;
   contextLength: number | null;
+  cutoff: string | null;
   inputPrice: string | null;
   outputPrice: string | null;
   capabilities: unknown;
@@ -108,6 +109,7 @@ async function catalogLookup(ids: string[]): Promise<(id: string) => CatalogRow 
       group: modelsTable.group,
       icon: modelsTable.icon,
       contextLength: modelsTable.contextLength,
+      cutoff: modelsTable.cutoff,
       inputPrice: modelsTable.inputPrice,
       outputPrice: modelsTable.outputPrice,
       capabilities: modelsTable.capabilities,
@@ -155,6 +157,7 @@ function toModelInfo(
     name: canon?.displayName ?? name,
     provider: group ?? "",
     context: c?.contextLength ?? 0,
+    cutoff: c?.cutoff ?? null,
     pricing: { prompt: perMillion(c?.inputPrice), completion: perMillion(c?.outputPrice) },
     group,
     icon,
@@ -175,6 +178,7 @@ async function listOpenRouter(): Promise<ModelInfo[]> {
     name: m.displayName,
     provider: m.id.split("/")[0] || "unknown",
     context: m.contextLength ?? 0,
+    cutoff: m.cutoff ?? null,
     pricing: { prompt: perMillion(m.inputPrice), completion: perMillion(m.outputPrice) },
     group: m.group,
     icon: m.icon,
