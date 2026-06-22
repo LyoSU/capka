@@ -6,6 +6,8 @@
  *
  * Centralized so every surface (worker, chat panel, API) maps errors the same.
  */
+import { errorText } from "./message";
+
 export type LLMErrorCategory =
   | "out_of_credits"
   | "invalid_key"
@@ -73,8 +75,7 @@ const DEFAULT_USER_MESSAGE =
 
 /** Classify a raw error string/Error into a user-friendly, role-aware shape. */
 export function classifyLLMError(raw: unknown): FriendlyError {
-  const detail =
-    raw instanceof Error ? raw.message : typeof raw === "string" ? raw : String(raw ?? "");
+  const detail = errorText(raw);
   const rule = RULES.find((r) => r.test.test(detail));
   return {
     category: rule?.category ?? "unknown",
@@ -92,8 +93,7 @@ export function classifyLLMError(raw: unknown): FriendlyError {
  * "unsupported") so an unrelated capability error doesn't strip attachments.
  */
 export function isVisionUnsupportedError(raw: unknown): boolean {
-  const detail =
-    raw instanceof Error ? raw.message : typeof raw === "string" ? raw : String(raw ?? "");
+  const detail = errorText(raw);
   return (
     /\b(image input|multimodal|image_url)\b/i.test(detail) ||
     /\b(no|without|lacks?|cannot|can'?t|doesn'?t|does not|not)\b[^.]{0,40}\b(vision|images?|multimodal)\b/i.test(
@@ -111,8 +111,7 @@ export function isVisionUnsupportedError(raw: unknown): boolean {
  * reasoning — it requires both a reasoning keyword and an "unsupported" verb.
  */
 export function isReasoningUnsupportedError(raw: unknown): boolean {
-  const detail =
-    raw instanceof Error ? raw.message : typeof raw === "string" ? raw : String(raw ?? "");
+  const detail = errorText(raw);
   return (
     /\b(thinking|reasoning|reasoning_effort|reasoningeffort|budget_?tokens|reasoning_?summary)\b/i.test(
       detail,

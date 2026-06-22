@@ -26,12 +26,13 @@ import { costUsd } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isVisionUnsupportedError, isReasoningUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
+import { errorText } from "@/lib/errors/message";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import type { StoredPart } from "@/lib/chat/contracts";
 import { log } from "@/lib/log";
 
-const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const errMsg = (e: unknown) => errorText(e);
 
 /**
  * Per-provider knobs that surface the model's reasoning ("thinking") in the
