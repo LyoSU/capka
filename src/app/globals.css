@@ -110,37 +110,46 @@
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.13 0.004 285);
-  --foreground: oklch(0.93 0 0);
-  --card: oklch(0.15 0.004 285);
-  --card-foreground: oklch(0.93 0 0);
-  --popover: oklch(0.17 0.004 285);
-  --popover-foreground: oklch(0.93 0 0);
-  --primary: oklch(0.93 0 0);
-  --primary-foreground: oklch(0.18 0.005 285);
-  --secondary: oklch(0.20 0.006 285);
-  --secondary-foreground: oklch(0.93 0 0);
-  --muted: oklch(0.20 0.006 285);
-  --muted-foreground: oklch(0.60 0.008 285);
+  /* Warm graphite, not black. Surfaces sit at L≈0.20–0.27 (Claude-like
+     charcoal) on the same warm hue (75) as the light theme — the old palette
+     was both near-black (L 0.13) and cool (hue 285), reading as "switched-off"
+     rather than "dark mode". Chroma stays near-zero so it's a warm grey, not a
+     tint. Surfaces step up in lightness as they come forward: sidebar (back) <
+     background < card < popover. */
+  --background: oklch(0.205 0.004 75);
+  --foreground: oklch(0.945 0.002 75);
+  --card: oklch(0.235 0.004 75);
+  --card-foreground: oklch(0.945 0.002 75);
+  --popover: oklch(0.255 0.005 75);
+  --popover-foreground: oklch(0.945 0.002 75);
+  --primary: oklch(0.945 0.002 75);
+  --primary-foreground: oklch(0.205 0.004 75);
+  --secondary: oklch(0.275 0.006 75);
+  --secondary-foreground: oklch(0.945 0.002 75);
+  --muted: oklch(0.275 0.006 75);
+  /* Raised to L 0.68 to clear WCAG AA (~4.5:1) on the lighter graphite bg. */
+  --muted-foreground: oklch(0.68 0.008 75);
   /* Lighter, slightly less saturated blue so it stays legible on the dark bg. */
   --link: oklch(0.72 0.12 245);
-  --accent: oklch(0.20 0.006 285);
-  --accent-foreground: oklch(0.93 0 0);
+  --accent: oklch(0.275 0.006 75);
+  --accent-foreground: oklch(0.945 0.002 75);
   --destructive: oklch(0.577 0.245 27.33);
-  --destructive-foreground: oklch(0.93 0 0);
+  --destructive-foreground: oklch(0.945 0.002 75);
   --success: oklch(0.72 0.17 152);
-  --success-foreground: oklch(0.18 0.005 285);
-  --border: oklch(1 0 0 / 0.08);
-  --input: oklch(1 0 0 / 0.10);
-  --ring: oklch(0.50 0.008 285);
-  --sidebar: oklch(0.11 0.004 285);
-  --sidebar-foreground: oklch(0.93 0 0);
-  --sidebar-primary: oklch(0.93 0 0);
-  --sidebar-primary-foreground: oklch(0.18 0.005 285);
-  --sidebar-border: oklch(1 0 0 / 0.06);
-  --sidebar-accent: oklch(0.20 0.006 285);
-  --sidebar-accent-foreground: oklch(0.93 0 0);
-  --sidebar-ring: oklch(0.50 0.008 285);
+  --success-foreground: oklch(0.205 0.004 75);
+  /* White-alpha borders nudged up: on a lighter bg the old 0.08/0.10 nearly
+     vanished, so hairlines now read at the same strength they did on black. */
+  --border: oklch(1 0 0 / 0.10);
+  --input: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.55 0.008 75);
+  --sidebar: oklch(0.175 0.004 75);
+  --sidebar-foreground: oklch(0.945 0.002 75);
+  --sidebar-primary: oklch(0.945 0.002 75);
+  --sidebar-primary-foreground: oklch(0.205 0.004 75);
+  --sidebar-border: oklch(1 0 0 / 0.08);
+  --sidebar-accent: oklch(0.275 0.006 75);
+  --sidebar-accent-foreground: oklch(0.945 0.002 75);
+  --sidebar-ring: oklch(0.55 0.008 75);
   --chart-1: oklch(0.488 0.243 264.05);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
