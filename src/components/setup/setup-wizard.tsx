@@ -268,7 +268,22 @@ export function SetupWizard({
                 <div className="space-y-4">
                   <div className="space-y-1.5">
                     <Label>{t("provider.field")}</Label>
-                    <Select value={provider} onValueChange={(v) => changeProvider(v as ProviderName)}>
+                    <Select
+                      value={provider}
+                      onValueChange={(v) => changeProvider(v as ProviderName)}
+                      items={Object.fromEntries(
+                        PROVIDER_OPTIONS.map((p) => {
+                          const Icon = iconForSlug(p.iconSlug);
+                          return [
+                            p.value,
+                            <>
+                              <Icon size={16} className="shrink-0 text-muted-foreground" />
+                              {p.label}
+                            </>,
+                          ];
+                        })
+                      )}
+                    >
                       <SelectTrigger className="h-auto w-full rounded-xl border-transparent bg-muted/60 py-2.5">
                         <SelectValue />
                       </SelectTrigger>

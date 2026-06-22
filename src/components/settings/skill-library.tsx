@@ -264,7 +264,11 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
               aria-label={t("searchPlaceholder")}
             />
           </div>
-          <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+          <Select
+            value={sort}
+            onValueChange={(v) => setSort(v as SortKey)}
+            items={{ name: t("sort.name"), status: t("sort.status") }}
+          >
             <SelectTrigger size="sm" className="w-[8.5rem]" aria-label={t("sortAria")}>
               <SelectValue />
             </SelectTrigger>

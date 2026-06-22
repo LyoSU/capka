@@ -418,7 +418,22 @@ export default function ConnectionsPage() {
         <div className="space-y-4 rounded-md border p-4">
           <div className="space-y-1.5">
             <label className="text-sm">{t("providerField")}</label>
-            <Select value={provider} onValueChange={(v) => changeProvider(v as ProviderName)}>
+            <Select
+              value={provider}
+              onValueChange={(v) => changeProvider(v as ProviderName)}
+              items={Object.fromEntries(
+                PROVIDER_OPTIONS.map((p) => {
+                  const Icon = iconForSlug(p.iconSlug);
+                  return [
+                    p.value,
+                    <>
+                      <Icon size={16} className="shrink-0 text-muted-foreground" />
+                      {p.label}
+                    </>,
+                  ];
+                })
+              )}
+            >
               <SelectTrigger className="w-full h-auto py-2">
                 <SelectValue />
               </SelectTrigger>

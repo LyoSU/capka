@@ -158,7 +158,11 @@ export default function MemoryPage() {
 
       {/* Filter + Add */}
       <div className="flex items-center gap-2">
-        <Select value={filterType} onValueChange={(v) => setFilterType(v ?? "all")}>
+        <Select
+          value={filterType}
+          onValueChange={(v) => setFilterType(v ?? "all")}
+          items={{ all: t("allTypes"), ...typeLabel }}
+        >
           <SelectTrigger className="w-36">
             <SelectValue />
           </SelectTrigger>
@@ -194,7 +198,7 @@ export default function MemoryPage() {
           </div>
           <div className="space-y-1.5">
             <label className="text-sm">{t("type")}</label>
-            <Select value={newType} onValueChange={(v) => setNewType(v as MemoryType)}>
+            <Select value={newType} onValueChange={(v) => setNewType(v as MemoryType)} items={typeLabel}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -261,7 +265,7 @@ export default function MemoryPage() {
                         onKeyDown={(e) => e.key === "Enter" && handleUpdate(m.id)}
                       />
                       <div className="flex items-center gap-2">
-                        <Select value={editType} onValueChange={(v) => setEditType(v as MemoryType)}>
+                        <Select value={editType} onValueChange={(v) => setEditType(v as MemoryType)} items={typeLabel}>
                           <SelectTrigger className="w-32">
                             <SelectValue />
                           </SelectTrigger>
