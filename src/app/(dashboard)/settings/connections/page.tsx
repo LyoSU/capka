@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectTrigger,
@@ -29,6 +30,7 @@ interface ProviderConfig {
   defaultModel: string | null;
   baseUrl: string | null;
   isActive: boolean | null;
+  shared: boolean | null;
   label: string | null;
   iconSlug: string | null;
 }
@@ -88,6 +90,7 @@ export default function ConnectionsPage() {
   const [defaultModel, setDefaultModel] = useState("");
   const [label, setLabel] = useState("");
   const [iconSlug, setIconSlug] = useState<string | null>(null);
+  const [formShared, setFormShared] = useState(true);
   const [showKey, setShowKey] = useState(false);
 
   const meta = PROVIDER_META[provider];
@@ -125,7 +128,21 @@ export default function ConnectionsPage() {
     setDefaultModel("");
     setLabel("");
     setIconSlug(null);
+    setFormShared(true);
     setShowForm(false);
+  };
+
+  const handleToggleShared = async (id: string, shared: boolean) => {
+    setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, shared } : c)));
+    const res = await fetch("/api/settings/providers", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, shared }),
+    });
+    if (!res.ok) {
+      setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, shared: !shared } : c)));
+      toast.error(t("toggleError"));
+    }
   };
 
   // Persist a custom name/glyph on an existing connection. State is updated
@@ -226,6 +243,7 @@ export default function ConnectionsPage() {
           defaultModel: modelId,
           label: meta.requiresBaseUrl ? label : undefined,
           iconSlug: meta.requiresBaseUrl ? iconSlug : undefined,
+          shared: isAdmin ? formShared : undefined,
         }),
       });
 
@@ -349,6 +367,22 @@ export default function ConnectionsPage() {
               />
             </div>
 
+            {/* Sharing is an admin-only property: whether this key backs other
+                users on the shared pool, or stays private to the admin. */}
+            {isAdmin && (
+              <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t("shareWithUsers")}</p>
+                  <p className="text-xs text-muted-foreground">{t("shareWithUsersHint")}</p>
+                </div>
+                <Switch
+                  checked={c.shared ?? true}
+                  onCheckedChange={(v) => handleToggleShared(c.id, v)}
+                  aria-label={t("shareWithUsers")}
+                />
+              </div>
+            )}
+
             {/* Naming + glyph only for base-URL providers (LiteLLM/Ollama),
                 where the connection's real identity isn't fixed by the choice. */}
             {PROVIDER_META[c.provider as ProviderName]?.requiresBaseUrl && (
@@ -471,6 +505,16 @@ export default function ConnectionsPage() {
                 <IconGrid value={iconSlug} fallback={meta.iconSlug} onChange={setIconSlug} />
               </div>
             </>
+          )}
+
+          {isAdmin && (
+            <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{t("shareWithUsers")}</p>
+                <p className="text-xs text-muted-foreground">{t("shareWithUsersHint")}</p>
+              </div>
+              <Switch checked={formShared} onCheckedChange={setFormShared} aria-label={t("shareWithUsers")} />
+            </div>
           )}
 
           <div className="flex gap-2">

@@ -612,6 +612,8 @@
       "connectionName": "Connection name",
       "connectionNamePlaceholder": "e.g. Z.AI or Local proxy",
       "connectionIcon": "Icon",
+      "shareWithUsers": "Available to users",
+      "shareWithUsersHint": "This key joins the shared pool. Turn off to keep it private to you.",
       "defaultModel": "Default Model",
       "pickModel": "Pick a model",
       "providerField": "Provider",

@@ -33,7 +33,9 @@ export async function resolveEnabledConfigs(
     .select({ config: providerConfigs })
     .from(providerConfigs)
     .innerJoin(users, eq(providerConfigs.userId, users.id))
-    .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true)))
+    // Only admin keys explicitly marked shared enter the pool — a private admin
+    // key (shared=false) is theirs alone.
+    .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true), eq(providerConfigs.shared, true)))
     .orderBy(providerConfigs.createdAt);
   return rows.map((r) => ({ ...r.config, isShared: true }));
 }
@@ -106,7 +108,8 @@ export async function resolveConfigById(userId: string, configId: string) {
     .select({ config: providerConfigs })
     .from(providerConfigs)
     .innerJoin(users, eq(providerConfigs.userId, users.id))
-    .where(and(eq(providerConfigs.id, configId), eq(users.role, "admin")))
+    // A user can only resolve a model ref to an admin key that's actually shared.
+    .where(and(eq(providerConfigs.id, configId), eq(users.role, "admin"), eq(providerConfigs.shared, true)))
     .limit(1);
   return shared ? { ...shared.config, isShared: true } : null;
 }

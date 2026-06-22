@@ -612,6 +612,8 @@
       "connectionName": "Назва підключення",
       "connectionNamePlaceholder": "Напр., Z.AI або Локальний проксі",
       "connectionIcon": "Іконка",
+      "shareWithUsers": "Доступне користувачам",
+      "shareWithUsersHint": "Цей ключ потрапляє у спільний пул. Вимкніть, щоб лишити приватним.",
       "defaultModel": "Модель за замовчуванням",
       "pickModel": "Виберіть модель",
       "providerField": "Провайдер",

@@ -77,6 +77,11 @@ export const providerConfigs = pgTable("provider_configs", {
   baseUrl: text("base_url"),
   defaultModel: text("default_model"),
   isActive: boolean("is_active").default(true),
+  // Whether an ADMIN's connection is offered to other users on the shared key.
+  // Ignored for non-admin configs (only admin keys are ever shared). Default
+  // true so existing admin keys keep working as the shared pool; an admin can
+  // turn it off to keep a key private to themselves.
+  shared: boolean("shared").default(true),
   // Optional user-given identity for the connection — lets two configs of the
   // same provider (e.g. two LiteLLM proxies) be told apart in the picker by a
   // friendly name + brand glyph instead of an opaque host.
