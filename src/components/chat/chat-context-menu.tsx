@@ -10,7 +10,7 @@ import {
   Pencil,
   Trash2,
   Download,
-  MoreHorizontal,
+  MoreVertical,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -89,7 +89,7 @@ export function ChatContextMenu({
           e.preventDefault();
           submitRename();
         }}
-        className="flex-1 px-1"
+        className="w-full px-1"
       >
         <Input
           value={renameValue}
@@ -107,15 +107,15 @@ export function ChatContextMenu({
 
   return (
     <>
-      <div className="group/chat flex items-center w-full">
-        {children}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={t("menu.options")}
-            className="ml-auto sm:opacity-0 sm:group-hover/chat:opacity-100 shrink-0 rounded-md p-0.5 hover:bg-accent focus-visible:opacity-100"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </DropdownMenuTrigger>
+      {children}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          data-sidebar="menu-action"
+          aria-label={t("menu.options")}
+          className="absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 data-[popup-open]:bg-sidebar-accent data-[popup-open]:text-sidebar-accent-foreground data-[popup-open]:opacity-100 sm:opacity-0 sm:group-hover/menu-item:opacity-100"
+        >
+          <MoreVertical className="size-4" />
+        </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-auto">
             <DropdownMenuItem onClick={startRename}>
               <Pencil className="h-4 w-4" />
@@ -160,7 +160,6 @@ export function ChatContextMenu({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
