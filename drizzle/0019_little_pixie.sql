@@ -1,2 +1,2 @@
-ALTER TABLE "models" ADD COLUMN "cutoff" text;--> statement-breakpoint
-ALTER TABLE "models" ADD COLUMN "open_weights" boolean;
+ALTER TABLE "models" ADD COLUMN IF NOT EXISTS "cutoff" text;--> statement-breakpoint
+ALTER TABLE "models" ADD COLUMN IF NOT EXISTS "open_weights" boolean;
