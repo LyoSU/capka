@@ -13,6 +13,7 @@ import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { heartbeat, isCancelRequested, finalizeTask, absorbQueuedTasks } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
+import { providerNativeTools } from "@/lib/providers";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
@@ -59,11 +60,26 @@ function reasoningOptions(provider: string): Record<string, Record<string, unkno
     case "openai":
       // Responses API returns a visible reasoning summary.
       return { openai: { reasoningSummary: "auto" } };
+    case "google":
+      // Gemini: surface its thinking — includeThoughts streams a thought summary
+      // into reasoning-delta. (Google Search grounding is a provider-executed
+      // TOOL in this SDK, not a providerOption, so it's wired into the tool set
+      // via providerNativeTools(), not here.)
+      return { google: { thinkingConfig: { includeThoughts: true } } };
     case "litellm":
       // Namespace matches the provider `name` in getModel. reasoningEffort asks
       // the gateway's reasoning model to think; openai-compatible then parses the
       // streamed reasoning_content into reasoning-delta parts.
       return { litellm: { reasoningEffort: "medium" } };
+    case "deepseek":
+    case "mistral":
+    case "xai":
+    case "zhipu":
+      // First-party OpenAI-compatible presets ride the same mechanism as litellm:
+      // the namespace matches the provider `name` in getModel. A non-reasoning
+      // model that rejects `reasoning_effort` trips the runner's
+      // retry-without-reasoning path, so sending it unconditionally is safe.
+      return { [provider]: { reasoningEffort: "medium" } };
     default:
       return undefined;
   }
@@ -221,7 +237,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     ? and(eq(memories.userId, userId), or(eq(memories.projectId, payload.projectId), isNull(memories.projectId)))
     : and(eq(memories.userId, userId), isNull(memories.projectId));
 
-  const [{ model, provider, modelId, isShared }, project, userMemories, user, chat] = await Promise.all([
+  const [{ model, provider, modelId, modelInput, isShared }, project, userMemories, user, chat] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
@@ -251,7 +267,9 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   const availableSkills = (await listAvailableSkills(userId, payload.projectId ?? null))
     .filter((s) => isUsable(policy.effect("skill", s.name)));
   const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null });
-  const tools = { ...sandbox.tools, ...mcp.tools, skill: skillTool };
+  // Provider-executed tools (e.g. Gemini's Google Search grounding) join the
+  // sandbox/MCP/skill tools; empty for providers without any.
+  const tools = { ...sandbox.tools, ...mcp.tools, skill: skillTool, ...providerNativeTools(provider) };
 
   // Workspace snapshot — runs inside the isolated Docker container, not the host.
   let workspaceSnapshot: string | undefined;
@@ -268,6 +286,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     workspaceSnapshot,
     attachedFiles: payload.attachedFiles,
     provider,
+    modelInput,
     user: user ? { name: user.name, timezone: user.timezone } : null,
     conversationStartedAt: chat?.createdAt ?? null,
     locale: user?.locale ?? payload.origin?.locale ?? null,
@@ -275,7 +294,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
 
   // Dispose both sandbox and MCP clients when the run ends.
   const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
-  return { model, provider, modelId, isShared, tools, closeMcp: closeAll, prompt, userMemories };
+  return { model, provider, modelId, modelInput, isShared, tools, closeMcp: closeAll, prompt, userMemories };
 }
 
 /**
@@ -357,7 +376,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, isShared, tools, closeMcp: close, prompt, userMemories } =
+    const { model, provider, modelId, modelInput, isShared, tools, closeMcp: close, prompt, userMemories } =
       await prepareRun(userId, sessionKey, payload, chatId);
     closeMcp = close;
 
@@ -440,6 +459,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const { nativeFiles } = classifyFiles(
       [...(payload.attachedFiles ?? []), ...extraAttachedFiles],
       provider,
+      modelInput,
     );
     if (nativeFiles.length) {
       await injectNativeFiles(modelMessages, sessionKey, userId, nativeFiles);

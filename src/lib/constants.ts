@@ -11,15 +11,37 @@ export const MAX_NATIVE_FILE_BYTES = 20 * 1024 * 1024;
 /** Max total bytes for all native multimodal files combined */
 export const MAX_NATIVE_TOTAL_BYTES = 50 * 1024 * 1024;
 
-/** Extension → MIME type map for common native-multimodal file types */
+/** Extension → MIME type map for common native-multimodal file types. Covers
+ *  images, PDF, audio and video so files re-attached from the workspace (where
+ *  the browser-provided type is gone) still resolve to a native modality. */
 const EXT_MIME: Record<string, string> = {
+  // Images
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".png": "image/png",
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  // Documents
   ".pdf": "application/pdf",
+  // Audio
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".ogg": "audio/ogg",
+  ".opus": "audio/opus",
+  ".flac": "audio/flac",
+  // Video
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".mpeg": "video/mpeg",
+  ".mpg": "video/mpeg",
+  ".avi": "video/x-msvideo",
 };
 
 /**

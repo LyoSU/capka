@@ -4,10 +4,12 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
+import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
 
 // Provider metadata + model-id helpers live in the dependency-free registry so
 // client bundles don't pull these AI SDKs. Re-exported here for back-compat.
 export * from "./registry";
+import { PROVIDER_META, type ProviderName } from "./registry";
 
 /**
  * Wrap a model so reasoning it emits *inline* as `<think>…</think>` in the
@@ -44,19 +46,24 @@ export function getModel(
   config?: { apiKey?: string; baseUrl?: string },
 ) {
   switch (provider) {
-    case "litellm": {
-      // Any OpenAI-compatible gateway (LiteLLM proxy, vLLM, OpenCode Zen, …).
-      // The dedicated openai-compatible provider (not @ai-sdk/openai) is the
-      // right tool here: it speaks /chat/completions AND parses the non-standard
-      // `reasoning_content`/`reasoning` fields that gateways use to stream a
-      // model's thinking — the official OpenAI provider drops those, so reasoning
-      // never reached the UI. `name` is the providerOptions namespace (see runner).
-      const p = createOpenAICompatible({
-        name: "litellm",
-        baseURL: config?.baseUrl ?? "",
-        apiKey: config?.apiKey,
-      });
-      // A gateway that splits reasoning into `reasoning_content` is handled by the
+    case "litellm":
+    case "deepseek":
+    case "mistral":
+    case "xai":
+    case "zhipu": {
+      // Every OpenAI-compatible /v1 endpoint shares one adapter: a self-hosted
+      // gateway (LiteLLM proxy, vLLM, OpenCode Zen, …) where the user supplies the
+      // base URL, OR a first-party preset (DeepSeek, Mistral, xAI, Z.ai) whose base
+      // URL is baked into the registry. The dedicated openai-compatible provider
+      // (not @ai-sdk/openai) is the right tool: it speaks /chat/completions AND
+      // parses the non-standard `reasoning_content`/`reasoning` fields these
+      // endpoints use to stream a model's thinking — the official OpenAI provider
+      // drops those, so reasoning never reached the UI. `name` is the
+      // providerOptions namespace; the runner's reasoningOptions() keys off the
+      // very same provider string, so the reasoning knob actually lands.
+      const baseURL = config?.baseUrl || PROVIDER_META[provider as ProviderName].defaultBaseUrl || "";
+      const p = createOpenAICompatible({ name: provider, baseURL, apiKey: config?.apiKey });
+      // An endpoint that splits reasoning into `reasoning_content` is handled by the
       // provider above; one that doesn't inlines `<think>` in the text — extract it.
       return withReasoningExtraction(p(modelId));
     }
@@ -72,6 +79,13 @@ export function getModel(
       const p = createOpenRouter({ apiKey: config?.apiKey ?? "" });
       return p.chat(modelId);
     }
+    case "google": {
+      // Gemini via the first-party SDK — the only adapter that serializes
+      // native video + audio (image/pdf too). Thinking is requested per-call via
+      // providerOptions, Google Search grounding via providerNativeTools (below).
+      const p = createGoogleGenerativeAI({ apiKey: config?.apiKey });
+      return p(modelId);
+    }
     case "ollama": {
       const p = createOllama({ baseURL: config?.baseUrl || "http://localhost:11434/api" });
       // Local open-weights reasoning models (DeepSeek-R1, Qwen QwQ, …) emit their
@@ -81,4 +95,16 @@ export function getModel(
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
+}
+
+/**
+ * Provider-executed tools to merge into the agent's tool set. The AI SDK runs
+ * these itself (not our sandbox). Currently: Gemini's Google Search grounding,
+ * which in this SDK is a TOOL — `google.tools.googleSearch` — rather than a
+ * providerOption. Gemini 2.x composes it with regular function tools, so it
+ * coexists with the sandbox/MCP/skill tools. Empty for every other provider.
+ */
+export function providerNativeTools(provider: string) {
+  if (provider === "google") return { google_search: google.tools.googleSearch({}) };
+  return {};
 }

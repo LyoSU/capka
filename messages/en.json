@@ -261,6 +261,9 @@
       "context": "Context size: how much it can keep in mind at once",
       "caps": {
         "vision": "Reads images",
+        "pdf": "Reads PDFs",
+        "audio": "Understands audio",
+        "video": "Understands video",
         "tools": "Can use tools",
         "reasoning": "Thinks step by step"
       },

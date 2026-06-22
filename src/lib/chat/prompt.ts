@@ -1,6 +1,6 @@
 import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
 import { type FileRef } from "@/lib/constants";
-import { providerAcceptsNativeFile } from "@/lib/providers/registry";
+import { acceptsNativeFile, type Modality } from "@/lib/providers/registry";
 import { formatAvailableSkills } from "@/lib/skills/fmt";
 
 /**
@@ -72,6 +72,9 @@ export function buildSystemPrompt(opts: {
   attachedFiles?: FileRef[];
   /** Resolved provider — gates which attachments are presented as native. */
   provider?: string;
+  /** Resolved model's native input modalities (OpenRouter catalog), if known —
+   *  takes precedence over the provider's static caps when gating attachments. */
+  modelInput?: Modality[] | null;
   user?: { name?: string | null; timezone?: string | null } | null;
   conversationStartedAt?: Date | null;
   locale?: string | null;
@@ -111,7 +114,7 @@ export function buildSystemPrompt(opts: {
   const promptLines: string[] = [];
   let hasToolOnly = false;
   for (const f of opts.attachedFiles ?? []) {
-    const native = providerAcceptsNativeFile(opts.provider ?? "", f.type);
+    const native = acceptsNativeFile(f.type, opts.provider ?? "", opts.modelInput);
     if (!native) hasToolOnly = true;
     promptLines.push(`  - /workspace/${f.name}${native ? " (attached natively — you can see/read it directly)" : ""}`);
   }
@@ -125,19 +128,21 @@ export function buildSystemPrompt(opts: {
 
 /**
  * Classify attached files into native multimodal vs tool-only, gated by what
- * the resolved provider's API actually accepts inline (see
- * `providerAcceptsNativeFile`). An unknown/empty provider falls back to the safe
- * side — images stay native, PDFs degrade to tool-only — so a missing provider
- * never reintroduces the `content[].type` rejection.
+ * the resolved model/provider actually accepts inline (see `acceptsNativeFile`).
+ * Per-model modalities win when known; otherwise the provider's static caps
+ * apply. An unknown/empty provider falls back to the safe side — images stay
+ * native, everything else degrades to tool-only — so a missing provider never
+ * reintroduces the `content[].type` rejection.
  */
 export function classifyFiles(
   files?: FileRef[],
   provider?: string,
+  modelInput?: Modality[] | null,
 ): { nativeFiles: FileRef[]; hasToolOnly: boolean } {
   const nativeFiles: FileRef[] = [];
   let hasToolOnly = false;
   for (const f of files ?? []) {
-    if (providerAcceptsNativeFile(provider ?? "", f.type)) nativeFiles.push(f);
+    if (acceptsNativeFile(f.type, provider ?? "", modelInput)) nativeFiles.push(f);
     else hasToolOnly = true;
   }
   return { nativeFiles, hasToolOnly };

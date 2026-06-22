@@ -4,10 +4,16 @@
  * consistent no matter which provider a model came from.
  */
 
+import type { Modality } from "@/lib/providers/registry";
+
 export interface Capabilities {
   vision: boolean;
   tools: boolean;
   reasoning: boolean;
+  /** Native inline input modalities this specific model accepts (from
+   *  OpenRouter's `architecture.input_modalities`). Absent when the source
+   *  doesn't report it — callers then fall back to the provider's static caps. */
+  input?: Modality[];
 }
 
 // Map a company/group name to a brand-icon slug the UI can render. Keyword

@@ -6,7 +6,7 @@ import { iconForGroup, prettyName } from "@/lib/models/normalize";
 import { getBlockPrivateProviderUrls, getModelMinContext, getModelMaxPrice } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import { parseOpenRouterModels, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
-import { PROVIDER_META, type ProviderName } from "./registry";
+import { PROVIDER_META, type ProviderName, type Modality } from "./registry";
 
 /**
  * A model as the picker consumes it. Kept here (not in the route) so server
@@ -22,7 +22,7 @@ export interface ModelInfo {
   cutoff?: string | null;
   group?: string | null;
   icon?: string | null;
-  capabilities?: { vision: boolean; tools: boolean; reasoning: boolean } | null;
+  capabilities?: { vision: boolean; tools: boolean; reasoning: boolean; input?: Modality[] } | null;
   featured?: boolean;
   // When the picker aggregates several enabled provider configs, each model is
   // tagged with the config it came from: `configId` routes the selection (the
@@ -236,7 +236,9 @@ async function listOpenAICompatible(
 ): Promise<ModelInfo[]> {
   await assertSafeUrl(baseUrl, opts.blockPrivate ?? false);
   const root = baseUrl.replace(/\/+$/, "");
-  const url = root.endsWith("/v1") ? `${root}/models` : `${root}/v1/models`;
+  // Append `/models` when the base already carries a version segment (/v1, but
+  // also Z.ai's /v4); otherwise assume the conventional /v1/models.
+  const url = /\/v\d+$/.test(root) ? `${root}/models` : `${root}/v1/models`;
   const raw = (await fetchJson(url, apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined)) as {
     data?: { id: string }[];
   };
@@ -256,6 +258,24 @@ async function listAnthropic(apiKey: string): Promise<ModelInfo[]> {
   const lookup = await catalogLookup(list.map((m) => m.id));
   return list
     .map((m) => toModelInfo(m.id, m.display_name || prettyName(m.id), "Anthropic", lookup(m.id), true))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Google Gemini: its own `/v1beta/models` listing (not OpenAI-shaped). Keep only
+ * models that can actually chat (`generateContent`), dropping embedding/AQA/TTS
+ * and the legacy `models/` prefix. Enriched against the catalog like the rest.
+ */
+async function listGoogle(apiKey: string): Promise<ModelInfo[]> {
+  const raw = (await fetchJson("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+    headers: { "x-goog-api-key": apiKey },
+  })) as { models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[] };
+  const list = (raw.models ?? [])
+    .filter((m) => m.supportedGenerationMethods?.includes("generateContent") && /gemini/i.test(m.name))
+    .map((m) => ({ id: m.name.replace(/^models\//, ""), displayName: m.displayName }));
+  const lookup = await catalogLookup(list.map((m) => m.id));
+  return list
+    .map((m) => toModelInfo(m.id, m.displayName || prettyName(m.id), "Google", lookup(m.id), true))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -307,6 +327,18 @@ export async function applySharedGovernance(models: ModelInfo[]): Promise<ModelI
     if (maxPrice > 0 && m.pricing.completion > maxPrice) return false;
     return true;
   });
+}
+
+/**
+ * The native input modalities the catalog knows THIS model accepts (OpenRouter's
+ * `input_modalities`), or null when the model isn't in the catalog / the source
+ * didn't report them — the caller then falls back to the provider's static caps.
+ * Matched by exact then bare id, exactly like the price lookup.
+ */
+export async function getModelInputModalities(modelId: string): Promise<Modality[] | null> {
+  const lookup = await catalogLookup([modelId]);
+  const caps = lookup(modelId)?.capabilities as { input?: Modality[] } | null | undefined;
+  return caps?.input && caps.input.length ? caps.input : null;
 }
 
 /** The model's completion price in USD per 1M tokens from the synced catalog,
@@ -369,12 +401,25 @@ async function listProviderModelsLive(opts: {
     case "litellm":
       if (!opts.baseUrl) return [];
       return listOpenAICompatible(opts.baseUrl, opts.apiKey, { blockPrivate });
+    case "deepseek":
+    case "mistral":
+    case "xai":
+    case "zhipu": {
+      // First-party OpenAI-compatible presets: fixed public host (no SSRF
+      // policy), key required, base URL from the registry unless overridden.
+      if (!opts.apiKey) return [];
+      const baseUrl = opts.baseUrl || PROVIDER_META[opts.provider].defaultBaseUrl!;
+      return listOpenAICompatible(baseUrl, opts.apiKey);
+    }
     case "openai":
       if (!opts.apiKey) return [];
       return listOpenAICompatible("https://api.openai.com/v1", opts.apiKey, { filterChat: true });
     case "anthropic":
       if (!opts.apiKey) return [];
       return listAnthropic(opts.apiKey);
+    case "google":
+      if (!opts.apiKey) return [];
+      return listGoogle(opts.apiKey);
     case "ollama":
       return listOllama(opts.baseUrl || PROVIDER_META.ollama.defaultBaseUrl!, blockPrivate);
   }

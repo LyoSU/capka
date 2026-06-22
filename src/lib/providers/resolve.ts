@@ -4,7 +4,7 @@ import { providerConfigs, users } from "@/lib/db/schema";
 import { getMasterKey, sharedKeyEnabled, getModelMaxPrice } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel, parseModelId, splitModelRef, providerLabel } from "@/lib/providers";
-import { assertSafeProviderConfig, getModelCompletionPriceUsdPerM } from "@/lib/providers/list-models";
+import { assertSafeProviderConfig, getModelCompletionPriceUsdPerM, getModelInputModalities } from "@/lib/providers/list-models";
 import { ValidationError } from "@/lib/errors";
 
 type ProviderConfigRow = typeof providerConfigs.$inferSelect;
@@ -177,7 +177,10 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
   });
-  return { model, provider: config.provider, modelId, isShared: config.isShared };
+  // Per-model native input modalities (OpenRouter catalog), so file gating knows
+  // exactly what THIS model takes; null falls back to the provider's static caps.
+  const modelInput = await getModelInputModalities(modelId);
+  return { model, provider: config.provider, modelId, modelInput, isShared: config.isShared };
 }
 
 export async function resolveUserModel(userId: string, requestModel?: string) {

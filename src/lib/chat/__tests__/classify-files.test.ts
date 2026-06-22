@@ -1,37 +1,76 @@
 import { describe, it, expect } from "vitest";
 import { classifyFiles } from "../prompt";
-import { providerAcceptsNativeFile } from "@/lib/providers/registry";
+import { acceptsNativeFile, mimeToModality } from "@/lib/providers/registry";
 import type { FileRef } from "@/lib/constants";
 
 const file = (type: string): FileRef => ({ name: `f.${type.split("/")[1]}`, type, size: 1 } as FileRef);
 
-describe("providerAcceptsNativeFile", () => {
+describe("mimeToModality", () => {
+  it("maps MIME prefixes to modalities", () => {
+    expect(mimeToModality("image/png")).toBe("image");
+    expect(mimeToModality("application/pdf")).toBe("pdf");
+    expect(mimeToModality("audio/mpeg")).toBe("audio");
+    expect(mimeToModality("video/mp4")).toBe("video");
+    expect(mimeToModality("text/csv")).toBeNull();
+  });
+});
+
+describe("acceptsNativeFile (provider fallback caps)", () => {
   it("accepts images on every provider (image_url is near-universal)", () => {
-    for (const p of ["litellm", "openrouter", "openai", "anthropic", "ollama"]) {
-      expect(providerAcceptsNativeFile(p, "image/png")).toBe(true);
+    for (const p of ["litellm", "openrouter", "openai", "anthropic", "google", "ollama"]) {
+      expect(acceptsNativeFile("image/png", p)).toBe(true);
     }
   });
 
-  it("accepts inline PDF only on first-party APIs and the OpenRouter gateway", () => {
-    expect(providerAcceptsNativeFile("anthropic", "application/pdf")).toBe(true);
-    expect(providerAcceptsNativeFile("openai", "application/pdf")).toBe(true);
-    expect(providerAcceptsNativeFile("openrouter", "application/pdf")).toBe(true);
+  it("accepts inline PDF on the first-party APIs and the OpenRouter gateway", () => {
+    expect(acceptsNativeFile("application/pdf", "anthropic")).toBe(true);
+    expect(acceptsNativeFile("application/pdf", "openai")).toBe(true);
+    expect(acceptsNativeFile("application/pdf", "openrouter")).toBe(true);
+    expect(acceptsNativeFile("application/pdf", "google")).toBe(true);
   });
 
   it("rejects inline PDF on generic OpenAI-compatible endpoints (Z.ai) and Ollama", () => {
     // The root cause of the `messages[N].content[1].type` error: a synthetic
     // `{type:"file"}` block these endpoints don't accept.
-    expect(providerAcceptsNativeFile("litellm", "application/pdf")).toBe(false);
-    expect(providerAcceptsNativeFile("ollama", "application/pdf")).toBe(false);
+    expect(acceptsNativeFile("application/pdf", "litellm")).toBe(false);
+    expect(acceptsNativeFile("application/pdf", "ollama")).toBe(false);
+  });
+
+  it("accepts audio where the SDK serializes it, not on Anthropic", () => {
+    expect(acceptsNativeFile("audio/mpeg", "google")).toBe(true);
+    expect(acceptsNativeFile("audio/mpeg", "openai")).toBe(true);
+    expect(acceptsNativeFile("audio/mpeg", "openrouter")).toBe(true);
+    expect(acceptsNativeFile("audio/mpeg", "anthropic")).toBe(false);
+  });
+
+  it("accepts video ONLY on Google (the only SDK that emits it)", () => {
+    expect(acceptsNativeFile("video/mp4", "google")).toBe(true);
+    expect(acceptsNativeFile("video/mp4", "openrouter")).toBe(false);
+    expect(acceptsNativeFile("video/mp4", "openai")).toBe(false);
+    expect(acceptsNativeFile("video/mp4", "anthropic")).toBe(false);
   });
 
   it("rejects non-multimodal types everywhere", () => {
-    expect(providerAcceptsNativeFile("openai", "text/csv")).toBe(false);
-    expect(providerAcceptsNativeFile("anthropic", "application/zip")).toBe(false);
+    expect(acceptsNativeFile("text/csv", "openai")).toBe(false);
+    expect(acceptsNativeFile("application/zip", "anthropic")).toBe(false);
   });
 });
 
-describe("classifyFiles (provider-aware)", () => {
+describe("acceptsNativeFile (per-model modalities win)", () => {
+  it("uses the model's input_modalities over the provider fallback", () => {
+    // An OpenRouter model that lists audio takes audio…
+    expect(acceptsNativeFile("audio/mpeg", "openrouter", ["image", "audio"])).toBe(true);
+    // …and one that lists only image/pdf degrades audio to tool-only.
+    expect(acceptsNativeFile("audio/mpeg", "openrouter", ["image", "pdf"])).toBe(false);
+    expect(acceptsNativeFile("application/pdf", "openrouter", ["image", "pdf"])).toBe(true);
+  });
+
+  it("never makes video native off Google, even if the catalog claims it", () => {
+    expect(acceptsNativeFile("video/mp4", "openrouter", ["image", "video"])).toBe(false);
+  });
+});
+
+describe("classifyFiles (provider + per-model aware)", () => {
   it("keeps a PDF native for Anthropic", () => {
     const { nativeFiles, hasToolOnly } = classifyFiles([file("application/pdf")], "anthropic");
     expect(nativeFiles).toHaveLength(1);
@@ -44,9 +83,13 @@ describe("classifyFiles (provider-aware)", () => {
     expect(hasToolOnly).toBe(true);
   });
 
-  it("still sends an image natively to Z.ai", () => {
-    const { nativeFiles, hasToolOnly } = classifyFiles([file("image/jpeg")], "litellm");
+  it("sends video natively to Gemini, tool-only elsewhere", () => {
+    expect(classifyFiles([file("video/mp4")], "google").nativeFiles).toHaveLength(1);
+    expect(classifyFiles([file("video/mp4")], "openrouter").nativeFiles).toHaveLength(0);
+  });
+
+  it("respects a model's per-model modalities", () => {
+    const { nativeFiles } = classifyFiles([file("audio/mpeg")], "openrouter", ["image", "audio"]);
     expect(nativeFiles).toHaveLength(1);
-    expect(hasToolOnly).toBe(false);
   });
 });

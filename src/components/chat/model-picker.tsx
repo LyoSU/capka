@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, use
 import { createPortal } from "react-dom";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
-import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle } from "lucide-react";
+import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
 import { parseModelId, displayModelName, encodeModelRef, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
@@ -52,15 +52,36 @@ function stripGroup(name: string, group?: string | null): string {
 
 function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
   const t = useTranslations("chat.model");
-  if (!caps || (!caps.vision && !caps.reasoning)) return null;
+  const input = caps?.input ?? [];
+  const hasPdf = input.includes("pdf");
+  const hasAudio = input.includes("audio");
+  const hasVideo = input.includes("video");
+  if (!caps || (!caps.vision && !caps.reasoning && !hasPdf && !hasAudio && !hasVideo)) return null;
   // Tool-calling is now a hard filter (every listed model has it), so its icon
   // would just be noise. Only the capabilities that actually vary are shown,
-  // with plain-language meaning on hover and for screen readers.
+  // with plain-language meaning on hover and for screen readers. Native input
+  // modalities (PDF/audio/video) let the user see what they can attach; image
+  // is already conveyed by the vision badge.
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-1.5 py-0.5">
       {caps.vision && (
         <span title={t("caps.vision")} className="inline-flex">
           <Eye className="h-3.5 w-3.5" aria-label={t("caps.vision")} />
+        </span>
+      )}
+      {hasPdf && (
+        <span title={t("caps.pdf")} className="inline-flex">
+          <FileText className="h-3.5 w-3.5" aria-label={t("caps.pdf")} />
+        </span>
+      )}
+      {hasAudio && (
+        <span title={t("caps.audio")} className="inline-flex">
+          <AudioLines className="h-3.5 w-3.5" aria-label={t("caps.audio")} />
+        </span>
+      )}
+      {hasVideo && (
+        <span title={t("caps.video")} className="inline-flex">
+          <Video className="h-3.5 w-3.5" aria-label={t("caps.video")} />
         </span>
       )}
       {caps.reasoning && (

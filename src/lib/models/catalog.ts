@@ -10,6 +10,7 @@ import {
   prettyName,
 } from "./normalize";
 import { MODELS_DEV_URL, parseModelsDevModels, matchModelsDev } from "./modelsdev";
+import type { Modality } from "@/lib/providers/registry";
 
 export interface CatalogModel {
   // Integration the model is served through. Open-ended on purpose: more
@@ -61,6 +62,12 @@ export function parseOpenRouterModels(raw: unknown): CatalogModel[] {
     const ctx = m.context_length ?? null;
     const params = m.supported_parameters ?? [];
     const group = groupFromName(m.name, m.id);
+    // OpenRouter's per-model input modalities: map their `file` → our `pdf`,
+    // keep image/audio/video, drop `text` and anything unrecognized. This is
+    // what gates native attachments precisely per model (see acceptsNativeFile).
+    const inputMods = (m.architecture?.input_modalities ?? [])
+      .map((x) => (x === "file" ? "pdf" : x))
+      .filter((x): x is Modality => x === "image" || x === "pdf" || x === "audio" || x === "video");
     // `input != null` (not `> 0`): a known price of 0 means a genuinely free
     // model, which we keep; only a missing/unparseable price drops the row.
     const enabled =
@@ -79,9 +86,10 @@ export function parseOpenRouterModels(raw: unknown): CatalogModel[] {
       outputPrice: output,
       cacheReadPrice: cacheRead,
       capabilities: {
-        vision: !!m.architecture?.input_modalities?.includes("image"),
+        vision: inputMods.includes("image"),
         tools: params.includes("tools") || params.includes("tool_choice"),
         reasoning: params.includes("reasoning") || params.includes("include_reasoning"),
+        input: inputMods,
       },
       enabled,
     });

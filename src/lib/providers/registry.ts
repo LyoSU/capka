@@ -8,10 +8,33 @@
 
 // Gateways (LiteLLM proxy, OpenRouter) are listed first: routing every backend
 // through one OpenAI-compatible endpoint is the recommended, most scalable
-// setup — one adapter, one model list, unified cost/limits. The direct
-// providers remain as simple presets.
-export const PROVIDERS = ["litellm", "openrouter", "openai", "anthropic", "ollama"] as const;
+// setup — one adapter, one model list, unified cost/limits. Then the two big
+// direct providers, then a cluster of first-party presets that are all just
+// OpenAI-compatible endpoints with a baked-in base URL (DeepSeek, Mistral, xAI,
+// Z.ai) — no SDK of their own, they ride the same litellm code path. Ollama
+// (local) is last.
+export const PROVIDERS = [
+  "litellm",
+  "openrouter",
+  "openai",
+  "anthropic",
+  "google",
+  "deepseek",
+  "mistral",
+  "xai",
+  "zhipu",
+  "ollama",
+] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
+
+/**
+ * Native (inline) input modalities. A file whose MIME maps to one of these can
+ * be pushed into the message `content` as a `{type:"file"}` part the model API
+ * accepts directly; anything else stays in /workspace for the agent to open
+ * with sandbox tools. `pdf` covers `application/pdf`; the rest map from the
+ * MIME prefix (image/ , audio/ , video/). See `mimeToModality`.
+ */
+export type Modality = "image" | "pdf" | "audio" | "video";
 
 export interface ProviderMeta {
   /** Human-facing name shown in dropdowns and provider cards. */
@@ -36,14 +59,23 @@ export interface ProviderMeta {
    */
   hasCatalog: boolean;
   /**
-   * Whether the provider's chat API accepts a PDF as an inline
-   * `{type:"file"}` content block. The first-party APIs and the OpenRouter
-   * gateway do; generic OpenAI-compatible endpoints (Z.ai, vLLM, a LiteLLM
-   * proxy in front of an arbitrary backend) and Ollama reject it with a
-   * `messages[N].content[k].type` error, so PDFs degrade to tool-only there.
-   * Images use the near-universal `image_url` block and aren't gated.
+   * Native input modalities this provider's AI-SDK adapter can actually
+   * serialize — verified against each provider package, NOT just what the
+   * upstream API claims. Used as the fallback when per-model modalities are
+   * unknown (direct providers, custom endpoints). For OpenRouter the catalog
+   * carries per-model `input_modalities`, which override this (see
+   * `acceptsNativeFile`).
+   *
+   * Reality of the SDKs as shipped:
+   * - `@ai-sdk/google` emits image/pdf/audio/video → Gemini does all four.
+   * - `@openrouter/ai-sdk-provider` emits image_url/input_audio/file but has
+   *   NO `video_url`, so video is impossible through it (gated to Google).
+   * - `@ai-sdk/openai` emits image/pdf/audio (audio only on audio models).
+   * - `@ai-sdk/anthropic` emits image/pdf (no audio, no video).
+   * - `@ai-sdk/openai-compatible` emits image_url/input_audio/file; PDF
+   *   support depends on the unknown backend, so presets stay conservative.
    */
-  acceptsInlinePdf: boolean;
+  nativeInput: Modality[];
 }
 
 export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
@@ -56,9 +88,9 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     requiresBaseUrl: true,
     baseUrlPlaceholder: "https://your-litellm-host/v1",
     hasCatalog: false,
-    // Generic OpenAI-compatible endpoint — the backend is unknown, so we can't
-    // assume it understands the `{type:"file"}` PDF block. Degrade to tool-only.
-    acceptsInlinePdf: false,
+    // Generic OpenAI-compatible endpoint: images + audio serialize, but the
+    // backend is unknown so we don't assume the `{type:"file"}` PDF block.
+    nativeInput: ["image", "audio"],
   },
   openrouter: {
     label: "OpenRouter",
@@ -67,7 +99,9 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     requiresKey: true,
     requiresBaseUrl: false,
     hasCatalog: true,
-    acceptsInlinePdf: true,
+    // Fallback only — per-model `input_modalities` from the catalog normally
+    // decide. The SDK provider has no video_url, so video is never native here.
+    nativeInput: ["image", "pdf", "audio"],
   },
   openai: {
     label: "OpenAI",
@@ -76,7 +110,7 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     requiresKey: true,
     requiresBaseUrl: false,
     hasCatalog: false,
-    acceptsInlinePdf: true,
+    nativeInput: ["image", "pdf", "audio"],
   },
   anthropic: {
     label: "Anthropic",
@@ -85,7 +119,62 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     requiresKey: true,
     requiresBaseUrl: false,
     hasCatalog: false,
-    acceptsInlinePdf: true,
+    // Claude takes images + PDF natively; no audio or video input.
+    nativeInput: ["image", "pdf"],
+  },
+  google: {
+    label: "Google Gemini",
+    blurb: "Connect directly to Gemini — the only provider with native video and audio.",
+    iconSlug: "google",
+    requiresKey: true,
+    requiresBaseUrl: false,
+    hasCatalog: false,
+    // Gemini is the multimodal flagship: image, PDF, audio AND video all ride
+    // the @ai-sdk/google file part (video can even be a YouTube URL).
+    nativeInput: ["image", "pdf", "audio", "video"],
+  },
+  deepseek: {
+    label: "DeepSeek",
+    blurb: "Connect directly to DeepSeek — low-cost chat and reasoning models.",
+    iconSlug: "deepseek",
+    requiresKey: true,
+    requiresBaseUrl: false,
+    defaultBaseUrl: "https://api.deepseek.com/v1",
+    hasCatalog: false,
+    // OpenAI-compatible preset: images serialize; its text/vision models don't
+    // take PDF/audio/video, so stay conservative and let those fall to tools.
+    nativeInput: ["image"],
+  },
+  mistral: {
+    label: "Mistral",
+    blurb: "Connect directly to Mistral — open-weight and frontier models from the EU.",
+    iconSlug: "mistral",
+    requiresKey: true,
+    requiresBaseUrl: false,
+    defaultBaseUrl: "https://api.mistral.ai/v1",
+    hasCatalog: false,
+    nativeInput: ["image"],
+  },
+  xai: {
+    label: "xAI (Grok)",
+    blurb: "Connect directly to xAI's Grok models.",
+    iconSlug: "xai",
+    requiresKey: true,
+    requiresBaseUrl: false,
+    defaultBaseUrl: "https://api.x.ai/v1",
+    hasCatalog: false,
+    nativeInput: ["image"],
+  },
+  zhipu: {
+    label: "Z.AI (GLM)",
+    blurb: "Connect directly to Z.AI — the GLM model family.",
+    iconSlug: "zhipu",
+    requiresKey: true,
+    requiresBaseUrl: false,
+    // Z.ai's OpenAI-compatible surface lives under /api/paas/v4 (not /v1).
+    defaultBaseUrl: "https://api.z.ai/api/paas/v4",
+    hasCatalog: false,
+    nativeInput: ["image"],
   },
   ollama: {
     label: "Ollama",
@@ -96,7 +185,8 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     defaultBaseUrl: "http://localhost:11434/api",
     baseUrlPlaceholder: "http://localhost:11434/api",
     hasCatalog: false,
-    acceptsInlinePdf: false,
+    // Local vision models take images; nothing else over the Ollama API.
+    nativeInput: ["image"],
   },
 };
 
@@ -123,26 +213,40 @@ export function providerLabel(provider: string): string {
   return isProviderName(provider) ? PROVIDER_META[provider].label : provider;
 }
 
+/** The native input modality a file's MIME maps to, or null if it has none
+ *  (a generic doc, archive, …) — those always stay tool-only. */
+export function mimeToModality(mimeType: string): Modality | null {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType === "application/pdf") return "pdf";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType.startsWith("video/")) return "video";
+  return null;
+}
+
 /**
- * Whether a provider's chat API accepts this file as a native, inline content
- * block. Used to gate `injectNativeFiles`: anything this returns `false` for is
- * left in /workspace for the agent to open with sandbox tools (tool-only)
- * instead of being pushed into the message `content` array.
+ * Whether this file can be pushed into the message `content` as a native inline
+ * part the model API accepts. Anything that returns `false` is left in
+ * /workspace for the agent to open with sandbox tools (tool-only).
  *
- * - Images → the near-universal `image_url` block, accepted everywhere a vision
- *   model exists (a non-vision model erroring is a model-choice problem, not an
- *   API-shape one, so we don't gate it here).
- * - PDF → the AI SDK serializes it as an OpenAI-specific `{type:"file"}` block;
- *   gated by each provider's declared `acceptsInlinePdf` capability. An unknown
- *   provider falls to the safe side (tool-only) so it never reintroduces the
- *   `messages[N].content[k].type` rejection.
+ * Precedence:
+ * 1. Video only serializes through the Google SDK — gated to Gemini regardless
+ *    of any catalog claim (OpenRouter's provider has no `video_url`).
+ * 2. Per-model `modelInput` (OpenRouter's `input_modalities`, when known) is
+ *    authoritative — it knows exactly what THIS model takes.
+ * 3. Otherwise fall back to the provider's static `nativeInput`.
+ * 4. An unknown provider falls to the safe side: only the universal image block.
  */
-export function providerAcceptsNativeFile(provider: string, mimeType: string): boolean {
-  if (mimeType.startsWith("image/")) return true;
-  if (mimeType === "application/pdf") {
-    return isProviderName(provider) && PROVIDER_META[provider].acceptsInlinePdf;
-  }
-  return false;
+export function acceptsNativeFile(
+  mimeType: string,
+  provider: string,
+  modelInput?: Modality[] | null,
+): boolean {
+  const mod = mimeToModality(mimeType);
+  if (!mod) return false;
+  if (mod === "video") return provider === "google";
+  if (modelInput && modelInput.length) return modelInput.includes(mod);
+  if (isProviderName(provider)) return PROVIDER_META[provider].nativeInput.includes(mod);
+  return mod === "image";
 }
 
 // ── Model id encoding ──────────────────────────────────────────────────────
