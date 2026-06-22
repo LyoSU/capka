@@ -4,6 +4,7 @@ import { settings } from "./db/schema";
 import { encrypt, decrypt, generateSecret } from "./crypto";
 import { checkMasterKey, CANARY_PLAINTEXT } from "./master-key";
 import { parseRegistrationMode, type RegistrationMode } from "./auth/telegram-oidc";
+import { DEFAULT_MODEL_MIN_CONTEXT } from "./constants";
 
 let masterKeyCache: string | null = null;
 
@@ -122,6 +123,24 @@ export async function assertMasterKeyConsistent(): Promise<void> {
 export async function isSetupComplete(): Promise<boolean> {
   const val = await getSetting("setup_complete");
   return val === "true";
+}
+
+/**
+ * Org-wide model governance, enforced on every served model list (the picker,
+ * per-config defaults, the add-provider preview). Hide models below a minimum
+ * context window and above a maximum price — keeping non-technical users away
+ * from tiny-context or budget-busting models. A model with unknown context or
+ * price is always kept (we don't penalise missing metadata).
+ */
+export async function getModelMinContext(): Promise<number> {
+  const v = parseInt((await getSetting("model_min_context")) ?? "", 10);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_MODEL_MIN_CONTEXT;
+}
+
+/** Max completion price in USD per 1M tokens; 0 (default) means no cap. */
+export async function getModelMaxPrice(): Promise<number> {
+  const v = parseFloat((await getSetting("model_max_price")) ?? "");
+  return Number.isFinite(v) && v > 0 ? v : 0;
 }
 
 /**

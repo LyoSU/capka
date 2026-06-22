@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chats } from "@/lib/db/schema";
+import { encodeModelRef } from "./registry";
 import { resolveProviderConfig } from "./resolve";
 
 /**
@@ -30,6 +31,9 @@ export async function resolveInitialModel(
     .limit(1);
   if (lastUsed?.model) return lastUsed.model;
 
+  // Encode the fallback as a config-scoped ref so a brand-new chat routes to the
+  // exact default connection (and the picker highlights the right row) even when
+  // several configs list the same model id.
   const config = await resolveProviderConfig(userId);
-  return config?.defaultModel ?? "";
+  return config?.defaultModel ? encodeModelRef(config.id, config.defaultModel) : "";
 }

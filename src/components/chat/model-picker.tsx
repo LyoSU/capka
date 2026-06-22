@@ -6,7 +6,7 @@ import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
 import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
-import { parseModelId, displayModelName, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
+import { parseModelId, displayModelName, encodeModelRef, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
 
 /** Brand glyph — resolves a slug to a stable icon component (dynamic select). */
@@ -31,6 +31,13 @@ function groupOf(m: ModelInfo): string {
 /** A model is usable on this agentic platform only if it can call tools. */
 function hasTools(m: ModelInfo): boolean {
   return !!m.capabilities?.tools;
+}
+
+/** Stable, collision-proof identity for a row: the same model id can arrive
+ *  from two enabled configs, so we key (and select) by the config-scoped ref.
+ *  Untagged models (single-credential modes, legacy) fall back to the bare id. */
+function refOf(m: ModelInfo): string {
+  return m.configId ? encodeModelRef(m.configId, m.id) : m.id;
 }
 
 /** Drop the "Provider:" prefix the catalog bakes into display names — the brand
@@ -242,14 +249,20 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
 const FEATURED_TAB = "__featured__";
 
 interface GroupEntry {
+  /** Stable identity used for the active-tab match. */
+  key: string;
+  /** Display label (header + rail). */
   group: string;
   icon?: string | null;
   models: ModelInfo[];
 }
 
-/** Group a flat model list into provider sections, ordered by GROUP_PRIORITY
- *  then alphabetically, each sorted featured-first. Shared by the rail (built
- *  from all models) and the right pane (built from the filtered set). */
+const sortFeaturedFirst = (a: ModelInfo, b: ModelInfo) =>
+  Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name);
+
+/** Group a flat model list by brand (company), ordered by GROUP_PRIORITY then
+ *  alphabetically, each sorted featured-first. Used for the single-connection
+ *  rail and for the brand sub-headers inside a connection's pane. */
 function buildGroups(list: ModelInfo[]): GroupEntry[] {
   const map = new Map<string, ModelInfo[]>();
   for (const m of list) {
@@ -258,9 +271,7 @@ function buildGroups(list: ModelInfo[]): GroupEntry[] {
     arr.push(m);
     map.set(g, arr);
   }
-  for (const arr of map.values()) {
-    arr.sort((a, b) => Number(b.featured) - Number(a.featured) || a.name.localeCompare(b.name));
-  }
+  for (const arr of map.values()) arr.sort(sortFeaturedFirst);
   return [...map.entries()]
     .sort(([a], [b]) => {
       const ai = GROUP_PRIORITY.indexOf(a);
@@ -270,28 +281,73 @@ function buildGroups(list: ModelInfo[]): GroupEntry[] {
       if (bi !== -1) return 1;
       return a.localeCompare(b);
     })
-    .map(([group, models]) => ({ group, icon: models[0]?.icon, models }));
+    .map(([group, models]) => ({ key: group, group, icon: models[0]?.icon, models }));
 }
 
-/** Vertical (desktop) / horizontal (mobile) strip of provider glyphs that
- *  drives which company's models the right pane shows. */
+/** Group by owning connection (provider config), preserving the order configs
+ *  first appear — the enabled order from the server. Each tab keeps the
+ *  connection's label + provider glyph; this is the top level whenever two or
+ *  more configs are aggregated, so identical models land under distinct tabs. */
+function buildConnectionGroups(list: ModelInfo[]): GroupEntry[] {
+  const order: string[] = [];
+  const map = new Map<string, ModelInfo[]>();
+  for (const m of list) {
+    const key = m.configId ?? "";
+    if (!map.has(key)) { map.set(key, []); order.push(key); }
+    map.get(key)!.push(m);
+  }
+  for (const arr of map.values()) arr.sort(sortFeaturedFirst);
+  return order.map((key) => {
+    const models = map.get(key)!;
+    return { key, group: models[0]?.configLabel ?? key, icon: models[0]?.configIcon ?? null, models };
+  });
+}
+
+/** The left (desktop) / top (mobile) tab strip that drives the right pane.
+ *  `labeled` mode names each tab — used when tabs are connections, since two
+ *  configs of the same provider share a glyph and need their label to differ;
+ *  otherwise it's a compact glyph-only strip of brands. */
 function ProviderRail({
   groups,
   hasFeatured,
   active,
   onSelect,
   orientation,
+  labeled,
 }: {
   groups: GroupEntry[];
   hasFeatured: boolean;
   active: string | null;
   onSelect: (tab: string) => void;
   orientation: "vertical" | "horizontal";
+  labeled: boolean;
 }) {
   const t = useTranslations("chat.model");
   const vertical = orientation === "vertical";
+
   const item = (key: string, title: string, glyph: React.ReactNode) => {
     const isActive = active === key;
+    const activeCls = isActive
+      ? "bg-background text-foreground ring-1 ring-border shadow-sm"
+      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground";
+    if (labeled) {
+      return (
+        <button
+          key={key}
+          type="button"
+          title={title}
+          aria-label={title}
+          aria-pressed={isActive}
+          onClick={() => onSelect(key)}
+          className={`flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-xs font-medium transition-colors ${activeCls} ${
+            vertical ? "w-full" : ""
+          }`}
+        >
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center">{glyph}</span>
+          <span className="truncate">{title}</span>
+        </button>
+      );
+    }
     return (
       <button
         key={key}
@@ -300,31 +356,28 @@ function ProviderRail({
         aria-label={title}
         aria-pressed={isActive}
         onClick={() => onSelect(key)}
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${
-          isActive
-            ? "bg-background text-foreground ring-1 ring-border shadow-sm"
-            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-        }`}
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${activeCls}`}
       >
         {glyph}
       </button>
     );
   };
+
   return (
     <div
       className={`flex shrink-0 gap-1 ${
         vertical
-          ? "flex-col items-center overflow-y-auto overscroll-contain border-r p-2"
+          ? `flex-col overflow-y-auto overscroll-contain border-r p-2 ${labeled ? "w-40 items-stretch" : "items-center"}`
           : "flex-row items-center overflow-x-auto border-b p-2"
       }`}
     >
       {hasFeatured && (
         <>
           {item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
-          <span className={vertical ? "my-1 h-px w-6 bg-border" : "mx-1 h-6 w-px bg-border"} />
+          <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
         </>
       )}
-      {groups.map((g) => item(g.group, g.group, <BrandIcon slug={g.icon} size={18} />))}
+      {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
     </div>
   );
 }
@@ -334,7 +387,7 @@ function ModelList({
   search,
   onSearch,
   onSelect,
-  currentModelId,
+  currentRef,
   activeIndex,
   onActiveIndex,
   listRef,
@@ -345,7 +398,7 @@ function ModelList({
   search: string;
   onSearch: (s: string) => void;
   onSelect: (m: ModelInfo) => void;
-  currentModelId: string;
+  currentRef: string;
   activeIndex: number;
   onActiveIndex: (i: number) => void;
   listRef: React.RefObject<HTMLDivElement | null>;
@@ -359,53 +412,82 @@ function ModelList({
 
   // Only tool-capable models are usable here, so they're the only ones listed.
   const models = useMemo(() => state.models.filter(hasTools), [state.models]);
-  // Rail is built from the full set so it stays stable while searching/filtering.
-  const railGroups = useMemo(() => buildGroups(models), [models]);
-  const hasFeatured = useMemo(() => models.some((m) => m.featured), [models]);
 
-  const filtered = useMemo(() => {
-    if (!searching) return models;
+  // Two axes when more than one connection is enabled: a connection strip on
+  // top, the classic brand rail on the left (scoped to the active connection).
+  // One connection (or untagged models) → no top strip, just the brand rail —
+  // identical to before. Decided from the data, no mode flag to keep in sync.
+  const byConnection = useMemo(
+    () => new Set(models.map((m) => m.configId).filter(Boolean)).size >= 2,
+    [models],
+  );
+
+  // Top strip = connections; selecting one scopes the brand rail + pane below.
+  const connTabs = useMemo(() => (byConnection ? buildConnectionGroups(models) : []), [models, byConnection]);
+  const [connTab, setConnTab] = useState<string | null>(null);
+  const defaultConn = useMemo(() => {
+    if (!byConnection) return null;
+    const cur = models.find((m) => refOf(m) === currentRef);
+    return cur?.configId ?? connTabs[0]?.key ?? null;
+  }, [byConnection, models, currentRef, connTabs]);
+  const activeConn = connTab ?? defaultConn;
+
+  // Models feeding the brand rail + pane: the active connection's, or all when a
+  // single connection (or untagged) makes the top strip unnecessary.
+  const scoped = useMemo(
+    () => (byConnection && activeConn ? models.filter((m) => m.configId === activeConn) : models),
+    [models, byConnection, activeConn],
+  );
+
+  // Left rail = brands of the scoped set. Built from the full scoped set so it
+  // stays stable while searching/filtering.
+  const brandGroups = useMemo(() => buildGroups(scoped), [scoped]);
+  const hasFeatured = useMemo(() => scoped.some((m) => m.featured), [scoped]);
+
+  // Search is global — across every connection — so a model is findable no
+  // matter which tab is open.
+  const searchResults = useMemo(() => {
+    if (!searching) return [];
     const q = search.trim().toLowerCase();
     return models.filter(
       (m) =>
         m.id.toLowerCase().includes(q) ||
         m.name.toLowerCase().includes(q) ||
-        groupOf(m).toLowerCase().includes(q),
+        groupOf(m).toLowerCase().includes(q) ||
+        (m.configLabel ?? "").toLowerCase().includes(q),
     );
   }, [models, search, searching]);
 
-  // Which company's models fill the right pane. Until the user clicks the rail
-  // (`tab` stays null), it falls back to the current model's provider — derived,
-  // not stored, so it tracks the catalog loading without a state-syncing effect.
-  const [tab, setTab] = useState<string | null>(null);
-  const defaultTab = useMemo(() => {
-    if (railGroups.length === 0) return null;
-    const cur = models.find((m) => m.id === currentModelId);
-    return cur ? groupOf(cur) : railGroups[0].group;
-  }, [railGroups, models, currentModelId]);
-  const activeTab = tab ?? defaultTab;
+  // Which brand fills the pane. Until the user clicks the rail it falls back to
+  // the current model's brand (when it belongs to the active connection) — so
+  // the pane opens on the selection without a state-syncing effect.
+  const [brandTab, setBrandTab] = useState<string | null>(null);
+  const defaultBrand = useMemo(() => {
+    if (brandGroups.length === 0) return null;
+    const cur = models.find((m) => refOf(m) === currentRef);
+    if (cur && (!byConnection || cur.configId === activeConn)) return groupOf(cur);
+    return brandGroups[0].key;
+  }, [brandGroups, models, currentRef, byConnection, activeConn]);
+  const activeBrand = brandTab ?? defaultBrand;
 
-  // The right pane shows: search results (across all providers) when searching,
-  // the featured set on the Featured tab, otherwise the active provider only.
+  // Pane: global search groups by its top dimension (connection, else brand);
+  // the Featured tab and a picked brand both scope to the active connection.
   const sections = useMemo<GroupEntry[]>(() => {
-    if (searching) return buildGroups(filtered);
-    if (activeTab === FEATURED_TAB) return buildGroups(filtered.filter((m) => m.featured));
-    return buildGroups(filtered.filter((m) => groupOf(m) === activeTab));
-  }, [searching, filtered, activeTab]);
+    if (searching) return byConnection ? buildConnectionGroups(searchResults) : buildGroups(searchResults);
+    if (activeBrand === FEATURED_TAB) return buildGroups(scoped.filter((m) => m.featured));
+    return buildGroups(scoped.filter((m) => groupOf(m) === activeBrand));
+  }, [searching, searchResults, scoped, activeBrand, byConnection]);
 
-  // Multi-provider views need headers to tell companies apart; a single
-  // provider's list doesn't (the rail already names it).
-  const showHeaders = searching || activeTab === FEATURED_TAB;
+  // Multi-group views need sticky headers; a single brand's pane names itself.
+  const showHeaders = searching || activeBrand === FEATURED_TAB;
 
   // Flatten the visible models for keyboard navigation + active-index math.
   const visible = useMemo(() => sections.flatMap((s) => s.models), [sections]);
-  const indexMap = useMemo(() => new Map(visible.map((m, i) => [m.id, i])), [visible]);
+  const indexMap = useMemo(() => new Map(visible.map((m, i) => [refOf(m), i])), [visible]);
 
-  const pickTab = (next: string) => {
-    onSearch("");
-    onActiveIndex(0);
-    setTab(next);
-  };
+  // Switching connection resets the brand to that connection's default.
+  const pickConn = (next: string) => { onSearch(""); onActiveIndex(0); setConnTab(next); setBrandTab(null); };
+  const pickBrand = (next: string) => { onSearch(""); onActiveIndex(0); setBrandTab(next); };
 
   // When a single company fills the pane (no per-group sticky headers), name it
   // up top so the user always knows which provider they're looking at.
@@ -466,8 +548,8 @@ function ModelList({
           </div>
         )}
 
-        {sections.map(({ group, icon, models: groupModels }) => (
-          <div key={group}>
+        {sections.map(({ key, group, icon, models: groupModels }) => (
+          <div key={key}>
             {showHeaders && (
               <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border/50">
                 <BrandIcon slug={icon} size={12} />
@@ -477,12 +559,13 @@ function ModelList({
             )}
 
             {groupModels.map((model) => {
-              const globalIdx = indexMap.get(model.id) ?? -1;
+              const ref = refOf(model);
+              const globalIdx = indexMap.get(ref) ?? -1;
               const isActive = globalIdx === activeIndex;
-              const isCurrent = model.id === currentModelId;
+              const isCurrent = ref === currentRef;
               return (
                 <button
-                  key={model.id}
+                  key={ref}
                   id={optionId(globalIdx)}
                   role="option"
                   aria-selected={isActive}
@@ -514,19 +597,43 @@ function ModelList({
 
   // No companies to choose between (loading, error, single provider) → skip the
   // rail entirely and let the list use the full width.
-  const showRail = railGroups.length > 1 || hasFeatured;
-  if (!showRail) return right;
+  const showConnStrip = byConnection && connTabs.length > 1;
+  const showBrandRail = brandGroups.length > 1 || hasFeatured;
 
-  return (
+  // Nothing to choose between (loading, error, a lone brand on a lone
+  // connection) → just the list at full width.
+  if (!showConnStrip && !showBrandRail) return right;
+
+  const body = (
     <div className={`flex min-h-0 min-w-0 flex-1 ${orientation === "vertical" ? "flex-row" : "flex-col"}`}>
-      <ProviderRail
-        groups={railGroups}
-        hasFeatured={hasFeatured}
-        active={searching ? null : activeTab}
-        onSelect={pickTab}
-        orientation={orientation}
-      />
+      {showBrandRail && (
+        <ProviderRail
+          groups={brandGroups}
+          hasFeatured={hasFeatured}
+          active={searching ? null : activeBrand}
+          onSelect={pickBrand}
+          orientation={orientation}
+          labeled={false}
+        />
+      )}
       {right}
+    </div>
+  );
+
+  if (!showConnStrip) return body;
+
+  // Connection strip on top, brand rail + pane below.
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <ProviderRail
+        groups={connTabs}
+        hasFeatured={false}
+        active={searching ? null : activeConn}
+        onSelect={pickConn}
+        orientation="horizontal"
+        labeled
+      />
+      {body}
     </div>
   );
 }
@@ -673,14 +780,20 @@ export function ModelPicker({
 
   const select = useCallback(
     (model: ModelInfo) => {
-      onChange(model.id);
+      // Emit the config-scoped ref so the chat routes to the exact config; an
+      // untagged model (field/credentials modes, legacy) yields its bare id.
+      onChange(refOf(model));
       setOpen(false);
     },
     [onChange],
   );
 
-  const currentModelId = parseModelId(value).modelId;
-  const currentModel = state.models.find((m) => m.id === currentModelId);
+  // Resolve the current selection: match the full ref first (the new tagged
+  // form), then fall back to a bare/legacy id so old chats still light up.
+  const currentModel =
+    state.models.find((m) => refOf(m) === value) ??
+    state.models.find((m) => m.id === parseModelId(value).modelId);
+  const currentRef = currentModel ? refOf(currentModel) : value;
   const groupLabel = currentModel ? groupOf(currentModel) : null;
   const displayName = stripGroup(currentModel?.name || (value ? displayModelName(value) : ""), groupLabel);
   const placeholderText = placeholder ?? t("placeholder");
@@ -691,7 +804,7 @@ export function ModelPicker({
       search={search}
       onSearch={setSearch}
       onSelect={select}
-      currentModelId={currentModelId}
+      currentRef={currentRef}
       activeIndex={activeIndex}
       onActiveIndex={setActiveIndex}
       listRef={listRef}

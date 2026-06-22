@@ -4,9 +4,9 @@ import { db } from "@/lib/db";
 import { providerConfigs } from "@/lib/db/schema";
 import { getMasterKey, getProviderKeyMode } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
-import { resolveProviderConfig } from "@/lib/providers/resolve";
+import { resolveEnabledConfigs, labelEnabledConfigs } from "@/lib/providers/resolve";
 import { listProviderModels, type ModelInfo } from "@/lib/providers/list-models";
-import { isProviderName } from "@/lib/providers/registry";
+import { isProviderName, PROVIDER_META } from "@/lib/providers/registry";
 import { syncModelCatalog } from "@/lib/models/catalog";
 
 // Re-exported for the many client components that import the picker's shape.
@@ -43,6 +43,54 @@ async function respond(provider: string, apiKey: string | undefined, baseUrl: st
 }
 
 /**
+ * Active mode: union of every enabled config's catalog, each model tagged with
+ * its owning config so the picker can route + label it. Per-config failures
+ * don't sink the whole list — we surface what loaded and only report an error
+ * (or the first-run "syncing" state) when nothing came back at all.
+ */
+async function respondAggregated(
+  configs: Awaited<ReturnType<typeof resolveEnabledConfigs>>,
+  showSharedBadge: boolean,
+): Promise<Response> {
+  const labels = labelEnabledConfigs(configs);
+
+  const results = await Promise.all(
+    configs.map(async (c) => {
+      if (!isProviderName(c.provider)) return { models: [] as ModelInfo[] };
+      const apiKey = await decryptKey(c.apiKey);
+      try {
+        const models = await listProviderModels({ provider: c.provider, apiKey, baseUrl: c.baseUrl ?? undefined });
+        const configIcon = PROVIDER_META[c.provider].iconSlug;
+        const tagged = models.map((m) => ({ ...m, configId: c.id, configLabel: labels.get(c.id), configIcon }));
+        return { models: tagged, provider: c.provider };
+      } catch (e) {
+        return { models: [] as ModelInfo[], error: e instanceof Error ? e.message : "Could not load models" };
+      }
+    }),
+  );
+
+  const models = results.flatMap((r) => r.models);
+
+  // First-run safety net: an empty OpenRouter config means its catalog hasn't
+  // synced — kick a background sync so the picker fills in shortly.
+  let syncing = false;
+  if (models.length === 0 && configs.some((c) => c.provider === "openrouter") && !results.some((r) => r.error)) {
+    syncing = true;
+    void syncModelCatalog().catch(() => {});
+  }
+
+  const error = models.length === 0 ? results.find((r) => r.error)?.error : undefined;
+
+  return Response.json({
+    models,
+    provider: null,
+    isShared: showSharedBadge,
+    syncing,
+    ...(error ? { error } : {}),
+  });
+}
+
+/**
  * GET — models for the caller's active provider, or for a specific saved
  * config via `?configId=` (used when editing that config's default model).
  */
@@ -60,13 +108,14 @@ export const GET = apiHandler(async (req: Request) => {
     return respond(cfg.provider, await decryptKey(cfg.apiKey), cfg.baseUrl, false);
   }
 
-  const config = await resolveProviderConfig(userId);
-  if (!config) return empty();
+  const configs = await resolveEnabledConfigs(userId);
+  if (configs.length === 0) return empty();
   // In shared_only there's no "own key" to switch to, so the "shared" badge is
-  // just noise — suppress it by reporting the key as non-shared to the picker.
+  // just noise — suppress it. Configs are all-own or all-shared, so the first
+  // one represents the set.
   const mode = await getProviderKeyMode();
-  const showShared = config.isShared && mode !== "shared_only";
-  return respond(config.provider, await decryptKey(config.apiKey), config.baseUrl, showShared);
+  const showShared = !!configs[0].isShared && mode !== "shared_only";
+  return respondAggregated(configs, showShared);
 });
 
 /**

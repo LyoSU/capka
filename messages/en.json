@@ -603,6 +603,12 @@
       "emptyHint": "Add an API key to start using AI models",
       "active": "active",
       "activate": "Activate",
+      "enabled": "enabled",
+      "enable": "Enable",
+      "disable": "Disable",
+      "enabledToast": "Provider enabled",
+      "disabledToast": "Provider disabled",
+      "toggleError": "Could not change state. Please try again.",
       "defaultModel": "Default Model",
       "pickModel": "Pick a model",
       "providerField": "Provider",
@@ -636,7 +642,12 @@
       "minContextHint": "Models with context below this are hidden. Default: 100k.",
       "tokensK": "{value}k tokens",
       "tokensM": "{value}M tokens",
-      "minContextSaveFailed": "Failed to save model filter"
+      "minContextSaveFailed": "Failed to save model filter",
+      "maxPrice": "Maximum model price",
+      "maxPriceHint": "More expensive models are hidden. 0 means no cap.",
+      "perMillion": "${value} per 1M tokens",
+      "noPriceCap": "no cap",
+      "maxPriceSaveFailed": "Failed to save price filter"
     },
     "usage": {
       "title": "Usage & cost",

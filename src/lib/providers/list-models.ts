@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, like, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models as modelsTable } from "@/lib/db/schema";
 import { iconForGroup, prettyName } from "@/lib/models/normalize";
-import { getBlockPrivateProviderUrls } from "@/lib/settings";
+import { getBlockPrivateProviderUrls, getModelMinContext, getModelMaxPrice } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import { parseOpenRouterModels, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
 import { PROVIDER_META, type ProviderName } from "./registry";
@@ -24,6 +24,14 @@ export interface ModelInfo {
   icon?: string | null;
   capabilities?: { vision: boolean; tools: boolean; reasoning: boolean } | null;
   featured?: boolean;
+  // When the picker aggregates several enabled provider configs, each model is
+  // tagged with the config it came from: `configId` routes the selection (the
+  // same model id can exist in two configs), `configLabel` names the connection
+  // (its rail tab) and `configIcon` is that connection's provider glyph. Absent
+  // in single-credential modes.
+  configId?: string;
+  configLabel?: string;
+  configIcon?: string;
 }
 
 const perMillion = (v: string | null | undefined) => (v ? parseFloat(v) * 1_000_000 : 0);
@@ -284,7 +292,31 @@ export function invalidateModelsCache(): void {
   modelsCache.clear();
 }
 
+/**
+ * Org-wide governance filter, applied to every served list. Keeps a model with
+ * unknown context/price (0) so missing metadata never hides an option; only a
+ * known-too-small context or known-too-expensive completion price is dropped.
+ */
+async function applyGovernance(models: ModelInfo[]): Promise<ModelInfo[]> {
+  const [minContext, maxPrice] = await Promise.all([getModelMinContext(), getModelMaxPrice()]);
+  return models.filter((m) => {
+    if (minContext > 0 && m.context > 0 && m.context < minContext) return false;
+    if (maxPrice > 0 && m.pricing.completion > maxPrice) return false;
+    return true;
+  });
+}
+
 export async function listProviderModels(opts: {
+  provider: ProviderName;
+  apiKey?: string;
+  baseUrl?: string;
+}): Promise<ModelInfo[]> {
+  return applyGovernance(await listProviderModelsCached(opts));
+}
+
+/** The raw list (cached per credential set); governance is layered on top so a
+ *  settings change takes effect immediately without waiting for the cache TTL. */
+async function listProviderModelsCached(opts: {
   provider: ProviderName;
   apiKey?: string;
   baseUrl?: string;

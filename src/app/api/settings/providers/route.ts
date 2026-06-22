@@ -44,12 +44,8 @@ export const POST = apiHandler(async (req: Request) => {
   const masterKey = await getMasterKey();
   const encryptedKey = apiKey ? encrypt(apiKey, masterKey) : null;
 
-  // Deactivate existing configs for this user
-  await db
-    .update(providerConfigs)
-    .set({ isActive: false })
-    .where(eq(providerConfigs.userId, userId));
-
+  // Several configs can be enabled at once (the picker aggregates them), so a
+  // new one is simply added enabled — it no longer disables the others.
   const id = nanoid();
   await db.insert(providerConfigs).values({
     id,
@@ -67,19 +63,20 @@ export const POST = apiHandler(async (req: Request) => {
 
 export const PUT = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
-  const { id, defaultModel, activate } = await req.json();
+  const { id, defaultModel, enabled } = await req.json();
   if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
-  if (activate) {
-    await db.update(providerConfigs).set({ isActive: false }).where(eq(providerConfigs.userId, userId));
+  // Toggle a single config's enabled state — others are left untouched, since
+  // any number may be enabled together.
+  if (typeof enabled === "boolean") {
     const [updated] = await db
       .update(providerConfigs)
-      .set({ isActive: true })
+      .set({ isActive: enabled })
       .where(and(eq(providerConfigs.id, id), eq(providerConfigs.userId, userId)))
       .returning();
     if (!updated) return Response.json({ error: "Not found" }, { status: 404 });
     invalidateModelsCache();
-    return Response.json({ id: updated.id, isActive: true });
+    return Response.json({ id: updated.id, isActive: updated.isActive });
   }
 
   const [updated] = await db

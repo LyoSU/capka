@@ -36,6 +36,7 @@ export default function ConnectionsPage() {
   const tc = useTranslations("common");
   const isAdmin = useIsAdmin();
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
+  const maxPrice = useSetting("model_max_price", "0");
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -84,17 +85,17 @@ export default function ConnectionsPage() {
     setShowForm(false);
   };
 
-  const handleActivate = async (id: string) => {
+  const handleToggle = async (id: string, enabled: boolean) => {
     const res = await fetch("/api/settings/providers", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, activate: true }),
+      body: JSON.stringify({ id, enabled }),
     });
     if (res.ok) {
-      setConfigs((prev) => prev.map((c) => ({ ...c, isActive: c.id === id })));
-      toast.success(t("activated"));
+      setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, isActive: enabled } : c)));
+      toast.success(enabled ? t("enabledToast") : t("disabledToast"));
     } else {
-      toast.error(t("activateError"));
+      toast.error(t("toggleError"));
     }
   };
 
@@ -197,6 +198,18 @@ export default function ConnectionsPage() {
     else toast.error(t("minContextSaveFailed"));
   };
 
+  const priceLabel = (val: string) => {
+    const n = parseFloat(val);
+    if (!n || n <= 0) return t("noPriceCap");
+    return t("perMillion", { value: n % 1 === 0 ? n.toFixed(0) : n.toFixed(2) });
+  };
+
+  const saveMaxPrice = async () => {
+    const ok = await maxPrice.persist(maxPrice.value);
+    if (ok) toast.success(tc("saved"));
+    else toast.error(t("maxPriceSaveFailed"));
+  };
+
   return (
     <div className="max-w-lg space-y-6">
       <div>
@@ -239,21 +252,20 @@ export default function ConnectionsPage() {
                 })()}
                 <span className="text-sm font-semibold">{providerLabel(c.provider)}</span>
                 {c.isActive && (
-                  <Badge variant="outline" className="text-[10px]">{t("active")}</Badge>
+                  <Badge variant="outline" className="text-[10px]">{t("enabled")}</Badge>
                 )}
               </div>
               <div className="flex items-center gap-1">
-                {!c.isActive && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-primary"
-                    onClick={() => handleActivate(c.id)}
-                    title={t("activate")}
-                  >
-                    <Power className="h-4 w-4" />
-                  </Button>
-                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-7 w-7 ${c.isActive ? "text-primary hover:text-muted-foreground" : "text-muted-foreground hover:text-primary"}`}
+                  onClick={() => handleToggle(c.id, !c.isActive)}
+                  title={c.isActive ? t("disable") : t("enable")}
+                  aria-pressed={!!c.isActive}
+                >
+                  <Power className="h-4 w-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -406,6 +418,28 @@ export default function ConnectionsPage() {
             </div>
             {minCtx.dirty && (
               <Button size="sm" onClick={saveMinCtx}>{tc("save")}</Button>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">{t("maxPrice")}</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={maxPrice.value}
+                  onChange={(e) => maxPrice.update(e.target.value)}
+                  placeholder="25"
+                  className="w-40"
+                />
+                <span className="text-sm text-muted-foreground">
+                  {priceLabel(maxPrice.value)}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("maxPriceHint")}</p>
+            </div>
+            {maxPrice.dirty && (
+              <Button size="sm" onClick={saveMaxPrice}>{tc("save")}</Button>
             )}
           </div>
         </>

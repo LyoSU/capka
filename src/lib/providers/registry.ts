@@ -165,6 +165,29 @@ export function parseModelId(
   return { provider: value.slice(0, idx), modelId: value.slice(idx + 1) };
 }
 
+// ── Config-scoped model refs ────────────────────────────────────────────────
+//
+// With several provider configs usable at once (two LiteLLM proxies can list
+// the very same `glm-5.2`), the bare model id is ambiguous. A *ref* prefixes the
+// owning config's id — `${configId}:${modelId}` — so the resolver routes to the
+// exact config and usage is attributed to it. configIds are nanoids (alphabet
+// `A-Za-z0-9_-`, never a colon), so the FIRST colon is always the boundary,
+// even when the modelId itself carries colons (e.g. OpenRouter's `…:free`).
+
+/** Build a config-scoped model ref from a config id and a bare model id. */
+export function encodeModelRef(configId: string, modelId: string): string {
+  return `${configId}:${modelId}`;
+}
+
+/** Split a value into a candidate config id + the model id. The caller decides
+ *  whether `configId` actually names a known config (DB-authoritative) — a
+ *  legacy `provider:modelId` or a bare id lands here too, so it's only a hint. */
+export function splitModelRef(value: string): { configId: string | null; modelId: string } {
+  const idx = value.indexOf(":");
+  if (idx === -1) return { configId: null, modelId: value };
+  return { configId: value.slice(0, idx), modelId: value.slice(idx + 1) };
+}
+
 /** Short, human-friendly model name from any encoded or bare value. */
 export function displayModelName(value: string): string {
   if (!value) return "select model";
