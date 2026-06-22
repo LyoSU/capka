@@ -30,8 +30,10 @@ export interface CatalogModel {
 
 // Minimum context to count a model as "serious" for default curation.
 const MIN_CONTEXT = 8000;
-// Variant tags we never surface by default (free tiers, betas, etc.).
-const NOISY_TAG = /:(free|extended|beta|thinking|nitro|online)/i;
+// Variant tags we never surface by default (routing/beta variants). `:free` is
+// intentionally NOT here — free tiers are a wanted, cost-conscious option for a
+// shared key, so they're curated in like any other model.
+const NOISY_TAG = /:(extended|beta|thinking|nitro|online)/i;
 
 export const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 export const LITELLM_PRICES_URL =
@@ -59,10 +61,12 @@ export function parseOpenRouterModels(raw: unknown): CatalogModel[] {
     const ctx = m.context_length ?? null;
     const params = m.supported_parameters ?? [];
     const group = groupFromName(m.name, m.id);
+    // `input != null` (not `> 0`): a known price of 0 means a genuinely free
+    // model, which we keep; only a missing/unparseable price drops the row.
     const enabled =
       !NOISY_TAG.test(m.id) &&
       !isDatedSlug(m.id) &&
-      (input ?? 0) > 0 &&
+      input != null &&
       (ctx ?? 0) >= MIN_CONTEXT;
     out.push({
       id: m.id,
