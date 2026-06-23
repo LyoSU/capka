@@ -152,6 +152,29 @@ describe("TelegramSink streaming", () => {
     expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
   });
 
+  it("kills the draft keepalive permanently once finished (no orphaned re-sends)", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 21, locale: "uk" });
+    sink.push("partial", { kind: "thinking" });
+    await vi.advanceTimersByTimeAsync(900); // first draft flushes → arms the keepalive
+    expect(api.sendRichMessageDraft).toHaveBeenCalledTimes(1);
+
+    await sink.finish({ status: "completed", text: "done", toolCount: 0, elapsedMs: 100 });
+    api.sendRichMessageDraft.mockClear();
+
+    // Long past the keepalive interval: the loop must be dead, not re-pushing the
+    // (already-answered) draft — the orphaned-keepalive duplication bug.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
+  });
+
+  it("finish is idempotent — a second call delivers nothing", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 22, locale: "uk" });
+    await sink.finish({ status: "completed", text: "only once", toolCount: 0, elapsedMs: 100 });
+    expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
+    await sink.finish({ status: "completed", text: "only once", toolCount: 0, elapsedMs: 100 });
+    expect(api.sendRichMessage).toHaveBeenCalledTimes(1); // no duplicate delivery
+  });
+
   it("falls back to plain chunks when rich send is rejected", async () => {
     api.sendRichMessage.mockRejectedValueOnce(new Error("400: can't parse rich message"));
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 9, locale: "en" });

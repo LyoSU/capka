@@ -196,6 +196,13 @@ class TelegramSink implements DeliverySink {
   // How many intermediate runs we've already committed as their own bubbles —
   // lets finish() know whether the reply has already been delivered in pieces.
   private sealed = 0;
+  // Terminal latch. Set once finish() runs; afterwards NO draft, keepalive, or
+  // bubble may ever be sent again. Without this, a keepalive `refresh()` whose
+  // network await was in-flight when finish() ran would re-arm itself in its
+  // `finally` — an immortal timer that keeps re-pushing the (already-answered)
+  // draft long after the turn ended, so the reply appears to "come back" in the
+  // chat over and over. The latch makes the sink's end-of-life irreversible.
+  private closed = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private bot: any = null;
 
@@ -213,13 +220,14 @@ class TelegramSink implements DeliverySink {
   }
 
   push(text: string, status: StreamStatus): void {
+    if (this.closed) return; // a late push after finish must never resurrect drafts
     this.pending = { text, status };
     this.lastStatus = status;
     this.schedule();
   }
 
   private schedule(): void {
-    if (this.timer || this.inflight) return;
+    if (this.closed || this.timer || this.inflight) return;
     const wait = Math.max(0, MIN_DRAFT_INTERVAL_MS - (Date.now() - this.lastSentAt));
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -228,13 +236,13 @@ class TelegramSink implements DeliverySink {
   }
 
   private async flush(): Promise<void> {
-    if (!this.pending) return;
+    if (this.closed || !this.pending) return;
     const { text, status } = this.pending;
     this.pending = null;
     this.inflight = true;
     try {
       const bot = await this.getBot();
-      if (!bot) return;
+      if (!bot || this.closed) return; // finish() may have latched during the await
       if (!text.trim() && !status) return; // nothing to show yet
       // Ephemeral animated preview; the real message is sent on finish().
       const draft = composeDraft(text, status, this.t);
@@ -247,13 +255,14 @@ class TelegramSink implements DeliverySink {
       log.warn("telegram draft update failed", { chatId: this.chatId, err: String(e) });
     } finally {
       this.inflight = false;
-      if (this.pending) this.schedule();
+      if (!this.closed && this.pending) this.schedule();
     }
   }
 
   // Re-send the last draft before its ~30s preview lapses, so the thinking block
   // stays put through long silent steps. Keeps rescheduling until finish().
   private scheduleKeepalive(): void {
+    if (this.closed) return; // never (re)arm the loop once the turn has ended
     if (this.keepaliveTimer) clearTimeout(this.keepaliveTimer);
     this.keepaliveTimer = setTimeout(() => {
       this.keepaliveTimer = null;
@@ -262,21 +271,25 @@ class TelegramSink implements DeliverySink {
   }
 
   private async refresh(): Promise<void> {
-    // A queued push will send fresh content anyway — don't fight it.
+    // A queued push will send fresh content anyway — don't fight it. Once closed,
+    // bail WITHOUT rescheduling so the loop dies for good.
+    if (this.closed) return;
     if (!this.lastDraft || this.pending || this.inflight) {
       this.scheduleKeepalive();
       return;
     }
     try {
       const bot = await this.getBot();
-      if (bot) {
+      // finish() may have latched while we awaited the bot/network — re-check
+      // before sending so we never re-push a draft for an already-ended turn.
+      if (bot && !this.closed) {
         await bot.api.sendRichMessageDraft(this.chatId, this.draftId, this.lastDraft);
         this.lastSentAt = Date.now();
       }
     } catch (e) {
       log.warn("telegram draft keepalive failed", { chatId: this.chatId, err: String(e) });
     } finally {
-      this.scheduleKeepalive();
+      this.scheduleKeepalive(); // no-op once closed (guarded above)
     }
   }
 
@@ -306,6 +319,7 @@ class TelegramSink implements DeliverySink {
   // draft forward to the next step's status so the just-sealed text doesn't
   // linger in the ephemeral preview as a duplicate.
   async seal(text: string): Promise<void> {
+    if (this.closed) return; // never commit a bubble after the turn ended
     const body = text.trim();
     if (!body) return;
     // Drop any queued draft: it still carries this now-sealed run's text and
@@ -330,6 +344,12 @@ class TelegramSink implements DeliverySink {
   }
 
   async finish(result: TaskResult & { toolCount: number; elapsedMs: number; reasoningMs?: number }): Promise<void> {
+    // Idempotent + terminal. Latch BEFORE any await so a keepalive/flush whose
+    // network call is in-flight sees `closed` the moment it resumes and refuses
+    // to re-send. A second finish() (e.g. success path then a late catch) is a
+    // no-op rather than a duplicate delivery.
+    if (this.closed) return;
+    this.closed = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;

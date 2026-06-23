@@ -20,12 +20,27 @@ import { modelChoices } from "@/lib/telegram/model-menu";
 import type { FileRef } from "@/lib/constants";
 import type { TaskPayload } from "@/lib/tasks/runner";
 
-let _bot: Bot | null = null;
-let _polling = false;
-// Captured when the bot is built — needed to construct file download URLs
-// (`https://api.telegram.org/file/bot<token>/<path>`), the one place the Bot API
-// has no method wrapper for.
-let _token = "";
+// Bot lifecycle state lives on globalThis, NOT in module scope. In dev, an HMR
+// recompile (or a second `register()`) re-evaluates this module — module-level
+// `let`s would reset to null/false and `startBot()` would spin up a SECOND
+// long-poller while the old module's poller keeps running in its closure. Two
+// pollers on one token race getUpdates and can each deliver/answer, so the bot
+// appears to reply multiple times. `globalThis` survives re-evaluation (same
+// Node process), so the singleton + polling guard are honored across reloads —
+// the same trick the durable worker uses (see worker.ts `globalThis.__worker`).
+interface BotState {
+  bot: Bot | null;
+  polling: boolean;
+  // Captured when the bot is built — needed to construct file download URLs
+  // (`https://api.telegram.org/file/bot<token>/<path>`), the one place the Bot
+  // API has no method wrapper for.
+  token: string;
+}
+const g = globalThis as unknown as { __telegramBot?: BotState };
+function botState(): BotState {
+  if (!g.__telegramBot) g.__telegramBot = { bot: null, polling: false, token: "" };
+  return g.__telegramBot;
+}
 
 const MAX_TELEGRAM_FILE_BYTES = 20 * 1024 * 1024; // getFile's hard download cap
 
@@ -127,7 +142,7 @@ function extractFiles(msg: NonNullable<Context["message"]>): TgFile[] {
 async function downloadTgFile(ctx: Context, f: TgFile): Promise<File | null> {
   const info = await ctx.api.getFile(f.fileId);
   if (!info.file_path || (info.file_size ?? 0) > MAX_TELEGRAM_FILE_BYTES) return null;
-  const res = await fetch(`https://api.telegram.org/file/bot${_token}/${info.file_path}`);
+  const res = await fetch(`https://api.telegram.org/file/bot${botState().token}/${info.file_path}`);
   if (!res.ok) return null;
   return new File([Buffer.from(await res.arrayBuffer())], f.fileName, { type: f.mime });
 }
@@ -261,16 +276,17 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
 }
 
 export async function getBot(): Promise<Bot | null> {
-  if (_bot) return _bot;
+  const s = botState();
+  if (s.bot) return s.bot;
   const token = await getSetting("telegram_bot_token");
   if (!token) return null;
 
-  _token = token;
-  _bot = new Bot(token);
+  s.token = token;
+  const bot = new Bot(token);
 
   // A bare /start greets; /start CODE is the deep-link path — tapping
   // `t.me/<bot>?start=CODE` in the web UI arrives here and links in one tap.
-  _bot.command("start", async (ctx) => {
+  bot.command("start", async (ctx) => {
     const code = ctx.match?.trim().toUpperCase();
     if (code) {
       await linkAccount(ctx, code);
@@ -287,7 +303,7 @@ export async function getBot(): Promise<Bot | null> {
     }
   });
 
-  _bot.command("link", async (ctx) => {
+  bot.command("link", async (ctx) => {
     const code = ctx.match?.trim().toUpperCase();
     if (!code) {
       await reply(ctx, "linkUsage");
@@ -296,7 +312,7 @@ export async function getBot(): Promise<Bot | null> {
     await linkAccount(ctx, code);
   });
 
-  _bot.command("new", async (ctx) => {
+  bot.command("new", async (ctx) => {
     const link = await findLink(ctx.from!.id);
     if (!link) {
       await reply(ctx, "linkFirst", { button: openAppButton() });
@@ -313,7 +329,7 @@ export async function getBot(): Promise<Bot | null> {
   // Pick the model for the active Telegram chat from a short, capability-tagged
   // list. The menu is a one-per-row inline keyboard; the tap is handled by the
   // `m:<index>` callback below, which re-derives the same list and stores the ref.
-  _bot.command("model", async (ctx) => {
+  bot.command("model", async (ctx) => {
     const link = await findLink(ctx.from!.id);
     if (!link) {
       await reply(ctx, "linkFirst", { button: openAppButton() });
@@ -334,7 +350,7 @@ export async function getBot(): Promise<Bot | null> {
   // A model was tapped: re-derive the same deterministic list and pin the chosen
   // ref on the active chat. callback_data is just the index, so a long model ref
   // never trips Telegram's 64-byte callback limit.
-  _bot.callbackQuery(/^m:(\d+)$/, async (ctx) => {
+  bot.callbackQuery(/^m:(\d+)$/, async (ctx) => {
     const link = await findLink(ctx.from!.id);
     if (!link) {
       await ctx.answerCallbackQuery();
@@ -354,13 +370,13 @@ export async function getBot(): Promise<Bot | null> {
   });
 
   // Plain text → straight into the engine.
-  _bot.on("message:text", (ctx) => ingest(ctx, ctx.message.text, []));
+  bot.on("message:text", (ctx) => ingest(ctx, ctx.message.text, []));
 
   // Any message carrying a file the assistant can use: photo, document, video,
   // audio, voice, animation, video note. The caption is the prompt. Telegram
   // delivers an album (media group) as several updates sharing a
   // `media_group_id`, so we buffer those and ingest them as one turn.
-  _bot.on(
+  bot.on(
     ["message:photo", "message:document", "message:video", "message:audio", "message:voice", "message:animation", "message:video_note"],
     async (ctx) => {
       const files = extractFiles(ctx.message);
@@ -375,15 +391,16 @@ export async function getBot(): Promise<Bot | null> {
 
   // Everything else (stickers, locations, contacts, polls…). Rather than
   // silently dropping it, tell the user what the bot can actually work with.
-  _bot.on("message", (ctx) => reply(ctx, "unsupported"));
+  bot.on("message", (ctx) => reply(ctx, "unsupported"));
 
   // Without this, a throwing handler is either swallowed or crashes the polling
   // process depending on the runtime. Log it and keep the bot alive.
-  _bot.catch((err) => {
+  bot.catch((err) => {
     log.error("telegram handler error", { updateId: err.ctx.update.update_id, err: String(err.error) });
   });
 
-  return _bot;
+  s.bot = bot;
+  return bot;
 }
 
 /** The model the user most recently used in any chat — what a NEW Telegram chat
@@ -448,10 +465,11 @@ async function resolveActiveChat(
  * deliver replies through. Idempotent; a no-op if no token is configured.
  */
 export async function startBot(): Promise<void> {
-  if (_polling) return;
+  const s = botState();
+  if (s.polling) return;
   const bot = await getBot();
   if (!bot) return;
-  _polling = true;
+  s.polling = true;
   // Drop any previously-registered webhook so getUpdates won't 409.
   await bot.api.deleteWebhook().catch(() => {});
   // Publish the "/" command menu (English default scope). Best-effort: a hiccup
@@ -471,15 +489,16 @@ export async function startBot(): Promise<void> {
 
 /** Stop polling and drop the singleton (so a new token takes effect). */
 export async function stopBot(): Promise<void> {
-  const bot = _bot;
+  const s = botState();
+  const bot = s.bot;
   // Clear the singleton up front so a concurrent startBot() can't observe the
   // old instance, then stop the previous poller. Crucially we do NOT swallow a
   // stop() failure silently: if it throws, the old getUpdates loop keeps running
   // and would answer on the OLD token alongside the new bot — exactly the
   // "previous bot still works after switching" bug. Surface it loudly.
-  _bot = null;
-  _polling = false;
-  _token = "";
+  s.bot = null;
+  s.polling = false;
+  s.token = "";
   if (bot) {
     try {
       await bot.stop();
