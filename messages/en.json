@@ -734,8 +734,8 @@
       },
       "by": "by {author}",
       "noMatches": "Nothing matches “{query}”.",
-      "emptyTitle": "No skills yet",
-      "emptyHint": "Skills are reusable instructions the assistant loads when they fit a task. Upload one, or install a plugin from the marketplace.",
+      "emptyTitle": "No skills of your own yet",
+      "emptyHint": "Skills are reusable instructions the assistant loads when they fit a task. Upload your own here — skills that come with plugins are managed on the Plugins tab.",
       "browseMarketplace": "Browse marketplace",
       "summary": "{enabled} of {total} enabled",
       "noDescription": "No description",
@@ -767,6 +767,10 @@
           "off": "Off",
           "mixed": "Partly on"
         }
+      },
+      "pluginsView": {
+        "installed": "Installed",
+        "browse": "Browse"
       }
     },
     "connectors": {
