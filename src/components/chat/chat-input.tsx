@@ -3,6 +3,7 @@
 import { useRef, useCallback, useMemo, useEffect, type KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
 import { ArrowUp, Loader2, Paperclip, RotateCw, Square, X } from "lucide-react";
+import { ContextMeter } from "@/components/chat/context-meter";
 import { Button } from "@/components/ui/button";
 import { BinaryFileThumb, FileTile, SandboxFileTile, type PreviewFile } from "./file-preview";
 import type { FileRef } from "@/lib/constants";
@@ -47,6 +48,8 @@ interface ChatInputProps {
   onAddFiles: (files: FileList | File[]) => void;
   onRemoveFile: (id: string) => void;
   onRetryFile: (id: string) => void;
+  /** Context-window fill, shown as a ring left of the send button. */
+  contextUsage?: { used: number; window: number } | null;
 }
 
 export function ChatInput({
@@ -60,6 +63,7 @@ export function ChatInput({
   onAddFiles,
   onRemoveFile,
   onRetryFile,
+  contextUsage,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -225,34 +229,41 @@ export function ChatInput({
               </Button>
             </div>
 
-            {/* While a reply streams: Send (queues the next turn) when there's
-                something to send, otherwise Stop. Idle: always Send. Send stays
-                disabled until any in-flight upload settles. */}
-            {isLoading && !hasContent ? (
-              <Button
-                size="icon"
-                variant="outline"
-                className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
-                onClick={onStop}
-                aria-label={t("stop")}
-              >
-                <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-              </Button>
-            ) : (
-              <Button
-                size="icon"
-                className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
-                disabled={!canSend}
-                onClick={onSubmit}
-                aria-label={isLoading ? t("queue") : t("send")}
-              >
-                {uploading ? (
-                  <Loader2 className="h-4.5 w-4.5 animate-spin sm:h-4 sm:w-4" />
-                ) : (
-                  <ArrowUp className="h-4.5 w-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:h-4 sm:w-4" />
-                )}
-              </Button>
-            )}
+            {/* Right cluster: context-window ring, then Send/Stop. Grouping them
+                keeps the ring just left of the button (the row is justify-between,
+                so a loose ring would drift to the centre). */}
+            <div className="flex items-center gap-2">
+              {contextUsage && <ContextMeter used={contextUsage.used} window={contextUsage.window} />}
+
+              {/* While a reply streams: Send (queues the next turn) when there's
+                  something to send, otherwise Stop. Idle: always Send. Send stays
+                  disabled until any in-flight upload settles. */}
+              {isLoading && !hasContent ? (
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
+                  onClick={onStop}
+                  aria-label={t("stop")}
+                >
+                  <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                </Button>
+              ) : (
+                <Button
+                  size="icon"
+                  className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
+                  disabled={!canSend}
+                  onClick={onSubmit}
+                  aria-label={isLoading ? t("queue") : t("send")}
+                >
+                  {uploading ? (
+                    <Loader2 className="h-4.5 w-4.5 animate-spin sm:h-4 sm:w-4" />
+                  ) : (
+                    <ArrowUp className="h-4.5 w-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:h-4 sm:w-4" />
+                  )}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>

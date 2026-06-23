@@ -38,6 +38,10 @@ export type TaskEvent =
   // A freshly-generated title for a new chat, pushed once after its first turn
   // so the sidebar can swap the placeholder in place (and animate) without a refetch.
   | { type: "chat:title"; chatId: string; title: string }
+  // A compaction checkpoint was written — the client reloads so the transcript
+  // shows the divider and the context meter re-derives (it hides until the next
+  // turn reports the post-compaction size).
+  | { type: "chat:compacted"; chatId: string; messageId: string }
   | { type: "new_message"; chatId: string };
 
 /** The per-user realtime channel name. Centralized so it never drifts. */

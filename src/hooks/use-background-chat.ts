@@ -360,6 +360,13 @@ export function useBackgroundChat({
               loadHistory();
               break;
             }
+
+            case "chat:compacted": {
+              // A compaction checkpoint landed — reload so the transcript shows
+              // the divider and the context meter re-derives from the new leaf.
+              loadHistory();
+              break;
+            }
           }
         } catch { /* ignore parse errors */ }
       };

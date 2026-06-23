@@ -1093,6 +1093,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               metadata: { status: "completed", compaction: { summary, summarizedUpTo: msgId, tokensSaved: budget.used } },
             });
             await db.update(chats).set({ activeLeafId: checkpointId }).where(eq(chats.id, chatId));
+            // Tell the client so it reloads: the transcript gains the divider and
+            // the context meter re-derives (hides until the next turn measures the
+            // collapsed context). Without this the UI only catches up on a manual
+            // reload — the compaction looked like nothing happened.
+            await publishTaskEvent(userId, { type: "chat:compacted", chatId, messageId: checkpointId });
             tlog.info("conversation compacted", {
               usedTokens: budget.used, effectiveLimit: budget.effectiveLimit, checkpointId,
             });

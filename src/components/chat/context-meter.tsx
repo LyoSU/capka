@@ -1,30 +1,67 @@
+import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+
+/** Compact token count: 1240 → "1k", 124000 → "124k", 1200000 → "1.2M". */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
 
 /**
- * How full the model's context window is, derived from the last turn's actual
- * input usage against the effective window (model ∩ admin cap, persisted on the
- * reply's metadata). Stays hidden below 50% — no point nagging on short chats —
- * then appears, and turns amber near the ~75% mark where the server compacts.
- * Purely informational; compaction is automatic.
+ * A small ring that fills as the model's context window fills, derived from the
+ * last turn's actual input usage against the effective window (model ∩ admin
+ * cap). Sits just left of the send button — deliberately unobtrusive (a ring,
+ * not a full-width bar). Hover (or tap) reveals an island with the exact
+ * figures, rendered via a portal so the composer's `overflow-hidden` can't clip
+ * it. Hidden below 50%, turns amber near the ~75% mark where the server
+ * compacts. Purely informational; compaction is automatic.
  */
 export function ContextMeter({ used, window: limit }: { used: number; window: number }) {
   const t = useTranslations("chat.panel");
+  const [open, setOpen] = useState(false);
   const fraction = limit > 0 ? used / limit : 0;
   if (fraction < 0.5) return null;
 
   const pct = Math.min(100, Math.round(fraction * 100));
   const warn = fraction >= 0.75;
+  const r = 6.5;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - Math.min(1, fraction));
+  const color = warn ? "stroke-amber-500" : "stroke-primary/50";
+
   return (
-    <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2 px-4 md:px-6 lg:max-w-4xl">
-      <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-        <div
-          className={`h-full rounded-full transition-all ${warn ? "bg-amber-500" : "bg-primary/40"}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className={`text-xs tabular-nums ${warn ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
-        {t("contextFull", { pct })}
-      </span>
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        aria-label={t("contextFull", { pct })}
+        className="flex shrink-0 items-center gap-1 rounded-md text-xs text-muted-foreground outline-none"
+      >
+        {warn && <span className="tabular-nums text-amber-600 dark:text-amber-400">{pct}%</span>}
+        <svg width="16" height="16" viewBox="0 0 16 16" className="shrink-0" aria-hidden>
+          <circle cx="8" cy="8" r={r} fill="none" strokeWidth="2" className="stroke-muted" />
+          <circle
+            cx="8"
+            cy="8"
+            r={r}
+            fill="none"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeDasharray={circ}
+            strokeDashoffset={offset}
+            transform="rotate(-90 8 8)"
+            className={`${color} transition-all`}
+          />
+        </svg>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="end" sideOffset={8} className="p-2.5 text-xs">
+        <div className="font-medium text-popover-foreground">{t("contextFull", { pct })}</div>
+        <div className="mt-0.5 whitespace-nowrap text-muted-foreground">
+          {t("contextTokens", { used: fmtTokens(used), total: fmtTokens(limit) })}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

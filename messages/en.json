@@ -213,6 +213,7 @@
       "queuedFiles": "{count, plural, one {# file} other {# files}}",
       "cancelQueued": "Remove from queue",
       "contextFull": "Context: {pct}%",
+      "contextTokens": "{used} / {total} tokens",
       "modelGoneTitle": "Model unavailable",
       "modelGoneBody": "This chat's model is no longer available — its provider was disconnected or the model was removed. Pick another model to continue here, or start a new chat.",
       "modelGonePick": "Choose an available model from the picker at the top to continue here.",
