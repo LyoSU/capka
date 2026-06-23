@@ -17,6 +17,7 @@ import { providerNativeTools } from "@/lib/providers";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles, findBlindModalities } from "@/lib/chat/prompt";
+import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
@@ -26,7 +27,7 @@ import { recordUsage } from "@/lib/usage";
 import { costUsd } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isVisionUnsupportedError, isReasoningUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
 import { errorText } from "@/lib/errors/message";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
@@ -462,11 +463,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       await injectNativeFiles(modelMessages, sessionKey, userId, nativeFiles);
       injectedNative = true;
     }
-    // Media the chosen model can't see/hear natively (e.g. an audio note on a
-    // text-only model). The model would otherwise answer blind — so we surface a
-    // notice on the message telling the user to switch to a capable model,
-    // instead of silently pretending the attachment was understood.
-    const blindModalities = findBlindModalities(turnFiles, provider, modelInput);
+    // Modalities of the files we DID inject — if the provider then rejects them at
+    // runtime (the catalog over-claimed for a custom backend), the soft retry below
+    // strips them and folds these into the notice so the user is still told.
+    const nativeModalities = Array.from(
+      new Set(nativeFiles.map((f) => mimeToModality(f.type)).filter((m): m is Modality => m !== null)),
+    );
+    // Media the chosen model can't take natively (e.g. an audio note on a text-only
+    // model) — known upfront from gating. The model would otherwise answer blind, so
+    // we surface a notice telling the user to switch to a capable model instead of
+    // silently pretending the attachment was understood. A runtime rejection (the
+    // retry) adds to this set.
+    let blindModalities = findBlindModalities(turnFiles, provider, modelInput);
 
     // Reasoning is enabled optimistically; the fallback below clears this flag
     // and re-streams without it if the model rejects thinking/reasoning.
@@ -654,9 +662,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       await flushBuffers();
     };
 
-    // Drop the native image/file parts the model can't read, but leave a text
-    // note in their place — the model should KNOW the user attached an image and
-    // say it can't see it, not answer as if nothing was sent.
+    // Drop the native image/file parts the model rejected, but leave a text note
+    // in their place — the model should KNOW the user attached something and say it
+    // can't process it, not answer as if nothing was sent.
     const stripNativeFilesWithNote = () => {
       const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
       if (!lastUser || !Array.isArray(lastUser.content)) return;
@@ -665,7 +673,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (removed > 0) {
         lastUser.content.push({
           type: "text",
-          text: `[The user attached ${removed === 1 ? "an image/file" : `${removed} images/files`}, but this model cannot view images. Tell the user you received the attachment but can't see its contents, and help with whatever text was provided.]`,
+          text: `[The user attached ${removed === 1 ? "a file" : `${removed} files`}, but this model can't process that attachment type. Tell the user you received the attachment but can't read its contents, and help with whatever text was provided.]`,
         });
       }
     };
@@ -674,13 +682,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // `error` part (streamError) with the iterator finishing normally. Retry the
     // same way for both. Returns true if a retry was launched.
     const retryOnCapabilityError = async (err: unknown): Promise<boolean> => {
-      if (injectedNative && !retried && isVisionUnsupportedError(err)) {
-        log.info("vision unsupported — retrying with image stripped + note", { taskId, chatId, userId });
+      if (injectedNative && !retried && isModalityUnsupportedError(err)) {
+        log.info("attachment modality unsupported — retrying with files stripped + note", { taskId, chatId, userId });
         retried = true;
         streamError = undefined;
         parts.length = 0;
         lastSealedIndex = -1;
         stripNativeFilesWithNote();
+        // The provider rejected what the catalog claimed it took — fold those
+        // modalities into the notice so the user is told to switch models.
+        blindModalities = Array.from(new Set([...blindModalities, ...nativeModalities]));
         result = makeStream();
         await consume();
         return true;

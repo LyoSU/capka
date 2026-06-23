@@ -27,6 +27,9 @@ async function respond(provider: string, apiKey: string | undefined, baseUrl: st
   let error: string | undefined;
   try {
     models = await listProviderModels({ provider, apiKey, baseUrl: baseUrl ?? undefined });
+    // Tag the connection provider so the picker gates attachment badges the same
+    // way the runner does (single-config / credentials paths carry no configId).
+    models = models.map((m) => ({ ...m, configProvider: provider }));
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not load models";
   }
@@ -61,7 +64,7 @@ async function respondAggregated(
       try {
         const models = await listProviderModels({ provider: c.provider, apiKey, baseUrl: c.baseUrl ?? undefined });
         const configIcon = c.iconSlug || PROVIDER_META[c.provider].iconSlug;
-        const tagged = models.map((m) => ({ ...m, configId: c.id, configLabel: labels.get(c.id), configIcon }));
+        const tagged = models.map((m) => ({ ...m, configId: c.id, configLabel: labels.get(c.id), configIcon, configProvider: c.provider }));
         return { models: tagged, provider: c.provider };
       } catch (e) {
         return { models: [] as ModelInfo[], error: e instanceof Error ? e.message : "Could not load models" };

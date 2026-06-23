@@ -123,6 +123,29 @@ export function isReasoningUnsupportedError(raw: unknown): boolean {
 }
 
 /**
+ * Any native attachment a provider rejects — image/vision, audio, or file/PDF.
+ * A superset of `isVisionUnsupportedError`: the runner optimistically trusts the
+ * catalog's per-model modalities (which can over-claim for a custom backend), so
+ * a runtime rejection of ANY attachment type must trigger the same strip-and-retry
+ * — not just images. Tied to attachment phrasing so an unrelated capability error
+ * doesn't strip files. The matching `input_audio` / `image_url` content-type names
+ * are the most reliable signal across OpenAI-compatible gateways.
+ */
+export function isModalityUnsupportedError(raw: unknown): boolean {
+  if (isVisionUnsupportedError(raw)) return true;
+  const detail = errorText(raw);
+  return (
+    /\b(input_audio|audio_url|audio input|file input|file_data|document input)\b/i.test(detail) ||
+    /\b(audio|file|document|pdf|attachment|content type)\b[^.]{0,40}\b(not supported|unsupported|not available|invalid|not allowed|cannot|can'?t)\b/i.test(
+      detail,
+    ) ||
+    /\b(no|without|lacks?|cannot|can'?t|doesn'?t|does not|not)\b[^.]{0,40}\b(audio|file|document|pdf)\b/i.test(
+      detail,
+    )
+  );
+}
+
+/**
  * Server-enforced run deadline. Used directly (not via the regex rules, which
  * would mis-match a generic "timeout" as a network error) when a task exceeds
  * its wall-clock budget — a live worker stuck on a hung tool/LLM call.

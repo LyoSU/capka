@@ -114,4 +114,34 @@ describe("parseLiteLLMModels", () => {
     expect(m.capabilities.vision).toBe(true);
     expect(m.enabled).toBe(false); // litellm rows are price coverage, off by default
   });
+
+  it("derives native input modalities from LiteLLM's real fields (array ∪ flags)", () => {
+    const raw = {
+      // supported_modalities carries audio/video but the per-flag is absent —
+      // exactly like gemini-2.5-flash. pdf is never in the array, only the flag.
+      "gemini-2.5-flash": {
+        litellm_provider: "gemini", mode: "chat", input_cost_per_token: 0.000001,
+        supported_modalities: ["text", "image", "audio", "video"],
+        supports_vision: true, supports_pdf_input: true,
+      },
+      // Flags only, no array — like gpt-4o-audio-preview.
+      "gpt-4o-audio-preview": {
+        litellm_provider: "openai", mode: "chat", input_cost_per_token: 0.000001,
+        supports_audio_input: true,
+      },
+      // Vision + pdf flags only — like gpt-4o / claude.
+      "gpt-4o": {
+        litellm_provider: "openai", mode: "chat", input_cost_per_token: 0.000001,
+        supports_vision: true, supports_pdf_input: true,
+      },
+      // No modality signals at all → no input (stays text-only / tool-only).
+      "text-only": { litellm_provider: "openai", mode: "chat", input_cost_per_token: 0.000001 },
+    };
+    const out = parseLiteLLMModels(raw);
+    const byId = Object.fromEntries(out.map((m) => [m.id, m.capabilities.input]));
+    expect(byId["gemini-2.5-flash"]).toEqual(["image", "pdf", "audio", "video"]);
+    expect(byId["gpt-4o-audio-preview"]).toEqual(["audio"]);
+    expect(byId["gpt-4o"]).toEqual(["image", "pdf"]);
+    expect(byId["text-only"]).toBeUndefined();
+  });
 });

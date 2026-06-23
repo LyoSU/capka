@@ -107,6 +107,27 @@ interface LLEntry {
   supports_vision?: boolean;
   supports_function_calling?: boolean;
   supports_reasoning?: boolean;
+  // Native input-modality signals — verified against the real LiteLLM price book.
+  // No single field is complete (e.g. gemini-2.5-flash lists audio/video only in
+  // `supported_modalities`, while gpt-4o-audio uses the per-flag), so we union
+  // the array with the flags. `pdf` is never in the array — only `supports_pdf_input`.
+  supported_modalities?: string[];
+  supports_image_input?: boolean;
+  supports_audio_input?: boolean;
+  supports_pdf_input?: boolean;
+  supports_video_input?: boolean;
+}
+
+/** Union LiteLLM's `supported_modalities` array with its per-flag booleans into
+ *  our native input modalities, in a stable order. */
+function liteLLMInputModalities(e: LLEntry): Modality[] {
+  const sm = e.supported_modalities ?? [];
+  const input: Modality[] = [];
+  if (sm.includes("image") || e.supports_vision || e.supports_image_input) input.push("image");
+  if (e.supports_pdf_input) input.push("pdf");
+  if (sm.includes("audio") || e.supports_audio_input) input.push("audio");
+  if (sm.includes("video") || e.supports_video_input) input.push("video");
+  return input;
 }
 
 /**
@@ -135,6 +156,10 @@ export function parseLiteLLMModels(raw: unknown): CatalogModel[] {
         vision: !!e.supports_vision,
         tools: !!e.supports_function_calling,
         reasoning: !!e.supports_reasoning,
+        ...((() => {
+          const input = liteLLMInputModalities(e);
+          return input.length ? { input } : {};
+        })()),
       },
       enabled: false,
     });

@@ -32,6 +32,12 @@ export interface ModelInfo {
   configId?: string;
   configLabel?: string;
   configIcon?: string;
+  // The provider of the owning connection (openrouter / litellm / anthropic …).
+  // Distinct from `provider` above, which is the model's BRAND. Lets the picker
+  // gate native-attachment badges through the same connection-aware logic the
+  // runner uses (`acceptsNativeFile`), so an audio icon never promises what the
+  // connection won't actually deliver.
+  configProvider?: string;
 }
 
 const perMillion = (v: string | null | undefined) => (v ? parseFloat(v) * 1_000_000 : 0);
@@ -105,7 +111,10 @@ const bareId = (id: string) => (id.includes("/") ? id.slice(id.lastIndexOf("/") 
  * the OpenRouter row wins — it carries the real display name/group/icon, while
  * a LiteLLM row only has a slug-normalized name. One query for the whole batch.
  */
-async function catalogLookup(ids: string[]): Promise<(id: string) => CatalogRow | null> {
+async function catalogLookup(
+  ids: string[],
+  preferSource: "openrouter" | "litellm" = "openrouter",
+): Promise<(id: string) => CatalogRow | null> {
   if (!ids.length) return () => null;
   const exact = Array.from(new Set(ids));
   const bares = Array.from(new Set(ids.map(bareId)));
@@ -131,8 +140,11 @@ async function catalogLookup(ids: string[]): Promise<(id: string) => CatalogRow 
     byId.set(r.id, r);
     const b = bareId(r.id);
     const cur = byBare.get(b);
-    // Prefer the OpenRouter row for a bare id — it has the canonical name.
-    if (!cur || (cur.source !== "openrouter" && r.source === "openrouter")) byBare.set(b, r);
+    // For a bare-id collision across sources, keep the preferred source's row.
+    // Default prefers OpenRouter (canonical name/group/icon for display); modality
+    // lookup prefers the connection's own source so a LiteLLM/direct model isn't
+    // described by OpenRouter's serving of the same id.
+    if (!cur || (cur.source !== preferSource && r.source === preferSource)) byBare.set(b, r);
   }
   return (id: string) => byId.get(id) ?? byBare.get(bareId(id)) ?? null;
 }
@@ -335,8 +347,15 @@ export async function applySharedGovernance(models: ModelInfo[]): Promise<ModelI
  * didn't report them — the caller then falls back to the provider's static caps.
  * Matched by exact then bare id, exactly like the price lookup.
  */
-export async function getModelInputModalities(modelId: string): Promise<Modality[] | null> {
-  const lookup = await catalogLookup([modelId]);
+export async function getModelInputModalities(
+  modelId: string,
+  provider?: string,
+): Promise<Modality[] | null> {
+  // Read the modality row from the SAME source the connection serves through, so
+  // a LiteLLM/direct model isn't described by OpenRouter's serving of the same id
+  // (and vice-versa). Direct providers are covered by the LiteLLM price book.
+  const preferSource = provider === "openrouter" ? "openrouter" : "litellm";
+  const lookup = await catalogLookup([modelId], preferSource);
   const caps = lookup(modelId)?.capabilities as { input?: Modality[] } | null | undefined;
   return caps?.input && caps.input.length ? caps.input : null;
 }

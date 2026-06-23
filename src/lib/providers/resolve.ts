@@ -177,14 +177,16 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
   });
-  // Per-model native input modalities, ONLY for OpenRouter: its catalog's
-  // `input_modalities` describe exactly what OpenRouter serves for this model.
-  // For direct providers the same catalog row (matched by bare id) would
-  // UNDER-report (it reflects OpenRouter's serving, not the direct API — e.g. it
-  // omits the audio/video that Gemini-direct accepts), so they use their own
-  // static `nativeInput` instead. null → fall back to those static caps.
-  const modelInput =
-    config.provider === "openrouter" ? await getModelInputModalities(modelId) : null;
+  // Per-model native input modalities from the synced catalog: OpenRouter's
+  // `architecture.input_modalities` and LiteLLM's `supported_modalities` +
+  // `supports_*_input` flags, both parsed into the same shape. Used for ANY
+  // provider the catalog knows (direct OpenAI/Anthropic/Gemini are covered by the
+  // LiteLLM price book, matched by id); unknown models fall back to the provider's
+  // static caps. `acceptsNativeFile` still hard-gates by SDK transport reality
+  // (video → Google only, etc.), and the runner soft-retries without the file if a
+  // provider rejects a modality it claimed — so trusting the metadata never turns
+  // into a hard failure for the user.
+  const modelInput = await getModelInputModalities(modelId, config.provider);
   return { model, provider: config.provider, modelId, modelInput, isShared: config.isShared };
 }
 
