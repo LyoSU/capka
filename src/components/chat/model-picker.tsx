@@ -6,6 +6,7 @@ import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
 import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video, SlidersHorizontal, Sparkles, Layers } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { parseModelId, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
 
@@ -478,34 +479,31 @@ function ProviderRail({
   const t = useTranslations("chat.model");
   const vertical = orientation === "vertical";
 
+  // Each tab is a tooltip trigger — our own instant tooltip (the native `title`
+  // takes ~700ms to appear, too slow for a glyph-only rail where the name is the
+  // only label). Glyph-only rails always need it; labeled tabs use it as a
+  // fallback when the name is truncated.
   const item = (key: string, title: string, glyph: React.ReactNode) => {
     const isActive = active === key;
     const activeCls = isActive
       ? "bg-background text-foreground ring-1 ring-border shadow-sm"
       : "text-muted-foreground hover:bg-accent/60 hover:text-foreground";
-    if (labeled) {
-      return (
-        <button
-          key={key}
-          type="button"
-          title={title}
-          aria-label={title}
-          aria-pressed={isActive}
-          onClick={() => onSelect(key)}
-          className={`flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-xs font-medium transition-colors ${activeCls} ${
-            vertical ? "w-full" : ""
-          }`}
-        >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center">{glyph}</span>
-          <span className="truncate">{title}</span>
-        </button>
-      );
-    }
-    return (
+    const btn = labeled ? (
       <button
-        key={key}
         type="button"
-        title={title}
+        aria-label={title}
+        aria-pressed={isActive}
+        onClick={() => onSelect(key)}
+        className={`flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-xs font-medium transition-colors ${activeCls} ${
+          vertical ? "w-full" : ""
+        }`}
+      >
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center">{glyph}</span>
+        <span className="truncate">{title}</span>
+      </button>
+    ) : (
+      <button
+        type="button"
         aria-label={title}
         aria-pressed={isActive}
         onClick={() => onSelect(key)}
@@ -514,23 +512,31 @@ function ProviderRail({
         {glyph}
       </button>
     );
+    return (
+      <Tooltip key={key}>
+        <TooltipTrigger render={btn} />
+        <TooltipContent side={vertical ? "right" : "bottom"}>{title}</TooltipContent>
+      </Tooltip>
+    );
   };
 
   return (
-    <div
-      className={`flex shrink-0 gap-1 ${
-        vertical
-          ? `flex-col overflow-y-auto overscroll-contain border-r p-2 ${labeled ? "w-40 items-stretch" : "items-center"}`
-          : "flex-row items-center overflow-x-auto border-b p-2"
-      }`}
-    >
-      {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
-      {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
-      {(hasAll || hasFeatured) && (
-        <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
-      )}
-      {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
-    </div>
+    <TooltipProvider delay={300}>
+      <div
+        className={`flex shrink-0 gap-1 ${
+          vertical
+            ? `flex-col overflow-y-auto overflow-x-hidden overscroll-contain border-r p-2 ${labeled ? "w-40 items-stretch" : "items-center"}`
+            : "flex-row items-center overflow-x-auto border-b p-2"
+        }`}
+      >
+        {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
+        {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
+        {(hasAll || hasFeatured) && (
+          <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
+        )}
+        {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
+      </div>
+    </TooltipProvider>
   );
 }
 
