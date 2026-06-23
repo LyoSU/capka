@@ -549,7 +549,7 @@ export function AppSidebar() {
           className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden h-8 w-8 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:mx-auto")}
           title={t("newChat")}
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4" strokeWidth={2.75} />
         </Link>
       </SidebarHeader>
 
@@ -570,8 +570,8 @@ export function AppSidebar() {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton render={<Link href={newChatHref} />}>
-                  <Plus className="h-4 w-4" />
-                  <span>{t("newChat")}</span>
+                  <Plus className="h-4 w-4" strokeWidth={2.75} />
+                  <span className="font-medium">{t("newChat")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

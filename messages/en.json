@@ -65,7 +65,7 @@
     "updateFailed": "Couldn't change the language"
   },
   "nav": {
-    "newChat": "New Chat",
+    "newChat": "New conversation",
     "expandSidebar": "Expand sidebar",
     "unreadReply": "Unread reply",
     "working": "Generating…",
@@ -1094,7 +1094,7 @@
       "preferences": "Preferences",
       "shortcuts": "Keyboard Shortcuts"
     },
-    "newChat": "New Chat",
+    "newChat": "New conversation",
     "projects": "Projects",
     "settings": "Settings",
     "memory": "Memory",
