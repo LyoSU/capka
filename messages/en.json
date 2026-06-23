@@ -271,6 +271,17 @@
       },
       "close": "Close",
       "featured": "Featured",
+      "all": "All",
+      "filter": {
+        "title": "Filters",
+        "clear": "Clear",
+        "vision": "Images",
+        "pdf": "PDF",
+        "audio": "Audio",
+        "video": "Video",
+        "reasoning": "Reasoning",
+        "free": "Free"
+      },
       "price": {
         "label": "Approx. cost",
         "free": "free",

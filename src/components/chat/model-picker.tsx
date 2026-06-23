@@ -4,9 +4,9 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, use
 import { createPortal } from "react-dom";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
-import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video } from "lucide-react";
+import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video, SlidersHorizontal, Sparkles, Layers } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
-import { parseModelId, displayModelName, encodeModelRef, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
+import { parseModelId, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
 
 /** Brand glyph — resolves a slug to a stable icon component (dynamic select). */
@@ -50,12 +50,32 @@ function stripGroup(name: string, group?: string | null): string {
   return name;
 }
 
-function Caps({ caps }: { caps: ModelInfo["capabilities"] }) {
+const MODALITY_MIME: Record<Modality, string> = {
+  image: "image/png", pdf: "application/pdf", audio: "audio/mpeg", video: "video/mp4",
+};
+
+/** Whether THIS model, on its OWNING CONNECTION, will actually take a file of the
+ *  given modality as a native inline part — the single source of truth, shared
+ *  with the runner via `acceptsNativeFile`. OpenRouter trusts the catalog's
+ *  per-model `input_modalities`; every other connection falls back to its static
+ *  caps (the API has no per-model standard). So a badge never promises a modality
+ *  the connection won't deliver. */
+function modelAcceptsModality(m: ModelInfo, mod: Modality): boolean {
+  const provider = m.configProvider ?? "";
+  // Trust the catalog's per-model modalities for ANY connection (OpenRouter's
+  // input_modalities, LiteLLM's supported_modalities/flags, applied to direct
+  // providers too). `acceptsNativeFile` still hard-gates by SDK transport reality
+  // (video → Google only, PDF → always native on OpenRouter, etc.); falls back to
+  // the provider's static caps when the catalog doesn't know the model.
+  return acceptsNativeFile(MODALITY_MIME[mod], provider, m.capabilities?.input ?? null);
+}
+
+function Caps({ model }: { model: ModelInfo }) {
   const t = useTranslations("chat.model");
-  const input = caps?.input ?? [];
-  const hasPdf = input.includes("pdf");
-  const hasAudio = input.includes("audio");
-  const hasVideo = input.includes("video");
+  const caps = model.capabilities;
+  const hasPdf = modelAcceptsModality(model, "pdf");
+  const hasAudio = modelAcceptsModality(model, "audio");
+  const hasVideo = modelAcceptsModality(model, "video");
   if (!caps || (!caps.vision && !caps.reasoning && !hasPdf && !hasAudio && !hasVideo)) return null;
   // Tool-calling is now a hard filter (every listed model has it), so its icon
   // would just be noise. Only the capabilities that actually vary are shown,
@@ -132,7 +152,7 @@ function PriceMeter({ model }: { model: ModelInfo }) {
   if (isFreeModel(model)) {
     return (
       <span
-        className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase leading-none tracking-wide text-emerald-600 dark:text-emerald-400"
+        className="shrink-0 text-[11px] font-medium leading-none text-emerald-600 dark:text-emerald-400"
         title={t("price.free")}
         aria-label={t("price.free")}
       >
@@ -160,6 +180,91 @@ function PriceMeter({ model }: { model: ModelInfo }) {
         ),
       )}
       {tier >= 4 && <span className="text-emerald-500">+</span>}
+    </span>
+  );
+}
+
+// ── Filters ────────────────────────────────────────────────────────────────
+//
+// Plain-language capability filters — the answer to "which of these can actually
+// hear a voice note / read a PDF". Phrased for non-technical staff (no "modality"
+// jargon); AND semantics, so stacking two narrows to models that do both.
+
+type FilterKey = "vision" | "pdf" | "audio" | "video" | "reasoning" | "free";
+const FILTER_KEYS: FilterKey[] = ["vision", "pdf", "audio", "video", "reasoning", "free"];
+const FILTER_ICON: Record<FilterKey, typeof Eye> = {
+  vision: Eye, pdf: FileText, audio: AudioLines, video: Video, reasoning: Brain, free: Sparkles,
+};
+
+function modelMatchesFilter(m: ModelInfo, key: FilterKey): boolean {
+  switch (key) {
+    case "vision": return !!m.capabilities?.vision;
+    // Attachment modalities are gated by the connection, not just the model —
+    // filtering "Audio" must only surface models that will actually hear it here.
+    case "pdf": return modelAcceptsModality(m, "pdf");
+    case "audio": return modelAcceptsModality(m, "audio");
+    case "video": return modelAcceptsModality(m, "video");
+    case "reasoning": return !!m.capabilities?.reasoning;
+    case "free": return isFreeModel(m);
+  }
+}
+
+/** AND over the active filters — empty set matches everything. */
+function matchesFilters(m: ModelInfo, active: Set<FilterKey>): boolean {
+  for (const k of active) if (!modelMatchesFilter(m, k)) return false;
+  return true;
+}
+
+/** The collapsible filter chip row. Hidden until the user opens it (a quiet
+ *  funnel toggle in the search bar) so the default view stays calm. */
+function FilterBar({
+  active, onToggle, onClear,
+}: {
+  active: Set<FilterKey>;
+  onToggle: (k: FilterKey) => void;
+  onClear: () => void;
+}) {
+  const t = useTranslations("chat.model");
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
+      {FILTER_KEYS.map((k) => {
+        const on = active.has(k);
+        const Icon = FILTER_ICON[k];
+        return (
+          <button
+            key={k}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onToggle(k)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+              on
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {t(`filter.${k}`)}
+          </button>
+        );
+      })}
+      {active.size > 0 && (
+        <button type="button" onClick={onClear} className="ml-auto text-xs text-muted-foreground hover:text-foreground">
+          {t("filter.clear")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A small "which connection" tag shown on each search result when two or more
+ *  connections are aggregated — so the same model served by two providers is
+ *  never ambiguous (the brand glyph alone can't tell them apart). */
+function ConnChip({ icon, label }: { icon?: string | null; label?: string | null }) {
+  if (!label) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/80">
+      <BrandIcon slug={icon} size={11} />
+      <span className="hidden max-w-24 truncate sm:inline">{label}</span>
     </span>
   );
 }
@@ -288,6 +393,12 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
 // away regardless of which company they came from.
 const FEATURED_TAB = "__featured__";
 
+// "All" — a synthetic tab on both rails: on the connection strip it lifts the
+// per-connection scoping (every connection at once); on the brand rail it shows
+// every brand grouped together. Lets the user browse the whole set without
+// searching; rows then carry connection chips so nothing is ambiguous.
+const ALL_TAB = "__all__";
+
 interface GroupEntry {
   /** Stable identity used for the active-tab match. */
   key: string;
@@ -350,6 +461,7 @@ function buildConnectionGroups(list: ModelInfo[]): GroupEntry[] {
 function ProviderRail({
   groups,
   hasFeatured,
+  hasAll,
   active,
   onSelect,
   orientation,
@@ -357,6 +469,7 @@ function ProviderRail({
 }: {
   groups: GroupEntry[];
   hasFeatured: boolean;
+  hasAll?: boolean;
   active: string | null;
   onSelect: (tab: string) => void;
   orientation: "vertical" | "horizontal";
@@ -411,11 +524,10 @@ function ProviderRail({
           : "flex-row items-center overflow-x-auto border-b p-2"
       }`}
     >
-      {hasFeatured && (
-        <>
-          {item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
-          <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
-        </>
+      {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
+      {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
+      {(hasAll || hasFeatured) && (
+        <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
       )}
       {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
     </div>
@@ -450,6 +562,21 @@ function ModelList({
   const optionId = (i: number) => `${listboxId}-opt-${i}`;
   const searching = search.trim().length > 0;
 
+  // Capability filters (collapsed by default). Local to the open list — closing
+  // and reopening the picker starts clean, matching the search box.
+  const [filters, setFilters] = useState<Set<FilterKey>>(() => new Set());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const toggleFilter = (k: FilterKey) => {
+    setFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+    onActiveIndex(0);
+  };
+  const clearFilters = () => { setFilters(new Set()); onActiveIndex(0); };
+  const passesFilter = useCallback((m: ModelInfo) => matchesFilters(m, filters), [filters]);
+
   // Only tool-capable models are usable here, so they're the only ones listed.
   const models = useMemo(() => state.models.filter(hasTools), [state.models]);
 
@@ -472,12 +599,20 @@ function ModelList({
   }, [byConnection, models, currentRef, connTabs]);
   const activeConn = connTab ?? defaultConn;
 
-  // Models feeding the brand rail + pane: the active connection's, or all when a
-  // single connection (or untagged) makes the top strip unnecessary.
+  // Models feeding the brand rail + pane: the active connection's, all of them
+  // when "All connections" is picked (or a single/untagged setup makes the top
+  // strip unnecessary).
   const scoped = useMemo(
-    () => (byConnection && activeConn ? models.filter((m) => m.configId === activeConn) : models),
+    () =>
+      byConnection && activeConn && activeConn !== ALL_TAB
+        ? models.filter((m) => m.configId === activeConn)
+        : models,
     [models, byConnection, activeConn],
   );
+
+  // Show the per-row connection tag whenever the pane spans more than one
+  // connection — global search or the "All connections" view.
+  const showConnChip = byConnection && (searching || activeConn === ALL_TAB);
 
   // Left rail = brands of the scoped set. Built from the full scoped set so it
   // stays stable while searching/filtering.
@@ -485,18 +620,23 @@ function ModelList({
   const hasFeatured = useMemo(() => scoped.some((m) => m.featured), [scoped]);
 
   // Search is global — across every connection — so a model is findable no
-  // matter which tab is open.
+  // matter which tab is open. Results are a single flat list (each row carries
+  // its connection chip), sorted featured-first, and narrowed by any active
+  // capability filters.
   const searchResults = useMemo(() => {
     if (!searching) return [];
     const q = search.trim().toLowerCase();
-    return models.filter(
-      (m) =>
-        m.id.toLowerCase().includes(q) ||
-        m.name.toLowerCase().includes(q) ||
-        groupOf(m).toLowerCase().includes(q) ||
-        (m.configLabel ?? "").toLowerCase().includes(q),
-    );
-  }, [models, search, searching]);
+    return models
+      .filter(
+        (m) =>
+          passesFilter(m) &&
+          (m.id.toLowerCase().includes(q) ||
+            m.name.toLowerCase().includes(q) ||
+            groupOf(m).toLowerCase().includes(q) ||
+            (m.configLabel ?? "").toLowerCase().includes(q)),
+      )
+      .sort(sortFeaturedFirst);
+  }, [models, search, searching, passesFilter]);
 
   // Which brand fills the pane. Until the user clicks the rail it falls back to
   // the current model's brand (when it belongs to the active connection) — so
@@ -504,22 +644,27 @@ function ModelList({
   const [brandTab, setBrandTab] = useState<string | null>(null);
   const defaultBrand = useMemo(() => {
     if (brandGroups.length === 0) return null;
+    // "All connections" opens on "All brands" — the whole set at once.
+    if (activeConn === ALL_TAB) return ALL_TAB;
     const cur = models.find((m) => refOf(m) === currentRef);
     if (cur && (!byConnection || cur.configId === activeConn)) return groupOf(cur);
     return brandGroups[0].key;
   }, [brandGroups, models, currentRef, byConnection, activeConn]);
   const activeBrand = brandTab ?? defaultBrand;
 
-  // Pane: global search groups by its top dimension (connection, else brand);
-  // the Featured tab and a picked brand both scope to the active connection.
+  // Pane: search is one flat list (per-row connection chips disambiguate); the
+  // Featured tab and a picked brand scope to the active connection, both narrowed
+  // by the active capability filters.
   const sections = useMemo<GroupEntry[]>(() => {
-    if (searching) return byConnection ? buildConnectionGroups(searchResults) : buildGroups(searchResults);
-    if (activeBrand === FEATURED_TAB) return buildGroups(scoped.filter((m) => m.featured));
-    return buildGroups(scoped.filter((m) => groupOf(m) === activeBrand));
-  }, [searching, searchResults, scoped, activeBrand, byConnection]);
+    if (searching) return [{ key: "search", group: "", icon: null, models: searchResults }];
+    if (activeBrand === FEATURED_TAB) return buildGroups(scoped.filter((m) => m.featured && passesFilter(m)));
+    if (activeBrand === ALL_TAB) return buildGroups(scoped.filter((m) => passesFilter(m)));
+    return buildGroups(scoped.filter((m) => groupOf(m) === activeBrand && passesFilter(m)));
+  }, [searching, searchResults, scoped, activeBrand, passesFilter]);
 
-  // Multi-group views need sticky headers; a single brand's pane names itself.
-  const showHeaders = searching || activeBrand === FEATURED_TAB;
+  // Multi-brand panes (Featured, All) need sticky brand headers; search is a flat
+  // list with per-row chips and a single brand's pane names itself.
+  const showHeaders = !searching && (activeBrand === FEATURED_TAB || activeBrand === ALL_TAB);
 
   // Flatten the visible models for keyboard navigation + active-index math.
   const visible = useMemo(() => sections.flatMap((s) => s.models), [sections]);
@@ -530,8 +675,9 @@ function ModelList({
   const pickBrand = (next: string) => { onSearch(""); onActiveIndex(0); setBrandTab(next); };
 
   // When a single company fills the pane (no per-group sticky headers), name it
-  // up top so the user always knows which provider they're looking at.
-  const paneHeading = !showHeaders ? sections[0] : null;
+  // up top so the user always knows which provider they're looking at. Search is
+  // a cross-provider flat list, so it gets no single heading (rows carry chips).
+  const paneHeading = !showHeaders && !searching ? sections[0] : null;
 
   const right = (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -563,7 +709,25 @@ function ModelList({
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
         {searching && <span className="text-[10px] text-muted-foreground tabular-nums">{visible.length}</span>}
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((v) => !v)}
+          aria-pressed={filtersOpen}
+          aria-label={t("filter.title")}
+          title={t("filter.title")}
+          className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
+            filtersOpen || filters.size > 0 ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          }`}
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          {filters.size > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-medium leading-none text-primary-foreground tabular-nums">
+              {filters.size}
+            </span>
+          )}
+        </button>
       </div>
+      {filtersOpen && <FilterBar active={filters} onToggle={toggleFilter} onClear={clearFilters} />}
 
       <div ref={listRef} id={listboxId} role="listbox" aria-label={t("selectModel")} className="flex-1 overflow-y-auto overscroll-contain">
         {state.loading && (
@@ -612,19 +776,35 @@ function ModelList({
                   data-index={globalIdx}
                   onClick={() => onSelect(model)}
                   onMouseEnter={() => onActiveIndex(globalIdx)}
-                  className={`flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
+                  className={`group/row flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
                 >
-                  {model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
-                  <span className="min-w-0 flex-1 truncate text-sm">{stripGroup(model.name, group)}</span>
-                  <PriceMeter model={model} />
-                  {isCurrent && (
-                    <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
+                  {searching ? (
+                    <BrandIcon slug={model.icon} size={14} className="shrink-0 text-muted-foreground" />
+                  ) : (
+                    model.featured && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
                   )}
-                  <span className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
-                    {model.context > 0 && (
-                      <span className="tabular-nums" title={t("context")}>{formatContext(model.context)}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm">{stripGroup(model.name, group)}</span>
+                  {/* Right meta cluster, pinned to the row's right edge so the
+                      connection tag and price line up in tidy columns regardless of
+                      name length. Context + capabilities reveal on hover / keyboard
+                      focus (the funnel filters cover "only models that hear audio");
+                      the price sits last and stays put whether or not caps show. */}
+                  <span className="ml-auto flex shrink-0 items-center gap-3">
+                    <span
+                      className={`flex items-center gap-2 text-[11px] text-muted-foreground transition-opacity duration-150 group-hover/row:opacity-100 ${
+                        isActive ? "opacity-100" : "opacity-0"
+                      }`}
+                    >
+                      {model.context > 0 && (
+                        <span className="tabular-nums" title={t("context")}>{formatContext(model.context)}</span>
+                      )}
+                      <Caps model={model} />
+                    </span>
+                    {showConnChip && <ConnChip icon={model.configIcon} label={model.configLabel} />}
+                    {isCurrent && (
+                      <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("active")}</span>
                     )}
-                    <Caps caps={model.capabilities} />
+                    <PriceMeter model={model} />
                   </span>
                 </button>
               );
@@ -650,6 +830,7 @@ function ModelList({
         <ProviderRail
           groups={brandGroups}
           hasFeatured={hasFeatured}
+          hasAll={brandGroups.length > 1}
           active={searching ? null : activeBrand}
           onSelect={pickBrand}
           orientation={orientation}
@@ -668,6 +849,7 @@ function ModelList({
       <ProviderRail
         groups={connTabs}
         hasFeatured={false}
+        hasAll
         active={searching ? null : activeConn}
         onSelect={pickConn}
         orientation="horizontal"
@@ -789,10 +971,10 @@ export function ModelPicker({
       if (!trigger) return;
       const margin = 8;
       const gap = 4; // matches the old mt-1
-      const panelH = 384; // h-96
+      const panelH = 480; // h-[30rem]
       const vw = document.documentElement.clientWidth;
       const vh = document.documentElement.clientHeight;
-      const width = Math.min(448 /* 28rem */, vw - margin * 2);
+      const width = Math.min(576 /* 36rem */, vw - margin * 2);
       const r = trigger.getBoundingClientRect();
       const left = Math.max(margin, Math.min(r.left, vw - width - margin));
       // Open downward; flip above the trigger if it would run off the bottom.
@@ -916,7 +1098,7 @@ export function ModelPicker({
       {open && !isMobile && variant === "field" && (
         <div
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
-          className="absolute top-full left-0 mt-1 z-50 flex h-96 w-[28rem] min-w-full overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 max-w-[calc(100vw-1rem)]"
+          className="absolute top-full left-0 mt-1 z-50 flex h-[30rem] w-[34rem] min-w-full overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 max-w-[calc(100vw-1rem)]"
         >
           {renderList("vertical")}
         </div>
@@ -929,7 +1111,7 @@ export function ModelPicker({
           ref={popoverRef}
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
-          className="z-50 flex h-96 overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
+          className="z-50 flex h-[30rem] overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
         >
           {renderList("vertical")}
         </div>,
