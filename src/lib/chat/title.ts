@@ -13,7 +13,11 @@ Rules:
 - Same language as the user's message
 - Capture the topic or task, not a greeting or pleasantry
 - No quotes, no markdown, no trailing punctuation, no emoji
-- If the message has no clear topic (just a greeting, "hi", "test"), output exactly: -`;
+- Almost always write a title. If the message contains ANY question, request,
+  task, or subject, title it — even if the message also mentions "test",
+  "testing", or "trying out".
+- Output exactly "-" ONLY for a message that is pure greeting or empty filler
+  with nothing whatsoever to name (e.g. "hi", "hello", "ok", "thanks", "test").`;
 
 const MAX_TITLE_LEN = 80;
 
