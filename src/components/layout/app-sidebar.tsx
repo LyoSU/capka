@@ -211,6 +211,18 @@ export function AppSidebar() {
     return params;
   }, [selectedProject, debouncedSearch]);
 
+  // Chats whose mark-read POST is still in flight. A refresh that races the POST
+  // would report them unread again and flash the dot the instant you navigate
+  // away (the active chat's dot is hidden by suppression, not by the flag). So
+  // we force the flag off for these until the POST settles; afterwards the server
+  // is authoritative again, so a genuinely new reply still flags the chat.
+  const pendingReadRef = useRef<Set<string>>(new Set());
+  const reconcileReads = useCallback((rows: ChatItem[]): ChatItem[] => {
+    const pending = pendingReadRef.current;
+    if (pending.size === 0) return rows;
+    return rows.map((r) => (pending.has(r.id) && r.unread ? { ...r, unread: false } : r));
+  }, []);
+
   // Reset: replace the list with a fresh first page. For a changed filter set
   // (project/search) or a context-menu action (pin/archive/delete) where stale
   // rows must drop out — merging can't remove rows the server no longer returns.
@@ -223,12 +235,12 @@ export function AppSidebar() {
           : { rows: [] as ChatItem[], cursor: null },
       )
       .then(({ rows, cursor }) => {
-        setChats(sortChats(rows));
+        setChats(sortChats(reconcileReads(rows)));
         setNextCursor(cursor);
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
-  }, [baseParams]);
+  }, [baseParams, reconcileReads]);
 
   // Head refresh: re-fetch the first page and MERGE it in — picks up new chats,
   // reordering, and fresh unread/running/title while keeping already-loaded
@@ -238,10 +250,10 @@ export function AppSidebar() {
     const params = baseParams();
     fetch(`/api/chats${params.size ? `?${params}` : ""}`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((rows: ChatItem[]) => setChats((prev) => mergeChats(prev, rows)))
+      .then((rows: ChatItem[]) => setChats((prev) => mergeChats(prev, reconcileReads(rows))))
       .catch(() => {})
       .finally(() => setLoaded(true));
-  }, [baseParams]);
+  }, [baseParams, reconcileReads]);
 
   // Load the next page when the scroll sentinel comes into view.
   const loadMore = useCallback(() => {
@@ -257,7 +269,7 @@ export function AppSidebar() {
           : { rows: [] as ChatItem[], cursor: null },
       )
       .then(({ rows, cursor }) => {
-        setChats((prev) => mergeChats(prev, rows));
+        setChats((prev) => mergeChats(prev, reconcileReads(rows)));
         setNextCursor(cursor);
       })
       .catch(() => {})
@@ -265,7 +277,7 @@ export function AppSidebar() {
         loadingMoreRef.current = false;
         setLoadingMore(false);
       });
-  }, [baseParams, nextCursor]);
+  }, [baseParams, nextCursor, reconcileReads]);
 
   // Filter change (project/search) or first mount → reset list + pagination.
   useEffect(() => {
@@ -281,12 +293,17 @@ export function AppSidebar() {
     refreshHeadRef.current();
   }, [pathname]);
 
-  // Persist "read" on open. The dot for the active chat is already suppressed in
-  // the render (so it never shows while you're looking), and the merge-refresh
-  // that fires on this same navigation reconciles the flag from the server — so
-  // no optimistic local clear is needed here.
+  // Persist "read" on open. Mark the chat pending FIRST (synchronously) so the
+  // refresh this same navigation triggers can't resurrect a not-yet-committed
+  // unread flag — reconcileReads forces it off while the POST is in flight, then
+  // clears the override once it settles. Kills the flash where leaving a chat
+  // briefly revealed its dot.
   const markRead = useCallback((id: string) => {
-    fetch(`/api/chats/${id}/read`, { method: "POST" }).catch(() => {});
+    const pending = pendingReadRef.current;
+    pending.add(id);
+    fetch(`/api/chats/${id}/read`, { method: "POST" })
+      .catch(() => {})
+      .finally(() => { pending.delete(id); });
   }, []);
   // The SSE handler (set up once) reads the live active chat / markRead via refs.
   const activeChatIdRef = useRef(activeChatId);
