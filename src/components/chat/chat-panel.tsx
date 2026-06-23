@@ -24,7 +24,7 @@ function msgText(m: { parts?: { type: string; text?: string }[] }): string {
     .trim();
 }
 
-import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X } from "lucide-react";
+import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X, Square } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -369,13 +369,31 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const inputEl = readOnly ? (
     <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
       <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Send className="h-4 w-4 shrink-0" />
-          {t("panel.telegramReadOnly")}
-        </p>
-        <Button variant="outline" size="sm" onClick={handleContinueHere} disabled={messages.length === 0}>
-          {t("panel.continueHere")}
-        </Button>
+        {isLoading ? (
+          // The bot (started from Telegram) is actively working on this read-only
+          // chat. We can't reply here, but the running task is the same row a web
+          // send would create — so the already-wired stop() cancels it all the same.
+          <>
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" aria-hidden="true" />
+              {t("panel.telegramBusy")}
+            </p>
+            <Button variant="outline" size="sm" onClick={stop}>
+              <Square className="h-3.5 w-3.5" />
+              {t("panel.stopBot")}
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Send className="h-4 w-4 shrink-0" />
+              {t("panel.telegramReadOnly")}
+            </p>
+            <Button variant="outline" size="sm" onClick={handleContinueHere} disabled={messages.length === 0}>
+              {t("panel.continueHere")}
+            </Button>
+          </>
+        )}
       </div>
     </div>
   ) : (

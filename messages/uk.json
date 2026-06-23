@@ -205,6 +205,8 @@
       "retry": "Повторити",
       "navigation": "Навігація чатом",
       "telegramReadOnly": "Це Telegram-чат, відповідайте там.",
+      "telegramBusy": "Бот працює над цим чатом…",
+      "stopBot": "Зупинити",
       "continueHere": "Продовжити у вебі",
       "queuedFiles": "{count, plural, one {# файл} few {# файли} many {# файлів} other {# файлу}} у черзі",
       "cancelQueued": "Прибрати з черги"

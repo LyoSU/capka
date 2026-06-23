@@ -205,6 +205,8 @@
       "retry": "Retry",
       "navigation": "Chat navigation",
       "telegramReadOnly": "This is a Telegram chat. Reply there.",
+      "telegramBusy": "The bot is working on this chat…",
+      "stopBot": "Stop",
       "continueHere": "Continue in a web chat",
       "queuedFiles": "{count, plural, one {# file} other {# files}}",
       "cancelQueued": "Remove from queue"
