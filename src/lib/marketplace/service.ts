@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { pluginMarketplaces, pluginInstalls } from "@/lib/db/schema";
+import { pluginMarketplaces, pluginInstalls, skills, mcpServers } from "@/lib/db/schema";
 import { createGuardedFetch } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls, getSetting } from "@/lib/settings";
 import { ValidationError } from "@/lib/errors";
@@ -91,6 +91,53 @@ export async function getInstallMeta(
     out.set(i.id, { pluginName: i.pluginName, author: item?.author ?? null, homepage: item?.homepage ?? null });
   }
   return out;
+}
+
+export type PluginEnabledState = "on" | "off" | "mixed";
+
+/** Installed plugins, each grouped with the skills + connectors it routed, so the
+ *  Extensions page can show — and act on — a plugin as one unit (no more hunting
+ *  scattered rows across the Skills and Connectors pages). */
+export async function listInstalledPlugins() {
+  const installs = await db.select().from(pluginInstalls);
+  if (!installs.length) return [];
+  const tags = installs.map((i) => `catalog:${i.id}`);
+  const [skillRows, connRows, meta] = await Promise.all([
+    db.select({ id: skills.id, name: skills.name, enabled: skills.enabled, source: skills.source }).from(skills).where(inArray(skills.source, tags)),
+    db.select({ id: mcpServers.id, name: mcpServers.name, enabled: mcpServers.enabled, transport: mcpServers.transport, source: mcpServers.source }).from(mcpServers).where(inArray(mcpServers.source, tags)),
+    getInstallMeta(installs.map((i) => i.id)),
+  ]);
+  return installs.map((i) => {
+    const tag = `catalog:${i.id}`;
+    const pluginSkills = skillRows.filter((r) => r.source === tag).map((r) => ({ id: r.id, name: r.name, enabled: r.enabled }));
+    const connectors = connRows.filter((r) => r.source === tag).map((r) => ({ id: r.id, name: r.name, enabled: r.enabled, transport: r.transport }));
+    const items = [...pluginSkills, ...connectors];
+    const enabledState: PluginEnabledState =
+      items.length === 0 || items.every((x) => x.enabled) ? "on" : items.some((x) => x.enabled) ? "mixed" : "off";
+    const m = (i.manifest ?? {}) as { displayName?: string; notes?: string[] };
+    return {
+      id: i.id,
+      pluginName: i.pluginName,
+      displayName: m.displayName ?? null,
+      version: i.version,
+      author: meta.get(i.id)?.author ?? null,
+      homepage: meta.get(i.id)?.homepage ?? null,
+      createdAt: i.createdAt,
+      enabledState,
+      notes: Array.isArray(m.notes) ? m.notes : [],
+      skills: pluginSkills,
+      connectors,
+    };
+  });
+}
+
+/** Flip enabled on every skill + connector a plugin routed — one action for the
+ *  whole group (the data model already filters runtime use by `enabled`). */
+export async function setPluginEnabled(installId: string, enabled: boolean): Promise<void> {
+  const tag = `catalog:${installId}`;
+  const now = new Date();
+  await db.update(skills).set({ enabled, updatedAt: now }).where(eq(skills.source, tag));
+  await db.update(mcpServers).set({ enabled, updatedAt: now }).where(eq(mcpServers.source, tag));
 }
 
 /** The install id for a (marketplace, plugin), or null. */

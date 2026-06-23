@@ -5,6 +5,7 @@ import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
 import { recordConnectError, clearConnectError } from "./connect-errors";
 import { McpOAuthProvider } from "./oauth/provider";
+import { needsPluginRoot, resolvePluginRoot } from "./plugin-runtime";
 
 const MAX_CONCURRENT = 4;
 
@@ -34,14 +35,19 @@ export async function loadMcpTools(opts: {
 
   for (let i = 0; i < configs.length; i += MAX_CONCURRENT) {
     const batch = configs.slice(i, i + MAX_CONCURRENT);
-    const settled = await Promise.allSettled(batch.map((c) => {
+    const settled = await Promise.allSettled(batch.map(async (c) => {
       // OAuth connectors use this user's stored tokens (auto-refresh, never
       // redirects mid-run); a missing token throws → the server is skipped and
       // the UI prompts the user to sign in.
       const authProvider = c.authKind === "oauth" && c.id
         ? new McpOAuthProvider(opts.userId, c.id, "runtime")
         : undefined;
-      return connectMcpServer(c, { blockPrivate, authProvider, sessionKey: opts.sessionKey });
+      // A plugin's bundled stdio server: materialize its files into the sandbox
+      // and resolve ${CLAUDE_PLUGIN_ROOT} before connecting.
+      const cfg = opts.sessionKey && needsPluginRoot(c)
+        ? await resolvePluginRoot(opts.sessionKey, c)
+        : c;
+      return connectMcpServer(cfg, { blockPrivate, authProvider, sessionKey: opts.sessionKey });
     }));
     settled.forEach((r, idx) => {
       const cfg = batch[idx];

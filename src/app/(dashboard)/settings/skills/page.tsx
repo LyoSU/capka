@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Library, Plug, Store } from "lucide-react";
+import { Library, Plug, Store, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import SkillLibrary from "@/components/settings/skill-library";
 import ConnectorList from "@/components/settings/connector-list";
 import { MarketplaceBrowser } from "@/components/settings/marketplace-browser";
+import InstalledPlugins from "@/components/settings/installed-plugins";
 
-type Tab = "library" | "connectors" | "marketplace";
+type Tab = "library" | "connectors" | "marketplace" | "installed";
 
 export default function CustomizePage() {
   const t = useTranslations("settings.skills");
@@ -23,12 +24,13 @@ export default function CustomizePage() {
     // Reading the URL must happen post-mount (no window on the server); an effect
     // is the right tool here and avoids a hydration mismatch on the default tab.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (q === "marketplace" || q === "connectors") setTab(q);
+    if (q === "marketplace" || q === "connectors" || q === "installed") setTab(q);
   }, []);
 
   const tabs: { key: Tab; label: string; icon: typeof Library; adminOnly?: boolean }[] = [
     { key: "library", label: t("tab.library"), icon: Library },
     { key: "connectors", label: t("tab.connectors"), icon: Plug },
+    { key: "installed", label: t("tab.installed"), icon: Package, adminOnly: true },
     { key: "marketplace", label: t("tab.marketplace"), icon: Store, adminOnly: true },
   ];
   const visibleTabs = tabs.filter((tb) => !tb.adminOnly || isAdmin);
@@ -60,6 +62,7 @@ export default function CustomizePage() {
 
       {active === "library" && <SkillLibrary chrome={false} />}
       {active === "connectors" && <ConnectorList chrome={false} />}
+      {active === "installed" && <InstalledPlugins />}
       {active === "marketplace" && <MarketplaceBrowser />}
     </div>
   );

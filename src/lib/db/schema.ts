@@ -407,6 +407,17 @@ export const pluginInstalls = pgTable("plugin_installs", {
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [index("idx_plugin_installs_marketplace").on(table.marketplaceId)]);
 
+// Bundled plugin files (servers/, scripts/, config) — base64 content, materialized
+// into the sandbox at /plugins/<installId> on demand so a plugin's local MCP server
+// referencing ${CLAUDE_PLUGIN_ROOT} can run. Mirrors skillFiles; Postgres is the
+// source of truth. Cascade-dropped with the install (which is the uninstall path).
+export const pluginFiles = pgTable("plugin_files", {
+  id: text("id").primaryKey(),
+  installId: text("install_id").notNull().references(() => pluginInstalls.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  content: text("content").notNull(), // base64
+}, (table) => [index("idx_plugin_files_install_id").on(table.installId)]);
+
 // Unified permission policy over skills + connectors. Default (no row) = allow.
 // G1 enforces allow/deny at tool-assembly; 'ask' is stored for the future gate.
 export const capabilityPolicies = pgTable("capability_policies", {

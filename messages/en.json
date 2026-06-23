@@ -706,7 +706,8 @@
       "tab": {
         "library": "Library",
         "marketplace": "Marketplace",
-        "connectors": "Connectors"
+        "connectors": "Connectors",
+        "installed": "Installed"
       },
       "loadError": "Couldn't load skills.",
       "toggleFailed": "Couldn't update the skill.",
@@ -746,7 +747,27 @@
       "deleteWarn": "This removes the skill for everyone it's available to. This can't be undone.",
       "deletePluginWarn": "This skill came from the “{plugin}” plugin and may return next time that plugin is installed or updated. To remove it for good, uninstall the plugin.",
       "cancel": "Cancel",
-      "delete": "Delete"
+      "delete": "Delete",
+      "installed": {
+        "loadError": "Couldn't load installed plugins.",
+        "actionFailed": "Something went wrong. Try again.",
+        "empty": "No plugins installed yet. Open Marketplace to add one.",
+        "counts": "{skills} skills · {connectors} connectors",
+        "by": "by {author}",
+        "enable": "Enable",
+        "disable": "Disable",
+        "update": "Update",
+        "uninstall": "Uninstall",
+        "cancel": "Cancel",
+        "uninstallConfirm": "Uninstall “{name}”? This removes all of its skills and connectors.",
+        "updated": "Plugin updated.",
+        "uninstalled": "Plugin uninstalled.",
+        "state": {
+          "on": "On",
+          "off": "Off",
+          "mixed": "Partly on"
+        }
+      }
     },
     "connectors": {
       "title": "Connectors",

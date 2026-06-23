@@ -75,6 +75,7 @@ export async function listEnabledServerConfigs(userId: string, projectId?: strin
       args: (r.args as string[] | null) ?? undefined,
       secrets,
       authKind: r.authKind as McpAuthKind,
+      source: r.source,
     });
   }
   return out;

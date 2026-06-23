@@ -23,6 +23,9 @@ export interface McpServerConfig {
   args?: string[];
   secrets?: McpSecrets;
   authKind?: McpAuthKind;
+  /** Provenance tag (e.g. `catalog:<installId>`). Lets the runtime materialize a
+   *  plugin's bundled files for a stdio server that references ${CLAUDE_PLUGIN_ROOT}. */
+  source?: string;
 }
 
 /** A server row as served to load/UI (no decrypted secrets). */

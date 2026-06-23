@@ -176,6 +176,13 @@
       "when": 1782403200008,
       "tag": "0024_enable_free_models",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1782403200009,
+      "tag": "0025_add_plugin_files",
+      "breakpoints": true
     }
   ]
 }
