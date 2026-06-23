@@ -237,10 +237,13 @@ export function mimeToModality(mimeType: string): Modality | null {
  * Precedence:
  * 1. Video only serializes through the Google SDK — gated to Gemini regardless
  *    of any catalog claim (OpenRouter's provider has no `video_url`).
- * 2. Per-model `modelInput` (OpenRouter's `input_modalities`, when known) is
+ * 2. OpenRouter parses PDFs server-side for ANY model (its file parser is
+ *    model-agnostic), so PDF is always native there — never gated by per-model
+ *    `input_modalities`, which often omit `file` even for PDF-capable models.
+ * 3. Per-model `modelInput` (OpenRouter's `input_modalities`, when known) is
  *    authoritative — it knows exactly what THIS model takes.
- * 3. Otherwise fall back to the provider's static `nativeInput`.
- * 4. An unknown provider falls to the safe side: only the universal image block.
+ * 4. Otherwise fall back to the provider's static `nativeInput`.
+ * 5. An unknown provider falls to the safe side: only the universal image block.
  */
 export function acceptsNativeFile(
   mimeType: string,
@@ -250,6 +253,7 @@ export function acceptsNativeFile(
   const mod = mimeToModality(mimeType);
   if (!mod) return false;
   if (mod === "video") return provider === "google";
+  if (mod === "pdf" && provider === "openrouter") return true;
   if (modelInput && modelInput.length) return modelInput.includes(mod);
   if (isProviderName(provider)) return PROVIDER_META[provider].nativeInput.includes(mod);
   return mod === "image";

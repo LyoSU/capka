@@ -71,6 +71,13 @@ describe("acceptsNativeFile (per-model modalities win)", () => {
   it("never makes video native off Google, even if the catalog claims it", () => {
     expect(acceptsNativeFile("video/mp4", "openrouter", ["image", "video"])).toBe(false);
   });
+
+  it("always keeps PDF native on OpenRouter, even when the model omits 'file'", () => {
+    // OpenRouter parses PDFs server-side for any model; input_modalities often
+    // lack 'file' even for PDF-capable models, so per-model must not gate it.
+    expect(acceptsNativeFile("application/pdf", "openrouter", ["image"])).toBe(true);
+    expect(acceptsNativeFile("application/pdf", "openrouter", [])).toBe(true);
+  });
 });
 
 describe("classifyFiles (provider + per-model aware)", () => {
