@@ -1,0 +1,1 @@
+ALTER TABLE "chats" ADD COLUMN "last_read_at" timestamp;

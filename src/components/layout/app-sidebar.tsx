@@ -16,6 +16,7 @@ import {
   Monitor,
   Sun,
   Moon,
+  Loader2,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import {
@@ -64,7 +65,40 @@ type ChatItem = {
   source: string | null;
   visibility: string | null;
   shareToken: string | null;
+  // An assistant reply landed since the user last opened this chat. Derived
+  // server-side from chats.lastReadAt; drives the unread dot.
+  unread?: boolean;
+  // A task is queued/generating for this chat right now. Seeded by the API,
+  // kept live by SSE task:start/task:finish; drives the working spinner.
+  running?: boolean;
 };
+
+// Mirror the server's ORDER BY (pinned DESC, updatedAt DESC, id DESC) so the
+// client-side merge keeps pages in the same order the cursor paginates by —
+// a chat that streams in on scroll, or gets bumped by new activity, lands
+// exactly where the server would have put it.
+function sortChats(list: ChatItem[]): ChatItem[] {
+  return [...list].sort((a, b) => {
+    const pa = a.pinned ? 1 : 0;
+    const pb = b.pinned ? 1 : 0;
+    if (pa !== pb) return pb - pa;
+    const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+    const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+    if (ta !== tb) return tb - ta;
+    return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+  });
+}
+
+// Merge a freshly-fetched batch into the loaded list: incoming rows overwrite
+// existing ones by id (server fields are authoritative), new ones are added,
+// and already-loaded older pages are preserved — so an SSE-driven head refresh
+// updates titles/unread/running and ordering without discarding the user's
+// scrolled-in pages.
+function mergeChats(prev: ChatItem[], incoming: ChatItem[]): ChatItem[] {
+  const map = new Map(prev.map((c) => [c.id, c]));
+  for (const c of incoming) map.set(c.id, { ...map.get(c.id), ...c });
+  return sortChats([...map.values()]);
+}
 
 type DateGroupKey = "today" | "yesterday" | "thisWeek" | "older";
 
@@ -109,7 +143,28 @@ function ChatTitle({ title, fallback }: { title: string | null; fallback: string
   // Keying the span by its text makes a title change (placeholder → generated
   // title, or a rename) remount a fresh element, which replays the CSS de-blur.
   // A refetch that returns the same text keeps the key, so it never re-animates.
-  return <span key={display} className="truncate animate-title-swap">{display}</span>;
+  return <span key={display} className="min-w-0 flex-1 truncate animate-title-swap">{display}</span>;
+}
+
+/** Trailing status affordance on a chat row. "Working" (a task is generating)
+ *  outranks "unread" — a running chat is by definition the freshest, so the
+ *  spinner subsumes the dot until the reply lands and it flips to unread. */
+function ChatStatusDot({
+  unread,
+  running,
+  labels,
+}: {
+  unread?: boolean;
+  running?: boolean;
+  labels: { unread: string; working: string };
+}) {
+  if (running) {
+    return <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label={labels.working} />;
+  }
+  if (unread) {
+    return <span className="size-2 shrink-0 rounded-full bg-primary" role="status" aria-label={labels.unread} />;
+  }
+  return null;
 }
 
 export function AppSidebar() {
@@ -130,12 +185,18 @@ export function AppSidebar() {
   // list arrives. Stays true after the first load, so search/SSE refetches
   // never re-flash the skeleton.
   const [loaded, setLoaded] = useState(false);
+  // Keyset cursor for the next page (from the X-Next-Cursor header). Null once
+  // the list is fully loaded — also the signal that hides the scroll sentinel.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   // Telegram chats can pile up; show the most recent and tuck the rest behind a
   // toggle so the section stays compact at the top of the list.
   const [showAllTelegram, setShowAllTelegram] = useState(false);
+  const activeChatId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
 
   // Debounce search by 300ms
   useEffect(() => {
@@ -143,21 +204,117 @@ export function AppSidebar() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const fetchChats = useCallback(() => {
+  const baseParams = useCallback(() => {
     const params = new URLSearchParams();
     if (selectedProject) params.set("projectId", selectedProject);
     if (debouncedSearch) params.set("search", debouncedSearch);
-    const url = `/api/chats${params.size ? `?${params}` : ""}`;
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setChats)
-      .catch(() => {})
-      .finally(() => setLoaded(true));
+    return params;
   }, [selectedProject, debouncedSearch]);
 
+  // Reset: replace the list with a fresh first page. For a changed filter set
+  // (project/search) or a context-menu action (pin/archive/delete) where stale
+  // rows must drop out — merging can't remove rows the server no longer returns.
+  const fetchReset = useCallback(() => {
+    const params = baseParams();
+    fetch(`/api/chats${params.size ? `?${params}` : ""}`)
+      .then(async (r) =>
+        r.ok
+          ? { rows: (await r.json()) as ChatItem[], cursor: r.headers.get("X-Next-Cursor") }
+          : { rows: [] as ChatItem[], cursor: null },
+      )
+      .then(({ rows, cursor }) => {
+        setChats(sortChats(rows));
+        setNextCursor(cursor);
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [baseParams]);
+
+  // Head refresh: re-fetch the first page and MERGE it in — picks up new chats,
+  // reordering, and fresh unread/running/title while keeping already-loaded
+  // older pages and the scroll position. Leaves nextCursor alone so pagination
+  // depth survives. Used for SSE/navigation refreshes.
+  const refreshHead = useCallback(() => {
+    const params = baseParams();
+    fetch(`/api/chats${params.size ? `?${params}` : ""}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: ChatItem[]) => setChats((prev) => mergeChats(prev, rows)))
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [baseParams]);
+
+  // Load the next page when the scroll sentinel comes into view.
+  const loadMore = useCallback(() => {
+    if (loadingMoreRef.current || !nextCursor) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const params = baseParams();
+    params.set("cursor", nextCursor);
+    fetch(`/api/chats?${params}`)
+      .then(async (r) =>
+        r.ok
+          ? { rows: (await r.json()) as ChatItem[], cursor: r.headers.get("X-Next-Cursor") }
+          : { rows: [] as ChatItem[], cursor: null },
+      )
+      .then(({ rows, cursor }) => {
+        setChats((prev) => mergeChats(prev, rows));
+        setNextCursor(cursor);
+      })
+      .catch(() => {})
+      .finally(() => {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      });
+  }, [baseParams, nextCursor]);
+
+  // Filter change (project/search) or first mount → reset list + pagination.
   useEffect(() => {
-    fetchChats();
-  }, [fetchChats, pathname]);
+    fetchReset();
+  }, [fetchReset]);
+
+  // Navigation → merge-refresh (keeps scroll) and mark the opened chat read so
+  // its unread dot clears. The dot is also suppressed for the active chat in the
+  // render below, so a reply that finishes while you're watching never flips it.
+  const refreshHeadRef = useRef(refreshHead);
+  useEffect(() => { refreshHeadRef.current = refreshHead; }, [refreshHead]);
+  useEffect(() => {
+    refreshHeadRef.current();
+  }, [pathname]);
+
+  // Persist "read" on open. The dot for the active chat is already suppressed in
+  // the render (so it never shows while you're looking), and the merge-refresh
+  // that fires on this same navigation reconciles the flag from the server — so
+  // no optimistic local clear is needed here.
+  const markRead = useCallback((id: string) => {
+    fetch(`/api/chats/${id}/read`, { method: "POST" }).catch(() => {});
+  }, []);
+  // The SSE handler (set up once) reads the live active chat / markRead via refs.
+  const activeChatIdRef = useRef(activeChatId);
+  useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
+  const markReadRef = useRef(markRead);
+  useEffect(() => { markReadRef.current = markRead; }, [markRead]);
+  useEffect(() => {
+    if (!activeChatId) return;
+    markRead(activeChatId);
+  }, [activeChatId, markRead]);
+
+  // Lazy-load the next page when the sentinel scrolls into view. Re-binds after
+  // each page (nextCursor changes) so the freshly-rendered sentinel is observed;
+  // the root is the sidebar's own scroll container, not the viewport.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreRef = useRef(loadMore);
+  useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const root = el.closest('[data-slot="sidebar-content"]') as HTMLElement | null;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting) loadMoreRef.current(); },
+      { root, rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [nextCursor]);
 
   // On mobile the sidebar is a full-screen sheet; once the user navigates it
   // must get out of the way. A route change covers most cases — the explicit
@@ -174,8 +331,6 @@ export function AppSidebar() {
   // is sent (no route change fires then), and titles are generated a moment after
   // a task finishes. Subscribe to the same task event stream the chat panel uses
   // and refetch (debounced) when a chat appears, finishes, or arrives externally.
-  const fetchChatsRef = useRef(fetchChats);
-  useEffect(() => { fetchChatsRef.current = fetchChats; }, [fetchChats]);
   useEffect(() => {
     let es: EventSource | null = null;
     let reconnect: ReturnType<typeof setTimeout>;
@@ -183,7 +338,7 @@ export function AppSidebar() {
     let delay = 1000;
     const refresh = () => {
       clearTimeout(debounce);
-      debounce = setTimeout(() => fetchChatsRef.current(), 400);
+      debounce = setTimeout(() => refreshHeadRef.current(), 400);
     };
     const connect = () => {
       es = new EventSource("/api/events");
@@ -197,7 +352,23 @@ export function AppSidebar() {
           if (d.type === "chat:title" && d.chatId && d.title) {
             const { chatId: cid, title } = d;
             setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, title } : c)));
-          } else if (d.type === "task:start" || d.type === "task:finish" || d.type === "new_message") {
+          } else if (d.type === "task:start" && d.chatId) {
+            // Flip the spinner on instantly; the debounced merge-refresh then
+            // surfaces brand-new chats and reconciles ordering authoritatively.
+            const cid = d.chatId;
+            setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: true } : c)));
+            refresh();
+          } else if (d.type === "task:finish" && d.chatId) {
+            // Reply done: drop the spinner now. The merge-refresh brings the
+            // fresh unread flag (set when the chat isn't the one being viewed).
+            const cid = d.chatId;
+            setChats((prev) => prev.map((c) => (c.id === cid ? { ...c, running: false } : c)));
+            // If you're watching this chat, the reply you just saw complete is
+            // read — re-stamp lastReadAt (the open-time stamp predates the reply)
+            // so it doesn't resurface as unread the moment you navigate away.
+            if (cid === activeChatIdRef.current) markReadRef.current(cid);
+            refresh();
+          } else if (d.type === "new_message") {
             refresh();
           }
         } catch { /* ignore parse errors */ }
@@ -227,7 +398,7 @@ export function AppSidebar() {
   const pinnedChats = webChats.filter((c) => c.pinned);
   const regularChats = webChats.filter((c) => !c.pinned);
   const groups = groupByDate(regularChats);
-  const activeChatId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
+  const statusLabels = { unread: t("unreadReply"), working: t("working") };
 
   const newChatHref = selectedProject
     ? `/chat?projectId=${selectedProject}`
@@ -316,11 +487,16 @@ export function AppSidebar() {
               <SidebarMenu>
                 {visibleTelegramChats.map((chat) => (
                   <SidebarMenuItem key={chat.id}>
-                    <ChatContextMenu chat={chat} onUpdate={fetchChats}>
+                    <ChatContextMenu chat={chat} onUpdate={fetchReset}>
                       <SidebarMenuButton
                         render={<Link href={`/chat/${chat.id}`} />}
                         data-active={activeChatId === chat.id || undefined}
                       >
+                        <ChatStatusDot
+                          unread={!!chat.unread && chat.id !== activeChatId}
+                          running={chat.running}
+                          labels={statusLabels}
+                        />
                         <ChatTitle title={chat.title} fallback={t("newChat")} />
                       </SidebarMenuButton>
                     </ChatContextMenu>
@@ -350,11 +526,16 @@ export function AppSidebar() {
               <SidebarMenu>
                 {pinnedChats.map((chat) => (
                   <SidebarMenuItem key={chat.id}>
-                    <ChatContextMenu chat={chat} onUpdate={fetchChats}>
+                    <ChatContextMenu chat={chat} onUpdate={fetchReset}>
                       <SidebarMenuButton
                         render={<Link href={`/chat/${chat.id}`} />}
                         data-active={activeChatId === chat.id || undefined}
                       >
+                        <ChatStatusDot
+                          unread={!!chat.unread && chat.id !== activeChatId}
+                          running={chat.running}
+                          labels={statusLabels}
+                        />
                         <ChatTitle title={chat.title} fallback={t("newChat")} />
                       </SidebarMenuButton>
                     </ChatContextMenu>
@@ -372,11 +553,16 @@ export function AppSidebar() {
               <SidebarMenu>
                 {group.chats.map((chat) => (
                   <SidebarMenuItem key={chat.id}>
-                    <ChatContextMenu chat={chat} onUpdate={fetchChats}>
+                    <ChatContextMenu chat={chat} onUpdate={fetchReset}>
                       <SidebarMenuButton
                         render={<Link href={`/chat/${chat.id}`} />}
                         data-active={activeChatId === chat.id || undefined}
                       >
+                        <ChatStatusDot
+                          unread={!!chat.unread && chat.id !== activeChatId}
+                          running={chat.running}
+                          labels={statusLabels}
+                        />
                         <ChatTitle title={chat.title} fallback={t("newChat")} />
                       </SidebarMenuButton>
                     </ChatContextMenu>
@@ -386,6 +572,15 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
+
+        {/* Infinite-scroll trigger: when this scrolls into view the next page
+            loads. Only rendered while more pages remain, so it doubles as the
+            "fully loaded" signal. */}
+        {nextCursor && (
+          <div ref={sentinelRef} className="flex justify-center py-3" aria-hidden>
+            {loadingMore && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
+        )}
 
         {loaded && chats.length === 0 && (
           <div className="animate-blur-rise flex flex-col items-center px-4 py-10 text-center">

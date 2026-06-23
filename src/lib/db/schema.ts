@@ -118,6 +118,11 @@ export const chats = pgTable("chats", {
   // this pointer. Null = empty chat. FK is set-null so deleting a message never
   // orphans the chat (the read path re-derives a leaf when this is stale).
   activeLeafId: text("active_leaf_id").references((): AnyPgColumn => messages.id, { onDelete: "set null" }),
+  // When the owner last opened this chat. Drives the sidebar's "unread reply"
+  // dot: a chat is unread when it holds an assistant message newer than this.
+  // Null = never opened, so any assistant reply counts as unread. Set by
+  // POST /api/chats/[id]/read on open and when a watched reply finishes.
+  lastReadAt: timestamp("last_read_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
