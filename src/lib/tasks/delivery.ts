@@ -13,6 +13,7 @@
 import { InputFile } from "grammy";
 import { log } from "@/lib/log";
 import { getTranslator, type Translator } from "@/lib/i18n/translator";
+import type { Modality } from "@/lib/providers/registry";
 
 // `locale` carries the originating Telegram client's language so the bot's
 // outbound text (status header, collapsed log, error fallbacks) matches what the
@@ -32,6 +33,11 @@ export interface TaskResult {
   errorDetail?: string;
   /** Whether the linked user is an admin (gates the technical error detail). */
   isAdmin?: boolean;
+  /** Media modalities the chosen model couldn't take natively this turn (e.g. a
+   *  voice note on a text-only model). Surfaced as a calm one-line heads-up above
+   *  the answer, pointing at /model — the user otherwise can't tell the model
+   *  never heard them. */
+  blindModalities?: Modality[];
 }
 
 /** The transient activity shown while the answer streams in. `reasoning` carries
@@ -357,7 +363,16 @@ class TelegramSink implements DeliverySink {
     } else {
       markdown = `_${this.t("noText")}_`;
     }
-    if (markdown) await this.sendRich(markdown, body || this.t("noText"), false);
+    // Calm heads-up when the model couldn't see/hear an attachment — prepended so
+    // the user learns it before reading a reply that ignored the file. Stands on
+    // its own if there was no other text to send.
+    const notice = result.blindModalities?.length
+      ? this.t("capabilityNotice", {
+          modalities: result.blindModalities.map((m) => this.t(`modality.${m}`)).join(", "),
+        })
+      : null;
+    if (notice) markdown = markdown ? `${notice}\n\n${markdown}` : notice;
+    if (markdown) await this.sendRich(markdown, notice ? `${notice}\n\n${body}` : body || this.t("noText"), false);
   }
 
   async sendFiles(files: OutFile[]): Promise<void> {

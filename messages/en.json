@@ -336,6 +336,15 @@
       "steps": "{count, plural, one {# step} other {# steps}}",
       "more": "+{count} more"
     },
+    "notice": {
+      "blindModalities": "The current model can't process this attachment ({modalities}). Switch to a model that supports it:",
+      "modality": {
+        "audio": "audio",
+        "video": "video",
+        "image": "images",
+        "pdf": "PDF"
+      }
+    },
     "time": {
       "justNow": "just now",
       "yesterday": "Yesterday {time}"
@@ -1091,6 +1100,17 @@
     "genericError": "Something went wrong. Please try again.",
     "technicalDetails": "Technical details",
     "doneLog": "✅ {count, plural, one {# tool} other {# tools}} · {secs}s",
-    "pendingApproval": "⏳ **Account awaiting approval**\n\nAn administrator needs to approve your account. You'll be able to chat as soon as they do."
+    "pendingApproval": "⏳ **Account awaiting approval**\n\nAn administrator needs to approve your account. You'll be able to chat as soon as they do.",
+    "capabilityNotice": "⚠️ The current model can't process this attachment ({modalities}). Use /model to pick one that supports it.",
+    "modality": {
+      "audio": "audio",
+      "video": "video",
+      "image": "images",
+      "pdf": "PDF"
+    },
+    "modelPrompt": "🧠 Pick a model for this chat:",
+    "modelSet": "✅ Now using *{model}* in this chat.",
+    "modelEmpty": "No models available yet. Add a provider in unClaw settings.",
+    "modelStale": "That list is out of date — send /model again."
   }
 }

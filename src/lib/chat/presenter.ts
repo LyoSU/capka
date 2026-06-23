@@ -86,6 +86,9 @@ export function toUIMessages(rows: {
         siblingCount: m.siblingCount ?? 1,
         // Surfaced so the user bubble can render attachment thumbnails.
         attachedFiles: meta?.attachedFiles,
+        // Capability heads-up (e.g. audio sent to a text-only model) — drives the
+        // "switch model" nudge on the turn.
+        notice: meta?.notice,
         // Tech details for the assistant (i) popover.
         durationMs: meta?.durationMs,
         model: meta?.model,

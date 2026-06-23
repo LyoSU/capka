@@ -1,8 +1,9 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
-  ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb, Info,
+  ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb, Info, AlertTriangle,
 } from "lucide-react";
+import { ModelPicker } from "@/components/chat/model-picker";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Markdown } from "@/components/chat/markdown";
@@ -425,6 +426,36 @@ function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: s
   );
 }
 
+/** Calm heads-up shown when the model couldn't natively take an attached media
+ *  type (e.g. an audio note sent to a text-only model). Amber, not red — it's a
+ *  limitation, not a failure. The embedded model picker IS the one-tap fix:
+ *  switch to a capable model, then regenerate. */
+function CapabilityNotice({
+  modalities, model, onModelChange,
+}: {
+  modalities: string[];
+  model?: string;
+  onModelChange?: (model: string) => void;
+}) {
+  const t = useTranslations("chat.notice");
+  const list = modalities.map((m) => t(`modality.${m}`)).join(", ");
+  return (
+    <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3.5 py-2.5">
+      <div className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="flex-1">
+          <span>{t("blindModalities", { modalities: list })}</span>
+          {onModelChange && model !== undefined && (
+            <div className="mt-1.5 inline-flex rounded-full border border-amber-500/30 bg-background/50 px-1">
+              <ModelPicker variant="pill" value={model} onChange={onModelChange} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Hover-revealed "copy" action for an assistant reply. Swaps to a check for a
  *  beat on success and fires a light haptic — quiet until the user reaches for it. */
 function CopyButton({ text }: { text: string }) {
@@ -777,16 +808,20 @@ interface ChatMessageProps {
   onSwitchBranch?: (messageId: string, direction: "prev" | "next") => void;
   /** Fork the conversation from this message into a new chat. */
   onFork?: (messageId: string) => void;
+  /** The chat's active model + setter — lets the capability notice offer a
+   *  one-tap switch to a model that can actually see/hear the attachment. */
+  model?: string;
+  onModelChange?: (model: string) => void;
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, model, onModelChange }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number; notice?: { kind: string; modalities: string[] } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -895,6 +930,13 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             }
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
+          />
+        )}
+        {metadata?.notice?.kind === "blind-modalities" && metadata.notice.modalities.length > 0 && (
+          <CapabilityNotice
+            modalities={metadata.notice.modalities}
+            model={model}
+            onModelChange={onModelChange}
           />
         )}
         {!isStreaming && (() => {

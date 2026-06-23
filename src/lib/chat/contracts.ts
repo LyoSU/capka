@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Modality } from "@/lib/providers/registry";
 
 // Inbound POST /api/chat body
 export const chatRequestSchema = z.object({
@@ -48,6 +49,11 @@ export type MessageMeta = {
   // Lets the chat history show what was attached; the bytes live in the sandbox
   // workspace and are fetched lazily by the client (never re-sent to the model).
   attachedFiles?: { name: string; type: string }[];
+  // A non-fatal heads-up surfaced on the turn. `blind-modalities` means the
+  // resolved model couldn't natively take one of the attached media types (e.g.
+  // an audio note on a text-only model), so it answered without seeing/hearing
+  // it — the UI nudges the user to switch to a capable model.
+  notice?: { kind: "blind-modalities"; modalities: Modality[] };
   // Legacy format
   toolCalls?: { id: string; name: string; input: unknown }[];
   toolResults?: { id: string; name: string; output: unknown }[];

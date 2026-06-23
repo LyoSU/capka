@@ -549,6 +549,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                       onEdit={!isLoading && !readOnly ? editMessage : undefined}
                       onSwitchBranch={!isLoading ? switchBranch : undefined}
                       onFork={!isLoading ? handleFork : undefined}
+                      model={model}
+                      onModelChange={readOnly ? undefined : setModel}
                     />
                   </div>
                 );

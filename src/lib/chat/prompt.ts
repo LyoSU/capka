@@ -1,6 +1,6 @@
 import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
 import { type FileRef } from "@/lib/constants";
-import { acceptsNativeFile, type Modality } from "@/lib/providers/registry";
+import { acceptsNativeFile, mimeToModality, type Modality } from "@/lib/providers/registry";
 import { formatAvailableSkills } from "@/lib/skills/fmt";
 
 /**
@@ -146,4 +146,28 @@ export function classifyFiles(
     else hasToolOnly = true;
   }
   return { nativeFiles, hasToolOnly };
+}
+
+/**
+ * The distinct media modalities present in the attachments that the resolved
+ * model CANNOT take natively — i.e. files the model is "blind/deaf" to. Only
+ * real media modalities (image/pdf/audio/video) count; a plain document has no
+ * modality and is correctly handled by sandbox tools, so it never warns. Drives
+ * the capability notice that tells the user to switch to a capable model instead
+ * of the model silently pretending it processed the file. First-seen order,
+ * deduped.
+ */
+export function findBlindModalities(
+  files?: FileRef[],
+  provider?: string,
+  modelInput?: Modality[] | null,
+): Modality[] {
+  const blind: Modality[] = [];
+  for (const f of files ?? []) {
+    const mod = mimeToModality(f.type);
+    if (!mod) continue;
+    if (acceptsNativeFile(f.type, provider ?? "", modelInput)) continue;
+    if (!blind.includes(mod)) blind.push(mod);
+  }
+  return blind;
 }

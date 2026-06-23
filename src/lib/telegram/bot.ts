@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import { nanoid } from "nanoid";
-import { eq, and, ne } from "drizzle-orm";
+import { eq, and, ne, desc, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages, users, accounts } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
@@ -16,6 +16,7 @@ import { getTranslator } from "@/lib/i18n/translator";
 import { getPublicUrl } from "@/lib/url";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { uploadFile } from "@/lib/sandbox/client";
+import { modelChoices } from "@/lib/telegram/model-menu";
 import type { FileRef } from "@/lib/constants";
 import type { TaskPayload } from "@/lib/tasks/runner";
 
@@ -35,6 +36,7 @@ const MAX_TELEGRAM_FILE_BYTES = 20 * 1024 * 1024; // getFile's hard download cap
 const BOT_COMMANDS = [
   { command: "start", description: "Show the welcome message" },
   { command: "new", description: "Start a new chat" },
+  { command: "model", description: "Switch the model for this chat" },
 ];
 
 // Bot replies follow the user's own Telegram client language (falling back to
@@ -303,9 +305,52 @@ export async function getBot(): Promise<Bot | null> {
     const id = nanoid();
     await db
       .insert(chats)
-      .values({ id, userId: link.userId, title: "Telegram Chat", source: "telegram" });
+      .values({ id, userId: link.userId, title: "Telegram Chat", source: "telegram", model: await lastUsedModel(link.userId) });
     await db.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
     await reply(ctx, "newChat", { button: openChatButton(id) });
+  });
+
+  // Pick the model for the active Telegram chat from a short, capability-tagged
+  // list. The menu is a one-per-row inline keyboard; the tap is handled by the
+  // `m:<index>` callback below, which re-derives the same list and stores the ref.
+  _bot.command("model", async (ctx) => {
+    const link = await findLink(ctx.from!.id);
+    if (!link) {
+      await reply(ctx, "linkFirst", { button: openAppButton() });
+      return;
+    }
+    const choices = await modelChoices(link.userId);
+    if (!choices.length) {
+      await reply(ctx, "modelEmpty");
+      return;
+    }
+    const kb = new InlineKeyboard();
+    choices.forEach((c, i) => kb.text(c.label, `m:${i}`).row());
+    await ctx
+      .replyWithRichMessage({ markdown: tFor(ctx)("modelPrompt") }, { reply_markup: kb })
+      .catch((e) => log.warn("telegram model menu failed", { err: String(e) }));
+  });
+
+  // A model was tapped: re-derive the same deterministic list and pin the chosen
+  // ref on the active chat. callback_data is just the index, so a long model ref
+  // never trips Telegram's 64-byte callback limit.
+  _bot.callbackQuery(/^m:(\d+)$/, async (ctx) => {
+    const link = await findLink(ctx.from!.id);
+    if (!link) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const choices = await modelChoices(link.userId);
+    const choice = choices[Number(ctx.match![1])];
+    await ctx.answerCallbackQuery();
+    if (!choice) {
+      await reply(ctx, "modelStale");
+      return;
+    }
+    const chat = await resolveActiveChat(link, "Telegram Chat");
+    await db.update(chats).set({ model: choice.ref, updatedAt: new Date() }).where(eq(chats.id, chat.id));
+    await ctx.editMessageReplyMarkup().catch(() => {});
+    await reply(ctx, "modelSet", { values: { model: choice.label } });
   });
 
   // Plain text → straight into the engine.
@@ -339,6 +384,20 @@ export async function getBot(): Promise<Bot | null> {
   });
 
   return _bot;
+}
+
+/** The model the user most recently used in any chat — what a NEW Telegram chat
+ *  inherits, so a voice note isn't silently handed to an audio-incapable default
+ *  model. Null when the user has never pinned a model (then the default config's
+ *  model applies, exactly as before). */
+async function lastUsedModel(userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ model: chats.model })
+    .from(chats)
+    .where(and(eq(chats.userId, userId), isNotNull(chats.model)))
+    .orderBy(desc(chats.updatedAt))
+    .limit(1);
+  return row?.model ?? null;
 }
 
 /**
@@ -376,7 +435,7 @@ async function resolveActiveChat(
       if (existing) return existing;
     }
     const id = nanoid();
-    await tx.insert(chats).values({ id, userId: link.userId, title: firstMessage || "Telegram Chat", source: "telegram" });
+    await tx.insert(chats).values({ id, userId: link.userId, title: firstMessage || "Telegram Chat", source: "telegram", model: await lastUsedModel(link.userId) });
     await tx.update(telegramLinks).set({ activeChatId: id }).where(eq(telegramLinks.id, link.id));
     const [created] = await tx.select().from(chats).where(eq(chats.id, id)).limit(1);
     return created;

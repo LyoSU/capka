@@ -16,7 +16,7 @@ import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { providerNativeTools } from "@/lib/providers";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
-import { buildSystemPrompt, classifyFiles } from "@/lib/chat/prompt";
+import { buildSystemPrompt, classifyFiles, findBlindModalities } from "@/lib/chat/prompt";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
@@ -456,15 +456,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const modelMessages = await convertToModelMessages(uiMessages);
 
     let injectedNative = false;
-    const { nativeFiles } = classifyFiles(
-      [...(payload.attachedFiles ?? []), ...extraAttachedFiles],
-      provider,
-      modelInput,
-    );
+    const turnFiles = [...(payload.attachedFiles ?? []), ...extraAttachedFiles];
+    const { nativeFiles } = classifyFiles(turnFiles, provider, modelInput);
     if (nativeFiles.length) {
       await injectNativeFiles(modelMessages, sessionKey, userId, nativeFiles);
       injectedNative = true;
     }
+    // Media the chosen model can't see/hear natively (e.g. an audio note on a
+    // text-only model). The model would otherwise answer blind — so we surface a
+    // notice on the message telling the user to switch to a capable model,
+    // instead of silently pretending the attachment was understood.
+    const blindModalities = findBlindModalities(turnFiles, provider, modelInput);
 
     // Reasoning is enabled optimistically; the fallback below clears this flag
     // and re-streams without it if the model rejects thinking/reasoning.
@@ -754,6 +756,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       metadata: {
         taskId, status: finalStatus, parts: parts.length > 0 ? parts : undefined,
         ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
+        // Capability gap: the model couldn't natively take one of the attached
+        // media types — flag it so the UI can nudge a model switch.
+        ...(blindModalities.length ? { notice: { kind: "blind-modalities" as const, modalities: blindModalities } } : {}),
         // Tech details for the (i) popover — only on a clean completion.
         ...(finalStatus === "completed" ? {
           durationMs: Date.now() - startedAt,
@@ -771,6 +776,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       error: failure?.userMessage, errorDetail: failure?.adminDetail,
       isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt,
+      ...(blindModalities.length ? { blindModalities } : {}),
     });
     // Deliver any files the agent created/edited this run to the origin channel
     // (Telegram). Best-effort and only on success — never fail the task over it.

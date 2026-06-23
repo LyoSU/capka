@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyFiles } from "../prompt";
+import { classifyFiles, findBlindModalities } from "../prompt";
 import { acceptsNativeFile, mimeToModality } from "@/lib/providers/registry";
 import type { FileRef } from "@/lib/constants";
 
@@ -101,5 +101,40 @@ describe("classifyFiles (provider + per-model aware)", () => {
   it("respects a model's per-model modalities", () => {
     const { nativeFiles } = classifyFiles([file("audio/mpeg")], "openrouter", ["image", "audio"]);
     expect(nativeFiles).toHaveLength(1);
+  });
+});
+
+describe("findBlindModalities (what the model can't see/hear)", () => {
+  it("flags audio the model can't take natively", () => {
+    // glm-5.2-style OpenRouter model with no audio modality.
+    expect(findBlindModalities([file("audio/ogg")], "openrouter", ["image", "pdf"])).toEqual(["audio"]);
+  });
+
+  it("returns nothing when the modality is accepted natively", () => {
+    expect(findBlindModalities([file("audio/ogg")], "google")).toEqual([]);
+    expect(findBlindModalities([file("audio/ogg")], "openrouter", ["image", "audio"])).toEqual([]);
+  });
+
+  it("ignores non-modality files (plain docs stay tool-only without a warning)", () => {
+    expect(findBlindModalities([file("text/csv")], "openrouter", ["image", "pdf"])).toEqual([]);
+    expect(findBlindModalities([file("application/zip")], "anthropic")).toEqual([]);
+  });
+
+  it("dedupes modalities and preserves first-seen order", () => {
+    const files = [file("audio/ogg"), file("video/mp4"), file("audio/mpeg")];
+    // openrouter takes neither audio nor video here → ["audio","video"], no dup.
+    expect(findBlindModalities(files, "openrouter", ["image", "pdf"])).toEqual(["audio", "video"]);
+  });
+
+  it("only flags the modalities that are actually blind, not the native ones", () => {
+    // image is native on openrouter; audio is not → only audio is blind.
+    expect(findBlindModalities([file("image/png"), file("audio/ogg")], "openrouter", ["image"])).toEqual([
+      "audio",
+    ]);
+  });
+
+  it("returns nothing for an empty / missing file list", () => {
+    expect(findBlindModalities([], "openrouter")).toEqual([]);
+    expect(findBlindModalities(undefined, "openrouter")).toEqual([]);
   });
 });
