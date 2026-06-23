@@ -707,6 +707,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               type: "task:tool-call", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, toolName: event.toolName, args: event.input, seq: ++seq,
             });
+            // Persist the call NOW (not just at finish-step): a tool can run for a
+            // long time, and a client reconnecting mid-execution must get a
+            // snapshot that already includes this step, or it reconciles in a loop
+            // until the step ends. Tool events are rare, so a forced write is cheap.
+            await saveSnapshot(true);
             break;
           }
           case "tool-result": {
@@ -721,6 +726,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: fits ? event.output : undefined, seq: ++seq,
             });
+            await saveSnapshot(true); // keep the snapshot current with each step
             break;
           }
           case "tool-error":
@@ -730,6 +736,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: { error: errMsg(event.error) }, isError: true, seq: ++seq,
             });
+            await saveSnapshot(true); // keep the snapshot current with each step
             break;
           case "error":
             streamError = errMsg(event.error);
