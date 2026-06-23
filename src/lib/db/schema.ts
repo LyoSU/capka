@@ -401,11 +401,17 @@ export const pluginInstalls = pgTable("plugin_installs", {
   marketplaceId: text("marketplace_id").notNull().references(() => pluginMarketplaces.id, { onDelete: "cascade" }),
   pluginName: text("plugin_name").notNull(),
   version: text("version"), // sha/ref pinned at install
-  scope: text("scope").notNull().default("system"),
+  scope: text("scope").notNull().default("system"), // 'system' (org-wide) | 'user' (personal)
+  // Owner for a personal (scope=user) install — cascades so a member's installs go
+  // with them. Null for system installs. `installedBy` stays the audit actor.
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
   manifest: jsonb("manifest").$type<Record<string, unknown>>().default({}),
   installedBy: text("installed_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
-}, (table) => [index("idx_plugin_installs_marketplace").on(table.marketplaceId)]);
+}, (table) => [
+  index("idx_plugin_installs_marketplace").on(table.marketplaceId),
+  index("idx_plugin_installs_user").on(table.userId),
+]);
 
 // Bundled plugin files (servers/, scripts/, config) — base64 content, materialized
 // into the sandbox at /plugins/<installId> on demand so a plugin's local MCP server

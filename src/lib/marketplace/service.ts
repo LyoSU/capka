@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginMarketplaces, pluginInstalls, skills, mcpServers } from "@/lib/db/schema";
 import { createGuardedFetch } from "@/lib/net/ssrf";
@@ -57,11 +57,17 @@ export async function listMarketplaces() {
   }));
 }
 
-/** A marketplace's catalog, each item flagged with whether it's installed. */
-export async function getCatalog(marketplaceId: string): Promise<(CatalogItem & { installed: boolean })[]> {
+/** A marketplace's catalog, each item flagged with whether it's installed *for the
+ *  viewer* — an org-wide (system) install, or this user's own personal one. */
+export async function getCatalog(marketplaceId: string, userId?: string): Promise<(CatalogItem & { installed: boolean })[]> {
   const row = (await db.select().from(pluginMarketplaces).where(eq(pluginMarketplaces.id, marketplaceId)).limit(1))[0];
   if (!row) return [];
-  const installs = await db.select({ name: pluginInstalls.pluginName }).from(pluginInstalls).where(eq(pluginInstalls.marketplaceId, marketplaceId));
+  const installs = await db.select({ name: pluginInstalls.pluginName }).from(pluginInstalls).where(and(
+    eq(pluginInstalls.marketplaceId, marketplaceId),
+    userId
+      ? or(eq(pluginInstalls.scope, "system"), and(eq(pluginInstalls.scope, "user"), eq(pluginInstalls.userId, userId)))
+      : undefined,
+  ));
   const installed = new Set(installs.map((i) => i.name));
   return ((row.catalog ?? []) as CatalogItem[]).map((c) => ({ ...c, installed: installed.has(c.name) }));
 }
@@ -95,11 +101,13 @@ export async function getInstallMeta(
 
 export type PluginEnabledState = "on" | "off" | "mixed";
 
-/** Installed plugins, each grouped with the skills + connectors it routed, so the
- *  Extensions page can show — and act on — a plugin as one unit (no more hunting
- *  scattered rows across the Skills and Connectors pages). */
-export async function listInstalledPlugins() {
-  const installs = await db.select().from(pluginInstalls);
+/** Installed plugins, each grouped with the skills + connectors it routed. Scoped
+ *  to the viewer: org-wide (system) installs plus the viewer's own personal ones.
+ *  `mine` marks a personal install the viewer owns (and may manage). */
+export async function listInstalledPlugins(userId: string) {
+  const installs = await db.select().from(pluginInstalls).where(
+    or(eq(pluginInstalls.scope, "system"), and(eq(pluginInstalls.scope, "user"), eq(pluginInstalls.userId, userId))),
+  );
   if (!installs.length) return [];
   const tags = installs.map((i) => `catalog:${i.id}`);
   const [skillRows, connRows, meta] = await Promise.all([
@@ -124,11 +132,22 @@ export async function listInstalledPlugins() {
       homepage: meta.get(i.id)?.homepage ?? null,
       createdAt: i.createdAt,
       enabledState,
+      scope: i.scope,
+      // The viewer owns this personal install → may manage it without being admin.
+      mine: i.scope === "user" && i.userId === userId,
       notes: Array.isArray(m.notes) ? m.notes : [],
       skills: pluginSkills,
       connectors,
     };
   });
+}
+
+/** Scope + owner of an install, for API ownership checks (a member may only act on
+ *  their own personal install; system installs are admin-only). */
+export async function getInstallOwner(installId: string): Promise<{ scope: string; userId: string | null } | null> {
+  const row = (await db.select({ scope: pluginInstalls.scope, userId: pluginInstalls.userId })
+    .from(pluginInstalls).where(eq(pluginInstalls.id, installId)).limit(1))[0];
+  return row ?? null;
 }
 
 /** Flip enabled on every skill + connector a plugin routed — one action for the

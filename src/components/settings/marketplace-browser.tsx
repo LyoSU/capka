@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PluginIcon } from "@/components/plugin-icon";
+import MembersInstallToggle from "@/components/settings/members-install-toggle";
 
 interface Marketplace {
   id: string;
@@ -190,6 +191,8 @@ export function MarketplaceBrowser() {
 
   return (
     <div className="space-y-5">
+      <MembersInstallToggle />
+
       {/* Add a marketplace */}
       <div className="flex gap-2">
         <Input

@@ -36,7 +36,9 @@ export default function CustomizePage() {
   const tabs: { key: Tab; label: string; icon: typeof Library; adminOnly?: boolean }[] = [
     { key: "library", label: t("tab.library"), icon: Library },
     { key: "connectors", label: t("tab.connectors"), icon: Plug },
-    { key: "plugins", label: t("tab.installed"), icon: Package, adminOnly: true },
+    // Plugins is visible to everyone (read-only + per-user OAuth sign-in); only
+    // admins get the management actions + the Browse/marketplace view inside it.
+    { key: "plugins", label: t("tab.installed"), icon: Package },
   ];
   const visibleTabs = tabs.filter((tb) => !tb.adminOnly || isAdmin);
   const active = visibleTabs.some((tb) => tb.key === tab) ? tab : "library";

@@ -183,6 +183,13 @@
       "when": 1782403200009,
       "tag": "0025_add_plugin_files",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782403200010,
+      "tag": "0026_plugin_install_owner",
+      "breakpoints": true
     }
   ]
 }

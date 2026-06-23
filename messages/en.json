@@ -774,7 +774,10 @@
           "needsLogin": "Needs sign-in",
           "unauthorized": "Auth failed",
           "error": "Connection error"
-        }
+        },
+        "signIn": "Sign in",
+        "memberInstallTitle": "Let members install plugins",
+        "memberInstallHint": "When on, members can install plugins for themselves from your marketplaces. Off — only you (admin) install, org-wide."
       },
       "pluginsView": {
         "installed": "Installed",

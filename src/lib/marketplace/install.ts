@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } from "@/lib/db/schema";
 import { createGuardedFetch } from "@/lib/net/ssrf";
@@ -21,6 +21,10 @@ const MAX_SKILL_FILES = 50;
 const MAX_PLUGIN_FILES = 200;
 const MAX_PLUGIN_FILE_BYTES = 1_000_000;
 const MAX_PLUGIN_TOTAL_BYTES = 5_000_000;
+
+/** Where a plugin's skills + connectors are routed: org-wide (system) or personal
+ *  (user). A member install is `{ scope: "user", userId: <them> }`. */
+interface InstallTarget { scope: "system" | "user"; userId: string | null; projectId: string | null }
 
 /** What a single plugin pull produced: the public manifest + the bundled files to
  *  persist for runtime materialization (kept out of the manifest JSON, which is
@@ -61,7 +65,7 @@ async function resolvePlugin(marketplaceId: string, pluginName: string) {
  *  tagging every row `catalog:<installId>`. Idempotent per name: ingestSkill /
  *  upsertServer upsert by name, so re-running with the same tag updates in place
  *  (the basis of upgrade). Returns what the current tree produced. */
-async function applyPlugin(gh: GitHubRef, tag: string): Promise<ApplyResult> {
+async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget): Promise<ApplyResult> {
   const prefix = gh.subdir ? `${gh.subdir}/` : "";
   const fetchFn = await ghFetch();
   const tree = await ghTree(gh.owner, gh.repo, gh.ref, fetchFn);
@@ -105,7 +109,7 @@ async function applyPlugin(gh: GitHubRef, tag: string): Promise<ApplyResult> {
       // session at connect time. Only NON-resolvable ${...} (a real secret) gates.
       const bundled = refsPluginRoot(serverDefParts(def));
       const envUnresolved = def.env ? Object.values(def.env).some(hasUnresolvedPlaceholder) : false;
-      const sid = await upsertStdioServer({ scope: "system", userId: null, projectId: null, name: sname, command: def.command, args: def.args, env: def.env, source: tag });
+      const sid = await upsertStdioServer({ ...target, name: sname, command: def.command, args: def.args, env: def.env, source: tag });
       if (bundled) {
         // Safety gate for a mass-user platform: a bundled server runs third-party
         // CODE in every user's sandbox. Install it OFF; an admin reviews + enables
@@ -125,7 +129,7 @@ async function applyPlugin(gh: GitHubRef, tag: string): Promise<ApplyResult> {
     const secrets = def.headers && !hasPlaceholder ? { headers: def.headers } : undefined;
     let authKind: "token" | "oauth" = "token";
     try { authKind = await detectAuthKind(def.url); } catch { /* default token */ }
-    const id = await upsertServer({ scope: "system", userId: null, projectId: null, name: sname, url: def.url, secrets, authKind, source: tag });
+    const id = await upsertServer({ ...target, name: sname, url: def.url, secrets, authKind, source: tag });
     if (hasPlaceholder) { await setEnabled(id, false); manifest.notes.push(`${sname}: needs an access key — open Connectors to add it`); }
     manifest.connectors.push(sname);
   }
@@ -172,7 +176,7 @@ async function applyPlugin(gh: GitHubRef, tag: string): Promise<ApplyResult> {
       if (content == null) continue;
       files.push({ path: f.path.slice(dir.length + 1), content: Buffer.from(content, "utf8").toString("base64") });
     }
-    await ingestSkill(parsed, files, { scope: "system", userId: null, projectId: null, source: tag });
+    await ingestSkill(parsed, files, { ...target, source: tag });
     manifest.skills.push(parsed.name);
   }
 
@@ -185,7 +189,7 @@ async function applyPlugin(gh: GitHubRef, tag: string): Promise<ApplyResult> {
     try { parsed = parseSkillMarkdown(body); } catch { parsed = null; }
     const base = c.path.split("/").pop()!.replace(/\.md$/, "");
     const finalParsed = parsed && parsed.name ? parsed : { name: base, description: undefined, body, frontmatter: {} };
-    await ingestSkill(finalParsed, [], { scope: "system", userId: null, projectId: null, source: tag });
+    await ingestSkill(finalParsed, [], { ...target, source: tag });
     manifest.skills.push(finalParsed.name);
   }
 
@@ -219,14 +223,30 @@ async function applyPlugin(gh: GitHubRef, tag: string): Promise<ApplyResult> {
 
 /** Install one plugin from an added marketplace into A (skills) + B (connectors),
  *  tagging every routed row `catalog:<installId>` for clean uninstall. */
-export async function installPlugin(opts: { marketplaceId: string; pluginName: string; installedBy: string }): Promise<InstallManifest> {
+export async function installPlugin(opts: {
+  marketplaceId: string;
+  pluginName: string;
+  installedBy: string;
+  /** Org-wide (admin) or personal (a member installing for themselves). */
+  scope?: "system" | "user";
+}): Promise<InstallManifest> {
   const { gh } = await resolvePlugin(opts.marketplaceId, opts.pluginName);
-  // Idempotent per (marketplace, plugin): re-installing the same plugin reuses its
-  // install row + tag instead of creating a duplicate (so it can't appear twice).
+  const scope = opts.scope ?? "system";
+  const ownerId = scope === "user" ? opts.installedBy : null;
+  const target: InstallTarget = { scope, userId: ownerId, projectId: null };
+
+  // Idempotent per (marketplace, plugin, owner): re-installing reuses the same
+  // install row + tag instead of duplicating. A member's personal install is
+  // distinct from the org-wide one (matched by scope + userId).
   const existing = (await db.select({ id: pluginInstalls.id }).from(pluginInstalls)
-    .where(and(eq(pluginInstalls.marketplaceId, opts.marketplaceId), eq(pluginInstalls.pluginName, opts.pluginName))).limit(1))[0];
+    .where(and(
+      eq(pluginInstalls.marketplaceId, opts.marketplaceId),
+      eq(pluginInstalls.pluginName, opts.pluginName),
+      eq(pluginInstalls.scope, scope),
+      ownerId ? eq(pluginInstalls.userId, ownerId) : isNull(pluginInstalls.userId),
+    )).limit(1))[0];
   const installId = existing?.id ?? nanoid();
-  const { manifest, files } = await applyPlugin(gh, `catalog:${installId}`);
+  const { manifest, files } = await applyPlugin(gh, `catalog:${installId}`, target);
 
   if (existing) {
     await db.update(pluginInstalls)
@@ -236,7 +256,8 @@ export async function installPlugin(opts: { marketplaceId: string; pluginName: s
     // Insert the install row before its files (pluginFiles FK → pluginInstalls).
     await db.insert(pluginInstalls).values({
       id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
-      version: manifest.version ?? gh.ref, scope: "system", manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
+      version: manifest.version ?? gh.ref, scope, userId: ownerId,
+      manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
     });
   }
   await persistPluginFiles(installId, files);
@@ -251,8 +272,10 @@ export async function upgradePlugin(installId: string): Promise<InstallManifest>
   if (!row) throw new Error("Install not found");
   const { gh } = await resolvePlugin(row.marketplaceId, row.pluginName);
   const tag = `catalog:${installId}`;
+  // Re-route into the same scope/owner the install already has.
+  const target: InstallTarget = { scope: row.scope === "user" ? "user" : "system", userId: row.userId, projectId: null };
 
-  const { manifest, files } = await applyPlugin(gh, tag);
+  const { manifest, files } = await applyPlugin(gh, tag, target);
   await persistPluginFiles(installId, files);
 
   // Prune rows this install owns that the new tree no longer produces.

@@ -195,6 +195,13 @@ export async function ownKeysAllowed(): Promise<boolean> {
   return (await getProviderKeyMode()) !== "shared_only";
 }
 
+/** Whether non-admin members may install plugins (personally) from the
+ *  admin-connected marketplaces. Off by default — installing is an admin act
+ *  until the admin opts in. */
+export async function membersCanInstallPlugins(): Promise<boolean> {
+  return (await getSetting("members_can_install_plugins")) === "true";
+}
+
 /**
  * Telegram "Login with Telegram" (OIDC) configuration, sourced at runtime from
  * the DB so nothing is baked into the image. The secret is encrypted at rest

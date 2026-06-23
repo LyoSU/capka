@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   // Build redirects off the PUBLIC origin (PUBLIC_URL / X-Forwarded-Host), not
   // req.url — behind a proxy the latter is the internal bind (e.g. 0.0.0.0:3000).
   const base = getPublicUrl({ headers: req.headers });
-  const settings = (q: string) => Response.redirect(`${base}/settings/skills?tab=connectors${q.replace("?", "&")}`, 302);
+  const settings = (q: string, tab = "connectors") => Response.redirect(`${base}/settings/skills?tab=${tab}${q.replace("?", "&")}`, 302);
   let userId: string;
   try {
     ({ userId } = await requireSession());
@@ -37,7 +37,8 @@ export async function GET(req: Request) {
     const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), timeoutMs: PROVIDER_FETCH_TIMEOUT_MS });
     const result = await auth(provider, { serverUrl: server.url, authorizationCode: code, fetchFn });
     if (result !== "AUTHORIZED") return settings("?error=oauth");
-    return settings(`?connected=${encodeURIComponent(server.name)}`);
+    const tab = server.source?.startsWith("catalog:") ? "plugins" : "connectors";
+    return settings(`?connected=${encodeURIComponent(server.name)}`, tab);
   } catch (e) {
     console.warn("[mcp-oauth] callback failed:", e);
     return settings("?error=oauth");

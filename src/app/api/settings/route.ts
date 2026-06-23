@@ -1,8 +1,8 @@
 import { requireAdmin, apiHandler } from "@/lib/auth";
 import { getSetting, setSetting } from "@/lib/settings";
 
-const READABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context", "model_max_price", "sandbox_enabled", "sandbox_network", "registration_enabled", "block_private_provider_urls", "share_admin_providers"];
-const WRITABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context", "model_max_price", "sandbox_enabled", "sandbox_network", "registration_enabled", "block_private_provider_urls", "share_admin_providers"];
+const READABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context", "model_max_price", "sandbox_enabled", "sandbox_network", "registration_enabled", "block_private_provider_urls", "share_admin_providers", "members_can_install_plugins"];
+const WRITABLE_KEYS = ["platform_name", "telegram_bot_token", "model_min_context", "model_max_price", "sandbox_enabled", "sandbox_network", "registration_enabled", "block_private_provider_urls", "share_admin_providers", "members_can_install_plugins"];
 const BLOCKED_KEYS = ["auth_secret", "setup_complete", "admin_email"];
 
 export const GET = apiHandler(async (req: Request) => {

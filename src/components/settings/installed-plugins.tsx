@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, RefreshCw, Trash2, Sparkles, Plug, AlertTriangle, CheckCircle2, Power, PowerOff } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Sparkles, Plug, AlertTriangle, CheckCircle2, Power, PowerOff, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { cn } from "@/lib/utils";
 
 interface Item { id: string; name: string; enabled: boolean }
@@ -24,6 +25,8 @@ interface InstalledPlugin {
   author: string | null;
   homepage: string | null;
   enabledState: "on" | "off" | "mixed";
+  /** A personal install this user owns — they may manage it without being admin. */
+  mine: boolean;
   notes: string[];
   skills: Item[];
   connectors: (Item & { transport: string })[];
@@ -34,6 +37,7 @@ interface InstalledPlugin {
  *  pieces a plugin adds are managed together instead of scattered. */
 export default function InstalledPlugins() {
   const t = useTranslations("settings.skills.installed");
+  const isAdmin = useIsAdmin();
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [health, setHealth] = useState<Record<string, Health>>({});
   const [loading, setLoading] = useState(true);
@@ -43,7 +47,7 @@ export default function InstalledPlugins() {
     try {
       // Health is live connection state per connector — it's why a connector that
       // looks installed may still be invisible to the assistant (disabled / errored).
-      const [r, hr] = await Promise.all([fetch("/api/admin/extensions"), fetch("/api/mcp/health")]);
+      const [r, hr] = await Promise.all([fetch("/api/extensions"), fetch("/api/mcp/health")]);
       if (r.ok) setPlugins((await r.json()).plugins ?? []);
       else toast.error(t("loadError"));
       if (hr.ok) setHealth((await hr.json()).health ?? {});
@@ -84,19 +88,22 @@ export default function InstalledPlugins() {
   };
 
   const toggle = (p: InstalledPlugin) =>
-    act(() => fetch("/api/admin/extensions", {
+    act(() => fetch("/api/extensions", {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ installId: p.id, enabled: p.enabledState !== "on" }),
     }), p.id);
 
   const update = (p: InstalledPlugin) =>
-    act(() => fetch("/api/admin/extensions", {
+    act(() => fetch("/api/extensions", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ installId: p.id }),
     }), p.id, t("updated"));
 
   const uninstall = (p: InstalledPlugin) =>
-    act(() => fetch(`/api/admin/extensions?installId=${encodeURIComponent(p.id)}`, { method: "DELETE" }), p.id, t("uninstalled"));
+    act(() => fetch(`/api/extensions?installId=${encodeURIComponent(p.id)}`, { method: "DELETE" }), p.id, t("uninstalled"));
+
+  // Per-user OAuth sign-in (every user does their own — not an admin action).
+  const signIn = (id: string) => { window.location.href = `/api/mcp/oauth/start?serverId=${encodeURIComponent(id)}`; };
 
   if (loading) {
     return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
@@ -131,33 +138,38 @@ export default function InstalledPlugins() {
                   {t("counts", { skills: p.skills.length, connectors: p.connectors.length })}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => toggle(p)}>
-                  {p.enabledState === "on" ? t("disable") : t("enable")}
-                </Button>
-                <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => update(p)} aria-label={t("update")}>
-                  {busy === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger
-                    render={
-                      <Button size="sm" variant="ghost" disabled={busy === p.id} aria-label={t("uninstall")}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    }
-                  />
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t("uninstall")}</AlertDialogTitle>
-                      <AlertDialogDescription>{t("uninstallConfirm", { name: title })}</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => uninstall(p)}>{t("uninstall")}</AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
+              {/* Managing a plugin (enable/update/uninstall): admins for org-wide
+                  installs, members for their own personal ones. Everyone else gets a
+                  read-only card + per-user sign-in on the connectors. */}
+              {(isAdmin || p.mine) && (
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => toggle(p)}>
+                    {p.enabledState === "on" ? t("disable") : t("enable")}
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => update(p)} aria-label={t("update")}>
+                    {busy === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger
+                      render={
+                        <Button size="sm" variant="ghost" disabled={busy === p.id} aria-label={t("uninstall")}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      }
+                    />
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t("uninstall")}</AlertDialogTitle>
+                        <AlertDialogDescription>{t("uninstallConfirm", { name: title })}</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => uninstall(p)}>{t("uninstall")}</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              )}
             </div>
 
             {p.skills.length > 0 && (
@@ -174,14 +186,22 @@ export default function InstalledPlugins() {
               <div className="space-y-1.5 border-t pt-3">
                 {p.connectors.map((c) => {
                   const st = connectorStatus(c);
+                  const needsLogin = health[c.id]?.status === "needs_login";
                   return (
                     <div key={c.id} className="flex items-center justify-between gap-2 text-sm">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <Plug className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{c.name}</span>
                       </span>
-                      <span className={cn("flex shrink-0 items-center gap-1 text-xs", st.cls)} title={st.detail}>
-                        <st.Icon className="h-3 w-3" />{st.label}
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className={cn("flex items-center gap-1 text-xs", st.cls)} title={st.detail}>
+                          <st.Icon className="h-3 w-3" />{st.label}
+                        </span>
+                        {needsLogin && (
+                          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => signIn(c.id)}>
+                            <LogIn className="mr-1 h-3 w-3" />{t("signIn")}
+                          </Button>
+                        )}
                       </span>
                     </div>
                   );
