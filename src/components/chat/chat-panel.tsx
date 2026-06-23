@@ -608,8 +608,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             label={t("panel.navigation")}
           />
 
+          {/* pointer-events-none lets the transparent gradient strip above the
+              composer pass clicks through to the message footers behind it —
+              otherwise this block's empty top band silently swallowed taps on
+              the (i)/copy/regenerate row of whatever message rested under it
+              (it worked in some chats and not others purely by scroll position).
+              Mirrors the header above; only the real controls re-enable events. */}
           <div
-            className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6 transition-transform duration-200 ease-out"
+            className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6 transition-transform duration-200 ease-out"
             // Lift the composer above the on-screen keyboard (iOS; ~0 elsewhere).
             style={{ transform: "translateY(calc(-1 * var(--kb, 0px)))" }}
           >
@@ -632,25 +638,29 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                 <ArrowDown className="h-4 w-4" />
               </Button>
             </div>
-            {error && !lastFailed && (
-              <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
-                <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  <span className="flex-1">{error}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-destructive hover:text-destructive"
-                    onClick={reload}
-                    aria-label={t("panel.retry")}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  </Button>
+            {/* The composer, queue and error banner are the genuinely
+                interactive part of this otherwise click-through block. */}
+            <div className="pointer-events-auto">
+              {error && !lastFailed && (
+                <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
+                  <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span className="flex-1">{error}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-destructive hover:text-destructive"
+                      onClick={reload}
+                      aria-label={t("panel.retry")}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
-            {queuedEl}
-            {inputEl}
+              )}
+              {queuedEl}
+              {inputEl}
+            </div>
           </div>
         </div>
       )}
