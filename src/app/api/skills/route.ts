@@ -2,34 +2,25 @@ import { apiHandler, requireSession } from "@/lib/auth";
 import { ingestSkillZip, MAX_SKILL_ZIP_BYTES, SkillZipError } from "@/lib/skills/ingest-zip";
 import { deleteSkill, getSkillMeta, listManagedSkills, setSkillEnabled } from "@/lib/skills/service";
 import { setMuted } from "@/lib/muted-resources";
-import { getInstallMeta } from "@/lib/marketplace/service";
 import { SkillParseError } from "@/lib/skills/types";
-
-const installIdOf = (source: string) => (source.startsWith("catalog:") ? source.slice("catalog:".length) : null);
 
 export const GET = apiHandler(async () => {
   const { userId, role } = await requireSession();
   const list = await listManagedSkills(userId, role === "admin");
 
-  // Attribute plugin-installed skills to their plugin (name + author + homepage),
-  // so the UI can group "a plugin installs a group of skills" the way it really works.
-  const installIds = [...new Set(list.map((s) => installIdOf(s.source)).filter((x): x is string => !!x))];
-  const meta = await getInstallMeta(installIds);
-
+  // Plugin-installed skills (source = catalog:*) are managed as a unit on the
+  // Extensions tab; the Library shows only hand-added skills so nothing appears twice.
   return Response.json({
-    skills: list.map((s) => {
-      const installId = installIdOf(s.source);
-      const plugin = installId ? meta.get(installId) ?? null : null;
-      return {
+    skills: list
+      .filter((s) => !s.source.startsWith("catalog:"))
+      .map((s) => ({
         id: s.id,
         name: s.name,
         description: s.description,
         scope: s.scope,
         enabled: s.enabled,
         mine: s.mine,
-        plugin: plugin ? { name: plugin.pluginName, author: plugin.author, homepage: plugin.homepage } : null,
-      };
-    }),
+      })),
   });
 });
 

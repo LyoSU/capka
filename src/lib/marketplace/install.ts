@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } from "@/lib/db/schema";
 import { createGuardedFetch } from "@/lib/net/ssrf";
@@ -221,14 +221,24 @@ async function applyPlugin(gh: GitHubRef, tag: string): Promise<ApplyResult> {
  *  tagging every routed row `catalog:<installId>` for clean uninstall. */
 export async function installPlugin(opts: { marketplaceId: string; pluginName: string; installedBy: string }): Promise<InstallManifest> {
   const { gh } = await resolvePlugin(opts.marketplaceId, opts.pluginName);
-  const installId = nanoid();
+  // Idempotent per (marketplace, plugin): re-installing the same plugin reuses its
+  // install row + tag instead of creating a duplicate (so it can't appear twice).
+  const existing = (await db.select({ id: pluginInstalls.id }).from(pluginInstalls)
+    .where(and(eq(pluginInstalls.marketplaceId, opts.marketplaceId), eq(pluginInstalls.pluginName, opts.pluginName))).limit(1))[0];
+  const installId = existing?.id ?? nanoid();
   const { manifest, files } = await applyPlugin(gh, `catalog:${installId}`);
 
-  // Insert the install row before its files (pluginFiles FK → pluginInstalls).
-  await db.insert(pluginInstalls).values({
-    id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
-    version: manifest.version ?? gh.ref, scope: "system", manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
-  });
+  if (existing) {
+    await db.update(pluginInstalls)
+      .set({ version: manifest.version ?? gh.ref, manifest: manifest as unknown as Record<string, unknown> })
+      .where(eq(pluginInstalls.id, installId));
+  } else {
+    // Insert the install row before its files (pluginFiles FK → pluginInstalls).
+    await db.insert(pluginInstalls).values({
+      id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
+      version: manifest.version ?? gh.ref, scope: "system", manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
+    });
+  }
   await persistPluginFiles(installId, files);
   return manifest;
 }

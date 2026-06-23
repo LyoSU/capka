@@ -704,10 +704,10 @@
       "title": "Customize",
       "subtitle": "Everything that extends what your assistant can do: skills, connectors, and plugins.",
       "tab": {
-        "library": "Library",
+        "library": "Skills",
         "marketplace": "Marketplace",
         "connectors": "Connectors",
-        "installed": "Installed"
+        "installed": "Plugins"
       },
       "loadError": "Couldn't load skills.",
       "toggleFailed": "Couldn't update the skill.",

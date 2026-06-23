@@ -105,11 +105,15 @@ export async function listServers(userId: string, projectId?: string | null): Pr
   // Effective per-user state: a shared connector the user muted shows as off
   // (and `mine` lets the UI choose a global toggle vs a personal mute).
   const muted = await mutedIds(userId, "mcp");
-  return rows.map((r) => {
-    const info = toInfo(r);
-    const mine = r.scope === "user";
-    return { ...info, mine, enabled: mine ? info.enabled : info.enabled && !muted.has(r.id) };
-  });
+  return rows
+    // Plugin-installed connectors are managed on the Extensions tab; the Connectors
+    // list shows only hand-added ones so nothing appears in two places.
+    .filter((r) => !r.source.startsWith("catalog:"))
+    .map((r) => {
+      const info = toInfo(r);
+      const mine = r.scope === "user";
+      return { ...info, mine, enabled: mine ? info.enabled : info.enabled && !muted.has(r.id) };
+    });
 }
 
 export interface UpsertServerInput {
@@ -124,6 +128,24 @@ export interface UpsertServerInput {
   source?: string; // 'manual' | 'catalog:<installId>'
 }
 
+/** Id of an existing row with the same identity (explicit id, else scope + name
+ *  within the same owner/project) so upserts dedupe by name like skills do —
+ *  re-applying a plugin or re-adding a same-named connector updates in place
+ *  instead of creating a duplicate row. `name` must already be slugified. */
+async function existingServerId(input: { id?: string; scope: McpScope; userId: string | null; projectId: string | null; name: string }): Promise<string | undefined> {
+  const rows = await db.select({ id: mcpServers.id }).from(mcpServers).where(
+    input.id
+      ? eq(mcpServers.id, input.id)
+      : and(
+          eq(mcpServers.scope, input.scope),
+          input.userId ? eq(mcpServers.userId, input.userId) : isNull(mcpServers.userId),
+          input.projectId ? eq(mcpServers.projectId, input.projectId) : isNull(mcpServers.projectId),
+          eq(mcpServers.name, input.name),
+        ),
+  ).limit(1);
+  return rows[0]?.id;
+}
+
 export async function upsertServer(input: UpsertServerInput): Promise<string> {
   const name = slugifyName(input.name);
   if (!NAME_RE.test(name)) throw new ValidationError("Use letters or numbers in the connector name.");
@@ -134,7 +156,8 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
     throw new ValidationError(e instanceof Error ? e.message : "That URL can't be used.");
   }
   const key = await getMasterKey();
-  const id = input.id ?? nanoid();
+  const matchedId = await existingServerId({ id: input.id, scope: input.scope, userId: input.userId, projectId: input.projectId, name });
+  const id = matchedId ?? nanoid();
   const values = {
     id, scope: input.scope, userId: input.userId, projectId: input.projectId,
     name, transport: "http" as const, url: input.url,
@@ -143,10 +166,7 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
     ...(input.source ? { source: input.source } : {}),
     updatedAt: new Date(),
   };
-  const existing = input.id
-    ? await db.select({ id: mcpServers.id }).from(mcpServers).where(eq(mcpServers.id, input.id)).limit(1)
-    : [];
-  if (existing[0]) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
+  if (matchedId) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
   else await db.insert(mcpServers).values(values);
   return id;
 }
@@ -173,7 +193,8 @@ export async function upsertStdioServer(input: UpsertStdioInput): Promise<string
   if (!NAME_RE.test(name)) throw new ValidationError("Use letters or numbers in the connector name.");
   if (!input.command.trim()) throw new ValidationError("A command is required for a local connector.");
   const key = await getMasterKey();
-  const id = input.id ?? nanoid();
+  const matchedId = await existingServerId({ id: input.id, scope: input.scope, userId: input.userId, projectId: input.projectId, name });
+  const id = matchedId ?? nanoid();
   const values = {
     id, scope: input.scope, userId: input.userId, projectId: input.projectId,
     name, transport: "stdio" as const, url: null,
@@ -184,10 +205,7 @@ export async function upsertStdioServer(input: UpsertStdioInput): Promise<string
     ...(input.source ? { source: input.source } : {}),
     updatedAt: new Date(),
   };
-  const existing = input.id
-    ? await db.select({ id: mcpServers.id }).from(mcpServers).where(eq(mcpServers.id, input.id)).limit(1)
-    : [];
-  if (existing[0]) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
+  if (matchedId) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
   else await db.insert(mcpServers).values(values);
   return id;
 }
