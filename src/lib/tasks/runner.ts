@@ -24,7 +24,7 @@ import { loadMcpTools } from "@/lib/mcp/load";
 import { getSandboxNetworkDefault } from "@/lib/settings";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage } from "@/lib/usage";
-import { costUsd } from "@/lib/pricing";
+import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
@@ -312,6 +312,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   const payload = (task.payload ?? {}) as TaskPayload;
   // Shared project folder when the chat belongs to a project, else its own.
   const sessionKey = workspaceSessionKey({ id: chatId, projectId: payload.projectId ?? null });
+  // One logger bound to this run's identity, so every line it emits carries
+  // taskId/chatId/userId without each call site repeating them.
+  const tlog = log.child({ taskId, chatId, userId });
 
   const ac = new AbortController();
   let deadlineHit = false;
@@ -380,6 +383,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const { model, provider, modelId, modelInput, isShared, tools, closeMcp: close, prompt, userMemories } =
       await prepareRun(userId, sessionKey, payload, chatId);
     closeMcp = close;
+
+    // Record an auxiliary (title/memory) LLM call's spend against the same key
+    // and budget as the main turn. These fire-and-forget calls used to go
+    // entirely unbilled, so cost analytics under-reported every turn.
+    const recordAuxUsage = (u: TokenUsage) =>
+      void recordUsage({ taskId, messageId: msgId, userId, provider, model: modelId, onSharedKey: isShared, usage: u });
 
     // Prompt caching, three tiers of system messages (see buildSystemPrompt):
     //  1. stable  — persona+sandbox+project+skills, identical for everyone →
@@ -490,6 +499,26 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       });
 
     let result = makeStream();
+
+    // Spend on attempts we threw away (capability/empty-response retries). The
+    // provider still billed those tokens, so they belong in the usage table for
+    // accurate shared-key accounting — but NOT in the message's (i) popover,
+    // which shows only the final attempt that produced the visible answer.
+    // Captured from the OLD stream right before each retry replaces `result`.
+    const discarded = { input: 0, output: 0, cached: 0 };
+    let hadDiscard = false;
+    const captureDiscarded = async () => {
+      try {
+        const u = await result.totalUsage;
+        if (!u) return;
+        const cached = u.inputTokenDetails?.cacheReadTokens ?? 0;
+        const input = u.inputTokenDetails?.noCacheTokens ?? Math.max(0, (u.inputTokens ?? 0) - cached);
+        hadDiscard = true;
+        discarded.input += input;
+        discarded.output += u.outputTokens ?? 0;
+        discarded.cached += cached;
+      } catch { /* an errored/aborted stream may not report usage — best effort */ }
+    };
 
     const appendText = (delta: string) => {
       const last = parts[parts.length - 1];
@@ -683,7 +712,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // same way for both. Returns true if a retry was launched.
     const retryOnCapabilityError = async (err: unknown): Promise<boolean> => {
       if (injectedNative && !retried && isModalityUnsupportedError(err)) {
-        log.info("attachment modality unsupported — retrying with files stripped + note", { taskId, chatId, userId });
+        tlog.info("attachment modality unsupported — retrying with files stripped + note");
         retried = true;
         streamError = undefined;
         parts.length = 0;
@@ -692,6 +721,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // The provider rejected what the catalog claimed it took — fold those
         // modalities into the notice so the user is told to switch models.
         blindModalities = Array.from(new Set([...blindModalities, ...nativeModalities]));
+        await captureDiscarded();
         result = makeStream();
         await consume();
         return true;
@@ -699,11 +729,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (useReasoning && isReasoningUnsupportedError(err)) {
         // Model can't reason — re-stream without the reasoning knobs. Reset parts
         // defensively so a retry can't duplicate output.
-        log.info("reasoning unsupported — retrying without it", { taskId, chatId, userId });
+        tlog.info("reasoning unsupported — retrying without it");
         useReasoning = false;
         streamError = undefined;
         parts.length = 0;
         lastSealedIndex = -1;
+        await captureDiscarded();
         result = makeStream();
         await consume();
         return true;
@@ -723,9 +754,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     if (!ac.signal.aborted && !streamError) {
       const hasContent = parts.some((p) => (p.type === "text" && p.text.trim()) || p.type === "tool-call");
       if (!hasContent) {
-        log.info("empty response — retrying once", { taskId, chatId, userId });
+        tlog.info("empty response — retrying once");
         parts.length = 0;
         lastSealedIndex = -1;
+        await captureDiscarded();
         result = makeStream();
         try {
           await consume();
@@ -759,7 +791,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         });
       }
     } catch (e) {
-      log.error("usage compute failed", { taskId, err: String(e) });
+      tlog.error("usage compute failed", { err: String(e) });
     }
 
     await db.update(messages).set({
@@ -781,6 +813,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }).where(eq(messages.id, msgId));
     await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
+    // One structured line per finished run — the happy path used to leave no
+    // trace in the logs (everything went to the DB), so "what happened with
+    // task X" wasn't greppable for successful turns.
+    tlog[finalStatus === "completed" ? "info" : "warn"]("task finished", {
+      status: finalStatus,
+      model: modelId,
+      durationMs: Date.now() - startedAt,
+      toolCount,
+      ...(usageMeta ? { usage: usageMeta } : {}),
+      ...(hadDiscard ? { discardedUsage: discarded } : {}),
+      ...(costMeta != null ? { costUsd: costMeta } : {}),
+      ...(streamError ? { error: streamError } : {}),
+    });
     await sink.finish({
       // Only the final, unsealed run — earlier runs already arrived as bubbles.
       status: finalStatus, text: openSegment(), reasoning: getReasoning(),
@@ -796,7 +841,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         const outFiles = await collectReferencedFiles(sessionKey, userId, getFullText());
         if (outFiles.length) await sink.sendFiles(outFiles);
       } catch (e) {
-        log.warn("output file delivery failed", { taskId, err: String(e) });
+        tlog.warn("output file delivery failed", { err: String(e) });
       }
     }
 
@@ -805,17 +850,25 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     if (usageMeta) {
       await recordUsage({
         taskId, messageId: msgId, userId, provider, model: modelId, onSharedKey: isShared,
+        // Fold in the spend of any retried-then-discarded attempts (billing
+        // truth), even though the (i) popover above shows only the final one.
         usage: {
-          inputTokens: usageMeta.input,
-          outputTokens: usageMeta.output,
-          cachedInputTokens: usageMeta.cached,
+          inputTokens: usageMeta.input + discarded.input,
+          outputTokens: usageMeta.output + discarded.output,
+          cachedInputTokens: usageMeta.cached + discarded.cached,
         },
+        // No retries → reuse the figure already computed for the popover (skips a
+        // second catalog lookup). With discarded spend folded in the totals
+        // differ, so let recordUsage recompute the cost from the combined usage.
+        costUsd: hadDiscard ? undefined : costMeta,
       });
     }
 
     // Extract long-term memories (fire-and-forget). Facts are about the USER, so
     // the user's own message is the primary signal — the assistant reply is only
     // context. (Feeding only the assistant output mined the wrong side of the turn.)
+    // Gated on a clean completion (like the title): a cancelled/failed turn
+    // shouldn't quietly spend tokens mining facts the user may have aborted.
     const lastUserText = (() => {
       const u = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
       if (!u) return "";
@@ -825,11 +878,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .map((p) => p.text)
         .join("\n");
     })();
-    if (lastUserText.trim()) {
+    if (finalStatus === "completed" && lastUserText.trim()) {
       extractMemories(
         model,
         { userText: lastUserText, assistantText: getFullText() },
         userMemories.map((m) => m.content),
+        recordAuxUsage,
       )
         .then(async (newFacts) => {
           if (newFacts.length > 0) {
@@ -840,7 +894,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             );
           }
         })
-        .catch((e) => log.error("memory extraction failed", { taskId, userId, err: String(e) }));
+        .catch((e) => tlog.error("memory extraction failed", { err: String(e) }));
     }
 
     // Auto-title the chat on its FIRST completed turn. "First turn" = no prior
@@ -850,18 +904,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // this lands, so the sidebar always shows *something* in the meantime.
     const isFirstTurn = !modelMessages.some((m) => m.role === "assistant");
     if (finalStatus === "completed" && isFirstTurn && lastUserText.trim()) {
-      generateChatTitle(model, lastUserText, getFullText())
+      generateChatTitle(model, lastUserText, getFullText(), recordAuxUsage)
         .then(async (title) => {
           if (!title) return;
           await db.update(chats).set({ title }).where(eq(chats.id, chatId));
           await publishTaskEvent(userId, { type: "chat:title", chatId, title });
         })
-        .catch((e) => log.error("chat title generation failed", { taskId, userId, err: String(e) }));
+        .catch((e) => tlog.error("chat title generation failed", { err: String(e) }));
     }
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";
     const status = isAbort && !deadlineHit ? "cancelled" : "failed";
     const failure = deadlineHit ? TIMED_OUT_ERROR : isAbort ? undefined : classifyLLMError(e);
+    // This catch swallows the error to finalize gracefully, so the worker's
+    // crash log never fires — record it here instead. A clean cancel is info.
+    tlog[status === "cancelled" ? "info" : "error"]("task ended", {
+      status, elapsedMs: Date.now() - startedAt, toolCount,
+      ...(failure ? { error: failure.adminDetail } : { err: String(e) }),
+    });
     await Promise.all([
       finalizeTask(taskId, status, failure?.adminDetail ?? null).catch(() => {}),
       db.update(messages).set({

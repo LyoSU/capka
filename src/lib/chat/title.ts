@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import { log } from "@/lib/log";
+import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
 
 // Tweak point: tone/length of auto-generated chat titles lives here. The model
 // detects the conversation language itself — keep the "same language" rule so a
@@ -25,6 +26,9 @@ export async function generateChatTitle(
   model: LanguageModel,
   userText: string,
   assistantText?: string,
+  /** Called with the spend of this (otherwise unbilled) auxiliary LLM call, so
+   *  the runner can record it against the same key/budget as the main turn. */
+  onUsage?: (usage: TokenUsage) => void,
 ): Promise<string | null> {
   const user = (userText ?? "").trim();
   if (user.length < 2) return null;
@@ -36,12 +40,14 @@ export async function generateChatTitle(
       : "");
 
   try {
-    const { text } = await generateText({
+    const { text, usage } = await generateText({
       model,
       system: TITLE_PROMPT,
       prompt,
       maxOutputTokens: 32,
     });
+    const billable = toTokenUsage(usage);
+    if (billable && onUsage) onUsage(billable);
     return sanitizeTitle(text);
   } catch (e) {
     log.error("chat title generation failed", { err: String(e) });

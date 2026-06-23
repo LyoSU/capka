@@ -45,4 +45,21 @@ describe("extractMemories", () => {
     expect(out).toContain("Prefers dark mode");
     expect(out).not.toContain("Works at Acme Corp");
   });
+
+  it("reports this call's spend via onUsage so it isn't billed-blind", async () => {
+    generateTextMock.mockResolvedValue({
+      text: "Works at Acme Corp",
+      usage: { inputTokens: 500, outputTokens: 12, cachedInputTokens: 100 },
+    });
+    const onUsage = vi.fn();
+    await extractMemories(model, { userText: "I work at Acme Corp on energy stuff" }, [], onUsage);
+    // Billable input excludes the cached portion (see toTokenUsage).
+    expect(onUsage).toHaveBeenCalledWith({ inputTokens: 400, outputTokens: 12, cachedInputTokens: 100 });
+  });
+
+  it("does not call onUsage when the model is never invoked (short input)", async () => {
+    const onUsage = vi.fn();
+    await extractMemories(model, { userText: "ok" }, [], onUsage);
+    expect(onUsage).not.toHaveBeenCalled();
+  });
 });

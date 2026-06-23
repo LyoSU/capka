@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeCost } from "../pricing";
+import { computeCost, toTokenUsage } from "../pricing";
 import {
   iconForGroup,
   iconForModel,
@@ -16,6 +16,35 @@ describe("computeCost", () => {
       { inputTokens: 1_000_000, outputTokens: 500_000, cachedInputTokens: 200_000 },
     );
     expect(got).toBeCloseTo(15 + 37.5 + 0.3, 6);
+  });
+});
+
+describe("toTokenUsage", () => {
+  it("returns undefined when the provider reported no usage", () => {
+    expect(toTokenUsage(undefined)).toBeUndefined();
+  });
+
+  it("subtracts the cached portion from inputTokens so cost isn't double-counted", () => {
+    // inputTokens is the TOTAL prompt incl. cached reads; the cached share is
+    // billed separately, so the billable input must exclude it.
+    expect(toTokenUsage({ inputTokens: 1000, outputTokens: 200, cachedInputTokens: 300 })).toEqual({
+      inputTokens: 700,
+      outputTokens: 200,
+      cachedInputTokens: 300,
+    });
+  });
+
+  it("defaults missing fields to zero and never goes negative", () => {
+    expect(toTokenUsage({ outputTokens: 50 })).toEqual({
+      inputTokens: 0,
+      outputTokens: 50,
+      cachedInputTokens: 0,
+    });
+    expect(toTokenUsage({ inputTokens: 100, cachedInputTokens: 500 })).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 500,
+    });
   });
 });
 
@@ -76,11 +105,14 @@ describe("parseOpenRouterModels", () => {
     expect(opus.group).toBe("Anthropic");
     expect(opus.icon).toBe("anthropic");
     expect(opus.inputPrice).toBeCloseTo(0.000015, 12);
-    expect(opus.capabilities).toEqual({ vision: true, tools: true, reasoning: true });
+    // `input` carries the native attachment modalities: image + file→pdf.
+    expect(opus.capabilities).toEqual({ vision: true, tools: true, reasoning: true, input: ["image", "pdf"] });
     expect(opus.enabled).toBe(true);
 
     const free = out.find((m) => m.id === "someorg/free-model:free")!;
-    expect(free.enabled).toBe(false); // :free + zero price → not curated in
+    // :free tiers are intentionally curated IN — a wanted, cost-conscious option
+    // on a shared key (a price of 0 is a real free model, not a missing price).
+    expect(free.enabled).toBe(true);
   });
 });
 

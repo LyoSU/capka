@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import { log } from "@/lib/log";
+import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
 
 const EXTRACTION_PROMPT = `You extract key facts about the user from a conversation turn. The user's own message is the primary signal; the assistant's reply is context only. Identify any new facts, preferences, or context about the USER that would be useful to remember for future conversations.
 
@@ -33,6 +34,9 @@ export async function extractMemories(
   model: LanguageModel,
   turn: ConversationTurn,
   existingMemories: string[],
+  /** Called with the spend of this (otherwise unbilled) auxiliary LLM call, so
+   *  the runner can record it against the same key/budget as the main turn. */
+  onUsage?: (usage: TokenUsage) => void,
 ): Promise<string[]> {
   const userText = (turn.userText ?? "").trim();
   if (userText.length < 20) return [];
@@ -44,12 +48,15 @@ export async function extractMemories(
       : "");
 
   try {
-    const { text: extracted } = await generateText({
+    const { text: extracted, usage } = await generateText({
       model,
       system: EXTRACTION_PROMPT,
       prompt,
       maxOutputTokens: 200,
     });
+
+    const billable = toTokenUsage(usage);
+    if (billable && onUsage) onUsage(billable);
 
     if (!extracted.trim()) return [];
 

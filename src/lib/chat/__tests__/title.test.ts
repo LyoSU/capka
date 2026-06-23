@@ -68,4 +68,22 @@ describe("generateChatTitle", () => {
     generateTextMock.mockResolvedValue({ text: "-" });
     expect(await generateChatTitle(model, "hello there friend")).toBeNull();
   });
+
+  it("reports this call's spend via onUsage so it isn't billed-blind", async () => {
+    generateTextMock.mockResolvedValue({
+      text: "Fix login bug",
+      usage: { inputTokens: 1200, outputTokens: 8, cachedInputTokens: 200 },
+    });
+    const onUsage = vi.fn();
+    await generateChatTitle(model, "the login button is broken", undefined, onUsage);
+    // Billable input excludes the cached portion (see toTokenUsage).
+    expect(onUsage).toHaveBeenCalledWith({ inputTokens: 1000, outputTokens: 8, cachedInputTokens: 200 });
+  });
+
+  it("does not call onUsage when the provider reports no usage", async () => {
+    generateTextMock.mockResolvedValue({ text: "Fix login bug" });
+    const onUsage = vi.fn();
+    await generateChatTitle(model, "the login button is broken", undefined, onUsage);
+    expect(onUsage).not.toHaveBeenCalled();
+  });
 });
