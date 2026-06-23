@@ -6,6 +6,7 @@ import { Loader2, RefreshCw, Trash2, Sparkles, Plug, AlertTriangle, CheckCircle2
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { PluginIcon } from "@/components/plugin-icon";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -25,8 +26,11 @@ interface InstalledPlugin {
   author: string | null;
   homepage: string | null;
   enabledState: "on" | "off" | "mixed";
+  scope: string;
   /** A personal install this user owns — they may manage it without being admin. */
   mine: boolean;
+  /** This user has hidden the (shared) plugin for themselves. */
+  mutedByMe: boolean;
   notes: string[];
   skills: Item[];
   connectors: (Item & { transport: string })[];
@@ -105,6 +109,13 @@ export default function InstalledPlugins() {
   // Per-user OAuth sign-in (every user does their own — not an admin action).
   const signIn = (id: string) => { window.location.href = `/api/mcp/oauth/start?serverId=${encodeURIComponent(id)}`; };
 
+  // Per-user hide of a shared plugin (members can't manage it, but can hide it).
+  const setMuted = (p: InstalledPlugin, muted: boolean) =>
+    act(() => fetch("/api/extensions", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ installId: p.id, muted }),
+    }), p.id);
+
   if (loading) {
     return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
   }
@@ -168,6 +179,20 @@ export default function InstalledPlugins() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
+                </div>
+              )}
+
+              {/* A member can't manage a shared plugin, but can hide it for
+                  themselves (per-user mute of its skills + connectors). */}
+              {!isAdmin && !p.mine && p.scope === "system" && (
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{p.mutedByMe ? t("hidden") : t("shown")}</span>
+                  <Switch
+                    checked={!p.mutedByMe}
+                    disabled={busy === p.id}
+                    onCheckedChange={(v) => setMuted(p, !v)}
+                    aria-label={t("hideForMe")}
+                  />
                 </div>
               )}
             </div>

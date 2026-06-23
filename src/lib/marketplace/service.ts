@@ -3,6 +3,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginMarketplaces, pluginInstalls, skills, mcpServers } from "@/lib/db/schema";
 import { createGuardedFetch } from "@/lib/net/ssrf";
+import { mutedIds, setMuted } from "@/lib/muted-resources";
 import { getBlockPrivateProviderUrls, getSetting } from "@/lib/settings";
 import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl } from "./source";
@@ -110,10 +111,12 @@ export async function listInstalledPlugins(userId: string) {
   );
   if (!installs.length) return [];
   const tags = installs.map((i) => `catalog:${i.id}`);
-  const [skillRows, connRows, meta] = await Promise.all([
+  const [skillRows, connRows, meta, mutedSkill, mutedMcp] = await Promise.all([
     db.select({ id: skills.id, name: skills.name, enabled: skills.enabled, source: skills.source }).from(skills).where(inArray(skills.source, tags)),
     db.select({ id: mcpServers.id, name: mcpServers.name, enabled: mcpServers.enabled, transport: mcpServers.transport, source: mcpServers.source }).from(mcpServers).where(inArray(mcpServers.source, tags)),
     getInstallMeta(installs.map((i) => i.id)),
+    mutedIds(userId, "skill"),
+    mutedIds(userId, "mcp"),
   ]);
   return installs.map((i) => {
     const tag = `catalog:${i.id}`;
@@ -122,6 +125,10 @@ export async function listInstalledPlugins(userId: string) {
     const items = [...pluginSkills, ...connectors];
     const enabledState: PluginEnabledState =
       items.length === 0 || items.every((x) => x.enabled) ? "on" : items.some((x) => x.enabled) ? "mixed" : "off";
+    // A member can't manage a shared (system) plugin, but can hide it for
+    // themselves: muted when every one of its items is in their mute set.
+    const ids = [...pluginSkills.map((s) => ({ id: s.id, set: mutedSkill })), ...connectors.map((c) => ({ id: c.id, set: mutedMcp }))];
+    const mutedByMe = ids.length > 0 && ids.every((x) => x.set.has(x.id));
     const m = (i.manifest ?? {}) as { displayName?: string; notes?: string[] };
     return {
       id: i.id,
@@ -135,11 +142,26 @@ export async function listInstalledPlugins(userId: string) {
       scope: i.scope,
       // The viewer owns this personal install → may manage it without being admin.
       mine: i.scope === "user" && i.userId === userId,
+      mutedByMe,
       notes: Array.isArray(m.notes) ? m.notes : [],
       skills: pluginSkills,
       connectors,
     };
   });
+}
+
+/** Per-user mute of a whole shared plugin — hides every skill + connector it
+ *  routed for this user only (the admin's global state is untouched). */
+export async function setPluginMutedForUser(installId: string, userId: string, muted: boolean): Promise<void> {
+  const tag = `catalog:${installId}`;
+  const [sk, co] = await Promise.all([
+    db.select({ id: skills.id }).from(skills).where(eq(skills.source, tag)),
+    db.select({ id: mcpServers.id }).from(mcpServers).where(eq(mcpServers.source, tag)),
+  ]);
+  await Promise.all([
+    ...sk.map((s) => setMuted(userId, "skill", s.id, muted)),
+    ...co.map((c) => setMuted(userId, "mcp", c.id, muted)),
+  ]);
 }
 
 /** Scope + owner of an install, for API ownership checks (a member may only act on
@@ -157,6 +179,17 @@ export async function setPluginEnabled(installId: string, enabled: boolean): Pro
   const now = new Date();
   await db.update(skills).set({ enabled, updatedAt: now }).where(eq(skills.source, tag));
   await db.update(mcpServers).set({ enabled, updatedAt: now }).where(eq(mcpServers.source, tag));
+}
+
+/** Whether this plugin is already installed org-wide (system). Used to stop a
+ *  member from creating a redundant personal copy of something everyone has. */
+export async function hasSystemInstall(marketplaceId: string, pluginName: string): Promise<boolean> {
+  const r = await db.select({ id: pluginInstalls.id }).from(pluginInstalls).where(and(
+    eq(pluginInstalls.marketplaceId, marketplaceId),
+    eq(pluginInstalls.pluginName, pluginName),
+    eq(pluginInstalls.scope, "system"),
+  )).limit(1);
+  return !!r[0];
 }
 
 /** The install id for a (marketplace, plugin), or null. */

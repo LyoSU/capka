@@ -777,7 +777,10 @@
         },
         "signIn": "Sign in",
         "memberInstallTitle": "Let members install plugins",
-        "memberInstallHint": "When on, members can install plugins for themselves from your marketplaces. Off — only you (admin) install, org-wide."
+        "memberInstallHint": "When on, members can install plugins for themselves from your marketplaces. Off — only you (admin) install, org-wide.",
+        "shown": "Shown",
+        "hidden": "Hidden",
+        "hideForMe": "Hide this plugin for me"
       },
       "pluginsView": {
         "installed": "Installed",

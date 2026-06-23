@@ -156,6 +156,9 @@ export async function ingestSkill(
         target.userId ? eq(skills.userId, target.userId) : isNull(skills.userId),
         target.projectId ? eq(skills.projectId, target.projectId) : isNull(skills.projectId),
         eq(skills.name, parsed.name),
+        // Match within the same origin: a plugin (catalog:*) must not overwrite a
+        // same-named hand-added skill (and vice versa).
+        eq(skills.source, target.source ?? "manual"),
       ),
     )
     .limit(1);

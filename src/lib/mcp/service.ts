@@ -128,11 +128,12 @@ export interface UpsertServerInput {
   source?: string; // 'manual' | 'catalog:<installId>'
 }
 
-/** Id of an existing row with the same identity (explicit id, else scope + name
- *  within the same owner/project) so upserts dedupe by name like skills do —
- *  re-applying a plugin or re-adding a same-named connector updates in place
- *  instead of creating a duplicate row. `name` must already be slugified. */
-async function existingServerId(input: { id?: string; scope: McpScope; userId: string | null; projectId: string | null; name: string }): Promise<string | undefined> {
+/** Id of an existing row with the same identity (explicit id, else scope + name +
+ *  source within the same owner/project) so upserts dedupe in place — re-applying a
+ *  plugin updates its own row. Crucially `source` is part of the key: a plugin
+ *  (`catalog:<id>`) must NOT match, and thus overwrite, a same-named MANUAL row.
+ *  `name` must already be slugified. */
+async function existingServerId(input: { id?: string; scope: McpScope; userId: string | null; projectId: string | null; name: string; source?: string }): Promise<string | undefined> {
   const rows = await db.select({ id: mcpServers.id }).from(mcpServers).where(
     input.id
       ? eq(mcpServers.id, input.id)
@@ -141,6 +142,7 @@ async function existingServerId(input: { id?: string; scope: McpScope; userId: s
           input.userId ? eq(mcpServers.userId, input.userId) : isNull(mcpServers.userId),
           input.projectId ? eq(mcpServers.projectId, input.projectId) : isNull(mcpServers.projectId),
           eq(mcpServers.name, input.name),
+          eq(mcpServers.source, input.source ?? "manual"),
         ),
   ).limit(1);
   return rows[0]?.id;
@@ -156,7 +158,7 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
     throw new ValidationError(e instanceof Error ? e.message : "That URL can't be used.");
   }
   const key = await getMasterKey();
-  const matchedId = await existingServerId({ id: input.id, scope: input.scope, userId: input.userId, projectId: input.projectId, name });
+  const matchedId = await existingServerId({ id: input.id, scope: input.scope, userId: input.userId, projectId: input.projectId, name, source: input.source });
   const id = matchedId ?? nanoid();
   const values = {
     id, scope: input.scope, userId: input.userId, projectId: input.projectId,
@@ -193,7 +195,7 @@ export async function upsertStdioServer(input: UpsertStdioInput): Promise<string
   if (!NAME_RE.test(name)) throw new ValidationError("Use letters or numbers in the connector name.");
   if (!input.command.trim()) throw new ValidationError("A command is required for a local connector.");
   const key = await getMasterKey();
-  const matchedId = await existingServerId({ id: input.id, scope: input.scope, userId: input.userId, projectId: input.projectId, name });
+  const matchedId = await existingServerId({ id: input.id, scope: input.scope, userId: input.userId, projectId: input.projectId, name, source: input.source });
   const id = matchedId ?? nanoid();
   const values = {
     id, scope: input.scope, userId: input.userId, projectId: input.projectId,

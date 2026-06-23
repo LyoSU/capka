@@ -1,5 +1,5 @@
 import { apiHandler, requireSession } from "@/lib/auth";
-import { getInstallOwner, listInstalledPlugins, setPluginEnabled } from "@/lib/marketplace/service";
+import { getInstallOwner, listInstalledPlugins, setPluginEnabled, setPluginMutedForUser } from "@/lib/marketplace/service";
 import { uninstallPlugin, upgradePlugin } from "@/lib/marketplace/install";
 import { audit } from "@/lib/governance/audit";
 
@@ -19,13 +19,24 @@ export const GET = apiHandler(async () => {
   return Response.json({ plugins: await listInstalledPlugins(userId) });
 });
 
-/** Enable or disable a whole plugin (all its skills + connectors at once). */
+/** Two distinct controls:
+ *  - `{ muted }`  → per-user hide of a shared (system) plugin. Any signed-in user.
+ *  - `{ enabled }` → global enable/disable of the whole plugin. Managers only
+ *                    (admin for org-wide installs, the owner for a personal one). */
 export const PATCH = apiHandler(async (req: Request) => {
   const { userId, role } = await requireSession();
-  const { installId, enabled } = await req.json();
-  if (typeof installId !== "string" || typeof enabled !== "boolean") {
-    return Response.json({ error: "installId and enabled required" }, { status: 400 });
+  const { installId, enabled, muted } = await req.json();
+  if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
+
+  if (typeof muted === "boolean") {
+    const owner = await getInstallOwner(installId);
+    if (!owner) return Response.json({ error: "Not found" }, { status: 404 });
+    if (owner.scope !== "system") return Response.json({ error: "Only shared plugins can be hidden per user" }, { status: 400 });
+    await setPluginMutedForUser(installId, userId, muted);
+    return Response.json({ ok: true });
   }
+
+  if (typeof enabled !== "boolean") return Response.json({ error: "enabled or muted required" }, { status: 400 });
   if (!(await canManage(installId, userId, role === "admin"))) return Response.json({ error: "Not allowed" }, { status: 403 });
   await setPluginEnabled(installId, enabled);
   await audit({ actorId: userId, action: enabled ? "plugin.enable" : "plugin.disable", targetType: "plugin", targetKey: installId });

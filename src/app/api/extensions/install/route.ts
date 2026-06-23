@@ -1,6 +1,7 @@
 import { apiHandler, requireSession } from "@/lib/auth";
 import { membersCanInstallPlugins } from "@/lib/settings";
 import { installPlugin } from "@/lib/marketplace/install";
+import { hasSystemInstall } from "@/lib/marketplace/service";
 import { audit } from "@/lib/governance/audit";
 
 /** Install a plugin from an admin-connected marketplace. Admins install org-wide
@@ -15,6 +16,10 @@ export const POST = apiHandler(async (req: Request) => {
   const { marketplaceId, pluginName } = await req.json();
   if (typeof marketplaceId !== "string" || typeof pluginName !== "string") {
     return Response.json({ error: "marketplaceId and pluginName required" }, { status: 400 });
+  }
+  // A member needn't install personally what's already available org-wide.
+  if (!isAdmin && (await hasSystemInstall(marketplaceId, pluginName))) {
+    return Response.json({ error: "This plugin is already installed for everyone." }, { status: 409 });
   }
   const scope = isAdmin ? "system" : "user";
   const manifest = await installPlugin({ marketplaceId, pluginName, installedBy: userId, scope });

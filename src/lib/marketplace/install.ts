@@ -31,6 +31,21 @@ interface InstallTarget { scope: "system" | "user"; userId: string | null; proje
  *  small + user-facing). */
 interface ApplyResult { manifest: InstallManifest; files: { path: string; content: string }[] }
 
+/** Delete skills/connectors this install owns that the latest tree no longer
+ *  produces (upstream removals). Keyed by the install tag. */
+async function pruneRemoved(tag: string, manifest: InstallManifest): Promise<void> {
+  const keepSkills = new Set(manifest.skills);
+  const keepConnectors = new Set(manifest.connectors);
+  const ownedSkills = await db.select({ id: skills.id, name: skills.name }).from(skills).where(eq(skills.source, tag));
+  for (const s of ownedSkills) {
+    if (!keepSkills.has(s.name)) await db.delete(skills).where(eq(skills.id, s.id));
+  }
+  const ownedConnectors = await db.select({ id: mcpServers.id, name: mcpServers.name }).from(mcpServers).where(eq(mcpServers.source, tag));
+  for (const c of ownedConnectors) {
+    if (!keepConnectors.has(c.name)) await db.delete(mcpServers).where(eq(mcpServers.id, c.id));
+  }
+}
+
 /** Replace the bundled-file set for an install (delete-then-insert keeps upgrade
  *  in sync with the new tree). */
 async function persistPluginFiles(installId: string, files: { path: string; content: string }[]): Promise<void> {
@@ -249,6 +264,7 @@ export async function installPlugin(opts: {
   const { manifest, files } = await applyPlugin(gh, `catalog:${installId}`, target);
 
   if (existing) {
+    await pruneRemoved(`catalog:${installId}`, manifest); // re-install: drop rows removed upstream
     await db.update(pluginInstalls)
       .set({ version: manifest.version ?? gh.ref, manifest: manifest as unknown as Record<string, unknown> })
       .where(eq(pluginInstalls.id, installId));
@@ -277,18 +293,7 @@ export async function upgradePlugin(installId: string): Promise<InstallManifest>
 
   const { manifest, files } = await applyPlugin(gh, tag, target);
   await persistPluginFiles(installId, files);
-
-  // Prune rows this install owns that the new tree no longer produces.
-  const keepSkills = new Set(manifest.skills);
-  const keepConnectors = new Set(manifest.connectors);
-  const ownedSkills = await db.select({ id: skills.id, name: skills.name }).from(skills).where(eq(skills.source, tag));
-  for (const s of ownedSkills) {
-    if (!keepSkills.has(s.name)) await db.delete(skills).where(eq(skills.id, s.id));
-  }
-  const ownedConnectors = await db.select({ id: mcpServers.id, name: mcpServers.name }).from(mcpServers).where(eq(mcpServers.source, tag));
-  for (const c of ownedConnectors) {
-    if (!keepConnectors.has(c.name)) await db.delete(mcpServers).where(eq(mcpServers.id, c.id));
-  }
+  await pruneRemoved(tag, manifest);
 
   await db.update(pluginInstalls)
     .set({ version: manifest.version ?? gh.ref, manifest: manifest as unknown as Record<string, unknown> })

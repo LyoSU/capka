@@ -41,11 +41,28 @@ export async function resolvePluginRoot(sessionKey: string, cfg: McpServerConfig
 
 const shellQuote = (s: string) => s.replace(/'/g, "'\\''");
 
-/** Write base64 file contents into the sandbox, one file per exec (mirrors the
- *  skill materializer). Paths were sanitized at install time. */
+// Bound each exec body so a fat plugin doesn't send one enormous command; far
+// fewer round-trips than one-exec-per-file (the old behavior) at scale.
+const MATERIALIZE_BATCH_BYTES = 512_000;
+
+/** Write base64 file contents into the sandbox, batching writes to cut sandbox
+ *  round-trips. Paths were sanitized at install time; content is pure base64. */
 async function materialize(sessionKey: string, baseDir: string, files: { path: string; content: string }[]): Promise<void> {
+  let batch: string[] = [];
+  let bytes = 0;
+  const flush = async () => {
+    if (!batch.length) return;
+    // Newline-joined: each file's mkdir+decode runs sequentially in one shell.
+    await execCommand(sessionKey, batch.join("\n"), 30_000);
+    batch = [];
+    bytes = 0;
+  };
   for (const f of files) {
     const abs = shellQuote(`${baseDir}/${f.path}`);
-    await execCommand(sessionKey, `mkdir -p "$(dirname '${abs}')" && echo '${f.content}' | base64 -d > '${abs}'`, 15_000);
+    const line = `mkdir -p "$(dirname '${abs}')" && printf %s '${f.content}' | base64 -d > '${abs}'`;
+    if (bytes && bytes + line.length > MATERIALIZE_BATCH_BYTES) await flush();
+    batch.push(line);
+    bytes += line.length + 1;
   }
+  await flush();
 }
