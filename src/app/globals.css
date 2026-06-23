@@ -186,6 +186,16 @@
 }
 .animate-title-swap { animation: title-swap 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
+/* A chat row that arrives AFTER first paint — you just created it, or it
+   streamed in over SSE — eases down into the list with a soft de-blur. Lands
+   at the top, so it travels in from just above. Quiet enough not to read as
+   jitter; distinct enough to notice the new chat appear. */
+@keyframes chat-row-in {
+  from { opacity: 0; filter: blur(6px); transform: translateY(-6px); }
+  to   { opacity: 1; filter: blur(0); transform: none; }
+}
+.animate-chat-row-in { animation: chat-row-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
 /* Step rail: each thought/action row decelerates in as it streams, and its
    node springs in with a touch of overshoot — so a sequence of work reads as a
    timeline assembling itself rather than text popping into place. */

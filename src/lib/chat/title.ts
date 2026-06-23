@@ -44,7 +44,11 @@ export async function generateChatTitle(
       model,
       system: TITLE_PROMPT,
       prompt,
-      maxOutputTokens: 32,
+      // Generous budget so reasoning models (DeepSeek-R1 et al.) can finish their
+      // <think> block AND still emit the title — a tight cap left them cut off
+      // mid-thought with nothing to title. Non-reasoning models stop after the
+      // 3–6 words anyway, so this costs ~nothing extra for them.
+      maxOutputTokens: 1000,
     });
     const billable = toTokenUsage(usage);
     if (billable && onUsage) onUsage(billable);
@@ -62,8 +66,8 @@ export function sanitizeTitle(raw: string): string | null {
   if (!t) return null;
   // Reasoning models (DeepSeek-R1 et al. via OpenRouter) inline their chain of
   // thought as <think>…</think> in the content. Drop closed blocks, then any
-  // dangling unclosed tag — with maxOutputTokens=32 the model is usually cut
-  // off mid-thought, so the remainder is all reasoning and nothing to title.
+  // dangling unclosed tag — if the budget still ran out mid-thought the
+  // remainder is all reasoning and nothing to title.
   t = t.replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/\1>/gi, "").trim();
   t = t.replace(/<(think|thinking|reasoning)\b[^>]*>[\s\S]*$/i, "").trim();
   if (!t) return null;

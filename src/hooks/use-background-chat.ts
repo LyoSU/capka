@@ -440,6 +440,12 @@ export function useBackgroundChat({
 
       const displayText = text.trim() || (files.length > 0 ? t("processFiles") : "");
 
+      // A chat that still has no messages is being created by this very send —
+      // it isn't in the sidebar yet (the row only lands once the DB row exists).
+      // Tell the sidebar NOW so it can drop the row in optimistically, before the
+      // POST round-trips, instead of popping in ~400ms later via the SSE refresh.
+      const isFirstMessage = msgRef.current.length === 0;
+
       // Optimistically add the user message. Carry the attachment refs in
       // metadata so the bubble shows thumbnails immediately — before history
       // reloads — matching what the server persists.
@@ -452,6 +458,13 @@ export function useBackgroundChat({
       const currentMessages = [...msgRef.current, userMsg];
       setMessages(currentMessages);
       setStatus("running");
+      if (isFirstMessage && typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("chat:created", {
+            detail: { id: chatId, title: displayText.slice(0, 100), projectId: projectId ?? null },
+          }),
+        );
+      }
       // Preserve this message across any reload until it's durably persisted —
       // a prior turn finishing mid-POST would otherwise reload it away.
       pendingRef.current = [...pendingRef.current, userMsg];

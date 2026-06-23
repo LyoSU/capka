@@ -167,6 +167,43 @@ function ChatStatusDot({
   return null;
 }
 
+/** One chat row. Single source of truth for the row markup so the pinned,
+ *  date-grouped, and Telegram sections stay identical — and so the enter
+ *  animation for a freshly-arrived chat lives in exactly one place. */
+function ChatRow({
+  chat,
+  active,
+  entering,
+  statusLabels,
+  fallback,
+  onUpdate,
+}: {
+  chat: ChatItem;
+  active: boolean;
+  entering: boolean;
+  statusLabels: { unread: string; working: string };
+  fallback: string;
+  onUpdate: () => void;
+}) {
+  return (
+    <SidebarMenuItem className={entering ? "animate-chat-row-in" : undefined}>
+      <ChatContextMenu chat={chat} onUpdate={onUpdate}>
+        <SidebarMenuButton
+          render={<Link href={`/chat/${chat.id}`} />}
+          data-active={active || undefined}
+        >
+          <ChatStatusDot
+            unread={!!chat.unread && !active}
+            running={chat.running}
+            labels={statusLabels}
+          />
+          <ChatTitle title={chat.title} fallback={fallback} />
+        </SidebarMenuButton>
+      </ChatContextMenu>
+    </SidebarMenuItem>
+  );
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -180,6 +217,10 @@ export function AppSidebar() {
     router.push("/login");
   }, [router]);
   const [chats, setChats] = useState<ChatItem[]>([]);
+  // Ids of rows that JUST arrived (optimistic new chat, or surfaced by an SSE
+  // refresh) — drives a one-shot enter animation. An id is cleared once the
+  // animation has played so a later refresh of the same row never re-animates.
+  const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
   // Distinguishes "still loading" from "loaded, genuinely empty" so the first
   // paint shows skeleton rows instead of flashing the empty state before the
   // list arrives. Stays true after the first load, so search/SSE refetches
@@ -405,6 +446,66 @@ export function AppSidebar() {
     };
   }, []);
 
+  // Optimistic new-chat: the composer fires `chat:created` the instant you send
+  // the first message, so the row appears immediately — no waiting for the POST
+  // or the SSE refresh. Drop in a minimal placeholder row (running, "now") that
+  // the subsequent merge-refresh reconciles with the authoritative server row.
+  // Skip if it wouldn't pass the active filter (it'd otherwise linger, since a
+  // merge-refresh never removes rows the server didn't return).
+  useEffect(() => {
+    const onCreated = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; title: string; projectId: string | null }>).detail;
+      if (!d?.id) return;
+      if (selectedProject && d.projectId !== selectedProject) return;
+      if (debouncedSearch) return;
+      setChats((prev) => {
+        if (prev.some((c) => c.id === d.id)) return prev;
+        const optimistic: ChatItem = {
+          id: d.id,
+          title: d.title || null,
+          projectId: d.projectId,
+          pinned: false,
+          archived: false,
+          updatedAt: new Date().toISOString(),
+          source: "web",
+          visibility: null,
+          shareToken: null,
+          running: true,
+        };
+        return mergeChats(prev, [optimistic]);
+      });
+    };
+    window.addEventListener("chat:created", onCreated);
+    return () => window.removeEventListener("chat:created", onCreated);
+  }, [selectedProject, debouncedSearch]);
+
+  // Enter animation bookkeeping: any chat id that wasn't in the previous render
+  // is "new" and animates in once. The FIRST loaded batch is the baseline — it's
+  // marked seen without animating (the skeleton already covered first paint), so
+  // only chats that arrive later (optimistic send, SSE) get the slide-in.
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const baselineSeenRef = useRef(false);
+  useEffect(() => {
+    if (!loaded) return;
+    if (!baselineSeenRef.current) {
+      baselineSeenRef.current = true;
+      for (const c of chats) seenIdsRef.current.add(c.id);
+      return;
+    }
+    const fresh = chats.filter((c) => !seenIdsRef.current.has(c.id)).map((c) => c.id);
+    if (fresh.length === 0) return;
+    for (const id of fresh) seenIdsRef.current.add(id);
+    setEnteringIds((prev) => new Set([...prev, ...fresh]));
+    const timer = setTimeout(() => {
+      setEnteringIds((prev) => {
+        const next = new Set(prev);
+        for (const id of fresh) next.delete(id);
+        return next;
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [chats, loaded]);
+
   // Telegram chats are a distinct kind — read-only in the web UI — so they get
   // their own section instead of mixing into the date-grouped web chats.
   const TELEGRAM_COLLAPSED = 5;
@@ -503,21 +604,15 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 {visibleTelegramChats.map((chat) => (
-                  <SidebarMenuItem key={chat.id}>
-                    <ChatContextMenu chat={chat} onUpdate={fetchReset}>
-                      <SidebarMenuButton
-                        render={<Link href={`/chat/${chat.id}`} />}
-                        data-active={activeChatId === chat.id || undefined}
-                      >
-                        <ChatStatusDot
-                          unread={!!chat.unread && chat.id !== activeChatId}
-                          running={chat.running}
-                          labels={statusLabels}
-                        />
-                        <ChatTitle title={chat.title} fallback={t("newChat")} />
-                      </SidebarMenuButton>
-                    </ChatContextMenu>
-                  </SidebarMenuItem>
+                  <ChatRow
+                    key={chat.id}
+                    chat={chat}
+                    active={activeChatId === chat.id}
+                    entering={enteringIds.has(chat.id)}
+                    statusLabels={statusLabels}
+                    fallback={t("newChat")}
+                    onUpdate={fetchReset}
+                  />
                 ))}
                 {(hiddenTelegramCount > 0 || showAllTelegram) && (
                   <SidebarMenuItem>
@@ -542,21 +637,15 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 {pinnedChats.map((chat) => (
-                  <SidebarMenuItem key={chat.id}>
-                    <ChatContextMenu chat={chat} onUpdate={fetchReset}>
-                      <SidebarMenuButton
-                        render={<Link href={`/chat/${chat.id}`} />}
-                        data-active={activeChatId === chat.id || undefined}
-                      >
-                        <ChatStatusDot
-                          unread={!!chat.unread && chat.id !== activeChatId}
-                          running={chat.running}
-                          labels={statusLabels}
-                        />
-                        <ChatTitle title={chat.title} fallback={t("newChat")} />
-                      </SidebarMenuButton>
-                    </ChatContextMenu>
-                  </SidebarMenuItem>
+                  <ChatRow
+                    key={chat.id}
+                    chat={chat}
+                    active={activeChatId === chat.id}
+                    entering={enteringIds.has(chat.id)}
+                    statusLabels={statusLabels}
+                    fallback={t("newChat")}
+                    onUpdate={fetchReset}
+                  />
                 ))}
               </SidebarMenu>
             </SidebarGroupContent>
@@ -569,21 +658,15 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.chats.map((chat) => (
-                  <SidebarMenuItem key={chat.id}>
-                    <ChatContextMenu chat={chat} onUpdate={fetchReset}>
-                      <SidebarMenuButton
-                        render={<Link href={`/chat/${chat.id}`} />}
-                        data-active={activeChatId === chat.id || undefined}
-                      >
-                        <ChatStatusDot
-                          unread={!!chat.unread && chat.id !== activeChatId}
-                          running={chat.running}
-                          labels={statusLabels}
-                        />
-                        <ChatTitle title={chat.title} fallback={t("newChat")} />
-                      </SidebarMenuButton>
-                    </ChatContextMenu>
-                  </SidebarMenuItem>
+                  <ChatRow
+                    key={chat.id}
+                    chat={chat}
+                    active={activeChatId === chat.id}
+                    entering={enteringIds.has(chat.id)}
+                    statusLabels={statusLabels}
+                    fallback={t("newChat")}
+                    onUpdate={fetchReset}
+                  />
                 ))}
               </SidebarMenu>
             </SidebarGroupContent>
