@@ -75,6 +75,9 @@ export function toUIMessages(rows: {
         createdAt: m.createdAt?.toISOString() ?? null,
         platform: m.platform ?? "web",
         taskStatus: meta?.status,
+        // Seq the persisted parts cover — lets a client resuming mid-stream
+        // reconcile live deltas against this snapshot. See MessageMeta.streamSeq.
+        streamSeq: meta?.streamSeq,
         // Forward the failure shape so a failed turn's ErrorNotice shows the real
         // message after a reload (not the generic fallback). message.tsx reads
         // these to pick a localized, role-aware error.

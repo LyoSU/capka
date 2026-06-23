@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { type FileRef } from "@/lib/constants";
 import type { TaskEvent } from "@/lib/tasks/events";
 import { mergePendingMessages, pendingStillUnknown } from "@/lib/chat/optimistic";
+import { classifyStreamEvent } from "@/lib/chat/stream-reconcile";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -45,6 +46,13 @@ export function useBackgroundChat({
   // Whether the SSE stream is currently connected — drives how hard the polling
   // fallback works (aggressive only when SSE is down).
   const sseHealthyRef = useRef(false);
+  // Highest realtime `seq` already applied to each streaming message. SSE has no
+  // replay and deltas are incremental, so a client that (re)mounts mid-stream
+  // would otherwise append live deltas onto an empty/stale prefix and show a
+  // truncated reply. Seeded from the DB snapshot's `streamSeq` on load; each
+  // applied delta advances it. Lets us tell covered/next/gapped deltas apart and
+  // reconcile from the DB when there's a gap. See classifyStreamEvent.
+  const appliedSeqRef = useRef<Map<string, number>>(new Map());
 
   const [error, setError] = useState<string | null>(null);
 
@@ -65,9 +73,23 @@ export function useBackgroundChat({
           setMessages(mergePendingMessages(history, pendingRef.current));
         }
         setError(null);
-        const last = history[history.length - 1];
-        const meta = last?.metadata as { taskStatus?: string } | undefined;
-        if (meta?.taskStatus === "running") setStatus("running");
+        // Find the running assistant reply (the snapshot we may be resuming). It's
+        // normally the last message, but a just-queued user follow-up can sit
+        // after it — so scan from the end rather than assuming `last`.
+        const running = [...history].reverse().find(
+          (m) => (m.metadata as { taskStatus?: string } | undefined)?.taskStatus === "running",
+        );
+        if (running) {
+          setStatus("running");
+          // Seed the applied-seq from the snapshot we just loaded so resumed
+          // deltas reconcile against it (this IS the gap-closing step on resume).
+          const meta = running.metadata as { streamSeq?: number } | undefined;
+          appliedSeqRef.current.set(running.id, meta?.streamSeq ?? 0);
+        }
+        // No cleanup needed for finished turns: message ids are unique per reply,
+        // so a stale cursor can never gate a future stream, and task:finish
+        // already drops the running one. (Avoids racing a just-set task:start
+        // cursor when this load was triggered by a prior turn finishing.)
       })
       .catch((e) => {
         console.error("[chat] loadHistory failed:", e);
@@ -95,7 +117,27 @@ export function useBackgroundChat({
     let es: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let truncReloadTimer: ReturnType<typeof setTimeout>;
+    let reconcileTimer: ReturnType<typeof setTimeout>;
     let retryDelay = 1000; // exponential backoff: 1s, 2s, 4s, 8s, max 30s
+
+    // A gap in the seq stream (we reconnected mid-stream, or a NOTIFY dropped)
+    // means our delta-accumulated copy is behind — pull a fresh DB snapshot
+    // rather than append onto a stale prefix. Debounced so a burst of gapped
+    // deltas during the resume window collapses into one reload; loadHistory
+    // re-seeds appliedSeq from the snapshot's streamSeq, after which live deltas
+    // resume cleanly.
+    const reconcileSoon = () => {
+      clearTimeout(reconcileTimer);
+      reconcileTimer = setTimeout(loadHistory, 250);
+    };
+
+    // Streaming events that mutate the reply and carry a per-message seq — gated
+    // through classifyStreamEvent so a resumed stream reconciles instead of
+    // truncating. task:start/reset/finish are handled explicitly, not gated.
+    const GATED = new Set([
+      "task:text-delta", "task:reasoning-delta",
+      "task:tool-input-start", "task:tool-call", "task:tool-result",
+    ]);
 
     const connect = () => {
       es = new EventSource("/api/events");
@@ -121,10 +163,27 @@ export function useBackgroundChat({
             return;
           }
 
+          // Reconcile gate: for seq-stamped streaming events, decide whether this
+          // delta is already covered by our snapshot (ignore), the next one
+          // (apply), or past a gap (reconcile from the DB). A delta with no seq
+          // (legacy publisher) always applies, so nothing else regresses.
+          if (GATED.has(data.type) && "messageId" in data) {
+            const mid = data.messageId as string;
+            const seq = (data as { seq?: number }).seq;
+            const action = classifyStreamEvent(appliedSeqRef.current.get(mid) ?? -1, seq);
+            if (action === "ignore") return;
+            if (action === "reconcile") { reconcileSoon(); return; }
+            // action === "apply": advance the cursor, then run the handler below.
+            if (typeof seq === "number") appliedSeqRef.current.set(mid, seq);
+          }
+
           switch (data.type) {
             case "task:start": {
               setStatus("running");
               setTaskInfo({ startedAt: Date.now(), currentTool: null });
+              // Baseline the seq cursor for this reply (task:start is seq 0), so
+              // the first delta (seq 1) is the next contiguous one.
+              appliedSeqRef.current.set(data.messageId, data.seq ?? 0);
               // Idempotent: if history already loaded this assistant row
               // (reconnect / cross-channel), don't append a duplicate.
               setMessages((prev) =>
@@ -132,6 +191,21 @@ export function useBackgroundChat({
                   ? prev
                   : [...prev, { id: data.messageId, role: "assistant", parts: [] }],
               );
+              break;
+            }
+
+            case "task:reset": {
+              // A runner retry threw away the partial reply — clear the streamed
+              // parts so retry deltas don't append onto the abandoned attempt, and
+              // move the cursor to the reset's seq.
+              appliedSeqRef.current.set(data.messageId, data.seq);
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === data.messageId);
+                if (idx === -1) return prev;
+                const msgs = [...prev];
+                msgs[idx] = { ...msgs[idx], parts: [] };
+                return msgs;
+              });
               break;
             }
 
@@ -258,6 +332,9 @@ export function useBackgroundChat({
               setStatus("idle");
               setTaskId(null);
               setTaskInfo({ startedAt: 0, currentTool: null });
+              // Stop tracking this reply's seq — the turn is done; loadHistory
+              // below reloads the final, authoritative content.
+              if (data.messageId) appliedSeqRef.current.delete(data.messageId);
               // Don't surface a failure via the bottom banner here: the server
               // has already persisted it on the message row (taskStatus:"failed"
               // + error), so the reload below brings it back as the message's own
@@ -292,6 +369,7 @@ export function useBackgroundChat({
       sseHealthyRef.current = false;
       clearTimeout(reconnectTimer);
       clearTimeout(truncReloadTimer);
+      clearTimeout(reconcileTimer);
       es?.close();
     };
   }, [chatId, loadHistory]);

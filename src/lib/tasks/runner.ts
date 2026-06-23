@@ -324,6 +324,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   }, MAX_TASK_MS);
   const msgId = nanoid();
   const parts: StoredPart[] = [];
+  // Per-message monotonic event counter. Stamped on every realtime event that
+  // mutates/finalizes this reply (text/reasoning deltas, tool steps, reset,
+  // finish). The persisted snapshot records the seq it covers (metadata.streamSeq),
+  // so a client resuming mid-stream can tell covered/next/gapped deltas apart and
+  // reconcile instead of appending onto a stale prefix. task:start is seq 0; the
+  // first delta is seq 1. Bumped synchronously at each publish so NOTIFY order
+  // (per-channel FIFO) matches seq order.
+  let seq = 0;
   // Join distinct segments with a blank line, not "". The model emits text (and
   // reasoning) in runs broken up by tool/reasoning steps, so each `text` part is
   // its own paragraph — the web renders them apart, but a channel that flattens
@@ -439,10 +447,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       role: "assistant",
       content: "",
       platform: payload.origin?.platform ?? "web",
-      metadata: { taskId, status: "running", parts: [] },
+      metadata: { taskId, status: "running", parts: [], streamSeq: 0 },
     });
     await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
-    await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId });
+    await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId, seq: 0 });
 
     // Show a "Thinking…" block immediately — before the model emits its first
     // token — so the channel reacts at once; reasoning text then streams into it.
@@ -564,13 +572,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (!reasonBuf) return;
       const delta = reasonBuf;
       reasonBuf = "";
-      await publishTaskEvent(userId, { type: "task:reasoning-delta", taskId, chatId, messageId: msgId, delta });
+      // ++seq synchronously before the await so concurrent flushes stay ordered.
+      await publishTaskEvent(userId, { type: "task:reasoning-delta", taskId, chatId, messageId: msgId, delta, seq: ++seq });
     };
     const flushText = async () => {
       if (!textBuf) return;
       const delta = textBuf;
       textBuf = "";
-      await publishTaskEvent(userId, { type: "task:text-delta", taskId, chatId, messageId: msgId, delta });
+      await publishTaskEvent(userId, { type: "task:text-delta", taskId, chatId, messageId: msgId, delta, seq: ++seq });
     };
     // Flush reasoning before text so the live stream keeps the model's order
     // (it reasons, then answers). The persisted `parts` array is the source of
@@ -583,10 +592,58 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // since earlier runs are already committed as their own bubbles. Throttled
       // + coalesced inside the sink, so calling it on every flush is cheap.
       sink.push(openSegment(), currentStatus);
+      // Persist progress so a client resuming mid-stream gets a fresh snapshot
+      // (throttled inside saveSnapshot). Runs AFTER the flushes above, so the
+      // snapshot's streamSeq covers every delta published this tick.
+      await saveSnapshot();
     };
     const scheduleFlush = () => {
       if (flushTimer) return;
       flushTimer = setTimeout(() => { flushTimer = null; void flushBuffers(); }, 100);
+    };
+
+    // Progressive persistence. WITHOUT this the DB only saved at finish-step, so
+    // a single long answer (one step, no tools) sat as `parts: []` in the DB the
+    // whole time it streamed — a client resuming mid-stream loaded an empty
+    // prefix and saw the reply truncated. Throttled to ~1s (one UPDATE/sec per
+    // task), and only ever called off a flush, so a quiet tool run adds no writes.
+    let lastSaveAt = 0;
+    const saveSnapshot = async (force = false) => {
+      if (!force && Date.now() - lastSaveAt < 1000) return;
+      lastSaveAt = Date.now();
+      // Capture parts + content synchronously (structuredClone, so a token
+      // appended during the DB await can't mutate what we persist).
+      //
+      // Consistency trap: `parts` is updated EAGERLY (appendText, per token)
+      // while `seq` is bumped LAZILY (at publish/flush). During a flush's publish
+      // await, consume can append more tokens — so `parts` here may be AHEAD of
+      // `seq`, holding text that hasn't been published yet (it sits in
+      // textBuf/reasonBuf). If we saved streamSeq=seq, the client would adopt
+      // those un-published tokens from the snapshot AND then apply them again
+      // when the next flush finally publishes them → duplicated text on resume.
+      // So count the still-buffered runs that WILL publish next (reasoning then
+      // text, each one ++seq) and fold them into streamSeq, so those upcoming
+      // deltas land at seq <= streamSeq and the client ignores them as covered.
+      const snapParts = structuredClone(parts);
+      const snapSeq = seq + (reasonBuf ? 1 : 0) + (textBuf ? 1 : 0);
+      const snapContent = getFullText();
+      await db.update(messages).set({
+        content: snapContent,
+        metadata: { taskId, status: "running", parts: snapParts, streamSeq: snapSeq },
+      }).where(eq(messages.id, msgId));
+    };
+
+    // Discard the partial reply before a retry re-streams from scratch
+    // (capability/empty-response retries reset `parts`). Tells the client to drop
+    // the abandoned attempt and resync, so retry deltas land on a clean slate
+    // instead of being appended to the thrown-away text.
+    const discardPartial = async () => {
+      parts.length = 0;
+      lastSealedIndex = -1;
+      textBuf = "";
+      reasonBuf = "";
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      await publishTaskEvent(userId, { type: "task:reset", taskId, chatId, messageId: msgId, seq: ++seq });
     };
 
     let retried = false;
@@ -633,7 +690,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             await sealTrailingRun();
             await publishTaskEvent(userId, {
               type: "task:tool-input-start", taskId, chatId, messageId: msgId,
-              toolCallId: event.id, toolName: event.toolName,
+              toolCallId: event.id, toolName: event.toolName, seq: ++seq,
             });
             break;
           }
@@ -648,7 +705,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
             await publishTaskEvent(userId, {
               type: "task:tool-call", taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId, toolName: event.toolName, args: event.input,
+              toolCallId: event.toolCallId, toolName: event.toolName, args: event.input, seq: ++seq,
             });
             break;
           }
@@ -662,7 +719,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             const fits = Buffer.byteLength(JSON.stringify(event.output ?? null)) <= MAX_REALTIME_RESULT_BYTES;
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId, result: fits ? event.output : undefined,
+              toolCallId: event.toolCallId, result: fits ? event.output : undefined, seq: ++seq,
             });
             break;
           }
@@ -671,19 +728,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: errMsg(event.error) });
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId, result: { error: errMsg(event.error) }, isError: true,
+              toolCallId: event.toolCallId, result: { error: errMsg(event.error) }, isError: true, seq: ++seq,
             });
             break;
           case "error":
             streamError = errMsg(event.error);
             break;
           case "finish-step":
-            // Flush buffered text, progressive save + lease renewal per step.
+            // Flush buffered text, force a snapshot (streamSeq + parts) + renew
+            // the lease per step. force=true bypasses the ~1s throttle so each
+            // step boundary is durably persisted.
             await flushBuffers();
-            await db.update(messages).set({
-              content: getFullText(),
-              metadata: { taskId, status: "running", parts },
-            }).where(eq(messages.id, msgId));
+            await saveSnapshot(true);
             await heartbeat(taskId, workerId);
             break;
         }
@@ -715,8 +771,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         tlog.info("attachment modality unsupported — retrying with files stripped + note");
         retried = true;
         streamError = undefined;
-        parts.length = 0;
-        lastSealedIndex = -1;
+        await discardPartial();
         stripNativeFilesWithNote();
         // The provider rejected what the catalog claimed it took — fold those
         // modalities into the notice so the user is told to switch models.
@@ -732,8 +787,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         tlog.info("reasoning unsupported — retrying without it");
         useReasoning = false;
         streamError = undefined;
-        parts.length = 0;
-        lastSealedIndex = -1;
+        await discardPartial();
         await captureDiscarded();
         result = makeStream();
         await consume();
@@ -755,8 +809,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const hasContent = parts.some((p) => (p.type === "text" && p.text.trim()) || p.type === "tool-call");
       if (!hasContent) {
         tlog.info("empty response — retrying once");
-        parts.length = 0;
-        lastSealedIndex = -1;
+        await discardPartial();
         await captureDiscarded();
         result = makeStream();
         try {

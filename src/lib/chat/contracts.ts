@@ -37,6 +37,12 @@ export type MessageMeta = {
   errorDetail?: string;
   errorCategory?: string;
   parts?: StoredPart[];
+  // Highest realtime `seq` reflected in `parts` at the moment this snapshot was
+  // persisted. A client that (re)mounts mid-stream seeds its applied-seq from
+  // this so resumed deltas reconcile against the snapshot (covered/next/gap)
+  // instead of appending onto a stale prefix. Only meaningful while streaming
+  // (status:"running"); irrelevant once the turn is finalized.
+  streamSeq?: number;
   // Tech details for the (i) popover, captured at finalize (completed turns only).
   // Denormalized copies of the usage table + elapsed time so the UI needs no JOIN
   // and the numbers survive a page reload.

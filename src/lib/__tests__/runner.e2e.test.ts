@@ -85,6 +85,16 @@ run("runAgentTask end-to-end (mock model, real queue/realtime/DB)", () => {
     const text = events.filter((e) => e.type === "task:text-delta").map((e) => e.delta).join("");
     expect(text).toBe("Hello world");
 
+    // Resume contract: task:start is seq 0 and every streaming event carries a
+    // strictly increasing seq, so a client resuming mid-stream can tell
+    // covered/next/gapped deltas apart. The persisted snapshot's streamSeq must
+    // be >= the last delta's seq (parts cover everything published).
+    expect(events.find((e) => e.type === "task:start")?.seq).toBe(0);
+    const seqs = events
+      .filter((e) => typeof e.seq === "number")
+      .map((e) => e.seq as number);
+    for (let i = 1; i < seqs.length; i++) expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
+
     // DB: assistant message persisted with full text + completed task
     const msg = await pool.query(`SELECT content, metadata FROM messages WHERE chat_id=$1 AND role='assistant'`, [C]);
     expect(msg.rows[0].content).toBe("Hello world");
