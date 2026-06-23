@@ -81,9 +81,13 @@ export function useBackgroundChat({
         );
         if (running) {
           setStatus("running");
+          // Adopt the running turn's taskId from the message it's attached to.
+          // Without this, a reconnect to a live turn shows "running" (and the
+          // stop button) but leaves taskId null — so stop() was a dead no-op.
+          const meta = running.metadata as { streamSeq?: number; taskId?: string } | undefined;
+          if (meta?.taskId) setTaskId(meta.taskId);
           // Seed the applied-seq from the snapshot we just loaded so resumed
           // deltas reconcile against it (this IS the gap-closing step on resume).
-          const meta = running.metadata as { streamSeq?: number } | undefined;
           appliedSeqRef.current.set(running.id, meta?.streamSeq ?? 0);
         }
         // No cleanup needed for finished turns: message ids are unique per reply,
@@ -180,6 +184,11 @@ export function useBackgroundChat({
           switch (data.type) {
             case "task:start": {
               setStatus("running");
+              // Track the taskId from the live event too — a turn that begins
+              // while we're watching (a queued send draining, a Telegram-sourced
+              // turn, another tab) would otherwise leave the stop button unable
+              // to cancel anything (taskId was only set by our own POST before).
+              setTaskId(data.taskId);
               setTaskInfo({ startedAt: Date.now(), currentTool: null });
               // Baseline the seq cursor for this reply (task:start is seq 0), so
               // the first delta (seq 1) is the next contiguous one.
@@ -573,11 +582,25 @@ export function useBackgroundChat({
 
   // ── Stop / Cancel ──────────────────────────────────────────
   const stop = useCallback(async () => {
-    if (!taskId) return;
-    await fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" }).catch(() => {});
+    // The taskId may be unknown to this client even while it shows "running":
+    // a turn started elsewhere (Telegram, another tab) or via an SSE task:start
+    // we adopted without a local POST, or a reconnect that found a running
+    // message. Resolve the chat's live task on demand so the button is never a
+    // dead no-op. If nothing is actually running, clear the stuck spinner anyway
+    // — that itself un-hangs a chat the UI wrongly believes is still working.
+    let id = taskId;
+    if (!id) {
+      id = await fetch(`/api/tasks?chatId=${chatId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((task) => (task?.status === "running" ? (task.id as string) : null))
+        .catch(() => null);
+    }
+    if (id) {
+      await fetch(`/api/tasks/${id}/cancel`, { method: "POST" }).catch(() => {});
+    }
     setStatus("idle");
     setTaskId(null);
-  }, [taskId]);
+  }, [taskId, chatId]);
 
   return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", taskInfo };
 }

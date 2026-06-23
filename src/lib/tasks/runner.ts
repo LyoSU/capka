@@ -323,6 +323,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     ac.abort();
   }, MAX_TASK_MS);
   const msgId = nanoid();
+  // Whether the assistant message row has been inserted yet. The insert happens
+  // AFTER prepareRun (which resolves the model/provider). If prepareRun throws —
+  // e.g. the chat's provider was disconnected or its model removed — there's no
+  // row for the catch to write the failure onto, so the turn used to vanish with
+  // no reply and no error (a silent dead-end that read as a hang). The catch
+  // checks this flag and INSERTS a failed message instead, so the user always
+  // sees what went wrong.
+  let messageInserted = false;
   const parts: StoredPart[] = [];
   // Per-message monotonic event counter. Stamped on every realtime event that
   // mutates/finalizes this reply (text/reasoning deltas, tool steps, reset,
@@ -453,6 +461,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       platform: payload.origin?.platform ?? "web",
       metadata: { taskId, status: "running", parts: [], streamSeq: 0 },
     });
+    messageInserted = true;
     await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
     await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId, seq: 0 });
 
@@ -993,15 +1002,32 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       status, elapsedMs: Date.now() - startedAt, toolCount,
       ...(failure ? { error: failure.adminDetail } : { err: String(e) }),
     });
+    const failureMeta = {
+      taskId, status, parts: parts.length > 0 ? parts : undefined,
+      ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
+    };
+    // If prepareRun threw before the assistant row existed (provider gone, model
+    // removed), there's nothing to UPDATE — INSERT the failed reply instead and
+    // point the chat at it, so the failure is a visible message rather than a
+    // silent dead-end. Otherwise update the row we already streamed into.
+    const persistMessage = messageInserted
+      ? db.update(messages).set({ content: getFullText(), metadata: failureMeta }).where(eq(messages.id, msgId))
+      : (async () => {
+          const parentId = (payload.uiMessages ?? []).at(-1)?.id ?? null;
+          await db.insert(messages).values({
+            id: msgId,
+            chatId,
+            parentId,
+            role: "assistant",
+            content: getFullText(),
+            platform: payload.origin?.platform ?? "web",
+            metadata: failureMeta,
+          });
+          await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
+        })();
     await Promise.all([
       finalizeTask(taskId, status, failure?.adminDetail ?? null).catch(() => {}),
-      db.update(messages).set({
-        content: getFullText(),
-        metadata: {
-          taskId, status, parts: parts.length > 0 ? parts : undefined,
-          ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
-        },
-      }).where(eq(messages.id, msgId)).catch(() => {}),
+      persistMessage.catch(() => {}),
     ]);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
     await sink.finish({

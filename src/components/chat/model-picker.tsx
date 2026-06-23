@@ -551,6 +551,7 @@ function ModelList({
   listRef,
   onClose,
   orientation = "vertical",
+  currentMissing = false,
 }: {
   state: ModelsState;
   search: string;
@@ -562,6 +563,9 @@ function ModelList({
   listRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
   orientation?: "vertical" | "horizontal";
+  /** The current selection is gone (provider disconnected / model removed) —
+   *  show a banner explaining why nothing is highlighted and to pick another. */
+  currentMissing?: boolean;
 }) {
   const t = useTranslations("chat.model");
   const listboxId = useId();
@@ -687,6 +691,12 @@ function ModelList({
 
   const right = (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {currentMissing && (
+        <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>{t("currentUnavailable")}</span>
+        </div>
+      )}
       {paneHeading && (
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <BrandIcon slug={paneHeading.icon} size={15} />
@@ -881,6 +891,11 @@ interface ModelPickerProps {
   configId?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Reports whether `value` resolves to a real, currently-serveable model once
+   *  the list has settled. Lets the parent (the chat composer) block sending to
+   *  a model whose provider was disconnected or whose entry was removed. While
+   *  the list is still loading `settled` is false — callers must not block yet. */
+  onResolved?: (status: { settled: boolean; available: boolean }) => void;
 }
 
 export function ModelPicker({
@@ -893,6 +908,7 @@ export function ModelPicker({
   configId,
   placeholder,
   disabled,
+  onResolved,
 }: ModelPickerProps) {
   const t = useTranslations("chat.model");
   const [open, setOpen] = useState(false);
@@ -1026,6 +1042,19 @@ export function ModelPicker({
   const displayName = stripGroup(currentModel?.name || (value ? displayModelName(value) : ""), groupLabel);
   const placeholderText = placeholder ?? t("placeholder");
 
+  // The list loaded fine and has models, but ours isn't among them → the model's
+  // provider was disconnected or its catalog entry was removed. We only claim
+  // this once the list has genuinely settled (not loading/syncing/awaiting a
+  // key) and came back non-empty, so a transient empty/error state never
+  // false-flags a model as gone. On a fetch error useModels injects a fallback
+  // entry for `value`, so currentModel still resolves and this stays false.
+  const settled = !state.loading && !state.syncing && !state.needsKey;
+  const modelMissing = settled && !state.error && state.models.length > 0 && !!value && !currentModel;
+
+  useEffect(() => {
+    onResolved?.({ settled, available: !modelMissing });
+  }, [settled, modelMissing, onResolved]);
+
   const renderList = (orientation: "vertical" | "horizontal") => (
     <ModelList
       state={state}
@@ -1038,6 +1067,7 @@ export function ModelPicker({
       listRef={listRef}
       onClose={close}
       orientation={orientation}
+      currentMissing={modelMissing}
     />
   );
 
@@ -1050,9 +1080,10 @@ export function ModelPicker({
           onClick={toggleOpen}
           aria-haspopup="listbox"
           aria-expanded={open}
+          title={modelMissing ? t("unavailable") : undefined}
           className="flex h-9 items-center gap-2.5 px-3 text-sm hover:text-foreground transition-colors"
         >
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0">
+          <span className={`flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0 ${modelMissing ? "opacity-50" : ""}`}>
             <BrandIcon slug={currentModel?.icon} size={14} />
           </span>
           {/* Until the catalog resolves the friendly name, show a skeleton rather
@@ -1062,7 +1093,12 @@ export function ModelPicker({
             <span className="h-4 w-28 animate-pulse rounded-md bg-muted" />
           ) : (
             <span className="flex items-baseline gap-1.5 min-w-0">
-              <span className="truncate max-w-52 font-medium text-foreground">{displayName || placeholderText}</span>
+              <span className={`truncate max-w-52 font-medium ${modelMissing ? "text-muted-foreground" : "text-foreground"}`}>{displayName || placeholderText}</span>
+              {/* The model's provider is gone — an amber dot flags it without
+                  hiding which model this used to be (the name stays). */}
+              {modelMissing && (
+                <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-amber-500" aria-label={t("unavailable")} />
+              )}
               {currentModel && currentModel.context > 0 && (
                 <span className="text-xs text-muted-foreground tabular-nums hidden md:inline" title={t("context")}>{formatContext(currentModel.context)}</span>
               )}

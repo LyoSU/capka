@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
 import { getMasterKey, sharedKeyEnabled, getModelMaxPrice } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
-import { getModel, parseModelId, splitModelRef, providerLabel } from "@/lib/providers";
+import { getModel, parseModelId, splitModelRef, providerLabel, isProviderName } from "@/lib/providers";
 import { assertSafeProviderConfig, getModelCompletionPriceUsdPerM, getModelInputModalities } from "@/lib/providers/list-models";
 import { ValidationError } from "@/lib/errors";
 
@@ -134,6 +134,17 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
       if (byId) {
         config = byId;
         modelId = rest;
+      } else if (!isProviderName(configId)) {
+        // The ref named a specific connection (a configId), but it no longer
+        // exists — the provider was disconnected or removed. Refuse instead of
+        // silently falling back to a different connection that can't serve this
+        // model (the turn would just fail in the background). The client blocks
+        // the composer for the same reason; this is the server-side backstop. A
+        // legacy `provider:modelId` value (configId is a known provider name)
+        // still falls through to the default-config path below.
+        throw new ValidationError(
+          "This chat's model is no longer available — its connection was removed. Please choose another model.",
+        );
       }
     }
   }

@@ -67,6 +67,8 @@
   "nav": {
     "newChat": "New Chat",
     "expandSidebar": "Expand sidebar",
+    "unreadReply": "Unread reply",
+    "working": "Generating…",
     "pinned": "Pinned",
     "telegram": "Telegram",
     "showMore": "Show {count} more",
@@ -209,7 +211,11 @@
       "stopBot": "Stop",
       "continueHere": "Continue in a web chat",
       "queuedFiles": "{count, plural, one {# file} other {# files}}",
-      "cancelQueued": "Remove from queue"
+      "cancelQueued": "Remove from queue",
+      "modelGoneTitle": "Model unavailable",
+      "modelGoneBody": "This chat's model is no longer available — its provider was disconnected or the model was removed. Pick another model to continue here, or start a new chat.",
+      "modelGonePick": "Choose an available model from the picker at the top to continue here.",
+      "modelGoneNew": "New chat"
     },
     "menu": {
       "rename": "Rename",
@@ -258,6 +264,9 @@
       "syncing": "Preparing the model list…",
       "loadError": "Could not load models",
       "active": "active",
+      "unavailable": "unavailable",
+      "unavailableProvider": "provider disconnected",
+      "currentUnavailable": "The current model is unavailable. Pick another below.",
       "shared": "shared",
       "sharedTooltip": "Using admin's shared provider config",
       "context": "Context size: how much it can keep in mind at once",

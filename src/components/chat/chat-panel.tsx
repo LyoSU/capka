@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useLayoutEffect, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
@@ -67,6 +67,15 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const t = useTranslations("chat");
   const locale = useLocale();
   const [model, setModel] = useState(defaultModel);
+
+  // Whether the chat's selected model is still serveable. The model picker
+  // resolves this against the live model list (provider disconnected, or the
+  // model removed from the catalog → not available). Default available:true so
+  // we never block before the list settles. When it settles unavailable, the
+  // composer is replaced with a "pick another model" notice — sending to a dead
+  // model just produces a failed turn, so we stop it at the source.
+  const [modelStatus, setModelStatus] = useState<{ settled: boolean; available: boolean }>({ settled: false, available: true });
+  const handleModelResolved = useCallback((s: { settled: boolean; available: boolean }) => setModelStatus(s), []);
 
   // The new-chat greeting varies by local time and weaves in the user's name,
   // so it's random + timezone-dependent — compute it on the client after mount
@@ -366,6 +375,12 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const lastMsg = messages[messages.length - 1];
   const lastFailed = (lastMsg?.metadata as { taskStatus?: string } | undefined)?.taskStatus === "failed";
 
+  // The chat's model is gone and nothing is currently streaming — swap the
+  // composer for a notice that explains why and lets the user pick another model
+  // to continue right here (or start fresh). Held off while a turn is still
+  // running so the composer keeps its stop button.
+  const modelGone = !readOnly && !isLoading && modelStatus.settled && !modelStatus.available;
+
   const inputEl = readOnly ? (
     <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
       <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
@@ -394,6 +409,29 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             </Button>
           </>
         )}
+      </div>
+    </div>
+  ) : modelGone ? (
+    <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
+      <div className="flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-4">
+        <p className="flex items-center gap-2 text-sm font-medium">
+          <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          {t("panel.modelGoneTitle")}
+        </p>
+        <p className="text-sm text-muted-foreground">{t("panel.modelGoneBody")}</p>
+        {/* No inline picker here — it rendered awkwardly inside the floating
+            bottom block. The model picker lives in the header above; picking an
+            available model there flips modelStatus back and the composer returns. */}
+        <p className="text-sm text-muted-foreground">{t("panel.modelGonePick")}</p>
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push(projectId ? `/chat?projectId=${projectId}` : "/chat")}
+          >
+            {t("panel.modelGoneNew")}
+          </Button>
+        </div>
       </div>
     </div>
   ) : (
@@ -583,7 +621,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             <div className="flex items-center gap-2">
               <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full border bg-card shadow-sm md:hidden" />
               <div className="pointer-events-auto inline-flex rounded-full border bg-card px-1 shadow-sm">
-                <ModelPicker variant="pill" value={model} onChange={setModel} />
+                <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
               </div>
             </div>
             <Button
