@@ -94,6 +94,7 @@ export function toUIMessages(rows: {
         notice: meta?.notice,
         // Tech details for the assistant (i) popover.
         durationMs: meta?.durationMs,
+        reasoningMs: meta?.reasoningMs,
         model: meta?.model,
         usage: meta?.usage,
         costUsd: meta?.costUsd,

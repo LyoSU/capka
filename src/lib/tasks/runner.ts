@@ -366,6 +366,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // localized to the originating channel's language.
   const stepsT = getTranslator(payload.origin?.locale, "steps");
   const startedAt = Date.now();
+  // When the first answer token lands — the reasoning/tool phase ends here, so
+  // `firstTextAt - startedAt` is the "reasoned for …" duration the UI shows
+  // (mirrors the web's live stopwatch, which freezes when the answer begins).
+  let firstTextAt: number | null = null;
   let toolCount = 0;
   let currentStatus: StreamStatus;
 
@@ -671,6 +675,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           }
           case "text-delta":
             // Answer is flowing — clear the transient "thinking/tool" header.
+            if (firstTextAt == null && event.text) firstTextAt = Date.now();
             currentStatus = undefined;
             appendText(event.text);
             textBuf += event.text;
@@ -854,6 +859,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       tlog.error("usage compute failed", { err: String(e) });
     }
 
+    // The reasoning/tool phase = start → first answer token (or the whole run if
+    // it never produced answer text). Persisted so a reloaded transcript shows
+    // the real "reasoned for …" time, not the full turn duration.
+    const reasoningMs = (firstTextAt ?? Date.now()) - startedAt;
+
     await db.update(messages).set({
       content: getFullText(),
       metadata: {
@@ -865,6 +875,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // Tech details for the (i) popover — only on a clean completion.
         ...(finalStatus === "completed" ? {
           durationMs: Date.now() - startedAt,
+          reasoningMs,
           model: modelId,
           ...(usageMeta ? { usage: usageMeta } : {}),
           ...(costMeta != null ? { costUsd: costMeta } : {}),
@@ -891,7 +902,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       status: finalStatus, text: openSegment(), reasoning: getReasoning(),
       error: failure?.userMessage, errorDetail: failure?.adminDetail,
       isAdmin: failure ? await resolveIsAdmin() : false,
-      toolCount, elapsedMs: Date.now() - startedAt,
+      toolCount, elapsedMs: Date.now() - startedAt, reasoningMs,
       ...(blindModalities.length ? { blindModalities } : {}),
     });
     // Deliver any files the agent created/edited this run to the origin channel

@@ -14,6 +14,8 @@ import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
 import { extractWorkspacePaths } from "@/lib/chat/artifacts";
+import { cleanReasoning } from "@/lib/chat/reasoning";
+import { formatShortDuration } from "@/lib/chat/duration";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
 
@@ -250,42 +252,22 @@ function WorkspaceLinks({ text, chatId, live }: { text: string; chatId: string; 
 }
 
 
-/** The model's reasoning — a step on the same rail as the tool actions, marked
- *  with a lightbulb. The label is a stable "Thinking…/Reasoning" tag, NOT a
- *  preview of the text — the full thought lives only in the expanded body.
- *  Auto-opens while the model is thinking (the user watches it live) and
- *  collapses once the answer begins; a manual click takes over from auto-follow. */
+/** The model's reasoning — a node on the same rail as the tool actions, marked
+ *  with a lightbulb. The thought text shows inline: the surrounding ActivityGroup
+ *  owns the collapse, so once a run is expanded the user reads the thinking
+ *  directly (no second click). The badge tops-aligns to the first line so it
+ *  reads as a paragraph annotation rather than a centred single-line row. */
 function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
-  const t = useTranslations("chat.message");
-  const streaming = !!isStreaming;
-  const [userToggled, setUserToggled] = useState(false);
-  const [open, setOpen] = useState(streaming);
-  // Auto-follow the streaming state until the user takes manual control. Done by
-  // adjusting state during render (React's "store previous value" pattern), not
-  // in an effect — that avoids the cascading re-render the lint rule warns about.
-  const [prevStreaming, setPrevStreaming] = useState(streaming);
-  if (!userToggled && prevStreaming !== streaming) {
-    setPrevStreaming(streaming);
-    setOpen(streaming);
-  }
-
+  // Strip leaked chain-of-thought wrapper tags and the extra leading break some
+  // models open a thought with — recomputed only when the streamed text grows.
+  const clean = useMemo(() => cleanReasoning(text), [text]);
   return (
-    <Collapsible open={open} onOpenChange={(v) => { setUserToggled(true); setOpen(v); }}>
-      <CollapsibleTrigger className="block w-full text-left transition-colors hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
-        <div className="animate-step-in relative flex min-h-[34px] items-center gap-3 py-1 pl-10 text-muted-foreground">
-          <span className="absolute left-0 top-1/2 grid h-[27px] w-[27px] -translate-y-1/2 place-items-center rounded-full border border-border bg-card text-muted-foreground">
-            <Lightbulb className={`animate-step-badge-in h-3.5 w-3.5 ${isStreaming ? "animate-pulse" : ""}`} />
-          </span>
-          <span className="text-sm italic">{isStreaming ? t("thinking") : t("reasoning")}</span>
-          <ChevronRight className="chevron ml-auto h-3.5 w-3.5 shrink-0 opacity-35 transition-transform" />
-        </div>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <p className="mb-2 ml-10 whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
-          {text}
-        </p>
-      </CollapsibleContent>
-    </Collapsible>
+    <div className="animate-step-in relative py-1 pl-10 text-muted-foreground">
+      <span className="absolute left-0 top-1 grid h-[27px] w-[27px] place-items-center rounded-full border border-border bg-card text-muted-foreground">
+        <Lightbulb className={`animate-step-badge-in h-3.5 w-3.5 ${isStreaming ? "animate-pulse" : ""}`} />
+      </span>
+      <p className="whitespace-pre-wrap text-sm italic leading-relaxed">{clean}</p>
+    </div>
   );
 }
 
@@ -375,9 +357,25 @@ function StepRow({ part }: { part: ToolPart }) {
 /** A single unit of work on the rail — either the model thinking or a tool call. */
 type ActivityItem = { kind: "reasoning"; text: string } | { kind: "tool"; part: ToolPart };
 
+/** The terminal "Done ✓" node that caps a finished run, so the rail reads as a
+ *  completed timeline rather than trailing off after the last step. Only shown
+ *  once the run has stopped streaming. */
+function DoneRow() {
+  const t = useTranslations("chat.tool");
+  return (
+    <div className="animate-step-in relative flex min-h-[34px] items-center gap-3 py-1 pl-10 text-muted-foreground">
+      <span className="absolute left-0 top-1/2 grid h-[27px] w-[27px] -translate-y-1/2 place-items-center rounded-full border border-border bg-card text-muted-foreground">
+        <Check className="animate-step-badge-in h-3.5 w-3.5" />
+      </span>
+      <span className="text-sm">{t("done")}</span>
+    </div>
+  );
+}
+
 /** Renders an interleaved run of reasoning + tool calls as one vertical step
  *  rail — a single thin line connecting each node, so thinking and actions read
- *  as one quiet "here's what I did" timeline rather than two different styles. */
+ *  as one quiet "here's what I did" timeline rather than two different styles.
+ *  A finished run is capped with a terminal "Done ✓" node. */
 function ActivityRail({ items, isStreaming }: { items: ActivityItem[]; isStreaming?: boolean }) {
   const lastIdx = items.length - 1;
   const rows = items.map((it, i) => {
@@ -386,9 +384,10 @@ function ActivityRail({ items, isStreaming }: { items: ActivityItem[]; isStreami
       ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={streaming} />
       : <StepRow key={it.part.toolCallId} part={it.part} />;
   });
+  if (!isStreaming) rows.push(<DoneRow key="done" />);
 
-  // A lone step needs no connecting line.
-  if (items.length === 1) return <>{rows}</>;
+  // A lone node needs no connecting line.
+  if (rows.length === 1) return <>{rows}</>;
 
   return (
     <div className="relative my-0.5">
@@ -396,6 +395,70 @@ function ActivityRail({ items, isStreaming }: { items: ActivityItem[]; isStreami
       <div className="pointer-events-none absolute bottom-4 left-[13px] top-4 w-px bg-border" aria-hidden="true" />
       {rows}
     </div>
+  );
+}
+
+/** The one-line summary shown on a collapsed activity run — the "last action",
+ *  Claude-style. While the run is live it names what's happening *now* (the last
+ *  item, present tense); once finished it names the last concrete tool step
+ *  ("Read SKILL.md") so the header carries information, falling back to a plain
+ *  "Reasoning" tag for a pure-thinking run. */
+
+/** Wraps a run of reasoning + tool calls in a single quiet spoiler whose header
+ *  reads, Grok-style, how long the run took — "Reasoned for 58s ›". While it
+ *  streams the timer ticks live from first paint; once it stops we freeze the
+ *  measured value. Reloaded history (never streamed in this session) falls back
+ *  to the stored turn duration so it still shows a number. Auto-opens while live
+ *  and auto-collapses when the answer begins, with a manual click taking over. */
+function ActivityGroup({ items, isStreaming, fallbackMs }: { items: ActivityItem[]; isStreaming?: boolean; fallbackMs?: number }) {
+  const t = useTranslations("chat.message");
+  const streaming = !!isStreaming;
+  const [userToggled, setUserToggled] = useState(false);
+  const [open, setOpen] = useState(streaming);
+  const [prevStreaming, setPrevStreaming] = useState(streaming);
+  if (!userToggled && prevStreaming !== streaming) {
+    setPrevStreaming(streaming);
+    setOpen(streaming);
+  }
+
+  // Live stopwatch: start on first streaming paint, tick each second, freeze the
+  // elapsed value the moment streaming stops (which is when the answer begins —
+  // so this measures reasoning + tools, not the whole turn).
+  const startRef = useRef<number | null>(null);
+  const [elapsed, setElapsed] = useState<number | null>(null);
+  useEffect(() => {
+    if (streaming) {
+      if (startRef.current == null) startRef.current = Date.now();
+      setElapsed(Date.now() - startRef.current);
+      const id = setInterval(() => {
+        if (startRef.current != null) setElapsed(Date.now() - startRef.current);
+      }, 1000);
+      return () => clearInterval(id);
+    }
+    if (startRef.current != null) setElapsed(Date.now() - startRef.current);
+  }, [streaming]);
+
+  const ms = elapsed ?? fallbackMs ?? null;
+  const hasReasoning = items.some((it) => it.kind === "reasoning");
+  const label =
+    ms != null
+      ? t(hasReasoning ? "reasonedFor" : "workedFor", { duration: formatShortDuration(ms) })
+      : streaming
+        ? t("thinking")
+        : t(hasReasoning ? "reasoning" : "activity");
+
+  return (
+    <Collapsible open={open} onOpenChange={(v) => { setUserToggled(true); setOpen(v); }}>
+      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
+        <span className={`min-w-0 truncate ${streaming ? "animate-pulse" : ""}`}>{label}</span>
+        <ChevronRight className="chevron h-3.5 w-3.5 shrink-0 opacity-40 transition-transform" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-0.5">
+          <ActivityRail items={items} isStreaming={isStreaming} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -821,7 +884,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number; notice?: { kind: string; modalities: string[] } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number; notice?: { kind: string; modalities: string[] } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -908,11 +971,11 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
                 </div>
               );
             }
-            // No wrapper blur-rise here — each rail row animates itself in as it
-            // streams (see .animate-step-in), so steps surface one by one.
+            // No wrapper blur-rise here — the spoiler header animates itself in,
+            // and on expand each rail row surfaces with .animate-step-in.
             return (
               <div key={gi} className={gi > 0 ? "mt-1.5" : ""}>
-                <ActivityRail items={g.items} isStreaming={isStreaming && gi === lastIdx} />
+                <ActivityGroup items={g.items} isStreaming={isStreaming && gi === lastIdx} fallbackMs={metadata?.reasoningMs} />
               </div>
             );
           })

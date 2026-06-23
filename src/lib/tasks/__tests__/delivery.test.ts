@@ -52,19 +52,25 @@ describe("composeFinal", () => {
   it("returns the bare answer when no tools ran and there's no reasoning", () => {
     expect(composeFinal("Just chatting.", "", 0, 4000, en)).toBe("Just chatting.");
   });
-  it("folds reasoning into a collapsed <details>, summarized by the tool log", () => {
+  it("folds reasoning into a collapsed <details> with a Grok-style 'reasoned for' summary", () => {
     expect(composeFinal("Готово.", "Зважую варіанти", 2, 6000, uk)).toBe(
-      "<details><summary>✅ 2 інструменти · 6с</summary>\n\nЗважую варіанти\n\n</details>\n\nГотово.",
+      "<details><summary>💭 Розмірковування протягом 6s</summary>\n\nЗважую варіанти\n\n</details>\n\nГотово.",
     );
   });
-  it("uses a plain reasoning summary when no tools ran", () => {
+  it("uses the reasoning summary even when no tools ran", () => {
     expect(composeFinal("Hi.", "thought it through", 0, 1000, en)).toBe(
-      "<details><summary>💭 Reasoning</summary>\n\nthought it through\n\n</details>\n\nHi.",
+      "<details><summary>💭 Reasoned for 1s</summary>\n\nthought it through\n\n</details>\n\nHi.",
+    );
+  });
+  it("prefers the reasoning-phase duration over the whole-turn elapsed", () => {
+    // 30s turn, but only 5s spent reasoning before the answer began.
+    expect(composeFinal("Done.", "thinking", 2, 30_000, en, 5000)).toBe(
+      "<details><summary>💭 Reasoned for 5s</summary>\n\nthinking\n\n</details>\n\nDone.",
     );
   });
   it("escapes angle brackets in the reasoning so they aren't read as tags", () => {
     expect(composeFinal("ok", "a < b && </details> c", 0, 0, en)).toBe(
-      "<details><summary>💭 Reasoning</summary>\n\na &lt; b &amp;&amp; &lt;/details&gt; c\n\n</details>\n\nok",
+      "<details><summary>💭 Reasoned for 0s</summary>\n\na &lt; b &amp;&amp; &lt;/details&gt; c\n\n</details>\n\nok",
     );
   });
 });

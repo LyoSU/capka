@@ -13,6 +13,7 @@
 import { InputFile } from "grammy";
 import { log } from "@/lib/log";
 import { getTranslator, type Translator } from "@/lib/i18n/translator";
+import { formatShortDuration } from "@/lib/chat/duration";
 import type { Modality } from "@/lib/providers/registry";
 
 // `locale` carries the originating Telegram client's language so the bot's
@@ -81,7 +82,7 @@ export interface OutFile {
 export interface DeliverySink {
   push(text: string, status: StreamStatus): void;
   seal(text: string): Promise<void>;
-  finish(result: TaskResult & { toolCount: number; elapsedMs: number }): Promise<void>;
+  finish(result: TaskResult & { toolCount: number; elapsedMs: number; reasoningMs?: number }): Promise<void>;
   sendFiles(files: OutFile[]): Promise<void>;
 }
 
@@ -146,11 +147,14 @@ export function composeFinal(
   toolCount: number,
   elapsedMs: number,
   t: Translator,
+  reasoningMs?: number,
 ): string {
   const log = toolCount > 0 ? t("doneLog", { count: toolCount, secs: Math.round(elapsedMs / 1000) }) : null;
   const think = reasoning.trim().slice(-THINKING_MAX_CHARS);
   if (think) {
-    const summary = escapeHtml(log ?? t("reasoningLog"));
+    // Grok-style summary: "💭 Reasoned for 58s" — the reasoning phase, not the
+    // whole turn (which would over-count the answer streaming time).
+    const summary = escapeHtml(t("reasonedFor", { duration: formatShortDuration(reasoningMs ?? elapsedMs) }));
     const block = `<details><summary>${summary}</summary>\n\n${escapeHtml(think)}\n\n</details>`;
     return body ? `${block}\n\n${body}` : block;
   }
@@ -325,7 +329,7 @@ class TelegramSink implements DeliverySink {
     }
   }
 
-  async finish(result: TaskResult & { toolCount: number; elapsedMs: number }): Promise<void> {
+  async finish(result: TaskResult & { toolCount: number; elapsedMs: number; reasoningMs?: number }): Promise<void> {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;

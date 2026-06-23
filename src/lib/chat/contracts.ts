@@ -47,6 +47,9 @@ export type MessageMeta = {
   // Denormalized copies of the usage table + elapsed time so the UI needs no JOIN
   // and the numbers survive a page reload.
   durationMs?: number;
+  // Reasoning/tool phase only (start → first answer token), so the "reasoned
+  // for …" label reflects thinking time rather than the whole turn.
+  reasoningMs?: number;
   model?: string;
   usage?: { input: number; output: number; cached: number };
   costUsd?: number;
