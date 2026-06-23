@@ -92,12 +92,16 @@ export function toUIMessages(rows: {
         // Capability heads-up (e.g. audio sent to a text-only model) — drives the
         // "switch model" nudge on the turn.
         notice: meta?.notice,
+        // Compaction checkpoint — the transcript renders a divider (not an empty
+        // bubble) and lets the user expand the summary it stands in for.
+        compaction: meta?.compaction,
         // Tech details for the assistant (i) popover.
         durationMs: meta?.durationMs,
         reasoningMs: meta?.reasoningMs,
         model: meta?.model,
         usage: meta?.usage,
         costUsd: meta?.costUsd,
+        contextWindow: meta?.contextWindow,
       },
     };
   });

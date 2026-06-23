@@ -1,7 +1,16 @@
 import { generateText } from "ai";
-import type { LanguageModel } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 import { log } from "@/lib/log";
 import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
+import { buildAuxRequest } from "@/lib/chat/context/aux";
+
+/** Appended-mode instruction (user turn). Same intent as EXTRACTION_PROMPT, but
+ *  it points at the conversation ALREADY in context rather than a pasted slice —
+ *  used on long chats where riding the hot prefix beats a fresh truncated call. */
+const EXTRACTION_INSTRUCTION =
+  "Based on our conversation above, extract any new facts, preferences, or work context about ME (the user) worth remembering. " +
+  "One fact per line, no bullets, each under 20 words. Only facts about me, grounded in what I said — not general knowledge, not facts about your replies. " +
+  "If there are no new facts, output nothing.";
 
 const EXTRACTION_PROMPT = `You extract key facts about the user from a conversation turn. The user's own message is the primary signal; the assistant's reply is context only. Identify any new facts, preferences, or context about the USER that would be useful to remember for future conversations.
 
@@ -37,6 +46,11 @@ export async function extractMemories(
   /** Called with the spend of this (otherwise unbilled) auxiliary LLM call, so
    *  the runner can record it against the same key/budget as the main turn. */
   onUsage?: (usage: TokenUsage) => void,
+  /** Long-chat path: the just-finished turn's hot system+history prefix. When
+   *  given, extraction rides that prefix (full context, cache-read priced)
+   *  instead of a fresh truncated call. Omit on short chats — a small standalone
+   *  call is cheaper there (hybrid by length). */
+  hotContext?: { systemMessages: ModelMessage[]; modelMessages: ModelMessage[] },
 ): Promise<string[]> {
   const userText = (turn.userText ?? "").trim();
   if (userText.length < 20) return [];
@@ -48,12 +62,25 @@ export async function extractMemories(
       : "");
 
   try {
-    const { text: extracted, usage } = await generateText({
-      model,
-      system: EXTRACTION_PROMPT,
-      prompt,
-      maxOutputTokens: 200,
-    });
+    const { text: extracted, usage } = hotContext
+      ? await generateText({
+          model,
+          // Cache-friendly: ride the warm prefix, instruction as the trailing
+          // user turn (no `system` override, which would miss the cache).
+          messages: buildAuxRequest(
+            hotContext.systemMessages,
+            hotContext.modelMessages,
+            turn.assistantText ?? "",
+            EXTRACTION_INSTRUCTION,
+          ),
+          maxOutputTokens: 200,
+        })
+      : await generateText({
+          model,
+          system: EXTRACTION_PROMPT,
+          prompt,
+          maxOutputTokens: 200,
+        });
 
     const billable = toTokenUsage(usage);
     if (billable && onUsage) onUsage(billable);

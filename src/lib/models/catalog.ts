@@ -349,3 +349,26 @@ export async function getModelPrice(modelId: string): Promise<ModelPrice | null>
   priceCache.set(modelId, price);
   return price;
 }
+
+const contextCache = new Map<string, number | null>();
+
+/**
+ * The model's context window (tokens) from the synced catalog, or null when the
+ * catalog doesn't know it (a custom/local backend) — in which case the budget
+ * falls back to a conservative default. Same id-matching as getModelPrice (exact,
+ * then provider-stripped). Cached in-process.
+ */
+export async function getModelContextLength(modelId: string): Promise<number | null> {
+  if (contextCache.has(modelId)) return contextCache.get(modelId)!;
+  const stripped = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
+  const rows = await db
+    .select({ id: models.id, contextLength: models.contextLength })
+    .from(models)
+    .where(or(eq(models.id, modelId), eq(models.id, stripped), like(models.id, `%/${stripped}`)))
+    .limit(5);
+
+  const exact = rows.find((r) => r.id === modelId) ?? rows.find((r) => r.contextLength != null);
+  const ctx = exact?.contextLength ?? null;
+  contextCache.set(modelId, ctx);
+  return ctx;
+}

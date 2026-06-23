@@ -28,6 +28,7 @@ import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X, Square }
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput } from "@/components/chat/chat-input";
+import { ContextMeter } from "@/components/chat/context-meter";
 import { useComposerAttachments } from "@/components/chat/use-composer-attachments";
 import { useChatDraft } from "@/components/chat/use-chat-draft";
 import type { FileRef } from "@/lib/constants";
@@ -137,6 +138,18 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // The message that starts the latest turn. Changing this (a new send, or
   // opening a chat) is what triggers the pin-to-top animation.
   const lastUserId = messages.findLast((m) => m.role === "user")?.id;
+
+  // Context-window fill from the most recent reply that reported usage + window.
+  // Drives the meter above the composer (hidden below 50%).
+  const contextUsage = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const meta = messages[i].metadata as { usage?: { input: number; cached: number }; contextWindow?: number } | undefined;
+      if (meta?.usage && meta.contextWindow) {
+        return { used: meta.usage.input + meta.usage.cached, window: meta.contextWindow };
+      }
+    }
+    return null;
+  })();
 
   // One nav entry per user turn — the minimap down the right edge.
   const navItems = messages
@@ -696,6 +709,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                   </div>
                 </div>
               )}
+              {contextUsage && <ContextMeter used={contextUsage.used} window={contextUsage.window} />}
               {queuedEl}
               {inputEl}
             </div>

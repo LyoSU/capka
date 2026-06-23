@@ -144,6 +144,18 @@ export async function getModelMaxPrice(): Promise<number> {
 }
 
 /**
+ * Org-wide cap on how much of a model's context window a chat may fill before we
+ * compact, in tokens; 0 (default) means "use the model's full window". Lets an
+ * admin hold users to e.g. 200k even on a 1M-token model — bounding the per-turn
+ * cost of the shared key. Only ever TIGHTENS the budget: a cap larger than the
+ * model's real window is clamped down in contextBudget().
+ */
+export async function getMaxContextTokens(): Promise<number> {
+  const v = parseInt((await getSetting("max_context_tokens")) ?? "", 10);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/**
  * Strict SSRF policy for admin-supplied provider URLs. Off by default so
  * self-hosted LiteLLM/Ollama on private/loopback addresses work out of the box;
  * when on, those ranges are blocked too (link-local/metadata is always blocked).

@@ -76,6 +76,7 @@ export default function ConnectionsPage() {
   const isAdmin = useIsAdmin();
   const minCtx = useSetting("model_min_context", String(DEFAULT_MODEL_MIN_CONTEXT));
   const maxPrice = useSetting("model_max_price", "0");
+  const maxCtxTokens = useSetting("max_context_tokens", "0");
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -283,6 +284,20 @@ export default function ConnectionsPage() {
     const ok = await maxPrice.persist(maxPrice.value);
     if (ok) toast.success(tc("saved"));
     else toast.error(t("maxPriceSaveFailed"));
+  };
+
+  // 0 (or empty) means "use each model's full window"; otherwise show the cap as
+  // a human token count, reusing the same formatter as the min-context field.
+  const ctxTokensLabel = (val: string) => {
+    const n = parseInt(val, 10);
+    if (!n || n <= 0) return t("noContextCap");
+    return contextLabel(val);
+  };
+
+  const saveMaxCtxTokens = async () => {
+    const ok = await maxCtxTokens.persist(maxCtxTokens.value);
+    if (ok) toast.success(tc("saved"));
+    else toast.error(t("maxContextTokensSaveFailed"));
   };
 
   const handleResync = async () => {
@@ -614,6 +629,28 @@ export default function ConnectionsPage() {
             </div>
             {maxPrice.dirty && (
               <Button size="sm" onClick={saveMaxPrice}>{tc("save")}</Button>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">{t("maxContextTokens")}</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="0"
+                  step="1000"
+                  value={maxCtxTokens.value}
+                  onChange={(e) => maxCtxTokens.update(e.target.value)}
+                  placeholder="0"
+                  className="w-40"
+                />
+                <span className="text-sm text-muted-foreground">
+                  {ctxTokensLabel(maxCtxTokens.value)}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("maxContextTokensHint")}</p>
+            </div>
+            {maxCtxTokens.dirty && (
+              <Button size="sm" onClick={saveMaxCtxTokens}>{tc("save")}</Button>
             )}
 
             <div className="space-y-1.5 pt-2">

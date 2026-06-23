@@ -53,6 +53,9 @@ export type MessageMeta = {
   model?: string;
   usage?: { input: number; output: number; cached: number };
   costUsd?: number;
+  // Effective context window (model window ∩ admin cap) at this turn. With
+  // `usage`, lets the UI render a "context full" meter: (input+cached)/this.
+  contextWindow?: number;
   // Files the user attached to THIS message — reference metadata only (name +
   // type, no bytes). Same shape as FileRef / chatRequestSchema.attachedFiles.
   // Lets the chat history show what was attached; the bytes live in the sandbox
@@ -63,6 +66,12 @@ export type MessageMeta = {
   // an audio note on a text-only model), so it answered without seeing/hearing
   // it — the UI nudges the user to switch to a capable model.
   notice?: { kind: "blind-modalities"; modalities: Modality[] };
+  // Marks this row as a COMPACTION CHECKPOINT — a summary that stands in for
+  // every turn up to `summarizedUpTo` when building context for the model. The
+  // full history stays in the DB and in the UI transcript (rendered as a
+  // divider); only what we feed the model is collapsed. Written by the runner's
+  // async compaction step. `tokensSaved` is best-effort, for the UI/analytics.
+  compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number };
   // Legacy format
   toolCalls?: { id: string; name: string; input: unknown }[];
   toolResults?: { id: string; name: string; output: unknown }[];

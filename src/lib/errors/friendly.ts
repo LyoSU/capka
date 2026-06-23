@@ -146,6 +146,17 @@ export function isModalityUnsupportedError(raw: unknown): boolean {
 }
 
 /**
+ * The conversation overran the model's context window. Reuses the same rules as
+ * classifyLLMError so the detection stays in one place. The runner uses this to
+ * trigger a mechanical emergency trim + retry instead of surfacing a dead end —
+ * note the prefix is by definition too big to summarize with an LLM here, so the
+ * reactive path must shrink mechanically, not via compaction.
+ */
+export function isContextOverflowError(raw: unknown): boolean {
+  return classifyLLMError(raw).category === "context_too_long";
+}
+
+/**
  * Server-enforced run deadline. Used directly (not via the regex rules, which
  * would mis-match a generic "timeout" as a network error) when a task exceeds
  * its wall-clock budget — a live worker stuck on a hung tool/LLM call.

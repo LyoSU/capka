@@ -877,6 +877,28 @@ interface ChatMessageProps {
   onModelChange?: (model: string) => void;
 }
 
+/** A compaction checkpoint in the transcript: a labelled divider where earlier
+ *  history was collapsed into a summary. Click to expand the summary the model
+ *  now sees in place of those turns — the full history above stays scrollable. */
+function CompactionDivider({ summary }: { summary: string }) {
+  const t = useTranslations("chat.message");
+  return (
+    <Collapsible className="my-4 px-2">
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="h-px flex-1 bg-border" />
+        <CollapsibleTrigger className="flex items-center gap-1.5 rounded-full border px-3 py-1 transition-colors hover:bg-accent">
+          <span aria-hidden>📋</span>
+          <span>{t("compacted")}</span>
+        </CollapsibleTrigger>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+      <CollapsibleContent className="mt-2 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+        <Markdown>{summary}</Markdown>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, model, onModelChange }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
@@ -884,7 +906,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number; notice?: { kind: string; modalities: string[] } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number; notice?: { kind: string; modalities: string[] }; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -1040,4 +1062,11 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
 // Memoized: with stable message identities (state changes only mutate the one
 // streaming message), keystrokes in the input and tokens for OTHER messages no
 // longer re-render the whole history.
-export const ChatMessage = memo(ChatMessageImpl);
+// Checkpoint rows render as a transcript divider, not a bubble. Branching here —
+// in the memo wrapper, which calls no hooks itself — keeps ChatMessageImpl free
+// of a conditional return sitting between hook calls (rules-of-hooks).
+export const ChatMessage = memo(function ChatMessage(props: ChatMessageProps) {
+  const cpMeta = props.message.metadata as { compaction?: { summary: string } } | undefined;
+  if (cpMeta?.compaction) return <CompactionDivider summary={cpMeta.compaction.summary} />;
+  return <ChatMessageImpl {...props} />;
+});

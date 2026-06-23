@@ -21,13 +21,19 @@ import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
-import { getSandboxNetworkDefault } from "@/lib/settings";
+import { getSandboxNetworkDefault, getMaxContextTokens } from "@/lib/settings";
+import { getModelContextLength } from "@/lib/models/catalog";
+import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
+import { contextBudget } from "@/lib/chat/context/budget";
+import { contextManagementOptions, mergeProviderOptions } from "@/lib/chat/context/provider-edits";
+import { stepSettings } from "@/lib/chat/context/step-control";
+import { compactConversation } from "@/lib/chat/context/compactor";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage } from "@/lib/usage";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
 import { errorText } from "@/lib/errors/message";
 import { downloadFile } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
@@ -127,6 +133,11 @@ const MAX_REALTIME_RESULT_BYTES = 6000;
  * aborts such a run so the slot frees and the user gets a clear failure.
  */
 const MAX_TASK_MS = 10 * 60_000;
+
+/** Reactive context-overflow fallback: how many of the most recent conversation
+ *  messages to keep when mechanically trimming a prompt the model rejected as too
+ *  long. Generous enough to preserve the live exchange, small enough to fit. */
+const EMERGENCY_KEEP_RECENT = 10;
 
 /** Download files with bounded concurrency and total size budget */
 async function downloadBounded(
@@ -293,9 +304,17 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     locale: user?.locale ?? payload.origin?.locale ?? null,
   });
 
+  // Context-window budget inputs: the model's real window (catalog) and any
+  // admin cap (which only ever tightens it). Both feed contextBudget() after the
+  // turn to decide whether the NEXT turn should compact.
+  const [contextLength, adminCap] = await Promise.all([
+    getModelContextLength(modelId),
+    getMaxContextTokens(),
+  ]);
+
   // Dispose both sandbox and MCP clients when the run ends.
   const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
-  return { model, provider, modelId, modelInput, isShared, tools, closeMcp: closeAll, prompt, userMemories };
+  return { model, provider, modelId, modelInput, isShared, tools, closeMcp: closeAll, prompt, userMemories, contextLength, adminCap };
 }
 
 /**
@@ -400,7 +419,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, modelInput, isShared, tools, closeMcp: close, prompt, userMemories } =
+    const { model, provider, modelId, modelInput, isShared, tools, closeMcp: close, prompt, userMemories, contextLength, adminCap } =
       await prepareRun(userId, sessionKey, payload, chatId);
     closeMcp = close;
 
@@ -482,9 +501,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let uiMessages = payload.uiMessages ?? [];
     if (replyParentId) {
       const path = await loadActivePath(chatId, replyParentId);
-      if (path.length) uiMessages = toUIMessages(path.map((p) => p.node));
+      // Shape the path into the model's view: collapse history at the newest
+      // compaction checkpoint into its summary (cache-stable — the checkpoint
+      // doesn't move, so the prefix stays a cache hit between turns). The DB and
+      // the UI transcript keep the full history; only the model's view is trimmed.
+      if (path.length) uiMessages = toUIMessages(buildModelContext(path.map((p) => p.node) as ContextRow[], {}));
     }
-    const modelMessages = await convertToModelMessages(uiMessages);
+    let modelMessages = await convertToModelMessages(uiMessages);
 
     let injectedNative = false;
     const turnFiles = [...(payload.attachedFiles ?? []), ...extraAttachedFiles];
@@ -510,14 +533,29 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // and re-streams without it if the model rejects thinking/reasoning.
     const reasoning = reasoningOptions(provider);
     let useReasoning = reasoning !== undefined;
-    const makeStream = () =>
-      streamText({
+    // Effective window (model ∩ admin cap) drives the provider-native edit's
+    // trigger. Reused from the budget logic so the cap is honored here too.
+    const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
+    const ctxMgmt = contextManagementOptions(provider, effectiveLimit);
+    const makeStream = () => {
+      // reasoning + context-management may both target the same provider
+      // namespace (e.g. anthropic) — merge so neither clobbers the other.
+      const providerOptions = mergeProviderOptions(
+        useReasoning ? (reasoning as Record<string, Record<string, unknown>>) : undefined,
+        ctxMgmt as Record<string, Record<string, unknown>> | undefined,
+      );
+      return streamText({
         model,
-        ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25) } : {}),
+        // prepareStep forces a text answer after FORCE_TEXT_AFTER_STEPS so a long
+        // tool loop wraps up instead of hitting the hard step cap mid-tool. It
+        // only tweaks toolChoice — never rewrites messages — so it can't break the
+        // prompt cache mid-turn (see stepSettings).
+        ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25), prepareStep: ({ stepNumber }) => stepSettings(stepNumber) } : {}),
         messages: [...systemMessages, ...modelMessages],
-        ...(useReasoning && reasoning ? { providerOptions: reasoning as never } : {}),
+        ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
         abortSignal: ac.signal,
       });
+    };
 
     let result = makeStream();
 
@@ -817,12 +855,34 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return false;
     };
 
+    // Reactive context-overflow recovery. The proactive budget check compacts
+    // BEFORE a turn, but a single huge first message (or a model whose window we
+    // couldn't read) can still overrun. We can't summarize our way out — the
+    // prefix is already too big to feed the model — so shrink MECHANICALLY: keep
+    // only the most recent turns and re-stream. Once, so a still-too-big prompt
+    // surfaces the friendly error instead of looping.
+    let emergencyTrimmed = false;
+    const retryOnContextOverflow = async (err: unknown): Promise<boolean> => {
+      if (emergencyTrimmed || !isContextOverflowError(err)) return false;
+      tlog.info("context overflow — emergency trim + retry", { keepRecent: EMERGENCY_KEEP_RECENT });
+      emergencyTrimmed = true;
+      streamError = undefined;
+      await discardPartial();
+      modelMessages = trimToRecent(modelMessages, EMERGENCY_KEEP_RECENT);
+      await captureDiscarded();
+      result = makeStream();
+      await consume();
+      return true;
+    };
+
     try {
       await consume();
       // Provider surfaced the error as a stream event, not a throw — same retry.
-      if (streamError && !ac.signal.aborted) await retryOnCapabilityError(streamError);
+      if (streamError && !ac.signal.aborted) {
+        if (!(await retryOnCapabilityError(streamError))) await retryOnContextOverflow(streamError);
+      }
     } catch (e) {
-      if (!(await retryOnCapabilityError(e))) throw e;
+      if (!(await retryOnCapabilityError(e)) && !(await retryOnContextOverflow(e))) throw e;
     }
 
     // Retry once if the model produced no content.
@@ -868,6 +928,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       tlog.error("usage compute failed", { err: String(e) });
     }
 
+    // Context budget from this turn's ACTUAL input (cached reads included — the
+    // whole prefix occupies the window). Computed once and reused: it drives both
+    // the long-chat aux path (memory rides the hot prefix) and the compaction
+    // trigger below. "Long" = at least half the effective window full.
+    const budget = usageMeta
+      ? contextBudget({ usedTokens: usageMeta.input + usageMeta.cached, modelContextLength: contextLength, adminCap: adminCap || null })
+      : undefined;
+    const longChat = (budget?.fraction ?? 0) >= 0.5;
+
     // The reasoning/tool phase = start → first answer token (or the whole run if
     // it never produced answer text). Persisted so a reloaded transcript shows
     // the real "reasoned for …" time, not the full turn duration.
@@ -888,6 +957,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           model: modelId,
           ...(usageMeta ? { usage: usageMeta } : {}),
           ...(costMeta != null ? { costUsd: costMeta } : {}),
+          // Effective window (model ∩ admin cap) so the UI's context meter can
+          // show how full the window is: (usage.input + usage.cached) / this.
+          ...(budget ? { contextWindow: budget.effectiveLimit } : {}),
         } : {}),
       },
     }).where(eq(messages.id, msgId));
@@ -964,6 +1036,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         { userText: lastUserText, assistantText: getFullText() },
         userMemories.map((m) => m.content),
         recordAuxUsage,
+        // Long chat → ride the hot prefix for full-context, cache-priced
+        // extraction; short chat → undefined keeps the cheap standalone call.
+        longChat ? { systemMessages, modelMessages } : undefined,
       )
         .then(async (newFacts) => {
           if (newFacts.length > 0) {
@@ -991,6 +1066,39 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           await publishTaskEvent(userId, { type: "chat:title", chatId, title });
         })
         .catch((e) => tlog.error("chat title generation failed", { err: String(e) }));
+    }
+
+    // Compaction. If this turn's INPUT neared the context-window budget, summarize
+    // the conversation on the still-hot prefix and write a checkpoint, so the next
+    // turn's buildModelContext collapses everything up to it into that summary.
+    // Cache-friendly by construction (same system+history, instruction appended as
+    // the final user turn — see buildCompactionMessages). Fire-and-forget like
+    // title/memory; gated on a clean completion. `used` counts the FULL input
+    // (cached reads included), since the whole prefix occupies the window.
+    if (finalStatus === "completed" && budget && budget.shouldCompact) {
+      {
+        compactConversation(model, systemMessages, modelMessages, recordAuxUsage)
+          .then(async (summary) => {
+            if (!summary) return;
+            // Race guard: only checkpoint if the chat's leaf is STILL this reply.
+            // A follow-up that already moved the leaf would otherwise get a
+            // checkpoint grafted as its sibling — skip and let the next turn
+            // re-evaluate the budget instead.
+            const [row] = await db.select({ leaf: chats.activeLeafId }).from(chats).where(eq(chats.id, chatId)).limit(1);
+            if (row?.leaf !== msgId) return;
+            const checkpointId = nanoid();
+            await db.insert(messages).values({
+              id: checkpointId, chatId, parentId: msgId, role: "assistant", content: "",
+              platform: payload.origin?.platform ?? "web",
+              metadata: { status: "completed", compaction: { summary, summarizedUpTo: msgId, tokensSaved: budget.used } },
+            });
+            await db.update(chats).set({ activeLeafId: checkpointId }).where(eq(chats.id, chatId));
+            tlog.info("conversation compacted", {
+              usedTokens: budget.used, effectiveLimit: budget.effectiveLimit, checkpointId,
+            });
+          })
+          .catch((e) => tlog.error("compaction failed", { err: String(e) }));
+      }
     }
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";
