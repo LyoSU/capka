@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, RefreshCw, Trash2, Sparkles, Plug, AlertTriangle } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Sparkles, Plug, AlertTriangle, CheckCircle2, Power, PowerOff } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,8 @@ import {
 import { cn } from "@/lib/utils";
 
 interface Item { id: string; name: string; enabled: boolean }
+type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
+interface Health { status: ProbeStatus; toolCount?: number; detail?: string }
 interface InstalledPlugin {
   id: string;
   pluginName: string;
@@ -33,14 +35,18 @@ interface InstalledPlugin {
 export default function InstalledPlugins() {
   const t = useTranslations("settings.skills.installed");
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
+  const [health, setHealth] = useState<Record<string, Health>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch("/api/admin/extensions");
+      // Health is live connection state per connector — it's why a connector that
+      // looks installed may still be invisible to the assistant (disabled / errored).
+      const [r, hr] = await Promise.all([fetch("/api/admin/extensions"), fetch("/api/mcp/health")]);
       if (r.ok) setPlugins((await r.json()).plugins ?? []);
       else toast.error(t("loadError"));
+      if (hr.ok) setHealth((await hr.json()).health ?? {});
     } catch {
       toast.error(t("loadError"));
     } finally {
@@ -48,6 +54,20 @@ export default function InstalledPlugins() {
     }
   }, [t]);
   useEffect(() => { load(); }, [load]);
+
+  /** Per-connector status the card shows so it's obvious why the assistant does or
+   *  doesn't see it: off → enable it; error → here's the reason; ok → tool count. */
+  const connectorStatus = (c: Item) => {
+    if (!c.enabled) return { label: t("status.disabled"), cls: "text-muted-foreground", Icon: PowerOff, detail: undefined as string | undefined };
+    const h = health[c.id];
+    if (h?.status === "ok") return { label: t("status.active", { count: h.toolCount ?? 0 }), cls: "text-emerald-600 dark:text-emerald-500", Icon: CheckCircle2, detail: undefined };
+    if (h) {
+      const label = h.status === "needs_login" ? t("status.needsLogin") : h.status === "unauthorized" ? t("status.unauthorized") : t("status.error");
+      return { label, cls: "text-amber-600 dark:text-amber-500", Icon: AlertTriangle, detail: h.detail };
+    }
+    // Enabled but no probe result (stdio connects only inside a run; success isn't recorded).
+    return { label: t("status.enabled"), cls: "text-muted-foreground", Icon: Power, detail: undefined };
+  };
 
   const act = async (req: () => Promise<Response>, id: string, okMsg?: string) => {
     setBusy(id);
@@ -140,18 +160,32 @@ export default function InstalledPlugins() {
               </div>
             </div>
 
-            {(p.skills.length > 0 || p.connectors.length > 0) && (
+            {p.skills.length > 0 && (
               <div className="flex flex-wrap gap-1.5 border-t pt-3">
                 {p.skills.map((s) => (
                   <Badge key={s.id} variant="outline" className={cn("gap-1 font-normal", !s.enabled && "opacity-50")}>
                     <Sparkles className="h-3 w-3" />{s.name}
                   </Badge>
                 ))}
-                {p.connectors.map((c) => (
-                  <Badge key={c.id} variant="outline" className={cn("gap-1 font-normal", !c.enabled && "opacity-50")}>
-                    <Plug className="h-3 w-3" />{c.name}
-                  </Badge>
-                ))}
+              </div>
+            )}
+
+            {p.connectors.length > 0 && (
+              <div className="space-y-1.5 border-t pt-3">
+                {p.connectors.map((c) => {
+                  const st = connectorStatus(c);
+                  return (
+                    <div key={c.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <Plug className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{c.name}</span>
+                      </span>
+                      <span className={cn("flex shrink-0 items-center gap-1 text-xs", st.cls)} title={st.detail}>
+                        <st.Icon className="h-3 w-3" />{st.label}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
 

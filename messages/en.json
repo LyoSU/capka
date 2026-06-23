@@ -766,6 +766,14 @@
           "on": "On",
           "off": "Off",
           "mixed": "Partly on"
+        },
+        "status": {
+          "disabled": "Disabled",
+          "enabled": "Enabled",
+          "active": "Active · {count} tools",
+          "needsLogin": "Needs sign-in",
+          "unauthorized": "Auth failed",
+          "error": "Connection error"
         }
       },
       "pluginsView": {
