@@ -1,6 +1,5 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { nanoid } from "nanoid";
 import { execCommand } from "./client";
 
 /**
@@ -46,10 +45,12 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
       }),
       execute: async ({ code, timeout }) => {
-        // Base64 encode to avoid heredoc delimiter collisions and shell escaping issues
+        // Pipe the program straight into the interpreter's stdin instead of staging
+        // it in /tmp. The sandbox's /tmp is a small (64 MB) tmpfs shared by every
+        // process; a sibling that fills it must never break code execution or file
+        // editing. Base64 still guards against shell-escaping/delimiter collisions.
         const encoded = Buffer.from(code).toString("base64");
-        const tmpFile = `/tmp/_exec_${nanoid()}.py`;
-        const cmd = `echo '${encoded}' | base64 -d > ${tmpFile} && python3 ${tmpFile}; rc=$?; rm -f ${tmpFile}; exit $rc`;
+        const cmd = `echo '${encoded}' | base64 -d | python3 -`;
         const result = await run(cmd, timeout);
         const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
         return { output: output || "(no output)", exitCode: result.exitCode, success: result.exitCode === 0 };
@@ -65,9 +66,10 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
       }),
       execute: async ({ code, timeout }) => {
+        // Pipe through node's stdin (ESM, matching the previous .mjs staging) so
+        // execution never depends on writable /tmp. See execute_python above.
         const encoded = Buffer.from(code).toString("base64");
-        const tmpFile = `/tmp/_exec_${nanoid()}.mjs`;
-        const cmd = `echo '${encoded}' | base64 -d > ${tmpFile} && node ${tmpFile}; rc=$?; rm -f ${tmpFile}; exit $rc`;
+        const cmd = `echo '${encoded}' | base64 -d | node --input-type=module`;
         const result = await run(cmd, timeout);
         const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
         return { output: output || "(no output)", exitCode: result.exitCode, success: result.exitCode === 0 };
@@ -142,11 +144,12 @@ with open(p) as f: content = f.read()
 if old not in content: print('ERROR: text not found'); sys.exit(1)
 with open(p, 'w') as f: f.write(content.replace(old, new, 1))
 print('OK')`;
-        // Base64 + unique tmp path: verbatim script, no heredoc/escaping surprises,
-        // no collision when several str_replace calls run concurrently.
+        // Base64 + pipe to python3's stdin: verbatim script, no heredoc/escaping
+        // surprises, and — crucially — no /tmp write, so editing a file in
+        // /workspace survives even when the tmpfs /tmp is full. The path/old/new
+        // are baked into the script, so it needs no stdin of its own.
         const encoded = Buffer.from(pyCode).toString("base64");
-        const tmpFile = `/tmp/_replace_${nanoid()}.py`;
-        const cmd = `echo '${encoded}' | base64 -d > ${tmpFile} && python3 ${tmpFile}; rc=$?; rm -f ${tmpFile}; exit $rc`;
+        const cmd = `echo '${encoded}' | base64 -d | python3 -`;
         const result = await run(cmd);
         if (result.exitCode !== 0) return { error: result.stdout + result.stderr, success: false };
         return { success: true, path };
