@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { chats, messages, memories, projects, users } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
+import { stripNul } from "./sanitize";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 import { describeStep } from "@/lib/chat/steps";
@@ -794,15 +795,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           }
           case "tool-result": {
             await flushBuffers();
-            parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output: event.output });
+            // Trust boundary: a tool can return raw binary (e.g. a PNG dumped as
+            // `output.content`) whose NUL bytes Postgres rejects in both `jsonb`
+            // and `pg_notify`. Strip them once, here, so neither the DB write nor
+            // the realtime publish below can choke. See stripNul.
+            const output = stripNul(event.output);
+            parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output });
             // The full output is in `parts` (saved to the DB at finish-step). Over
             // realtime we ship it only if it fits NOTIFY's budget; an oversized
             // body (e.g. a loaded skill) is dropped here so the small state-flip
             // event survives intact — the client backfills the body from the DB.
-            const fits = Buffer.byteLength(JSON.stringify(event.output ?? null)) <= MAX_REALTIME_RESULT_BYTES;
+            const fits = Buffer.byteLength(JSON.stringify(output ?? null)) <= MAX_REALTIME_RESULT_BYTES;
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId, result: fits ? event.output : undefined, seq: ++seq,
+              toolCallId: event.toolCallId, result: fits ? output : undefined, seq: ++seq,
             });
             await saveSnapshot(true); // keep the snapshot current with each step
             break;

@@ -87,6 +87,19 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         const cmd = max_lines ? `head -n ${max_lines} '${safePath}'` : `cat '${safePath}'`;
         const result = await run(cmd);
         if (result.exitCode !== 0) return { error: result.stderr || "File not found", content: null };
+        // A NUL byte means this is binary, not text. Returning the raw bytes
+        // would (a) feed the model useless mojibake that bloats context and
+        // invites byte-level hallucination, and (b) carry a NUL that Postgres
+        // rejects on persist (the runner's stripNul is the safety net for that).
+        // Report it instead — as the tool's own description already advises.
+        if (result.stdout.includes("\u0000")) {
+          const sz = await run(`wc -c < '${safePath}'`);
+          const bytes = sz.exitCode === 0 ? sz.stdout.trim() : "unknown";
+          return {
+            error: `Binary file (${bytes} bytes) — not text. Inspect it with execute_bash (e.g. \`file\`, \`xxd\`) or process it in execute_python.`,
+            content: null,
+          };
+        }
         return { content: result.stdout, error: null };
       },
     }),
