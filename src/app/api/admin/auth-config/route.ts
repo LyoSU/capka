@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { requireAdmin, apiHandler, resetAuth, telegramRedirectUri } from "@/lib/auth";
-import { getSetting, setSetting, getTelegramOidcConfig, getRegistrationMode } from "@/lib/settings";
+import {
+  getSetting,
+  setSetting,
+  getTelegramOidcConfig,
+  getRegistrationMode,
+  getEmailSignupEnabled,
+} from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
 
 /**
@@ -13,6 +19,7 @@ export const GET = apiHandler(async (req: Request) => {
   await requireAdmin();
   const tg = await getTelegramOidcConfig();
   const mode = await getRegistrationMode();
+  const emailSignupEnabled = await getEmailSignupEnabled();
   const toggle = (await getSetting("telegram_login_enabled")) === "true";
   return Response.json({
     telegram: {
@@ -23,6 +30,7 @@ export const GET = apiHandler(async (req: Request) => {
       redirectUri: telegramRedirectUri(getPublicUrl({ headers: req.headers })),
     },
     registrationMode: mode,
+    emailSignupEnabled,
   });
 });
 
@@ -32,6 +40,7 @@ const bodySchema = z.object({
   clientSecret: z.string().optional(),
   enabled: z.boolean().optional(),
   registrationMode: z.enum(["open", "approval", "closed"]).optional(),
+  emailSignupEnabled: z.boolean().optional(),
 });
 
 export const POST = apiHandler(async (req: Request) => {
@@ -42,6 +51,7 @@ export const POST = apiHandler(async (req: Request) => {
   if (body.clientSecret) await setSetting("telegram_oidc_client_secret", body.clientSecret, true);
   if (body.enabled !== undefined) await setSetting("telegram_login_enabled", body.enabled ? "true" : "false", false);
   if (body.registrationMode !== undefined) await setSetting("registration_mode", body.registrationMode, false);
+  if (body.emailSignupEnabled !== undefined) await setSetting("email_signup_enabled", body.emailSignupEnabled ? "true" : "false", false);
 
   // The better-auth instance caches its plugin config — drop it so the next
   // request rebuilds with the new credentials/toggle.

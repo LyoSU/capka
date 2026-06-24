@@ -253,3 +253,15 @@ export async function getRegistrationMode(): Promise<RegistrationMode> {
   if (explicit) return parseRegistrationMode(explicit);
   return (await getSetting("registration_enabled")) === "true" ? "open" : "closed";
 }
+
+/**
+ * Whether email/password sign-up is offered at all. A separate axis from the
+ * registration mode: an admin can keep registration open for Telegram while
+ * forbidding email account creation (Telegram-only onboarding). Defaults to true
+ * so existing instances and fresh setups keep email sign-up working until an
+ * admin opts out. Gates account *creation* only — existing email accounts still
+ * sign in.
+ */
+export async function getEmailSignupEnabled(): Promise<boolean> {
+  return (await getSetting("email_signup_enabled")) !== "false";
+}

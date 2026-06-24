@@ -976,6 +976,12 @@
           "desc": "Only existing accounts can sign in. No new sign-ups."
         }
       },
+      "email": {
+        "title": "Email sign-up",
+        "desc": "Allow creating accounts with an email and password. Turn off to leave Telegram as the only way in. Existing email accounts keep signing in.",
+        "toggleAria": "Allow email sign-up",
+        "deadEndWarning": "Email sign-up is off and Telegram login isn't configured — new users won't be able to register at all."
+      },
       "pending": {
         "title": "Waiting for approval",
         "desc": "People who signed in and need your go-ahead.",

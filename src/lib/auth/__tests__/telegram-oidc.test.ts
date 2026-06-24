@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   decodeTelegramClaims,
+  emailSignupAllowed,
   isReservedTelegramEmail,
   parseRegistrationMode,
   resolveRegistration,
@@ -91,6 +92,30 @@ describe("resolveRegistration", () => {
 
   it("closed mode rejects new identities", () => {
     expect(resolveRegistration({ mode: "closed", isFirstUser: false }).allow).toBe(false);
+  });
+});
+
+describe("emailSignupAllowed", () => {
+  it("always allows email sign-up before setup completes (bootstrap the first admin)", () => {
+    // Even with email disabled and a closed mode, a fresh instance must let the
+    // first admin register via email — otherwise setup can never finish.
+    for (const mode of ["open", "approval", "closed"] as const) {
+      expect(emailSignupAllowed({ mode, emailEnabled: false, setupDone: false })).toBe(true);
+    }
+  });
+
+  it("blocks email sign-up once set up when the email toggle is off, even in open mode", () => {
+    expect(emailSignupAllowed({ mode: "open", emailEnabled: false, setupDone: true })).toBe(false);
+    expect(emailSignupAllowed({ mode: "approval", emailEnabled: false, setupDone: true })).toBe(false);
+  });
+
+  it("blocks email sign-up in closed mode even when the email toggle is on", () => {
+    expect(emailSignupAllowed({ mode: "closed", emailEnabled: true, setupDone: true })).toBe(false);
+  });
+
+  it("allows email sign-up when set up, toggle on, and mode is not closed", () => {
+    expect(emailSignupAllowed({ mode: "open", emailEnabled: true, setupDone: true })).toBe(true);
+    expect(emailSignupAllowed({ mode: "approval", emailEnabled: true, setupDone: true })).toBe(true);
   });
 });
 

@@ -1,7 +1,7 @@
 import { getAuth } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
-import { getRegistrationMode, isSetupComplete } from "@/lib/settings";
-import { isReservedTelegramEmail } from "@/lib/auth/telegram-oidc";
+import { getRegistrationMode, getEmailSignupEnabled, isSetupComplete } from "@/lib/settings";
+import { emailSignupAllowed, isReservedTelegramEmail } from "@/lib/auth/telegram-oidc";
 
 export async function GET(request: Request) {
   const auth = await getAuth();
@@ -10,14 +10,19 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  // Registration is governed by the single instance-wide mode (open/approval/
-  // closed) — see getRegistrationMode. "closed" blocks email sign-up entirely.
-  // Exception: before setup is complete, self-signup must work so the first
-  // admin can bootstrap their account.
+  // Email sign-up is governed by the registration mode ("closed" blocks it) AND
+  // the standalone email toggle — an admin can forbid email account creation
+  // while leaving Telegram open. emailSignupAllowed composes both with the
+  // bootstrap exception: before setup is complete self-signup must work so the
+  // first admin can create their account.
   const url = new URL(request.url);
   if (url.pathname.endsWith("/sign-up/email")) {
-    const setupDone = await isSetupComplete();
-    if (setupDone && (await getRegistrationMode()) === "closed") {
+    const [setupDone, mode, emailEnabled] = await Promise.all([
+      isSetupComplete(),
+      getRegistrationMode(),
+      getEmailSignupEnabled(),
+    ]);
+    if (!emailSignupAllowed({ mode, emailEnabled, setupDone })) {
       return Response.json({ error: "Registration is disabled" }, { status: 403 });
     }
     // Reserve the synthetic Telegram domain: nobody may register an

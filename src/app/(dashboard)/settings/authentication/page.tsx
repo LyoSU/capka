@@ -16,6 +16,7 @@ type Mode = "open" | "approval" | "closed";
 interface Config {
   telegram: { enabledToggle: boolean; ready: boolean; clientId: string; hasClientSecret: boolean; redirectUri: string };
   registrationMode: Mode;
+  emailSignupEnabled: boolean;
 }
 interface PendingUser { id: string; name: string; email: string; status: string; createdAt: string | null }
 
@@ -29,6 +30,7 @@ export default function AuthenticationPage() {
   const [clientSecret, setClientSecret] = useState("");
   const [hasSecret, setHasSecret] = useState(false);
   const [mode, setMode] = useState<Mode>("closed");
+  const [emailSignup, setEmailSignup] = useState(true);
   const [redirectUri, setRedirectUri] = useState("");
   const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState<PendingUser[]>([]);
@@ -51,6 +53,7 @@ export default function AuthenticationPage() {
         setHasSecret(data.telegram.hasClientSecret);
         setRedirectUri(data.telegram.redirectUri);
         setMode(data.registrationMode);
+        setEmailSignup(data.emailSignupEnabled);
       }
       await loadPending();
     } finally {
@@ -62,7 +65,7 @@ export default function AuthenticationPage() {
   const save = async () => {
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { enabled, registrationMode: mode, clientId: clientId.trim() };
+      const body: Record<string, unknown> = { enabled, registrationMode: mode, emailSignupEnabled: emailSignup, clientId: clientId.trim() };
       if (clientSecret.trim()) body.clientSecret = clientSecret.trim();
       const res = await fetch("/api/admin/auth-config", {
         method: "POST",
@@ -198,6 +201,24 @@ export default function AuthenticationPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Email sign-up toggle — a separate axis from the mode above. Off = no new
+          email accounts; existing email users still sign in, and Telegram (if
+          configured) stays open. */}
+      <div className="space-y-3 rounded-md border p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-medium">{t("email.title")}</h3>
+            <p className="text-sm text-muted-foreground">{t("email.desc")}</p>
+          </div>
+          <Switch checked={emailSignup} onCheckedChange={setEmailSignup} aria-label={t("email.toggleAria")} />
+        </div>
+        {!emailSignup && !ready && (
+          <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            {t("email.deadEndWarning")}
+          </p>
+        )}
       </div>
 
       <div className="flex justify-end">

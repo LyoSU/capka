@@ -83,6 +83,29 @@ export function telegramDisplayName(claims: TelegramClaims): string {
   return claims.name ?? (claims.username ? `@${claims.username}` : `Telegram ${claims.telegramUserId}`);
 }
 
+/**
+ * Whether NEW email/password sign-ups are allowed right now. This is a separate
+ * axis from {@link RegistrationMode}: an admin can keep registration "open" for
+ * Telegram while forbidding email sign-up entirely (Telegram-only onboarding).
+ * Existing email accounts still LOG IN regardless — this gates account *creation*
+ * only.
+ *
+ * Precedence:
+ *   1. Before first-run setup completes the very first admin can only bootstrap
+ *      via email, so sign-up is ALWAYS allowed then — overrides everything below.
+ *   2. The admin email toggle (`email_signup_enabled`); off blocks email sign-up.
+ *   3. The registration mode; "closed" forbids all new sign-ups (email included).
+ */
+export function emailSignupAllowed(opts: {
+  mode: RegistrationMode;
+  emailEnabled: boolean;
+  setupDone: boolean;
+}): boolean {
+  if (!opts.setupDone) return true;
+  if (!opts.emailEnabled) return false;
+  return opts.mode !== "closed";
+}
+
 export interface RegistrationDecision {
   /** Whether the account may be created at all. */
   allow: boolean;
