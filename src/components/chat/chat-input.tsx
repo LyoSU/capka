@@ -88,6 +88,14 @@ export function ChatInput({
     el.style.height = `${el.scrollHeight}px`;
   }, []);
 
+  // Keep the textarea height in sync with `value` on EVERY change, not just on
+  // keystrokes. After a send the parent resets `value` to "" programmatically
+  // (and a restored draft sets it on mount) — neither fires the textarea's
+  // onChange, so without this the box stays stuck at its grown-out height.
+  useEffect(() => {
+    resize();
+  }, [value, resize]);
+
   // Something is uploading → hold the send until it settles, so we never send a
   // message whose attachment isn't in the sandbox yet.
   const uploading = files.some((f) => f.status === "uploading");
