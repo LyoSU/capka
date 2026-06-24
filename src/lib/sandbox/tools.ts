@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { execCommand } from "./client";
+import { execCommand, deleteFile } from "./client";
 
 /**
  * Create sandbox tools for a chat session.
@@ -15,7 +15,18 @@ import { execCommand } from "./client";
 export async function loadSandboxTools(sessionKey: string, ensureSession: () => Promise<unknown>) {
   const run = async (cmd: string, timeout?: number) => {
     await ensureSession();
-    return execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000));
+    try {
+      return await execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000));
+    } catch (e) {
+      // The disk-quota block (HTTP 413) is the one exec failure the agent can fix
+      // on its own — by freeing space with delete_path. Surface it as a normal
+      // failed command result (the actionable message in stderr) so the model
+      // reads it and recovers, rather than the tool call hard-erroring.
+      if (e && typeof e === "object" && (e as { status?: number }).status === 413) {
+        return { stdout: "", stderr: (e as Error).message, exitCode: 1 };
+      }
+      throw e;
+    }
   };
 
   const tools = {
@@ -165,6 +176,26 @@ print('OK')`;
         const target = (path || ".").replace(/'/g, "'\\''");
         const result = await run(`ls -la '${target}'`);
         return { listing: result.stdout, error: result.exitCode !== 0 ? result.stderr : null };
+      },
+    }),
+
+    delete_path: tool({
+      description:
+        "Delete a file or an entire folder (recursively) from the workspace. Use this to remove " +
+        "files you no longer need, and especially to FREE SPACE when the workspace is full — it is " +
+        "the only way to delete then, because `rm` via execute_bash is paused while storage is over " +
+        "the limit. Deletion is permanent.",
+      inputSchema: z.object({
+        path: z.string().describe("Path relative to /workspace — a file or a folder"),
+      }),
+      execute: async ({ path }) => {
+        await ensureSession();
+        try {
+          await deleteFile(sessionKey, path);
+          return { success: true, path };
+        } catch (e) {
+          return { success: false, error: e instanceof Error ? e.message : "Delete failed" };
+        }
       },
     }),
 

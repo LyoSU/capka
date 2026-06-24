@@ -174,3 +174,55 @@ Existing `SANDBOX_MEMORY_MB`, `SANDBOX_CPUS`, `MAX_WORKSPACE_MB`,
 1. Non-`/tmp` writable-layer paths are unbounded but ephemeral.
 2. Persistent disk enforcement is poll-based, so a single command can transiently
    overshoot the cap before the next gate; bounded and documented.
+
+## Implementation status — 2026-06-24
+
+The persistent `/workspace` disk quota shipped; the pieces and the one deliberate
+divergence:
+
+- **Pre-exec gate (enforcement point #1) — shipped.** `POST /sessions/:id/exec`
+  now returns `413 { code: "WORKSPACE_FULL" }` and runs nothing once the workspace
+  is at/over `MAX_WORKSPACE_MB`. Logic lives in `workspace-quota.js`
+  (`createQuotaTracker`), unit-tested, and wired in `server.js`. The expensive
+  tree walk (`workspace.size`) is cached for `QUOTA_CACHE_TTL_MS` (default 5s) to
+  keep `du` off the hot path; the existing GC pass feeds fresh sizes into the
+  cache for free via `findOverQuota`'s new `onSize` callback.
+- **Deadlock break — completed.** `DELETE /files` already existed but **refused
+  directories**, so it could not free a workspace full of folders (e.g. a venv) —
+  the deadlock was only half-broken. `workspace.delete` now removes a directory
+  and its whole subtree (`fs.rm({ recursive })`), still `safeRealPath`-contained.
+  The escape is surfaced to the agent as the **`delete_path` tool**; deleting a
+  path clears that session's cached size (`quota.forget`) so the gate lifts
+  immediately, not after the TTL. The platform's `client.ts` passes the
+  `WORKSPACE_FULL` message through verbatim (other failures stay generic), and the
+  sandbox tools convert the 413 into a normal failed result so the model reads the
+  actionable message and recovers in-run instead of hard-erroring.
+- **Idle-loop stop (enforcement point #2) — intentionally NOT shipped.** Per
+  product decision, an over-quota session is handled by refusing its next exec, not
+  by stopping the container mid-task (too abrupt for non-technical users). The
+  consequence — a backgrounded writer (`foo &`) can overshoot until its next
+  gated exec — is accepted; the kernel quota below is the real fix for that.
+- **`/shared` (`MAX_SHARED_MB`) accounting — not yet shipped.** Only `/workspace`
+  is enforced so far.
+
+### Recommended host-level hardening (the real, deadlock-free cap)
+
+App-level polling cannot stop a single runaway command mid-write — only a kernel
+quota returns `ENOSPC` at exactly the limit while still allowing deletes. Where
+`DATA_ROOT`'s filesystem supports project quotas, enable one and the app gate
+becomes a redundant safety net:
+
+```sh
+# XFS: mount DATA_ROOT's fs with pquota, then cap a project id pointed at DATA_ROOT
+mount -o remount,pquota /data
+xfs_quota -x -c 'project -s -p /data/storage 1' /data
+xfs_quota -x -c 'limit -p bhard=20g 1' /data
+
+# ext4: enable the project-quota feature, then set a hard block limit
+tune2fs -O project -Q prjquota /dev/<dev>   # unmounted; or mkfs with -O project
+chattr -p 1 +P /data/storage
+setquota -P 1 0 20g 0 0 /data
+```
+
+This needs host/Coolify-level FS setup and privileges the controller container
+does not hold, so it stays an ops task, documented here rather than automated.

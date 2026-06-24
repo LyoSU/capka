@@ -17,6 +17,7 @@ import { assertRuntimeAvailable } from "./runtime-check.js";
 import { resolveRuntimeProfile } from "./profile.js";
 import { reconcile } from "./reconcile.js";
 import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces } from "./gc.js";
+import { createQuotaTracker } from "./workspace-quota.js";
 import { pickLruVictim } from "./session-policy.js";
 import { notReadyGuard } from "./readiness.js";
 import { withRetry } from "./retry.js";
@@ -52,6 +53,9 @@ const WORKSPACE_TTL_MS = parseInt(process.env.WORKSPACE_TTL_MS || "2592000000");
 const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
 const MAX_WORKSPACE_MB = parseInt(process.env.MAX_WORKSPACE_MB || "500");
+// How long a measured workspace size is trusted before re-walking the tree. Keeps
+// the expensive du off the hot exec path and coalesces command bursts.
+const QUOTA_CACHE_TTL_MS = parseInt(process.env.QUOTA_CACHE_TTL_MS || "5000");
 const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB || "100");
 const SANDBOX_UID = parseInt(process.env.SANDBOX_UID || "1000");
 const SANDBOX_GID = parseInt(process.env.SANDBOX_GID || "1000");
@@ -82,6 +86,15 @@ let workspace;
 let backend;
 let ready = false;
 let liveCount = 0;
+
+// App-level disk-quota guard. The `size` closure reads the module-level
+// `workspace` lazily, so it picks up the real store after boot (and the fake one
+// injected by tests via __setTestState). See workspace-quota.js for the why.
+const quota = createQuotaTracker({
+  size: (userId, sessionId) => workspace.size(userId, sessionId),
+  limitBytes: MAX_WORKSPACE_MB * 1024 * 1024,
+  ttlMs: QUOTA_CACHE_TTL_MS,
+});
 
 /** Resolve the owner of a file op: a live session's owner (cross-checked against
  *  any supplied userId), else a platform-supplied userId backed by a valid HMAC
@@ -205,6 +218,19 @@ const server = createServer(async (req, res) => {
       // fresh container is spun up against the same files. The platform's
       // ensureSession does exactly that before retrying.
       if (!session.handle) return jsonRes(res, 409, { error: "Sandbox is stopped; recreate the session" });
+      // Disk-quota gate: refuse to run a command once the workspace is at/over the
+      // cap, so a session that has filled /workspace can't keep growing it. The
+      // escape is NOT `rm` (that's an exec and is blocked too — which would
+      // deadlock cleanup); it's the ungated delete endpoint, surfaced to the agent
+      // as the `delete_path` tool, which removes files AND folders. The message
+      // names that so the agent recovers instead of looping on a blocked `rm`.
+      if (await quota.isOverQuota(session.userId, session.sessionId)) {
+        log("workspace.exec_blocked", { sessionId: session.sessionId, userId: session.userId, limitMb: MAX_WORKSPACE_MB }, "warn");
+        return jsonRes(res, 413, {
+          error: `Workspace is full (max ${MAX_WORKSPACE_MB}MB). Use the delete_path tool to remove large files or folders, then continue — running commands is paused until usage is back under the limit.`,
+          code: "WORKSPACE_FULL",
+        });
+      }
       const { command, timeout } = await parseBody(req);
       if (!command) return jsonRes(res, 400, { error: "Missing command" });
       store.touch(session.sessionId);
@@ -283,6 +309,10 @@ const server = createServer(async (req, res) => {
       } catch (e) {
         return jsonRes(res, 400, { error: e.message });
       }
+      // Freeing space must lift the quota block immediately, not after the cache
+      // TTL — otherwise an agent that just deleted junk is still refused its next
+      // command for a few seconds. Drop the cached size so the next exec re-measures.
+      quota.forget(r.sessionId);
       return jsonRes(res, 200, { ok: true });
     }
 
@@ -361,6 +391,7 @@ const server = createServer(async (req, res) => {
         }
         await store.delete(s.sessionId);
         await workspace.remove(s.userId, s.sessionId).catch(() => {});
+        quota.forget(s.sessionId); // wipe → a recycled id must not read a stale size
         log("session.destroy", { sessionId: s.sessionId });
       }
       return jsonRes(res, 200, { ok: true });
@@ -410,7 +441,7 @@ async function flushAndGc() {
     await gcOrphanWorkspaces({ store, workspace, listOnDisk: listWorkspacesOnDisk, graceMs: GC_GRACE_MS, log });
     // Soft quota is advisory only — the sandbox can write to its bind mount past
     // MAX_WORKSPACE_MB. Surface the breach for ops; real enforcement is host-level.
-    for (const o of await findOverQuota({ store, workspace, limitBytes: MAX_WORKSPACE_MB * 1024 * 1024 })) {
+    for (const o of await findOverQuota({ store, workspace, limitBytes: MAX_WORKSPACE_MB * 1024 * 1024, onSize: quota.note })) {
       log("workspace.over_quota", { ...o, mb: Math.round(o.bytes / 1048576), limitMb: MAX_WORKSPACE_MB }, "warn");
     }
   } catch (e) {

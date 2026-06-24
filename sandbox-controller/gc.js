@@ -5,10 +5,13 @@
  *  host-level concern — an XFS project quota on DATA_ROOT, or a per-session volume
  *  with a size cap. This surfaces the breach so ops can alert, without destroying a
  *  (possibly non-technical) user's work mid-task. */
-export async function findOverQuota({ store, workspace, limitBytes }) {
+export async function findOverQuota({ store, workspace, limitBytes, onSize }) {
   const over = [];
   for (const s of await store.all()) {
     const bytes = await workspace.size(s.userId, s.sessionId);
+    // Feed every measurement to the live quota tracker so its cache stays warm
+    // without a second du on the exec path (see workspace-quota.js).
+    onSize?.(s.sessionId, bytes);
     if (bytes > limitBytes) over.push({ sessionId: s.sessionId, userId: s.userId, bytes });
   }
   return over;

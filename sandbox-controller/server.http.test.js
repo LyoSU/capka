@@ -21,10 +21,11 @@ d("controller HTTP API (lifecycle)", () => {
   let server, store, LocalFsStore, base;
   const containers = new Map();
   let nextId = 1;
+  let execCalls = 0;
   const backend = {
     async ensureRuntime() {},
     async create(spec) { const handle = `h${nextId++}`; containers.set(handle, { sessionId: spec.sessionId, running: true }); return { handle }; },
-    async exec(_handle, cmd) { return { stdout: `ran:${cmd}`, stderr: "", exitCode: 0 }; },
+    async exec(_handle, cmd) { execCalls++; return { stdout: `ran:${cmd}`, stderr: "", exitCode: 0 }; },
     async destroy(handle) { containers.delete(handle); },
     async list() { return [...containers].map(([handle, c]) => ({ sessionId: c.sessionId, handle, running: c.running })); },
   };
@@ -39,6 +40,8 @@ d("controller HTTP API (lifecycle)", () => {
     process.env.DATABASE_URL = dbUrl;
     process.env.DATA_ROOT = DATA_ROOT;
     process.env.MAX_SESSIONS_PER_USER = "2";
+    process.env.MAX_WORKSPACE_MB = "1"; // tiny cap so a 2MB file trips the quota gate
+    process.env.QUOTA_CACHE_TTL_MS = "0"; // no caching in tests — measure every exec
     await mkdir(DATA_ROOT, { recursive: true });
 
     const mod = await import("./server.js");
@@ -105,6 +108,19 @@ d("controller HTTP API (lifecycle)", () => {
     const del = await fetch(`${base}/sessions/sdel`, { method: "DELETE", headers: auth });
     expect(del.status).toBe(200);
     expect(await store.get("sdel")).toBeNull();
+  });
+
+  it("refuses exec with 413 WORKSPACE_FULL once the workspace exceeds its quota (no command runs)", async () => {
+    expect((await post("sfull", "ufull")).status).toBe(201);
+    // Write straight to the bind mount, the way an in-sandbox process would —
+    // bypassing the upload-path check, which is exactly the hole this guards.
+    const ws = new LocalFsStore({ dataRoot: DATA_ROOT, uid: UID, gid: GID });
+    await ws.write("ufull", "sfull", "big.bin", Buffer.alloc(2 * 1024 * 1024)); // 2MB > 1MB cap
+    const before = execCalls;
+    const r = await fetch(`${base}/sessions/sfull/exec`, { method: "POST", headers: auth, body: JSON.stringify({ command: "echo hi" }) });
+    expect(r.status).toBe(413);
+    expect((await r.json()).code).toBe("WORKSPACE_FULL");
+    expect(execCalls).toBe(before); // gated before the backend ran anything
   });
 
   it("lists files by HMAC token without a live container, honoring depth", async () => {

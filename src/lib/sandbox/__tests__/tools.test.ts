@@ -4,8 +4,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // real controller. The point of these tests: the model's core file/code tools
 // must NOT depend on writable /tmp scratch space — a sibling process filling the
 // 64 MB /tmp tmpfs must never break editing files that live in /workspace.
-const { execCommand } = vi.hoisted(() => ({ execCommand: vi.fn() }));
-vi.mock("../client", () => ({ execCommand }));
+const { execCommand, deleteFile } = vi.hoisted(() => ({ execCommand: vi.fn(), deleteFile: vi.fn() }));
+vi.mock("../client", () => ({ execCommand, deleteFile }));
 
 import { loadSandboxTools } from "../tools";
 
@@ -53,5 +53,45 @@ describe("sandbox tools never rely on /tmp scratch space", () => {
     };
     expect(res.success).toBe(false);
     expect(res.exitCode).toBe(1);
+  });
+});
+
+describe("sandbox tools — workspace-full (quota) recovery", () => {
+  beforeEach(() => {
+    execCommand.mockReset();
+    deleteFile.mockReset();
+  });
+
+  it("turns a 413 quota block into a normal failed result (no throw) so the model recovers in-run", async () => {
+    const msg = "Workspace is full (max 500MB). Use the delete_path tool to remove large files or folders, then continue.";
+    execCommand.mockRejectedValue(Object.assign(new Error(msg), { status: 413 }));
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "dd if=/dev/zero of=big" }, opts)) as {
+      output: string; success: boolean;
+    };
+    expect(res.success).toBe(false);
+    expect(res.output).toContain("delete_path"); // the actionable message reached the model
+  });
+
+  it("re-throws non-quota errors — the 413 escape must not swallow real failures", async () => {
+    execCommand.mockRejectedValue(Object.assign(new Error("controller down"), { status: 502 }));
+    const { tools } = await load();
+    await expect(tools.execute_bash.execute!({ command: "ls" }, opts)).rejects.toThrow("controller down");
+  });
+
+  it("delete_path frees space via the ungated delete endpoint (handles files and folders)", async () => {
+    deleteFile.mockResolvedValue({ ok: true });
+    const { tools } = await load();
+    const res = (await tools.delete_path.execute!({ path: "venv" }, opts)) as { success: boolean; path: string };
+    expect(deleteFile).toHaveBeenCalledWith("sess1", "venv");
+    expect(res).toEqual({ success: true, path: "venv" });
+  });
+
+  it("delete_path reports a friendly failure instead of throwing", async () => {
+    deleteFile.mockRejectedValue(new Error("nope"));
+    const { tools } = await load();
+    const res = (await tools.delete_path.execute!({ path: "x" }, opts)) as { success: boolean; error: string };
+    expect(res.success).toBe(false);
+    expect(res.error).toBe("nope");
   });
 });

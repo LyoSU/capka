@@ -59,6 +59,13 @@ async function request(path: string, method: string, body?: unknown) {
     const op = path.split("/").pop() || method.toLowerCase();
     const raw = data.error || `Sandbox ${res.status}`;
     log.error("sandbox request failed", { method, path, status: res.status, err: String(raw) });
+    // The workspace-full block is an actionable condition the agent must SEE and
+    // act on (free space, then retry), so its message passes through verbatim.
+    // Everything else collapses to a generic message — we don't leak controller
+    // internals to end users for failures they can't act on.
+    if (data.code === "WORKSPACE_FULL") {
+      throw new SandboxError(String(raw), op, false, 413);
+    }
     throw new SandboxError("Sandbox operation failed", op, res.status >= 500);
   }
   return data;

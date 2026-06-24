@@ -58,10 +58,14 @@ export function runWorkspaceStoreContract(makeStore) {
       await expect(store.delete("u1", "s1", "ghost.txt")).resolves.toBeUndefined();
     });
 
-    it("delete() refuses to remove a directory", async () => {
+    it("delete() removes a directory and its whole subtree (the quota-gate escape)", async () => {
       await store.ensure("u1", "s1");
+      await store.write("u1", "s1", "keep.txt", Buffer.from("k"));
       await store.write("u1", "s1", "dir/inner.txt", Buffer.from("x"));
-      await expect(store.delete("u1", "s1", "dir")).rejects.toBeTruthy();
+      await store.write("u1", "s1", "dir/sub/deep.txt", Buffer.from("y"));
+      await store.delete("u1", "s1", "dir");
+      const names = (await store.list("u1", "s1", ".")).map((e) => e.name).sort();
+      expect(names).toEqual(["keep.txt"]); // the folder and everything under it is gone
     });
 
     it("rejects path traversal", async () => {
