@@ -17,6 +17,7 @@ import { assertRuntimeAvailable } from "./runtime-check.js";
 import { resolveRuntimeProfile } from "./profile.js";
 import { reconcile } from "./reconcile.js";
 import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces } from "./gc.js";
+import { pickLruVictim } from "./session-policy.js";
 import { notReadyGuard } from "./readiness.js";
 import { withRetry } from "./retry.js";
 import { createMcpBridge } from "./mcp-bridge.js";
@@ -144,40 +145,52 @@ const server = createServer(async (req, res) => {
       const sid = sanitize(sessionId);
       const uid = sanitize(userId);
 
-      const existing = await store.get(sid);
-      if (existing && existing.userId !== uid) return jsonRes(res, 403, { error: "Session belongs to another user" });
+      const pre = await store.get(sid);
+      if (pre && pre.userId !== uid) return jsonRes(res, 403, { error: "Session belongs to another user" });
 
-      // Live container already up → reuse as-is. (Mid-op invalidation on the next
-      // exec handles a container that vanished out from under us.)
-      if (existing && existing.handle) {
+      // Hot path — a live container is already up → reuse without taking the lock.
+      // (Mid-op invalidation on the next exec handles a container that vanished.)
+      if (pre && pre.handle) {
         await workspace.ensure(uid, sid);
         store.touch(sid);
         return jsonRes(res, 200, { sessionId: sid, status: "reused" });
       }
 
-      // We need to spin a container — either a brand-new workspace or reviving a
-      // stopped one. The per-user cap limits CONCURRENT LIVE containers (RAM), not
-      // stored workspaces: evict the LRU *live* one by STOPPING it (its files stay).
-      const liveSessions = (await store.listByUser(uid)).filter((s) => s.handle && s.sessionId !== sid);
-      if (liveSessions.length >= MAX_SESSIONS_PER_USER) {
-        const victim = liveSessions.reduce((min, cur) => (cur.lastActivity < min.lastActivity ? cur : min));
-        await backend.destroy(victim.handle).catch(() => {});
-        await store.setStopped(victim.sessionId);
-        liveCount = Math.max(0, liveCount - 1);
-        log("session.evict", { sessionId: victim.sessionId, userId: uid });
-      }
+      // Slow path — spin a container (fresh workspace OR revive a stopped one).
+      // Serialize per-session so two concurrent requests can't each create a
+      // container (the loser would leak). Re-read inside the lock: another request
+      // may have revived it while we waited.
+      const out = await store.withSessionLock(sid, async () => {
+        const existing = await store.get(sid);
+        if (existing && existing.handle) {
+          await workspace.ensure(uid, sid);
+          store.touch(sid);
+          return { code: 200, body: { sessionId: sid, status: "reused" } };
+        }
 
-      const { wsHostPath, sharedHostPath } = await workspace.ensure(uid, sid);
-      const net = resolveNetworkMode(networkMode);
-      const { handle } = await backend.create({
-        sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
-        networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
+        // The per-user cap limits CONCURRENT LIVE containers (RAM), not stored
+        // workspaces: evict the LRU live one by STOPPING it (its files stay).
+        const victim = pickLruVictim(await store.listByUser(uid), MAX_SESSIONS_PER_USER, sid);
+        if (victim) {
+          await backend.destroy(victim.handle).catch(() => {});
+          await store.setStopped(victim.sessionId);
+          liveCount = Math.max(0, liveCount - 1);
+          log("session.evict", { sessionId: victim.sessionId, userId: uid });
+        }
+
+        const { wsHostPath, sharedHostPath } = await workspace.ensure(uid, sid);
+        const net = resolveNetworkMode(networkMode);
+        const { handle } = await backend.create({
+          sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
+          networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
+        });
+        const now = Date.now();
+        await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, lastActivity: now, createdAt: existing?.createdAt ?? now });
+        liveCount++;
+        log(existing ? "session.resume" : "session.create", { sessionId: sid, userId: uid, handle, image: SANDBOX_IMAGE });
+        return { code: 201, body: { sessionId: sid, status: existing ? "resumed" : "created" } };
       });
-      const now = Date.now();
-      await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, lastActivity: now, createdAt: existing?.createdAt ?? now });
-      liveCount++;
-      log(existing ? "session.resume" : "session.create", { sessionId: sid, userId: uid, handle, image: SANDBOX_IMAGE });
-      return jsonRes(res, 201, { sessionId: sid, status: existing ? "resumed" : "created" });
+      return jsonRes(res, out.code, out.body);
     }
 
     // POST /sessions/:id/exec

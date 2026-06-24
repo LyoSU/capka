@@ -35,6 +35,31 @@ d("PostgresSessionStore", () => {
     expect(list.map((r) => r.sessionId).sort()).toEqual(["s1", "s2"]);
   });
 
+  it("setStopped() nulls the handle but keeps the row and lastActivity", async () => {
+    await store.upsert({ sessionId: "stop", userId: "u1", handle: "c9", networkMode: "none", lastActivity: 42, createdAt: 1 });
+    await store.setStopped("stop");
+    const got = await store.get("stop");
+    expect(got).not.toBeNull();
+    expect(got.handle).toBeNull();
+    expect(got.lastActivity).toBe(42); // reaper clock keeps counting from real use
+    await store.delete("stop");
+  });
+
+  it("withSessionLock serializes the critical section for one session", async () => {
+    const order = [];
+    const slow = (tag) => store.withSessionLock("lk", async () => {
+      order.push(`${tag}:enter`);
+      await new Promise((r) => setTimeout(r, 30));
+      order.push(`${tag}:exit`);
+    });
+    await Promise.all([slow("A"), slow("B")]);
+    // Whichever wins, the two sections never interleave (no enter between an enter/exit pair).
+    const a = order.indexOf("A:enter"), b = order.indexOf("B:enter");
+    const first = a < b ? "A" : "B";
+    const second = first === "A" ? "B" : "A";
+    expect(order).toEqual([`${first}:enter`, `${first}:exit`, `${second}:enter`, `${second}:exit`]);
+  });
+
   it("delete() removes the record", async () => {
     await store.delete("s1");
     await store.delete("s2");

@@ -81,6 +81,24 @@ export class PostgresSessionStore {
     this._activity.set(sessionId, ts);
   }
 
+  /** Serialize the create/revive critical section for one workspace across
+   *  processes via a Postgres advisory lock, so two concurrent requests for the
+   *  same stopped session can't each spin up a container (the second would leak,
+   *  orphaned until reconcile). The lock is held on a dedicated pooled connection
+   *  and released in `finally`; `fn`'s own queries run on the pool as usual — the
+   *  lock is just a cooperative mutex every create/revive path takes. */
+  async withSessionLock(sessionId, fn) {
+    const client = await this.pool.connect();
+    try {
+      // hashtext → int4 key; collisions only over-serialize unrelated ids (rare, safe).
+      await client.query("SELECT pg_advisory_lock(hashtext($1))", [sessionId]);
+      return await fn();
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [sessionId]).catch(() => {});
+      client.release();
+    }
+  }
+
   /** Persist cached lastActivity values, then clear the cache. */
   async flush() {
     if (this._activity.size === 0) return;
