@@ -204,6 +204,22 @@ divergence:
   gated exec — is accepted; the kernel quota below is the real fix for that.
 - **`/shared` (`MAX_SHARED_MB`) accounting — not yet shipped.** Only `/workspace`
   is enforced so far.
+- **Per-file size cap (`RLIMIT_FSIZE`) — shipped 2026-06-24 (follow-up).** The
+  poll-based gate could NOT stop a single command from creating a huge file: a
+  fresh workspace is under quota, so `fallocate -l 100G` slipped through in one
+  command (verified — it produced a real 100 GB file; the gate only blocks the
+  *next* exec). Fixed at the kernel: `sandbox-spec.js` now sets `--ulimit fsize`
+  (Docker passes bytes straight to `RLIMIT_FSIZE`), defaulting to `MAX_WORKSPACE_MB`
+  (`MAX_FILE_MB` to override; 0 disables). `fallocate`/`dd`/`truncate` past the cap
+  fail with `EFBIG`/SIGXFSZ **mid-write**, synchronously — confirmed in a real
+  container (`fallocate -l 100M` under a 10 MB cap → exit 153, 0 bytes; `dd`
+  capped at exactly 10 MB). No KVM, no host privilege, no FS feature needed.
+- **Residual hole (honest):** `fsize` caps each *file*, not the *count*. One
+  command running a loop (`for i …; do fallocate -l 500M f$i; done`) can still
+  create many capped files before the 30 s exec timeout and the next-exec gate
+  fire. Bounding *total* bytes during a single command needs either the kernel
+  project quota below, or a size watchdog that aborts the running exec — the
+  latter is a noted follow-up, not yet built.
 
 ### Recommended host-level hardening (the real, deadlock-free cap)
 

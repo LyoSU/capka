@@ -91,6 +91,21 @@ describe("buildSandboxConfig — resource exhaustion limits", () => {
     expect(nofile.Hard).toBe(1024);
   });
 
+  it("caps single-file size (fsize) to kill a one-command disk bomb mid-write", () => {
+    // RLIMIT_FSIZE is kernel-enforced and synchronous: `fallocate -l 100G` /
+    // `dd` / `truncate` past the cap fail with EFBIG instantly — the one defense
+    // the poll-based workspace quota can't provide (it only blocks the NEXT exec).
+    const fsize = buildSandboxConfig({ ...base, fsizeBytes: 500 * 1024 * 1024 }).HostConfig.Ulimits.find((u) => u.Name === "fsize");
+    expect(fsize).toBeDefined();
+    expect(fsize.Soft).toBe(500 * 1024 * 1024);
+    expect(fsize.Hard).toBe(500 * 1024 * 1024);
+  });
+
+  it("omits the fsize ulimit when no cap is given (off unless the controller sets it)", () => {
+    const fsize = (buildSandboxConfig(base).HostConfig.Ulimits || []).find((u) => u.Name === "fsize");
+    expect(fsize).toBeUndefined();
+  });
+
   it("pins MemorySwap to Memory so swap can't be used to exceed the RAM cap", () => {
     // Without this, Docker defaults memory+swap to 2× memory, letting a process
     // spill past the 384MB cap into swap and evade the OOM limit.

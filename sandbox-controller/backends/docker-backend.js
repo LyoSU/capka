@@ -49,6 +49,7 @@ export class DockerBackend {
       nanoCpus: spec.nanoCpus,
       tmpMb: spec.tmpMb,
       mcpTmpMb: spec.mcpTmpMb,
+      fsizeBytes: spec.fsizeBytes,
     });
 
     let container;

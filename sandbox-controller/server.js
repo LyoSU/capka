@@ -53,6 +53,11 @@ const WORKSPACE_TTL_MS = parseInt(process.env.WORKSPACE_TTL_MS || "2592000000");
 const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
 const MAX_WORKSPACE_MB = parseInt(process.env.MAX_WORKSPACE_MB || "500");
+// Hard per-file size cap (RLIMIT_FSIZE), kernel-enforced. Defaults to the whole
+// workspace budget: no single file may exceed the total quota anyway, and this
+// stops a one-command disk bomb (`fallocate -l 100G`) that the poll-based quota
+// can't catch until the NEXT exec. Set MAX_FILE_MB=0 to disable.
+const MAX_FILE_MB = parseInt(process.env.MAX_FILE_MB || String(MAX_WORKSPACE_MB));
 // How long a measured workspace size is trusted before re-walking the tree. Keeps
 // the expensive du off the hot exec path and coalesces command bursts.
 const QUOTA_CACHE_TTL_MS = parseInt(process.env.QUOTA_CACHE_TTL_MS || "5000");
@@ -199,6 +204,7 @@ const server = createServer(async (req, res) => {
           sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
           networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
           tmpMb: TMP_MB, mcpTmpMb: MCP_TMP_MB,
+          fsizeBytes: MAX_FILE_MB * 1024 * 1024,
         });
         const now = Date.now();
         await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, lastActivity: now, createdAt: existing?.createdAt ?? now });

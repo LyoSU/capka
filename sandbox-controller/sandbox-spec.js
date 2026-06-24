@@ -30,6 +30,11 @@ export function buildSandboxConfig({
   nanoCpus,
   pidsLimit = 100,
   nofileLimit = 65536,
+  // Max bytes any single file may reach (RLIMIT_FSIZE). 0 = no cap. This is the
+  // kernel-enforced, synchronous backstop the poll-based workspace quota lacks:
+  // `fallocate -l 100G` / `dd` / `truncate` past the cap fail with EFBIG mid-write,
+  // instead of slipping through as one command and only blocking the NEXT exec.
+  fsizeBytes = 0,
   runtime,
   readonlyRootfs = true,
   // tmpfs sizes (MB). NOTE: tmpfs pages are charged against the container's
@@ -60,7 +65,12 @@ export function buildSandboxConfig({
       // Cap open file descriptors. The image default (~1M) lets a malicious
       // process open hundreds of thousands of FDs and destabilize the container's
       // own processes (Xvfb, the runner) and starve sibling sandboxes on the host.
-      Ulimits: [{ Name: "nofile", Soft: nofileLimit, Hard: nofileLimit }],
+      Ulimits: [
+        { Name: "nofile", Soft: nofileLimit, Hard: nofileLimit },
+        // Single-file size cap — the only synchronous defense against a one-shot
+        // `fallocate -l 100G`. Omitted when 0 so it's off unless the controller sets it.
+        ...(fsizeBytes > 0 ? [{ Name: "fsize", Soft: fsizeBytes, Hard: fsizeBytes }] : []),
+      ],
       // OCI runtime: gVisor ("runsc") in the secure profile. Omitted when unset so
       // the daemon default applies (dev/bare runs). Fail-closed availability is
       // enforced at boot by runtime-check.js, not here.
