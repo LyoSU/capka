@@ -7,6 +7,10 @@ export interface SkillToolCtx {
   userId: string;
   sessionKey: string;
   projectId: string | null;
+  /** Shared, memoized session creator — a skill's bundle is written into the
+   *  sandbox via `docker exec`, so ensure the container exists before materializing.
+   *  Optional so the tool still works (body-only) if no creator was provided. */
+  ensureSession?: () => Promise<unknown>;
 }
 
 /**
@@ -37,6 +41,7 @@ export function makeSkillTool(ctx: SkillToolCtx) {
       let baseDir = `/skills/${info.name}`;
       let fileList: string[] = [];
       try {
+        await ctx.ensureSession?.(); // spin the container before writing the bundle into it
         const mat = await materializeSkill(ctx.sessionKey, info.name, info.body, files);
         baseDir = mat.baseDir;
         fileList = mat.files;

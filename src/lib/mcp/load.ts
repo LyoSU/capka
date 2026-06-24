@@ -18,6 +18,10 @@ export async function loadMcpTools(opts: {
   projectId: string | null;
   /** The run's sandbox session — required to bridge stdio connectors. */
   sessionKey?: string;
+  /** Shared, memoized session creator. A stdio connector runs via `docker exec`
+   *  inside the sandbox, so the container must exist before we connect — call this
+   *  first. http/sse connectors don't need it, keeping the sandbox lazy. */
+  ensureSession?: () => Promise<unknown>;
   /** Governance gate — a denied connector is never connected (G1). */
   isServerAllowed?: (name: string) => boolean;
 }): Promise<{
@@ -28,6 +32,16 @@ export async function loadMcpTools(opts: {
   const configs = (await listEnabledServerConfigs(opts.userId, opts.projectId))
     .filter((c) => allow(c.name))
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Any stdio connector needs a live container (its server is `docker exec`'d in,
+  // and a plugin's files are materialized via exec). Spin it up once, up front,
+  // with the run's networkMode — otherwise the connect/materialize calls below
+  // would hit a not-yet-created session (404) and the connector would be skipped.
+  if (opts.ensureSession && configs.some((c) => c.transport === "stdio")) {
+    await opts.ensureSession().catch((e) => {
+      console.warn("[mcp] ensureSession failed; stdio connectors will be skipped:", e instanceof Error ? e.message : e);
+    });
+  }
   // Same SSRF policy the connector URL was validated against at upsert time.
   const blockPrivate = await getBlockPrivateProviderUrls();
   const connected: ConnectedMcp[] = [];

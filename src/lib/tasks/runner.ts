@@ -35,7 +35,7 @@ import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
 import { errorText } from "@/lib/errors/message";
-import { downloadFile } from "@/lib/sandbox/client";
+import { downloadFile, createSession } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import type { StoredPart } from "@/lib/chat/contracts";
 import { log } from "@/lib/log";
@@ -269,16 +269,34 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   // Egress: a project may force "bridge"; otherwise fall back to the org default.
   // The controller still gates bridge on SANDBOX_ALLOW_NETWORK.
   const networkMode = project?.sandboxNetwork === "bridge" ? "bridge" : await getSandboxNetworkDefault();
-  const sandbox = await loadSandboxTools(userId, sessionKey, networkMode);
+  // Lazy, shared sandbox session: created (with the resolved networkMode) on the
+  // FIRST consumer that actually needs the container — a sandbox tool call, a
+  // stdio MCP connector, or an invoked skill. Memoized so all three share one
+  // container and the networkMode is set exactly once. A chat that triggers none
+  // of these never spins a sandbox.
+  let sessionEnsured: Promise<unknown> | null = null;
+  const ensureSession = () => {
+    // Memoize the success; on failure clear it so a later consumer can retry
+    // (a transient controller blip shouldn't poison the whole turn's sandbox).
+    if (!sessionEnsured) {
+      sessionEnsured = createSession(sessionKey, userId, networkMode).catch((e) => {
+        sessionEnsured = null;
+        throw e;
+      });
+    }
+    return sessionEnsured;
+  };
+  const sandbox = await loadSandboxTools(sessionKey, ensureSession);
   const mcp = await loadMcpTools({
     userId,
     projectId: payload.projectId ?? null,
     sessionKey,
+    ensureSession,
     isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
   });
   const availableSkills = (await listAvailableSkills(userId, payload.projectId ?? null))
     .filter((s) => isUsable(policy.effect("skill", s.name)));
-  const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null });
+  const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null, ensureSession });
   // Provider-executed tools (e.g. Gemini's Google Search grounding) join the
   // sandbox/MCP/skill tools; empty for providers without any.
   const tools = { ...sandbox.tools, ...mcp.tools, skill: skillTool, ...providerNativeTools(provider) };

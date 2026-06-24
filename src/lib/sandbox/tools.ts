@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { nanoid } from "nanoid";
-import { createSession, execCommand } from "./client";
+import { execCommand } from "./client";
 
 /**
  * Create sandbox tools for a chat session.
@@ -9,14 +9,11 @@ import { createSession, execCommand } from "./client";
  *
  * NOTE: All commands run inside an isolated Docker container (not on the host).
  * Shell injection within the sandbox is by design — the container IS the security boundary.
+ *
+ * `ensureSession` is the run's shared, memoized session creator: the container is
+ * spun up on the FIRST tool call (lazy) and shared with the MCP/skill paths.
  */
-export async function loadSandboxTools(userId: string, sessionKey: string, networkMode?: string) {
-  // Lazy container: a chat that never invokes a tool never spins up a sandbox.
-  // The session is created on the FIRST tool call and memoized — concurrent tool
-  // calls within a turn share one createSession (idempotent on the controller).
-  let ensured: Promise<unknown> | null = null;
-  const ensureSession = () => (ensured ??= createSession(sessionKey, userId, networkMode));
-
+export async function loadSandboxTools(sessionKey: string, ensureSession: () => Promise<unknown>) {
   const run = async (cmd: string, timeout?: number) => {
     await ensureSession();
     return execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000));
