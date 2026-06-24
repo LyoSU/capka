@@ -141,14 +141,18 @@ export const POST = apiHandler(async (req: Request) => {
 
   // Enqueue a durable task. The worker rebuilds model/tools/prompt from this
   // payload and runs it in the background — independent of this request.
-  const taskId = nanoid();
   const payload: TaskPayload = {
     requestModel: effectiveModel,
     projectId: project?.id,
     uiMessages: body.messages || [],
     attachedFiles: attachedFiles as FileRef[] | undefined,
   };
-  await enqueueTask({ id: taskId, chatId, userId, payload });
+  // Coalesces if the chat already has a pending turn (another tab/device, a
+  // queued follow-up, a stale-after-failure resend) — the message we just
+  // persisted folds into that turn instead of spawning a parallel one. The
+  // returned id is the turn that will actually answer, so the client's stop
+  // button targets a real, live turn rather than a phantom.
+  const { id: taskId } = await enqueueTask({ id: nanoid(), chatId, userId, payload });
 
   // Return immediately — client syncs via SSE
   return Response.json({ taskId, chatId });

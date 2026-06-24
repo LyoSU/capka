@@ -29,19 +29,54 @@ export interface TaskRow {
   updated_at: Date;
 }
 
-/** Insert a queued task and wake any listening worker. */
+/**
+ * Enqueue a turn for a chat, coalescing instead of duplicating.
+ *
+ * A chat holds at most one pending (queued) turn — enforced in the DB by the
+ * `uq_tasks_one_queued_per_chat` partial unique index, not by hope. So if the
+ * chat already has a pending turn (because another tab/device/Telegram message
+ * or a stale-after-failure client just enqueued one), this insert conflicts and
+ * we DON'T create a second turn: the caller already persisted the user message,
+ * and the existing pending turn rebuilds its context from the live tree when it
+ * runs (see runAgentTask), so the new message folds into that one reply.
+ *
+ * Returns the id of the turn that will actually answer — the freshly inserted
+ * one, or the existing pending one it folded into — so the caller hands the
+ * client a taskId that maps to a real, cancellable turn (never a phantom).
+ * `created` says which happened; we only wake a worker when a turn was truly
+ * created (a folded message rides a turn a worker will already pick up).
+ */
 export async function enqueueTask(input: {
   id: string;
   chatId: string;
   userId: string;
   payload: unknown;
-}): Promise<void> {
-  await pool.query(
-    `INSERT INTO tasks (id, chat_id, user_id, status, payload)
-     VALUES ($1, $2, $3, 'queued', $4)`,
+}): Promise<{ id: string; created: boolean }> {
+  // One round-trip: try the insert; if the partial unique index rejects it,
+  // fall through to the chat's existing pending turn. Exactly one row comes back
+  // — the inserted row (created=true) OR the incumbent (created=false) — because
+  // the second arm is gated on the insert having produced nothing.
+  const { rows } = await pool.query<{ id: string; created: boolean }>(
+    `WITH ins AS (
+       INSERT INTO tasks (id, chat_id, user_id, status, payload)
+       VALUES ($1, $2, $3, 'queued', $4)
+       ON CONFLICT (chat_id) WHERE status = 'queued' DO NOTHING
+       RETURNING id
+     )
+     SELECT id, true AS created FROM ins
+     UNION ALL
+     SELECT id, false AS created FROM tasks
+      WHERE chat_id = $2 AND status = 'queued' AND NOT EXISTS (SELECT 1 FROM ins)
+      LIMIT 1`,
     [input.id, input.chatId, input.userId, JSON.stringify(input.payload)],
   );
-  await realtime.publish("task_enqueued", { id: input.id });
+  // Fallback only for the rare race where the incumbent was claimed (queued →
+  // running) between our failed insert and the SELECT: no pending row remains,
+  // but the now-running turn will still see the just-persisted message when it
+  // rebuilds from the live tree. Report the message's own id, uncreated.
+  const row = rows[0] ?? { id: input.id, created: false };
+  if (row.created) await realtime.publish("task_enqueued", { id: row.id });
+  return row;
 }
 
 /** Atomically claim the oldest queued task, taking a lease. Returns null if none. */

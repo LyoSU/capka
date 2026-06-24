@@ -55,6 +55,50 @@ run("durable queue", () => {
     expect(await isCancelRequested("qt2")).toBe(false);
     await requestCancel("qt2");
     expect(await isCancelRequested("qt2")).toBe(true);
+    // Clear the pending slot on chat C — the one-queued-per-chat index would
+    // otherwise make the following tests' enqueues fold into this leftover.
+    await finalizeTask("qt2", "cancelled");
+  });
+
+  it("keeps at most one pending turn per chat — a second enqueue folds into the first", async () => {
+    const cc = "qtest-coalesce";
+    await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [cc, U]);
+
+    const first = await enqueueTask({ id: "qc1", chatId: cc, userId: U, payload: { n: 1 } });
+    expect(first).toEqual({ id: "qc1", created: true });
+
+    // A follow-up while one is already pending must NOT create a parallel turn —
+    // it folds into the incumbent and reports that incumbent's id so the client
+    // tracks a real, cancellable turn.
+    const second = await enqueueTask({ id: "qc2", chatId: cc, userId: U, payload: { n: 2 } });
+    expect(second).toEqual({ id: "qc1", created: false });
+
+    const { rows } = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM tasks WHERE chat_id = $1 AND status = 'queued'`,
+      [cc],
+    );
+    expect(rows[0].n).toBe(1);
+
+    await pool.query(`DELETE FROM tasks WHERE chat_id = $1`, [cc]);
+    await pool.query(`DELETE FROM chats WHERE id = $1`, [cc]);
+  });
+
+  it("allows a fresh continuation once the running turn frees the slot", async () => {
+    const cc = "qtest-continuation";
+    await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [cc, U]);
+
+    await enqueueTask({ id: "qk1", chatId: cc, userId: U, payload: {} });
+    // Move it out of 'queued' (as claimNextTask would) so the partial index no
+    // longer constrains the chat — a queued continuation can now sit behind it.
+    await pool.query(
+      `UPDATE tasks SET status='running', lease_expires_at = now() + interval '1 minute' WHERE id='qk1'`,
+    );
+
+    const cont = await enqueueTask({ id: "qk2", chatId: cc, userId: U, payload: {} });
+    expect(cont).toEqual({ id: "qk2", created: true });
+
+    await pool.query(`DELETE FROM tasks WHERE chat_id = $1`, [cc]);
+    await pool.query(`DELETE FROM chats WHERE id = $1`, [cc]);
   });
 
   it("reconciles zombies whose lease expired", async () => {

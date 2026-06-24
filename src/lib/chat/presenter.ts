@@ -1,4 +1,5 @@
 import type { StoredPart, MessageMeta } from "./contracts";
+import { INTERRUPTED_TOOL_RESULT } from "./tool-results";
 
 /** Convert DB message rows to UI message format */
 export function toUIMessages(rows: {
@@ -35,8 +36,17 @@ export function toUIMessages(rows: {
           const err = errorMap.get(p.id);
           // AI SDK 6 tool-part states: input-streaming | input-available |
           // output-available | output-error. A call with neither result nor
-          // error yet has its input available and is awaiting output.
-          const state = tr ? "output-available" : err ? "output-error" : "input-available";
+          // error yet is awaiting output — but only LEGITIMATELY so while its
+          // turn is still streaming. On a finished turn (status !== "running")
+          // an output-less call is an orphan: the turn was interrupted mid-tool
+          // (deadline, lost worker, cancel) or this row was COPIED by a fork.
+          // Render it as a terminal error, not a forever-spinner — and, just as
+          // important, the model's history view (this same mapping) then carries
+          // a complete call→result pair, so convertToModelMessages won't throw
+          // AI_MissingToolResultsError on the next turn. See sealOrphanToolCalls.
+          const isLive = meta?.status === "running";
+          const orphan = !tr && !err && !isLive;
+          const state = tr ? "output-available" : err || orphan ? "output-error" : "input-available";
           parts.push({
             type: "dynamic-tool",
             toolCallId: p.id,
@@ -44,7 +54,7 @@ export function toUIMessages(rows: {
             state,
             input: p.input,
             output: tr?.output,
-            ...(err ? { errorText: err } : {}),
+            ...(err ? { errorText: err } : orphan ? { errorText: INTERRUPTED_TOOL_RESULT } : {}),
           });
         }
       }

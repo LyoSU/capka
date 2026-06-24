@@ -12,6 +12,7 @@ import { describeStep } from "@/lib/chat/steps";
 import { extractWorkspacePaths } from "@/lib/chat/artifacts";
 import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
+import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { heartbeat, isCancelRequested, finalizeTask, absorbQueuedTasks } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { providerNativeTools } from "@/lib/providers";
@@ -550,7 +551,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the UI transcript keep the full history; only the model's view is trimmed.
       if (path.length) uiMessages = toUIMessages(buildModelContext(path.map((p) => p.node) as ContextRow[], {}));
     }
-    let modelMessages = await convertToModelMessages(uiMessages);
+    // Seal any tool call left dangling by an interrupted earlier turn (deadline,
+    // lost worker, cancel — or a fork that COPIED such a turn). Without this the
+    // SDK throws AI_MissingToolResultsError and the turn dies before it starts;
+    // the orphan becomes a terminal "interrupted" result so the model can carry
+    // on. Safe here — `uiMessages` is settled history, never the live reply.
+    let modelMessages = await convertToModelMessages(sealOrphanToolCalls(uiMessages));
 
     let injectedNative = false;
     const turnFiles = [...(payload.attachedFiles ?? []), ...extraAttachedFiles];

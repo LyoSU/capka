@@ -40,12 +40,27 @@ describe("toUIMessages", () => {
     ]);
   });
 
-  it("marks a tool-call with no result yet as input-available (valid AI SDK 6 state)", () => {
+  it("keeps an output-less tool-call as input-available WHILE the turn is running", () => {
     const meta: MessageMeta = {
+      status: "running",
       parts: [{ type: "tool-call", id: "t1", name: "write_file", input: { path: "x" } }],
     };
     const [msg] = toUIMessages([row({ metadata: meta })]);
+    // Live turn — the tool is genuinely executing, so it must keep its spinner.
     expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "input-available" });
+  });
+
+  it("seals an orphan tool-call (no result, turn finished) as output-error", () => {
+    const meta: MessageMeta = {
+      status: "failed",
+      parts: [{ type: "tool-call", id: "t1", name: "write_file", input: { path: "x" } }],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    // The turn died mid-tool (or this row was copied by a fork): render it as a
+    // terminal error, never a forever-spinner — and crucially this makes the
+    // model's history a complete call→result pair (no AI_MissingToolResultsError).
+    expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "output-error" });
+    expect((msg.parts[0] as { errorText?: string }).errorText).toBeTruthy();
   });
 
   it("surfaces tool-error as output-error with errorText", () => {

@@ -1,7 +1,8 @@
 import {
-  pgTable, text, boolean, timestamp, integer, jsonb, index, bigint, numeric,
+  pgTable, text, boolean, timestamp, integer, jsonb, index, uniqueIndex, bigint, numeric,
   primaryKey, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
@@ -192,6 +193,19 @@ export const tasks = pgTable("tasks", {
   index("idx_tasks_chat_id").on(table.chatId),
   index("idx_tasks_user_id_status").on(table.userId, table.status),
   index("idx_tasks_status_lease").on(table.status, table.leaseExpiresAt),
+  // One pending turn per chat, enforced by the DB itself — the invariant the
+  // whole queue rests on. A chat's turns are serialized (claimNextTask won't
+  // start one while another is live), so a follow-up sent while the chat is
+  // busy must FOLD into the single pending continuation, never spawn a second
+  // independent turn. Without a hard constraint that "fold" lived only in client
+  // logic, so any state the client couldn't see — another tab, a phone, a
+  // Telegram message, a stale-after-failure UI — slipped a parallel turn past it
+  // (the chat that "duplicated itself and ran different tasks"). This partial
+  // unique index makes the duplicate physically impossible no matter how many
+  // tabs/devices/workers race; enqueueTask leans on it via ON CONFLICT to
+  // coalesce instead of insert. Partial (status='queued') so it constrains only
+  // pending rows — running/finished tasks accumulate freely as history.
+  uniqueIndex("uq_tasks_one_queued_per_chat").on(table.chatId).where(sql`status = 'queued'`),
 ]);
 
 // Per-task / per-message token usage and cost, captured at finalize time.
