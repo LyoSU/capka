@@ -20,6 +20,10 @@ export class PostgresSessionStore {
         created_at    bigint NOT NULL
       )
     `);
+    // A row now represents a WORKSPACE; `handle` is null when its container has
+    // been reclaimed (stopped) but the files live on. Drop the legacy NOT NULL on
+    // existing deployments. Idempotent — no-op once already nullable.
+    await this.pool.query("ALTER TABLE sandbox_sessions ALTER COLUMN handle DROP NOT NULL");
   }
 
   #map(row) {
@@ -53,6 +57,13 @@ export class PostgresSessionStore {
   async delete(sessionId) {
     this._activity.delete(sessionId);
     await this.pool.query("DELETE FROM sandbox_sessions WHERE session_id = $1", [sessionId]);
+  }
+
+  /** Reclaim compute: the container is gone, but the workspace row (and its disk)
+   *  survive. `lastActivity` is intentionally left untouched so the workspace-TTL
+   *  reaper keeps counting from the last real use. */
+  async setStopped(sessionId) {
+    await this.pool.query("UPDATE sandbox_sessions SET handle = NULL WHERE session_id = $1", [sessionId]);
   }
 
   async listByUser(userId) {

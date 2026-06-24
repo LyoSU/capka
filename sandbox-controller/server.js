@@ -16,7 +16,7 @@ import { PostgresSessionStore } from "./session-store.js";
 import { assertRuntimeAvailable } from "./runtime-check.js";
 import { resolveRuntimeProfile } from "./profile.js";
 import { reconcile } from "./reconcile.js";
-import { gcOrphanWorkspaces, findOverQuota } from "./gc.js";
+import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces } from "./gc.js";
 import { notReadyGuard } from "./readiness.js";
 import { withRetry } from "./retry.js";
 import { createMcpBridge } from "./mcp-bridge.js";
@@ -44,7 +44,8 @@ const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "unclaw-sandbox";
 const MEMORY_LIMIT = parseInt(process.env.SANDBOX_MEMORY_MB || "512") * 1024 * 1024;
 const CPU_LIMIT = parseFloat(process.env.SANDBOX_CPUS || "1.0") * 1e9;
 const EXEC_TIMEOUT = parseInt(process.env.SANDBOX_EXEC_TIMEOUT_MS || "30000");
-const IDLE_TTL = parseInt(process.env.SANDBOX_IDLE_TTL_MS || "900000"); // 15 min
+const IDLE_TTL = parseInt(process.env.SANDBOX_IDLE_TTL_MS || "900000"); // 15 min — stop idle CONTAINER (files stay)
+const WORKSPACE_TTL_MS = parseInt(process.env.WORKSPACE_TTL_MS || "2592000000"); // 30d — delete a workspace (row + disk) unused this long
 const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
 const MAX_WORKSPACE_MB = parseInt(process.env.MAX_WORKSPACE_MB || "500");
@@ -144,20 +145,24 @@ const server = createServer(async (req, res) => {
       const uid = sanitize(userId);
 
       const existing = await store.get(sid);
-      if (existing) {
-        if (existing.userId !== uid) return jsonRes(res, 403, { error: "Session belongs to another user" });
-        // Assume live; mid-op invalidation handles a vanished container on next exec.
+      if (existing && existing.userId !== uid) return jsonRes(res, 403, { error: "Session belongs to another user" });
+
+      // Live container already up → reuse as-is. (Mid-op invalidation on the next
+      // exec handles a container that vanished out from under us.)
+      if (existing && existing.handle) {
         await workspace.ensure(uid, sid);
         store.touch(sid);
         return jsonRes(res, 200, { sessionId: sid, status: "reused" });
       }
 
-      // Per-user limit — evict least-recently-used idle session.
-      const userSessions = await store.listByUser(uid);
-      if (userSessions.length >= MAX_SESSIONS_PER_USER) {
-        const victim = userSessions.reduce((min, cur) => (cur.lastActivity < min.lastActivity ? cur : min));
-        await backend.destroy(victim.handle);
-        await store.delete(victim.sessionId);
+      // We need to spin a container — either a brand-new workspace or reviving a
+      // stopped one. The per-user cap limits CONCURRENT LIVE containers (RAM), not
+      // stored workspaces: evict the LRU *live* one by STOPPING it (its files stay).
+      const liveSessions = (await store.listByUser(uid)).filter((s) => s.handle && s.sessionId !== sid);
+      if (liveSessions.length >= MAX_SESSIONS_PER_USER) {
+        const victim = liveSessions.reduce((min, cur) => (cur.lastActivity < min.lastActivity ? cur : min));
+        await backend.destroy(victim.handle).catch(() => {});
+        await store.setStopped(victim.sessionId);
         liveCount = Math.max(0, liveCount - 1);
         log("session.evict", { sessionId: victim.sessionId, userId: uid });
       }
@@ -169,10 +174,10 @@ const server = createServer(async (req, res) => {
         networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
       });
       const now = Date.now();
-      await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, lastActivity: now, createdAt: now });
+      await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, lastActivity: now, createdAt: existing?.createdAt ?? now });
       liveCount++;
-      log("session.create", { sessionId: sid, userId: uid, handle, image: SANDBOX_IMAGE });
-      return jsonRes(res, 201, { sessionId: sid, status: "created" });
+      log(existing ? "session.resume" : "session.create", { sessionId: sid, userId: uid, handle, image: SANDBOX_IMAGE });
+      return jsonRes(res, 201, { sessionId: sid, status: existing ? "resumed" : "created" });
     }
 
     // POST /sessions/:id/exec
@@ -180,6 +185,10 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && execMatch) {
       const session = await store.get(execMatch[1]);
       if (!session) return jsonRes(res, 404, { error: "Session not found" });
+      // Stopped workspace (container reclaimed): tell the caller to recreate so a
+      // fresh container is spun up against the same files. The platform's
+      // ensureSession does exactly that before retrying.
+      if (!session.handle) return jsonRes(res, 409, { error: "Sandbox is stopped; recreate the session" });
       const { command, timeout } = await parseBody(req);
       if (!command) return jsonRes(res, 400, { error: "Missing command" });
       store.touch(session.sessionId);
@@ -325,10 +334,14 @@ const server = createServer(async (req, res) => {
     if (method === "DELETE" && deleteMatch) {
       const s = await store.get(deleteMatch[1]);
       if (s) {
-        mcpBridge.stopAll(s.handle);
-        await backend.destroy(s.handle);
+        // Explicit teardown: kill the container (if any) AND wipe the workspace.
+        if (s.handle != null) {
+          mcpBridge.stopAll(s.handle);
+          await backend.destroy(s.handle).catch(() => {});
+          liveCount = Math.max(0, liveCount - 1);
+        }
         await store.delete(s.sessionId);
-        liveCount = Math.max(0, liveCount - 1);
+        await workspace.remove(s.userId, s.sessionId).catch(() => {});
         log("session.destroy", { sessionId: s.sessionId });
       }
       return jsonRes(res, 200, { ok: true });
@@ -353,9 +366,12 @@ async function idleSweep() {
     await store.flush();
     const now = Date.now();
     for (const s of await store.all()) {
+      if (s.handle == null) continue; // already stopped — no compute to reclaim
       if (now - s.lastActivity > IDLE_TTL) {
-        await backend.destroy(s.handle);
-        await store.delete(s.sessionId);
+        // Reclaim the container, KEEP the workspace (files + row survive). The dir
+        // is only deleted later by the TTL reaper if it stays unused for 30d.
+        await backend.destroy(s.handle).catch(() => {});
+        await store.setStopped(s.sessionId);
         liveCount = Math.max(0, liveCount - 1);
         log("session.idle", { sessionId: s.sessionId });
       }
@@ -369,6 +385,9 @@ async function idleSweep() {
 async function flushAndGc() {
   try {
     await store.flush();
+    // Disk hygiene: reap workspaces unused beyond the long TTL (row + dir), then
+    // sweep any TRUE orphan dirs (no row at all) past the grace window.
+    await reapStaleWorkspaces({ store, backend, workspace, ttlMs: WORKSPACE_TTL_MS, log });
     await gcOrphanWorkspaces({ store, workspace, listOnDisk: listWorkspacesOnDisk, graceMs: GC_GRACE_MS, log });
     // Soft quota is advisory only — the sandbox can write to its bind mount past
     // MAX_WORKSPACE_MB. Surface the breach for ops; real enforcement is host-level.

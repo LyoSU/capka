@@ -14,10 +14,29 @@ export async function findOverQuota({ store, workspace, limitBytes }) {
   return over;
 }
 
-/** Garbage-collect orphaned workspaces: directories on disk whose session is no
- *  longer in Postgres and older than a grace window. Without this, evicted/idle
- *  sessions leave their workspace dirs forever and fill the disk on a shared host.
- *  Idempotent; logs each removal. */
+/** Reap workspaces unused for longer than the (long) workspace TTL: delete the
+ *  row AND its on-disk dir, stopping any lingering container first. This is the
+ *  ONLY path that destroys a user's files — idle eviction merely stops the
+ *  container (handle → null) and leaves the workspace alone, so files survive
+ *  short gaps and restarts. `lastActivity` reflects real use (exec/file ops), so
+ *  the clock only advances while a workspace sits truly idle. Idempotent. */
+export async function reapStaleWorkspaces({ store, backend, workspace, ttlMs, now = Date.now(), log }) {
+  let reaped = 0;
+  for (const s of await store.all()) {
+    if (now - s.lastActivity <= ttlMs) continue;
+    if (s.handle != null) await Promise.resolve(backend.destroy(s.handle)).catch(() => {});
+    await store.delete(s.sessionId);
+    await workspace.remove(s.userId, s.sessionId);
+    reaped++;
+    log?.("workspace.reap", { userId: s.userId, sessionId: s.sessionId });
+  }
+  return { reaped };
+}
+
+/** Garbage-collect TRULY orphaned workspaces: directories on disk with no row in
+ *  Postgres at all (e.g. pre-migration leftovers or manual junk), older than a
+ *  grace window. Stopped workspaces still HAVE a row, so they are NOT touched
+ *  here — only the TTL reaper removes those. Idempotent; logs each removal. */
 export async function gcOrphanWorkspaces({ store, workspace, listOnDisk, graceMs, now = Date.now(), log }) {
   const live = new Set((await store.all()).map((r) => r.sessionId));
   const onDisk = await listOnDisk();

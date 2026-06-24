@@ -1,5 +1,34 @@
 import { describe, it, expect, vi } from "vitest";
-import { gcOrphanWorkspaces, findOverQuota } from "./gc.js";
+import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces } from "./gc.js";
+
+describe("reapStaleWorkspaces", () => {
+  it("deletes row + dir for workspaces idle beyond the TTL, stopping live ones", async () => {
+    const rows = [
+      { sessionId: "stale-live", userId: "u1", handle: "c1", lastActivity: 0 },
+      { sessionId: "stale-stopped", userId: "u1", handle: null, lastActivity: 0 },
+      { sessionId: "fresh", userId: "u1", handle: "c2", lastActivity: 9_999 },
+    ];
+    const deleted = [];
+    const removed = [];
+    const store = { all: async () => rows, delete: async (id) => deleted.push(id) };
+    const backend = { destroy: vi.fn() };
+    const workspace = { remove: async (u, s) => removed.push(`${u}/${s}`) };
+    const out = await reapStaleWorkspaces({ store, backend, workspace, ttlMs: 1000, now: 10_000 });
+    expect(out.reaped).toBe(2);
+    expect(deleted.sort()).toEqual(["stale-live", "stale-stopped"]);
+    expect(removed.sort()).toEqual(["u1/stale-live", "u1/stale-stopped"]);
+    expect(backend.destroy).toHaveBeenCalledTimes(1); // only the live one had a handle
+    expect(backend.destroy).toHaveBeenCalledWith("c1");
+  });
+
+  it("keeps workspaces used within the TTL", async () => {
+    const store = { all: async () => [{ sessionId: "fresh", userId: "u1", handle: null, lastActivity: 9_500 }] };
+    const remove = vi.fn();
+    const out = await reapStaleWorkspaces({ store, backend: { destroy: vi.fn() }, workspace: { remove }, ttlMs: 1000, now: 10_000 });
+    expect(out.reaped).toBe(0);
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
 
 describe("gcOrphanWorkspaces", () => {
   it("removes orphaned workspaces older than grace", async () => {
