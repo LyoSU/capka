@@ -47,6 +47,8 @@ export class DockerBackend {
       networkMode: spec.networkMode,
       memoryBytes: spec.memoryBytes,
       nanoCpus: spec.nanoCpus,
+      tmpMb: spec.tmpMb,
+      mcpTmpMb: spec.mcpTmpMb,
     });
 
     let container;

@@ -32,6 +32,12 @@ export function buildSandboxConfig({
   nofileLimit = 65536,
   runtime,
   readonlyRootfs = true,
+  // tmpfs sizes (MB). NOTE: tmpfs pages are charged against the container's
+  // memory cgroup, so tmpMb + mcpTmpMb come OUT of memoryBytes — raising them
+  // without raising Memory makes the container OOM sooner. Keep the sum well
+  // under the memory budget. Tunable via SANDBOX_TMP_MB / SANDBOX_MCP_TMP_MB.
+  tmpMb = 64,
+  mcpTmpMb = 256,
 }) {
   return {
     Image: image,
@@ -72,10 +78,10 @@ export function buildSandboxConfig({
       // execute the fetched binary). It's ephemeral (dies with the session) and
       // outside the agent's /workspace, so it never pollutes the user's files.
       Tmpfs: {
-        "/tmp": "rw,nosuid,nodev,noexec,size=64m",
+        "/tmp": `rw,nosuid,nodev,noexec,size=${tmpMb}m`,
         // `exec` is REQUIRED and explicit — Docker adds noexec to tmpfs by default,
         // which would stop npx/uvx-installed server binaries from running here.
-        "/opt/mcp": "rw,nosuid,nodev,exec,size=256m,mode=1777",
+        "/opt/mcp": `rw,nosuid,nodev,exec,size=${mcpTmpMb}m,mode=1777`,
       },
       // Hard, non-negotiable isolation. Privileged is set explicitly so the
       // test pins it and a future edit can't omit it into a truthy default.

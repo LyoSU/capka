@@ -42,6 +42,8 @@ if (!SECRET || (SECRET === DEFAULT_SECRET && process.env.ALLOW_DEFAULT_SECRET !=
 }
 
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "unclaw-sandbox";
+const TMP_MB = parseInt(process.env.SANDBOX_TMP_MB || "64");
+const MCP_TMP_MB = parseInt(process.env.SANDBOX_MCP_TMP_MB || "256");
 const MEMORY_LIMIT = parseInt(process.env.SANDBOX_MEMORY_MB || "512") * 1024 * 1024;
 const CPU_LIMIT = parseFloat(process.env.SANDBOX_CPUS || "1.0") * 1e9;
 const EXEC_TIMEOUT = parseInt(process.env.SANDBOX_EXEC_TIMEOUT_MS || "30000");
@@ -183,6 +185,7 @@ const server = createServer(async (req, res) => {
         const { handle } = await backend.create({
           sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
           networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
+          tmpMb: TMP_MB, mcpTmpMb: MCP_TMP_MB,
         });
         const now = Date.now();
         await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, lastActivity: now, createdAt: existing?.createdAt ?? now });

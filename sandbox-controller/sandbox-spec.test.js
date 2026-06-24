@@ -99,6 +99,32 @@ describe("buildSandboxConfig — resource exhaustion limits", () => {
   });
 });
 
+describe("buildSandboxConfig — tunable tmpfs sizing", () => {
+  // tmpfs pages are charged against the container's memory cgroup, so /tmp +
+  // /opt/mcp sizes eat into memoryBytes. They must be tunable per deployment so
+  // an operator can right-size them against the Memory budget instead of having
+  // a single process fill a hardcoded 64m /tmp and brick the session.
+  it("defaults /tmp and /opt/mcp to their conservative sizes", () => {
+    const t = buildSandboxConfig(base).HostConfig.Tmpfs;
+    expect(t["/tmp"]).toContain("size=64m");
+    expect(t["/opt/mcp"]).toContain("size=256m");
+  });
+
+  it("lets the operator resize /tmp", () => {
+    const t = buildSandboxConfig({ ...base, tmpMb: 256 }).HostConfig.Tmpfs;
+    expect(t["/tmp"]).toContain("size=256m");
+    // resizing must not weaken the hardening flags
+    expect(t["/tmp"]).toContain("noexec");
+    expect(t["/tmp"]).toContain("nosuid");
+  });
+
+  it("lets the operator resize the exec-allowed /opt/mcp tmpfs", () => {
+    const t = buildSandboxConfig({ ...base, mcpTmpMb: 128 }).HostConfig.Tmpfs;
+    expect(t["/opt/mcp"]).toContain("size=128m");
+    expect(t["/opt/mcp"]).toContain("exec");
+  });
+});
+
 describe("resolveNetworkMode — platform decides; only bridge grants network", () => {
   it("grants bridge when the platform requests it", () => {
     expect(resolveNetworkMode("bridge")).toBe("bridge");
