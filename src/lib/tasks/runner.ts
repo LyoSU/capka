@@ -283,13 +283,19 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   // sandbox/MCP/skill tools; empty for providers without any.
   const tools = { ...sandbox.tools, ...mcp.tools, skill: skillTool, ...providerNativeTools(provider) };
 
-  // Workspace snapshot — runs inside the isolated Docker container, not the host.
+  // Workspace snapshot — read straight off disk via the controller's file API
+  // (HMAC-token, no live container). This keeps the sandbox lazy: a chat that
+  // never runs code stays container-free, yet the model still sees existing files.
   let workspaceSnapshot: string | undefined;
   try {
-    const { execCommand } = await import("@/lib/sandbox/client");
-    const ws = await execCommand(sessionKey, "find /workspace -maxdepth 3 -not -path '*/\\.*' | head -50", 5000).catch(() => null);
-    if (ws?.stdout?.trim()) workspaceSnapshot = ws.stdout.trim();
-  } catch { /* sandbox not ready yet */ }
+    const { listFiles } = await import("@/lib/sandbox/client");
+    const { entries } = await listFiles(sessionKey, ".", userId);
+    if (entries?.length) {
+      workspaceSnapshot = entries
+        .map((e) => (e.isDirectory ? `${e.name}/` : e.name))
+        .join("\n");
+    }
+  } catch { /* no workspace yet */ }
 
   const prompt = buildSystemPrompt({
     project,

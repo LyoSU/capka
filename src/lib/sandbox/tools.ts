@@ -11,10 +11,16 @@ import { createSession, execCommand } from "./client";
  * Shell injection within the sandbox is by design — the container IS the security boundary.
  */
 export async function loadSandboxTools(userId: string, sessionKey: string, networkMode?: string) {
-  await createSession(sessionKey, userId, networkMode);
+  // Lazy container: a chat that never invokes a tool never spins up a sandbox.
+  // The session is created on the FIRST tool call and memoized — concurrent tool
+  // calls within a turn share one createSession (idempotent on the controller).
+  let ensured: Promise<unknown> | null = null;
+  const ensureSession = () => (ensured ??= createSession(sessionKey, userId, networkMode));
 
-  const run = (cmd: string, timeout?: number) =>
-    execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000));
+  const run = async (cmd: string, timeout?: number) => {
+    await ensureSession();
+    return execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000));
+  };
 
   const tools = {
     execute_bash: tool({

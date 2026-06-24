@@ -79,6 +79,13 @@ services:
       # Keep test resource usage modest on a shared, RAM-tight host.
       - SANDBOX_MEMORY_MB=384
       - MAX_SESSIONS_PER_USER=2
+      # How long an orphaned workspace dir survives on disk after its session is
+      # evicted, before the GC sweep deletes it. Default 7d so a user's files don't
+      # vanish ~1h after they stop chatting. Override from the Coolify env panel.
+      - GC_GRACE_MS=${GC_GRACE_MS:-604800000}
+      # How long a sandbox container may sit idle before it's stopped (the files on
+      # disk stay; only the compute is reclaimed). Default 15 min.
+      - SANDBOX_IDLE_TTL_MS=${SANDBOX_IDLE_TTL_MS:-900000}
       # Sandbox egress is controlled in the admin panel (Security → Internet access).
     networks:
       - default
