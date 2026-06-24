@@ -39,23 +39,30 @@ export class LocalFsStore {
     return { wsHostPath: this.toHostPath(wsPath), sharedHostPath: this.toHostPath(sharedPath) };
   }
 
-  async list(userId, sessionId, relPath = ".") {
+  /** List a workspace directory. `depth` 1 (default) = a single level — the file
+   *  browser's behavior, unchanged. depth > 1 walks subdirectories (parent before
+   *  children, full relative `path` on each) so a container-free workspace snapshot
+   *  can mirror the old `find -maxdepth N`. `limit` hard-caps the entry count so a
+   *  huge tree can't blow up the response. */
+  async list(userId, sessionId, relPath = ".", depth = 1, limit = 1000) {
     const base = this.#wsPath(userId, sessionId);
-    const dirPath = await safeRealPath(base, relPath);
-    const names = await readdir(dirPath).catch(() => []);
     const entries = [];
-    for (const name of names) {
-      try {
-        const s = await stat(join(dirPath, name));
-        entries.push({
-          name,
-          path: relPath === "." ? name : `${relPath}/${name}`,
-          isDirectory: s.isDirectory(),
-          size: s.size,
-          modifiedAt: s.mtime.toISOString(),
-        });
-      } catch { /* skip inaccessible */ }
-    }
+    const walk = async (rel, d) => {
+      if (entries.length >= limit) return;
+      const dirPath = await safeRealPath(base, rel);
+      const names = await readdir(dirPath).catch(() => []);
+      for (const name of names) {
+        if (entries.length >= limit) break;
+        try {
+          const s = await stat(join(dirPath, name));
+          const childRel = rel === "." ? name : `${rel}/${name}`;
+          const isDirectory = s.isDirectory();
+          entries.push({ name, path: childRel, isDirectory, size: s.size, modifiedAt: s.mtime.toISOString() });
+          if (isDirectory && d > 1) await walk(childRel, d - 1);
+        } catch { /* skip inaccessible */ }
+      }
+    };
+    await walk(relPath, Math.max(1, depth));
     return entries;
   }
 

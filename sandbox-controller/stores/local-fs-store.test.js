@@ -21,6 +21,33 @@ runWorkspaceStoreContract(() => {
   return { store, cleanup: async () => { await rm(dir, { recursive: true, force: true }); } };
 });
 
+describe("LocalFsStore.list depth", () => {
+  it("returns a single level by default and a nested tree at depth>1, capped by limit", async () => {
+    const dataRoot = join(TMP, `ws-tree-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      const { wsHostPath } = await store.ensure("u1", "s1");
+      await mkdir(join(wsHostPath, "sub", "deep"), { recursive: true });
+      await writeFile(join(wsHostPath, "top.txt"), "a");
+      await writeFile(join(wsHostPath, "sub", "mid.txt"), "b");
+      await writeFile(join(wsHostPath, "sub", "deep", "leaf.txt"), "c");
+
+      const flat = await store.list("u1", "s1");
+      expect(flat.map((e) => e.path).sort()).toEqual(["sub", "top.txt"]); // one level only
+
+      const tree = await store.list("u1", "s1", ".", 3);
+      const paths = tree.map((e) => e.path).sort();
+      expect(paths).toContain("sub/mid.txt");
+      expect(paths).toContain("sub/deep/leaf.txt"); // nested, full relative path
+
+      const capped = await store.list("u1", "s1", ".", 3, 2);
+      expect(capped.length).toBe(2); // hard limit respected
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 // Filesystem-specific hardening beyond the shared contract: a process inside the
 // sandbox owns its /workspace and can plant symlinks there. A later controller-side
 // write MUST NOT follow such a symlink out of the workspace (matches the multi-tenant

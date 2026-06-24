@@ -289,10 +289,12 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   let workspaceSnapshot: string | undefined;
   try {
     const { listFiles } = await import("@/lib/sandbox/client");
-    const { entries } = await listFiles(sessionKey, ".", userId);
+    // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no container).
+    const { entries } = await listFiles(sessionKey, ".", userId, 3);
     if (entries?.length) {
       workspaceSnapshot = entries
-        .map((e) => (e.isDirectory ? `${e.name}/` : e.name))
+        .slice(0, 50)
+        .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
         .join("\n");
     }
   } catch { /* no workspace yet */ }

@@ -118,9 +118,10 @@ type FileEntry = {
   modifiedAt: string | null;
 };
 
-export async function listFiles(sessionId: string, path = ".", userId?: string): Promise<{ entries: FileEntry[]; error?: string }> {
+export async function listFiles(sessionId: string, path = ".", userId?: string, depth?: number): Promise<{ entries: FileEntry[]; error?: string }> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path });
+  if (depth && depth > 1) params.set("depth", String(depth));
   if (userId) {
     params.set("userId", userId);
     params.set("token", workspaceToken(userId, sessionId));

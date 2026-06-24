@@ -258,7 +258,10 @@ const server = createServer(async (req, res) => {
       if (r.missing) return jsonRes(res, 400, { error: "Missing userId" });
       if (r.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
       store.touch(r.sessionId);
-      const entries = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".");
+      // depth>1 lets the platform fetch a shallow tree (workspace snapshot) without
+      // a container; the file browser omits it and gets a single level. Clamp 1..5.
+      const depth = Math.min(5, Math.max(1, parseInt(url.searchParams.get("depth") || "1", 10) || 1));
+      const entries = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".", depth);
       return jsonRes(res, 200, { entries });
     }
 
@@ -457,7 +460,21 @@ async function boot() {
   setInterval(flushAndGc, FLUSH_INTERVAL_MS);
 }
 
-boot().catch((e) => {
-  console.error("[boot] FATAL:", e.message);
-  process.exit(1);
-});
+// Test seam: with CONTROLLER_NO_BOOT set, skip the Docker-dependent boot so the
+// HTTP app can be exercised over real sockets against a throwaway Postgres + a
+// fake backend (see server.http.test.js). Inert in production. `store` is the
+// real PostgresSessionStore bound to DATABASE_URL.
+export { server, store };
+export function __setTestState(s = {}) {
+  if (s.workspace !== undefined) workspace = s.workspace;
+  if (s.backend !== undefined) backend = s.backend;
+  if (s.ready !== undefined) ready = s.ready;
+  if (s.liveCount !== undefined) liveCount = s.liveCount;
+}
+
+if (!process.env.CONTROLLER_NO_BOOT) {
+  boot().catch((e) => {
+    console.error("[boot] FATAL:", e.message);
+    process.exit(1);
+  });
+}
