@@ -17,7 +17,7 @@ import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { formatSize } from "@/lib/constants";
 import { extOf, fileCategory, fileKind, previewKind, type FileCategory } from "@/lib/file-kinds";
 import { cn } from "@/lib/utils";
-import { downloadAllPaths } from "./workspace-paths";
+import { downloadAllPaths, canDownloadAll } from "./workspace-paths";
 import { FileThumb, FileTile, SandboxFileTile, usePreview, type PreviewFile } from "./file-preview";
 
 type FileEntry = { name: string; path: string; isDirectory: boolean; size: number; modifiedAt: string | null };
@@ -157,7 +157,11 @@ export function WorkspacePanel({
   }, [entries, sortKey, sortDir, grouped]);
 
   const fileCount = orderedFiles.length;
-  const isEmpty = folders.length === 0 && fileCount === 0;
+  // The header badge counts everything visible — folders included. Counting only
+  // files made a folders-only directory (e.g. a Python venv, or the root itself)
+  // report a tiny number next to a long list.
+  const entryCount = folders.length + fileCount;
+  const isEmpty = entryCount === 0;
 
   // The files that open in Quick Look, in display order — so ←/→ steps through
   // exactly what's shown, skipping folders and download-only types.
@@ -324,8 +328,8 @@ export function WorkspacePanel({
         <h3 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold tracking-tight">
           <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{t("title")}</span>
-          {fileCount > 0 && (
-            <span className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground">{fileCount}</span>
+          {entryCount > 0 && (
+            <span className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground">{entryCount}</span>
           )}
         </h3>
         <label title={t("upload")} aria-label={t("upload")}>
@@ -334,7 +338,7 @@ export function WorkspacePanel({
             <Upload className={`h-3.5 w-3.5 ${uploading ? "animate-pulse" : ""}`} />
           </div>
         </label>
-        {fileCount > 1 && (
+        {canDownloadAll(folders.length, fileCount) && (
           <button onClick={downloadAll} title={t("downloadAll")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
             <Download className="h-3.5 w-3.5" />
           </button>
