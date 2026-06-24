@@ -17,6 +17,7 @@ import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { formatSize } from "@/lib/constants";
 import { extOf, fileCategory, fileKind, previewKind, type FileCategory } from "@/lib/file-kinds";
 import { cn } from "@/lib/utils";
+import { downloadAllPaths } from "./workspace-paths";
 import { FileThumb, FileTile, SandboxFileTile, usePreview, type PreviewFile } from "./file-preview";
 
 type FileEntry = { name: string; path: string; isDirectory: boolean; size: number; modifiedAt: string | null };
@@ -167,7 +168,10 @@ export function WorkspacePanel({
   const downloadUrl = (p: string) => `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(p)}`;
   const downloadAll = () => {
     const params = new URLSearchParams({ chatId });
-    orderedFiles.forEach((f) => params.append("paths", f.path));
+    // Archive folders too, not just current-level files — the server's `zip -r`
+    // recurses into each folder path, so subfolders are included instead of
+    // skipped. See downloadAllPaths.
+    downloadAllPaths(entries).forEach((p) => params.append("paths", p));
     const a = document.createElement("a");
     a.href = `/api/sandbox/files/download-all?${params}`;
     a.download = "workspace-files.zip";
