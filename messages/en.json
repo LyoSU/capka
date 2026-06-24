@@ -254,7 +254,8 @@
       "signIn": "Sign in"
     },
     "taskStatus": {
-      "thinking": "Thinking…"
+      "thinking": "Thinking…",
+      "retrying": "The model is slow — retrying…"
     },
     "model": {
       "search": "Search models…",

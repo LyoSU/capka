@@ -16,6 +16,7 @@ export type LLMErrorCategory =
   | "context_too_long"
   | "network"
   | "timed_out"
+  | "provider_unresponsive"
   | "unknown";
 
 export interface FriendlyError {
@@ -166,4 +167,19 @@ export const TIMED_OUT_ERROR: FriendlyError = {
   userMessage:
     "This task took too long and was stopped. Please try again, or break it into smaller steps.",
   adminDetail: "Task exceeded the maximum run time and was aborted by the server.",
+};
+
+/**
+ * The provider accepted the request but stopped streaming — no tokens for long
+ * enough that the stall watchdog gave up after retrying. Distinct from a clean
+ * timeout (the model never produced ANYTHING, vs. ran out of time mid-work) and
+ * from `network` (the connection opened fine; the gateway just went quiet). The
+ * actionable advice for a non-technical user is to retry or switch models, since
+ * one provider being flaky is exactly what a model switch routes around.
+ */
+export const PROVIDER_UNRESPONSIVE_ERROR: FriendlyError = {
+  category: "provider_unresponsive",
+  userMessage:
+    "The AI model stopped responding. Please try again — if it keeps happening, switch to a different model.",
+  adminDetail: "Provider streamed no output before the stall timeout; retries were exhausted.",
 };

@@ -609,7 +609,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                 const showStatus = !!last && (last.role === "user" || (last.role === "assistant" && (last.parts?.length ?? 0) === 0));
                 return showStatus ? (
                   <div className="px-4 py-4 md:px-6">
-                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} />
+                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} retrying={taskInfo.retrying} />
                   </div>
                 ) : null;
               })()}

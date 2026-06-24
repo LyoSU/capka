@@ -35,7 +35,7 @@ export function useBackgroundChat({
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<"idle" | "running">("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null }>({ startedAt: 0, currentTool: null });
+  const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null; retrying: { attempt: number; max: number } | null }>({ startedAt: 0, currentTool: null, retrying: null });
   const msgRef = useRef(messages);
   msgRef.current = messages;
   // Optimistic user messages whose POST is still in flight. A task:finish for a
@@ -179,6 +179,8 @@ export function useBackgroundChat({
             if (action === "reconcile") { reconcileSoon(); return; }
             // action === "apply": advance the cursor, then run the handler below.
             if (typeof seq === "number") appliedSeqRef.current.set(mid, seq);
+            // Content is flowing again — clear any "retrying" notice from a stall.
+            setTaskInfo((prev) => (prev.retrying ? { ...prev, retrying: null } : prev));
           }
 
           switch (data.type) {
@@ -189,7 +191,7 @@ export function useBackgroundChat({
               // turn, another tab) would otherwise leave the stop button unable
               // to cancel anything (taskId was only set by our own POST before).
               setTaskId(data.taskId);
-              setTaskInfo({ startedAt: Date.now(), currentTool: null });
+              setTaskInfo({ startedAt: Date.now(), currentTool: null, retrying: null });
               // Baseline the seq cursor for this reply (task:start is seq 0), so
               // the first delta (seq 1) is the next contiguous one.
               appliedSeqRef.current.set(data.messageId, data.seq ?? 0);
@@ -340,7 +342,7 @@ export function useBackgroundChat({
             case "task:finish": {
               setStatus("idle");
               setTaskId(null);
-              setTaskInfo({ startedAt: 0, currentTool: null });
+              setTaskInfo({ startedAt: 0, currentTool: null, retrying: null });
               // Stop tracking this reply's seq — the turn is done; loadHistory
               // below reloads the final, authoritative content.
               if (data.messageId) appliedSeqRef.current.delete(data.messageId);
@@ -352,6 +354,16 @@ export function useBackgroundChat({
               // unreadable red blink above the composer. The banner is reserved
               // for load errors (loadHistory's own catch).
               loadHistory();
+              break;
+            }
+
+            case "task:notice": {
+              // The provider stalled and the runner is re-streaming. Surface a
+              // calm "model is slow, retrying" instead of a silent pause; the next
+              // content delta clears it (see the GATED apply path above).
+              if (data.notice.kind === "retrying") {
+                setTaskInfo((prev) => ({ ...prev, retrying: { attempt: data.notice.attempt, max: data.notice.max } }));
+              }
               break;
             }
 

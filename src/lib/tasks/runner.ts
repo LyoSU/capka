@@ -34,7 +34,8 @@ import { recordUsage } from "@/lib/usage";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, TIMED_OUT_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR } from "@/lib/errors/friendly";
+import { StallWatchdog } from "./stall-watchdog";
 import { errorText } from "@/lib/errors/message";
 import { downloadFile, createSession } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
@@ -134,6 +135,21 @@ const MAX_REALTIME_RESULT_BYTES = 6000;
  * aborts such a run so the slot frees and the user gets a clear failure.
  */
 const MAX_TASK_MS = 10 * 60_000;
+
+/**
+ * Stream stall ceiling. A provider can accept the request and then go silent —
+ * no tokens, not even reasoning — which, with only MAX_TASK_MS as a backstop,
+ * left the user staring at a blank chat for 10 minutes before a generic timeout.
+ * The stall watchdog aborts an attempt that produces nothing for this long while
+ * we're waiting on the model (it's PAUSED during local tool execution, which is
+ * legitimately quiet — see StallWatchdog). 60s is comfortably longer than any
+ * real time-to-first-token, short enough that a hung gateway fails fast.
+ */
+const STREAM_IDLE_MS = 60_000;
+/** How many times a stalled attempt is re-streamed before giving up with a clear
+ *  "provider didn't respond" message. A transient gateway hiccup usually clears
+ *  on the first retry; past 2 the model/provider is genuinely unhealthy. */
+const MAX_STALL_RETRIES = 2;
 
 /** Reactive context-overflow fallback: how many of the most recent conversation
  *  messages to keep when mechanically trimming a prompt the model rejected as too
@@ -564,6 +580,22 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // trigger. Reused from the budget logic so the cap is honored here too.
     const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
     const ctxMgmt = contextManagementOptions(provider, effectiveLimit);
+    // Stall detection runs per-attempt: `ac` is the task-wide signal (deadline,
+    // cancel, lost lease); `attemptAc` aborts only the CURRENT stream when the
+    // provider goes silent, so a retry can re-stream without the whole task
+    // reading as cancelled. The model's signal is the union of both. A stalled
+    // attempt sets `stalled` and is re-streamed up to MAX_STALL_RETRIES; once
+    // exhausted, `stalledOut` makes finalization surface PROVIDER_UNRESPONSIVE.
+    let attemptAc = new AbortController();
+    let stalled = false;
+    let stalledOut = false;
+    let stallRetries = 0;
+    const watchdog = new StallWatchdog(STREAM_IDLE_MS, () => {
+      stalled = true;
+      tlog.warn("provider.stall", { model: modelId, attempt: stallRetries, idleMs: STREAM_IDLE_MS });
+      attemptAc.abort();
+    });
+
     const makeStream = () => {
       // reasoning + context-management may both target the same provider
       // namespace (e.g. anthropic) — merge so neither clobbers the other.
@@ -580,7 +612,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25), prepareStep: ({ stepNumber }) => stepSettings(stepNumber) } : {}),
         messages: [...systemMessages, ...modelMessages],
         ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
-        abortSignal: ac.signal,
+        // Either signal aborts the stream; only `attemptAc` aborts are retryable.
+        abortSignal: AbortSignal.any([ac.signal, attemptAc.signal]),
       });
     };
 
@@ -726,8 +759,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
 
     let retried = false;
     const consume = async () => {
+      // Arm the stall watchdog for this attempt: it fires only while we're waiting
+      // on the model (paused during local tool runs) and is torn down whatever way
+      // the loop ends (clean finish, abort event, or throw).
+      watchdog.start();
+      try {
       for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;
+        // A stall (or any abort) ends the stream via an "abort" event — stop
+        // pulling at once so the retry path can take over.
+        if (attemptAc.signal.aborted) break;
+        // Any event means the provider is alive — reset the idle timer.
+        watchdog.activity();
         switch (event.type) {
           case "reasoning-delta": {
             // Thinking resuming after answer text means that run is done — commit
@@ -791,9 +834,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // snapshot that already includes this step, or it reconciles in a loop
             // until the step ends. Tool events are rare, so a forced write is cheap.
             await saveSnapshot(true);
+            // The model is now waiting on OUR tool — pause the stall watchdog so a
+            // legitimately slow command (a long sandbox run) isn't mistaken for a
+            // hung provider. It resumes on the matching tool-result/tool-error.
+            watchdog.enterTool();
             break;
           }
           case "tool-result": {
+            watchdog.exitTool(); // tool returned — back to waiting on the model
             await flushBuffers();
             // Trust boundary: a tool can return raw binary (e.g. a PNG dumped as
             // `output.content`) whose NUL bytes Postgres rejects in both `jsonb`
@@ -814,6 +862,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             break;
           }
           case "tool-error":
+            watchdog.exitTool(); // tool failed — back to waiting on the model
             await flushBuffers();
             parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: errMsg(event.error) });
             await publishTaskEvent(userId, {
@@ -836,6 +885,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         }
       }
       await flushBuffers();
+      } catch (e) {
+        // A stall aborts THIS attempt's signal. Depending on the SDK that ends the
+        // stream via an "abort" event (caught by the break above) OR throws an
+        // AbortError here — swallow the latter so the orchestration's `stalled`
+        // path can re-stream. Anything else (a real error, or the task-wide `ac`
+        // aborting on deadline/cancel) propagates as before.
+        if (!(stalled && !ac.signal.aborted)) throw e;
+      } finally {
+        watchdog.stop();
+      }
     };
 
     // Drop the native image/file parts the model rejected, but leave a text note
@@ -907,18 +966,45 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return true;
     };
 
-    try {
-      await consume();
-      // Provider surfaced the error as a stream event, not a throw — same retry.
-      if (streamError && !ac.signal.aborted) {
-        if (!(await retryOnCapabilityError(streamError))) await retryOnContextOverflow(streamError);
+    // One attempt = a stream consumed to completion, plus its capability/context
+    // retries. The watchdog can abort an attempt mid-flight when the provider goes
+    // silent; that ends the stream via an "abort" event (no throw), so consume
+    // returns and `stalled` flags it. Re-stream a bounded number of times before
+    // giving up with a clear "provider didn't respond" failure.
+    for (;;) {
+      stalled = false;
+      try {
+        await consume();
+        // Provider surfaced the error as a stream event, not a throw — same retry.
+        if (streamError && !ac.signal.aborted) {
+          if (!(await retryOnCapabilityError(streamError))) await retryOnContextOverflow(streamError);
+        }
+      } catch (e) {
+        if (!(await retryOnCapabilityError(e)) && !(await retryOnContextOverflow(e))) throw e;
       }
-    } catch (e) {
-      if (!(await retryOnCapabilityError(e)) && !(await retryOnContextOverflow(e))) throw e;
+      if (!stalled || ac.signal.aborted) break;
+      if (stallRetries >= MAX_STALL_RETRIES) { stalledOut = true; break; }
+      stallRetries++;
+      tlog.info("provider stall — re-streaming", { attempt: stallRetries, max: MAX_STALL_RETRIES });
+      await discardPartial();
+      await captureDiscarded();
+      attemptAc = new AbortController(); // fresh signal; the stalled one stays aborted
+      // Layer 2: replace the silent pause with a visible "model is slow, retrying".
+      // No seq — a notice doesn't mutate the reply, so it must not consume a slot
+      // in the per-message counter (that would gap the next delta into a reconcile).
+      // Ordering still holds: NOTIFY is per-channel FIFO and this rides after the
+      // task:reset above and before the retry's first delta.
+      await publishTaskEvent(userId, {
+        type: "task:notice", taskId, chatId, messageId: msgId,
+        notice: { kind: "retrying", attempt: stallRetries, max: MAX_STALL_RETRIES },
+      });
+      result = makeStream();
     }
 
-    // Retry once if the model produced no content.
-    if (!ac.signal.aborted && !streamError) {
+    // Retry once if the model produced no content. Skip after a stall-out — the
+    // empty parts there mean "provider never spoke", not "model chose silence",
+    // and another attempt would just stall again.
+    if (!ac.signal.aborted && !streamError && !stalledOut) {
       const hasContent = parts.some((p) => (p.type === "text" && p.text.trim()) || p.type === "tool-call");
       if (!hasContent) {
         tlog.info("empty response — retrying once");
@@ -933,10 +1019,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    const finalStatus = deadlineHit ? "failed" : ac.signal.aborted ? "cancelled" : streamError ? "failed" : "completed";
+    const finalStatus = deadlineHit ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : "completed";
     // Map any provider error to a friendly, role-aware shape: users see
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
-    const failure = deadlineHit ? TIMED_OUT_ERROR : streamError ? classifyLLMError(streamError) : undefined;
+    // A stall-out gets its own category (distinct from a clean timeout) so the
+    // user is told to retry/switch models rather than "shorten your request".
+    const failure = deadlineHit ? TIMED_OUT_ERROR : stalledOut ? PROVIDER_UNRESPONSIVE_ERROR : streamError ? classifyLLMError(streamError) : undefined;
 
     // Token usage + cost, computed once. Needed BOTH for the persisted message
     // metadata (so the (i) details survive a reload — elapsedMs and the usage

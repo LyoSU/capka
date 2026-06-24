@@ -33,6 +33,11 @@ export type TaskEvent =
   // parts for this message and resync its applied-seq, so retry deltas land on a
   // clean slate instead of being appended to the abandoned attempt.
   | { type: "task:reset"; taskId: string; chatId: string; messageId: string; seq: number }
+  // A transient, non-persisted heads-up about the run itself (not the reply
+  // content) — currently only "the provider stalled, we're re-streaming". Lets
+  // the UI replace a silent pause with a calm "model is slow, retrying…" instead
+  // of leaving the user wondering whether anything is happening.
+  | { type: "task:notice"; taskId: string; chatId: string; messageId: string; notice: { kind: "retrying"; attempt: number; max: number }; seq?: number }
   // messageId is absent when a task fails/cancels before an assistant message exists.
   | { type: "task:finish"; taskId: string; chatId: string; messageId?: string; status: string; error?: string; seq?: number }
   // A freshly-generated title for a new chat, pushed once after its first turn

@@ -16,9 +16,13 @@ function formatElapsed(ms: number): string {
 export function TaskStatus({
   startedAt,
   currentTool,
+  retrying,
 }: {
   startedAt: number;
   currentTool: string | null;
+  // Set while the runner is re-streaming after a provider stall — takes over the
+  // label so the user sees the model is slow rather than a frozen spinner.
+  retrying?: { attempt: number; max: number } | null;
 }) {
   const [elapsed, setElapsed] = useState(0);
   const tSteps = useTranslations("steps");
@@ -32,7 +36,11 @@ export function TaskStatus({
     return () => clearInterval(id);
   }, [startedAt]);
 
-  const label = currentTool ? describeStep(tSteps, currentTool).activeLabel : t("thinking");
+  const label = retrying
+    ? t("retrying")
+    : currentTool
+      ? describeStep(tSteps, currentTool).activeLabel
+      : t("thinking");
   const time = formatElapsed(elapsed);
 
   // Mirrors a running rail node (27px circle + spinner) so the live status reads

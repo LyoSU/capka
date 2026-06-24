@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { classifyLLMError, isVisionUnsupportedError } from "@/lib/errors/friendly";
+import { classifyLLMError, isVisionUnsupportedError, PROVIDER_UNRESPONSIVE_ERROR } from "@/lib/errors/friendly";
+
+describe("PROVIDER_UNRESPONSIVE_ERROR", () => {
+  it("is a distinct category with a calm, model-switch-pointing message and no jargon", () => {
+    expect(PROVIDER_UNRESPONSIVE_ERROR.category).toBe("provider_unresponsive");
+    expect(PROVIDER_UNRESPONSIVE_ERROR.userMessage).toMatch(/respond|model|try/i);
+    expect(PROVIDER_UNRESPONSIVE_ERROR.userMessage).not.toMatch(/stall|idle|abort|signal/i);
+    expect(PROVIDER_UNRESPONSIVE_ERROR.adminDetail.length).toBeGreaterThan(0);
+  });
+});
 
 describe("classifyLLMError", () => {
   it("maps OpenRouter 402 / out-of-credits to a top-up message, keeping raw detail for admins", () => {
