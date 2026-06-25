@@ -295,6 +295,8 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     if (!created) await releaseHold(tgTaskId);
     await ctx.replyWithChatAction("typing").catch(() => {});
   } catch (error: unknown) {
+    // The turn never got enqueued — release its budget hold so it doesn't leak.
+    await releaseHold(tgTaskId);
     await reply(ctx, "startError", { values: { error: error instanceof Error ? error.message : "Unknown error" } });
   }
 }
@@ -524,6 +526,16 @@ async function tryAcquirePollerLock(): Promise<boolean> {
     if (rows[0]?.locked) {
       // Hold the connection — and thus the lock — for our lifetime.
       s.leaderClient = client;
+      // If this connection drops, Postgres releases the advisory lock with it, so
+      // we must stop polling and re-campaign — otherwise a standby takes the lock
+      // and we'd double-poll the same token. (pg emits 'error' on backend/socket
+      // failure.) Listen once; relinquish is idempotent.
+      client.on("error", (err) => {
+        log.warn("telegram poll-leader connection lost — relinquishing", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        void relinquishLeadership();
+      });
       return true;
     }
   } catch (e) {
@@ -531,6 +543,27 @@ async function tryAcquirePollerLock(): Promise<boolean> {
   }
   client.release();
   return false;
+}
+
+/** Give up poll leadership after losing the lock connection, then re-campaign. */
+async function relinquishLeadership(): Promise<void> {
+  const s = botState();
+  if (!s.leaderClient && !s.polling) return; // already relinquished
+  // The lock is already gone with the dead connection — drop the handle without
+  // release() (the client is broken; the pool reaps it) and stop polling so we
+  // don't keep getUpdates running without the lock alongside the new leader.
+  s.leaderClient = null;
+  if (s.leaderTimer) { clearInterval(s.leaderTimer); s.leaderTimer = null; }
+  const bot = s.bot;
+  s.polling = false;
+  if (bot) {
+    try { await bot.stop(); } catch (e) {
+      log.error("telegram stop on relinquish failed", { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  // Re-enter the campaign: reacquire the lock (likely, if we were just blipped) or
+  // stand by under whoever took over.
+  await startBot();
 }
 
 function releasePollerLock(): void {
@@ -606,6 +639,9 @@ export async function stopBot(): Promise<void> {
   // and would answer on the OLD token alongside the new bot — exactly the
   // "previous bot still works after switching" bug. Surface it loudly.
   s.bot = null;
+  // Drop any in-flight build too, so a getBot() racing this stop can't resolve
+  // afterwards and reinstate the old bot.
+  s.botPromise = null;
   s.polling = false;
   s.token = "";
   if (bot) {

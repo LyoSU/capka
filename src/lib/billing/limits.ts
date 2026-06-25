@@ -76,8 +76,19 @@ export async function getDefaultTier(): Promise<Tier> {
  * Shared-key spend for one user across all three windows in a single query,
  * bounded to the widest window (30d) so we scan the smallest slice possible.
  */
-async function sharedSpendWindows(userId: string): Promise<Record<WindowKey, number>> {
-  const [row] = await db
+// A db or an in-transaction handle — both expose the same query builder, so the
+// windows sum reads identically whether or not it's inside reserveBudget's lock.
+type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Shared-key spend (committed + outstanding holds) for one user across all three
+ * windows in a single query, bounded to the widest window (30d). Pending holds
+ * are plain rows, so they're summed too — that's what lets a concurrent reserve
+ * see another in-flight turn's reservation. Single source of truth for both the
+ * UI status and the enforcement gate, so the two can never drift.
+ */
+async function spendWindows(exec: Executor, userId: string): Promise<Record<WindowKey, number>> {
+  const [row] = await exec
     .select({
       h5: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.createdAt} >= now() - interval '5 hours'), 0)`,
       d7: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.createdAt} >= now() - interval '7 days'), 0)`,
@@ -92,6 +103,10 @@ async function sharedSpendWindows(userId: string): Promise<Record<WindowKey, num
       ),
     );
   return { h5: Number(row?.h5 ?? 0), d7: Number(row?.d7 ?? 0), d30: Number(row?.d30 ?? 0) };
+}
+
+async function sharedSpendWindows(userId: string): Promise<Record<WindowKey, number>> {
+  return spendWindows(db, userId);
 }
 
 function capFor(tier: Tier, w: WindowKey): number | null {
@@ -120,20 +135,6 @@ export async function getLimitStatus(userId: string): Promise<LimitStatus> {
     blocked: !!blocked,
     blockedWindow: blocked?.window ?? null,
   };
-}
-
-/**
- * Enforcement gate, called before enqueuing a task. Only shared-key requests are
- * checked; own-key users and unlimited tiers short-circuit to allowed. Returns
- * the tripped window when blocked so the caller can build a precise message.
- */
-export async function checkBudget(
-  userId: string,
-  onSharedKey: boolean,
-): Promise<{ allowed: boolean; window: WindowKey | null }> {
-  if (!onSharedKey) return { allowed: true, window: null };
-  const status = await getLimitStatus(userId);
-  return { allowed: !status.blocked, window: status.blockedWindow };
 }
 
 // A typical turn's token shape, used only to size the pre-run hold. The
@@ -188,26 +189,7 @@ export async function reserveBudget(input: {
     // just-written holds. Transaction-scoped: released on commit/rollback.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${input.userId}))`);
 
-    const [row] = await tx
-      .select({
-        h5: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.createdAt} >= now() - interval '5 hours'), 0)`,
-        d7: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.createdAt} >= now() - interval '7 days'), 0)`,
-        d30: sql<string>`coalesce(sum(${usage.costUsd}), 0)`,
-      })
-      .from(usage)
-      .where(
-        and(
-          eq(usage.userId, input.userId),
-          eq(usage.onSharedKey, true),
-          sql`${usage.createdAt} >= now() - interval '30 days'`,
-        ),
-      );
-
-    const spend: Record<WindowKey, number> = {
-      h5: Number(row?.h5 ?? 0),
-      d7: Number(row?.d7 ?? 0),
-      d30: Number(row?.d30 ?? 0),
-    };
+    const spend = await spendWindows(tx, input.userId);
 
     for (const w of ORDER) {
       const cap = capFor(tier, w);

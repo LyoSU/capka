@@ -1,4 +1,4 @@
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireSession, requireActive } from "@/lib/auth";
 import { getInstallOwner, listInstalledPlugins, setPluginEnabled, setPluginMutedForUser } from "@/lib/marketplace/service";
 import { uninstallPlugin, upgradePlugin } from "@/lib/marketplace/install";
 import { audit } from "@/lib/governance/audit";
@@ -45,7 +45,8 @@ export const PATCH = apiHandler(async (req: Request) => {
 
 /** Re-pull a plugin from its source (update to latest). */
 export const POST = apiHandler(async (req: Request) => {
-  const { userId, role } = await requireSession();
+  // requireActive: re-pulling third-party code is install-class, like POST /install.
+  const { userId, role } = await requireActive();
   const { installId } = await req.json();
   if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
   if (!(await canManage(installId, userId, role === "admin"))) return Response.json({ error: "Not allowed" }, { status: 403 });

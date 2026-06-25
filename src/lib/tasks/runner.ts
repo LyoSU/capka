@@ -519,6 +519,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         replyParentId = leaf;
         const absorbed = await absorbQueuedTasks(chatId, taskId);
         extraAttachedFiles = absorbed.flatMap((t) => (t.payload as TaskPayload | null)?.attachedFiles ?? []);
+        // Each absorbed follow-up reserved its own budget hold at enqueue; this
+        // turn now answers them all and reconciles only its OWN hold to the real
+        // cost, so release the absorbed ones — otherwise they leak as pending
+        // holds and erode the user's budget until the 30-day window rolls.
+        for (const t of absorbed) await releaseHold(t.id);
       }
     }
     await db.insert(messages).values({

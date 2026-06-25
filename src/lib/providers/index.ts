@@ -8,14 +8,15 @@ import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
 import { createGuardedFetch } from "@/lib/net/ssrf";
 
 /**
- * A user-supplied custom base URL is an SSRF surface: even after the up-front
- * assertSafeProviderConfig check, the host could DNS-rebind or 3xx-redirect to a
- * cloud-metadata address between that check and the SDK's own fetch. Route the
- * SDK through createGuardedFetch so EVERY request (and redirect hop) is
- * re-validated with manual redirects. No timeout — inference streams for minutes,
- * and link-local/metadata are blocked regardless of the blockPrivate flag (false
- * here so a self-hosted gateway on a private/loopback address still works).
- * First-party endpoints (no custom baseUrl) keep the default fetch.
+ * A user-supplied custom base URL is an SSRF surface. Routing the SDK through
+ * createGuardedFetch re-validates EVERY request and follows 3xx hops manually
+ * with a per-hop check — closing the redirect-to-metadata bypass and re-checking
+ * DNS on each call (it narrows, but can't fully close, a connect-time DNS-rebind
+ * race; pinning the resolved IP would be the complete fix). Link-local/metadata
+ * (169.254/fe80) are blocked regardless of blockPrivate, which is false here so a
+ * self-hosted gateway on a private/loopback address still works. No timeout —
+ * inference streams for minutes. First-party endpoints (no custom baseUrl) keep
+ * the default fetch.
  */
 function guardedFetchFor(baseUrl?: string): typeof fetch | undefined {
   if (!baseUrl) return undefined;
