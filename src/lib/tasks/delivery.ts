@@ -41,12 +41,13 @@ export interface TaskResult {
   blindModalities?: Modality[];
 }
 
-/** The transient activity shown while the answer streams in. `reasoning` carries
- *  the live thinking text so it can fill a native <tg-thinking> block; `label`
- *  is the same human-readable step text the web UI shows ("Running a command…",
- *  "Creating logo.svg…"), with an optional dim `detail` (e.g. the command). */
+/** The transient activity shown while the answer streams in. The live reasoning
+ *  text is passed alongside (see `composeDraft`), so a "thinking" status just
+ *  marks the phase; `label` is the same human-readable step text the web UI shows
+ *  ("Running a command…", "Creating logo.svg…"), with an optional dim `detail`
+ *  (e.g. the command). */
 export type StreamStatus =
-  | { kind: "thinking"; reasoning?: string }
+  | { kind: "thinking" }
   | { kind: "tool"; label: string; detail?: string }
   | undefined;
 
@@ -71,22 +72,22 @@ export interface OutFile {
 
 /**
  * A channel the runner streams a task into. `push` is fire-and-forget and
- * coalesces internally (the runner calls it on every flush, ~10×/s); `seal`
- * commits one completed answer run as its own (silent) bubble the moment a tool
- * or reasoning step interrupts it — so the user watches the reply land in pieces,
- * like a person typing; `finish` persists the final (notifying) bubble exactly
- * once; `sendFiles` delivers any files the run produced. The web sink is a no-op
- * — the web UI already receives everything over realtime and browses sandbox
- * files directly, and renders the whole turn as a single message.
+ * coalesces internally (the runner calls it on every flush, ~10×/s) — it updates
+ * the ephemeral, animated draft preview with the live reasoning + answer-so-far.
+ * `finish` persists the whole turn as ONE final (notifying) rich message exactly
+ * once, mirroring the draft's structure (the reasoning folds from the live
+ * <tg-thinking> block into a collapsed <details>); `sendFiles` delivers any files
+ * the run produced. The web sink is a no-op — the web UI already receives
+ * everything over realtime and browses sandbox files directly, and renders the
+ * whole turn as a single message.
  */
 export interface DeliverySink {
-  push(text: string, status: StreamStatus): void;
-  seal(text: string): Promise<void>;
+  push(answer: string, reasoning: string, status: StreamStatus): void;
   finish(result: TaskResult & { toolCount: number; elapsedMs: number; reasoningMs?: number }): Promise<void>;
   sendFiles(files: OutFile[]): Promise<void>;
 }
 
-const NOOP_SINK: DeliverySink = { push() {}, async seal() {}, async finish() {}, async sendFiles() {} };
+const NOOP_SINK: DeliverySink = { push() {}, async finish() {}, async sendFiles() {} };
 
 export function makeDeliverySink(origin: TaskOrigin | undefined): DeliverySink {
   if (origin?.platform === "telegram") return new TelegramSink(origin.telegramChatId, origin.locale);
@@ -116,21 +117,30 @@ export function draftIdFrom(seed: string): number {
   return (Math.abs(h) % 2_000_000_000) + 1;
 }
 
-/** Streaming view. While the agent is working with nothing written yet, use the
- *  native <tg-thinking> block (HTML, draft-only) — for reasoning it shows the
- *  live thinking text, for a tool it names the tool. Once answer text starts,
- *  switch to Markdown with a small status header above it. */
-export function composeDraft(text: string, status: StreamStatus, t: Translator): DraftBody {
-  if (!text.trim() && status) {
+/** Streaming view, built to MIRROR the final message so the live preview and the
+ *  persisted reply correspond. Layout is always "reasoning block on top, answer
+ *  below"; the live reasoning rides the native, animated <tg-thinking> block
+ *  (HTML, draft-only) which `finish` then folds into a collapsed <details>.
+ *
+ *  Markdown isn't parsed inside <tg-thinking> (only HTML tags are), so the
+ *  reasoning is HTML-escaped; the answer sits OUTSIDE the tag, in the markdown
+ *  field, where the model's Markdown renders normally. While nothing is written
+ *  yet, the whole draft is just the <tg-thinking> block (or the active tool's
+ *  step). A running tool shows a `> 🔧 …` blockquote that finish caps as
+ *  `> ✅ N tools · Ts`. */
+export function composeDraft(answer: string, reasoning: string, status: StreamStatus, t: Translator): DraftBody {
+  const body = answer.trim();
+  const think = reasoning.trim().slice(-THINKING_MAX_CHARS);
+  if (!body) {
     const inner =
-      status.kind === "thinking"
-        ? escapeHtml((status.reasoning ?? "").trim().slice(-THINKING_MAX_CHARS)) || t("statusThinking")
-        : `🔧 ${escapeHtml(status.label)}${status.detail ? ` — ${escapeHtml(status.detail)}` : ""}`;
+      status?.kind === "tool"
+        ? `🔧 ${escapeHtml(status.label)}${status.detail ? ` — ${escapeHtml(status.detail)}` : ""}`
+        : escapeHtml(think) || t("statusThinking");
     return { html: `<tg-thinking>${inner}</tg-thinking>` };
   }
-  if (!status) return { markdown: text };
-  const header = status.kind === "thinking" ? `💭 _${t("statusThinking")}_` : `🔧 ${status.label}`;
-  return { markdown: `> ${header}\n\n${text}` };
+  if (status?.kind === "tool") return { markdown: `> 🔧 ${status.label}\n\n${answer}` };
+  if (think) return { markdown: `<tg-thinking>${escapeHtml(think)}</tg-thinking>\n\n${answer}` };
+  return { markdown: answer };
 }
 
 /** Final view, mirroring the web: the model's thinking is folded into a
@@ -183,19 +193,12 @@ export function composeError(
 class TelegramSink implements DeliverySink {
   private readonly draftId: number;
   private readonly t: Translator;
-  private pending: { text: string; status: StreamStatus } | null = null;
+  private pending: { answer: string; reasoning: string; status: StreamStatus } | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inflight = false;
   private lastSentAt = 0;
   private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
   private lastDraft: DraftBody | null = null;
-  // Last status pushed — so seal() can roll the live draft forward to "now
-  // thinking/running a tool" the instant a run is committed, instead of leaving
-  // the just-sealed text lingering in the preview.
-  private lastStatus: StreamStatus;
-  // How many intermediate runs we've already committed as their own bubbles —
-  // lets finish() know whether the reply has already been delivered in pieces.
-  private sealed = 0;
   // Terminal latch. Set once finish() runs; afterwards NO draft, keepalive, or
   // bubble may ever be sent again. Without this, a keepalive `refresh()` whose
   // network await was in-flight when finish() ran would re-arm itself in its
@@ -219,10 +222,9 @@ class TelegramSink implements DeliverySink {
     return this.bot;
   }
 
-  push(text: string, status: StreamStatus): void {
+  push(answer: string, reasoning: string, status: StreamStatus): void {
     if (this.closed) return; // a late push after finish must never resurrect drafts
-    this.pending = { text, status };
-    this.lastStatus = status;
+    this.pending = { answer, reasoning, status };
     this.schedule();
   }
 
@@ -237,15 +239,15 @@ class TelegramSink implements DeliverySink {
 
   private async flush(): Promise<void> {
     if (this.closed || !this.pending) return;
-    const { text, status } = this.pending;
+    const { answer, reasoning, status } = this.pending;
     this.pending = null;
     this.inflight = true;
     try {
       const bot = await this.getBot();
       if (!bot || this.closed) return; // finish() may have latched during the await
-      if (!text.trim() && !status) return; // nothing to show yet
+      if (!answer.trim() && !reasoning.trim() && !status) return; // nothing to show yet
       // Ephemeral animated preview; the real message is sent on finish().
-      const draft = composeDraft(text, status, this.t);
+      const draft = composeDraft(answer, reasoning, status, this.t);
       await bot.api.sendRichMessageDraft(this.chatId, this.draftId, draft);
       this.lastSentAt = Date.now();
       this.lastDraft = draft;
@@ -295,8 +297,7 @@ class TelegramSink implements DeliverySink {
 
   // Send one rich message, falling back to plain-text chunks if the Markdown is
   // rejected (so a formatting quirk never drops the message). `plain` is the
-  // markup-free text for that fallback; `silent` suppresses the notification
-  // (used for intermediate bubbles — only the final reply pings).
+  // markup-free text for that fallback; `silent` suppresses the notification.
   private async sendRich(markdown: string, plain: string, silent: boolean): Promise<void> {
     const bot = await this.getBot();
     if (!bot) return;
@@ -311,34 +312,6 @@ class TelegramSink implements DeliverySink {
         }
       } catch (e2) {
         log.error("telegram delivery failed", { chatId: this.chatId, err: String(e2) });
-      }
-    }
-  }
-
-  // Commit one finished answer run as its own silent bubble, then roll the live
-  // draft forward to the next step's status so the just-sealed text doesn't
-  // linger in the ephemeral preview as a duplicate.
-  async seal(text: string): Promise<void> {
-    if (this.closed) return; // never commit a bubble after the turn ended
-    const body = text.trim();
-    if (!body) return;
-    // Drop any queued draft: it still carries this now-sealed run's text and
-    // would re-show it as a duplicate after we commit and clear the preview.
-    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
-    this.pending = null;
-    await this.sendRich(body, body, true);
-    this.sealed += 1;
-    if (this.lastStatus) {
-      try {
-        const bot = await this.getBot();
-        if (bot) {
-          const draft = composeDraft("", this.lastStatus, this.t);
-          await bot.api.sendRichMessageDraft(this.chatId, this.draftId, draft);
-          this.lastDraft = draft;
-          this.lastSentAt = Date.now();
-        }
-      } catch (e) {
-        log.warn("telegram draft reset failed", { chatId: this.chatId, err: String(e) });
       }
     }
   }
@@ -375,15 +348,13 @@ class TelegramSink implements DeliverySink {
     const reasoning = result.reasoning ?? "";
     let markdown: string | null;
     if (body) {
-      // The final run — capped with the tool log + collapsed reasoning.
-      markdown = composeFinal(body, reasoning, result.toolCount, result.elapsedMs, this.t);
+      // The whole answer, one message — capped with the tool log + collapsed
+      // reasoning (the <tg-thinking> the draft showed, folded into <details>).
+      markdown = composeFinal(body, reasoning, result.toolCount, result.elapsedMs, this.t, result.reasoningMs);
     } else if (result.toolCount > 0 || reasoning.trim()) {
       // Tools ran / it thought but wrote no closing text — still cap the reply
       // with a "done" footer so it doesn't just trail off.
-      markdown = composeFinal("", reasoning, result.toolCount, result.elapsedMs, this.t);
-    } else if (this.sealed > 0) {
-      // Pure narration already delivered as bubbles; nothing left to add.
-      markdown = null;
+      markdown = composeFinal("", reasoning, result.toolCount, result.elapsedMs, this.t, result.reasoningMs);
     } else {
       markdown = `_${this.t("noText")}_`;
     }

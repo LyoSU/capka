@@ -531,7 +531,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Show a "Thinking…" block immediately — before the model emits its first
     // token — so the channel reacts at once; reasoning text then streams into it.
     currentStatus = { kind: "thinking" };
-    sink.push("", currentStatus);
+    sink.push("", "", currentStatus);
 
     const hasTools = Object.keys(tools).length > 0;
     // Telegram chats are linear and serialized per chat, so a queued follow-up
@@ -657,27 +657,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       else parts.push({ type: "reasoning", text: delta });
     };
 
-    // Live-bubble delivery (Telegram): each answer run becomes its own bubble,
-    // committed the moment a tool/reasoning step ends it. `lastSealedIndex` is the
-    // index of the last `parts` entry already sent as a bubble.
-    let lastSealedIndex = -1;
-    const sealTrailingRun = async () => {
-      const i = parts.length - 1;
-      const p = parts[i];
-      if (i !== lastSealedIndex && p && p.type === "text" && p.text.trim()) {
-        lastSealedIndex = i;
-        await sink.seal(p.text);
-      }
-    };
-    // The still-open answer run — only the trailing, unsealed text part (earlier
-    // runs are already committed bubbles). This is what the live draft previews
-    // and what finish() persists as the final bubble.
-    const openSegment = () => {
-      const i = parts.length - 1;
-      const p = parts[i];
-      return i !== lastSealedIndex && p && p.type === "text" ? p.text : "";
-    };
-
     // Batch text deltas: one NOTIFY every ~100ms instead of per token, so a
     // long response is a handful of round-trips, not hundreds. Tool events
     // (rarer) publish immediately and flush any buffered text first to keep
@@ -705,10 +684,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       await flushReasoning();
       await flushText();
-      // Mirror progress to the outbound channel (Telegram): only the OPEN run,
-      // since earlier runs are already committed as their own bubbles. Throttled
-      // + coalesced inside the sink, so calling it on every flush is cheap.
-      sink.push(openSegment(), currentStatus);
+      // Mirror progress to the outbound channel (Telegram): the full answer so
+      // far + the live reasoning, rendered as one animated draft preview.
+      // Throttled + coalesced inside the sink, so calling it on every flush is cheap.
+      sink.push(getFullText(), getReasoning(), currentStatus);
       // Persist progress so a client resuming mid-stream gets a fresh snapshot
       // (throttled inside saveSnapshot). Runs AFTER the flushes above, so the
       // snapshot's streamSeq covers every delta published this tick.
@@ -756,7 +735,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // instead of being appended to the thrown-away text.
     const discardPartial = async () => {
       parts.length = 0;
-      lastSealedIndex = -1;
       textBuf = "";
       reasonBuf = "";
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -778,24 +756,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // Any event means the provider is alive — reset the idle timer.
         watchdog.activity();
         switch (event.type) {
-          case "reasoning-delta": {
-            // Thinking resuming after answer text means that run is done — commit
-            // it as its own bubble before the reasoning block takes over.
-            const li = parts.length - 1;
-            const tp = parts[li];
-            if (li !== lastSealedIndex && tp && tp.type === "text" && tp.text.trim()) {
-              currentStatus = { kind: "thinking", reasoning: getReasoning() };
-              await flushBuffers();
-              await sealTrailingRun();
-            }
+          case "reasoning-delta":
             appendReasoning(event.text);
-            // Carry the live reasoning so the Telegram sink can fill a native
-            // <tg-thinking> block (the web stream uses reasonBuf as before).
-            currentStatus = { kind: "thinking", reasoning: getReasoning() };
+            // Mark the thinking phase; the live reasoning text itself rides
+            // getReasoning() into the sink's <tg-thinking> block (the web stream
+            // uses reasonBuf as before).
+            currentStatus = { kind: "thinking" };
             reasonBuf += event.text;
             scheduleFlush();
             break;
-          }
           case "text-delta":
             // Answer is flowing — clear the transient "thinking/tool" header.
             if (firstTextAt == null && event.text) firstTextAt = Date.now();
@@ -809,13 +778,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // yet. Surface the step at once (a spinner with a generic label) so
             // the user sees what's happening the moment it starts; `tool-call`
             // refines the label once the parsed args arrive. Not persisted — the
-            // `tool-call` part below is the durable record. The narration before
-            // it is a finished run, so seal it now (tool-call then won't re-seal).
+            // `tool-call` part below is the durable record.
             // `event.id` is the toolCallId on this chunk type.
             const step = describeStep(stepsT, event.toolName);
             currentStatus = { kind: "tool", label: step.activeLabel };
             await flushBuffers();
-            await sealTrailingRun();
             await publishTaskEvent(userId, {
               type: "task:tool-input-start", taskId, chatId, messageId: msgId,
               toolCallId: event.id, toolName: event.toolName, seq: ++seq,
@@ -827,9 +794,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             const step = describeStep(stepsT, event.toolName, event.input);
             currentStatus = { kind: "tool", label: step.activeLabel, detail: step.detail };
             await flushBuffers();
-            // The narration before a tool call is a finished run — send it as its
-            // own bubble so the user sees it land before the tool runs.
-            await sealTrailingRun();
             parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
             await publishTaskEvent(userId, {
               type: "task:tool-call", taskId, chatId, messageId: msgId,
@@ -1105,8 +1069,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       ...(streamError ? { error: streamError } : {}),
     });
     await sink.finish({
-      // Only the final, unsealed run — earlier runs already arrived as bubbles.
-      status: finalStatus, text: openSegment(), reasoning: getReasoning(),
+      // The whole answer, persisted as one rich message (no bubble fragmentation).
+      status: finalStatus, text: getFullText(), reasoning: getReasoning(),
       error: failure?.userMessage, errorDetail: failure?.adminDetail,
       isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt, reasoningMs,

@@ -8,34 +8,42 @@ const en = getTranslator("en", "telegram");
 describe("composeDraft", () => {
   it("uses a native <tg-thinking> block while reasoning with no answer yet", () => {
     // No reasoning text yet → localized placeholder.
-    expect(composeDraft("", { kind: "thinking" }, uk)).toEqual({ html: "<tg-thinking>думаю…</tg-thinking>" });
+    expect(composeDraft("", "", { kind: "thinking" }, uk)).toEqual({ html: "<tg-thinking>думаю…</tg-thinking>" });
     // Live reasoning text fills the block.
-    expect(composeDraft("", { kind: "thinking", reasoning: "Зважую варіанти" }, uk)).toEqual({
+    expect(composeDraft("", "Зважую варіанти", { kind: "thinking" }, uk)).toEqual({
       html: "<tg-thinking>Зважую варіанти</tg-thinking>",
     });
-    // HTML-significant chars in reasoning are escaped.
-    expect(composeDraft("", { kind: "thinking", reasoning: "a < b & c" }, uk)).toEqual({
+    // HTML-significant chars in reasoning are escaped (markdown isn't parsed in tg-thinking).
+    expect(composeDraft("", "a < b & c", { kind: "thinking" }, uk)).toEqual({
       html: "<tg-thinking>a &lt; b &amp; c</tg-thinking>",
     });
   });
   it("shows the friendly tool label (and detail) in the thinking block when nothing is written yet", () => {
-    expect(composeDraft("", { kind: "tool", label: "Виконання команди…", detail: "ls -la" }, uk)).toEqual({
+    expect(composeDraft("", "", { kind: "tool", label: "Виконання команди…", detail: "ls -la" }, uk)).toEqual({
       html: "<tg-thinking>🔧 Виконання команди… — ls -la</tg-thinking>",
     });
-    expect(composeDraft("", { kind: "tool", label: "Створення logo.svg…" }, uk)).toEqual({
+    expect(composeDraft("", "", { kind: "tool", label: "Створення logo.svg…" }, uk)).toEqual({
       html: "<tg-thinking>🔧 Створення logo.svg…</tg-thinking>",
     });
   });
-  it("switches to a Markdown status header once answer text is flowing", () => {
-    expect(composeDraft("Привіт", { kind: "thinking", reasoning: "x" }, uk)).toEqual({
-      markdown: "> 💭 _думаю…_\n\nПривіт",
+  it("keeps the live <tg-thinking> block above the answer while it streams (mirrors the final <details>)", () => {
+    // Reasoning rides a tg-thinking block on top; the answer sits outside it, as
+    // markdown. Status is already cleared (answering), but the reasoning persists.
+    expect(composeDraft("Привіт", "Зважую варіанти", undefined, uk)).toEqual({
+      markdown: "<tg-thinking>Зважую варіанти</tg-thinking>\n\nПривіт",
     });
-    expect(composeDraft("partial", { kind: "tool", label: "Виконання команди…" }, uk)).toEqual({
+    // Reasoning is HTML-escaped even when embedded in the markdown field.
+    expect(composeDraft("Hi", "a < b", undefined, uk)).toEqual({
+      markdown: "<tg-thinking>a &lt; b</tg-thinking>\n\nHi",
+    });
+  });
+  it("shows a `> 🔧` blockquote above the answer while a tool runs", () => {
+    expect(composeDraft("partial", "", { kind: "tool", label: "Виконання команди…" }, uk)).toEqual({
       markdown: "> 🔧 Виконання команди…\n\npartial",
     });
   });
-  it("shows just the answer once a status clears (answering)", () => {
-    expect(composeDraft("the answer", undefined, uk)).toEqual({ markdown: "the answer" });
+  it("shows just the answer when there's no reasoning and no active step", () => {
+    expect(composeDraft("the answer", "", undefined, uk)).toEqual({ markdown: "the answer" });
   });
 });
 
@@ -125,21 +133,21 @@ describe("TelegramSink streaming", () => {
 
   it("coalesces a burst of pushes into a single draft with the latest text", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 42, locale: "uk" });
-    sink.push("a", { kind: "thinking" });
-    sink.push("ab", { kind: "thinking" });
-    sink.push("abc", undefined);
+    sink.push("a", "", { kind: "thinking" });
+    sink.push("ab", "", { kind: "thinking" });
+    sink.push("abc", "", undefined);
 
     await vi.advanceTimersByTimeAsync(900);
 
     expect(api.sendRichMessageDraft).toHaveBeenCalledTimes(1);
     const [chatId, , richMessage] = api.sendRichMessageDraft.mock.calls[0];
     expect(chatId).toBe(42);
-    expect(richMessage.markdown).toBe("abc"); // latest, status cleared
+    expect(richMessage.markdown).toBe("abc"); // latest, no reasoning, status cleared
   });
 
   it("persists the final answer via sendRichMessage and cancels pending drafts", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 7, locale: "uk" });
-    sink.push("draft text", { kind: "thinking" });
+    sink.push("draft text", "", { kind: "thinking" });
     await sink.finish({ status: "completed", text: "final answer", toolCount: 1, elapsedMs: 3000 });
 
     // The pending draft timer must not fire after finish.
@@ -154,7 +162,7 @@ describe("TelegramSink streaming", () => {
 
   it("kills the draft keepalive permanently once finished (no orphaned re-sends)", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 21, locale: "uk" });
-    sink.push("partial", { kind: "thinking" });
+    sink.push("partial", "", { kind: "thinking" });
     await vi.advanceTimersByTimeAsync(900); // first draft flushes → arms the keepalive
     expect(api.sendRichMessageDraft).toHaveBeenCalledTimes(1);
 
@@ -190,20 +198,6 @@ describe("TelegramSink streaming", () => {
     expect(api.sendRichMessage).not.toHaveBeenCalled();
   });
 
-  it("seal commits a trimmed intermediate bubble, silently", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 11, locale: "uk" });
-    await sink.seal("  Готую дані.  ");
-    expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
-    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("Готую дані.");
-    expect(api.sendRichMessage.mock.calls[0][2]).toEqual({ disable_notification: true });
-  });
-
-  it("seal ignores empty text", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 11 });
-    await sink.seal("   ");
-    expect(api.sendRichMessage).not.toHaveBeenCalled();
-  });
-
   it("finish caps a tools-only reply with a notifying footer", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 12, locale: "uk" });
     await sink.finish({ status: "completed", text: "", toolCount: 3, elapsedMs: 5000 });
@@ -211,12 +205,17 @@ describe("TelegramSink streaming", () => {
     expect(api.sendRichMessage.mock.calls[0][2]).toBeUndefined(); // final pings
   });
 
-  it("finish adds nothing when the reply was already delivered as bubbles", async () => {
+  it("persists the whole answer (reasoning folded into <details>) as one final message", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 13, locale: "uk" });
-    await sink.seal("Крок 1");
-    api.sendRichMessage.mockClear();
-    await sink.finish({ status: "completed", text: "", toolCount: 0, elapsedMs: 1000 });
-    expect(api.sendRichMessage).not.toHaveBeenCalled();
+    sink.push("Готово.", "Зважую варіанти", undefined);
+    await sink.finish({
+      status: "completed", text: "Готово.", reasoning: "Зважую варіанти",
+      toolCount: 0, elapsedMs: 6000, reasoningMs: 6000,
+    });
+    expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe(
+      "<details><summary>💭 Розмірковування протягом 6s</summary>\n\nЗважую варіанти\n\n</details>\n\nГотово.",
+    );
   });
 
   it("finish falls back to a no-text note when nothing was produced", async () => {
