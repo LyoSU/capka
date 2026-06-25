@@ -31,6 +31,7 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { deriveContextFill } from "@/lib/chat/context/fill";
 import { useComposerAttachments } from "@/components/chat/use-composer-attachments";
 import { useChatDraft } from "@/components/chat/use-chat-draft";
+import { useChatQueue } from "@/components/chat/use-chat-queue";
 import type { FileRef } from "@/lib/constants";
 import { FileDropZone } from "@/components/chat/file-drop-zone";
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -298,9 +299,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // Messages typed while a reply is streaming wait here (shown above the
   // composer, each cancellable) and are dispatched one-by-one as the chat frees
   // up — held client-side so they can be edited/removed before they're sent.
-  // Attachments are already-uploaded refs (eager upload), so a queued turn just
-  // carries its refs.
-  const [queued, setQueued] = useState<{ id: string; text: string; refs: FileRef[] }[]>([]);
+  // Persisted per-chat to localStorage so the queue survives the `key={chatId}`
+  // remount on a chat switch (the in-memory version was dropped on the floor).
+  const { queued, setQueued } = useChatQueue(chatId);
   const dispatchingRef = useRef(false);
 
   const send = async (text: string, refs: FileRef[]) => {
