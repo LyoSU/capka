@@ -98,11 +98,11 @@
      soft tinted surface + legible warm text, so an error reads as honest, not
      as a fire alarm — and the body stays `--foreground`, never all-red. Warmed
      toward the palette's hue rather than a pure primary red. */
-  --destructive-surface: oklch(0.95 0.022 25);
-  --destructive-border: oklch(0.85 0.06 25);
+  --destructive-surface: oklch(0.945 0.04 22);
+  --destructive-border: oklch(0.74 0.13 24);
   --destructive-text: oklch(0.505 0.17 25);
-  --warning-surface: oklch(0.955 0.045 82);
-  --warning-border: oklch(0.85 0.085 82);
+  --warning-surface: oklch(0.95 0.065 80);
+  --warning-border: oklch(0.74 0.13 78);
   --warning-text: oklch(0.50 0.085 70);
   --success: oklch(0.52 0.15 150);
   --success-foreground: oklch(0.985 0 0);
