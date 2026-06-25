@@ -1,4 +1,4 @@
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireActive } from "@/lib/auth";
 import { membersCanInstallPlugins } from "@/lib/settings";
 import { getCatalog, listMarketplaces } from "@/lib/marketplace/service";
 
@@ -7,7 +7,7 @@ import { getCatalog, listMarketplaces } from "@/lib/marketplace/service";
  *  → the marketplace list; with one → that marketplace's catalog (installed flags
  *  scoped to the viewer). */
 export const GET = apiHandler(async (req: Request) => {
-  const { userId, role } = await requireSession();
+  const { userId, role } = await requireActive();
   if (role !== "admin" && !(await membersCanInstallPlugins())) {
     return Response.json({ error: "Not allowed" }, { status: 403 });
   }

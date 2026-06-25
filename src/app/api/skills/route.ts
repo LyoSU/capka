@@ -1,4 +1,4 @@
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireSession, requireActive } from "@/lib/auth";
 import { ingestSkillZip, MAX_SKILL_ZIP_BYTES, SkillZipError } from "@/lib/skills/ingest-zip";
 import { deleteSkill, getSkillMeta, listManagedSkills, setSkillEnabled } from "@/lib/skills/service";
 import { setMuted } from "@/lib/muted-resources";
@@ -26,7 +26,8 @@ export const GET = apiHandler(async () => {
 
 /** Upload a personal (user-scope) skill .zip. */
 export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireSession();
+  // requireActive: a not-yet-approved account must not ingest third-party code.
+  const { userId } = await requireActive();
   const form = await req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) return Response.json({ error: "Missing file" }, { status: 400 });

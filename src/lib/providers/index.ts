@@ -5,6 +5,22 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
 import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
+import { createGuardedFetch } from "@/lib/net/ssrf";
+
+/**
+ * A user-supplied custom base URL is an SSRF surface: even after the up-front
+ * assertSafeProviderConfig check, the host could DNS-rebind or 3xx-redirect to a
+ * cloud-metadata address between that check and the SDK's own fetch. Route the
+ * SDK through createGuardedFetch so EVERY request (and redirect hop) is
+ * re-validated with manual redirects. No timeout — inference streams for minutes,
+ * and link-local/metadata are blocked regardless of the blockPrivate flag (false
+ * here so a self-hosted gateway on a private/loopback address still works).
+ * First-party endpoints (no custom baseUrl) keep the default fetch.
+ */
+function guardedFetchFor(baseUrl?: string): typeof fetch | undefined {
+  if (!baseUrl) return undefined;
+  return createGuardedFetch({ blockPrivate: false });
+}
 
 // Provider metadata + model-id helpers live in the dependency-free registry so
 // client bundles don't pull these AI SDKs. Re-exported here for back-compat.
@@ -67,13 +83,13 @@ export function getModel(
       // providerOptions namespace; the runner's reasoningOptions() keys off the
       // very same provider string, so the reasoning knob actually lands.
       const baseURL = config?.baseUrl || PROVIDER_META[provider as ProviderName].defaultBaseUrl || "";
-      const p = createOpenAICompatible({ name: provider, baseURL, apiKey: config?.apiKey });
+      const p = createOpenAICompatible({ name: provider, baseURL, apiKey: config?.apiKey, fetch: guardedFetchFor(config?.baseUrl) });
       // An endpoint that splits reasoning into `reasoning_content` is handled by the
       // provider above; one that doesn't inlines `<think>` in the text — extract it.
       return withReasoningExtraction(p(modelId));
     }
     case "openai": {
-      const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
+      const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl, fetch: guardedFetchFor(config?.baseUrl) });
       // Which wire API to drive the model over. The default `p(modelId)` targets
       // the Responses API (/responses) — but OpenAI-COMPATIBLE gateways (LiteLLM,
       // vLLM, LM Studio, a proxy) speak /chat/completions only, and even when a
@@ -88,7 +104,7 @@ export function getModel(
       return config?.baseUrl ? p.chat(modelId) : p(modelId);
     }
     case "anthropic": {
-      const p = createAnthropic({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
+      const p = createAnthropic({ apiKey: config?.apiKey, baseURL: config?.baseUrl, fetch: guardedFetchFor(config?.baseUrl) });
       return p(modelId);
     }
     case "openrouter": {
@@ -103,7 +119,7 @@ export function getModel(
       return p(modelId);
     }
     case "ollama": {
-      const p = createOllama({ baseURL: config?.baseUrl || "http://localhost:11434/api" });
+      const p = createOllama({ baseURL: config?.baseUrl || "http://localhost:11434/api", fetch: guardedFetchFor(config?.baseUrl) });
       // Local open-weights reasoning models (DeepSeek-R1, Qwen QwQ, …) emit their
       // chain of thought inline as `<think>…</think>` — pull it into reasoning.
       return withReasoningExtraction(p(modelId));

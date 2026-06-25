@@ -1,4 +1,4 @@
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireActive } from "@/lib/auth";
 import { membersCanInstallPlugins } from "@/lib/settings";
 import { installPlugin } from "@/lib/marketplace/install";
 import { hasSystemInstall } from "@/lib/marketplace/service";
@@ -8,7 +8,7 @@ import { audit } from "@/lib/governance/audit";
  *  (system); members install personally (user-scope) — and only when the admin has
  *  enabled member installs. */
 export const POST = apiHandler(async (req: Request) => {
-  const { userId, role } = await requireSession();
+  const { userId, role } = await requireActive();
   const isAdmin = role === "admin";
   if (!isAdmin && !(await membersCanInstallPlugins())) {
     return Response.json({ error: "Plugin installs are admin-only on this instance." }, { status: 403 });

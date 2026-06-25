@@ -1094,10 +1094,11 @@ export function ModelPicker({
           ) : (
             <span className="flex items-baseline gap-1.5 min-w-0">
               <span className={`truncate max-w-52 font-medium ${modelMissing ? "text-muted-foreground" : "text-foreground"}`}>{displayName || placeholderText}</span>
-              {/* The model's provider is gone — an amber dot flags it without
-                  hiding which model this used to be (the name stays). */}
+              {/* The model's provider is gone — a warning dot flags it without
+                  hiding which model this used to be (the name stays). Uses the
+                  semantic warning token so it matches the unavailable banner. */}
               {modelMissing && (
-                <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-amber-500" aria-label={t("unavailable")} />
+                <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-warning-text" aria-label={t("unavailable")} />
               )}
               {currentModel && currentModel.context > 0 && (
                 <span className="text-xs text-muted-foreground tabular-nums hidden md:inline" title={t("context")}>{formatContext(currentModel.context)}</span>
