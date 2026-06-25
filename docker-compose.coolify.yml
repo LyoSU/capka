@@ -76,8 +76,11 @@ services:
       # was unreliable). Only set HOST_DATA_ROOT to override the auto-detected value.
       # Pinned ghcr image; controller pulls it on demand (ensureRuntime).
       - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
-      # Keep test resource usage modest on a shared, RAM-tight host.
-      - SANDBOX_MEMORY_MB=384
+      # Per-sandbox RAM cap. NOTE: the /tmp + /opt/mcp tmpfs sizes are charged
+      # against this same cgroup, so the real budget for processes is
+      # SANDBOX_MEMORY_MB minus those. 1 GB leaves ample headroom; override down
+      # on a RAM-tight host.
+      - SANDBOX_MEMORY_MB=${SANDBOX_MEMORY_MB:-1024}
       - MAX_SESSIONS_PER_USER=2
       # How long a sandbox CONTAINER may sit idle before it's stopped. Only the
       # compute is reclaimed — the workspace (files + row) stays and is revived on
