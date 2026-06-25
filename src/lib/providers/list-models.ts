@@ -78,13 +78,14 @@ async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
 
 /**
  * SSRF guard to run before ANY live request to a provider — model listing, the
- * "Test" button, AND real inference. Only user-supplied-URL providers
- * (litellm/ollama) carry a base URL worth checking; OpenAI/Anthropic/OpenRouter
- * use fixed public hosts. Resolves DNS and blocks link-local/metadata (always)
- * plus private ranges when the admin opted into the stricter policy.
+ * "Test" button, AND real inference. Any user-supplied base URL is the vector,
+ * regardless of provider (LiteLLM/Ollama, but also a custom OpenAI/Anthropic
+ * endpoint): a config with no baseUrl uses a fixed public host and is exempt.
+ * Resolves DNS and blocks link-local/metadata (always) plus private ranges when
+ * the admin opted into the stricter policy.
  */
-export async function assertSafeProviderConfig(provider: string, baseUrl?: string | null): Promise<void> {
-  if ((provider !== "litellm" && provider !== "ollama") || !baseUrl) return;
+export async function assertSafeProviderConfig(_provider: string, baseUrl?: string | null): Promise<void> {
+  if (!baseUrl) return;
   await assertSafeUrl(baseUrl, await getBlockPrivateProviderUrls());
 }
 
@@ -262,7 +263,17 @@ async function listOpenAICompatible(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function listAnthropic(apiKey: string): Promise<ModelInfo[]> {
+async function listAnthropic(
+  apiKey: string,
+  baseUrl?: string,
+  blockPrivate = false,
+): Promise<ModelInfo[]> {
+  // A custom endpoint (an Anthropic-compatible aggregator like yunwu.ai) is
+  // reached over the native Messages API at /v1/messages, but its MODEL LISTING
+  // is almost always the OpenAI-shaped /v1/models behind Bearer auth — not
+  // Anthropic's native x-api-key /v1/models. List it like any compatible
+  // endpoint so the picker populates instead of 401-ing against api.anthropic.com.
+  if (baseUrl) return listOpenAICompatible(baseUrl, apiKey, { blockPrivate });
   const raw = (await fetchJson("https://api.anthropic.com/v1/models?limit=100", {
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
   })) as { data?: { id: string; display_name?: string }[] };
@@ -404,8 +415,10 @@ async function listProviderModelsLive(opts: {
 }): Promise<ModelInfo[]> {
   // Only the user-supplied-URL providers need the SSRF policy; OpenRouter is
   // catalog-only and OpenAI/Anthropic use fixed public hosts.
+  // Any user-supplied base URL is the SSRF vector, regardless of provider — so
+  // a custom Anthropic/OpenAI endpoint is policed just like a LiteLLM/Ollama one.
   const blockPrivate =
-    opts.provider === "litellm" || opts.provider === "ollama"
+    opts.provider === "litellm" || opts.provider === "ollama" || opts.baseUrl
       ? await getBlockPrivateProviderUrls()
       : false;
 
@@ -435,7 +448,7 @@ async function listProviderModelsLive(opts: {
       return listOpenAICompatible("https://api.openai.com/v1", opts.apiKey, { filterChat: true });
     case "anthropic":
       if (!opts.apiKey) return [];
-      return listAnthropic(opts.apiKey);
+      return listAnthropic(opts.apiKey, opts.baseUrl, blockPrivate);
     case "google":
       if (!opts.apiKey) return [];
       return listGoogle(opts.apiKey);
