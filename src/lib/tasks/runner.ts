@@ -31,7 +31,8 @@ import { contextManagementOptions, mergeProviderOptions } from "@/lib/chat/conte
 import { stepSettings } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
-import { recordUsage } from "@/lib/usage";
+import { recordUsage, reconcileUsage } from "@/lib/usage";
+import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
@@ -1168,10 +1169,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    // Persist usage to the usage table (analytics). Reuses the split computed
-    // above; recordUsage never throws on its own.
+    // Settle the turn's budget hold to the real figures (or insert if there was
+    // no hold). Reuses the split computed above; never throws on its own.
     if (usageMeta) {
-      await recordUsage({
+      await reconcileUsage({
         taskId, messageId: msgId, userId, provider, model: modelId, onSharedKey: isShared,
         // Fold in the spend of any retried-then-discarded attempts (billing
         // truth), even though the (i) popover above shows only the final one.
@@ -1335,6 +1336,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   } finally {
     clearTimeout(deadline);
     clearInterval(monitor);
+    // Self-heal the budget hold: a completed turn already reconciled it to the
+    // real cost above (so this deletes nothing), while a failed/cancelled turn
+    // leaves it pending — release it here so a stuck estimate never inflates the
+    // budget. A hard process crash skips this; reconcileZombies releases those.
+    await releaseHold(taskId).catch(() => {});
     await closeMcp?.().catch(() => {});
   }
 }

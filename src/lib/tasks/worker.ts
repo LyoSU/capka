@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { models } from "@/lib/db/schema";
 import { realtime } from "@/lib/realtime";
 import { claimNextTask, reconcileZombies, INTERRUPTED_MESSAGE } from "@/lib/tasks/queue";
+import { releaseHold } from "@/lib/billing/limits";
 import { runAgentTask } from "@/lib/tasks/runner";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { syncModelCatalog } from "@/lib/models/catalog";
@@ -65,6 +66,9 @@ async function reconcile(): Promise<void> {
   try {
     const dead = await reconcileZombies();
     for (const t of dead) {
+      // A hard crash skipped the runner's finally, so its budget hold is still
+      // pending — release it here so a dead turn never inflates the budget.
+      await releaseHold(t.id);
       await publishTaskEvent(t.user_id, {
         type: "task:finish", taskId: t.id, chatId: t.chat_id, status: "failed",
         error: INTERRUPTED_MESSAGE,

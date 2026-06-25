@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { chats, messages, projects } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
-import { checkBudget } from "@/lib/billing/limits";
+import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { BudgetExceededError, ForbiddenError } from "@/lib/errors";
 import { enqueueTask } from "@/lib/tasks/queue";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -68,14 +68,23 @@ export const POST = apiHandler(async (req: Request) => {
 
   // Validate the provider/model up front so the user gets immediate feedback
   // instead of a task that fails in the background. The worker re-resolves it.
-  const { isShared } = await resolveUserModelInfo(userId, effectiveModel);
+  const { isShared, modelId: resolvedModelId, provider: resolvedProvider } = await resolveUserModelInfo(userId, effectiveModel);
 
-  // Budget gate: block NEW shared-key requests once a spend window is exhausted.
-  // Already-running tasks finish (this only guards new enqueues); own-key users
-  // are never throttled.
-  const budget = await checkBudget(userId, isShared);
-  if (!budget.allowed) {
-    throw new BudgetExceededError(budget.window ?? "d30");
+  // Budget gate: reserve an estimated hold for this turn up front, atomically.
+  // The turn's own cost is counted before it runs (no single-turn free pass) and
+  // concurrent turns across chats reserve against each other (no TOCTOU). Own-key
+  // users are never gated; a shared-key turn on an unpriceable model fails closed.
+  const taskId = nanoid();
+  const reservation = await reserveBudget({
+    userId, taskId, onSharedKey: isShared, modelId: resolvedModelId, provider: resolvedProvider,
+  });
+  if (!reservation.allowed) {
+    if (reservation.reason === "unpriced") {
+      throw new ForbiddenError(
+        "This model isn't priced in the catalog, so it can't run on the shared key. Ask an admin to sync models, or pick another model.",
+      );
+    }
+    throw new BudgetExceededError(reservation.window ?? "d30");
   }
 
   if (!existingChat) {
@@ -110,6 +119,7 @@ export const POST = apiHandler(async (req: Request) => {
         .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
         .limit(1);
       if (!parent) {
+        await releaseHold(taskId); // this turn won't run — don't leave its hold reserved
         return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
       }
     }
@@ -152,10 +162,16 @@ export const POST = apiHandler(async (req: Request) => {
   // persisted folds into that turn instead of spawning a parallel one. The
   // returned id is the turn that will actually answer, so the client's stop
   // button targets a real, live turn rather than a phantom.
-  const { id: taskId } = await enqueueTask({ id: nanoid(), chatId, userId, payload });
+  const { id: turnId, created } = await enqueueTask({ id: taskId, chatId, userId, payload });
+  if (!created) {
+    // Folded into an existing turn (or the rare claimed-incumbent race) — our
+    // reserved turn won't run, so release its hold. The turn that actually
+    // answers carries its own hold and reconciles to the real cost.
+    await releaseHold(taskId);
+  }
 
   // Return immediately — client syncs via SSE
-  return Response.json({ taskId, chatId });
+  return Response.json({ taskId: turnId, chatId });
 });
 
 export const GET = apiHandler(async (req: Request) => {

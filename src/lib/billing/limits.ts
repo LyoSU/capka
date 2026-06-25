@@ -1,6 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { tiers, users, usage } from "@/lib/db/schema";
+import { computeCost } from "@/lib/pricing";
+import { getModelPrice } from "@/lib/models/catalog";
+import { log } from "@/lib/log";
 
 /**
  * Per-user spend budgets on the SHARED (admin) provider key. Own-key users pay
@@ -130,4 +134,107 @@ export async function checkBudget(
   if (!onSharedKey) return { allowed: true, window: null };
   const status = await getLimitStatus(userId);
   return { allowed: !status.blocked, window: status.blockedWindow };
+}
+
+// A typical turn's token shape, used only to size the pre-run hold. The
+// reconcile at finalize replaces the estimate with the real figures, so this
+// just needs to be a sensible non-zero reservation — big enough that concurrent
+// turns meaningfully reserve against each other, small enough not to lock out a
+// modest cap on the very first turn.
+const ESTIMATE_INPUT_TOKENS = 20_000;
+const ESTIMATE_OUTPUT_TOKENS = 4_000;
+
+/**
+ * Estimated USD for one turn on `modelId`. Returns null when the model has no
+ * known price — the caller fails closed on a shared key, since an unpriceable
+ * turn can be neither bounded nor billed.
+ */
+async function estimateTurnCost(modelId: string): Promise<number | null> {
+  const price = await getModelPrice(modelId);
+  if (!price) return null;
+  return computeCost(price, { inputTokens: ESTIMATE_INPUT_TOKENS, outputTokens: ESTIMATE_OUTPUT_TOKENS });
+}
+
+export type ReserveReason = "budget" | "unpriced";
+
+/**
+ * Atomically reserve budget for a turn BEFORE it runs: under a per-user lock,
+ * sum committed spend + outstanding holds across the windows, refuse if any cap
+ * would be exceeded, otherwise write a pending hold carrying the estimate. The
+ * runner reconciles that hold to the real cost at finalize, or it's released if
+ * the turn never runs.
+ *
+ * Replaces the old check-then-spend gate: a turn's own estimated cost is counted
+ * before it runs (no single-turn free pass) and concurrent turns across chats
+ * reserve against each other's holds (no TOCTOU overshoot).
+ */
+export async function reserveBudget(input: {
+  userId: string;
+  taskId: string;
+  onSharedKey: boolean;
+  modelId?: string;
+  provider?: string;
+}): Promise<{ allowed: boolean; window: WindowKey | null; reason: ReserveReason | null }> {
+  // Own-key turns pay their own provider — never gated, never held.
+  if (!input.onSharedKey) return { allowed: true, window: null, reason: null };
+
+  const estimate = input.modelId ? await estimateTurnCost(input.modelId) : null;
+  if (estimate === null) return { allowed: false, window: null, reason: "unpriced" };
+
+  const tier = await getTierForUser(input.userId);
+
+  return await db.transaction(async (tx) => {
+    // Serialize this user's budget ops so concurrent reserves see each other's
+    // just-written holds. Transaction-scoped: released on commit/rollback.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${input.userId}))`);
+
+    const [row] = await tx
+      .select({
+        h5: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.createdAt} >= now() - interval '5 hours'), 0)`,
+        d7: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.createdAt} >= now() - interval '7 days'), 0)`,
+        d30: sql<string>`coalesce(sum(${usage.costUsd}), 0)`,
+      })
+      .from(usage)
+      .where(
+        and(
+          eq(usage.userId, input.userId),
+          eq(usage.onSharedKey, true),
+          sql`${usage.createdAt} >= now() - interval '30 days'`,
+        ),
+      );
+
+    const spend: Record<WindowKey, number> = {
+      h5: Number(row?.h5 ?? 0),
+      d7: Number(row?.d7 ?? 0),
+      d30: Number(row?.d30 ?? 0),
+    };
+
+    for (const w of ORDER) {
+      const cap = capFor(tier, w);
+      if (cap !== null && spend[w] + estimate >= cap) {
+        return { allowed: false, window: w, reason: "budget" as const };
+      }
+    }
+
+    await tx.insert(usage).values({
+      id: nanoid(),
+      taskId: input.taskId,
+      userId: input.userId,
+      provider: input.provider ?? "shared",
+      model: input.modelId ?? "",
+      costUsd: String(estimate),
+      onSharedKey: true,
+      pending: true,
+    });
+    return { allowed: true, window: null, reason: null };
+  });
+}
+
+/** Release a turn's outstanding hold — it folded into another turn or won't run. */
+export async function releaseHold(taskId: string): Promise<void> {
+  try {
+    await db.delete(usage).where(and(eq(usage.taskId, taskId), eq(usage.pending, true)));
+  } catch (err) {
+    log.error("hold release failed (non-fatal)", { taskId, err: String(err) });
+  }
 }

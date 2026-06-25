@@ -7,8 +7,8 @@ import { telegramLinks, linkCodes, chats, messages, users, accounts } from "@/li
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { enqueueTask } from "@/lib/tasks/queue";
-import { resolveProviderConfig } from "@/lib/providers/resolve";
-import { checkBudget } from "@/lib/billing/limits";
+import { resolveUserModelInfo } from "@/lib/providers/resolve";
+import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { loadActivePath } from "@/lib/chat/tree";
 import { take } from "@/lib/rate-limit";
@@ -210,21 +210,30 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     return;
   }
 
-  // Same shared-key budget gate as the web enqueue path — a user must not be able
-  // to sidestep their spending limit by switching to Telegram.
-  const config = await resolveProviderConfig(link.userId);
-  const budget = await checkBudget(link.userId, config?.isShared ?? false);
-  if (!budget.allowed) {
-    await reply(ctx, "budgetReached");
-    return;
-  }
-
   // Route into the link's pinned Telegram chat — NOT "whatever the user last
   // touched on the web", which would mix Telegram replies into web/project
   // chats and lose project context.
   const title = (text || files[0]?.fileName || "Telegram Chat").slice(0, 100);
   const chat = await resolveActiveChat(link, title);
   const sessionKey = workspaceSessionKey({ id: chat.id, projectId: chat.projectId ?? null });
+
+  // Same shared-key budget gate as the web path — a user must not sidestep their
+  // limit via Telegram. Reserve an estimated hold up front (atomic, per-user); the
+  // runner reconciles it to the real cost, or it's released if the turn folds.
+  // Gated before any file download so a blocked user wastes no work.
+  const tgTaskId = nanoid();
+  const { isShared: tgShared, modelId: tgModelId, provider: tgProvider } = await resolveUserModelInfo(link.userId, chat.model ?? undefined);
+  const reservation = await reserveBudget({
+    userId: link.userId, taskId: tgTaskId, onSharedKey: tgShared, modelId: tgModelId, provider: tgProvider,
+  });
+  if (!reservation.allowed) {
+    if (reservation.reason === "unpriced") {
+      await ctx.reply("This model isn't priced, so it can't run on the shared key — please ask an admin to sync models or pick another model.").catch(() => {});
+    } else {
+      await reply(ctx, "budgetReached");
+    }
+    return;
+  }
 
   // Pull each Telegram file into the user's sandbox so the assistant can read,
   // run or analyze it — passed through as attachedFiles, exactly like the web.
@@ -280,7 +289,10 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
       attachedFiles: attachedFiles.length ? attachedFiles : undefined,
       origin: { platform: "telegram", telegramChatId: ctx.chat!.id, locale: ctx.from?.language_code },
     };
-    await enqueueTask({ id: nanoid(), chatId: chat.id, userId: link.userId, payload });
+    const { created } = await enqueueTask({ id: tgTaskId, chatId: chat.id, userId: link.userId, payload });
+    // Folded into an existing turn — our reserved turn won't run, so release its
+    // hold; the turn that answers carries its own hold.
+    if (!created) await releaseHold(tgTaskId);
     await ctx.replyWithChatAction("typing").catch(() => {});
   } catch (error: unknown) {
     await reply(ctx, "startError", { values: { error: error instanceof Error ? error.message : "Unknown error" } });
