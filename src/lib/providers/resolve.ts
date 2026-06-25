@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
 import { getMasterKey, sharedKeyEnabled, getModelMaxPrice } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
-import { getModel, parseModelId, splitModelRef, providerLabel, isProviderName } from "@/lib/providers";
+import { getModel, parseModelId, splitModelRef, providerLabel, isProviderName, type ApiStyle } from "@/lib/providers";
 import { assertSafeProviderConfig, getModelCompletionPriceUsdPerM, getModelInputModalities } from "@/lib/providers/list-models";
 import { ValidationError } from "@/lib/errors";
 
@@ -187,6 +187,7 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
   const model = getModel(config.provider, modelId, {
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
+    apiStyle: (config.apiStyle as ApiStyle | null) ?? undefined,
   });
   // Per-model native input modalities from the synced catalog: OpenRouter's
   // `architecture.input_modalities` and LiteLLM's `supported_modalities` +

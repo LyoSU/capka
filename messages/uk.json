@@ -704,7 +704,13 @@
       "resyncModelsHint": "Оновити список моделей і метадані (ціни, контекст, можливості) з OpenRouter. Виконується автоматично кожні 12 год — натисніть, щоб підтягнути зміни зараз.",
       "resyncModelsButton": "Синхронізувати зараз",
       "resyncDone": "Каталог оновлено — {count} моделей з OpenRouter.",
-      "resyncFailed": "Не вдалося оновити каталог моделей"
+      "resyncFailed": "Не вдалося оновити каталог моделей",
+      "apiType": "Тип API",
+      "apiTypeHint": "Як спілкуватися з моделлю. «Автоматично» використовує Responses API для OpenAI і Chat Completions для кастомного ендпоінта. Оберіть Chat Completions, якщо інструменти не працюють на OpenAI-сумісному шлюзі.",
+      "apiTypeAuto": "Автоматично",
+      "apiTypeChat": "Chat Completions",
+      "apiTypeResponses": "Responses API",
+      "baseUrlOptional": "Базовий URL (необов'язково)"
     },
     "usage": {
       "title": "Витрати",

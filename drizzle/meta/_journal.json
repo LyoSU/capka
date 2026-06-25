@@ -211,6 +211,13 @@
       "when": 1782403200013,
       "tag": "0029_one_queued_turn_per_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1782403200014,
+      "tag": "0030_add_provider_api_style",
+      "breakpoints": true
     }
   ]
 }

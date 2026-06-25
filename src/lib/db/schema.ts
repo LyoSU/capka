@@ -88,6 +88,12 @@ export const providerConfigs = pgTable("provider_configs", {
   // friendly name + brand glyph instead of an opaque host.
   label: text("label"),
   iconSlug: text("icon_slug"),
+  // OpenAI transport: which wire API to drive the model over. null = "auto"
+  // (real OpenAI → Responses API; a custom baseUrl → Chat Completions, since
+  // OpenAI-compatible gateways implement /chat/completions only). "chat" forces
+  // Chat Completions, "responses" forces the Responses API. Only the `openai`
+  // provider reads this; every other provider has a single correct transport.
+  apiStyle: text("api_style"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_provider_configs_user_id").on(table.userId)]);

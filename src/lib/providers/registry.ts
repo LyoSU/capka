@@ -49,6 +49,10 @@ export interface ProviderMeta {
   requiresKey: boolean;
   /** Provider is reached via a base URL the user must supply. */
   requiresBaseUrl: boolean;
+  /** Base URL is OPTIONAL — first-party by default, but the user may point it at
+   *  a custom/compatible endpoint (e.g. OpenAI behind a gateway). The form shows
+   *  the field; an empty value keeps the provider's own default. */
+  optionalBaseUrl?: boolean;
   /** Sensible default for the base URL field. */
   defaultBaseUrl?: string;
   /** Placeholder for the base URL field. */
@@ -108,10 +112,14 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
   },
   openai: {
     label: "OpenAI",
-    blurb: "Connect directly to OpenAI.",
+    blurb: "Connect directly to OpenAI, or to an OpenAI-compatible endpoint.",
     iconSlug: "openai",
     requiresKey: true,
     requiresBaseUrl: false,
+    // Defaults to api.openai.com, but may be pointed at a compatible gateway —
+    // pair with the API-type selector to force Chat Completions there.
+    optionalBaseUrl: true,
+    baseUrlPlaceholder: "https://api.openai.com/v1",
     hasCatalog: false,
     // Image + PDF are safe across the chat models. Audio is only on the
     // gpt-4o-audio family, and we can't tell per model here (no audio retry), so

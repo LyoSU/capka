@@ -6,7 +6,7 @@ import { assertSafeProviderConfig } from "@/lib/providers/list-models";
 export const POST = apiHandler(async (req: Request) => {
   await requireRole("admin", "user");
 
-  const { provider, apiKey, modelId, baseUrl } = await req.json();
+  const { provider, apiKey, modelId, baseUrl, apiStyle } = await req.json();
   if (!provider || !modelId) {
     return Response.json({ error: "Missing provider or modelId" }, { status: 400 });
   }
@@ -19,6 +19,9 @@ export const POST = apiHandler(async (req: Request) => {
     const model = getModel(provider, modelId, {
       apiKey: apiKey || undefined,
       baseUrl: baseUrl || undefined,
+      // Test over the very transport the saved config will use, so a "tools work?"
+      // check isn't a false positive on a different API.
+      apiStyle: apiStyle || undefined,
     });
 
     const { text } = await generateText({ model, prompt: "Say ok", maxOutputTokens: 20 });

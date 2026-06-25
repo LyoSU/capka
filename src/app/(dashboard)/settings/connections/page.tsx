@@ -33,6 +33,7 @@ interface ProviderConfig {
   shared: boolean | null;
   label: string | null;
   iconSlug: string | null;
+  apiStyle: string | null;
 }
 
 /** A compact grid of brand glyphs for naming a custom connection. The first
@@ -94,6 +95,8 @@ export default function ConnectionsPage() {
   const [iconSlug, setIconSlug] = useState<string | null>(null);
   const [formShared, setFormShared] = useState(true);
   const [showKey, setShowKey] = useState(false);
+  // OpenAI wire transport for the new connection. "auto" persists as null.
+  const [apiStyle, setApiStyle] = useState("auto");
 
   const meta = PROVIDER_META[provider];
 
@@ -103,6 +106,7 @@ export default function ConnectionsPage() {
     setDefaultModel("");
     setLabel("");
     setIconSlug(null);
+    setApiStyle("auto");
     setBaseUrl(PROVIDER_META[next].defaultBaseUrl ?? "");
   }
 
@@ -130,6 +134,7 @@ export default function ConnectionsPage() {
     setDefaultModel("");
     setLabel("");
     setIconSlug(null);
+    setApiStyle("auto");
     setFormShared(true);
     setShowForm(false);
   };
@@ -183,6 +188,20 @@ export default function ConnectionsPage() {
     }
   };
 
+  // Switch an existing OpenAI connection's wire transport. "auto" persists as
+  // null; the change takes effect on the next turn (model is re-resolved each run).
+  const handleUpdateApiStyle = async (id: string, style: string | null) => {
+    const value = !style || style === "auto" ? null : style;
+    setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, apiStyle: value } : c)));
+    const res = await fetch("/api/settings/providers", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, apiStyle: value }),
+    });
+    if (res.ok) toast.success(tc("saved"));
+    else toast.error(t("toggleError"));
+  };
+
   const handleUpdateModel = async (id: string, model: string) => {
     const res = await fetch("/api/settings/providers", {
       method: "PUT",
@@ -214,7 +233,16 @@ export default function ConnectionsPage() {
         return;
       }
 
-      const effectiveBaseUrl = meta.requiresBaseUrl ? baseUrl || meta.defaultBaseUrl : undefined;
+      // Required base URL falls back to the provider default; an OPTIONAL one
+      // (OpenAI → compatible gateway) is sent only when the user typed something,
+      // otherwise the SDK's own default endpoint is used.
+      const effectiveBaseUrl = meta.requiresBaseUrl
+        ? baseUrl || meta.defaultBaseUrl
+        : meta.optionalBaseUrl
+          ? baseUrl.trim() || undefined
+          : undefined;
+      // The wire transport only applies to OpenAI; "auto" stays unset.
+      const effectiveApiStyle = provider === "openai" && apiStyle !== "auto" ? apiStyle : undefined;
 
       // Test connection
       const testRes = await fetch("/api/settings/providers/test", {
@@ -225,6 +253,7 @@ export default function ConnectionsPage() {
           apiKey: meta.requiresKey ? apiKey : undefined,
           modelId,
           baseUrl: effectiveBaseUrl,
+          apiStyle: effectiveApiStyle,
         }),
       });
 
@@ -246,6 +275,7 @@ export default function ConnectionsPage() {
           label: meta.requiresBaseUrl ? label : undefined,
           iconSlug: meta.requiresBaseUrl ? iconSlug : undefined,
           shared: isAdmin ? formShared : undefined,
+          apiStyle: effectiveApiStyle,
         }),
       });
 
@@ -397,6 +427,32 @@ export default function ConnectionsPage() {
               />
             </div>
 
+            {/* OpenAI wire transport — the escape hatch when a compatible
+                endpoint drops tools under the default Responses API. */}
+            {c.provider === "openai" && (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">{t("apiType")}</label>
+                <Select
+                  value={c.apiStyle ?? "auto"}
+                  onValueChange={(v) => handleUpdateApiStyle(c.id, v)}
+                  items={{
+                    auto: t("apiTypeAuto"),
+                    chat: t("apiTypeChat"),
+                    responses: t("apiTypeResponses"),
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">{t("apiTypeAuto")}</SelectItem>
+                    <SelectItem value="chat">{t("apiTypeChat")}</SelectItem>
+                    <SelectItem value="responses">{t("apiTypeResponses")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {/* Sharing is an admin-only property: whether this key backs other
                 users on the shared pool, or stays private to the admin. */}
             {isAdmin && (
@@ -514,14 +570,39 @@ export default function ConnectionsPage() {
             </div>
           )}
 
-          {meta.requiresBaseUrl && (
+          {(meta.requiresBaseUrl || meta.optionalBaseUrl) && (
             <div className="space-y-1.5">
-              <label className="text-sm">{t("baseUrl")}</label>
+              <label className="text-sm">{meta.optionalBaseUrl ? t("baseUrlOptional") : t("baseUrl")}</label>
               <Input
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 placeholder={meta.baseUrlPlaceholder}
               />
+            </div>
+          )}
+
+          {provider === "openai" && (
+            <div className="space-y-1.5">
+              <label className="text-sm">{t("apiType")}</label>
+              <Select
+                value={apiStyle}
+                onValueChange={(v) => setApiStyle(v ?? "auto")}
+                items={{
+                  auto: t("apiTypeAuto"),
+                  chat: t("apiTypeChat"),
+                  responses: t("apiTypeResponses"),
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">{t("apiTypeAuto")}</SelectItem>
+                  <SelectItem value="chat">{t("apiTypeChat")}</SelectItem>
+                  <SelectItem value="responses">{t("apiTypeResponses")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{t("apiTypeHint")}</p>
             </div>
           )}
 

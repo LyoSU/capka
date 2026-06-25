@@ -40,10 +40,15 @@ export function withReasoningExtraction(model: WrappableModel): WrappableModel {
   });
 }
 
+/** OpenAI wire transport. "auto" (the default) picks Chat Completions for a
+ *  custom baseUrl and the Responses API for first-party OpenAI; the others
+ *  force one regardless. Only the `openai` provider reads it. */
+export type ApiStyle = "auto" | "chat" | "responses";
+
 export function getModel(
   provider: string,
   modelId: string,
-  config?: { apiKey?: string; baseUrl?: string },
+  config?: { apiKey?: string; baseUrl?: string; apiStyle?: ApiStyle | null },
 ) {
   switch (provider) {
     case "litellm":
@@ -69,13 +74,17 @@ export function getModel(
     }
     case "openai": {
       const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
-      // A custom baseUrl means an OpenAI-COMPATIBLE gateway (LiteLLM, vLLM, LM
-      // Studio, a proxy), which speaks /chat/completions only. The default
-      // `p(modelId)` now targets the Responses API (/responses) — these gateways
-      // don't implement it, and even when proxied the Responses-style tool
-      // serialization differs, so function tools silently never reach the model.
-      // Force the chat model for custom endpoints; keep Responses for first-party
-      // OpenAI (no baseUrl), where it unlocks built-in tools + o-series reasoning.
+      // Which wire API to drive the model over. The default `p(modelId)` targets
+      // the Responses API (/responses) — but OpenAI-COMPATIBLE gateways (LiteLLM,
+      // vLLM, LM Studio, a proxy) speak /chat/completions only, and even when a
+      // proxy forwards /responses the Responses-style tool serialization differs,
+      // so function tools silently never reach the model. The user picks the
+      // transport per connection; "auto" infers it from the baseUrl (a custom
+      // endpoint ⇒ chat, first-party OpenAI ⇒ Responses, which also unlocks
+      // built-in tools + o-series reasoning).
+      const style: ApiStyle = config?.apiStyle ?? "auto";
+      if (style === "chat") return p.chat(modelId);
+      if (style === "responses") return p.responses(modelId);
       return config?.baseUrl ? p.chat(modelId) : p(modelId);
     }
     case "anthropic": {

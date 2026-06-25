@@ -9,6 +9,12 @@ import { ForbiddenError } from "@/lib/errors";
 import { PROVIDERS } from "@/lib/providers";
 import { invalidateModelsCache } from "@/lib/providers/list-models";
 
+// "auto" is the stored-as-null default — only an explicit override is persisted.
+// Anything unrecognised is treated as no override (null), never trusted blindly.
+function normalizeApiStyle(value: unknown): string | null {
+  return value === "chat" || value === "responses" ? value : null;
+}
+
 export const GET = apiHandler(async () => {
   const { userId } = await requireSession();
 
@@ -22,6 +28,7 @@ export const GET = apiHandler(async () => {
       shared: providerConfigs.shared,
       label: providerConfigs.label,
       iconSlug: providerConfigs.iconSlug,
+      apiStyle: providerConfigs.apiStyle,
       createdAt: providerConfigs.createdAt,
     })
     .from(providerConfigs)
@@ -39,7 +46,7 @@ export const POST = apiHandler(async (req: Request) => {
     throw new ForbiddenError("Adding your own provider key is disabled on this instance.");
   }
 
-  const { provider, apiKey, baseUrl, defaultModel, label, iconSlug, shared } = await req.json();
+  const { provider, apiKey, baseUrl, defaultModel, label, iconSlug, shared, apiStyle } = await req.json();
   if (!provider || !PROVIDERS.includes(provider)) {
     return Response.json({ error: "Invalid or missing provider" }, { status: 400 });
   }
@@ -61,6 +68,8 @@ export const POST = apiHandler(async (req: Request) => {
     shared: shared === false ? false : true,
     label: label?.trim() || null,
     iconSlug: iconSlug || null,
+    // Only meaningful for the openai provider; harmless null elsewhere.
+    apiStyle: provider === "openai" ? normalizeApiStyle(apiStyle) : null,
   });
 
   invalidateModelsCache();
@@ -69,7 +78,7 @@ export const POST = apiHandler(async (req: Request) => {
 
 export const PUT = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
-  const { id, defaultModel, enabled, label, iconSlug, shared } = await req.json();
+  const { id, defaultModel, enabled, label, iconSlug, shared, apiStyle } = await req.json();
   if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
   // Toggle a single config's enabled state — others are left untouched, since
@@ -92,6 +101,7 @@ export const PUT = apiHandler(async (req: Request) => {
   if (label !== undefined) set.label = label?.trim() || null;
   if (iconSlug !== undefined) set.iconSlug = iconSlug || null;
   if (typeof shared === "boolean") set.shared = shared;
+  if (apiStyle !== undefined) set.apiStyle = normalizeApiStyle(apiStyle);
   if (Object.keys(set).length === 0) return Response.json({ error: "Nothing to update" }, { status: 400 });
 
   const [updated] = await db
