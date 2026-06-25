@@ -40,10 +40,8 @@ if [ "${SANDBOX_EGRESS_FILTER:-0}" = "1" ] && command -v iptables >/dev/null 2>&
 fi
 
 # Drop to the sandbox user (uid/gid 1000) with its normal supplementary groups and
-# run the long-lived processes there. setpriv ships in util-linux on the base image.
-exec setpriv --reuid=1000 --regid=1000 --init-groups -- /bin/bash -c '
-  # Virtual display for headless rendering (LibreOffice, wkhtmltopdf, Playwright)
-  Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
-  sleep 0.5
-  exec sleep infinity
-'
+# idle there. setpriv ships in util-linux on the base image. No long-lived Xvfb:
+# GUI tools (LibreOffice, wkhtmltopdf) render under an on-demand, throwaway X
+# server via the `xvfb-run` shims baked into the image (see Dockerfile.sandbox §8b),
+# so we don't burn ~170 MB on a persistent display the typical session never uses.
+exec setpriv --reuid=1000 --regid=1000 --init-groups -- sleep infinity

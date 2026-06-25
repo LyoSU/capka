@@ -49,8 +49,10 @@ export function buildSandboxConfig({
     name: `sandbox-${sessionId}`,
     // When egress is on (bridge), tell the entrypoint to install the egress
     // firewall that blocks private/internal ranges (see sandbox-entrypoint.sh).
+    // No ambient DISPLAY: there's no persistent Xvfb to point at. GUI tools
+    // (LibreOffice, wkhtmltopdf) render under a throwaway X server via the
+    // `xvfb-run` shims in the image, which set their own DISPLAY per command.
     Env: [
-      "DISPLAY=:99",
       "PYTHONUNBUFFERED=1",
       "LANG=C.UTF-8",
       ...(networkMode === "bridge" ? ["SANDBOX_EGRESS_FILTER=1"] : []),
@@ -64,7 +66,8 @@ export function buildSandboxConfig({
       PidsLimit: pidsLimit,
       // Cap open file descriptors. The image default (~1M) lets a malicious
       // process open hundreds of thousands of FDs and destabilize the container's
-      // own processes (Xvfb, the runner) and starve sibling sandboxes on the host.
+      // own processes (the runner, on-demand render servers) and starve sibling
+      // sandboxes on the host.
       Ulimits: [
         { Name: "nofile", Soft: nofileLimit, Hard: nofileLimit },
         // Single-file size cap — the only synchronous defense against a one-shot

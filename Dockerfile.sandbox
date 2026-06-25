@@ -45,7 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw \
     libreoffice-core libreoffice-common python3-uno \
     tesseract-ocr tesseract-ocr-eng \
-    xvfb xfonts-utils xfonts-scalable xfonts-cyrillic \
+    xvfb xauth xfonts-utils xfonts-scalable xfonts-cyrillic \
     texlive-base texlive-latex-base texlive-latex-recommended \
     texlive-fonts-recommended texlive-xetex latexmk \
     && rm -rf /var/lib/apt/lists/*
@@ -109,6 +109,25 @@ RUN npx playwright install chromium \
     && npx playwright install-deps chromium
 
 # ---------------------------------------------------------------------------
+# 8b. On-demand X server for GUI tools
+# ---------------------------------------------------------------------------
+# LibreOffice and wkhtmltopdf need an X server to render, but most sandbox
+# sessions never touch them. Instead of a persistent Xvfb burning ~170 MB in
+# EVERY container (idle or not), shim these binaries on PATH so each invocation
+# spins up a private, throwaway X server via `xvfb-run` and tears it down after.
+# /usr/local/bin precedes /usr/bin in PATH, so `soffice`/`wkhtmltopdf` typed in
+# the agent's shell transparently hit the shim. `xvfb-run -a` auto-picks a free
+# display; `-e /dev/stderr` surfaces its log to the caller instead of a tempfile.
+# (Playwright/Chromium run headless without X, so they are intentionally NOT
+# shimmed; a headed run can be wrapped with `xvfb-run` explicitly.)
+RUN set -eux; \
+    for pair in "soffice:/usr/bin/soffice" "libreoffice:/usr/bin/libreoffice" "wkhtmltopdf:/usr/bin/wkhtmltopdf"; do \
+      name="${pair%%:*}"; real="${pair#*:}"; \
+      printf '#!/bin/sh\nexec xvfb-run -a -e /dev/stderr -s "-screen 0 1920x1080x24 -nolisten tcp" "%s" "$@"\n' "$real" > "/usr/local/bin/$name"; \
+      chmod 755 "/usr/local/bin/$name"; \
+    done
+
+# ---------------------------------------------------------------------------
 # 9. Non-root user + workspace
 # ---------------------------------------------------------------------------
 # Ubuntu 24.04 ships with 'ubuntu' user at UID 1000 — rename to 'sandbox'
@@ -121,7 +140,8 @@ RUN usermod -l sandbox -d /home/sandbox -m ubuntu 2>/dev/null || true && \
 # lookups from crashing; HOME is overridden to the writable /opt/mcp tmpfs at runtime.
 RUN useradd -u 1001 -m -d /home/mcp -s /usr/sbin/nologin mcp
 
-# Entrypoint: start Xvfb (needed by LibreOffice, wkhtmltopdf, Playwright) then idle
+# Entrypoint: repair mount ownership, drop to the sandbox user, then idle.
+# (No persistent Xvfb — GUI tools get a throwaway X server on demand; see §8b.)
 COPY --chmod=755 sandbox-entrypoint.sh /entrypoint.sh
 
 WORKDIR /workspace

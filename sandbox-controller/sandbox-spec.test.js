@@ -77,8 +77,8 @@ describe("buildSandboxConfig — isolation hardening", () => {
 describe("buildSandboxConfig — resource exhaustion limits", () => {
   it("caps open file descriptors (nofile) to contain FD-exhaustion DoS", () => {
     // Default ulimit -n is ~1M; a malicious process can open hundreds of
-    // thousands of FDs and destabilize the container's own processes (Xvfb,
-    // the runner) and starve sibling sandboxes on the host.
+    // thousands of FDs and destabilize the container's own processes (the
+    // runner, on-demand render servers) and starve sibling sandboxes on the host.
     const nofile = (buildSandboxConfig(base).HostConfig.Ulimits || []).find((u) => u.Name === "nofile");
     expect(nofile).toBeDefined();
     expect(nofile.Hard).toBeLessThanOrEqual(65536);
