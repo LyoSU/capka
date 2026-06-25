@@ -15,7 +15,11 @@ jobs:
   cla:
     runs-on: ubuntu-latest
     steps:
-      - uses: contributor-assistant/github-action@v2.6.1
+      # Pinned to the immutable commit SHA (not the mutable @v2.6.1 tag): this
+      # action runs on pull_request_target with contents/pull-requests write, so a
+      # retagged or compromised release must not be able to silently gain that
+      # write access to the repo. Bump the SHA + comment together when upgrading.
+      - uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         if: (github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
