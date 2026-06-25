@@ -9,7 +9,7 @@ import { useBilling, type WindowStatus } from "@/hooks/use-billing";
 // the cap. Purely informational — enforcement happens server-side.
 function barColor(pct: number): string {
   if (pct >= 100) return "bg-destructive";
-  if (pct >= 75) return "bg-amber-500";
+  if (pct >= 75) return "bg-warning-text";
   return "bg-primary";
 }
 

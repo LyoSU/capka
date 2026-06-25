@@ -215,7 +215,7 @@ export default function AuthenticationPage() {
           <Switch checked={emailSignup} onCheckedChange={setEmailSignup} aria-label={t("email.toggleAria")} />
         </div>
         {!emailSignup && !ready && (
-          <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <p className="rounded-md border border-warning-border bg-warning-surface px-3 py-2 text-xs text-foreground">
             {t("email.deadEndWarning")}
           </p>
         )}

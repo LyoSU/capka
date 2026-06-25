@@ -39,12 +39,12 @@ export function ProviderStatusBanner() {
 
   const message = status === "out_of_credits" ? t("outOfCredits") : t("invalidKey");
   return (
-    <div className="flex items-center justify-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-800 dark:text-amber-300">
-      <AlertTriangle className="h-4 w-4 shrink-0" />
+    <div className="flex items-center justify-center gap-2 border-b border-warning-border bg-warning-surface px-4 py-2 text-sm text-foreground">
+      <AlertTriangle className="h-4 w-4 shrink-0 text-warning-text" />
       <span>{message}</span>
       <Link
         href="/settings/connections"
-        className="shrink-0 font-medium underline underline-offset-2 hover:opacity-80"
+        className="shrink-0 font-medium text-warning-text underline underline-offset-2 hover:opacity-80"
       >
         {t("fix")}
       </Link>

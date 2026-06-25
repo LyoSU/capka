@@ -272,7 +272,7 @@ export function MarketplaceBrowser() {
                       {c.author && <span className="text-xs text-muted-foreground">{t("by", { author: c.author })}</span>}
                     </div>
                     {c.description && <p className="line-clamp-2 text-xs text-muted-foreground">{c.description}</p>}
-                    {!c.installable && <p className="text-xs text-amber-600 dark:text-amber-500">{t("unsupportedSource")}</p>}
+                    {!c.installable && <p className="text-xs text-warning-text">{t("unsupportedSource")}</p>}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -282,7 +282,7 @@ export function MarketplaceBrowser() {
                         {busy === c.name ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUpCircle className="h-4 w-4" />}
                       </Button>
                       <Button variant="ghost" size="sm" disabled={busy === c.name} onClick={() => uninstall(c.name)}>
-                        <Check className="mr-1.5 h-4 w-4 text-emerald-600" />
+                        <Check className="mr-1.5 h-4 w-4 text-success" />
                         {t("installedLabel")}
                       </Button>
                     </>

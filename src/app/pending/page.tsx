@@ -32,8 +32,8 @@ export default function PendingPage() {
       }
     >
       <div className="flex flex-col items-center gap-3 rounded-xl border bg-muted/30 px-6 py-8 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-950/40">
-          <Clock className="h-6 w-6 text-amber-600 dark:text-amber-500" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-warning-border bg-warning-surface">
+          <Clock className="h-6 w-6 text-warning-text" />
         </div>
         <p className="text-sm text-muted-foreground">{t("hint")}</p>
         <Button variant="outline" size="sm" onClick={() => router.refresh()}>

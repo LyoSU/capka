@@ -95,21 +95,21 @@ function HealthLine({ h, loading, t }: { h?: Health; loading: boolean; t: Return
   }
   if (h.status === "ok") {
     return (
-      <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-500">
+      <span className="flex items-center gap-1 text-xs text-success">
         <CheckCircle2 className="h-3 w-3" />{t("health.ok", { count: h.toolCount ?? 0 })}
       </span>
     );
   }
   if (h.status === "needs_login") {
     return (
-      <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
+      <span className="flex items-center gap-1 text-xs text-warning-text">
         <LogIn className="h-3 w-3" />{t("health.needsLogin")}
       </span>
     );
   }
   if (h.status === "unauthorized") {
     return (
-      <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
+      <span className="flex items-center gap-1 text-xs text-warning-text">
         <AlertTriangle className="h-3 w-3" />{t("health.unauthorized")}
       </span>
     );
@@ -474,11 +474,11 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
           {testResult && (
             <div className="rounded-md bg-muted/50 px-3 py-2">
               {testResult.status === "ok"
-                ? <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-500"><CheckCircle2 className="h-3 w-3" />{t("testOk", { count: testResult.toolCount ?? 0 })}</span>
+                ? <span className="flex items-center gap-1 text-xs text-success"><CheckCircle2 className="h-3 w-3" />{t("testOk", { count: testResult.toolCount ?? 0 })}</span>
                 : testResult.status === "needs_login"
-                  ? <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"><LogIn className="h-3 w-3" />{t("testOauth")}</span>
+                  ? <span className="flex items-center gap-1 text-xs text-warning-text"><LogIn className="h-3 w-3" />{t("testOauth")}</span>
                   : testResult.status === "unauthorized"
-                    ? <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"><AlertTriangle className="h-3 w-3" />{t("health.unauthorized")}</span>
+                    ? <span className="flex items-center gap-1 text-xs text-warning-text"><AlertTriangle className="h-3 w-3" />{t("health.unauthorized")}</span>
                     : <span className="flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" />{t("health.unreachable")}</span>}
             </div>
           )}

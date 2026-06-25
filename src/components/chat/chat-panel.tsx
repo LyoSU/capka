@@ -419,9 +419,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     </div>
   ) : modelGone ? (
     <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
-      <div className="flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-4">
-        <p className="flex items-center gap-2 text-sm font-medium">
-          <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+      <div className="flex flex-col gap-3 rounded-2xl border border-warning-border bg-warning-surface px-4 py-4">
+        <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <AlertCircle className="h-4 w-4 shrink-0 text-warning-text" />
           {t("panel.modelGoneTitle")}
         </p>
         <p className="text-sm text-muted-foreground">{t("panel.modelGoneBody")}</p>
@@ -463,10 +463,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       {queued.map((q) => (
         <div
           key={q.id}
-          className="flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-1.5 text-sm"
+          className="flex items-center gap-2 rounded-xl border bg-card px-3 py-1.5 text-sm shadow-sm"
         >
           <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate text-muted-foreground">
+          <span className="flex-1 truncate text-foreground/90">
             {q.text || t("panel.queuedFiles", { count: q.refs.length })}
           </span>
           <button

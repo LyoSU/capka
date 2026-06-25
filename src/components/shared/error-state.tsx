@@ -40,7 +40,7 @@ export function ErrorState({ error, retry }: ErrorStateProps) {
 
   return (
     <div className="flex min-h-[60dvh] w-full flex-col items-center justify-center gap-5 p-6 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full border border-destructive-border bg-destructive-surface text-destructive-text">
         <AlertTriangle className="h-6 w-6" />
       </div>
       <div className="space-y-1.5">

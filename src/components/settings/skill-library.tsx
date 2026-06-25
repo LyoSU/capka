@@ -374,7 +374,7 @@ function SkillGroup({
                   variant="secondary"
                   className={cn(
                     "ml-auto font-normal",
-                    group.kind === "personal" ? "text-muted-foreground" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+                    group.kind === "personal" ? "text-muted-foreground" : "bg-success/10 text-success",
                   )}
                 >
                   {group.kind === "personal" ? t("reach.personal") : t("reach.shared")}
@@ -421,7 +421,7 @@ function SkillRow({
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-sm font-medium">{skill.name}</span>
           {noDescription && (
-            <Badge variant="outline" className="gap-1 border-amber-500/40 text-amber-700 dark:text-amber-500">
+            <Badge variant="outline" className="gap-1 border-warning-border text-warning-text">
               <AlertTriangle className="h-3 w-3" /> {t("noDescription")}
             </Badge>
           )}

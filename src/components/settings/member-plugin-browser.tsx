@@ -120,7 +120,7 @@ export default function MemberPluginBrowser() {
                 {c.description && <p className="truncate text-xs text-muted-foreground">{c.description}</p>}
               </div>
               {c.installed ? (
-                <span className="flex shrink-0 items-center gap-1 text-xs text-emerald-600 dark:text-emerald-500">
+                <span className="flex shrink-0 items-center gap-1 text-xs text-success">
                   <Check className="h-3.5 w-3.5" />{t("installedLabel")}
                 </span>
               ) : (

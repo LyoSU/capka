@@ -467,19 +467,19 @@ function ActivityGroup({ items, isStreaming, fallbackMs }: { items: ActivityItem
 function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: string; isAdmin?: boolean }) {
   const t = useTranslations("chat.tool");
   return (
-    <div role="alert" className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5">
-      <div className="flex items-start gap-2 text-sm text-destructive">
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-        <span className="flex-1">{message}</span>
+    <div role="alert" className="mt-2 rounded-lg border border-destructive-border bg-destructive-surface px-3.5 py-2.5">
+      <div className="flex items-start gap-2 text-sm">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive-text" />
+        <span className="flex-1 text-foreground">{message}</span>
       </div>
       {isAdmin && detail && detail !== message && (
         <Collapsible>
-          <CollapsibleTrigger className="mt-1.5 ml-6 flex items-center gap-1 text-xs text-destructive/60 hover:text-destructive transition-colors [&[data-state=open]>.chevron]:rotate-90">
+          <CollapsibleTrigger className="mt-1.5 ml-6 flex items-center gap-1 text-xs text-destructive-text/80 hover:text-destructive-text transition-colors [&[data-state=open]>.chevron]:rotate-90">
             <ChevronRight className="chevron h-3 w-3 transition-transform" />
             {t("technicalDetails")}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <pre className="mt-1 ml-6 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-destructive/5 p-2 font-mono text-[11px] text-destructive/70">
+            <pre className="mt-1 ml-6 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-destructive-border/60 bg-destructive-surface p-2 font-mono text-[11px] text-foreground/80">
               {detail}
             </pre>
           </CollapsibleContent>
@@ -503,13 +503,13 @@ function CapabilityNotice({
   const t = useTranslations("chat.notice");
   const list = modalities.map((m) => t(`modality.${m}`)).join(", ");
   return (
-    <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3.5 py-2.5">
-      <div className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-        <div className="flex-1">
+    <div className="mt-2 rounded-lg border border-warning-border bg-warning-surface px-3.5 py-2.5">
+      <div className="flex items-start gap-2 text-sm">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-text" />
+        <div className="flex-1 text-foreground">
           <span>{t("blindModalities", { modalities: list })}</span>
           {onModelChange && model !== undefined && (
-            <div className="mt-1.5 inline-flex rounded-full border border-amber-500/30 bg-background/50 px-1">
+            <div className="mt-1.5 inline-flex rounded-full border border-warning-border bg-card/60 px-1">
               <ModelPicker variant="pill" value={model} onChange={onModelChange} />
             </div>
           )}
@@ -542,7 +542,7 @@ function CopyButton({ text }: { text: string }) {
       aria-label={copied ? t("copied") : t("copy")}
       className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
   );
 }

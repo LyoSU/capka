@@ -22,8 +22,8 @@ const KNOWN_ACTIONS = new Set([
 function EffectControl({ value, onChange, t }: { value: Effect; onChange: (e: Effect) => void; t: ReturnType<typeof useTranslations> }) {
   const opts: { e: Effect; soon?: boolean }[] = [{ e: "allow" }, { e: "ask", soon: true }, { e: "deny" }];
   const color: Record<Effect, string> = {
-    allow: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-    ask: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+    allow: "bg-success/15 text-success",
+    ask: "bg-warning-text/15 text-warning-text",
     deny: "bg-destructive/15 text-destructive",
   };
   return (

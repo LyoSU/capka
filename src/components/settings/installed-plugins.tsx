@@ -68,10 +68,10 @@ export default function InstalledPlugins() {
   const connectorStatus = (c: Item) => {
     if (!c.enabled) return { label: t("status.disabled"), cls: "text-muted-foreground", Icon: PowerOff, detail: undefined as string | undefined };
     const h = health[c.id];
-    if (h?.status === "ok") return { label: t("status.active", { count: h.toolCount ?? 0 }), cls: "text-emerald-600 dark:text-emerald-500", Icon: CheckCircle2, detail: undefined };
+    if (h?.status === "ok") return { label: t("status.active", { count: h.toolCount ?? 0 }), cls: "text-success", Icon: CheckCircle2, detail: undefined };
     if (h) {
       const label = h.status === "needs_login" ? t("status.needsLogin") : h.status === "unauthorized" ? t("status.unauthorized") : t("status.error");
-      return { label, cls: "text-amber-600 dark:text-amber-500", Icon: AlertTriangle, detail: h.detail };
+      return { label, cls: "text-warning-text", Icon: AlertTriangle, detail: h.detail };
     }
     // Enabled but no probe result (stdio connects only inside a run; success isn't recorded).
     return { label: t("status.enabled"), cls: "text-muted-foreground", Icon: Power, detail: undefined };
@@ -235,7 +235,7 @@ export default function InstalledPlugins() {
             )}
 
             {p.notes.length > 0 && (
-              <ul className="space-y-1 border-t pt-3 text-xs text-amber-600 dark:text-amber-500">
+              <ul className="space-y-1 border-t pt-3 text-xs text-warning-text">
                 {p.notes.map((n, i) => (
                   <li key={i} className="flex items-start gap-1.5">
                     <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{n}

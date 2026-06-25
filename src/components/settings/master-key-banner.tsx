@@ -66,12 +66,12 @@ export function MasterKeyBanner() {
   // Insecure: master key lives in the DB. Offer to promote it to the env.
   if (status.source === "db") {
     return (
-      <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+      <div className="space-y-3 rounded-lg border border-warning-border bg-warning-surface p-4">
         <div className="flex items-start gap-2.5">
-          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-500" />
+          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning-text" />
           <div className="space-y-1">
-            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{t("insecureTitle")}</p>
-            <p className="text-sm text-amber-800/80 dark:text-amber-300/80">{t("insecureBody")}</p>
+            <p className="text-sm font-medium text-foreground">{t("insecureTitle")}</p>
+            <p className="text-sm text-muted-foreground">{t("insecureBody")}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -79,7 +79,7 @@ export function MasterKeyBanner() {
             {envLine}
           </code>
           <Button variant="outline" size="sm" onClick={copyEnv}>
-            {copied ? <Check className="text-emerald-600" /> : <Copy />}
+            {copied ? <Check className="text-success" /> : <Copy />}
             {copied ? tc("copied") : tc("copy")}
           </Button>
         </div>
@@ -91,10 +91,10 @@ export function MasterKeyBanner() {
   // Secure via env, but a stale DB copy remains — offer to finish the cleanup.
   if (status.dbKeyPresent) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-warning-border bg-warning-surface p-4">
         <div className="flex items-start gap-2.5">
-          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-500" />
-          <p className="text-sm text-amber-800/90 dark:text-amber-300/90">{t("secureLeftover")}</p>
+          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning-text" />
+          <p className="text-sm text-foreground">{t("secureLeftover")}</p>
         </div>
         <Button variant="outline" size="sm" onClick={removeDbCopy} disabled={removing}>
           {t("removeDbCopy")}
@@ -106,7 +106,7 @@ export function MasterKeyBanner() {
   // Fully secure.
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-500" />
+      <ShieldCheck className="h-4 w-4 text-success" />
       {t("secureClean")}
     </div>
   );

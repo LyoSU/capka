@@ -692,8 +692,8 @@ function ModelList({
   const right = (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {currentMissing && (
-        <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+        <div className="flex items-center gap-2 border-b border-warning-border bg-warning-surface px-3 py-2 text-xs text-foreground">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning-text" />
           <span>{t("currentUnavailable")}</span>
         </div>
       )}

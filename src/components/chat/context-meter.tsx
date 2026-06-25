@@ -29,7 +29,7 @@ export function ContextMeter({ used, window: limit }: { used: number; window: nu
   const r = 6.5;
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - Math.min(1, fraction));
-  const color = warn ? "stroke-amber-500" : "stroke-primary/50";
+  const color = warn ? "stroke-warning-text" : "stroke-primary/50";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -39,7 +39,7 @@ export function ContextMeter({ used, window: limit }: { used: number; window: nu
         aria-label={t("contextFull", { pct })}
         className="flex shrink-0 items-center gap-1 rounded-md text-xs text-muted-foreground outline-none"
       >
-        {warn && <span className="tabular-nums text-amber-600 dark:text-amber-400">{pct}%</span>}
+        {warn && <span className="tabular-nums text-warning-text">{pct}%</span>}
         <svg width="16" height="16" viewBox="0 0 16 16" className="shrink-0" aria-hidden>
           <circle cx="8" cy="8" r={r} fill="none" strokeWidth="2" className="stroke-muted" />
           <circle
