@@ -49,6 +49,11 @@ export interface ProviderMeta {
   requiresKey: boolean;
   /** Provider is reached via a base URL the user must supply. */
   requiresBaseUrl: boolean;
+  /** Base URL is OPTIONAL — first-party by default, but the user may point it at
+   *  a compatible endpoint that speaks this provider's native wire format (e.g. an
+   *  Anthropic-compatible aggregator at /v1/messages). The form shows the field;
+   *  an empty value keeps the provider's own default endpoint. */
+  optionalBaseUrl?: boolean;
   /** Sensible default for the base URL field. */
   defaultBaseUrl?: string;
   /** Placeholder for the base URL field. */
@@ -123,10 +128,15 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
   },
   anthropic: {
     label: "Anthropic",
-    blurb: "Connect directly to Claude.",
+    blurb: "Connect directly to Claude, or to an Anthropic-compatible endpoint (/v1/messages).",
     iconSlug: "anthropic",
     requiresKey: true,
     requiresBaseUrl: false,
+    // Defaults to api.anthropic.com. May point at a compatible gateway that
+    // speaks the native Messages API — some aggregators forward `tools` over
+    // /v1/messages even when their OpenAI-compat surface drops them.
+    optionalBaseUrl: true,
+    baseUrlPlaceholder: "https://api.anthropic.com/v1",
     hasCatalog: false,
     // Claude takes images + PDF natively; no audio or video input.
     nativeInput: ["image", "pdf"],

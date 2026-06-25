@@ -234,7 +234,14 @@ export default function ConnectionsPage() {
         return;
       }
 
-      const effectiveBaseUrl = meta.requiresBaseUrl ? baseUrl || meta.defaultBaseUrl : undefined;
+      // Required base URL falls back to the provider default; an OPTIONAL one
+      // (Anthropic → compatible gateway) is sent only when the user typed
+      // something, otherwise the SDK's own default endpoint is used.
+      const effectiveBaseUrl = meta.requiresBaseUrl
+        ? baseUrl || meta.defaultBaseUrl
+        : meta.optionalBaseUrl
+          ? baseUrl.trim() || undefined
+          : undefined;
       // The wire transport only applies to OpenAI; default (Responses) stays unset.
       const effectiveApiStyle = provider === "openai" && useChatApi ? "chat" : undefined;
 
@@ -554,7 +561,7 @@ export default function ConnectionsPage() {
             </div>
           )}
 
-          {meta.requiresBaseUrl && (
+          {(meta.requiresBaseUrl || meta.optionalBaseUrl) && (
             <div className="space-y-1.5">
               <label className="text-sm">{t("baseUrl")}</label>
               <Input
