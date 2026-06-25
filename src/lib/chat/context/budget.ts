@@ -8,11 +8,15 @@ export const COMPACT_THRESHOLD = 0.75;
 
 /**
  * Conservative window assumed when the catalog reports no `contextLength` for a
- * model (a custom/local backend). Pessimistic on purpose: better to compact a
- * little early than to blow a window we couldn't measure. The reactive
- * `context_too_long` retry is the safety net behind this guess.
+ * model (a custom/local backend). Genuinely pessimistic: an unknown model is far
+ * more likely a small local one (8k–32k) than a frontier 128k+ window, and the
+ * old 128k default meant the proactive gate NEVER fired for a small model — it
+ * silently overran until the reactive `context_too_long` retry caught it. 32k
+ * compacts a little early for an unknown-but-large model (harmless) while
+ * actually protecting the common small-model case. The reactive retry remains
+ * the safety net behind this guess.
  */
-export const DEFAULT_CONTEXT_LENGTH = 128_000;
+export const DEFAULT_CONTEXT_LENGTH = 32_000;
 
 export interface ContextBudget {
   /** Tokens we actually plan against: min(model window, admin cap), or the default. */

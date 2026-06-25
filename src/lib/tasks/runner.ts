@@ -26,7 +26,7 @@ import { loadMcpTools } from "@/lib/mcp/load";
 import { getSandboxNetworkDefault, getMaxContextTokens } from "@/lib/settings";
 import { getModelContextLength } from "@/lib/models/catalog";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
-import { contextBudget } from "@/lib/chat/context/budget";
+import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions } from "@/lib/chat/context/provider-edits";
 import { stepSettings } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
@@ -964,7 +964,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       emergencyTrimmed = true;
       streamError = undefined;
       await discardPartial();
-      modelMessages = trimToRecent(modelMessages, EMERGENCY_KEEP_RECENT);
+      // Trim at the UI-message level — a tool call and its result live together
+      // inside one assistant UIMessage there, so a mechanical slice can never
+      // split the pair — then rebuild through the SAME safe pipeline the initial
+      // build used (sealOrphanToolCalls + convertToModelMessages). Trimming the
+      // already-split ModelMessage[] could strand a tool_result whose tool_use
+      // was sliced off, which 400s as AI_MissingToolResultsError on the retry —
+      // the very failure this path exists to recover from.
+      const trimmedUi = trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT);
+      modelMessages = await convertToModelMessages(sealOrphanToolCalls(trimmedUi));
+      // Re-attach the turn's native files (the trim+reconvert produced fresh
+      // model messages, dropping the bytes injected into the original set).
+      if (injectedNative && nativeFiles.length) {
+        await injectNativeFiles(modelMessages, sessionKey, userId, nativeFiles);
+      }
       foldDiscarded();
       result = makeStream();
       await consume();
@@ -1238,6 +1251,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         compactConversation(model, systemMessages, modelMessages, recordAuxUsage)
           .then(async (summary) => {
             if (!summary) return;
+            // Re-entrancy floor: if the summary itself would still trip the
+            // compaction threshold, checkpointing it is pointless — the next turn
+            // would overflow again and we'd thrash compact→overflow→compact. Bail
+            // and let the reactive emergency trim handle it. (~4 chars/token is a
+            // deliberately rough estimate; we only need an order-of-magnitude.)
+            const estSummaryTokens = Math.ceil(summary.length / 4);
+            if (estSummaryTokens >= budget.effectiveLimit * COMPACT_THRESHOLD) {
+              tlog.warn("compaction summary still over threshold — skipping checkpoint", {
+                estSummaryTokens, effectiveLimit: budget.effectiveLimit,
+              });
+              return;
+            }
             // Race guard: only checkpoint if the chat's leaf is STILL this reply.
             // A follow-up that already moved the leaf would otherwise get a
             // checkpoint grafted as its sibling — skip and let the next turn
@@ -1265,8 +1290,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";
-    const status = isAbort && !deadlineHit ? "cancelled" : "failed";
-    const failure = deadlineHit ? TIMED_OUT_ERROR : isAbort ? undefined : classifyLLMError(e);
+    // A lost lease aborts by throwing — it must NOT read as a clean user cancel.
+    const status = isAbort && !deadlineHit && !leaseLost ? "cancelled" : "failed";
+    const failure = deadlineHit ? TIMED_OUT_ERROR : leaseLost ? INTERRUPTED_ERROR : isAbort ? undefined : classifyLLMError(e);
     // This catch swallows the error to finalize gracefully, so the worker's
     // crash log never fires — record it here instead. A clean cancel is info.
     tlog[status === "cancelled" ? "info" : "error"]("task ended", {
