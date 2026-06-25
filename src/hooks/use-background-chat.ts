@@ -193,8 +193,18 @@ export function useBackgroundChat({
               setTaskId(data.taskId);
               setTaskInfo({ startedAt: Date.now(), currentTool: null, retrying: null });
               // Baseline the seq cursor for this reply (task:start is seq 0), so
-              // the first delta (seq 1) is the next contiguous one.
-              appliedSeqRef.current.set(data.messageId, data.seq ?? 0);
+              // the first delta (seq 1) is the next contiguous one. NEVER lower a
+              // cursor we've already advanced: a redelivered/late task:start
+              // (reconnect racing a snapshot load) must not reset us to 0, or
+              // already-applied deltas would re-classify as `apply` and duplicate.
+              {
+                const prevSeq = appliedSeqRef.current.get(data.messageId);
+                const baseline = data.seq ?? 0;
+                appliedSeqRef.current.set(
+                  data.messageId,
+                  prevSeq === undefined ? baseline : Math.max(prevSeq, baseline),
+                );
+              }
               // Idempotent: if history already loaded this assistant row
               // (reconnect / cross-channel), don't append a duplicate.
               setMessages((prev) =>
@@ -446,7 +456,7 @@ export function useBackgroundChat({
   // Attachments arrive already uploaded (the composer uploads eagerly on attach,
   // so the bytes are in the sandbox before send) — we only carry their refs here.
   const sendMessage = useCallback(
-    async (text: string, model: string, attachedFiles?: FileRef[]) => {
+    async (text: string, model: string, attachedFiles?: FileRef[], messageId?: string) => {
       const files = attachedFiles ?? [];
       if (!text.trim() && files.length === 0) return;
 
@@ -462,7 +472,11 @@ export function useBackgroundChat({
       // metadata so the bubble shows thumbnails immediately — before history
       // reloads — matching what the server persists.
       const userMsg: Message = {
-        id: nanoid(),
+        // A stable id supplied by the caller (the send queue) makes the whole
+        // send idempotent: the server upserts on this id (onConflictDoNothing),
+        // so the same queued message draining from two tabs collapses to one row
+        // instead of producing a duplicate bubble.
+        id: messageId ?? nanoid(),
         role: "user",
         parts: [{ type: "text", text: displayText }],
         metadata: files.length > 0 ? { attachedFiles: files } : undefined,

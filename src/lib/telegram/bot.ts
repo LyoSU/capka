@@ -1,7 +1,8 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
+import type { PoolClient } from "pg";
 import { nanoid } from "nanoid";
 import { eq, and, ne, desc, isNotNull } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, pool } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages, users, accounts } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
@@ -30,15 +31,26 @@ import type { TaskPayload } from "@/lib/tasks/runner";
 // the same trick the durable worker uses (see worker.ts `globalThis.__worker`).
 interface BotState {
   bot: Bot | null;
+  // Memoizes the in-flight `new Bot(token)` build so two concurrent first-callers
+  // (a delivery flush + a keepalive refresh) don't each construct a bot and have
+  // the second clobber — and discard — the first live instance.
+  botPromise: Promise<Bot | null> | null;
   polling: boolean;
   // Captured when the bot is built — needed to construct file download URLs
   // (`https://api.telegram.org/file/bot<token>/<path>`), the one place the Bot
   // API has no method wrapper for.
   token: string;
+  // The pooled connection that holds the poll-leader advisory lock for this
+  // process. Held for our lifetime while we're the leader; releasing it (or the
+  // process dying) drops the lock so a standby instance can take over.
+  leaderClient: PoolClient | null;
+  // Set on a standby instance: the interval that keeps campaigning for the lock.
+  leaderTimer: ReturnType<typeof setInterval> | null;
 }
 const g = globalThis as unknown as { __telegramBot?: BotState };
 function botState(): BotState {
-  if (!g.__telegramBot) g.__telegramBot = { bot: null, polling: false, token: "" };
+  if (!g.__telegramBot)
+    g.__telegramBot = { bot: null, botPromise: null, polling: false, token: "", leaderClient: null, leaderTimer: null };
   return g.__telegramBot;
 }
 
@@ -278,6 +290,20 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
 export async function getBot(): Promise<Bot | null> {
   const s = botState();
   if (s.bot) return s.bot;
+  // Single-flight: concurrent callers share one build instead of racing to
+  // `new Bot()` and clobbering each other's instance.
+  if (s.botPromise) return s.botPromise;
+  s.botPromise = buildBot();
+  try {
+    return await s.botPromise;
+  } finally {
+    s.botPromise = null;
+  }
+}
+
+async function buildBot(): Promise<Bot | null> {
+  const s = botState();
+  if (s.bot) return s.bot;
   const token = await getSetting("telegram_bot_token");
   if (!token) return null;
 
@@ -464,33 +490,104 @@ async function resolveActiveChat(
  * behind NAT, and the bot becomes a persistent process that the runner can
  * deliver replies through. Idempotent; a no-op if no token is configured.
  */
+// Only ONE process may long-poll a given bot token: Telegram hands the same
+// getUpdates batch to whichever poller asks, so two pollers double-process every
+// command and double-deliver. Across multiple app instances the per-process
+// `polling` guard isn't enough, so we elect a single poll leader with a
+// session-level Postgres advisory lock — the holder polls, the rest stand by.
+// If the leader's process dies its connection drops and the lock releases, so a
+// standby takes over on its next retry. No manual failover, no webhook needed.
+const POLLER_LOCK_KEY = 0x756e636c; // 'uncl' — stable, arbitrary 32-bit key
+const LEADER_RETRY_MS = 15_000;
+
+async function tryAcquirePollerLock(): Promise<boolean> {
+  const s = botState();
+  if (s.leaderClient) return true; // already the leader
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query<{ locked: boolean }>(
+      "SELECT pg_try_advisory_lock($1) AS locked",
+      [POLLER_LOCK_KEY],
+    );
+    if (rows[0]?.locked) {
+      // Hold the connection — and thus the lock — for our lifetime.
+      s.leaderClient = client;
+      return true;
+    }
+  } catch (e) {
+    log.error("telegram poller lock check failed", { error: e instanceof Error ? e.message : String(e) });
+  }
+  client.release();
+  return false;
+}
+
+function releasePollerLock(): void {
+  const s = botState();
+  if (s.leaderTimer) {
+    clearInterval(s.leaderTimer);
+    s.leaderTimer = null;
+  }
+  if (s.leaderClient) {
+    // Releasing the connection drops the session and its advisory lock, letting
+    // a standby instance take over the poll.
+    s.leaderClient.release();
+    s.leaderClient = null;
+  }
+}
+
 export async function startBot(): Promise<void> {
   const s = botState();
-  if (s.polling) return;
+  if (s.polling || s.leaderTimer) return; // already polling, or already campaigning
   const bot = await getBot();
   if (!bot) return;
-  s.polling = true;
-  // Drop any previously-registered webhook so getUpdates won't 409.
-  await bot.api.deleteWebhook().catch(() => {});
-  // Publish the "/" command menu (English default scope). Best-effort: a hiccup
-  // here must not stop polling.
-  await bot.api.setMyCommands(BOT_COMMANDS).catch(() => {});
-  // bot.start() resolves only when the bot stops, so never await it here.
-  void bot.start({
-    onStart: (info) => {
-      log.info("telegram polling started", { username: info.username });
-      // Cache the bot's @username (public, not a secret) so the web UI can build
-      // the one-tap link deep link without an admin-only token read. Also
-      // backfills installs whose token was saved before this field existed.
-      void setSetting("telegram_bot_username", info.username, false);
-    },
-  });
+
+  const beginPolling = async () => {
+    if (s.polling) return;
+    s.polling = true;
+    // Drop any previously-registered webhook so getUpdates won't 409.
+    await bot.api.deleteWebhook().catch(() => {});
+    // Publish the "/" command menu (English default scope). Best-effort: a hiccup
+    // here must not stop polling.
+    await bot.api.setMyCommands(BOT_COMMANDS).catch(() => {});
+    // bot.start() resolves only when the bot stops, so never await it here.
+    void bot.start({
+      onStart: (info) => {
+        log.info("telegram polling started", { username: info.username });
+        // Cache the bot's @username (public, not a secret) so the web UI can build
+        // the one-tap link deep link without an admin-only token read. Also
+        // backfills installs whose token was saved before this field existed.
+        void setSetting("telegram_bot_username", info.username, false);
+      },
+    });
+  };
+
+  // Become the single poll leader if we can; otherwise stand by and keep
+  // campaigning so we take over when the current leader dies.
+  if (await tryAcquirePollerLock()) {
+    await beginPolling();
+    return;
+  }
+  log.info("telegram poller standing by — another instance holds the poll lock");
+  s.leaderTimer = setInterval(() => {
+    void (async () => {
+      if (s.polling) return;
+      if (await tryAcquirePollerLock()) {
+        if (s.leaderTimer) {
+          clearInterval(s.leaderTimer);
+          s.leaderTimer = null;
+        }
+        await beginPolling();
+      }
+    })();
+  }, LEADER_RETRY_MS);
 }
 
 /** Stop polling and drop the singleton (so a new token takes effect). */
 export async function stopBot(): Promise<void> {
   const s = botState();
   const bot = s.bot;
+  // Give up poll leadership first so a standby (or our own restart) can re-poll.
+  releasePollerLock();
   // Clear the singleton up front so a concurrent startBot() can't observe the
   // old instance, then stop the previous poller. Crucially we do NOT swallow a
   // stop() failure silently: if it throws, the old getUpdates loop keeps running

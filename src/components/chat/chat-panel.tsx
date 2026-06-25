@@ -4,6 +4,7 @@ import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
+import { nanoid } from "nanoid";
 
 // useLayoutEffect warns during SSR; this client component is still rendered on
 // the server, so fall back to useEffect there. The choice is stable per render.
@@ -304,9 +305,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const { queued, setQueued } = useChatQueue(chatId);
   const dispatchingRef = useRef(false);
 
-  const send = async (text: string, refs: FileRef[]) => {
+  const send = async (text: string, refs: FileRef[], id?: string): Promise<boolean> => {
     try {
-      await sendMessage(text, model, refs.length > 0 ? refs : undefined);
+      await sendMessage(text, model, refs.length > 0 ? refs : undefined, id);
+      return true;
     } catch (e) {
       // The send failed and the hook already rolled back its optimistic bubble —
       // put the user's words back in the composer so nothing they typed is lost.
@@ -318,6 +320,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       setInput((cur) => [text, cur].filter(Boolean).join("\n\n"));
       attachments.restore(refs);
       toast.error(e instanceof Error ? e.message : t("panel.sendFailed"));
+      return false;
     }
   };
 
@@ -333,7 +336,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     // A turn is already running (or queued items are still draining) — line this
     // one up instead of sending now.
     if (isLoading || queued.length > 0 || dispatchingRef.current) {
-      setQueued((q) => [...q, { id: crypto.randomUUID(), text, refs }]);
+      // nanoid (not crypto.randomUUID, which is undefined on non-secure origins)
+      // — and this id rides through the drain into the POST as the message id, so
+      // a double-drain (same chat in two tabs) collapses server-side.
+      setQueued((q) => [...q, { id: nanoid(), text, refs }]);
       return;
     }
     await send(text, refs);
@@ -347,9 +353,19 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     if (isLoading || dispatchingRef.current || queued.length === 0) return;
     const batch = queued;
     dispatchingRef.current = true;
-    setQueued([]);
     void (async () => {
-      for (const item of batch) await send(item.text, item.refs);
+      for (const item of batch) {
+        // Dequeue this one as we start it — NOT the whole batch up-front. A reload
+        // mid-drain then keeps the not-yet-started items in localStorage (the
+        // whole point of persisting the queue), and the stable id keeps the
+        // in-flight one idempotent if it raced through to the server.
+        setQueued((q) => q.filter((m) => m.id !== item.id));
+        const ok = await send(item.text, item.refs, item.id);
+        // A hard failure put the text back in the composer; stop the burst rather
+        // than hammering a failing server — the rest stay queued and re-drain when
+        // the chat is free, one attempt each (no retry loop: each is dequeued).
+        if (!ok) break;
+      }
     })().finally(() => { dispatchingRef.current = false; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, queued]);
