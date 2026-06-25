@@ -69,7 +69,14 @@ export function getModel(
     }
     case "openai": {
       const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
-      return p(modelId);
+      // A custom baseUrl means an OpenAI-COMPATIBLE gateway (LiteLLM, vLLM, LM
+      // Studio, a proxy), which speaks /chat/completions only. The default
+      // `p(modelId)` now targets the Responses API (/responses) — these gateways
+      // don't implement it, and even when proxied the Responses-style tool
+      // serialization differs, so function tools silently never reach the model.
+      // Force the chat model for custom endpoints; keep Responses for first-party
+      // OpenAI (no baseUrl), where it unlocks built-in tools + o-series reasoning.
+      return config?.baseUrl ? p.chat(modelId) : p(modelId);
     }
     case "anthropic": {
       const p = createAnthropic({ apiKey: config?.apiKey, baseURL: config?.baseUrl });
