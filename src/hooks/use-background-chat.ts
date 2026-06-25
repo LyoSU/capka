@@ -527,7 +527,7 @@ export function useBackgroundChat({
   // chat's persisted model. An empty userMessage means "don't insert a new user
   // row" (regenerate); a non-empty one re-inserts the edited message (edit).
   const rerun = useCallback(
-    async (history: Message[], userMessage: string, userMessageId?: string) => {
+    async (history: Message[], userMessage: string, userMessageId?: string, attachedFiles?: FileRef[]) => {
       // Non-destructive: the server inserts a sibling branch keyed off the
       // history we send, so the previous version stays reachable via ‹ i/N ›.
       setMessages(history);
@@ -541,6 +541,9 @@ export function useBackgroundChat({
             projectId,
             userMessage,
             userMessageId,
+            // Edit only changes the text — the original attachments ride along so
+            // the server re-persists them and the runner re-feeds them to the model.
+            attachedFiles: attachedFiles?.length ? attachedFiles : undefined,
             messages: history.map((m) => ({ id: m.id, role: m.role, parts: m.parts })),
           }),
         });
@@ -584,8 +587,17 @@ export function useBackgroundChat({
     const idx = msgs.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
     const history = msgs.slice(0, idx);
-    const edited: Message = { id: nanoid(), role: "user", parts: [{ type: "text", text }] };
-    await rerun([...history, edited], text, edited.id);
+    // Editing rewrites the text but keeps whatever the user had attached — carry
+    // the refs into the new message's metadata (so the bubble shows thumbnails
+    // optimistically) and through rerun (so the server re-persists + re-feeds them).
+    const attachedFiles = (msgs[idx].metadata as { attachedFiles?: FileRef[] } | undefined)?.attachedFiles;
+    const edited: Message = {
+      id: nanoid(),
+      role: "user",
+      parts: [{ type: "text", text }],
+      metadata: attachedFiles?.length ? { attachedFiles } : undefined,
+    };
+    await rerun([...history, edited], text, edited.id, attachedFiles);
   }, [rerun]);
 
   // ── Switch branch (‹ i/N › version arrows) ─────────────────

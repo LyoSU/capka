@@ -735,6 +735,11 @@ function UserBubble({
           {onSwitchBranch && (
             <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} />
           )}
+          {text && (
+            <span className="opacity-0 transition group-hover/msg:opacity-100 group-data-[revealed]/msg:opacity-100">
+              <CopyButton text={text} />
+            </span>
+          )}
           {onEdit && text && (
             <button
               type="button"
