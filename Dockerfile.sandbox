@@ -19,7 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     build-essential pkg-config \
     python3 python3-dev python3-pip python3-venv python3-setuptools python-is-python3 \
-    && rm -rf /var/lib/apt/lists/*
+    # Modern, token-efficient CLIs for the agent. ripgrep+fd+sqlite mirror
+    # Anthropic's own code-execution sandbox baseline; jq/sd/gron let the agent
+    # query & transform structured output instead of dumping blobs into context.
+    ripgrep fd-find jq sd gron sqlite3 \
+    && rm -rf /var/lib/apt/lists/* \
+    # fd-find installs the binary as `fdfind` on Debian/Ubuntu (name clash with
+    # another package); give the agent the `fd` it expects.
+    && ln -sf "$(command -v fdfind)" /usr/local/bin/fd
 
 # ---------------------------------------------------------------------------
 # 2. Java (for tabula-py, pdftk)
@@ -40,7 +47,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg imagemagick graphviz \
-    pandoc wkhtmltopdf \
+    pandoc \
     poppler-utils qpdf \
     libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw \
     libreoffice-core libreoffice-common python3-uno \
@@ -94,38 +101,92 @@ RUN pip install --break-system-packages --no-cache-dir \
 # ---------------------------------------------------------------------------
 # 7. Node.js global packages
 # ---------------------------------------------------------------------------
+# PUPPETEER_SKIP_DOWNLOAD stops @mermaid-js/mermaid-cli's bundled puppeteer from
+# pulling its OWN ~640 MB Chrome into /root/.cache — at runtime it reuses the
+# single Playwright Chromium via PUPPETEER_EXECUTABLE_PATH (set in §8). Playwright
+# is NOT installed here; §8 pins it to the exact pip version so both share one
+# browser build instead of silently drifting apart.
+ENV PUPPETEER_SKIP_DOWNLOAD=1
 RUN npm install -g \
     typescript tsx ts-node \
     @mermaid-js/mermaid-cli \
     sharp pdf-lib docx pptxgenjs \
     marked \
-    playwright
+    && npm cache clean --force
 
 # ---------------------------------------------------------------------------
-# 8. Playwright + Chromium
+# 7b. Modern static-binary CLIs not in apt (arch-aware)
 # ---------------------------------------------------------------------------
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN npx playwright install chromium \
-    && npx playwright install-deps chromium
-
-# ---------------------------------------------------------------------------
-# 8b. On-demand X server for GUI tools
-# ---------------------------------------------------------------------------
-# LibreOffice and wkhtmltopdf need an X server to render, but most sandbox
-# sessions never touch them. Instead of a persistent Xvfb burning ~170 MB in
-# EVERY container (idle or not), shim these binaries on PATH so each invocation
-# spins up a private, throwaway X server via `xvfb-run` and tears it down after.
-# /usr/local/bin precedes /usr/bin in PATH, so `soffice`/`wkhtmltopdf` typed in
-# the agent's shell transparently hit the shim. `xvfb-run -a` auto-picks a free
-# display; `-e /dev/stderr` surfaces its log to the caller instead of a tempfile.
-# (Playwright/Chromium run headless without X, so they are intentionally NOT
-# shimmed; a headed run can be wrapped with `xvfb-run` explicitly.)
+# duckdb: in-process SQL over CSV/Parquet/JSON — the agent analyses data files
+#   and returns only the rows it needs instead of loading everything.
+# yq (mikefarah, Go): the REAL yq — Ubuntu's apt `yq` is an unrelated Python
+#   jq-wrapper with different syntax, so we fetch the upstream binary by hand.
 RUN set -eux; \
-    for pair in "soffice:/usr/bin/soffice" "libreoffice:/usr/bin/libreoffice" "wkhtmltopdf:/usr/bin/wkhtmltopdf"; do \
+    arch="$(dpkg --print-architecture)"; \
+    curl -fsSL "https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-${arch}.zip" -o /tmp/duckdb.zip; \
+    unzip -d /usr/local/bin /tmp/duckdb.zip; rm /tmp/duckdb.zip; chmod 755 /usr/local/bin/duckdb; \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${arch}" -o /usr/local/bin/yq; \
+    chmod 755 /usr/local/bin/yq
+
+# ---------------------------------------------------------------------------
+# 8. Playwright + Chromium (one shared browser for Python AND Node)
+# ---------------------------------------------------------------------------
+# The Python (pip) and Node (npm) Playwright packages each pin an EXACT Chromium
+# build; if their versions drift, one downloads a build the other lacks and then
+# silently fails at launch ("Run playwright install"). So read the version pip
+# resolved, pin npm to the SAME one, and install the browser ONCE — both runtimes
+# resolve to it via PLAYWRIGHT_BROWSERS_PATH. npm's own browser download is
+# skipped; the Python installer fetches the single shared build (+ system deps).
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# Global npm modules aren't on Node's default resolution path, so a bare
+# `require("playwright")` from /workspace fails — NODE_PATH fixes that.
+ENV NODE_PATH=/usr/lib/node_modules
+RUN set -eux; \
+    PWVER="$(python3 -c 'import importlib.metadata as m; print(m.version("playwright"))')"; \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g "playwright@${PWVER}"; \
+    npm cache clean --force; \
+    python3 -m playwright install --with-deps chromium; \
+    rm -rf /var/lib/apt/lists/*; \
+    # The agent expects a `chromium` command, not a version-buried Playwright
+    # path — symlink the resolved binary onto PATH and reuse it for puppeteer.
+    CHROME="$(python3 -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"; \
+    ln -sf "$CHROME" /usr/local/bin/chromium; \
+    ln -sf "$CHROME" /usr/local/bin/chromium-browser; \
+    rm -rf /root/.cache
+# mermaid-cli's puppeteer drives the same single Chromium instead of its own copy.
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium
+
+# ---------------------------------------------------------------------------
+# 8b. On-demand X server for GUI tools + modern HTML->PDF
+# ---------------------------------------------------------------------------
+# LibreOffice needs an X server to render, but most sandbox sessions never touch
+# it. Instead of a persistent Xvfb burning ~170 MB in EVERY container (idle or
+# not), shim its binaries on PATH so each invocation spins up a private,
+# throwaway X server via `xvfb-run` and tears it down after. /usr/local/bin
+# precedes /usr/bin in PATH, so `soffice` typed in the agent's shell hits the
+# shim transparently. `xvfb-run -a` auto-picks a free display; `-e /dev/stderr`
+# surfaces its log to the caller instead of a tempfile.
+RUN set -eux; \
+    for pair in "soffice:/usr/bin/soffice" "libreoffice:/usr/bin/libreoffice"; do \
       name="${pair%%:*}"; real="${pair#*:}"; \
       printf '#!/bin/sh\nexec xvfb-run -a -e /dev/stderr -s "-screen 0 1920x1080x24 -nolisten tcp" "%s" "$@"\n' "$real" > "/usr/local/bin/$name"; \
       chmod 755 "/usr/local/bin/$name"; \
     done
+
+# html2pdf: modern HTML->PDF via headless Chromium, replacing the archived,
+# CVSS-9.8-SSRF wkhtmltopdf. Chromium is already in the image and runs headless
+# (no X needed). --no-sandbox/--disable-dev-shm-usage are the correct flags
+# under gVisor (Chrome's own sandbox is redundant there; /dev/shm is tiny).
+RUN set -eux; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      '# Usage: html2pdf <input.html|url> [output.pdf]' \
+      'set -e; src="$1"; [ -n "$src" ] || { echo "usage: html2pdf <input.html|url> [output.pdf]" >&2; exit 2; }' \
+      'case "$src" in http://*|https://*|file://*) url="$src";; *) url="file://$(realpath "$src")";; esac' \
+      'out="${2:-${src%.*}.pdf}"' \
+      'exec chromium --headless=new --no-sandbox --disable-dev-shm-usage --disable-gpu --no-pdf-header-footer --print-to-pdf="$out" "$url"' \
+      > /usr/local/bin/html2pdf; \
+    chmod 755 /usr/local/bin/html2pdf
 
 # ---------------------------------------------------------------------------
 # 9. Non-root user + workspace
