@@ -73,10 +73,10 @@ export interface OutFile {
 /**
  * A channel the runner streams a task into. `push` is fire-and-forget and
  * coalesces internally (the runner calls it on every flush, ~10×/s) — it updates
- * the ephemeral, animated draft preview with the live reasoning + answer-so-far.
- * `finish` persists the whole turn as ONE final (notifying) rich message exactly
- * once, mirroring the draft's structure (the reasoning folds from the live
- * <tg-thinking> block into a collapsed <details>); `sendFiles` delivers any files
+ * the ephemeral, animated draft preview: the live reasoning (a <tg-thinking>
+ * block) until the answer starts, then the answer-so-far. `finish` persists the
+ * whole turn as ONE final (notifying) rich message exactly once, with the
+ * reasoning folded into a collapsed <details> above it; `sendFiles` delivers any files
  * the run produced. The web sink is a no-op — the web UI already receives
  * everything over realtime and browses sandbox files directly, and renders the
  * whole turn as a single message.
@@ -117,30 +117,25 @@ export function draftIdFrom(seed: string): number {
   return (Math.abs(h) % 2_000_000_000) + 1;
 }
 
-/** Streaming view, built to MIRROR the final message so the live preview and the
- *  persisted reply correspond. Layout is always "reasoning block on top, answer
- *  below"; the live reasoning rides the native, animated <tg-thinking> block
- *  (HTML, draft-only) which `finish` then folds into a collapsed <details>.
+/** Streaming view. While NOTHING is written yet, the whole draft is the native,
+ *  animated <tg-thinking> block — live reasoning text, or the active tool's step.
+ *  Once ANY answer text exists, content wins: the draft is just the answer.
  *
- *  Markdown isn't parsed inside <tg-thinking> (only HTML tags are), so the
- *  reasoning is HTML-escaped; the answer sits OUTSIDE the tag, in the markdown
- *  field, where the model's Markdown renders normally. While nothing is written
- *  yet, the whole draft is just the <tg-thinking> block (or the active tool's
- *  step). A running tool shows a `> 🔧 …` blockquote that finish caps as
- *  `> ✅ N tools · Ts`. */
+ *  Content-wins is deliberate. An agentic turn alternates reasoning, tool calls
+ *  and answer text; if we floated a reasoning/tool block above the already-shown
+ *  answer it would jump in and out and merge thinking from separate phases — a
+ *  visual mess as the model thinks again after a tool. So mid-answer activity
+ *  stays out of the live view; the finished reply still folds all the reasoning
+ *  into a collapsed <details> (see `composeFinal`). Markdown isn't parsed inside
+ *  <tg-thinking> (only HTML tags are), so the reasoning is HTML-escaped. */
 export function composeDraft(answer: string, reasoning: string, status: StreamStatus, t: Translator): DraftBody {
-  const body = answer.trim();
+  if (answer.trim()) return { markdown: answer };
   const think = reasoning.trim().slice(-THINKING_MAX_CHARS);
-  if (!body) {
-    const inner =
-      status?.kind === "tool"
-        ? `🔧 ${escapeHtml(status.label)}${status.detail ? ` — ${escapeHtml(status.detail)}` : ""}`
-        : escapeHtml(think) || t("statusThinking");
-    return { html: `<tg-thinking>${inner}</tg-thinking>` };
-  }
-  if (status?.kind === "tool") return { markdown: `> 🔧 ${status.label}\n\n${answer}` };
-  if (think) return { markdown: `<tg-thinking>${escapeHtml(think)}</tg-thinking>\n\n${answer}` };
-  return { markdown: answer };
+  const inner =
+    status?.kind === "tool"
+      ? `🔧 ${escapeHtml(status.label)}${status.detail ? ` — ${escapeHtml(status.detail)}` : ""}`
+      : escapeHtml(think) || t("statusThinking");
+  return { html: `<tg-thinking>${inner}</tg-thinking>` };
 }
 
 /** Final view, mirroring the web: the model's thinking is folded into a

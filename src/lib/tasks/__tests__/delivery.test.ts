@@ -26,23 +26,15 @@ describe("composeDraft", () => {
       html: "<tg-thinking>🔧 Створення logo.svg…</tg-thinking>",
     });
   });
-  it("keeps the live <tg-thinking> block above the answer while it streams (mirrors the final <details>)", () => {
-    // Reasoning rides a tg-thinking block on top; the answer sits outside it, as
-    // markdown. Status is already cleared (answering), but the reasoning persists.
-    expect(composeDraft("Привіт", "Зважую варіанти", undefined, uk)).toEqual({
-      markdown: "<tg-thinking>Зважую варіанти</tg-thinking>\n\nПривіт",
-    });
-    // Reasoning is HTML-escaped even when embedded in the markdown field.
-    expect(composeDraft("Hi", "a < b", undefined, uk)).toEqual({
-      markdown: "<tg-thinking>a &lt; b</tg-thinking>\n\nHi",
-    });
-  });
-  it("shows a `> 🔧` blockquote above the answer while a tool runs", () => {
+  it("content wins once any answer text exists — no thinking/tool block jumps in above it", () => {
+    // Reasoning continues (thinking-again after a tool) but the live view stays
+    // the clean answer — the reasoning is kept for the final <details>, not the draft.
+    expect(composeDraft("Привіт", "Зважую варіанти", undefined, uk)).toEqual({ markdown: "Привіт" });
+    // A tool running mid-answer doesn't float a `> 🔧` line above the streamed text.
     expect(composeDraft("partial", "", { kind: "tool", label: "Виконання команди…" }, uk)).toEqual({
-      markdown: "> 🔧 Виконання команди…\n\npartial",
+      markdown: "partial",
     });
-  });
-  it("shows just the answer when there's no reasoning and no active step", () => {
+    // Plain answer, no reasoning, no step.
     expect(composeDraft("the answer", "", undefined, uk)).toEqual({ markdown: "the answer" });
   });
 });
