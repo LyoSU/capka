@@ -95,8 +95,9 @@ export default function ConnectionsPage() {
   const [iconSlug, setIconSlug] = useState<string | null>(null);
   const [formShared, setFormShared] = useState(true);
   const [showKey, setShowKey] = useState(false);
-  // OpenAI wire transport for the new connection. "auto" persists as null.
-  const [apiStyle, setApiStyle] = useState("auto");
+  // OpenAI only: drive the model over Chat Completions instead of the default
+  // Responses API. Off persists as null (auto = Responses); on persists "chat".
+  const [useChatApi, setUseChatApi] = useState(false);
 
   const meta = PROVIDER_META[provider];
 
@@ -106,7 +107,7 @@ export default function ConnectionsPage() {
     setDefaultModel("");
     setLabel("");
     setIconSlug(null);
-    setApiStyle("auto");
+    setUseChatApi(false);
     setBaseUrl(PROVIDER_META[next].defaultBaseUrl ?? "");
   }
 
@@ -134,7 +135,7 @@ export default function ConnectionsPage() {
     setDefaultModel("");
     setLabel("");
     setIconSlug(null);
-    setApiStyle("auto");
+    setUseChatApi(false);
     setFormShared(true);
     setShowForm(false);
   };
@@ -233,16 +234,9 @@ export default function ConnectionsPage() {
         return;
       }
 
-      // Required base URL falls back to the provider default; an OPTIONAL one
-      // (OpenAI → compatible gateway) is sent only when the user typed something,
-      // otherwise the SDK's own default endpoint is used.
-      const effectiveBaseUrl = meta.requiresBaseUrl
-        ? baseUrl || meta.defaultBaseUrl
-        : meta.optionalBaseUrl
-          ? baseUrl.trim() || undefined
-          : undefined;
-      // The wire transport only applies to OpenAI; "auto" stays unset.
-      const effectiveApiStyle = provider === "openai" && apiStyle !== "auto" ? apiStyle : undefined;
+      const effectiveBaseUrl = meta.requiresBaseUrl ? baseUrl || meta.defaultBaseUrl : undefined;
+      // The wire transport only applies to OpenAI; default (Responses) stays unset.
+      const effectiveApiStyle = provider === "openai" && useChatApi ? "chat" : undefined;
 
       // Test connection
       const testRes = await fetch("/api/settings/providers/test", {
@@ -427,29 +421,19 @@ export default function ConnectionsPage() {
               />
             </div>
 
-            {/* OpenAI wire transport — the escape hatch when a compatible
-                endpoint drops tools under the default Responses API. */}
+            {/* OpenAI transport — Responses API by default; flip to Chat
+                Completions if a setup needs the classic endpoint. */}
             {c.provider === "openai" && (
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">{t("apiType")}</label>
-                <Select
-                  value={c.apiStyle ?? "auto"}
-                  onValueChange={(v) => handleUpdateApiStyle(c.id, v)}
-                  items={{
-                    auto: t("apiTypeAuto"),
-                    chat: t("apiTypeChat"),
-                    responses: t("apiTypeResponses"),
-                  }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">{t("apiTypeAuto")}</SelectItem>
-                    <SelectItem value="chat">{t("apiTypeChat")}</SelectItem>
-                    <SelectItem value="responses">{t("apiTypeResponses")}</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t("chatCompletions")}</p>
+                  <p className="text-xs text-muted-foreground">{t("chatCompletionsHint")}</p>
+                </div>
+                <Switch
+                  checked={c.apiStyle === "chat"}
+                  onCheckedChange={(v) => handleUpdateApiStyle(c.id, v ? "chat" : null)}
+                  aria-label={t("chatCompletions")}
+                />
               </div>
             )}
 
@@ -570,9 +554,9 @@ export default function ConnectionsPage() {
             </div>
           )}
 
-          {(meta.requiresBaseUrl || meta.optionalBaseUrl) && (
+          {meta.requiresBaseUrl && (
             <div className="space-y-1.5">
-              <label className="text-sm">{meta.optionalBaseUrl ? t("baseUrlOptional") : t("baseUrl")}</label>
+              <label className="text-sm">{t("baseUrl")}</label>
               <Input
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
@@ -582,27 +566,12 @@ export default function ConnectionsPage() {
           )}
 
           {provider === "openai" && (
-            <div className="space-y-1.5">
-              <label className="text-sm">{t("apiType")}</label>
-              <Select
-                value={apiStyle}
-                onValueChange={(v) => setApiStyle(v ?? "auto")}
-                items={{
-                  auto: t("apiTypeAuto"),
-                  chat: t("apiTypeChat"),
-                  responses: t("apiTypeResponses"),
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">{t("apiTypeAuto")}</SelectItem>
-                  <SelectItem value="chat">{t("apiTypeChat")}</SelectItem>
-                  <SelectItem value="responses">{t("apiTypeResponses")}</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">{t("apiTypeHint")}</p>
+            <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{t("chatCompletions")}</p>
+                <p className="text-xs text-muted-foreground">{t("chatCompletionsHint")}</p>
+              </div>
+              <Switch checked={useChatApi} onCheckedChange={setUseChatApi} aria-label={t("chatCompletions")} />
             </div>
           )}
 

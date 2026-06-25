@@ -705,12 +705,8 @@
       "resyncModelsButton": "Re-sync now",
       "resyncDone": "Catalog re-synced — {count} models from OpenRouter.",
       "resyncFailed": "Failed to re-sync the model catalog",
-      "apiType": "API type",
-      "apiTypeHint": "How to talk to the model. Auto uses the Responses API for OpenAI and Chat Completions for a custom endpoint. Choose Chat Completions if tools don't work on an OpenAI-compatible gateway.",
-      "apiTypeAuto": "Auto",
-      "apiTypeChat": "Chat Completions",
-      "apiTypeResponses": "Responses API",
-      "baseUrlOptional": "Base URL (optional)"
+      "chatCompletions": "Use Chat Completions API",
+      "chatCompletionsHint": "OpenAI uses its Responses API by default. Turn this on only if your setup needs the classic Chat Completions endpoint."
     },
     "usage": {
       "title": "Usage & cost",
