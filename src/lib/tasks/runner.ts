@@ -35,7 +35,9 @@ import { recordUsage } from "@/lib/usage";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR } from "@/lib/errors/friendly";
+import { delay } from "@ai-sdk/provider-utils";
+import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
 import { errorText } from "@/lib/errors/message";
 import { downloadFile, createSession } from "@/lib/sandbox/client";
@@ -147,10 +149,10 @@ const MAX_TASK_MS = 10 * 60_000;
  * real time-to-first-token, short enough that a hung gateway fails fast.
  */
 const STREAM_IDLE_MS = 60_000;
-/** How many times a stalled attempt is re-streamed before giving up with a clear
- *  "provider didn't respond" message. A transient gateway hiccup usually clears
- *  on the first retry; past 2 the model/provider is genuinely unhealthy. */
-const MAX_STALL_RETRIES = 2;
+/** Max recovery attempts (stall + transient) per turn before giving up with a
+ *  clear "provider didn't respond" message. A transient gateway hiccup usually
+ *  clears on the first retry; past 3 the model/provider is genuinely unhealthy. */
+const MAX_RECOVERIES = 3;
 
 /** Reactive context-overflow fallback: how many of the most recent conversation
  *  messages to keep when mechanically trimming a prompt the model rejected as too
@@ -590,15 +592,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // cancel, lost lease); `attemptAc` aborts only the CURRENT stream when the
     // provider goes silent, so a retry can re-stream without the whole task
     // reading as cancelled. The model's signal is the union of both. A stalled
-    // attempt sets `stalled` and is re-streamed up to MAX_STALL_RETRIES; once
+    // attempt sets `stalled` and is recovered up to MAX_RECOVERIES; once
     // exhausted, `stalledOut` makes finalization surface PROVIDER_UNRESPONSIVE.
     let attemptAc = new AbortController();
     let stalled = false;
     let stalledOut = false;
-    let stallRetries = 0;
+    let recoveries = 0;
+    // A continuation re-stream appends these to the prompt (see resume()); empty
+    // on the first attempt and on clean (capability/context) restarts.
+    let resumeMessages: ModelMessage[] = [];
+    // One-shot seam fix applied to the first text delta after a resume.
+    let stitchNextDelta = false;
+    let resumeTail = "";
     const watchdog = new StallWatchdog(STREAM_IDLE_MS, () => {
       stalled = true;
-      tlog.warn("provider.stall", { model: modelId, attempt: stallRetries, idleMs: STREAM_IDLE_MS });
+      tlog.warn("provider.stall", { model: modelId, attempt: recoveries, idleMs: STREAM_IDLE_MS });
       attemptAc.abort();
     });
 
@@ -616,7 +624,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // only tweaks toolChoice — never rewrites messages — so it can't break the
         // prompt cache mid-turn (see stepSettings).
         ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25), prepareStep: ({ stepNumber }) => stepSettings(stepNumber) } : {}),
-        messages: [...systemMessages, ...modelMessages],
+        messages: [...systemMessages, ...modelMessages, ...resumeMessages],
         ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
         // Either signal aborts the stream; only `attemptAc` aborts are retryable.
         abortSignal: AbortSignal.any([ac.signal, attemptAc.signal]),
@@ -625,24 +633,27 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
 
     let result = makeStream();
 
-    // Spend on attempts we threw away (capability/empty-response retries). The
-    // provider still billed those tokens, so they belong in the usage table for
-    // accurate shared-key accounting — but NOT in the message's (i) popover,
-    // which shows only the final attempt that produced the visible answer.
-    // Captured from the OLD stream right before each retry replaces `result`.
+    // Usage accumulated LIVE from finish-step events — the source of truth.
+    // `result.totalUsage` rejects on an aborted stream, so relying on it dropped
+    // usage (and skipped billing) on every cancel/break. Per-step usages sum to
+    // totalUsage on a clean run and survive an abort (steps emit usage before the
+    // `abort` event).
+    const liveUsage = { input: 0, output: 0, cached: 0 };
+    // Spend on attempts thrown away by a capability/context/empty discard — billed
+    // by the provider (usage-table truth), but NOT in the (i) popover, which shows
+    // only the final attempt that produced the visible answer.
     const discarded = { input: 0, output: 0, cached: 0 };
     let hadDiscard = false;
-    const captureDiscarded = async () => {
-      try {
-        const u = await result.totalUsage;
-        if (!u) return;
-        const cached = u.inputTokenDetails?.cacheReadTokens ?? 0;
-        const input = u.inputTokenDetails?.noCacheTokens ?? Math.max(0, (u.inputTokens ?? 0) - cached);
-        hadDiscard = true;
-        discarded.input += input;
-        discarded.output += u.outputTokens ?? 0;
-        discarded.cached += cached;
-      } catch { /* an errored/aborted stream may not report usage — best effort */ }
+    // Roll the current visible-answer usage into `discarded` when a retry wipes
+    // `parts`. Stall/transient resumes KEEP their output, so they don't fold.
+    const foldDiscarded = () => {
+      if (liveUsage.input || liveUsage.output || liveUsage.cached) hadDiscard = true;
+      discarded.input += liveUsage.input;
+      discarded.output += liveUsage.output;
+      discarded.cached += liveUsage.cached;
+      liveUsage.input = 0;
+      liveUsage.output = 0;
+      liveUsage.cached = 0;
     };
 
     const appendText = (delta: string) => {
@@ -737,6 +748,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       parts.length = 0;
       textBuf = "";
       reasonBuf = "";
+      resumeMessages = [];
+      stitchNextDelta = false;
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       await publishTaskEvent(userId, { type: "task:reset", taskId, chatId, messageId: msgId, seq: ++seq });
     };
@@ -765,14 +778,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             reasonBuf += event.text;
             scheduleFlush();
             break;
-          case "text-delta":
+          case "text-delta": {
+            // First delta after a resume may re-emit the partial's tail — stitch it off.
+            let text = event.text;
+            if (stitchNextDelta) { stitchNextDelta = false; text = stitchOverlap(resumeTail, text); }
+            if (!text) break;
             // Answer is flowing — clear the transient "thinking/tool" header.
-            if (firstTextAt == null && event.text) firstTextAt = Date.now();
+            if (firstTextAt == null) firstTextAt = Date.now();
             currentStatus = undefined;
-            appendText(event.text);
-            textBuf += event.text;
+            appendText(text);
+            textBuf += text;
             scheduleFlush();
             break;
+          }
           case "tool-input-start": {
             // The model has begun a tool call but its args haven't streamed in
             // yet. Surface the step at once (a spinner with a generic label) so
@@ -844,7 +862,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           case "error":
             streamError = errMsg(event.error);
             break;
-          case "finish-step":
+          case "finish-step": {
+            // Accumulate this step's usage live, so a later abort/cancel still
+            // reports the tokens already billed (see liveUsage).
+            const cached = event.usage.inputTokenDetails?.cacheReadTokens ?? 0;
+            liveUsage.input += event.usage.inputTokenDetails?.noCacheTokens ?? Math.max(0, (event.usage.inputTokens ?? 0) - cached);
+            liveUsage.output += event.usage.outputTokens ?? 0;
+            liveUsage.cached += cached;
             // Flush buffered text, force a snapshot (streamSeq + parts) + renew
             // the lease per step. force=true bypasses the ~1s throttle so each
             // step boundary is durably persisted.
@@ -852,6 +876,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             await saveSnapshot(true);
             await heartbeat(taskId, workerId);
             break;
+          }
         }
       }
       await flushBuffers();
@@ -896,7 +921,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // The provider rejected what the catalog claimed it took — fold those
         // modalities into the notice so the user is told to switch models.
         blindModalities = Array.from(new Set([...blindModalities, ...nativeModalities]));
-        await captureDiscarded();
+        foldDiscarded();
         result = makeStream();
         await consume();
         return true;
@@ -908,7 +933,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         useReasoning = false;
         streamError = undefined;
         await discardPartial();
-        await captureDiscarded();
+        foldDiscarded();
         result = makeStream();
         await consume();
         return true;
@@ -930,45 +955,76 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       streamError = undefined;
       await discardPartial();
       modelMessages = trimToRecent(modelMessages, EMERGENCY_KEEP_RECENT);
-      await captureDiscarded();
+      foldDiscarded();
       result = makeStream();
       await consume();
       return true;
     };
 
+    // Continuation: KEEP `parts`, rebuild the in-progress reply into a user-turn
+    // "continue" request (never an assistant prefill — that 400s on modern
+    // Anthropic), disable reasoning, arm the seam stitch, and re-stream. Returns
+    // false when there's nothing to resume from (caller restarts clean instead).
+    const resume = async (): Promise<boolean> => {
+      await flushBuffers(); // canonical parts in DB + client before continuing
+      const msgs = await buildResumeMessages(msgId, parts);
+      if (msgs.length === 0) return false;
+      resumeTail = getFullText().slice(-500);
+      stitchNextDelta = true;
+      useReasoning = false; // partial reasoning isn't replayable
+      resumeMessages = msgs;
+      result = makeStream();
+      return true;
+    };
+
     // One attempt = a stream consumed to completion, plus its capability/context
-    // retries. The watchdog can abort an attempt mid-flight when the provider goes
-    // silent; that ends the stream via an "abort" event (no throw), so consume
-    // returns and `stalled` flags it. Re-stream a bounded number of times before
-    // giving up with a clear "provider didn't respond" failure.
+    // retries. A stall (watchdog abort, no throw) or a transient stream error is
+    // recovered by CONTINUING from the partial — up to MAX_RECOVERIES — instead of
+    // regenerating from scratch. Once exhausted, `stalledOut` surfaces the
+    // friendly "provider didn't respond" failure while keeping the partial answer.
     for (;;) {
       stalled = false;
+      let transient: unknown;
       try {
         await consume();
-        // Provider surfaced the error as a stream event, not a throw — same retry.
+        // Provider surfaced the error as a stream event, not a throw.
         if (streamError && !ac.signal.aborted) {
-          if (!(await retryOnCapabilityError(streamError))) await retryOnContextOverflow(streamError);
+          if (!(await retryOnCapabilityError(streamError)) && !(await retryOnContextOverflow(streamError))) {
+            if (isTransientError(streamError)) transient = streamError;
+          }
         }
       } catch (e) {
-        if (!(await retryOnCapabilityError(e)) && !(await retryOnContextOverflow(e))) throw e;
+        if (!(await retryOnCapabilityError(e)) && !(await retryOnContextOverflow(e))) {
+          if (isTransientError(e)) transient = e;
+          else throw e;
+        }
       }
-      if (!stalled || ac.signal.aborted) break;
-      if (stallRetries >= MAX_STALL_RETRIES) { stalledOut = true; break; }
-      stallRetries++;
-      tlog.info("provider stall — re-streaming", { attempt: stallRetries, max: MAX_STALL_RETRIES });
-      await discardPartial();
-      await captureDiscarded();
-      attemptAc = new AbortController(); // fresh signal; the stalled one stays aborted
-      // Layer 2: replace the silent pause with a visible "model is slow, retrying".
-      // No seq — a notice doesn't mutate the reply, so it must not consume a slot
-      // in the per-message counter (that would gap the next delta into a reconcile).
-      // Ordering still holds: NOTIFY is per-channel FIFO and this rides after the
-      // task:reset above and before the retry's first delta.
+
+      if (ac.signal.aborted) break;
+      if (!stalled && transient === undefined) break;
+      if (recoveries >= MAX_RECOVERIES) { stalledOut = true; break; }
+      recoveries++;
+
+      // Transient errors back off a beat; a stall retries at once (it already
+      // burned the 60s idle window). On a successful resume the error must not
+      // finalize as a failure.
+      if (transient !== undefined) {
+        streamError = undefined;
+        await delay(1000);
+        if (ac.signal.aborted) break;
+      }
+      tlog.info("provider recovery — re-streaming", { attempt: recoveries, max: MAX_RECOVERIES, kind: transient !== undefined ? "transient" : "stall" });
+
+      // Replace the silent pause with a visible "model is slow, retrying". No seq —
+      // a notice doesn't mutate the reply, so it must not consume a per-message slot.
       await publishTaskEvent(userId, {
         type: "task:notice", taskId, chatId, messageId: msgId,
-        notice: { kind: "retrying", attempt: stallRetries, max: MAX_STALL_RETRIES },
+        notice: { kind: "retrying", attempt: recoveries, max: MAX_RECOVERIES },
       });
-      result = makeStream();
+
+      attemptAc = new AbortController(); // fresh signal; the stalled one stays aborted
+      // Continue from the partial; if there's nothing to continue, restart clean.
+      if (!(await resume())) { await discardPartial(); foldDiscarded(); result = makeStream(); }
     }
 
     // Retry once if the model produced no content. Skip after a stall-out — the
@@ -979,7 +1035,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (!hasContent) {
         tlog.info("empty response — retrying once");
         await discardPartial();
-        await captureDiscarded();
+        foldDiscarded();
         result = makeStream();
         try {
           await consume();
@@ -1002,20 +1058,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // fatal: a failure here just omits the numbers from metadata. `inputTokens`
     // is the TOTAL input incl. cached reads, so split it — non-cached at the
     // input rate, cached reads at the discounted rate (avoids double-counting).
-    let usageMeta: { input: number; output: number; cached: number } | undefined;
+    // Usage from the live accumulator (robust to cancel/abort), not result.totalUsage.
+    const usageMeta = liveUsage.input || liveUsage.output || liveUsage.cached
+      ? { input: liveUsage.input, output: liveUsage.output, cached: liveUsage.cached }
+      : undefined;
     let costMeta: number | null = null;
-    try {
-      const u = await result.totalUsage;
-      if (u) {
-        const cached = u.inputTokenDetails?.cacheReadTokens ?? 0;
-        const input = u.inputTokenDetails?.noCacheTokens ?? Math.max(0, (u.inputTokens ?? 0) - cached);
-        usageMeta = { input, output: u.outputTokens ?? 0, cached };
+    if (usageMeta) {
+      try {
         costMeta = await costUsd(modelId, {
-          inputTokens: input, outputTokens: usageMeta.output, cachedInputTokens: cached,
+          inputTokens: usageMeta.input, outputTokens: usageMeta.output, cachedInputTokens: usageMeta.cached,
         });
+      } catch (e) {
+        tlog.error("cost compute failed", { err: String(e) });
       }
-    } catch (e) {
-      tlog.error("usage compute failed", { err: String(e) });
     }
 
     // Context budget from this turn's ACTUAL input (cached reads included — the

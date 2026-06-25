@@ -158,6 +158,19 @@ export function isContextOverflowError(raw: unknown): boolean {
 }
 
 /**
+ * A provider hiccup worth re-streaming (continuation), vs. a fatal config/auth
+ * error re-streaming can't fix. classifyLLMError has no explicit 5xx rule (they
+ * fall to "unknown"), so server-error shapes are matched directly here.
+ */
+export function isTransientError(raw: unknown): boolean {
+  const { category } = classifyLLMError(raw);
+  if (category === "network" || category === "rate_limited") return true;
+  return /\b(50\d|51\d|52\d|internal server error|bad gateway|service unavailable|temporarily unavailable|server error)\b/i.test(
+    errorText(raw),
+  );
+}
+
+/**
  * Server-enforced run deadline. Used directly (not via the regex rules, which
  * would mis-match a generic "timeout" as a network error) when a task exceeds
  * its wall-clock budget — a live worker stuck on a hung tool/LLM call.
