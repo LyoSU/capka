@@ -17,6 +17,7 @@ export type LLMErrorCategory =
   | "network"
   | "timed_out"
   | "provider_unresponsive"
+  | "interrupted"
   | "unknown";
 
 export interface FriendlyError {
@@ -195,4 +196,16 @@ export const PROVIDER_UNRESPONSIVE_ERROR: FriendlyError = {
   userMessage:
     "The AI model stopped responding. Please try again — if it keeps happening, switch to a different model.",
   adminDetail: "Provider streamed no output before the stall timeout; retries were exhausted.",
+};
+
+/**
+ * The worker running this turn lost its lease — the server restarted, or the
+ * zombie-reconciler took the task over because a heartbeat was late. This is a
+ * crash/interruption, NOT a user cancellation, so it must finalize as "failed"
+ * (with a retry nudge), never as a clean "cancelled".
+ */
+export const INTERRUPTED_ERROR: FriendlyError = {
+  category: "interrupted",
+  userMessage: "This task was interrupted and didn't finish. Please try again.",
+  adminDetail: "Worker lost its task lease (server restart or zombie reconciliation); the turn was aborted mid-run.",
 };

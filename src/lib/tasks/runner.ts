@@ -35,7 +35,7 @@ import { recordUsage } from "@/lib/usage";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { extractMemories } from "@/lib/memory/extract";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
 import { delay } from "@ai-sdk/provider-utils";
 import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
@@ -383,6 +383,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
 
   const ac = new AbortController();
   let deadlineHit = false;
+  // Distinguishes an abort caused by losing our lease (crash/reconciliation —
+  // finalize as "failed") from a cooperative user cancel (finalize "cancelled").
+  let leaseLost = false;
   const deadline = setTimeout(() => {
     deadlineHit = true;
     ac.abort();
@@ -451,7 +454,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void (async () => {
       try {
         const alive = await heartbeat(taskId, workerId);
-        if (!alive) { ac.abort(); return; } // lost lease (reconciled) → stop
+        if (!alive) { leaseLost = true; ac.abort(); return; } // lost lease (reconciled) → stop
         if (await isCancelRequested(taskId)) ac.abort();
       } catch { /* transient DB hiccup; next tick retries */ }
     })();
@@ -750,6 +753,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       reasonBuf = "";
       resumeMessages = [];
       stitchNextDelta = false;
+      // Reset per-attempt metadata too: the discarded attempt's first-token time
+      // and tool count must NOT carry into the surviving attempt, or the final
+      // "reasoned for …" duration is measured against a thrown-away stream and
+      // the "N tools" footer over-counts tools the user never saw land.
+      firstTextAt = null;
+      toolCount = 0;
+      currentStatus = { kind: "thinking" };
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       await publishTaskEvent(userId, { type: "task:reset", taskId, chatId, messageId: msgId, seq: ++seq });
     };
@@ -1045,12 +1055,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    const finalStatus = deadlineHit ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : "completed";
+    const finalStatus = deadlineHit ? "failed" : leaseLost ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : "completed";
     // Map any provider error to a friendly, role-aware shape: users see
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
     // A stall-out gets its own category (distinct from a clean timeout) so the
     // user is told to retry/switch models rather than "shorten your request".
-    const failure = deadlineHit ? TIMED_OUT_ERROR : stalledOut ? PROVIDER_UNRESPONSIVE_ERROR : streamError ? classifyLLMError(streamError) : undefined;
+    const failure = deadlineHit ? TIMED_OUT_ERROR : leaseLost ? INTERRUPTED_ERROR : stalledOut ? PROVIDER_UNRESPONSIVE_ERROR : streamError ? classifyLLMError(streamError) : undefined;
 
     // Token usage + cost, computed once. Needed BOTH for the persisted message
     // metadata (so the (i) details survive a reload — elapsedMs and the usage

@@ -70,13 +70,32 @@ export async function enqueueTask(input: {
       LIMIT 1`,
     [input.id, input.chatId, input.userId, JSON.stringify(input.payload)],
   );
-  // Fallback only for the rare race where the incumbent was claimed (queued →
-  // running) between our failed insert and the SELECT: no pending row remains,
-  // but the now-running turn will still see the just-persisted message when it
-  // rebuilds from the live tree. Report the message's own id, uncreated.
-  const row = rows[0] ?? { id: input.id, created: false };
-  if (row.created) await realtime.publish("task_enqueued", { id: row.id });
-  return row;
+  const row = rows[0];
+  if (row) {
+    if (row.created) await realtime.publish("task_enqueued", { id: row.id });
+    return row;
+  }
+  // Rare race: the incumbent was claimed (queued → running) between our failed
+  // insert and the SELECT, so neither arm returned a row. The partial unique
+  // index only covers QUEUED rows, so the slot is free again now — retry the
+  // insert once. This creates a real queued follow-up carrying THIS message's
+  // payload (its model switch / attachments) instead of silently dropping it
+  // onto the running turn (which only re-reads message TEXT from the live tree,
+  // not the new task payload).
+  const retry = await pool.query<{ id: string }>(
+    `INSERT INTO tasks (id, chat_id, user_id, status, payload)
+     VALUES ($1, $2, $3, 'queued', $4)
+     ON CONFLICT (chat_id) WHERE status = 'queued' DO NOTHING
+     RETURNING id`,
+    [input.id, input.chatId, input.userId, JSON.stringify(input.payload)],
+  );
+  if (retry.rows[0]) {
+    await realtime.publish("task_enqueued", { id: retry.rows[0].id });
+    return { id: retry.rows[0].id, created: true };
+  }
+  // Still nothing — another queued turn beat us to the freed slot; the caller's
+  // message is already persisted, so it folds into that turn's live-tree rebuild.
+  return { id: input.id, created: false };
 }
 
 /** Atomically claim the oldest queued task, taking a lease. Returns null if none. */
