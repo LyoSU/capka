@@ -41,7 +41,7 @@ export async function GET(req: Request) {
     console.warn("[mcp-oauth] start failed:", e);
     // Record WHY so the connectors UI can explain it (e.g. "does not support
     // dynamic client registration") instead of a bare "couldn't sign in".
-    if (serverId) recordConnectError(serverId, errorText(e));
+    if (serverId) recordConnectError(userId, serverId, errorText(e));
     return settings("?error=oauth");
   }
 }

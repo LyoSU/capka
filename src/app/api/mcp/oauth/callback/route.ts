@@ -45,7 +45,7 @@ export async function GET(req: Request) {
     return settings(`?connected=${encodeURIComponent(server.name)}`, tab);
   } catch (e) {
     console.warn("[mcp-oauth] callback failed:", e);
-    if (serverId) recordConnectError(serverId, errorText(e));
+    if (serverId) recordConnectError(userId, serverId, errorText(e));
     return settings("?error=oauth");
   }
 }

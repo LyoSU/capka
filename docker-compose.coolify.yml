@@ -135,6 +135,12 @@ services:
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - UNCLAW_MASTER_KEY=${UNCLAW_MASTER_KEY}
+      # Let the in-process worker own SIGTERM. Without this, Next installs its own
+      # handler that calls server.close()→process.exit(143); for a BACKGROUND task
+      # (tab closed, no open SSE holding the HTTP server) that exit fires before
+      # the worker can drain, killing the task mid-run — defeating the drain. With
+      # manual handling, the worker's SIGTERM handler drains then exits.
+      - NEXT_MANUAL_SIG_HANDLE=1
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

@@ -133,6 +133,10 @@ export async function startWorker(): Promise<void> {
   // finish within a grace window; anything still running when it elapses is
   // reconciled as a retryable "interrupted" by the next instance. Registered once
   // (startWorker is idempotent). Clearing the intervals lets the loop wind down.
+  //
+  // NEXT_MANUAL_SIG_HANDLE=1 (set in prod compose) suppresses Next's own SIGTERM
+  // handler so this one owns shutdown — otherwise Next's server.close()→exit(143)
+  // races and, for a background task with no open SSE, exits before we drain.
   const shutdown = async (signal: NodeJS.Signals) => {
     if (s.draining) return;
     s.draining = true;

@@ -7,6 +7,7 @@
  * Centralized so every surface (worker, chat panel, API) maps errors the same.
  */
 import { errorText } from "./message";
+import { stripNul } from "@/lib/tasks/sanitize";
 
 export type LLMErrorCategory =
   | "out_of_credits"
@@ -54,9 +55,11 @@ const RULES: Rule[] = [
   },
   {
     category: "rate_limited",
-    // "saturated"/"upstream load" = a shared gateway pool is momentarily full;
-    // genuinely transient, so retrying (the runner re-streams) is the right move.
-    test: /\b(429|rate[_\s-]?limit|too many requests|overloaded|capacity|saturated|upstream load)\b/i,
+    // A shared gateway pool momentarily full ("upstream load … saturated"); a
+    // transient condition, so retrying (the runner re-streams) is the right move.
+    // `saturated` is anchored to a pool/upstream context so it doesn't match an
+    // unrelated "image is saturated"/"market is saturated" and force a retry.
+    test: /\b(429|rate[_\s-]?limit|too many requests|overloaded|capacity|upstream load)\b|\b(upstream|group|pool|channel)\b[^.]{0,30}\bsaturated\b/i,
     userMessage: "The assistant is busy right now. Please try again in a few moments.",
   },
   {
@@ -85,7 +88,10 @@ const DEFAULT_USER_MESSAGE =
 
 /** Classify a raw error string/Error into a user-friendly, role-aware shape. */
 export function classifyLLMError(raw: unknown): FriendlyError {
-  const detail = errorText(raw);
+  // Strip NUL: a raw provider/gateway error can carry binary bytes, and this
+  // detail is written to jsonb message metadata + the tasks.error column — an
+  // un-stripped NUL would throw on the very write meant to persist the failure.
+  const detail = stripNul(errorText(raw));
   const rule = RULES.find((r) => r.test.test(detail));
   return {
     category: rule?.category ?? "unknown",

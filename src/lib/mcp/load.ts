@@ -35,10 +35,12 @@ export async function loadMcpTools(opts: {
   const allow = opts.isServerAllowed ?? (() => true);
   const configs = (await listEnabledServerConfigs(opts.userId, opts.projectId))
     .filter((c) => allow(c.name))
-    // Skip a connector that failed to connect moments ago: re-dialing a dead
-    // endpoint every run only adds its timeout to startup. Its recorded error
-    // stays visible in the connectors UI; it's retried once the backoff lapses.
-    .filter((c) => !(c.id && recentlyFailed(c.id, CONNECT_BACKOFF_MS)))
+    // Skip a connector that failed to connect for THIS user moments ago:
+    // re-dialing a dead endpoint every run only adds its timeout to startup. Its
+    // recorded error stays visible in the connectors UI; it's retried once the
+    // backoff lapses (per-user, so one user's failure never hides a shared
+    // connector from another whose auth is fine).
+    .filter((c) => !(c.id && recentlyFailed(opts.userId, c.id, CONNECT_BACKOFF_MS)))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   // Any stdio connector needs a live container (its server is `docker exec`'d in,
@@ -76,10 +78,10 @@ export async function loadMcpTools(opts: {
       if (r.status === "rejected") {
         const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
         console.warn(`[mcp] connect failed for "${cfg.name}":`, reason);
-        recordConnectError(cfg.id, reason);
+        recordConnectError(opts.userId, cfg.id, reason);
         return;
       }
-      clearConnectError(cfg.id);
+      clearConnectError(opts.userId, cfg.id);
       connected.push(r.value);
       for (const mt of [...r.value.tools].sort((a, b) => a.name.localeCompare(b.name))) {
         tools[mcpToolName(cfg.name, mt.name)] = adaptMcpTool(r.value.client, cfg.name, mt);

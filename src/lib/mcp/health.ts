@@ -86,7 +86,7 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
   // stdio servers can't be probed here (they need a live sandbox session), but if a
   // recent run recorded a connect failure, surface it so the UI explains the silence.
   for (const r of rows.filter((r) => r.transport === "stdio")) {
-    const detail = getConnectError(r.id);
+    const detail = getConnectError(userId, r.id);
     if (detail) out[r.id] = { status: "unreachable", detail };
   }
 
@@ -119,7 +119,7 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
   // a healthy probe always wins (a recorded error is only the last FAILED attempt).
   for (const r of rows) {
     if (out[r.id]?.status === "ok") continue;
-    const detail = getConnectError(r.id);
+    const detail = getConnectError(userId, r.id);
     if (detail) out[r.id] = { ...(out[r.id] ?? { status: "unreachable" }), detail };
   }
   return out;

@@ -1302,7 +1302,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             await db.insert(messages).values({
               id: checkpointId, chatId, parentId: msgId, role: "assistant", content: "",
               platform: payload.origin?.platform ?? "web",
-              metadata: { status: "completed", compaction: { summary, summarizedUpTo: msgId, tokensSaved: budget.used } },
+              metadata: { status: "completed", compaction: { summary: stripNul(summary), summarizedUpTo: msgId, tokensSaved: budget.used } },
             });
             await db.update(chats).set({ activeLeafId: checkpointId }).where(eq(chats.id, chatId));
             // Tell the client so it reloads: the transcript gains the divider and
