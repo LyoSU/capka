@@ -113,6 +113,11 @@ services:
     build: .
     expose:
       - "3000"
+    # Give the in-process task worker time to drain on redeploy: it stops claiming
+    # new tasks on SIGTERM and lets running turns finish (DRAIN_GRACE_MS=25s in
+    # worker.ts) before exiting, so a deploy no longer kills live tasks mid-run.
+    # Must exceed that grace so Docker doesn't SIGKILL mid-drain.
+    stop_grace_period: 35s
     # This host fronts apps with its own nginx (Coolify's Traefik is stopped
     # here), so publish to loopback for nginx to reverse-proxy. 127.0.0.1 only —
     # never exposed past UFW. On a host that uses Coolify's Traefik, drop this.

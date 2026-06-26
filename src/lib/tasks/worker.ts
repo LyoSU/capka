@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { models } from "@/lib/db/schema";
 import { realtime } from "@/lib/realtime";
 import { claimNextTask, reconcileZombies, INTERRUPTED_MESSAGE } from "@/lib/tasks/queue";
+import { drainInFlight } from "@/lib/tasks/drain";
 import { releaseHold } from "@/lib/billing/limits";
 import { runAgentTask } from "@/lib/tasks/runner";
 import { publishTaskEvent } from "@/lib/tasks/events";
@@ -24,27 +25,34 @@ const POLL_MS = 5_000;
 const RECONCILE_MS = 30_000;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const CATALOG_STALE_MS = 12 * 60 * 60 * 1000;
+/** On shutdown, how long to let already-running tasks finish before exiting.
+ *  Most turns finish well inside this; the rare long one is reconciled as a
+ *  retryable "interrupted" by the next instance. Keep the platform's
+ *  stop_grace_period comfortably above this (see docker-compose.coolify.yml). */
+const DRAIN_GRACE_MS = 25_000;
 
 interface WorkerState {
   started: boolean;
   workerId: string;
   inFlight: number;
   ticking: boolean;
+  /** Set on SIGTERM/SIGINT: stop claiming new tasks so the process can exit. */
+  draining: boolean;
 }
 
 const g = globalThis as unknown as { __worker?: WorkerState };
 
 function state(): WorkerState {
-  if (!g.__worker) g.__worker = { started: false, workerId: `w_${nanoid(8)}`, inFlight: 0, ticking: false };
+  if (!g.__worker) g.__worker = { started: false, workerId: `w_${nanoid(8)}`, inFlight: 0, ticking: false, draining: false };
   return g.__worker;
 }
 
 async function tick(): Promise<void> {
   const s = state();
-  if (s.ticking) return;
+  if (s.ticking || s.draining) return;
   s.ticking = true;
   try {
-    while (s.inFlight < MAX_CONCURRENCY) {
+    while (s.inFlight < MAX_CONCURRENCY && !s.draining) {
       const task = await claimNextTask(s.workerId);
       if (!task) break;
       s.inFlight++;
@@ -108,15 +116,36 @@ export async function startWorker(): Promise<void> {
 
   // Wake on enqueue (cross-process via NOTIFY), with a polling fallback.
   await realtime.subscribe("task_enqueued", () => void tick());
-  setInterval(() => void tick(), POLL_MS);
+  const pollTimer = setInterval(() => void tick(), POLL_MS);
 
   // Reconcile zombies on boot and periodically.
   void reconcile();
-  setInterval(() => void reconcile(), RECONCILE_MS);
+  const reconcileTimer = setInterval(() => void reconcile(), RECONCILE_MS);
 
   // Keep the model catalog fresh (background, never blocks startup).
   void refreshCatalogIfStale();
-  setInterval(() => void refreshCatalogIfStale(), CATALOG_REFRESH_MS);
+  const catalogTimer = setInterval(() => void refreshCatalogIfStale(), CATALOG_REFRESH_MS);
+
+  // Graceful shutdown: a deploy/restart sends SIGTERM. WITHOUT this, every
+  // in-flight task was killed mid-run and surfaced to the user as an interruption
+  // (the single biggest source of "worker lost" failures during the beta, one
+  // batch per redeploy). Now we stop claiming new work and let running tasks
+  // finish within a grace window; anything still running when it elapses is
+  // reconciled as a retryable "interrupted" by the next instance. Registered once
+  // (startWorker is idempotent). Clearing the intervals lets the loop wind down.
+  const shutdown = async (signal: NodeJS.Signals) => {
+    if (s.draining) return;
+    s.draining = true;
+    clearInterval(pollTimer);
+    clearInterval(reconcileTimer);
+    clearInterval(catalogTimer);
+    log.info("worker draining on signal — no new tasks; waiting for in-flight", { signal, workerId: s.workerId, inFlight: s.inFlight });
+    const { drained, remaining } = await drainInFlight(() => state().inFlight, DRAIN_GRACE_MS);
+    log.info("worker drain complete", { signal, workerId: s.workerId, drained, remaining });
+    process.exit(0);
+  };
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  process.once("SIGINT", () => void shutdown("SIGINT"));
 
   // Pick up anything already queued.
   void tick();
