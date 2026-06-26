@@ -3,11 +3,15 @@ import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { connectMcpServer, disconnectMcp, type ConnectedMcp } from "./client";
 import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
-import { recordConnectError, clearConnectError } from "./connect-errors";
+import { recordConnectError, clearConnectError, recentlyFailed } from "./connect-errors";
 import { McpOAuthProvider } from "./oauth/provider";
 import { needsPluginRoot, resolvePluginRoot } from "./plugin-runtime";
 
 const MAX_CONCURRENT = 4;
+/** Don't re-dial a connector that failed within this window — one broken server
+ *  shouldn't add its connect timeout to every single turn (see recentlyFailed).
+ *  Short enough that a fixed/re-authorized connector recovers within a minute. */
+const CONNECT_BACKOFF_MS = 60_000;
 
 /** Connect every enabled server (bounded concurrency), adapt + namespace their
  *  tools. A server that fails is logged and skipped — never fatal. Tools are
@@ -31,6 +35,10 @@ export async function loadMcpTools(opts: {
   const allow = opts.isServerAllowed ?? (() => true);
   const configs = (await listEnabledServerConfigs(opts.userId, opts.projectId))
     .filter((c) => allow(c.name))
+    // Skip a connector that failed to connect moments ago: re-dialing a dead
+    // endpoint every run only adds its timeout to startup. Its recorded error
+    // stays visible in the connectors UI; it's retried once the backoff lapses.
+    .filter((c) => !(c.id && recentlyFailed(c.id, CONNECT_BACKOFF_MS)))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   // Any stdio connector needs a live container (its server is `docker exec`'d in,

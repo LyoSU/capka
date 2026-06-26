@@ -6,6 +6,8 @@ import { consumeState } from "@/lib/mcp/oauth/store";
 import { createGuardedFetch, PROVIDER_FETCH_TIMEOUT_MS } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
+import { recordConnectError } from "@/lib/mcp/connect-errors";
+import { errorText } from "@/lib/errors/message";
 
 /** OAuth redirect target: exchange the authorization code for per-user tokens.
  *  Validates the single-use state and that it belongs to the signed-in user. */
@@ -20,6 +22,7 @@ export async function GET(req: Request) {
   } catch {
     return Response.redirect(`${base}/login`, 302);
   }
+  let serverId: string | undefined;
   try {
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
@@ -29,6 +32,7 @@ export async function GET(req: Request) {
     const flight = await consumeState(state);
     // State must exist, be fresh, and belong to THIS user (anti code-injection).
     if (!flight || flight.userId !== userId) return settings("?error=oauth");
+    serverId = flight.serverId;
 
     const server = await getAccessibleServer(userId, flight.serverId);
     if (!server || !server.url) return settings("?error=oauth");
@@ -41,6 +45,7 @@ export async function GET(req: Request) {
     return settings(`?connected=${encodeURIComponent(server.name)}`, tab);
   } catch (e) {
     console.warn("[mcp-oauth] callback failed:", e);
+    if (serverId) recordConnectError(serverId, errorText(e));
     return settings("?error=oauth");
   }
 }

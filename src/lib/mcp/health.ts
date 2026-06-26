@@ -112,5 +112,15 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
       out[p.id] = health;
     });
   }
+
+  // Surface a recorded sign-in/connect failure (e.g. an OAuth server that doesn't
+  // support dynamic client registration) as the detail — so the user sees WHY a
+  // connector won't authorize instead of a silent "needs sign-in". Any transport;
+  // a healthy probe always wins (a recorded error is only the last FAILED attempt).
+  for (const r of rows) {
+    if (out[r.id]?.status === "ok") continue;
+    const detail = getConnectError(r.id);
+    if (detail) out[r.id] = { ...(out[r.id] ?? { status: "unreachable" }), detail };
+  }
   return out;
 }

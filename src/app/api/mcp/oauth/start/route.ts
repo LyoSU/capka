@@ -5,6 +5,8 @@ import { McpOAuthProvider } from "@/lib/mcp/oauth/provider";
 import { createGuardedFetch, PROVIDER_FETCH_TIMEOUT_MS } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
+import { recordConnectError } from "@/lib/mcp/connect-errors";
+import { errorText } from "@/lib/errors/message";
 
 /** Begin the OAuth sign-in for a connector: discover + (DCR) + PKCE, then 302 the
  *  user's browser to the provider's authorization page. On any failure we bounce
@@ -20,8 +22,8 @@ export async function GET(req: Request) {
   } catch {
     return Response.redirect(`${base}/login`, 302);
   }
+  const serverId = new URL(req.url).searchParams.get("serverId");
   try {
-    const serverId = new URL(req.url).searchParams.get("serverId");
     if (!serverId) return settings("?error=oauth");
     const server = await getAccessibleServer(userId, serverId);
     if (!server || !server.url || server.authKind !== "oauth") return settings("?error=oauth");
@@ -37,6 +39,9 @@ export async function GET(req: Request) {
     return settings(`?connected=${encodeURIComponent(server.name)}`, tab);
   } catch (e) {
     console.warn("[mcp-oauth] start failed:", e);
+    // Record WHY so the connectors UI can explain it (e.g. "does not support
+    // dynamic client registration") instead of a bare "couldn't sign in".
+    if (serverId) recordConnectError(serverId, errorText(e));
     return settings("?error=oauth");
   }
 }

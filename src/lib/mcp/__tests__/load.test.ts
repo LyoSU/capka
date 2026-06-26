@@ -14,7 +14,7 @@ vi.mock("../client", () => ({
   disconnectMcp: vi.fn(),
 }));
 vi.mock("../adapt", () => ({ adaptMcpTool: vi.fn(), mcpToolName: (s: string, t: string) => `mcp__${s}__${t}` }));
-vi.mock("../connect-errors", () => ({ recordConnectError: vi.fn(), clearConnectError: vi.fn() }));
+vi.mock("../connect-errors", () => ({ recordConnectError: vi.fn(), clearConnectError: vi.fn(), recentlyFailed: vi.fn(() => false) }));
 vi.mock("../oauth/provider", () => ({ McpOAuthProvider: class {} }));
 vi.mock("../plugin-runtime", () => ({ needsPluginRoot: () => false, resolvePluginRoot: vi.fn() }));
 vi.mock("@/lib/settings", () => ({ getBlockPrivateProviderUrls: async () => false }));
