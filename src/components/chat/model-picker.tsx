@@ -9,6 +9,7 @@ import { iconForSlug } from "./provider-icons";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { parseModelId, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
+import { customModelOption } from "@/lib/providers/custom-model";
 
 /** Brand glyph — resolves a slug to a stable icon component (dynamic select). */
 function BrandIcon({ slug, size, className }: { slug?: string | null; size?: number; className?: string }) {
@@ -636,7 +637,7 @@ function ModelList({
   const searchResults = useMemo(() => {
     if (!searching) return [];
     const q = search.trim().toLowerCase();
-    return models
+    const matched = models
       .filter(
         (m) =>
           passesFilter(m) &&
@@ -646,7 +647,17 @@ function ModelList({
             (m.configLabel ?? "").toLowerCase().includes(q)),
       )
       .sort(sortFeaturedFirst);
-  }, [models, search, searching, passesFilter]);
+    // A fully-qualified id the catalog doesn't list (stealth/alpha model, or one
+    // newer than the last sync) is still runnable — the id passes straight through
+    // to the provider. Offer it as a custom option bound to the active connection
+    // when nothing matches it exactly, so it's reachable from the picker.
+    if (!models.some((m) => m.id.toLowerCase() === q)) {
+      const sample = models.find((m) => m.configId === activeConn) ?? models[0];
+      const custom = customModelOption(search, sample);
+      if (custom) return [...matched, custom];
+    }
+    return matched;
+  }, [models, search, searching, passesFilter, activeConn]);
 
   // Which brand fills the pane. Until the user clicks the rail it falls back to
   // the current model's brand (when it belongs to the active connection) — so
