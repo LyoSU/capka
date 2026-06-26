@@ -4,6 +4,7 @@ import type { LanguageModel, ModelMessage } from "ai";
 import type { TokenUsage } from "@/lib/pricing";
 import { db } from "@/lib/db";
 import { memoryDocs } from "@/lib/db/schema";
+import { stripNul } from "@/lib/tasks/sanitize";
 import {
   reconcileMemoryDoc,
   consolidateMemoryDoc,
@@ -72,7 +73,10 @@ async function optimisticUpdate(
     const written = await db
       .update(memoryDocs)
       .set({
-        content: next.content,
+        // The single write boundary for memory content (every transform funnels
+        // here). It's LLM-generated, so strip NUL — same jsonb/text hazard as the
+        // message parts — so a stray NUL can't throw this write and drop the doc.
+        content: stripNul(next.content),
         prevContent: fresh.content,
         version: fresh.version + 1,
         turnsSinceConsolidation: next.turnsSinceConsolidation,

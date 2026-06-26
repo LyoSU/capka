@@ -38,4 +38,9 @@ RUN mkdir -p data/storage && chown -R nextjs:nodejs data
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME="0.0.0.0"
+# Let the in-process task worker own SIGTERM (it drains in-flight tasks before
+# exiting). Without this, Next's own handler calls server.close()→exit(143),
+# which for a background task with no open SSE fires before the drain. Set on the
+# prod image only — `next dev` (the dev stage) keeps Next's instant Ctrl-C.
+ENV NEXT_MANUAL_SIG_HANDLE=1
 CMD ["node", "server.js"]

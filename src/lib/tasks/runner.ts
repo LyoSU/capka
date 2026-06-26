@@ -1262,7 +1262,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       generateChatTitle(model, lastUserText, getFullText(), recordAuxUsage)
         .then(async (title) => {
           if (!title) return;
-          await db.update(chats).set({ title }).where(eq(chats.id, chatId));
+          await db.update(chats).set({ title: stripNul(title) }).where(eq(chats.id, chatId));
           await publishTaskEvent(userId, { type: "chat:title", chatId, title });
         })
         .catch((e) => tlog.error("chat title generation failed", { err: String(e) }));
