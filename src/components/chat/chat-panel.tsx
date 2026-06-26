@@ -316,6 +316,13 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // remount on a chat switch (the in-memory version was dropped on the floor).
   const { queued, setQueued } = useChatQueue(chatId);
   const dispatchingRef = useRef(false);
+  // Synchronous "a direct send is in flight" guard. `isLoading` is React state
+  // and only flips to running on the next committed render, so for the brief
+  // window between starting `send()` and that commit it still reads false — a
+  // fast second submit would slip past the busy-check and fire a SECOND
+  // concurrent send instead of queuing as the next turn. This ref closes that
+  // window the way `dispatchingRef` already does for the drain loop.
+  const sendingRef = useRef(false);
 
   const send = async (text: string, refs: FileRef[], id?: string): Promise<boolean> => {
     try {
@@ -345,16 +352,27 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     haptic("tap"); // light confirmation that the message left
     clearDraft(); // sent — drop the persisted draft so a reload won't restore it
     attachments.clear(); // forget the chips; the sent message owns the files now
-    // A turn is already running (or queued items are still draining) — line this
-    // one up instead of sending now.
-    if (isLoading || queued.length > 0 || dispatchingRef.current) {
+    // A turn is already running, queued items are still draining, or a direct
+    // send we just kicked off hasn't flipped isLoading yet — line this one up
+    // instead of sending now. `sendingRef` is the synchronous part of that
+    // check: it's true the instant a send starts, so a fast second submit
+    // queues as the next turn rather than racing out as a concurrent send.
+    if (isLoading || queued.length > 0 || dispatchingRef.current || sendingRef.current) {
       // nanoid (not crypto.randomUUID, which is undefined on non-secure origins)
       // — and this id rides through the drain into the POST as the message id, so
       // a double-drain (same chat in two tabs) collapses server-side.
       setQueued((q) => [...q, { id: nanoid(), text, refs }]);
       return;
     }
-    await send(text, refs);
+    // Hold the guard until the POST resolves — by then sendMessage's
+    // setStatus("running") has committed, so isLoading takes over seamlessly
+    // (on failure send() rolls back to idle and the guard simply releases).
+    sendingRef.current = true;
+    try {
+      await send(text, refs);
+    } finally {
+      sendingRef.current = false;
+    }
   };
 
   // Drain the queue when the chat frees up: send each queued message as its own
