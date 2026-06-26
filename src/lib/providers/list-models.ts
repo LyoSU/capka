@@ -223,12 +223,13 @@ function catalogModelToInfo(m: CatalogModel): ModelInfo {
 }
 
 /**
- * OpenRouter, straight from its live `/models` (the same source the catalog
- * syncs from). Used only as a first-run fallback while the curated DB catalog
- * is still empty, so the picker fills immediately instead of waiting on the
- * background sync. The key is passed through when present; the endpoint is
- * public, so an unauthenticated call still works. Throws on network failure so
- * the caller can surface it.
+ * OpenRouter, straight from its live `/models` with the user's key — the source
+ * of truth for the picker. Shows EVERYTHING the API returns for this key (new
+ * and stealth/preview models the 24h catalog sync hasn't picked up, models the
+ * key has special access to), with no curation filter — the catalog is only used
+ * to enrich (featured, knowledge cutoff). The key is passed through when present;
+ * the endpoint also works unauthenticated. Throws on network failure so the
+ * caller can fall back to the curated catalog.
  */
 async function listOpenRouterLive(apiKey?: string): Promise<ModelInfo[]> {
   const raw = await fetchJson(
@@ -236,7 +237,6 @@ async function listOpenRouterLive(apiKey?: string): Promise<ModelInfo[]> {
     apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined,
   );
   return parseOpenRouterModels(raw)
-    .filter((m) => m.enabled)
     .map(catalogModelToInfo)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -396,16 +396,14 @@ async function listProviderModelsCached(opts: {
   apiKey?: string;
   baseUrl?: string;
 }): Promise<ModelInfo[]> {
-  // OpenRouter is served from the synced DB catalog — already fast, never cache.
-  if (opts.provider !== "openrouter") {
-    const key = modelsCacheKey(opts);
-    const hit = modelsCache.get(key);
-    if (hit && Date.now() - hit.at < MODELS_TTL_MS) return hit.models;
-    const models = await listProviderModelsLive(opts);
-    modelsCache.set(key, { at: Date.now(), models });
-    return models;
-  }
-  return listProviderModelsLive(opts);
+  // All providers (incl. OpenRouter, now a live keyed API call) cache per
+  // credential set for a few minutes so re-mounting the picker doesn't re-probe.
+  const key = modelsCacheKey(opts);
+  const hit = modelsCache.get(key);
+  if (hit && Date.now() - hit.at < MODELS_TTL_MS) return hit.models;
+  const models = await listProviderModelsLive(opts);
+  modelsCache.set(key, { at: Date.now(), models });
+  return models;
 }
 
 async function listProviderModelsLive(opts: {
@@ -424,11 +422,20 @@ async function listProviderModelsLive(opts: {
 
   switch (opts.provider) {
     case "openrouter": {
-      // Prefer the curated, enriched DB catalog; fall back to a live listing on
-      // first run (catalog not yet synced) so the picker is never empty when
-      // the network is reachable.
-      const curated = await listOpenRouter();
-      return curated.length ? curated : listOpenRouterLive(opts.apiKey);
+      // Source of truth = the live API for this key (everything it returns, incl.
+      // new/stealth models the 24h catalog lacks). Enrich with the curated
+      // catalog (featured, knowledge cutoff) by id. Fall back to the catalog only
+      // if the live call fails, so the picker is never empty offline.
+      const [live, curated] = await Promise.all([
+        listOpenRouterLive(opts.apiKey).catch(() => [] as ModelInfo[]),
+        listOpenRouter(),
+      ]);
+      if (!live.length) return curated;
+      const meta = new Map(curated.map((m) => [m.id, m]));
+      return live.map((m) => {
+        const c = meta.get(m.id);
+        return c ? { ...m, featured: c.featured, cutoff: c.cutoff ?? m.cutoff } : m;
+      });
     }
     case "litellm":
       if (!opts.baseUrl) return [];
