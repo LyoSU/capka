@@ -298,17 +298,29 @@ export const projects = pgTable("projects", {
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_projects_user_id").on(table.userId)]);
 
-export const memories = pgTable("memories", {
+// Agent memory as ONE self-maintaining markdown document per scope — "CLAUDE.md
+// in Postgres". `projectId IS NULL` is the user-global doc (≈ ~/CLAUDE.md); a row
+// with a projectId is that project's doc (≈ project/CLAUDE.md). The doc is edited
+// by line-level reconcile ops after each turn, periodically consolidated, and is
+// hand-editable in settings. `version` drives optimistic concurrency (two chats
+// in one project can race the same doc); `prevContent` is one step of undo so a
+// bad consolidation rewrite is recoverable.
+export const memoryDocs = pgTable("memory_docs", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
-  content: text("content").notNull(),
-  type: text("type").notNull().default("fact"),
-  createdAt: timestamp("created_at").defaultNow(),
+  content: text("content").notNull().default(""),
+  prevContent: text("prev_content"),
+  version: integer("version").notNull().default(0),
+  turnsSinceConsolidation: integer("turns_since_consolidation").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
-  index("idx_memories_user_id").on(table.userId),
-  index("idx_memories_project_id").on(table.projectId),
+  // One doc per scope. NULL projectId is "distinct" under a plain UNIQUE, so the
+  // user-global row needs its own partial unique index (enforced in the migration).
+  uniqueIndex("uniq_memory_docs_user_project").on(table.userId, table.projectId),
+  index("idx_memory_docs_user_id").on(table.userId),
 ]);
+
 
 // Anthropic-compatible Agent Skills. Scope tiers: 'system' (whole deployment),
 // 'user' (one user, all projects), 'project' (one project). Precedence on name

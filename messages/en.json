@@ -527,28 +527,16 @@
     },
     "memory": {
       "title": "Agent Memory",
-      "subtitle": "Things the AI remembers about you across conversations.",
-      "allTypes": "All types",
-      "add": "Add memory",
-      "content": "Content",
-      "contentPlaceholder": "e.g. Prefers TypeScript over JavaScript",
-      "type": "Type",
-      "empty": "No memories yet. The AI will learn about you as you chat.",
-      "emptyFiltered": "No {type} memories",
-      "added": "Memory added",
-      "addFailed": "Failed to add memory",
-      "deleted": "Memory deleted",
-      "deleteFailed": "Failed to delete memory",
-      "updated": "Memory updated",
-      "updateFailed": "Failed to update memory",
-      "loadError": "Could not load memories. Please refresh the page.",
-      "confirmDeleteTitle": "Delete memory?",
-      "confirmDeleteDesc": "This memory will be permanently removed.",
-      "types": {
-        "fact": "Facts",
-        "preference": "Preferences",
-        "context": "Context"
-      }
+      "subtitle": "What the AI remembers across conversations. It maintains these notes itself — you can edit them too.",
+      "userTitle": "About you",
+      "userDesc": "Facts and preferences the AI carries into every chat.",
+      "projectTitle": "Project memory",
+      "projectDesc": "What the AI remembers about a specific project's work.",
+      "selectProject": "Select a project",
+      "placeholder": "The AI fills this in as you chat. You can add or edit notes here too — one per line.",
+      "saved": "Memory saved",
+      "saveFailed": "Failed to save memory",
+      "loadError": "Could not load memory. Please refresh the page."
     },
     "integrations": {
       "title": "Integrations",

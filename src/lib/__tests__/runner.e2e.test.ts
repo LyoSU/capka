@@ -33,7 +33,10 @@ vi.mock("@/lib/providers/resolve", () => ({
 vi.mock("@/lib/sandbox/tools", () => ({
   loadSandboxTools: async () => ({ tools: {}, close: async () => {} }),
 }));
-vi.mock("@/lib/memory/extract", () => ({ extractMemories: async () => [] }));
+vi.mock("@/lib/memory/store", () => ({
+  readMemoryDocs: async () => ({ user: "", project: "" }),
+  maintainMemoryDoc: async () => {},
+}));
 
 import { pool } from "../db";
 import { realtime } from "../realtime";

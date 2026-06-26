@@ -66,7 +66,9 @@ export function buildSessionContext(opts: {
 
 export function buildSystemPrompt(opts: {
   project?: { systemPrompt?: string | null } | null;
-  memories: { content: string }[];
+  /** Self-maintaining memory docs (≈ ~/CLAUDE.md + project/CLAUDE.md), injected
+   *  verbatim. Empty strings are skipped. */
+  memoryDocs?: { user?: string; project?: string };
   skills?: { name: string; description: string | null; body?: string | null }[];
   workspaceSnapshot?: string;
   attachedFiles?: FileRef[];
@@ -100,9 +102,13 @@ export function buildSystemPrompt(opts: {
 
   // ── Volatile suffix (not cached) ────────────────────────────────────────
   let volatile = "";
-  if (opts.memories.length > 0) {
-    const memoryLines = opts.memories.map((m) => `- ${m.content}`).join("\n");
-    volatile += `## Things you know about the user:\n${memoryLines}`;
+  const userDoc = opts.memoryDocs?.user?.trim();
+  const projectDoc = opts.memoryDocs?.project?.trim();
+  if (userDoc) {
+    volatile += `## What you remember about the user:\n${userDoc}`;
+  }
+  if (projectDoc) {
+    volatile += `${volatile ? "\n\n" : ""}## What you remember about this project:\n${projectDoc}`;
   }
 
   // Workspace snapshot changes every run — must stay out of the cached prefix.

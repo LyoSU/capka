@@ -1,9 +1,9 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
-import { eq, and, or, isNull, desc } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { chats, messages, memories, projects, users } from "@/lib/db/schema";
+import { chats, messages, projects, users } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
 import { stripNul } from "./sanitize";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
@@ -34,7 +34,8 @@ import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
-import { extractMemories } from "@/lib/memory/extract";
+import { maintainMemoryDoc, readMemoryDocs } from "@/lib/memory/store";
+import { makeMemoryTools } from "@/lib/memory/tool";
 import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
 import { delay } from "@ai-sdk/provider-utils";
@@ -264,18 +265,14 @@ async function injectNativeFiles(
  *  `sessionKey` is the project (shared folder) or the chat itself — see
  *  workspaceSessionKey. Memory is scoped to the project plus user-global facts. */
 async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string) {
-  // A project chat sees its project memory + user-global (unscoped) memory.
-  // A standalone chat sees only user-global memory, so projects don't leak.
-  const memoryFilter = payload.projectId
-    ? and(eq(memories.userId, userId), or(eq(memories.projectId, payload.projectId), isNull(memories.projectId)))
-    : and(eq(memories.userId, userId), isNull(memories.projectId));
-
-  const [{ model, provider, modelId, modelInput, isShared }, project, userMemories, user, chat] = await Promise.all([
+  // A project chat sees its project memory doc + the user-global doc. A
+  // standalone chat sees only the user-global doc, so projects don't leak.
+  const [{ model, provider, modelId, modelInput, isShared }, project, memoryDocs, user, chat] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
-    db.select().from(memories).where(memoryFilter).orderBy(desc(memories.createdAt)).limit(50),
+    readMemoryDocs(userId, payload.projectId ?? null),
     db.select({ name: users.name, timezone: users.timezone, locale: users.locale })
       .from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]),
     db.select({ createdAt: chats.createdAt }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
@@ -319,8 +316,14 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     .filter((s) => isUsable(policy.effect("skill", s.name)));
   const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null, ensureSession });
   // Provider-executed tools (e.g. Gemini's Google Search grounding) join the
-  // sandbox/MCP/skill tools; empty for providers without any.
-  const tools = { ...sandbox.tools, ...mcp.tools, skill: skillTool, ...providerNativeTools(provider) };
+  // sandbox/MCP/skill + memory tools; empty for providers without any.
+  const tools = {
+    ...sandbox.tools,
+    ...mcp.tools,
+    skill: skillTool,
+    ...makeMemoryTools({ userId, projectId: payload.projectId ?? null }),
+    ...providerNativeTools(provider),
+  };
 
   // Workspace snapshot — read straight off disk via the controller's file API
   // (HMAC-token, no live container). This keeps the sandbox lazy: a chat that
@@ -340,7 +343,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
 
   const prompt = buildSystemPrompt({
     project,
-    memories: userMemories,
+    memoryDocs,
     skills: availableSkills.map((s) => ({ name: s.name, description: s.description, body: s.body })),
     workspaceSnapshot,
     attachedFiles: payload.attachedFiles,
@@ -361,7 +364,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
 
   // Dispose both sandbox and MCP clients when the run ends.
   const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
-  return { model, provider, modelId, modelInput, isShared, tools, closeMcp: closeAll, prompt, userMemories, contextLength, adminCap };
+  return { model, provider, modelId, modelInput, isShared, tools, closeMcp: closeAll, prompt, contextLength, adminCap };
 }
 
 /**
@@ -469,7 +472,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, modelInput, isShared, tools, closeMcp: close, prompt, userMemories, contextLength, adminCap } =
+    const { model, provider, modelId, modelInput, isShared, tools, closeMcp: close, prompt, contextLength, adminCap } =
       await prepareRun(userId, sessionKey, payload, chatId);
     closeMcp = close;
 
@@ -1193,11 +1196,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       });
     }
 
-    // Extract long-term memories (fire-and-forget). Facts are about the USER, so
-    // the user's own message is the primary signal — the assistant reply is only
-    // context. (Feeding only the assistant output mined the wrong side of the turn.)
-    // Gated on a clean completion (like the title): a cancelled/failed turn
-    // shouldn't quietly spend tokens mining facts the user may have aborted.
+    // Fold the turn into long-term memory (fire-and-forget). One reconcile call
+    // maintains the doc for the current scope — the project doc in a project, else
+    // the user-global doc; the agent's remember() tool covers the other scope on
+    // demand. Gated on a clean completion (like the title): a cancelled/failed
+    // turn shouldn't quietly spend tokens mining facts the user may have aborted.
     const lastUserText = (() => {
       const u = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
       if (!u) return "";
@@ -1208,25 +1211,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .join("\n");
     })();
     if (finalStatus === "completed" && lastUserText.trim()) {
-      extractMemories(
+      maintainMemoryDoc({
         model,
-        { userText: lastUserText, assistantText: getFullText() },
-        userMemories.map((m) => m.content),
-        recordAuxUsage,
+        provider,
+        userId,
+        projectId: payload.projectId ?? null,
+        scope: payload.projectId ? "project" : "user",
+        turn: { userText: lastUserText, assistantText: getFullText() },
+        onUsage: recordAuxUsage,
         // Long chat → ride the hot prefix for full-context, cache-priced
-        // extraction; short chat → undefined keeps the cheap standalone call.
-        longChat ? { systemMessages, modelMessages } : undefined,
-      )
-        .then(async (newFacts) => {
-          if (newFacts.length > 0) {
-            await db.insert(memories).values(
-              newFacts.map((content) => ({
-                id: nanoid(), userId, projectId: payload.projectId ?? null, content, type: "fact",
-              })),
-            );
-          }
-        })
-        .catch((e) => tlog.error("memory extraction failed", { err: String(e) }));
+        // reconcile; short chat → undefined keeps the cheap standalone call.
+        hotContext: longChat ? { systemMessages, modelMessages } : undefined,
+      }).catch((e) => tlog.error("memory maintenance failed", { err: String(e) }));
     }
 
     // Auto-title the chat on its FIRST completed turn. "First turn" = no prior

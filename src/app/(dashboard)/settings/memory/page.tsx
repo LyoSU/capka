@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useTranslations, useLocale } from "next-intl";
-import { Trash2, Plus, Pencil, Check, X, Loader2, Brain } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -17,136 +15,111 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 
-import { MEMORY_TYPES, type MemoryType } from "@/lib/constants";
-
-interface Memory {
+interface ProjectDoc {
   id: string;
+  name: string;
   content: string;
-  type: string;
-  projectId: string | null;
-  createdAt: string;
 }
 
-export default function MemoryPage() {
+/** One editable memory document (the user-global doc or a project's). Tracks its
+ *  own dirty/saving state so saving one doesn't disturb another. */
+function DocEditor({
+  value,
+  projectId,
+  onSaved,
+}: {
+  value: string;
+  projectId: string | null;
+  onSaved: (content: string) => void;
+}) {
   const t = useTranslations("settings.memory");
   const tc = useTranslations("common");
-  const locale = useLocale();
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editContent, setEditContent] = useState("");
-  const [editType, setEditType] = useState<MemoryType>("fact");
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [error, setError] = useState("");
 
-  // Form state
-  const [newContent, setNewContent] = useState("");
-  const [newType, setNewType] = useState<MemoryType>("fact");
-  const [filterType, setFilterType] = useState<string>("all");
+  // Reset when the underlying doc switches (e.g. picking another project).
+  useEffect(() => setDraft(value), [value]);
 
-  const fetchMemories = useCallback(async () => {
-    try {
-      setError("");
-      const url = filterType !== "all"
-        ? `/api/memories?type=${filterType}`
-        : "/api/memories";
-      const res = await fetch(url);
-      if (res.ok) setMemories(await res.json());
-      else setError(t("loadError"));
-    } catch {
-      setError(t("loadError"));
-    } finally {
-      setLoading(false);
-    }
-  }, [filterType, t]);
+  const dirty = draft !== value;
 
-  useEffect(() => {
-    fetchMemories();
-  }, [fetchMemories]);
-
-  const handleAdd = async () => {
-    if (!newContent.trim()) return;
+  const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/memories", {
-        method: "POST",
+      const res = await fetch("/api/memory-docs", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: newContent, type: newType }),
+        body: JSON.stringify({ content: draft, projectId }),
       });
-      if (res.ok) {
-        const memory = await res.json();
-        setMemories((prev) => [memory, ...prev]);
-        setNewContent("");
-        setNewType("fact");
-        setShowForm(false);
-        toast.success(t("added"));
-      } else {
-        toast.error(t("addFailed"));
-      }
+      if (!res.ok) throw new Error();
+      onSaved(draft);
+      toast.success(t("saved"));
+    } catch {
+      toast.error(t("saveFailed"));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    const res = await fetch(`/api/memories/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      setMemories((prev) => prev.filter((m) => m.id !== id));
-      setDeleteId(null);
-      toast.success(t("deleted"));
-    } else {
-      toast.error(t("deleteFailed"));
+  return (
+    <div className="space-y-2">
+      <Textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={t("placeholder")}
+        className="min-h-40 font-mono text-sm"
+      />
+      <div className="flex justify-end">
+        <Button size="sm" onClick={save} disabled={!dirty || saving}>
+          {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+          {tc("save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default function MemoryPage() {
+  const t = useTranslations("settings.memory");
+  const [userDoc, setUserDoc] = useState("");
+  const [projectDocs, setProjectDocs] = useState<ProjectDoc[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setError("");
+      const res = await fetch("/api/memory-docs");
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setUserDoc(data.user ?? "");
+      setProjectDocs(data.projects ?? []);
+    } catch {
+      setError(t("loadError"));
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [t]);
 
-  const startEdit = (m: Memory) => {
-    setEditingId(m.id);
-    setEditContent(m.content);
-    setEditType(m.type as MemoryType);
-  };
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditContent("");
-  };
+  const selected = projectDocs.find((p) => p.id === selectedProject) ?? null;
 
-  const handleUpdate = async (id: string) => {
-    const res = await fetch(`/api/memories/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: editContent, type: editType }),
-    });
-    if (res.ok) {
-      const updated = await res.json();
-      setMemories((prev) => prev.map((m) => (m.id === id ? { ...m, ...updated } : m)));
-      setEditingId(null);
-      toast.success(t("updated"));
-    } else {
-      toast.error(t("updateFailed"));
-    }
-  };
-
-  const grouped = {
-    fact: memories.filter((m) => m.type === "fact"),
-    preference: memories.filter((m) => m.type === "preference"),
-    context: memories.filter((m) => m.type === "context"),
-  };
-
-  const typeLabel: Record<string, string> = {
-    fact: t("types.fact"),
-    preference: t("types.preference"),
-    context: t("types.context"),
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-lg space-y-6">
       <div>
         <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">
-          {t("subtitle")}
-        </p>
+        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
       <Separator />
 
@@ -156,181 +129,44 @@ export default function MemoryPage() {
         </div>
       )}
 
-      {/* Filter + Add */}
-      <div className="flex items-center gap-2">
-        <Select
-          value={filterType}
-          onValueChange={(v) => setFilterType(v ?? "all")}
-          items={{ all: t("allTypes"), ...typeLabel }}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t("allTypes")}</SelectItem>
-            {MEMORY_TYPES.map((t) => (
-              <SelectItem key={t} value={t}>
-                {typeLabel[t]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="flex-1" />
-        {!showForm && (
-          <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            {t("add")}
-          </Button>
-        )}
-      </div>
-
-      {/* Add form */}
-      {showForm && (
-        <div className="space-y-3 rounded-md border p-4">
-          <div className="space-y-1.5">
-            <label className="text-sm">{t("content")}</label>
-            <Input
-              value={newContent}
-              onChange={(e) => setNewContent(e.target.value)}
-              placeholder={t("contentPlaceholder")}
-              onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm">{t("type")}</label>
-            <Select value={newType} onValueChange={(v) => setNewType(v as MemoryType)} items={typeLabel}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MEMORY_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {typeLabel[t]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={handleAdd} disabled={saving}>
-              {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              {tc("save")}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowForm(false)} disabled={saving}>
-              {tc("cancel")}
-            </Button>
-          </div>
+      <section className="space-y-2">
+        <div>
+          <h3 className="text-sm font-medium">{t("userTitle")}</h3>
+          <p className="text-xs text-muted-foreground">{t("userDesc")}</p>
         </div>
-      )}
+        <DocEditor value={userDoc} projectId={null} onSaved={setUserDoc} />
+      </section>
 
-      {/* Memory list */}
-      {loading && (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
-      )}
-
-      {!loading && memories.length === 0 && (
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
-          <Brain className="h-5 w-5 text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">
-            {t("empty")}
-          </p>
-        </div>
-      )}
-
-      {!loading && filterType !== "all" && memories.length > 0 && grouped[filterType as MemoryType]?.length === 0 && (
-        <p className="py-4 text-center text-sm text-muted-foreground">
-          {t("emptyFiltered", { type: (typeLabel[filterType as MemoryType] || filterType).toLowerCase() })}
-        </p>
-      )}
-
-      {!loading &&
-        (filterType === "all" ? MEMORY_TYPES : [filterType as MemoryType]).map((type) => {
-          const items = grouped[type];
-          if (!items || items.length === 0) return null;
-          return (
-            <div key={type} className="space-y-2">
-              <h3 className="text-sm font-medium text-muted-foreground">{typeLabel[type]}</h3>
-              {items.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-start gap-2 rounded-md border p-3"
-                >
-                  {editingId === m.id ? (
-                    <div className="flex flex-1 flex-col gap-2">
-                      <Input
-                        value={editContent}
-                        onChange={(e) => setEditContent(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleUpdate(m.id)}
-                      />
-                      <div className="flex items-center gap-2">
-                        <Select value={editType} onValueChange={(v) => setEditType(v as MemoryType)} items={typeLabel}>
-                          <SelectTrigger className="w-32">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {MEMORY_TYPES.map((t) => (
-                              <SelectItem key={t} value={t}>
-                                {typeLabel[t]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Button variant="ghost" size="icon-xs" onClick={() => handleUpdate(m.id)} aria-label={tc("save")}>
-                          <Check className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon-xs" onClick={cancelEdit} aria-label={tc("cancel")}>
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex-1 space-y-1">
-                        <p className="text-sm">{m.content}</p>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">{typeLabel[m.type] || m.type}</Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(m.createdAt).toLocaleDateString(locale)}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 gap-0.5">
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="text-muted-foreground hover:text-foreground"
-                          onClick={() => startEdit(m)}
-                          aria-label={tc("edit")}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="text-muted-foreground hover:text-destructive"
-                          onClick={() => setDeleteId(m.id)}
-                          aria-label={tc("delete")}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </div>
+      {projectDocs.length > 0 && (
+        <section className="space-y-2">
+          <div>
+            <h3 className="text-sm font-medium">{t("projectTitle")}</h3>
+            <p className="text-xs text-muted-foreground">{t("projectDesc")}</p>
+          </div>
+          <Select value={selectedProject ?? ""} onValueChange={(v) => setSelectedProject(v || null)}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={t("selectProject")} />
+            </SelectTrigger>
+            <SelectContent>
+              {projectDocs.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
               ))}
-            </div>
-          );
-        })}
-
-      <ConfirmDialog
-        open={!!deleteId}
-        onOpenChange={(open) => !open && setDeleteId(null)}
-        onConfirm={() => deleteId && handleDelete(deleteId)}
-        title={t("confirmDeleteTitle")}
-        description={t("confirmDeleteDesc")}
-      />
+            </SelectContent>
+          </Select>
+          {selected && (
+            <DocEditor
+              key={selected.id}
+              value={selected.content}
+              projectId={selected.id}
+              onSaved={(content) =>
+                setProjectDocs((prev) => prev.map((p) => (p.id === selected.id ? { ...p, content } : p)))
+              }
+            />
+          )}
+        </section>
+      )}
     </div>
   );
 }

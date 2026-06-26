@@ -225,6 +225,20 @@
       "when": 1782416215973,
       "tag": "0031_odd_kang",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1782476269117,
+      "tag": "0032_create_memory_docs",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1782476284538,
+      "tag": "0033_drop_memories",
+      "breakpoints": true
     }
   ]
 }
