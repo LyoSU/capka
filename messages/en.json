@@ -699,7 +699,10 @@
     },
     "usage": {
       "title": "Usage & cost",
-      "subtitle": "All AI usage across the platform. The shared-key portion is what the organization pays.",
+      "subtitleShared": "What the organization is spending on its shared AI key.",
+      "subtitleOwn": "How members are using their own provider keys — their own spend, not the organization's.",
+      "scopeShared": "Shared key",
+      "scopeOwn": "Own keys",
       "rangeDays": "{days} days",
       "totalCost": "Total cost",
       "calls": "Requests",
@@ -725,8 +728,7 @@
       "perMillionTokens": "per 1M tokens",
       "avgLine": "avg {cost}/day",
       "modelMeta": "{rate}/1M · {tokens} tok",
-      "userMeta": "avg {cost}/req",
-      "onSharedKey": "{cost} on shared key"
+      "userMeta": "avg {cost}/req"
     },
     "skills": {
       "title": "Customize",

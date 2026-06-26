@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 
 interface Totals {
   cost: number;
-  sharedCost: number;
   inputTokens: string | number;
   cachedInputTokens: string | number;
   outputTokens: string | number;
@@ -55,23 +54,26 @@ interface UsageData {
 }
 
 type T = ReturnType<typeof useTranslations>;
+type Scope = "shared" | "own";
 
 const RANGES = [7, 30, 90] as const;
+const SCOPES: Scope[] = ["shared", "own"];
 
 export default function UsagePage() {
   const t = useTranslations("settings.usage");
   const locale = useLocale();
   const [days, setDays] = useState<number>(30);
+  const [scope, setScope] = useState<Scope>("shared");
   const [data, setData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`/api/admin/usage?days=${days}`)
+    fetch(`/api/admin/usage?days=${days}&scope=${scope}`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [days]);
+  }, [days, scope]);
 
   const money = (n: number) =>
     new Intl.NumberFormat(locale, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(n || 0);
@@ -107,7 +109,7 @@ export default function UsagePage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-medium">{t("title")}</h2>
-          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
+          <p className="text-sm text-muted-foreground">{t(scope === "own" ? "subtitleOwn" : "subtitleShared")}</p>
         </div>
         <ToggleGroup
           value={[String(days)]}
@@ -128,6 +130,26 @@ export default function UsagePage() {
         </ToggleGroup>
       </div>
 
+      {/* Whose spend: the org's shared key vs members' own provider keys. */}
+      <ToggleGroup
+        value={[scope]}
+        onValueChange={(v) => {
+          if (v.length) {
+            setLoading(true);
+            setScope(v[0] as Scope);
+          }
+        }}
+        variant="outline"
+        size="sm"
+        className="w-full"
+      >
+        {SCOPES.map((s) => (
+          <ToggleGroupItem key={s} value={s} className="flex-1">
+            {t(s === "own" ? "scopeOwn" : "scopeShared")}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -143,7 +165,6 @@ export default function UsagePage() {
             <Stat
               label={t("totalCost")}
               value={money(totalCost)}
-              sub={t("onSharedKey", { cost: moneyPrecise(data.totals.sharedCost || 0) })}
               delta={<Trend cur={totalCost} prev={data.prev?.cost ?? 0} tone="cost" t={t} pct={pct} />}
             />
             <Stat
