@@ -38,7 +38,11 @@ interface Rule {
 const RULES: Rule[] = [
   {
     category: "out_of_credits",
-    test: /\b(402|insufficient[_\s-]?(credits|quota|funds|balance)|out of credits|requires more credits|can only afford|exceeded your current quota|billing)\b/i,
+    // Also covers reseller/gateway quota gates that aren't a quick retry: a
+    // weekly/monthly usage cap ("resets in N days") or a per-day unlock gate
+    // ("check-in required to unlock your key"). Bucketed here (not rate_limited)
+    // so the runner does NOT treat them as transient and waste retry attempts.
+    test: /\b(402|insufficient[_\s-]?(credits|quota|funds|balance)|out of credits|requires more credits|can only afford|exceeded your current quota|billing|usage[_\s-]?limit (reached|exceeded)|check[_\s-]?in required|unlock your key)\b/i,
     userMessage:
       "The assistant is temporarily unavailable — the AI account is out of credit. Your administrator needs to top it up.",
   },
@@ -50,7 +54,9 @@ const RULES: Rule[] = [
   },
   {
     category: "rate_limited",
-    test: /\b(429|rate[_\s-]?limit|too many requests|overloaded|capacity)\b/i,
+    // "saturated"/"upstream load" = a shared gateway pool is momentarily full;
+    // genuinely transient, so retrying (the runner re-streams) is the right move.
+    test: /\b(429|rate[_\s-]?limit|too many requests|overloaded|capacity|saturated|upstream load)\b/i,
     userMessage: "The assistant is busy right now. Please try again in a few moments.",
   },
   {
@@ -61,7 +67,9 @@ const RULES: Rule[] = [
   },
   {
     category: "model_unavailable",
-    test: /\b(model).*(not found|not a valid model|does not exist|is not available|no endpoints|unsupported)\b/i,
+    // Adds reseller shapes: a deprecated model ("migrate to …") and a request the
+    // gateway can't serve in the chosen wire format ("not supported for format …").
+    test: /\b(model).*(not found|not a valid model|does not exist|is not available|no endpoints|unsupported|not supported|deprecated|no longer (available|supported))\b/i,
     userMessage:
       "The selected AI model isn't available right now. Try a different model, or ask your administrator.",
   },

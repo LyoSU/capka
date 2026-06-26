@@ -464,7 +464,7 @@ function ActivityGroup({ items, isStreaming, fallbackMs }: { items: ActivityItem
 
 /** Friendly, role-aware failure notice. Everyone sees `message`; admins can
  *  expand the raw technical `detail`. */
-function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: string; isAdmin?: boolean }) {
+function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean }) {
   const t = useTranslations("chat.tool");
   return (
     <div role="alert" className="mt-2 rounded-lg border border-destructive-border bg-destructive-surface px-3.5 py-2.5">
@@ -472,7 +472,7 @@ function ErrorNotice({ message, detail, isAdmin }: { message: string; detail?: s
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive-text" />
         <span className="flex-1 text-foreground">{message}</span>
       </div>
-      {isAdmin && detail && detail !== message && (
+      {(isAdmin || ownsResource) && detail && detail !== message && (
         <Collapsible>
           <CollapsibleTrigger className="mt-1.5 ml-6 flex items-center gap-1 text-xs text-destructive-text/80 hover:text-destructive-text transition-colors [&[data-state=open]>.chevron]:rotate-90">
             <ChevronRight className="chevron h-3 w-3 transition-transform" />
@@ -911,7 +911,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number; notice?: { kind: string; modalities: string[] }; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number; notice?: { kind: string; modalities: string[] }; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -1020,6 +1020,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             }
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
+            ownsResource={metadata.errorOwned ?? undefined}
           />
         )}
         {metadata?.notice?.kind === "blind-modalities" && metadata.notice.modalities.length > 0 && (

@@ -390,6 +390,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // Distinguishes an abort caused by losing our lease (crash/reconciliation —
   // finalize as "failed") from a cooperative user cancel (finalize "cancelled").
   let leaseLost = false;
+  // Whether this turn ran on the user's OWN provider key (vs a shared admin key).
+  // Drives error-detail visibility: an end user must see WHY their own key failed
+  // (only they can fix it), while a shared-key failure's raw detail stays
+  // admin-only. Set once prepareRun resolves the provider; defaults to false so a
+  // failure before resolution stays admin-only.
+  let ownKey = false;
   const deadline = setTimeout(() => {
     deadlineHit = true;
     ac.abort();
@@ -475,6 +481,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const { model, provider, modelId, modelInput, isShared, tools, closeMcp: close, prompt, contextLength, adminCap } =
       await prepareRun(userId, sessionKey, payload, chatId);
     closeMcp = close;
+    ownKey = !isShared; // own-key failures are the user's to see + fix
+
+
 
     // Record an auxiliary (title/memory) LLM call's spend against the same key
     // and budget as the main turn. These fire-and-forget calls used to go
@@ -788,18 +797,27 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // Any event means the provider is alive — reset the idle timer.
         watchdog.activity();
         switch (event.type) {
-          case "reasoning-delta":
-            appendReasoning(event.text);
+          case "reasoning-delta": {
+            // Strip NUL at the single point model output enters `parts` (mirrors
+            // the tool-result boundary): a NUL in reasoning/text would otherwise
+            // ride into the jsonb metadata/text content write and throw
+            // ("unsupported Unicode escape sequence"), losing the whole message.
+            // Keeps the documented "parts never carry NUL" invariant true for
+            // EVERY source, so the DB write, realtime publish, and Telegram sink
+            // can all rely on it.
+            const text = stripNul(event.text);
+            appendReasoning(text);
             // Mark the thinking phase; the live reasoning text itself rides
             // getReasoning() into the sink's <tg-thinking> block (the web stream
             // uses reasonBuf as before).
             currentStatus = { kind: "thinking" };
-            reasonBuf += event.text;
+            reasonBuf += text;
             scheduleFlush();
             break;
+          }
           case "text-delta": {
             // First delta after a resume may re-emit the partial's tail — stitch it off.
-            let text = event.text;
+            let text = stripNul(event.text);
             if (stitchNextDelta) { stitchNextDelta = false; text = stitchOverlap(resumeTail, text); }
             if (!text) break;
             // Answer is flowing — clear the transient "thinking/tool" header.
@@ -828,13 +846,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           }
           case "tool-call": {
             toolCount += 1;
-            const step = describeStep(stepsT, event.toolName, event.input);
+            // Strip NUL from the model-generated args before they enter `parts`
+            // (a model can emit a literal NUL escape in a JSON string arg, which
+            // is valid JSON but breaks the jsonb write). Completes the "parts never
+            // carry NUL" invariant across every source.
+            const input = stripNul(event.input);
+            const step = describeStep(stepsT, event.toolName, input);
             currentStatus = { kind: "tool", label: step.activeLabel, detail: step.detail };
             await flushBuffers();
-            parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input: event.input });
+            parts.push({ type: "tool-call", id: event.toolCallId, name: event.toolName, input });
             await publishTaskEvent(userId, {
               type: "task:tool-call", taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId, toolName: event.toolName, args: event.input, seq: ++seq,
+              toolCallId: event.toolCallId, toolName: event.toolName, args: input, seq: ++seq,
             });
             // Persist the call NOW (not just at finish-step): a tool can run for a
             // long time, and a client reconnecting mid-execution must get a
@@ -871,10 +894,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           case "tool-error":
             watchdog.exitTool(); // tool failed — back to waiting on the model
             await flushBuffers();
-            parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: errMsg(event.error) });
+            // Strip NUL like every other string entering `parts`: a tool can throw
+            // an error whose message embeds raw binary, which would otherwise break
+            // the jsonb metadata write the same way a binary tool-result would.
+            const toolErr = stripNul(errMsg(event.error));
+            parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: toolErr });
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
-              toolCallId: event.toolCallId, result: { error: errMsg(event.error) }, isError: true, seq: ++seq,
+              toolCallId: event.toolCallId, result: { error: toolErr }, isError: true, seq: ++seq,
             });
             await saveSnapshot(true); // keep the snapshot current with each step
             break;
@@ -1123,7 +1150,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       content: getFullText(),
       metadata: {
         taskId, status: finalStatus, parts: parts.length > 0 ? parts : undefined,
-        ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
+        ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
         // Capability gap: the model couldn't natively take one of the attached
         // media types — flag it so the UI can nudge a model switch.
         ...(blindModalities.length ? { notice: { kind: "blind-modalities" as const, modalities: blindModalities } } : {}),
@@ -1303,7 +1330,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     });
     const failureMeta = {
       taskId, status, parts: parts.length > 0 ? parts : undefined,
-      ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category } : {}),
+      ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
     };
     // If prepareRun threw before the assistant row existed (provider gone, model
     // removed), there's nothing to UPDATE — INSERT the failed reply instead and
