@@ -36,6 +36,35 @@ export function mcpToolName(server: string, tool: string): string {
   return `mcp__${server}__${tool}`;
 }
 
+/**
+ * Prune a JSON Schema so every entry in a `required` array is actually declared
+ * in the sibling `properties`. MCP servers are external and routinely ship
+ * schemas where `required` lists a property they forgot to declare; permissive
+ * gateways (OpenAI-style) ignore it, but Google AI Studio rejects the WHOLE
+ * request ("GenerateContentRequest.tools[…].parameters.required[N]: property is
+ * not defined"), which silently blocks every Google model for a user with many
+ * tools. This is schema hygiene at the single trust boundary where untrusted
+ * tool schemas enter the model call — not a per-provider workaround. Recurses
+ * into nested object properties, array `items`, and anyOf/oneOf/allOf branches.
+ * Returns a new value; never mutates the caller's schema.
+ */
+export function sanitizeToolSchema<T>(schema: T): T {
+  if (Array.isArray(schema)) return schema.map(sanitizeToolSchema) as T;
+  if (schema === null || typeof schema !== "object") return schema;
+
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema)) out[k] = sanitizeToolSchema(v);
+
+  const props = out.properties;
+  if (Array.isArray(out.required) && props !== null && typeof props === "object") {
+    const declared = new Set(Object.keys(props as Record<string, unknown>));
+    const pruned = (out.required as unknown[]).filter((r) => typeof r === "string" && declared.has(r));
+    if (pruned.length) out.required = pruned;
+    else delete out.required;
+  }
+  return out as T;
+}
+
 /** Concatenate an MCP result's text blocks — used for an error message. */
 function textOf(result: McpCallResult): string {
   return (result.content ?? [])
@@ -73,7 +102,7 @@ function toModelContent(result: McpCallResult) {
 export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: McpToolDef) {
   return dynamicTool({
     description: mcpTool.description ?? `${serverName} ${mcpTool.name}`,
-    inputSchema: jsonSchema((mcpTool.inputSchema ?? { type: "object", properties: {} }) as never),
+    inputSchema: jsonSchema(sanitizeToolSchema(mcpTool.inputSchema ?? { type: "object", properties: {} }) as never),
     execute: async (input, { abortSignal }) => {
       const result = (await client.callTool(
         { name: mcpTool.name, arguments: (input ?? {}) as Record<string, unknown> },

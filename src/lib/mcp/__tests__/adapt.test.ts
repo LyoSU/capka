@@ -1,7 +1,62 @@
 import { describe, it, expect, vi } from "vitest";
-import { mcpToolName, adaptMcpTool } from "../adapt";
+import { mcpToolName, adaptMcpTool, sanitizeToolSchema } from "../adapt";
 
 const opts = { toolCallId: "1", messages: [] };
+
+describe("sanitizeToolSchema", () => {
+  it("drops required entries that aren't declared in properties (the Gemini 'property is not defined' crash)", () => {
+    const dirty = {
+      type: "object",
+      properties: { a: { type: "string" } },
+      required: ["a", "b", "c"], // b, c never declared — Google AI Studio rejects the whole request
+    };
+    expect(sanitizeToolSchema(dirty)).toEqual({
+      type: "object",
+      properties: { a: { type: "string" } },
+      required: ["a"],
+    });
+  });
+
+  it("removes a required array that becomes empty after pruning", () => {
+    const dirty = { type: "object", properties: {}, required: ["ghost"] };
+    expect(sanitizeToolSchema(dirty)).toEqual({ type: "object", properties: {} });
+  });
+
+  it("prunes recursively inside nested object properties and array items", () => {
+    const dirty = {
+      type: "object",
+      properties: {
+        nested: { type: "object", properties: { x: { type: "number" } }, required: ["x", "missing"] },
+        list: { type: "array", items: { type: "object", properties: { id: { type: "string" } }, required: ["id", "nope"] } },
+      },
+      required: ["nested"],
+    };
+    expect(sanitizeToolSchema(dirty)).toEqual({
+      type: "object",
+      properties: {
+        nested: { type: "object", properties: { x: { type: "number" } }, required: ["x"] },
+        list: { type: "array", items: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
+      },
+      required: ["nested"],
+    });
+  });
+
+  it("prunes inside anyOf/oneOf/allOf combinator branches", () => {
+    const dirty = {
+      anyOf: [
+        { type: "object", properties: { a: { type: "string" } }, required: ["a", "b"] },
+      ],
+    };
+    expect(sanitizeToolSchema(dirty)).toEqual({
+      anyOf: [{ type: "object", properties: { a: { type: "string" } }, required: ["a"] }],
+    });
+  });
+
+  it("leaves a valid schema untouched", () => {
+    const clean = { type: "object", properties: { q: { type: "string" } }, required: ["q"] };
+    expect(sanitizeToolSchema(clean)).toEqual(clean);
+  });
+});
 
 describe("mcpToolName", () => {
   it("namespaces server + tool", () => {
