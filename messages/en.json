@@ -263,6 +263,7 @@
       "selectModel": "Select model",
       "needKey": "Enter your API key to load models",
       "noneFound": "No models found",
+      "noneFoundHint": "To use a model that isn't listed, type its full ID (e.g. openrouter/owl-alpha)",
       "noneAvailable": "No models available",
       "syncing": "Preparing the model list…",
       "loadError": "Could not load models",

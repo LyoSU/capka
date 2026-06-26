@@ -652,7 +652,16 @@ function ModelList({
     // to the provider. Offer it as a custom option bound to the active connection
     // when nothing matches it exactly, so it's reachable from the picker.
     if (!models.some((m) => m.id.toLowerCase() === q)) {
-      const sample = models.find((m) => m.configId === activeConn) ?? models[0];
+      // Bind a typed id to the connection whose provider matches its prefix
+      // ("openrouter/…" → the OpenRouter connection), so it routes to a provider
+      // that can actually serve it — not whatever tab happens to be active (which
+      // produced "No available channel for openrouter/… under group <other>").
+      // Fall back to the active connection, then any.
+      const prefix = q.split("/")[0];
+      const sample =
+        models.find((m) => m.configProvider?.toLowerCase() === prefix) ??
+        models.find((m) => m.configId === activeConn) ??
+        models[0];
       const custom = customModelOption(search, sample);
       if (custom) return [...matched, custom];
     }
@@ -772,7 +781,14 @@ function ModelList({
             ) : state.error ? (
               <span className="flex flex-col items-center gap-1.5 text-destructive"><AlertCircle className="h-4 w-4" />{state.error}</span>
             ) : searching ? (
-              t("noneFound")
+              <span className="flex flex-col items-center gap-1.5">
+                {t("noneFound")}
+                {/* A model not in the catalog (a stealth/preview id, or one newer
+                    than the last sync) is still usable — typing its FULL id offers
+                    it as a custom option. Nudge that, since a bare word can't be
+                    resolved to one. */}
+                <span className="text-muted-foreground/70">{t("noneFoundHint")}</span>
+              </span>
             ) : (
               t("noneAvailable")
             )}
@@ -1033,21 +1049,29 @@ export function ModelPicker({
     });
   }, [disabled]);
 
+  // A typed, off-catalog model (a stealth/preview id) isn't in state.models, so
+  // remember the one just selected — otherwise the pill flags the chat
+  // "unavailable" the moment it's picked, even though it routes and runs fine.
+  const [customModel, setCustomModel] = useState<ModelInfo | null>(null);
+
   const select = useCallback(
     (model: ModelInfo) => {
       // Emit the config-scoped ref so the chat routes to the exact config; an
       // untagged model (field/credentials modes, legacy) yields its bare id.
+      if (!state.models.some((m) => refOf(m) === refOf(model))) setCustomModel(model);
       onChange(refOf(model));
       setOpen(false);
     },
-    [onChange],
+    [onChange, state.models],
   );
 
   // Resolve the current selection: match the full ref first (the new tagged
-  // form), then fall back to a bare/legacy id so old chats still light up.
+  // form), then fall back to a bare/legacy id so old chats still light up, then
+  // the just-typed custom model so an off-catalog pick isn't shown as missing.
   const currentModel =
     state.models.find((m) => refOf(m) === value) ??
-    state.models.find((m) => m.id === parseModelId(value).modelId);
+    state.models.find((m) => m.id === parseModelId(value).modelId) ??
+    (customModel && refOf(customModel) === value ? customModel : undefined);
   const currentRef = currentModel ? refOf(currentModel) : value;
   const groupLabel = currentModel ? groupOf(currentModel) : null;
   const displayName = stripGroup(currentModel?.name || (value ? displayModelName(value) : ""), groupLabel);
