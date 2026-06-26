@@ -104,6 +104,18 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const [showScrollDown, setShowScrollDown] = useState(false);
   // The user turn currently at the top of the view — highlighted in the nav.
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
+  // The composer floats over the scroll area as an overlay, so the scroll area
+  // reserves bottom room equal to the composer's live height. Attaching files
+  // grows the composer; a fixed inset would then hide the tail of the reply
+  // behind it with nowhere to scroll. Measured here and fed into paddingBottom.
+  const composerRef = useRef<HTMLDivElement>(null);
+  const [composerH, setComposerH] = useState(160);
+  // Carries a height delta from the ResizeObserver to a layout effect that
+  // applies the matching scroll shift — done after the new padding commits so
+  // the room exists and a grow-shift isn't clamped. prevComposerH lets the
+  // observer compute the delta without re-measuring.
+  const pendingShift = useRef(0);
+  const prevComposerH = useRef(160);
 
   const router = useRouter();
   const { messages, isLoading, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, taskInfo } = useBackgroundChat({
@@ -380,6 +392,40 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const showGreeting = !initialHasHistory && messages.length === 0;
   const [filesOpen, setFilesOpen] = useState(false);
 
+  // Track the composer's height so the scroll inset always matches it. Re-run
+  // when the greeting gives way to the message stream, since the composer only
+  // mounts there. The initial measurement seeds prevComposerH WITHOUT queuing a
+  // shift (first paint shouldn't jump); subsequent growth/shrink (a file chip
+  // appearing, the queue filling) queues the delta.
+  useIsomorphicLayoutEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    prevComposerH.current = el.offsetHeight;
+    setComposerH(el.offsetHeight);
+    const ro = new ResizeObserver(() => {
+      const h = el.offsetHeight;
+      const delta = h - prevComposerH.current;
+      if (!delta) return;
+      prevComposerH.current = h;
+      pendingShift.current += delta;
+      setComposerH(h);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [showGreeting]);
+
+  // Once the padding (driven by composerH) has committed, apply the queued
+  // scroll delta: the content shifts by exactly the composer's growth, so the
+  // last line you were reading stays glued to the composer's top edge instead
+  // of being swallowed by it.
+  useIsomorphicLayoutEffect(() => {
+    const d = pendingShift.current;
+    if (!d) return;
+    pendingShift.current = 0;
+    const el = scrollRef.current;
+    if (el) el.scrollTop += d;
+  }, [composerH]);
+
   // A monotonically-rising count of completed tool calls across the whole thread.
   // It ticks up the moment a tool finishes — exactly when the agent may have
   // written or changed files — so the workspace panel refreshes in real time.
@@ -584,9 +630,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             ref={scrollRef}
             onScroll={handleScroll}
             className="flex-1 overflow-y-auto pt-16"
-            // Extra bottom room equal to the keyboard inset so the last message
-            // can still scroll clear of the lifted composer.
-            style={{ paddingBottom: "calc(10rem + var(--kb, 0px))" }}
+            // Bottom room tracks the composer's live height (+a little air, +the
+            // keyboard inset) so the last message always clears the overlaid
+            // composer — even after attachments grow it.
+            style={{ paddingBottom: `calc(${composerH + 16}px + var(--kb, 0px))` }}
           >
             <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
               {messages.map((message, i) => {
@@ -700,8 +747,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
               </Button>
             </div>
             {/* The composer, queue and error banner are the genuinely
-                interactive part of this otherwise click-through block. */}
-            <div className="pointer-events-auto">
+                interactive part of this otherwise click-through block. Its
+                height (measured via composerRef) drives the scroll inset. */}
+            <div ref={composerRef} className="pointer-events-auto">
               {error && !lastFailed && (
                 <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
                   <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
