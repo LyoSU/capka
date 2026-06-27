@@ -5,6 +5,12 @@ import { ingestSkill, type IngestTarget } from "./service";
 import { SkillParseError } from "./types";
 
 export const MAX_SKILL_ZIP_BYTES = 5 * 1024 * 1024;
+// Decompression-bomb guards: the 5 MB compressed cap above says nothing about the
+// UNCOMPRESSED size, and a zip-bomb can expand to gigabytes. Bound entry count,
+// per-entry size, and total uncompressed bytes before reading any entry data.
+const MAX_ZIP_ENTRIES = 2000;
+const MAX_ENTRY_BYTES = 5 * 1024 * 1024;
+const MAX_UNCOMPRESSED_BYTES = 25 * 1024 * 1024;
 
 export class SkillZipError extends Error {}
 
@@ -25,6 +31,17 @@ export async function ingestSkillZip(
     throw new SkillZipError("That file isn't a readable .zip.");
   }
   const entries = zip.getEntries();
+
+  // Reject decompression bombs up front, using the zip's declared sizes — before
+  // any getData() allocates the uncompressed bytes into memory.
+  if (entries.length > MAX_ZIP_ENTRIES) throw new SkillZipError("That zip has too many files.");
+  let totalUncompressed = 0;
+  for (const e of entries) {
+    if (e.isDirectory) continue;
+    if (e.header.size > MAX_ENTRY_BYTES) throw new SkillZipError("A file inside the zip is too large.");
+    totalUncompressed += e.header.size;
+    if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) throw new SkillZipError("The zip's contents are too large.");
+  }
 
   const skillEntry = entries.find((e) => !e.isDirectory && /(^|\/)SKILL\.md$/.test(e.entryName));
   if (!skillEntry) throw new SkillZipError("No SKILL.md in zip");

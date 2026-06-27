@@ -239,6 +239,13 @@
       "when": 1782476284538,
       "tag": "0033_drop_memories",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782577646875,
+      "tag": "0034_fk_and_money_precision",
+      "breakpoints": true
     }
   ]
 }

@@ -25,12 +25,25 @@ chown -R sandbox:sandbox /workspace 2>/dev/null || true
 # (169.254.169.254). Loopback covers Docker's embedded resolver (127.0.0.11).
 # Return traffic arrives via INPUT (untouched), so no conntrack is needed —
 # keeps it working under gVisor's limited netfilter.
-if [ "${SANDBOX_EGRESS_FILTER:-0}" = "1" ] && command -v iptables >/dev/null 2>&1; then
+die() { echo "sandbox-entrypoint: $1" >&2; exit 1; }
+
+if [ "${SANDBOX_EGRESS_FILTER:-0}" = "1" ]; then
+  # FAIL-CLOSED. Egress was turned on WITH a firewall, so the private/metadata DROP
+  # rules are the only thing between a prompt-injected agent and the company LAN /
+  # 169.254.169.254. If we can't install AND verify them, we must refuse to run —
+  # never fall through to open egress (the old `command -v iptables` / `|| true`
+  # form did exactly that when iptables was absent or the rules silently no-op'd).
+  command -v iptables >/dev/null 2>&1 || die "egress filter requested but iptables is unavailable — refusing to run with open egress"
   PRIVATE_V4="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 192.0.0.0/24 198.18.0.0/15"
-  iptables -F OUTPUT 2>/dev/null || true
-  iptables -A OUTPUT -o lo -j ACCEPT
-  for net in $PRIVATE_V4; do iptables -A OUTPUT -d "$net" -j DROP; done
-  iptables -A OUTPUT -j ACCEPT
+  iptables -F OUTPUT || die "iptables flush failed"
+  iptables -A OUTPUT -o lo -j ACCEPT || die "iptables loopback rule failed"
+  for net in $PRIVATE_V4; do iptables -A OUTPUT -d "$net" -j DROP || die "iptables DROP $net failed"; done
+  iptables -A OUTPUT -j ACCEPT || die "iptables accept rule failed"
+  # Verify the cloud-metadata block actually took. gVisor's netfilter is partial,
+  # so a rule can be "accepted" yet not enforced — probe it explicitly.
+  iptables -C OUTPUT -d 169.254.0.0/16 -j DROP 2>/dev/null || die "egress firewall did not install (metadata DROP missing) — refusing to run"
+  # IPv6 best-effort: drop private/link-local when the stack is present. (Public
+  # IPv6 egress without these rules is the residual gap; v4 metadata is the must-have.)
   if command -v ip6tables >/dev/null 2>&1; then
     ip6tables -F OUTPUT 2>/dev/null || true
     ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true

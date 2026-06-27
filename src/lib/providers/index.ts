@@ -13,14 +13,17 @@ import { createGuardedFetch } from "@/lib/net/ssrf";
  * with a per-hop check — closing the redirect-to-metadata bypass and re-checking
  * DNS on each call (it narrows, but can't fully close, a connect-time DNS-rebind
  * race; pinning the resolved IP would be the complete fix). Link-local/metadata
- * (169.254/fe80) are blocked regardless of blockPrivate, which is false here so a
- * self-hosted gateway on a private/loopback address still works. No timeout —
- * inference streams for minutes. First-party endpoints (no custom baseUrl) keep
- * the default fetch.
+ * (169.254/fe80) are blocked regardless of blockPrivate. `blockPrivate` is threaded
+ * from the admin's strict-SSRF setting so the per-hop redirect re-check matches the
+ * pre-flight policy: with strict off a self-hosted gateway on a private/loopback
+ * address still works; with strict on, a provider that 3xx-redirects to a private
+ * address is blocked here too (not just at the pre-flight check). No timeout —
+ * inference streams for minutes. First-party endpoints (no custom baseUrl) keep the
+ * default fetch.
  */
-function guardedFetchFor(baseUrl?: string): typeof fetch | undefined {
+function guardedFetchFor(baseUrl: string | undefined, blockPrivate: boolean): typeof fetch | undefined {
   if (!baseUrl) return undefined;
-  return createGuardedFetch({ blockPrivate: false });
+  return createGuardedFetch({ blockPrivate });
 }
 
 // Provider metadata + model-id helpers live in the dependency-free registry so
@@ -65,8 +68,9 @@ export type ApiStyle = "auto" | "chat" | "responses";
 export function getModel(
   provider: string,
   modelId: string,
-  config?: { apiKey?: string; baseUrl?: string; apiStyle?: ApiStyle | null },
+  config?: { apiKey?: string; baseUrl?: string; apiStyle?: ApiStyle | null; blockPrivate?: boolean },
 ) {
+  const blockPrivate = config?.blockPrivate ?? false;
   switch (provider) {
     case "litellm":
     case "deepseek":
@@ -84,13 +88,13 @@ export function getModel(
       // providerOptions namespace; the runner's reasoningOptions() keys off the
       // very same provider string, so the reasoning knob actually lands.
       const baseURL = config?.baseUrl || PROVIDER_META[provider as ProviderName].defaultBaseUrl || "";
-      const p = createOpenAICompatible({ name: provider, baseURL, apiKey: config?.apiKey, fetch: guardedFetchFor(config?.baseUrl) });
+      const p = createOpenAICompatible({ name: provider, baseURL, apiKey: config?.apiKey, fetch: guardedFetchFor(config?.baseUrl, blockPrivate) });
       // An endpoint that splits reasoning into `reasoning_content` is handled by the
       // provider above; one that doesn't inlines `<think>` in the text — extract it.
       return withReasoningExtraction(p(modelId));
     }
     case "openai": {
-      const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl, fetch: guardedFetchFor(config?.baseUrl) });
+      const p = createOpenAI({ apiKey: config?.apiKey, baseURL: config?.baseUrl, fetch: guardedFetchFor(config?.baseUrl, blockPrivate) });
       // Which wire API to drive the model over. The default `p(modelId)` targets
       // the Responses API (/responses) — but OpenAI-COMPATIBLE gateways (LiteLLM,
       // vLLM, LM Studio, a proxy) speak /chat/completions only, and even when a
@@ -105,7 +109,7 @@ export function getModel(
       return config?.baseUrl ? p.chat(modelId) : p(modelId);
     }
     case "anthropic": {
-      const p = createAnthropic({ apiKey: config?.apiKey, baseURL: config?.baseUrl, fetch: guardedFetchFor(config?.baseUrl) });
+      const p = createAnthropic({ apiKey: config?.apiKey, baseURL: config?.baseUrl, fetch: guardedFetchFor(config?.baseUrl, blockPrivate) });
       return p(modelId);
     }
     case "openrouter": {
@@ -120,7 +124,7 @@ export function getModel(
       return p(modelId);
     }
     case "ollama": {
-      const p = createOllama({ baseURL: config?.baseUrl || "http://localhost:11434/api", fetch: guardedFetchFor(config?.baseUrl) });
+      const p = createOllama({ baseURL: config?.baseUrl || "http://localhost:11434/api", fetch: guardedFetchFor(config?.baseUrl, blockPrivate) });
       // Local open-weights reasoning models (DeepSeek-R1, Qwen QwQ, …) emit their
       // chain of thought inline as `<think>…</think>` — pull it into reasoning.
       return withReasoningExtraction(p(modelId));

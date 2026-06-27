@@ -12,8 +12,14 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Vendored helper scripts — their lint noise was drowning real signal.
+    // Vendored agent/tooling scratch dirs (not project source) — their lint noise
+    // was drowning real signal and is not the project's to fix.
     ".claude/**",
+    ".agents/**",
+    ".impeccable/**",
+    ".playwright-mcp/**",
+    ".superpowers/**",
+    ".cursor/**",
   ]),
   {
     // Open-core boundary: the AGPL core (src/**) must never import from ee/**.

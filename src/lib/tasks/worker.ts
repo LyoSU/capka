@@ -20,7 +20,10 @@ import { log } from "@/lib/log";
  * Robust + simple: no external broker, all state in Postgres.
  */
 
-const MAX_CONCURRENCY = 3;
+// Per-instance concurrent-task ceiling. Configurable so a beefier host (or a
+// multi-instance deployment that wants to tune throughput) can raise it without a
+// code change; claims stay atomic across instances via SKIP LOCKED.
+const MAX_CONCURRENCY = Math.max(1, parseInt(process.env.WORKER_MAX_CONCURRENCY || "3", 10) || 3);
 const POLL_MS = 5_000;
 const RECONCILE_MS = 30_000;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;

@@ -28,9 +28,9 @@ describe("buildMatcher", () => {
 });
 
 describe("isUsable", () => {
-  it("only deny hides a capability (ask behaves as allow in G1)", () => {
+  it("usable only when explicitly allowed; ask fails safe (deny) until an approval gate exists", () => {
     expect(isUsable("allow")).toBe(true);
-    expect(isUsable("ask")).toBe(true);
+    expect(isUsable("ask")).toBe(false);
     expect(isUsable("deny")).toBe(false);
   });
 });

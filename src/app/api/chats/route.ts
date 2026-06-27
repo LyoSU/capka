@@ -1,9 +1,10 @@
 import { eq, gt, desc, and, ilike, isNull, inArray, exists, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { requireSession, requireRole, apiHandler } from "@/lib/auth";
+import { requireSession, requireActive, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { chats, messages, tasks } from "@/lib/db/schema";
+import { chats, messages, tasks, projects } from "@/lib/db/schema";
+import { requireOwned } from "@/lib/db/ownership";
 
 const createChatSchema = z.object({
   id: z.string().optional(),
@@ -142,8 +143,13 @@ export const GET = apiHandler(async (req: Request) => {
 });
 
 export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireRole("admin", "user");
+  const { userId } = await requireActive();
   const body = createChatSchema.parse(await req.json());
+
+  // A project id must belong to the caller — otherwise a user could attach their
+  // chat to someone else's project and inherit its sandbox workspace / system
+  // prompt / egress mode. /api/chat validates this; this route must match it.
+  if (body.projectId) await requireOwned(projects, body.projectId, userId, "Project");
 
   const id = body.id || nanoid();
   await db.insert(chats).values({

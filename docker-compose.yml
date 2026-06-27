@@ -94,8 +94,12 @@ services:
       # (the old ${PWD} guess broke under Coolify/systemd/non-repo-root launches).
       # Set HOST_DATA_ROOT only to override the auto-detected value.
       - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
-      # Sandbox egress is controlled in the admin panel (Security → Internet access),
-      # per run, with a per-project override — no env flag.
+      # Sandbox egress kill-switch (deployment-level, FAIL-CLOSED). The admin panel
+      # (Security → Internet access) and the per-project override choose the INTENT,
+      # but a sandbox only ever gets network when the deployment also opts in here.
+      # Unset/false ⇒ NO sandbox egress, no matter what any in-app toggle says — so
+      # an operator can hard-forbid egress that a user/admin couldn't re-enable.
+      - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
     networks:
       - default
       - docker-proxy

@@ -101,7 +101,10 @@ export const providerConfigs = pgTable("provider_configs", {
 export const chats = pgTable("chats", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  projectId: text("project_id"),
+  // FK so a chat can't reference a non-existent (or someone else's deleted)
+  // project. set null (not cascade): deleting a project should orphan its chats
+  // back to project-less, not delete the conversations.
+  projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
   title: text("title"),
   model: text("model"),
   // Where the conversation originates. "web" chats are fully interactive; a
@@ -181,7 +184,9 @@ export const linkCodes = pgTable("link_codes", {
 export const tasks = pgTable("tasks", {
   id: text("id").primaryKey(),
   chatId: text("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
-  userId: text("user_id").notNull(),
+  // FK so a deleted user's tasks don't orphan (and their pending holds can't
+  // linger unreleasable). Cascade matches chats/messages.
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("queued"), // queued, running, completed, failed, cancelled
   error: text("error"),
   // Self-contained run payload so any worker can execute the task without the
@@ -219,13 +224,18 @@ export const usage = pgTable("usage", {
   id: text("id").primaryKey(),
   taskId: text("task_id"),
   messageId: text("message_id"),
-  userId: text("user_id").notNull(),
+  // FK so a deleted user's spend rows don't linger as orphans that still sum into
+  // org totals (admin/usage LEFT JOINs user). Cascade matches every other
+  // user-owned table; the row is history that dies with the user.
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   provider: text("provider").notNull(),
   model: text("model").notNull(),
   inputTokens: integer("input_tokens").default(0),
   outputTokens: integer("output_tokens").default(0),
   cachedInputTokens: integer("cached_input_tokens").default(0),
-  costUsd: numeric("cost_usd"),
+  // Fixed precision/scale: this is the money ledger. An unconstrained numeric let
+  // JS-float round-trips store absurd-precision strings; pin it to 8 decimals.
+  costUsd: numeric("cost_usd", { precision: 18, scale: 8 }),
   // Whether this spend hit the shared (admin) key vs the user's own key. Only
   // shared-key spend counts against a user's budget — own-key users pay their
   // own provider directly, so they're never throttled.
@@ -252,9 +262,9 @@ export const usage = pgTable("usage", {
 export const tiers = pgTable("tiers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  limit5h: numeric("limit_5h"), // USD cap over the last 5 hours (null = unlimited)
-  limitWeek: numeric("limit_week"), // USD cap over the last 7 days
-  limitMonth: numeric("limit_month"), // USD cap over the last 30 days
+  limit5h: numeric("limit_5h", { precision: 18, scale: 8 }), // USD cap over the last 5 hours (null = unlimited)
+  limitWeek: numeric("limit_week", { precision: 18, scale: 8 }), // USD cap over the last 7 days
+  limitMonth: numeric("limit_month", { precision: 18, scale: 8 }), // USD cap over the last 30 days
   isDefault: boolean("is_default").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 }, (t) => [index("idx_tiers_is_default").on(t.isDefault)]);
@@ -270,9 +280,9 @@ export const models = pgTable("models", {
   group: text("group"), // company, e.g. "Anthropic"
   icon: text("icon"), // brand slug for the UI, e.g. "anthropic"
   contextLength: integer("context_length"),
-  inputPrice: numeric("input_price"), // USD per token
-  outputPrice: numeric("output_price"),
-  cacheReadPrice: numeric("cache_read_price"),
+  inputPrice: numeric("input_price", { precision: 20, scale: 12 }), // USD per token (tiny — needs deep scale)
+  outputPrice: numeric("output_price", { precision: 20, scale: 12 }),
+  cacheReadPrice: numeric("cache_read_price", { precision: 20, scale: 12 }),
   capabilities: jsonb("capabilities"), // { vision, tools, reasoning }
   cutoff: text("cutoff"), // knowledge cutoff, e.g. "2025-03" (from Models.dev)
   openWeights: boolean("open_weights"), // open-weights model? (from Models.dev)

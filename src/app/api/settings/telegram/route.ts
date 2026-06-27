@@ -1,12 +1,16 @@
 import { Bot } from "grammy";
-import { requireAdmin, apiHandler } from "@/lib/auth";
+import { requireAdmin, requireSession, apiHandler } from "@/lib/auth";
 import { setSetting, isSetupComplete } from "@/lib/settings";
 import { restartBot } from "@/lib/telegram/bot";
 
 export const POST = apiHandler(async (req: Request) => {
-  // During setup wizard, user isn't admin yet — allow if setup not complete
+  // After setup, this is an admin-only action. DURING setup the caller isn't admin
+  // yet — but the route stores a bot token and restarts the bot, so it must never
+  // run fully unauthenticated. Require at least a signed-in session in the setup
+  // window (the bootstrap account); only drop the admin check, not all auth.
   const setupDone = await isSetupComplete();
   if (setupDone) await requireAdmin();
+  else await requireSession();
 
   const { botToken } = await req.json();
   if (!botToken?.trim()) {

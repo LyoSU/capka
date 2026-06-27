@@ -66,6 +66,13 @@ const SANDBOX_UID = parseInt(process.env.SANDBOX_UID || "1000");
 const SANDBOX_GID = parseInt(process.env.SANDBOX_GID || "1000");
 const GC_GRACE_MS = parseInt(process.env.GC_GRACE_MS || "3600000"); // 1h
 const FLUSH_INTERVAL_MS = parseInt(process.env.FLUSH_INTERVAL_MS || "60000");
+// Deployment-level egress kill-switch. The platform resolves a per-run mode
+// (org default + per-project "bridge"), but a deployment that never sets
+// SANDBOX_ALLOW_NETWORK=true gets NO network for any sandbox, regardless of what
+// a user picks on their project. This is the gate the platform's settings/runner
+// comments promise — without it those comments lied and a normal user could open
+// egress a deployment meant to forbid. Off by default = fail-closed.
+const ALLOW_NETWORK = process.env.SANDBOX_ALLOW_NETWORK === "true";
 
 // Isolation: gVisor is OPT-IN. Default runtime is runc (boots on any Docker host);
 // set SANDBOX_RUNTIME=runsc to opt into the fail-closed "secure" profile.
@@ -199,7 +206,13 @@ const server = createServer(async (req, res) => {
         }
 
         const { wsHostPath, sharedHostPath } = await workspace.ensure(uid, sid);
-        const net = resolveNetworkMode(networkMode);
+        // Honor the deployment kill-switch: a bridge request is downgraded to
+        // "none" unless the operator opted the whole deployment into egress.
+        const requestedNet = resolveNetworkMode(networkMode);
+        const net = ALLOW_NETWORK ? requestedNet : "none";
+        if (requestedNet === "bridge" && net === "none") {
+          log("session.network.denied", { sessionId: sid, userId: uid, reason: "SANDBOX_ALLOW_NETWORK not set" });
+        }
         const { handle } = await backend.create({
           sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
           networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,

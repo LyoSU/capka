@@ -1,7 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
-import { getMasterKey, sharedKeyEnabled, getModelMaxPrice } from "@/lib/settings";
+import { getMasterKey, sharedKeyEnabled, getModelMaxPrice, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { decrypt } from "@/lib/crypto";
 import { getModel, parseModelId, splitModelRef, providerLabel, isProviderName, type ApiStyle } from "@/lib/providers";
 import { assertSafeProviderConfig, getModelCompletionPriceUsdPerM, getModelInputModalities } from "@/lib/providers/list-models";
@@ -188,6 +188,9 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     apiKey: apiKey || undefined,
     baseUrl: config.baseUrl || undefined,
     apiStyle: (config.apiStyle as ApiStyle | null) ?? undefined,
+    // Honor the admin's strict-SSRF policy on the redirect re-check too, matching
+    // the assertSafeProviderConfig pre-flight above.
+    blockPrivate: await getBlockPrivateProviderUrls(),
   });
   // Per-model native input modalities from the synced catalog: OpenRouter's
   // `architecture.input_modalities` and LiteLLM's `supported_modalities` +

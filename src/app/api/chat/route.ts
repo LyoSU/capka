@@ -87,6 +87,12 @@ export const POST = apiHandler(async (req: Request) => {
     throw new BudgetExceededError(reservation.window ?? "d30");
   }
 
+  // The hold reserved above must be released on EVERY path that doesn't hand it to
+  // a live turn — including an exception between here and enqueue. A failed
+  // insert/update/enqueue would otherwise leak a pending hold that inflates the
+  // budget forever (no task row exists for the zombie reconciler to clean up).
+  let handedOff = false;
+  try {
   if (!existingChat) {
     await db.insert(chats).values({
       id: chatId,
@@ -119,7 +125,7 @@ export const POST = apiHandler(async (req: Request) => {
         .where(and(eq(messages.id, parentId), eq(messages.chatId, chatId)))
         .limit(1);
       if (!parent) {
-        await releaseHold(taskId); // this turn won't run — don't leave its hold reserved
+        // handedOff stays false → the finally below releases the hold.
         return Response.json({ error: "Conversation is out of date — please reload." }, { status: 409 });
       }
     }
@@ -163,15 +169,16 @@ export const POST = apiHandler(async (req: Request) => {
   // returned id is the turn that will actually answer, so the client's stop
   // button targets a real, live turn rather than a phantom.
   const { id: turnId, created } = await enqueueTask({ id: taskId, chatId, userId, payload });
-  if (!created) {
-    // Folded into an existing turn (or the rare claimed-incumbent race) — our
-    // reserved turn won't run, so release its hold. The turn that actually
-    // answers carries its own hold and reconciles to the real cost.
-    await releaseHold(taskId);
-  }
+  // A created turn now OWNS this hold and reconciles it to the real cost at
+  // finalize. A folded/raced turn (created=false) does not — the finally releases
+  // our hold; the turn that actually answers carries its own.
+  if (created) handedOff = true;
 
   // Return immediately — client syncs via SSE
   return Response.json({ taskId: turnId, chatId });
+  } finally {
+    if (!handedOff) await releaseHold(taskId);
+  }
 });
 
 export const GET = apiHandler(async (req: Request) => {

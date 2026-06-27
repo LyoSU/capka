@@ -2,6 +2,13 @@
 # {$DOMAIN} is read from the environment at startup; Caddy provisions and renews
 # a Let's Encrypt cert for it automatically (no account email required).
 {$DOMAIN} {
+	# Transport hardening. Caddy terminates TLS here, so HSTS belongs at this layer.
+	# (CSP is still TODO — it needs a nonce on the inline theme-init script; tracked
+	# in next.config.ts.) Header is set on every response, including errors.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+	}
 	reverse_proxy platform:3000
 	# Allow large uploads (matches the host-nginx client_max_body_size in DEPLOY.md).
 	request_body {

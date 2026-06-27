@@ -18,9 +18,12 @@ export function buildMatcher(rows: PolicyRow[]): PolicyMatcher {
   return { effect: (type, key) => best.get(`${type}:${key}`)?.effect ?? "allow" };
 }
 
-/** deny is the only effect that removes a capability in G1 (ask behaves as allow). */
+/** A capability is usable only when explicitly allowed (the unmatched default is
+ *  "allow", see buildMatcher). "ask" is treated as DENY until a real interactive
+ *  approval gate exists — an admin who sets "Ask" expects a control, so it must
+ *  fail safe (block), never silently allow. */
 export function isUsable(effect: Effect): boolean {
-  return effect !== "deny";
+  return effect === "allow";
 }
 
 /** Policies visible to a run (org system + own user + the project), as a matcher. */

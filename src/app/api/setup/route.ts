@@ -80,10 +80,14 @@ export async function POST(req: Request) {
     if (!session) {
       return Response.json({ error: "Must be signed in to complete setup" }, { status: 401 });
     }
-    // Verify this is the admin email from step 1
+    // Verify this is the admin email claimed in step 1. The `account` step MUST
+    // have run first: without `admin_email` set there is no bootstrap owner to
+    // match against, so a `!adminEmail` short-circuit would let ANY signed-in
+    // account (email signup is open pre-setup) promote itself to admin and lock
+    // out the real operator. Refuse until the account step has claimed the email.
     const adminEmail = await getSetting("admin_email");
-    if (adminEmail && session.user.email !== adminEmail) {
-      return Response.json({ error: "Only the admin account can complete setup" }, { status: 403 });
+    if (!adminEmail || session.user.email !== adminEmail) {
+      return Response.json({ error: "Complete the account step first, then finish setup from that same account." }, { status: 403 });
     }
     await db.update(users).set({ role: "admin" }).where(eq(users.id, session.user.id));
     await setSetting("setup_complete", "true");
