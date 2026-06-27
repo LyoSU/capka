@@ -17,6 +17,9 @@ export type ConfigIssue = { level: "error" | "warn"; key: string; message: strin
  */
 export function checkConfig(env: Record<string, string | undefined> = process.env): ConfigIssue[] {
   const issues: ConfigIssue[] = [];
+  // Production profile: settings that are merely insecure-but-tolerable in dev are
+  // real misconfigurations in production, so they're escalated from warn to error.
+  const isProd = env.NODE_ENV === "production";
 
   const masterKey = env.UNCLAW_MASTER_KEY?.trim();
   if (masterKey && !isValidMasterKey(masterKey)) {
@@ -28,8 +31,11 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
         "openssl rand -hex 32. Encryption/decryption of every stored key will fail until fixed.",
     });
   } else if (!masterKey) {
+    // The whole point of UNCLAW_MASTER_KEY is to keep the key OUT of the DB, so a
+    // DB leak can't decrypt provider keys. Falling back to a DB-stored key defeats
+    // that — tolerable for a quick local run, a real hole in production.
     issues.push({
-      level: "warn",
+      level: isProd ? "error" : "warn",
       key: "UNCLAW_MASTER_KEY",
       message:
         "not set — a master key will be generated and stored in the DB. This is insecure " +
@@ -40,7 +46,7 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
   const dbUrl = env.DATABASE_URL?.trim();
   if (!dbUrl) {
     issues.push({
-      level: "warn",
+      level: isProd ? "error" : "warn",
       key: "DATABASE_URL",
       message: "not set — falling back to the local default (postgres on localhost:5432).",
     });

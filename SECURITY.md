@@ -136,6 +136,10 @@ deployments — not a turnkey-certified multi-tenant platform.
   edition, not in this repo.
 - **Docker socket is root-equivalent.** Even via the socket-proxy, only **rootless
   Docker** (or gVisor) makes a container escape *not* equal host root — see above.
+- **Audit log is best-effort.** Entries are written after the action, not in the
+  same transaction, and a write failure is logged but does not block the action.
+  In a DB outage a critical event could go unrecorded. Treat the audit log as
+  strong evidence, not a hard guarantee; for compliance, ship logs off-box.
 
 If your threat model exceeds these boundaries, run rootless + gVisor, front the app
 with your own WAF/egress controls, and budget for a security review before exposing
