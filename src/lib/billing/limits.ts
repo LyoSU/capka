@@ -16,9 +16,14 @@ export type WindowKey = "h5" | "d7" | "d30";
 
 export interface WindowStatus {
   window: WindowKey;
-  used: number; // USD spent in the window on the shared key
+  // Settled spend (reconciled, pending=false) vs outstanding holds (pending=true).
+  // `used` is their sum — what enforcement and the % bar are based on; the split
+  // lets the UI show real spend without presenting estimates as committed.
+  committed: number;
+  reserved: number;
+  used: number; // committed + reserved, in USD on the shared key
   limit: number | null; // USD cap for the window (null = unlimited)
-  pct: number; // 0..100+ — 0 when unlimited
+  pct: number; // used/limit, 0..100+ — 0 when unlimited
 }
 
 export interface LimitStatus {
@@ -80,19 +85,29 @@ export async function getDefaultTier(): Promise<Tier> {
 // windows sum reads identically whether or not it's inside reserveBudget's lock.
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+/** Committed (settled) vs reserved (outstanding holds) shared-key spend per window. */
+export interface SpendSplit {
+  committed: Record<WindowKey, number>;
+  reserved: Record<WindowKey, number>;
+}
+
 /**
- * Shared-key spend (committed + outstanding holds) for one user across all three
- * windows in a single query, bounded to the widest window (30d). Pending holds
- * are plain rows, so they're summed too — that's what lets a concurrent reserve
- * see another in-flight turn's reservation. Single source of truth for both the
- * UI status and the enforcement gate, so the two can never drift.
+ * Shared-key spend for one user across all three windows in a single query,
+ * bounded to the widest window (30d). Settled rows (pending=false) and holds
+ * (pending=true) are summed SEPARATELY: their total drives enforcement (a
+ * concurrent reserve must see another in-flight turn's hold), while the split
+ * lets the UI distinguish real spend from estimates. Single source of truth for
+ * both the UI status and the enforcement gate, so the two can never drift.
  */
-async function spendWindows(exec: Executor, userId: string): Promise<Record<WindowKey, number>> {
+async function spendWindows(exec: Executor, userId: string): Promise<SpendSplit> {
   const [row] = await exec
     .select({
-      h5: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.createdAt} >= now() - interval '5 hours'), 0)`,
-      d7: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.createdAt} >= now() - interval '7 days'), 0)`,
-      d30: sql<string>`coalesce(sum(${usage.costUsd}), 0)`,
+      h5c: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = false and ${usage.createdAt} >= now() - interval '5 hours'), 0)`,
+      h5r: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = true and ${usage.createdAt} >= now() - interval '5 hours'), 0)`,
+      d7c: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = false and ${usage.createdAt} >= now() - interval '7 days'), 0)`,
+      d7r: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = true and ${usage.createdAt} >= now() - interval '7 days'), 0)`,
+      d30c: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = false), 0)`,
+      d30r: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = true), 0)`,
     })
     .from(usage)
     .where(
@@ -102,10 +117,13 @@ async function spendWindows(exec: Executor, userId: string): Promise<Record<Wind
         sql`${usage.createdAt} >= now() - interval '30 days'`,
       ),
     );
-  return { h5: Number(row?.h5 ?? 0), d7: Number(row?.d7 ?? 0), d30: Number(row?.d30 ?? 0) };
+  return {
+    committed: { h5: Number(row?.h5c ?? 0), d7: Number(row?.d7c ?? 0), d30: Number(row?.d30c ?? 0) },
+    reserved: { h5: Number(row?.h5r ?? 0), d7: Number(row?.d7r ?? 0), d30: Number(row?.d30r ?? 0) },
+  };
 }
 
-async function sharedSpendWindows(userId: string): Promise<Record<WindowKey, number>> {
+async function sharedSpendWindows(userId: string): Promise<SpendSplit> {
   return spendWindows(db, userId);
 }
 
@@ -121,10 +139,12 @@ export async function getLimitStatus(userId: string): Promise<LimitStatus> {
   const [tier, spend] = await Promise.all([getTierForUser(userId), sharedSpendWindows(userId)]);
 
   const windows: WindowStatus[] = ORDER.map((w) => {
-    const used = spend[w];
+    const committed = spend.committed[w];
+    const reserved = spend.reserved[w];
+    const used = committed + reserved;
     const limit = capFor(tier, w);
     const pct = limit ? Math.min(999, Math.round((used / limit) * 100)) : 0;
-    return { window: w, used, limit, pct };
+    return { window: w, committed, reserved, used, limit, pct };
   });
 
   const blocked = windows.find((w) => w.limit !== null && w.used >= w.limit) ?? null;
@@ -193,7 +213,9 @@ export async function reserveBudget(input: {
 
     for (const w of ORDER) {
       const cap = capFor(tier, w);
-      if (cap !== null && spend[w] + estimate >= cap) {
+      // Enforce on the EFFECTIVE total (settled + outstanding holds), so concurrent
+      // turns reserve against each other.
+      if (cap !== null && spend.committed[w] + spend.reserved[w] + estimate >= cap) {
         return { allowed: false, window: w, reason: "budget" as const };
       }
     }

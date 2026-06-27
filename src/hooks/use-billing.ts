@@ -6,9 +6,11 @@ export type WindowKey = "h5" | "d7" | "d30";
 
 export interface WindowStatus {
   window: WindowKey;
-  used: number;
+  committed: number; // settled spend (USD)
+  reserved: number; // outstanding holds (USD, estimates)
+  used: number; // committed + reserved
   limit: number | null;
-  pct: number;
+  pct: number; // used/limit
 }
 
 export interface BillingInfo {

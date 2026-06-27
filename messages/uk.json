@@ -590,6 +590,7 @@
     "limits": {
       "title": "Ваш ліміт",
       "usedPct": "{pct}%",
+      "reservedPct": "+{pct}% зарезервовано",
       "details": "Деталі",
       "hideDetails": "Згорнути",
       "reached": "Ліміт вичерпано",

@@ -590,6 +590,7 @@
     "limits": {
       "title": "Your limit",
       "usedPct": "{pct}%",
+      "reservedPct": "+{pct}% reserved",
       "details": "Details",
       "hideDetails": "Hide",
       "reached": "Limit reached",

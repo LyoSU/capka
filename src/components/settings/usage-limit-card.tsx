@@ -13,13 +13,15 @@ function barColor(pct: number): string {
   return "bg-primary";
 }
 
-function Bar({ pct }: { pct: number }) {
+// Stacked bar: solid = committed (settled) spend, translucent = outstanding holds
+// (estimates) on top, so a reservation never looks like money already spent.
+function Bar({ committedPct, reservedPct }: { committedPct: number; reservedPct: number }) {
+  const committedW = Math.min(100, committedPct);
+  const reservedW = Math.min(100 - committedW, Math.max(0, reservedPct));
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-      <div
-        className={cn("h-full rounded-full transition-all", barColor(pct))}
-        style={{ width: `${Math.min(100, pct)}%` }}
-      />
+    <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+      <div className={cn("h-full transition-all", barColor(committedPct + reservedPct))} style={{ width: `${committedW}%` }} />
+      <div className={cn("h-full opacity-40 transition-all", barColor(committedPct + reservedPct))} style={{ width: `${reservedW}%` }} />
     </div>
   );
 }
@@ -54,15 +56,24 @@ export function UsageLimitCard() {
       </div>
 
       <div className="space-y-3">
-        {capped.map((w) => (
-          <div key={w.window} className="space-y-1.5">
-            <div className="flex items-baseline justify-between text-sm">
-              <span className="text-muted-foreground">{label(w)}</span>
-              <span className="font-medium tabular-nums">{t("usedPct", { pct: w.pct })}</span>
+        {capped.map((w) => {
+          const committedPct = w.limit ? Math.min(999, Math.round((w.committed / w.limit) * 100)) : 0;
+          const reservedPct = w.limit ? Math.round((w.reserved / w.limit) * 100) : 0;
+          return (
+            <div key={w.window} className="space-y-1.5">
+              <div className="flex items-baseline justify-between text-sm">
+                <span className="text-muted-foreground">{label(w)}</span>
+                <span className="font-medium tabular-nums">
+                  {t("usedPct", { pct: committedPct })}
+                  {reservedPct > 0 && (
+                    <span className="ml-1 font-normal text-muted-foreground">{t("reservedPct", { pct: reservedPct })}</span>
+                  )}
+                </span>
+              </div>
+              <Bar committedPct={committedPct} reservedPct={reservedPct} />
             </div>
-            <Bar pct={w.pct} />
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <p className="text-xs text-muted-foreground">{t("hint")}</p>
