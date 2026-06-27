@@ -6,6 +6,10 @@ import { Loader2, Plus, Trash2, RefreshCw, Download, Check, Search } from "lucid
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { PluginIcon } from "@/components/plugin-icon";
 import MembersInstallToggle from "@/components/settings/members-install-toggle";
 
@@ -258,12 +262,29 @@ export function MarketplaceBrowser() {
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {c.installed ? (
-                    // Updates go through the Installed tab's review flow (preview the
-                    // diff, confirm the exact commit) — not a blind one-click here.
-                    <Button variant="ghost" size="sm" disabled={busy === c.name} onClick={() => uninstall(c.name)}>
-                      <Check className="mr-1.5 h-4 w-4 text-success" />
-                      {t("installedLabel")}
-                    </Button>
+                    // The "Installed" badge doubles as the uninstall control — it
+                    // looks like a status, so confirm before removing (updates still
+                    // go through the Installed tab's review flow, never a click here).
+                    <AlertDialog>
+                      <AlertDialogTrigger
+                        render={
+                          <Button variant="ghost" size="sm" disabled={busy === c.name}>
+                            <Check className="mr-1.5 h-4 w-4 text-success" />
+                            {t("installedLabel")}
+                          </Button>
+                        }
+                      />
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t("uninstall")}</AlertDialogTitle>
+                          <AlertDialogDescription>{t("uninstallConfirm", { name: c.name })}</AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => uninstall(c.name)}>{t("uninstall")}</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   ) : (
                     <Button size="sm" disabled={!c.installable || busy === c.name} onClick={() => install(c.name)}>
                       {busy === c.name ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Download className="mr-1.5 h-4 w-4" />}
