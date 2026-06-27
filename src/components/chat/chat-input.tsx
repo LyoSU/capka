@@ -4,6 +4,7 @@ import { useRef, useCallback, useMemo, useEffect, type KeyboardEvent } from "rea
 import { useTranslations } from "next-intl";
 import { ArrowUp, Loader2, Paperclip, RotateCw, Square, X } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { BinaryFileThumb, FileTile, SandboxFileTile, type PreviewFile } from "./file-preview";
 import type { FileRef } from "@/lib/constants";
@@ -50,6 +51,8 @@ interface ChatInputProps {
   onRetryFile: (id: string) => void;
   /** Context-window fill, shown as a ring left of the send button. */
   contextUsage?: { used: number; window: number } | null;
+  /** Fresh, empty chat — focus the composer on mount so it's ready to type. */
+  isNewChat: boolean;
 }
 
 export function ChatInput({
@@ -64,8 +67,10 @@ export function ChatInput({
   onRemoveFile,
   onRetryFile,
   contextUsage,
+  isNewChat,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
+  const isMobile = useIsMobile();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -104,7 +109,11 @@ export function ChatInput({
   const canSend = hasContent && !uploading;
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // On mobile, Enter is the on-screen keyboard's newline — sending happens via
+    // the button instead (the hardware-keyboard convenience of Enter-to-send only
+    // makes sense on a physical keyboard). `isComposing` guards an IME mid-word:
+    // pressing Enter to confirm a composition must not fire the send.
+    if (e.key === "Enter" && !e.shiftKey && !isMobile && !e.nativeEvent.isComposing) {
       e.preventDefault();
       // Allow sending while a reply streams — the message queues and runs after
       // the current turn (serialized per chat on the server).
@@ -201,6 +210,10 @@ export function ChatInput({
             <textarea
               ref={textareaRef}
               value={value}
+              // Land the caret in the composer on mount. On desktop always (ready
+              // to type, no downside); on mobile only for a fresh chat — popping
+              // the keyboard every time you open an existing thread would cover it.
+              autoFocus={!isMobile || isNewChat}
               onChange={(e) => {
                 onChange(e.target.value);
                 resize();
@@ -251,6 +264,9 @@ export function ChatInput({
                   size="icon"
                   variant="outline"
                   className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
+                  // Keep the caret in the composer — a button click would otherwise
+                  // steal focus (and close the mobile keyboard) on every send/stop.
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={onStop}
                   aria-label={t("stop")}
                 >
@@ -261,6 +277,9 @@ export function ChatInput({
                   size="icon"
                   className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
                   disabled={!canSend}
+                  // Keep the caret in the composer — a button click would otherwise
+                  // steal focus (and close the mobile keyboard) on every send.
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={onSubmit}
                   aria-label={isLoading ? t("queue") : t("send")}
                 >

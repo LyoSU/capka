@@ -533,6 +533,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       onRemoveFile={attachments.remove}
       onRetryFile={attachments.retry}
       contextUsage={contextUsage}
+      isNewChat={showGreeting}
     />
   );
 
