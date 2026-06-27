@@ -253,6 +253,13 @@
       "when": 1782589216505,
       "tag": "0035_plugin_commit_pin",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1782592212079,
+      "tag": "0036_usage_one_pending_per_task",
+      "breakpoints": true
     }
   ]
 }

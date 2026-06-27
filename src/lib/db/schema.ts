@@ -251,6 +251,11 @@ export const usage = pgTable("usage", {
   index("idx_usage_model").on(t.model),
   // Reconcile/release look a hold up by task id; keep that lookup cheap.
   index("idx_usage_task_pending").on(t.taskId, t.pending),
+  // At most ONE outstanding hold per task. reconcileUsage settles holds by task id,
+  // so a duplicate pending row would record the real cost N times (the billing leak
+  // the chat-route try/finally guards against — this makes it structurally
+  // impossible). reserveBudget inserts ON CONFLICT DO NOTHING against this index.
+  uniqueIndex("uq_usage_one_pending_per_task").on(t.taskId).where(sql`pending`),
 ]);
 
 // ── Spend tiers ──────────────────────────────────────────────

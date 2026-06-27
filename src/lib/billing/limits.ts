@@ -198,6 +198,10 @@ export async function reserveBudget(input: {
       }
     }
 
+    // ON CONFLICT DO NOTHING against uq_usage_one_pending_per_task: if a hold for
+    // this task already exists (retry / coalesced turn), the budget is already
+    // reserved by it — don't add a second pending row (which would double-count at
+    // reconcile and, with the unique index, throw).
     await tx.insert(usage).values({
       id: nanoid(),
       taskId: input.taskId,
@@ -207,7 +211,7 @@ export async function reserveBudget(input: {
       costUsd: String(estimate),
       onSharedKey: true,
       pending: true,
-    });
+    }).onConflictDoNothing();
     return { allowed: true, window: null, reason: null };
   });
 }
