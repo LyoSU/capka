@@ -23,6 +23,9 @@ interface InstalledPlugin {
   pluginName: string;
   displayName: string | null;
   version: string | null;
+  /** The git commit this install is pinned to (provenance), and its date. */
+  commitSha: string | null;
+  commitDate: string | null;
   author: string | null;
   homepage: string | null;
   enabledState: "on" | "off" | "mixed";
@@ -36,6 +39,16 @@ interface InstalledPlugin {
   connectors: (Item & { transport: string })[];
 }
 
+/** What GET /api/extensions/preview returns: the target commit and, if it differs
+ *  from the pin, the file-level diff to review before applying the update. */
+interface UpgradePreview {
+  changed: boolean;
+  fromSha: string | null;
+  to: { sha: string; date: string | null; message: string | null };
+  diff?: { added: string[]; removed: string[]; modified: string[] };
+  touchesConnectors?: boolean;
+}
+
 /** The Extensions tab: each installed plugin shown as one unit with its skills +
  *  connectors and group-level actions (enable/disable/update/uninstall), so the
  *  pieces a plugin adds are managed together instead of scattered. */
@@ -46,6 +59,9 @@ export default function InstalledPlugins() {
   const [health, setHealth] = useState<Record<string, Health>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  // The upgrade-review dialog: set after a preview reports real changes, so the
+  // operator confirms exactly what an update brings before the pin is moved.
+  const [review, setReview] = useState<{ plugin: InstalledPlugin; preview: UpgradePreview } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -97,11 +113,32 @@ export default function InstalledPlugins() {
       body: JSON.stringify({ installId: p.id, enabled: p.enabledState !== "on" }),
     }), p.id);
 
-  const update = (p: InstalledPlugin) =>
-    act(() => fetch("/api/extensions", {
+  // Step 1: preview. Up to date → just say so; real changes → open the review
+  // dialog. Moving the pin (the actual re-pull) only happens on confirm (step 2).
+  const checkUpdate = async (p: InstalledPlugin) => {
+    setBusy(p.id);
+    try {
+      const r = await fetch(`/api/extensions/preview?installId=${encodeURIComponent(p.id)}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || t("previewFailed")); return; }
+      const preview = d as UpgradePreview;
+      if (!preview.changed) { toast.success(t("upToDate")); return; }
+      setReview({ plugin: p, preview });
+    } catch {
+      toast.error(t("previewFailed"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Step 2: apply — re-pull from source, moving the pin to the previewed commit.
+  const applyUpdate = (p: InstalledPlugin) => {
+    setReview(null);
+    return act(() => fetch("/api/extensions", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ installId: p.id }),
     }), p.id, t("updated"));
+  };
 
   const uninstall = (p: InstalledPlugin) =>
     act(() => fetch(`/api/extensions?installId=${encodeURIComponent(p.id)}`, { method: "DELETE" }), p.id, t("uninstalled"));
@@ -142,6 +179,14 @@ export default function InstalledPlugins() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="truncate font-medium">{title}</span>
                   {p.version && <span className="text-xs text-muted-foreground">v{p.version}</span>}
+                  {p.commitSha && (
+                    <code
+                      className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      title={p.commitDate ? `${p.commitSha} · ${new Date(p.commitDate).toLocaleString()}` : p.commitSha}
+                    >
+                      #{p.commitSha.slice(0, 7)}
+                    </code>
+                  )}
                   <Badge variant={stateVariant(p.enabledState)}>{t(`state.${p.enabledState}`)}</Badge>
                 </div>
                 {p.author && <p className="text-xs text-muted-foreground">{t("by", { author: p.author })}</p>}
@@ -157,7 +202,7 @@ export default function InstalledPlugins() {
                   <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => toggle(p)}>
                     {p.enabledState === "on" ? t("disable") : t("enable")}
                   </Button>
-                  <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => update(p)} aria-label={t("update")}>
+                  <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => checkUpdate(p)} aria-label={t("update")}>
                     {busy === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                   </Button>
                   <AlertDialog>
@@ -246,6 +291,52 @@ export default function InstalledPlugins() {
           </div>
         );
       })}
+
+      {/* Upgrade review: opened after a preview found real changes. Shows the
+          target commit + a counts summary, and warns loudly when a connector
+          definition changed (new code that could run in the sandbox). */}
+      <AlertDialog open={!!review} onOpenChange={(o) => { if (!o) setReview(null); }}>
+        <AlertDialogContent>
+          {review && (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("reviewTitle")}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("reviewDesc", {
+                    name: review.plugin.displayName || review.plugin.pluginName,
+                    from: review.preview.fromSha ? `#${review.preview.fromSha.slice(0, 7)}` : "—",
+                    to: `#${review.preview.to.sha.slice(0, 7)}`,
+                  })}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              {review.preview.to.message && (
+                <p className="truncate text-xs text-muted-foreground" title={review.preview.to.message}>
+                  {review.preview.to.message}
+                </p>
+              )}
+              {review.preview.diff && (
+                <p className="text-xs text-muted-foreground">
+                  {t("reviewChanges", {
+                    added: review.preview.diff.added.length,
+                    removed: review.preview.diff.removed.length,
+                    modified: review.preview.diff.modified.length,
+                  })}
+                </p>
+              )}
+              {review.preview.touchesConnectors && (
+                <p className="flex items-start gap-1.5 rounded-lg bg-warning/10 p-2 text-xs text-warning-text">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {t("reviewConnectorsWarning")}
+                </p>
+              )}
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction onClick={() => applyUpdate(review.plugin)}>{t("reviewApply")}</AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

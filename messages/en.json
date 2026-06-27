@@ -818,7 +818,14 @@
         "memberInstallHint": "When on, members can install plugins for themselves from your marketplaces. Off — only you (admin) install, org-wide.",
         "shown": "Shown",
         "hidden": "Hidden",
-        "hideForMe": "Hide this plugin for me"
+        "hideForMe": "Hide this plugin for me",
+        "upToDate": "Already up to date.",
+        "previewFailed": "Couldn't check for updates.",
+        "reviewTitle": "Review update",
+        "reviewDesc": "Updating “{name}” moves it from {from} to {to}.",
+        "reviewChanges": "{added} added · {removed} removed · {modified} changed",
+        "reviewConnectorsWarning": "This update changes a connector definition — it can introduce code that runs in your sandbox. Review before applying.",
+        "reviewApply": "Apply update"
       },
       "pluginsView": {
         "installed": "Installed",
