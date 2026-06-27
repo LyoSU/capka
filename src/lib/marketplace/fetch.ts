@@ -73,18 +73,49 @@ export function diffTrees(oldTree: TreeEntry[], newTree: TreeEntry[], prefix = "
   return { added: added.sort(), removed: removed.sort(), modified: modified.sort() };
 }
 
-/** Fetch one file as text via raw.githubusercontent. null on 404. */
+// Hard cap for any single raw file we pull (manifests, configs, skill files,
+// marketplace.json). Generous for legit content, but bounds memory so a hostile
+// or accidental multi-GB file can't be slurped via res.text().
+export const GH_RAW_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Max plugin entries taken from one marketplace.json. */
+export const MAX_CATALOG_PLUGINS = 5000;
+
+/** Fetch one file as text via raw.githubusercontent, capped at `maxBytes`. null on
+ *  404; throws if the file exceeds the cap (checked by declared length AND while
+ *  streaming, since Content-Length can be absent or lie). */
 export async function ghRaw(
   owner: string,
   repo: string,
   ref: string,
   path: string,
   fetchFn: typeof fetch,
+  maxBytes: number = GH_RAW_MAX_BYTES,
 ): Promise<string | null> {
   const res = await fetchFn(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path.split("/").map(encodeURIComponent).join("/")}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GitHub raw ${path}: HTTP ${res.status}`);
-  return res.text();
+
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error(`GitHub raw ${path}: ${declared} bytes exceeds the ${maxBytes}-byte cap`);
+  }
+  if (!res.body) return res.text();
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error(`GitHub raw ${path}: exceeds the ${maxBytes}-byte cap`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 const authorName = (a: unknown): string | null =>
@@ -101,7 +132,10 @@ export function parseMarketplace(
 ): { name: string; owner: string | null; items: CatalogItem[] } {
   const root = (json ?? {}) as { name?: string; owner?: unknown; plugins?: unknown[] };
   const items: CatalogItem[] = [];
-  for (const raw of Array.isArray(root.plugins) ? root.plugins : []) {
+  // Bound how many entries one marketplace.json can produce, so a hostile/huge
+  // catalog can't bloat the DB row + UI even if it parsed within the byte cap.
+  const plugins = (Array.isArray(root.plugins) ? root.plugins : []).slice(0, MAX_CATALOG_PLUGINS);
+  for (const raw of plugins) {
     const p = raw as { name?: string; description?: string; author?: unknown; category?: string; homepage?: string; source?: PluginSource };
     if (!p || typeof p.name !== "string") continue;
     const source: PluginSource = p.source ?? p.name; // fallback: bare relative path = name
