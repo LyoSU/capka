@@ -9,10 +9,10 @@ import { ingestSkill } from "@/lib/skills/service";
 import { upsertServer, upsertStdioServer, setEnabled } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { parseGitHubUrl, resolveGitHub } from "./source";
-import { ghTree, ghRaw, resolveCommit, type TreeEntry } from "./fetch";
+import { ghTree, ghRaw, resolveCommit, diffTrees, type TreeEntry, type TreeDiff } from "./fetch";
 import { extractServers, parseManifestMcp, type ServerDef } from "./manifest";
 import { refsPluginRoot, hasUnresolvedPlaceholder, serverDefParts, selectPluginFiles } from "./plugin-root";
-import type { CatalogItem, GitHubRef, InstallManifest } from "./types";
+import type { CatalogItem, CommitInfo, GitHubRef, InstallManifest } from "./types";
 
 const IGNORED_DIRS = ["agents", "hooks", "lspServers", "outputStyles"];
 const MAX_SKILL_FILES = 50;
@@ -290,6 +290,43 @@ export async function installPlugin(opts: {
   }
   await persistPluginFiles(installId, files);
   return manifest;
+}
+
+/** What `upgradePlugin` would change, computed WITHOUT touching the DB so an
+ *  operator can review (informed consent) before moving the pin. `changed:false`
+ *  means the pinned commit is already the latest. */
+export interface UpgradePreview {
+  changed: boolean;
+  fromSha: string | null;
+  to: CommitInfo;
+  diff?: TreeDiff;
+  /** A connector DEFINITION file (.mcp.json / plugin.json) was added or changed —
+   *  the highest-signal warning, since it can introduce code that runs in the sandbox. */
+  touchesConnectors?: boolean;
+}
+
+/** Resolve what an upgrade would do without applying it: the target commit and,
+ *  if it differs from the pin, the file-level diff between the two trees. */
+export async function previewUpgrade(installId: string): Promise<UpgradePreview> {
+  const row = (await db.select().from(pluginInstalls).where(eq(pluginInstalls.id, installId)).limit(1))[0];
+  if (!row) throw new Error("Install not found");
+  const { gh } = await resolvePlugin(row.marketplaceId, row.pluginName);
+  const fetchFn = await ghFetch();
+  const to = await resolveCommit(gh.owner, gh.repo, gh.ref, fetchFn);
+  if (to.sha === row.commitSha) return { changed: false, fromSha: row.commitSha, to };
+
+  const prefix = gh.subdir ? `${gh.subdir}/` : "";
+  // A legacy install (null pin) has no baseline to diff against — everything reads
+  // as added, which honestly reflects "we can't prove what you have now".
+  const [oldTree, newTree] = await Promise.all([
+    row.commitSha ? ghTree(gh.owner, gh.repo, row.commitSha, fetchFn) : Promise.resolve([] as TreeEntry[]),
+    ghTree(gh.owner, gh.repo, to.sha, fetchFn),
+  ]);
+  const diff = diffTrees(oldTree, newTree, prefix);
+  const touchesConnectors = [...diff.added, ...diff.modified, ...diff.removed].some(
+    (p) => p === ".mcp.json" || p.endsWith("/.mcp.json") || p.endsWith("plugin.json"),
+  );
+  return { changed: true, fromSha: row.commitSha, to, diff, touchesConnectors };
 }
 
 /** Re-pull an installed plugin from its source, keeping the same installId/tag so

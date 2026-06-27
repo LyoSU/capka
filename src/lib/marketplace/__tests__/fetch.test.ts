@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { parseMarketplace, resolveCommit, ghTree } from "../fetch";
+import { parseMarketplace, resolveCommit, ghTree, diffTrees, type TreeEntry } from "../fetch";
 
 const jsonResponse = (body: unknown, ok = true, status = 200) =>
   ({ ok, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response;
@@ -17,6 +17,26 @@ describe("resolveCommit", () => {
   it("throws on a non-ok response", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({}, false, 404));
     await expect(resolveCommit("o", "r", "nope", fetchFn as unknown as typeof fetch)).rejects.toThrow(/HTTP 404/);
+  });
+});
+
+describe("diffTrees", () => {
+  const blob = (path: string, sha: string): TreeEntry => ({ path, type: "blob", sha });
+
+  it("classifies added / removed / modified blobs by content sha, relative to the prefix", () => {
+    const oldTree = [blob("p/keep.md", "1"), blob("p/changes.md", "2"), blob("p/gone.md", "3")];
+    const newTree = [blob("p/keep.md", "1"), blob("p/changes.md", "9"), blob("p/new.md", "4")];
+    expect(diffTrees(oldTree, newTree, "p/")).toEqual({
+      added: ["new.md"],
+      removed: ["gone.md"],
+      modified: ["changes.md"],
+    });
+  });
+
+  it("ignores tree (directory) entries and paths outside the prefix", () => {
+    const oldTree = [{ path: "p/dir", type: "tree", sha: "t" } as TreeEntry, blob("other/x.md", "1")];
+    const newTree = [{ path: "p/dir", type: "tree", sha: "t2" } as TreeEntry, blob("other/x.md", "9")];
+    expect(diffTrees(oldTree, newTree, "p/")).toEqual({ added: [], removed: [], modified: [] });
   });
 });
 

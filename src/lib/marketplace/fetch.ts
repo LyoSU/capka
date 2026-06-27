@@ -44,6 +44,35 @@ export async function ghTree(
   return (json.tree ?? []).map((t) => ({ path: t.path, type: t.type === "tree" ? "tree" : "blob", sha: t.sha ?? "" }));
 }
 
+/** A path-level diff between two trees, relative to the plugin prefix. */
+export interface TreeDiff { added: string[]; removed: string[]; modified: string[] }
+
+/**
+ * Compare two recursive trees by each blob's content-sha, within `prefix`,
+ * returning the plugin-relative paths that were added / removed / modified.
+ * Directories (tree entries) are ignored — only files matter for review. This is
+ * the basis of the upgrade preview: it shows an operator exactly what an update
+ * changes before they move the pin, so a new server file can't slip in unseen.
+ */
+export function diffTrees(oldTree: TreeEntry[], newTree: TreeEntry[], prefix = ""): TreeDiff {
+  const blobs = (t: TreeEntry[]) => {
+    const m = new Map<string, string>();
+    for (const e of t) if (e.type === "blob" && e.path.startsWith(prefix)) m.set(e.path.slice(prefix.length), e.sha);
+    return m;
+  };
+  const a = blobs(oldTree);
+  const b = blobs(newTree);
+  const added: string[] = [];
+  const removed: string[] = [];
+  const modified: string[] = [];
+  for (const [path, sha] of b) {
+    if (!a.has(path)) added.push(path);
+    else if (a.get(path) !== sha) modified.push(path);
+  }
+  for (const path of a.keys()) if (!b.has(path)) removed.push(path);
+  return { added: added.sort(), removed: removed.sort(), modified: modified.sort() };
+}
+
 /** Fetch one file as text via raw.githubusercontent. null on 404. */
 export async function ghRaw(
   owner: string,
