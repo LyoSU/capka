@@ -56,3 +56,4 @@ next-env.d.ts
 # Maintainer-private deploy runbook + internal audit (not for the public tree)
 DEPLOY.md
 AUDIT-2026-06-09.md
+docs/superpowers/
