@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Plus, Trash2, RefreshCw, Download, Check, Search, ArrowUpCircle } from "lucide-react";
+import { Loader2, Plus, Trash2, RefreshCw, Download, Check, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -131,25 +131,6 @@ export function MarketplaceBrowser() {
     }
   };
 
-  const update = async (pluginName: string) => {
-    if (!selected) return;
-    setBusy(pluginName);
-    try {
-      const res = await fetch("/api/admin/marketplaces/install", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ marketplaceId: selected, pluginName }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        const m = data.manifest ?? {};
-        toast.success(t("updated", { skills: (m.skills ?? []).length, connectors: (m.connectors ?? []).length }));
-        await loadCatalog(selected);
-      } else toast.error(data.error || t("updateFailed"));
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const uninstall = async (pluginName: string) => {
     if (!selected) return;
@@ -277,15 +258,12 @@ export function MarketplaceBrowser() {
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {c.installed ? (
-                    <>
-                      <Button variant="ghost" size="sm" disabled={busy === c.name} onClick={() => update(c.name)} aria-label={t("update")}>
-                        {busy === c.name ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUpCircle className="h-4 w-4" />}
-                      </Button>
-                      <Button variant="ghost" size="sm" disabled={busy === c.name} onClick={() => uninstall(c.name)}>
-                        <Check className="mr-1.5 h-4 w-4 text-success" />
-                        {t("installedLabel")}
-                      </Button>
-                    </>
+                    // Updates go through the Installed tab's review flow (preview the
+                    // diff, confirm the exact commit) — not a blind one-click here.
+                    <Button variant="ghost" size="sm" disabled={busy === c.name} onClick={() => uninstall(c.name)}>
+                      <Check className="mr-1.5 h-4 w-4 text-success" />
+                      {t("installedLabel")}
+                    </Button>
                   ) : (
                     <Button size="sm" disabled={!c.installable || busy === c.name} onClick={() => install(c.name)}>
                       {busy === c.name ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Download className="mr-1.5 h-4 w-4" />}

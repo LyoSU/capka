@@ -49,9 +49,11 @@ export const POST = apiHandler(async (req: Request) => {
   const { userId, role } = await requireActive();
   const { installId, toSha } = await req.json();
   if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
-  if (!(await canManage(installId, userId, role === "admin"))) return Response.json({ error: "Not allowed" }, { status: 403 });
   // toSha binds the upgrade to the commit the user reviewed (see previewUpgrade).
-  const manifest = await upgradePlugin(installId, typeof toSha === "string" ? { toSha } : undefined);
+  // Required and fail-closed: no blind "pull latest" path that skips the review.
+  if (typeof toSha !== "string" || !toSha) return Response.json({ error: "toSha (reviewed commit) required" }, { status: 400 });
+  if (!(await canManage(installId, userId, role === "admin"))) return Response.json({ error: "Not allowed" }, { status: 403 });
+  const manifest = await upgradePlugin(installId, toSha);
   await audit({ actorId: userId, action: "plugin.update", targetType: "plugin", targetKey: installId, detail: { skills: manifest.skills.length, connectors: manifest.connectors.length } });
   return Response.json({ ok: true, manifest });
 });
