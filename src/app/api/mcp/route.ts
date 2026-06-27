@@ -1,4 +1,4 @@
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireSession, requireActive } from "@/lib/auth";
 import { listServers, upsertServer, setEnabled, deleteServer } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { saveOAuthClientFromInput } from "@/lib/mcp/oauth/admin-client";
@@ -13,7 +13,9 @@ export const GET = apiHandler(async () => {
 });
 
 export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireSession();
+  // Mutations are install-class (a connector runs SSRF-guarded probes / third-party
+  // tools), so a pending account may not create them — requireActive, not session.
+  const { userId } = await requireActive();
   const { name, url, headers, oauthClientId, oauthClientSecret, authKind: pick } = await req.json();
   if (typeof name !== "string" || typeof url !== "string") {
     return Response.json({ error: "name and url required" }, { status: 400 });
@@ -30,7 +32,7 @@ export const POST = apiHandler(async (req: Request) => {
 });
 
 export const PATCH = apiHandler(async (req: Request) => {
-  const { userId } = await requireSession();
+  const { userId } = await requireActive();
   const { id, enabled } = await req.json();
   if (typeof id !== "string" || typeof enabled !== "boolean") {
     return Response.json({ error: "Bad request" }, { status: 400 });
@@ -53,7 +55,7 @@ export const PATCH = apiHandler(async (req: Request) => {
 });
 
 export const DELETE = apiHandler(async (req: Request) => {
-  const { userId } = await requireSession();
+  const { userId } = await requireActive();
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return Response.json({ error: "id required" }, { status: 400 });
   const owned = await db.select({ id: mcpServers.id }).from(mcpServers)
