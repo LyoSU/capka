@@ -140,6 +140,14 @@ deployments — not a turnkey-certified multi-tenant platform.
   same transaction, and a write failure is logged but does not block the action.
   In a DB outage a critical event could go unrecorded. Treat the audit log as
   strong evidence, not a hard guarantee; for compliance, ship logs off-box.
+- **Dependency audit has accepted residual advisories.** Fixable ones are pinned
+  via `overrides` (postcss, dompurify). The rest are **dev-tooling reaching the
+  prod tree through a dependency's loose declarations** — chiefly the `esbuild`
+  dev-server advisory (it only affects `esbuild serve`, which a deployed app never
+  runs) and a `js-yaml` quadratic-DoS in `gray-matter` frontmatter parsing
+  (bounded by the 2 MB fetch cap on plugin/skill files). Their only npm-offered
+  "fix" is absurd major downgrades, so they're accepted, not applied. Re-evaluate
+  on each dependency bump.
 
 If your threat model exceeds these boundaries, run rootless + gVisor, front the app
 with your own WAF/egress controls, and budget for a security review before exposing

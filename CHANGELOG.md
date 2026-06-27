@@ -50,3 +50,10 @@ All notable changes to unClaw are documented here. Format follows
   extended to admin role/status/remove, auth-config, and master-key actions.
 - Billing holds are always released (try/finally); first-run setup can no longer be
   hijacked to self-promote admin; pending accounts are rejected centrally.
+- Dependency advisories pinned where a non-breaking fix exists: `postcss` ≥8.5.10
+  (CSS-stringify XSS) and `dompurify` ≥3.4.11 via `overrides` (was 12 prod
+  advisories, now the remainder are dev-tooling only — see `SECURITY.md`).
+- Account status is fail-closed (only "active" grants access); marketplace upgrade
+  consent is fail-closed (must target the reviewed commit); MCP connector mutations
+  require an approved account; one billing hold per task (partial unique index);
+  marketplace raw fetches and catalog size are byte/count-capped.
