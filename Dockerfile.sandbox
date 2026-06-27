@@ -1,5 +1,10 @@
 # Based on Anthropic Claude Code Execution sandbox environment
-FROM ubuntu:24.04
+# Pin the base image for reproducibility. For a fully reproducible, tamper-evident
+# build, override with the digest in CI:
+#   --build-arg UBUNTU_REF=ubuntu:24.04@sha256:<digest>
+# (Left as the tag by default so security rebuilds of 24.04 are still picked up.)
+ARG UBUNTU_REF=ubuntu:24.04
+FROM ${UBUNTU_REF}
 
 LABEL description="unClaw AI Agent Sandbox"
 
@@ -121,11 +126,16 @@ RUN npm install -g \
 #   and returns only the rows it needs instead of loading everything.
 # yq (mikefarah, Go): the REAL yq — Ubuntu's apt `yq` is an unrelated Python
 #   jq-wrapper with different syntax, so we fetch the upstream binary by hand.
+# Pinned to explicit versions (was `latest/download`, which made every rebuild
+# pull a different, unrecorded binary — a non-reproducible supply-chain hole).
+# Bump these deliberately when upgrading.
+ARG DUCKDB_VERSION=v1.5.4
+ARG YQ_VERSION=v4.53.3
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
-    curl -fsSL "https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-${arch}.zip" -o /tmp/duckdb.zip; \
+    curl -fsSL "https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/duckdb_cli-linux-${arch}.zip" -o /tmp/duckdb.zip; \
     unzip -d /usr/local/bin /tmp/duckdb.zip; rm /tmp/duckdb.zip; chmod 755 /usr/local/bin/duckdb; \
-    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${arch}" -o /usr/local/bin/yq; \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${arch}" -o /usr/local/bin/yq; \
     chmod 755 /usr/local/bin/yq
 
 # ---------------------------------------------------------------------------
