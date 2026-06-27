@@ -209,7 +209,7 @@ export function WorkspacePanel({
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${bg}`}>
           <Icon className={`h-4 w-4 ${color}`} />
         </div>
-        <button onClick={() => setPath(entry.path)} className="min-w-0 flex-1 text-left">
+        <button type="button" onClick={() => setPath(entry.path)} className="min-w-0 flex-1 text-left">
           <p className="truncate text-sm font-medium">{entry.name}</p>
         </button>
       </div>
@@ -401,6 +401,7 @@ export function WorkspacePanel({
       <div className="flex-1 overflow-y-auto py-2">
         {path !== "." && (
           <button
+            type="button"
             onClick={() => setPath(path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".")}
             className="mx-3 mb-1 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
           >

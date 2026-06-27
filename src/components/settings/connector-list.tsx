@@ -440,7 +440,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
               {method === "oauth" && (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground">{t("method.oauthHint")}</p>
-                  <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                  <button type="button" aria-expanded={showAdvanced} onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                     {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}{t("advanced")}
                   </button>
                   {showAdvanced && (

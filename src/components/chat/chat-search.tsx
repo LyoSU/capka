@@ -34,6 +34,14 @@ export function ChatSearch({
           ref={inputRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          // Escape clears the filter (keeping focus) when there's a query, the
+          // same one-key escape hatch a search box is expected to offer.
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && value) {
+              e.preventDefault();
+              onChange("");
+            }
+          }}
           placeholder={t("searchChats")}
           className="pl-7 h-7 text-sm pr-7"
         />
