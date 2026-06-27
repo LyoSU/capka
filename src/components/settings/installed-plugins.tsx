@@ -131,12 +131,13 @@ export default function InstalledPlugins() {
     }
   };
 
-  // Step 2: apply — re-pull from source, moving the pin to the previewed commit.
-  const applyUpdate = (p: InstalledPlugin) => {
+  // Step 2: apply — re-pull from source, pinning to the EXACT commit just reviewed
+  // (toSha), not whatever the branch points at now (consent bound to the artifact).
+  const applyUpdate = (p: InstalledPlugin, toSha: string) => {
     setReview(null);
     return act(() => fetch("/api/extensions", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ installId: p.id }),
+      body: JSON.stringify({ installId: p.id, toSha }),
     }), p.id, t("updated"));
   };
 
@@ -331,7 +332,7 @@ export default function InstalledPlugins() {
               )}
               <AlertDialogFooter>
                 <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                <AlertDialogAction onClick={() => applyUpdate(review.plugin)}>{t("reviewApply")}</AlertDialogAction>
+                <AlertDialogAction onClick={() => applyUpdate(review.plugin, review.preview.to.sha)}>{t("reviewApply")}</AlertDialogAction>
               </AlertDialogFooter>
             </>
           )}

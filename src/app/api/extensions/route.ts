@@ -47,10 +47,11 @@ export const PATCH = apiHandler(async (req: Request) => {
 export const POST = apiHandler(async (req: Request) => {
   // requireActive: re-pulling third-party code is install-class, like POST /install.
   const { userId, role } = await requireActive();
-  const { installId } = await req.json();
+  const { installId, toSha } = await req.json();
   if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
   if (!(await canManage(installId, userId, role === "admin"))) return Response.json({ error: "Not allowed" }, { status: 403 });
-  const manifest = await upgradePlugin(installId);
+  // toSha binds the upgrade to the commit the user reviewed (see previewUpgrade).
+  const manifest = await upgradePlugin(installId, typeof toSha === "string" ? { toSha } : undefined);
   await audit({ actorId: userId, action: "plugin.update", targetType: "plugin", targetKey: installId, detail: { skills: manifest.skills.length, connectors: manifest.connectors.length } });
   return Response.json({ ok: true, manifest });
 });

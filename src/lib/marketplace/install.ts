@@ -331,8 +331,14 @@ export async function previewUpgrade(installId: string): Promise<UpgradePreview>
 
 /** Re-pull an installed plugin from its source, keeping the same installId/tag so
  *  rows update in place. Skills/connectors removed upstream are pruned; the
- *  pluginInstalls row gets the fresh version + manifest. */
-export async function upgradePlugin(installId: string): Promise<InstallManifest> {
+ *  pluginInstalls row gets the fresh version + manifest.
+ *
+ *  `toSha` binds consent to the artifact: the UI reviews a specific commit via
+ *  previewUpgrade, then passes that SHA here so we apply EXACTLY what was reviewed
+ *  — not whatever the branch points at by the time "Apply" is clicked (a TOCTOU
+ *  where a hostile upstream could swap in a new commit between review and apply).
+ *  Omitted (e.g. the no-review admin path) → resolve the branch's current commit. */
+export async function upgradePlugin(installId: string, opts?: { toSha?: string }): Promise<InstallManifest> {
   const row = (await db.select().from(pluginInstalls).where(eq(pluginInstalls.id, installId)).limit(1))[0];
   if (!row) throw new Error("Install not found");
   const { gh } = await resolvePlugin(row.marketplaceId, row.pluginName);
@@ -340,9 +346,11 @@ export async function upgradePlugin(installId: string): Promise<InstallManifest>
   // Re-route into the same scope/owner the install already has.
   const target: InstallTarget = { scope: row.scope === "user" ? "user" : "system", userId: row.userId, projectId: null };
 
-  // Upgrade moves the pin: resolve gh.ref (the branch/tag) to its CURRENT commit
-  // and re-pin to it. (installPlugin, by contrast, re-pulls the stored commit.)
-  const { manifest, files } = await applyPlugin(gh, tag, target);
+  // Upgrade moves the pin. With toSha we apply exactly the reviewed commit (the
+  // pin lands there); without it we resolve gh.ref (the branch) to its current
+  // commit. (installPlugin, by contrast, re-pulls the already-stored commit.)
+  const ref = opts?.toSha || gh.ref;
+  const { manifest, files } = await applyPlugin({ ...gh, ref }, tag, target);
   await persistPluginFiles(installId, files);
   await pruneRemoved(tag, manifest);
 
