@@ -23,6 +23,10 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // HSTS at the app layer too (not only the Caddy profile), so deployments
+          // behind a different proxy still get it. Browsers honour it only over
+          // HTTPS, so it's a no-op on a plain-HTTP/localhost response.
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
           // frame-ancestors is the modern, header-superseding clickjacking guard;
           // 'none' mirrors the DENY above for browsers that honour CSP.
           { key: "Content-Security-Policy", value: `${BASE_CSP}; frame-ancestors 'none'` },

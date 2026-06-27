@@ -57,3 +57,9 @@ All notable changes to unClaw are documented here. Format follows
   consent is fail-closed (must target the reviewed commit); MCP connector mutations
   require an approved account; one billing hold per task (partial unique index);
   marketplace raw fetches and catalog size are byte/count-capped.
+- **Production master key is fail-closed**: with `NODE_ENV=production` and no
+  `UNCLAW_MASTER_KEY`, the app now refuses to start rather than silently storing the
+  key in the DB. Set `UNCLAW_MASTER_KEY` (recommended) or `ALLOW_DB_MASTER_KEY=true`
+  to knowingly keep the insecure fallback. (`npm run up` already generates the env
+  key, so turnkey deploys are unaffected.)
+- HSTS is now sent by the platform too, not only the Caddy TLS profile.

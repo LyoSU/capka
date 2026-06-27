@@ -99,7 +99,10 @@ marketplace sources as you would any dependency: install from repos you trust.
 ## Secret handling
 
 - `UNCLAW_MASTER_KEY` encrypts provider API keys at rest and lives **outside** the
-  database, so a DB leak alone cannot decrypt them. 64 hex chars.
+  database, so a DB leak alone cannot decrypt them. 64 hex chars. In production the
+  app is **fail-closed**: with no `UNCLAW_MASTER_KEY` it refuses to start rather than
+  fall back to a DB-stored key. Set `ALLOW_DB_MASTER_KEY=true` to knowingly accept
+  the insecure fallback (dev/testing).
 - `CONTROLLER_SECRET` gates the platform↔controller channel; the controller
   refuses to boot on the default value in production.
 - `scripts/up.sh` generates strong values into `.env` (mode `600`) on first run

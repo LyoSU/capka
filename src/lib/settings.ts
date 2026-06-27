@@ -18,6 +18,19 @@ export async function getMasterKey(): Promise<string> {
     return envKey;
   }
 
+  // Fail-CLOSED in production: a DB-stored master key encrypts provider keys with a
+  // value sitting in the same DB, so a dump leaks both — the exact thing
+  // UNCLAW_MASTER_KEY exists to prevent. Refuse to use or mint one unless the
+  // operator explicitly opts into the insecure fallback.
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DB_MASTER_KEY !== "true") {
+    throw new Error(
+      "UNCLAW_MASTER_KEY is not set. In production the master key must come from the " +
+      "environment — a DB-stored key is insecure (a DB leak then exposes every provider " +
+      "key). Generate one with `openssl rand -hex 32` and set UNCLAW_MASTER_KEY, or set " +
+      "ALLOW_DB_MASTER_KEY=true to knowingly accept the insecure DB fallback.",
+    );
+  }
+
   if (masterKeyCache) return masterKeyCache;
 
   const row = await db.select().from(settings).where(eq(settings.key, "auth_secret")).limit(1);
