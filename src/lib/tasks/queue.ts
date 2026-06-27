@@ -93,9 +93,15 @@ export async function enqueueTask(input: {
     await realtime.publish("task_enqueued", { id: retry.rows[0].id });
     return { id: retry.rows[0].id, created: true };
   }
-  // Still nothing — another queued turn beat us to the freed slot; the caller's
-  // message is already persisted, so it folds into that turn's live-tree rebuild.
-  return { id: input.id, created: false };
+  // Still nothing — another queued turn beat us to the freed slot. Return THAT
+  // incumbent's real id (not our message id) so the caller's stop button targets
+  // the turn that will actually answer; the message we persisted folds into its
+  // live-tree rebuild.
+  const incumbent = await pool.query<{ id: string }>(
+    `SELECT id FROM tasks WHERE chat_id = $1 AND status = 'queued' LIMIT 1`,
+    [input.chatId],
+  );
+  return { id: incumbent.rows[0]?.id ?? input.id, created: false };
 }
 
 /** Atomically claim the oldest queued task, taking a lease. Returns null if none. */
@@ -208,7 +214,12 @@ export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "us
            SET status = 'failed',
                error = 'worker lost (lease expired)',
                updated_at = now()
-         WHERE status = 'running' AND lease_expires_at < now()
+         -- Margin past expiry so a SINGLE missed heartbeat (a transient DB hiccup —
+         -- the monitor swallows one and retries next tick) doesn't reap a task that's
+         -- still streaming. Without it the reconciler could fail+publish a turn the
+         -- runner then finalizes again → the user sees "interrupted" flip to the real
+         -- answer (double finalize).
+         WHERE status = 'running' AND lease_expires_at < now() - interval '15 seconds'
          RETURNING id, user_id, chat_id
      ), reconciled_messages AS (
         UPDATE messages m

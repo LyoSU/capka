@@ -1,7 +1,7 @@
 import { eq, gt, desc, and, ilike, isNull, inArray, exists, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { requireSession, requireActive, apiHandler } from "@/lib/auth";
+import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages, tasks, projects } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
@@ -143,7 +143,7 @@ export const GET = apiHandler(async (req: Request) => {
 });
 
 export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireActive();
+  const { userId } = await requireRole("admin", "user");
   const body = createChatSchema.parse(await req.json());
 
   // A project id must belong to the caller — otherwise a user could attach their

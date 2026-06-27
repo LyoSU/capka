@@ -5,7 +5,7 @@ import { realtime } from "@/lib/realtime";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   let userId: string;
   try {
     const ctx = await requireSession();
@@ -16,16 +16,33 @@ export async function GET() {
   }
   let unsubscribe: (() => void) | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let torndown = false;
+
+  // Single teardown, idempotent. Runs from cancel() (the normal client-disconnect
+  // path), from req.signal abort (an independent trigger — some proxy/runtime
+  // disconnects fire the request AbortSignal but never call cancel()), and from a
+  // persistently-failing enqueue. Without all three, a dropped socket could leak
+  // the heartbeat interval AND the Postgres LISTEN callback forever (every NOTIFY
+  // then fans out to a growing set of dead closures).
+  const teardown = () => {
+    if (torndown) return;
+    torndown = true;
+    if (heartbeat) clearInterval(heartbeat);
+    if (unsubscribe) unsubscribe();
+  };
+  req.signal.addEventListener("abort", teardown);
 
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
 
       const send = (data: string) => {
+        if (torndown) return;
         try {
           controller.enqueue(encoder.encode(data));
         } catch {
-          // Stream closed
+          // Controller closed without cancel() firing — clean up proactively.
+          teardown();
         }
       };
 
@@ -39,6 +56,9 @@ export async function GET() {
           send(`data: ${JSON.stringify(data)}\n\n`);
         },
       );
+      // If the request already aborted during the await above, tear down now —
+      // the abort listener may have fired before `unsubscribe` was assigned.
+      if (req.signal.aborted) teardown();
 
       // Heartbeat every 30s
       heartbeat = setInterval(() => {
@@ -47,8 +67,7 @@ export async function GET() {
     },
     cancel() {
       // Called when client disconnects
-      if (heartbeat) clearInterval(heartbeat);
-      if (unsubscribe) unsubscribe();
+      teardown();
     },
   });
 

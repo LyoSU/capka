@@ -1013,9 +1013,9 @@ export function ModelPicker({
   // Measuring layout (getBoundingClientRect) then writing the result to state is
   // exactly what useLayoutEffect is for — the set-state-in-effect rule is a false
   // positive here (there's no external system to read this from during render).
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useLayoutEffect(() => {
     if (!open || isMobile || variant !== "pill") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears measured position on close; measurement must live in useLayoutEffect
       setPos(null);
       return;
     }

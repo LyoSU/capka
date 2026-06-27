@@ -1,47 +1,25 @@
 "use client";
 
-import { useState } from "react";
-
 /**
- * App-Store-style square avatar for a plugin or skill. Prefers the homepage's
- * favicon; falls back to a monogram on a calm tint derived from the name, so
- * every item still reads as a distinct "app" even without an icon.
+ * App-Store-style square avatar for a plugin or skill: a monogram on a calm tint
+ * derived from the name, so every item reads as a distinct "app".
+ *
+ * Deliberately NOT a remote favicon: the old version fetched
+ * google.com/s2/favicons, which leaked every configured plugin/connector hostname
+ * to Google on render and broke icons in offline/air-gapped deployments — both at
+ * odds with a self-hosted, privacy-positioned product. `homepage` is accepted for
+ * call-site compatibility but no longer triggers any network request.
  */
 export function PluginIcon({
   name,
-  homepage,
   size = 40,
 }: {
   name: string;
   homepage?: string | null;
   size?: number;
 }) {
-  const [failed, setFailed] = useState(false);
-  let host = "";
-  try {
-    if (homepage) host = new URL(homepage).hostname;
-  } catch {
-    /* no host */
-  }
-
   const px = `${size}px`;
   const radius = Math.round(size * 0.28);
-
-  if (host && !failed) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128`}
-        alt=""
-        width={size}
-        height={size}
-        loading="lazy"
-        onError={() => setFailed(true)}
-        className="shrink-0 border border-border/60 bg-card object-cover"
-        style={{ width: px, height: px, borderRadius: radius }}
-      />
-    );
-  }
 
   // Deterministic hue from the name → stable, calm pastel monogram.
   let hash = 0;

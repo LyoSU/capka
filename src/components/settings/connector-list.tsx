@@ -57,30 +57,15 @@ function nameFromCommand(raw: string): string {
   return s || pkg.replace(/^@/, "").split("/")[0] || "";
 }
 
-/** Site favicon for the connector's host — gives the list an App-Store feel.
- *  Loaded client-side (no server SSRF surface); falls back to the Plug glyph if
- *  the host has no favicon or the lookup fails. */
-function ConnectorIcon({ url }: { url: string | null }) {
-  const [failed, setFailed] = useState(false);
-  let host = "";
-  try { if (url) host = new URL(url).hostname; } catch { /* not a URL */ }
-  if (!host || failed) {
-    return (
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-muted">
-        <Plug className="h-3.5 w-3.5 text-muted-foreground" />
-      </div>
-    );
-  }
+/** Connector glyph. Deliberately a local icon, not a remote favicon: the old
+ *  google.com/s2/favicons lookup leaked every connector hostname to Google on
+ *  render and broke in offline/air-gapped deployments — both wrong for a
+ *  self-hosted, privacy-positioned product. `url` is kept for call-site stability. */
+function ConnectorIcon() {
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`}
-      alt=""
-      width={24}
-      height={24}
-      className="h-6 w-6 shrink-0 rounded"
-      onError={() => setFailed(true)}
-    />
+    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-muted">
+      <Plug className="h-3.5 w-3.5 text-muted-foreground" />
+    </div>
   );
 }
 
@@ -516,7 +501,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
         return (
           <div key={s.id} className="flex items-start justify-between gap-4 rounded-md border p-3">
             <div className="flex flex-1 items-start gap-3">
-              <ConnectorIcon url={s.url} />
+              <ConnectorIcon />
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{s.name}</span>

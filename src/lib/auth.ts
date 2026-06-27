@@ -239,10 +239,17 @@ export async function requireSession(): Promise<{
   return { userId: session.user.id, role, status, session };
 }
 
-/** Require a minimum role — throws ForbiddenError if insufficient. */
+/** Require a minimum role — throws ForbiddenError if insufficient. Also gates out
+ *  pending (awaiting-approval) accounts: they carry the "user" role but must have NO
+ *  app access until approved. Centralizing the pending check here covers every
+ *  role-checked route, not just the key-spending chat route. (Admins are never
+ *  pending — the bootstrap user is active, approval mode assigns role "user".) */
 export async function requireRole(...allowed: Role[]) {
   const ctx = await requireSession();
   if (!allowed.includes(ctx.role)) throw new ForbiddenError();
+  if (ctx.status === "pending") {
+    throw new ForbiddenError("Your account is awaiting administrator approval.");
+  }
   return ctx;
 }
 

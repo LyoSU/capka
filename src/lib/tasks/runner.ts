@@ -1250,7 +1250,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     await sink.finish({
       // The whole answer, persisted as one rich message (no bubble fragmentation).
       status: finalStatus, text: getFullText(), reasoning: getReasoning(),
-      error: failure?.userMessage, errorDetail: failure?.adminDetail,
+      error: failure?.userMessage, errorDetail: failure?.adminDetail, errorCategory: failure?.category,
       isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt, reasoningMs,
       ...(blindModalities.length ? { blindModalities } : {}),
@@ -1419,7 +1419,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     ]);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
     await sink.finish({
-      status, text: getFullText(), error: failure?.userMessage, errorDetail: failure?.adminDetail,
+      status, text: getFullText(), error: failure?.userMessage, errorDetail: failure?.adminDetail, errorCategory: failure?.category,
       isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt,
     });

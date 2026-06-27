@@ -27,8 +27,13 @@ export interface TaskResult {
   /** The model's thinking, folded into a collapsed <details> block above the
    *  answer (mirrors the web, which shows reasoning collapsed). */
   reasoning?: string;
-  /** Friendly, user-facing error (set when status is "failed"). */
+  /** Friendly, user-facing error (set when status is "failed"). English fallback;
+   *  prefer `errorCategory` for a localized message. */
   error?: string;
+  /** LLM error category (e.g. "rate_limited") so the Telegram sink can localize the
+   *  message via errors.llm.<category>, matching the web path — instead of shipping
+   *  the English `error` string to a non-English user. */
+  errorCategory?: string;
   /** Raw technical detail of a failure — surfaced in-chat to admins only, in a
    *  collapsed <details>, so they never have to open the web UI to diagnose. */
   errorDetail?: string;
@@ -188,6 +193,10 @@ export function composeError(
 class TelegramSink implements DeliverySink {
   private readonly draftId: number;
   private readonly t: Translator;
+  /** Locale-scoped translator for the shared errors.llm.* catalog, so a failure
+   *  reaches a non-English Telegram user localized (matching the web), not in the
+   *  English userMessage baked into friendly.ts. */
+  private readonly tErr: Translator;
   private pending: { answer: string; reasoning: string; status: StreamStatus } | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inflight = false;
@@ -207,6 +216,7 @@ class TelegramSink implements DeliverySink {
   constructor(private readonly chatId: number, locale?: string) {
     this.draftId = draftIdFrom(`tg:${chatId}:${Date.now()}`);
     this.t = getTranslator(locale, "telegram");
+    this.tErr = getTranslator(locale, "errors.llm");
   }
 
   // Dynamic import keeps the Telegram bot out of contexts that never deliver.
@@ -333,7 +343,11 @@ class TelegramSink implements DeliverySink {
     // A failure is delivered in-chat, never deferred to the web UI: a calm
     // notice for everyone, plus a collapsed technical detail for admins.
     if (result.status !== "completed") {
-      const userMessage = result.error || this.t("genericError");
+      // Prefer the localized category message (matches the web); fall back to the
+      // English userMessage, then a generic line.
+      const userMessage = result.errorCategory
+        ? this.tErr(result.errorCategory)
+        : result.error || this.t("genericError");
       const markdown = composeError(userMessage, result.errorDetail, result.isAdmin ?? false, this.t);
       await this.sendRich(markdown, userMessage, false);
       return;

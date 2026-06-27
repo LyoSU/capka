@@ -139,6 +139,15 @@ class Realtime {
         chatId: base.chatId,
         taskId: base.taskId,
         messageId: base.messageId,
+        // Carry small routing scalars through the truncation so a dropped
+        // tool-result body still tells the client WHICH call resolved (it backfills
+        // the body from the DB). Without toolCallId/seq the client can't match the
+        // result to its pending tool call and the step spins forever — exactly the
+        // failure the runner's size pre-check tries (but can't fully) to avoid,
+        // since it measures only the body, not this envelope.
+        ...(base.toolCallId !== undefined ? { toolCallId: base.toolCallId } : {}),
+        ...(base.seq !== undefined ? { seq: base.seq } : {}),
+        ...(base.isError !== undefined ? { isError: base.isError } : {}),
         _truncated: true,
       });
     }
