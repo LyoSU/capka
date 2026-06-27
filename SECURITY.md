@@ -67,6 +67,35 @@ npm run up   # the stack now drives a rootless daemon; an escape lands unprivile
 | Team, semi-trusted users | Above + rootless Docker, set `PUBLIC_URL`, TLS in front (see Caddy profile). |
 | Multi-tenant / internet-facing | Above + rootless or gVisor (`runsc`) runtime, network egress policy, external managed Postgres, regular backups. |
 
+## Network egress from sandboxes
+
+Sandboxes have **no outbound network by default** (fail-closed). Set
+`SANDBOX_ALLOW_NETWORK=true` only if agent code legitimately needs the internet
+(package installs, scraping, outbound APIs) — it widens the blast radius of any
+sandbox compromise. The in-container egress firewall additionally blocks the
+cloud metadata range and refuses to start if its rules can't be verified.
+
+## Marketplace, plugins & third-party code
+
+Installing a plugin pulls code from a third-party repo into the capability system.
+The trust model:
+
+- **Pinned to a commit.** An install resolves its source ref to a concrete git
+  commit and pulls the tree + files *at that SHA* — a consistent snapshot and a
+  provenance record of exactly what was installed. A re-install re-pulls the same
+  pinned commit; only an explicit upgrade moves the pin.
+- **Code execution is disabled by default.** Every stdio MCP server a plugin
+  routes (bundled code *or* a bare `npx`/`uvx` that fetches a remote package) is
+  installed **off**; an admin reviews and enables it in Extensions. Sandbox
+  isolation is the containment; this is informed consent.
+- **Upgrades are reviewable.** An upgrade previews the file-level diff between the
+  pinned and target commits (flagging changed connector definitions) and applies
+  **exactly the reviewed commit**, so a hostile upstream can't swap in a different
+  commit between review and apply.
+
+This reduces — it does not eliminate — the risk of running third-party code. Treat
+marketplace sources as you would any dependency: install from repos you trust.
+
 ## Secret handling
 
 - `UNCLAW_MASTER_KEY` encrypts provider API keys at rest and lives **outside** the
@@ -75,3 +104,39 @@ npm run up   # the stack now drives a rootless daemon; an escape lands unprivile
   refuses to boot on the default value in production.
 - `scripts/up.sh` generates strong values into `.env` (mode `600`) on first run
   and never overwrites an operator-set value.
+
+## Known limitations & residual risks
+
+We'd rather state these plainly than imply a stronger posture than ships today.
+unClaw is a **self-hosted Docker app for solo operators and small/medium teams**,
+with sandboxed execution and a documented hardening path for higher-trust
+deployments — not a turnkey-certified multi-tenant platform.
+
+- **Long-running process required.** The agent worker runs **in-process** inside
+  the platform container via Next.js instrumentation. unClaw must run as a
+  long-lived process (Docker/VM); serverless/edge hosts that freeze between
+  requests are unsupported. A separate `worker` service running the same code is a
+  planned option, not a current one.
+- **Realtime/queue scale boundary.** The task queue and realtime bus are Postgres
+  (`SKIP LOCKED` leases + `LISTEN/NOTIFY`). This is deliberately dependency-light
+  and right for small/medium load; it is **not** an event-streaming layer (8 KB
+  NOTIFY payload limit, single-DB fan-out). Very high concurrency needs a
+  different bus.
+- **CSP is partial.** The shipped policy is the inline-safe slice (`object-src`,
+  `base-uri`, `form-action`, `frame-ancestors`). A strict `script-src` without
+  `unsafe-inline` (per-request nonce) is **not yet enabled**, so this is not full
+  XSS containment for model/user-generated content.
+- **SSRF is narrowed, not fully pinned.** Outbound fetches block private/loopback/
+  metadata ranges and strip credentials on cross-host redirects, but DNS-rebinding
+  is not yet fully closed (would require connection-level IP pinning). Don't point
+  the instance at a network where SSRF to an internal service would be catastrophic
+  without additional network-level egress controls.
+- **Auth depends on `better-auth`.** A young dependency carries its own advisory
+  surface; keep it updated. Enterprise SSO/OIDC/SCIM is a separate commercial
+  edition, not in this repo.
+- **Docker socket is root-equivalent.** Even via the socket-proxy, only **rootless
+  Docker** (or gVisor) makes a container escape *not* equal host root — see above.
+
+If your threat model exceeds these boundaries, run rootless + gVisor, front the app
+with your own WAF/egress controls, and budget for a security review before exposing
+it to untrusted users.

@@ -67,6 +67,13 @@ proxy. Prebuilt images mean no build toolchain is needed — see *Prebuilt image
 | A team | Same, plus backups + the upgrade runbook (`docs/UPGRADE.md`) and `SECURITY.md`. |
 | A company | External managed Postgres, rootless Docker, SSO — see `SECURITY.md` hardening table. |
 
+unClaw is a self-hosted Docker app for **solo operators and small/medium teams**:
+sandboxed execution plus a documented hardening path for higher-trust setups — not
+a turnkey-certified multi-tenant platform. It runs as a **long-lived process**
+(Docker/VM); serverless/edge hosts that freeze between requests are unsupported.
+See **[`SECURITY.md`](SECURITY.md) → Known limitations** before exposing it to
+untrusted users.
+
 ### Templates (one-click)
 
 - **Railway** — `deploy/railway.json`. Chat/agent platform only (Railway has no
@@ -151,8 +158,10 @@ Until you opt in, the controller logs an `isolation.unhardened` warning at boot.
 See **[`SECURITY.md`](SECURITY.md)** for the full threat model, the rootless
 setup, the per-deployment hardening table, and how to report a vulnerability.
 
-To allow sandboxes outbound network access (off by default), set
-`SANDBOX_ALLOW_NETWORK=true` in the environment.
+Sandboxes have **no outbound network by default** (fail-closed). To allow it, set
+`SANDBOX_ALLOW_NETWORK=true`. ⚠ This is a **breaking change for deployments created
+before it landed** — sandbox code that reached the internet now silently can't
+until you opt back in (see `CHANGELOG.md`).
 
 ## First run
 
