@@ -214,7 +214,7 @@ async function upsertTelegramLink(userId: string, telegramUserId: number, userna
 }
 
 export type Role = "admin" | "user" | "viewer";
-export type AccountStatus = "active" | "pending";
+export type AccountStatus = "active" | "pending" | "rejected";
 
 /** Require authenticated session — throws UnauthorizedError. */
 export async function requireSession(): Promise<{
@@ -235,7 +235,11 @@ export async function requireSession(): Promise<{
   if (!session) throw new UnauthorizedError();
   const rawRole = (session.user as Record<string, unknown>).role;
   const role: Role = rawRole === "admin" || rawRole === "viewer" ? rawRole : "user";
-  const status: AccountStatus = (session.user as Record<string, unknown>).status === "pending" ? "pending" : "active";
+  // Fail-CLOSED: only an explicit "active" grants access. Anything else (pending,
+  // rejected, or some future/manually-set value) is non-active and gated out — the
+  // old `!== "pending" ? "active"` defaulted unknown statuses to active.
+  const rawStatus = (session.user as Record<string, unknown>).status;
+  const status: AccountStatus = rawStatus === "active" ? "active" : rawStatus === "pending" ? "pending" : "rejected";
   return { userId: session.user.id, role, status, session };
 }
 
@@ -247,20 +251,25 @@ export async function requireSession(): Promise<{
 export async function requireRole(...allowed: Role[]) {
   const ctx = await requireSession();
   if (!allowed.includes(ctx.role)) throw new ForbiddenError();
-  if (ctx.status === "pending") {
-    throw new ForbiddenError("Your account is awaiting administrator approval.");
-  }
+  if (ctx.status !== "active") throw inactiveError(ctx.status);
   return ctx;
 }
 
-/** Require an approved (non-pending) account — gates pending users out of any
+/** Require an approved (active) account — gates pending/rejected users out of any
  *  feature that spends the shared key or exposes data. Admins are always active. */
 export async function requireActive() {
   const ctx = await requireSession();
-  if (ctx.status === "pending") {
-    throw new ForbiddenError("Your account is awaiting administrator approval.");
-  }
+  if (ctx.status !== "active") throw inactiveError(ctx.status);
   return ctx;
+}
+
+/** The role-aware refusal for a non-active account. */
+function inactiveError(status: AccountStatus): ForbiddenError {
+  return new ForbiddenError(
+    status === "pending"
+      ? "Your account is awaiting administrator approval."
+      : "Your account is not active.",
+  );
 }
 
 /** Require admin role. */
