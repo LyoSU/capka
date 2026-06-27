@@ -9,7 +9,7 @@ import { ingestSkill } from "@/lib/skills/service";
 import { upsertServer, upsertStdioServer, setEnabled } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { parseGitHubUrl, resolveGitHub } from "./source";
-import { ghTree, ghRaw, type TreeEntry } from "./fetch";
+import { ghTree, ghRaw, resolveCommit, type TreeEntry } from "./fetch";
 import { extractServers, parseManifestMcp, type ServerDef } from "./manifest";
 import { refsPluginRoot, hasUnresolvedPlaceholder, serverDefParts, selectPluginFiles } from "./plugin-root";
 import type { CatalogItem, GitHubRef, InstallManifest } from "./types";
@@ -83,10 +83,14 @@ async function resolvePlugin(marketplaceId: string, pluginName: string) {
 async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget): Promise<ApplyResult> {
   const prefix = gh.subdir ? `${gh.subdir}/` : "";
   const fetchFn = await ghFetch();
-  const tree = await ghTree(gh.owner, gh.repo, gh.ref, fetchFn);
+  // Pin gh.ref (a branch/tag/HEAD) to a concrete commit, then pull the tree AND
+  // every file AT that SHA — a single consistent snapshot (no TOCTOU if the branch
+  // moves mid-install) and a provenance record of exactly what was installed.
+  const commit = await resolveCommit(gh.owner, gh.repo, gh.ref, fetchFn);
+  const tree = await ghTree(gh.owner, gh.repo, commit.sha, fetchFn);
 
-  const manifest: InstallManifest = { skills: [], connectors: [], ignored: [], notes: [] };
-  const raw = (path: string) => ghRaw(gh.owner, gh.repo, gh.ref, path, fetchFn);
+  const manifest: InstallManifest = { skills: [], connectors: [], ignored: [], notes: [], commit };
+  const raw = (path: string) => ghRaw(gh.owner, gh.repo, commit.sha, path, fetchFn);
   // Set when a routed stdio server bundles files (${CLAUDE_PLUGIN_ROOT}); triggers
   // storing the plugin tree for runtime materialization.
   let needsFiles = false;
@@ -258,7 +262,7 @@ export async function installPlugin(opts: {
   // Idempotent per (marketplace, plugin, owner): re-installing reuses the same
   // install row + tag instead of duplicating. A member's personal install is
   // distinct from the org-wide one (matched by scope + userId).
-  const existing = (await db.select({ id: pluginInstalls.id }).from(pluginInstalls)
+  const existing = (await db.select({ id: pluginInstalls.id, commitSha: pluginInstalls.commitSha }).from(pluginInstalls)
     .where(and(
       eq(pluginInstalls.marketplaceId, opts.marketplaceId),
       eq(pluginInstalls.pluginName, opts.pluginName),
@@ -266,18 +270,21 @@ export async function installPlugin(opts: {
       ownerId ? eq(pluginInstalls.userId, ownerId) : isNull(pluginInstalls.userId),
     )).limit(1))[0];
   const installId = existing?.id ?? nanoid();
-  const { manifest, files } = await applyPlugin(gh, `catalog:${installId}`, target);
+  // Re-install stays PINNED: re-pull the commit already installed, not whatever the
+  // branch points at now. Moving the pin is an explicit upgrade (with a diff).
+  const ref = existing?.commitSha || gh.ref;
+  const { manifest, files } = await applyPlugin({ ...gh, ref }, `catalog:${installId}`, target);
 
   if (existing) {
     await pruneRemoved(`catalog:${installId}`, manifest); // re-install: drop rows removed upstream
     await db.update(pluginInstalls)
-      .set({ version: manifest.version ?? gh.ref, manifest: manifest as unknown as Record<string, unknown> })
+      .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? existing.commitSha, manifest: manifest as unknown as Record<string, unknown> })
       .where(eq(pluginInstalls.id, installId));
   } else {
     // Insert the install row before its files (pluginFiles FK → pluginInstalls).
     await db.insert(pluginInstalls).values({
       id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
-      version: manifest.version ?? gh.ref, scope, userId: ownerId,
+      version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? null, scope, userId: ownerId,
       manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
     });
   }
@@ -296,12 +303,14 @@ export async function upgradePlugin(installId: string): Promise<InstallManifest>
   // Re-route into the same scope/owner the install already has.
   const target: InstallTarget = { scope: row.scope === "user" ? "user" : "system", userId: row.userId, projectId: null };
 
+  // Upgrade moves the pin: resolve gh.ref (the branch/tag) to its CURRENT commit
+  // and re-pin to it. (installPlugin, by contrast, re-pulls the stored commit.)
   const { manifest, files } = await applyPlugin(gh, tag, target);
   await persistPluginFiles(installId, files);
   await pruneRemoved(tag, manifest);
 
   await db.update(pluginInstalls)
-    .set({ version: manifest.version ?? gh.ref, manifest: manifest as unknown as Record<string, unknown> })
+    .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? row.commitSha, manifest: manifest as unknown as Record<string, unknown> })
     .where(eq(pluginInstalls.id, installId));
   return manifest;
 }

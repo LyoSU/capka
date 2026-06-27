@@ -32,6 +32,14 @@ export interface CatalogItem {
   installable: boolean; // false for non-GitHub sources in C1
 }
 
+/** A resolved git commit — the pin. Recorded at install so we know exactly which
+ *  bytes were installed, and so an upgrade is an explicit move to a new commit. */
+export interface CommitInfo {
+  sha: string;
+  date: string | null;
+  message: string | null; // first line only
+}
+
 /** What an install routed, for status + uninstall. */
 export interface InstallManifest {
   skills: string[];
@@ -41,4 +49,6 @@ export interface InstallManifest {
   /** From .claude-plugin/plugin.json, when present. */
   version?: string;
   displayName?: string;
+  /** The commit the install/upgrade pinned to (provenance). */
+  commit?: CommitInfo;
 }

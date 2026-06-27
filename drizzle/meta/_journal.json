@@ -246,6 +246,13 @@
       "when": 1782577646875,
       "tag": "0034_fk_and_money_precision",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782589216505,
+      "tag": "0035_plugin_commit_pin",
+      "breakpoints": true
     }
   ]
 }

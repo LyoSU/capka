@@ -454,7 +454,8 @@ export const pluginInstalls = pgTable("plugin_installs", {
   id: text("id").primaryKey(),
   marketplaceId: text("marketplace_id").notNull().references(() => pluginMarketplaces.id, { onDelete: "cascade" }),
   pluginName: text("plugin_name").notNull(),
-  version: text("version"), // sha/ref pinned at install
+  version: text("version"), // human-facing version from plugin.json (or the ref), display only
+  commitSha: text("commit_sha"), // the git commit the install is PINNED to (provenance + supply-chain pin)
   scope: text("scope").notNull().default("system"), // 'system' (org-wide) | 'user' (personal)
   // Owner for a personal (scope=user) install — cascades so a member's installs go
   // with them. Null for system installs. `installedBy` stays the audit actor.

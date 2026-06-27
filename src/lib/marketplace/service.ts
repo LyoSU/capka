@@ -129,12 +129,15 @@ export async function listInstalledPlugins(userId: string) {
     // themselves: muted when every one of its items is in their mute set.
     const ids = [...pluginSkills.map((s) => ({ id: s.id, set: mutedSkill })), ...connectors.map((c) => ({ id: c.id, set: mutedMcp }))];
     const mutedByMe = ids.length > 0 && ids.every((x) => x.set.has(x.id));
-    const m = (i.manifest ?? {}) as { displayName?: string; notes?: string[] };
+    const m = (i.manifest ?? {}) as { displayName?: string; notes?: string[]; commit?: { sha: string; date: string | null; message: string | null } };
     return {
       id: i.id,
       pluginName: i.pluginName,
       displayName: m.displayName ?? null,
       version: i.version,
+      // Provenance: the pinned commit (short sha + date) for the Extensions UI.
+      commitSha: i.commitSha,
+      commitDate: m.commit?.date ?? null,
       author: meta.get(i.id)?.author ?? null,
       homepage: meta.get(i.id)?.homepage ?? null,
       createdAt: i.createdAt,

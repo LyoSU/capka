@@ -1,5 +1,37 @@
-import { describe, it, expect } from "vitest";
-import { parseMarketplace } from "../fetch";
+import { describe, it, expect, vi } from "vitest";
+import { parseMarketplace, resolveCommit, ghTree } from "../fetch";
+
+const jsonResponse = (body: unknown, ok = true, status = 200) =>
+  ({ ok, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response;
+
+describe("resolveCommit", () => {
+  it("pins a ref to its concrete commit (sha + first-line message + date)", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ sha: "abc123", commit: { message: "feat: thing\n\nbody", committer: { date: "2026-01-02T03:04:05Z" } } }),
+    );
+    const c = await resolveCommit("o", "r", "main", fetchFn as unknown as typeof fetch);
+    expect(c).toEqual({ sha: "abc123", date: "2026-01-02T03:04:05Z", message: "feat: thing" });
+    expect(fetchFn).toHaveBeenCalledWith("https://api.github.com/repos/o/r/commits/main");
+  });
+
+  it("throws on a non-ok response", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({}, false, 404));
+    await expect(resolveCommit("o", "r", "nope", fetchFn as unknown as typeof fetch)).rejects.toThrow(/HTTP 404/);
+  });
+});
+
+describe("ghTree", () => {
+  it("carries each entry's blob sha (content hash) so trees can be diffed", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ tree: [{ path: "a.md", type: "blob", sha: "deadbeef" }, { path: "dir", type: "tree", sha: "treesha" }] }),
+    );
+    const tree = await ghTree("o", "r", "abc123", fetchFn as unknown as typeof fetch);
+    expect(tree).toEqual([
+      { path: "a.md", type: "blob", sha: "deadbeef" },
+      { path: "dir", type: "tree", sha: "treesha" },
+    ]);
+  });
+});
 
 describe("parseMarketplace", () => {
   const mkt = { owner: "anthropics", repo: "claude-plugins-official" };

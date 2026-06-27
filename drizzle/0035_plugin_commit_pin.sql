@@ -1,0 +1,1 @@
+ALTER TABLE "plugin_installs" ADD COLUMN "commit_sha" text;

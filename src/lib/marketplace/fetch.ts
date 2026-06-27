@@ -1,8 +1,35 @@
 import { resolveGitHub } from "./source";
-import type { CatalogItem, PluginSource } from "./types";
+import type { CatalogItem, CommitInfo, PluginSource } from "./types";
 
-/** One entry of a recursive git tree. */
-export interface TreeEntry { path: string; type: "blob" | "tree" }
+/** One entry of a recursive git tree. `sha` is the git blob/tree object id — a
+ *  content hash, so two trees can be diffed precisely by comparing it per path. */
+export interface TreeEntry { path: string; type: "blob" | "tree"; sha: string }
+
+/**
+ * Resolve a ref (branch / tag / "HEAD" / a SHA) to a concrete commit — the pin.
+ * Fetching the tree + files AT this SHA gives a consistent snapshot (no TOCTOU if
+ * the branch moves mid-install) and records exactly which bytes were installed.
+ * Passing a SHA returns that same SHA, so it is idempotent.
+ */
+export async function resolveCommit(
+  owner: string,
+  repo: string,
+  ref: string,
+  fetchFn: typeof fetch,
+): Promise<CommitInfo> {
+  const res = await fetchFn(`https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`);
+  if (!res.ok) throw new Error(`GitHub commit ${owner}/${repo}@${ref}: HTTP ${res.status}`);
+  const json = (await res.json()) as {
+    sha?: string;
+    commit?: { message?: string; author?: { date?: string }; committer?: { date?: string } };
+  };
+  if (!json.sha) throw new Error(`GitHub commit ${owner}/${repo}@${ref}: no sha in response`);
+  return {
+    sha: json.sha,
+    date: json.commit?.committer?.date ?? json.commit?.author?.date ?? null,
+    message: json.commit?.message?.split("\n")[0] ?? null,
+  };
+}
 
 /** Recursive git tree for a repo ref — the full file list in one request. */
 export async function ghTree(
@@ -13,8 +40,8 @@ export async function ghTree(
 ): Promise<TreeEntry[]> {
   const res = await fetchFn(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
   if (!res.ok) throw new Error(`GitHub tree ${owner}/${repo}@${ref}: HTTP ${res.status}`);
-  const json = (await res.json()) as { tree?: { path: string; type: string }[] };
-  return (json.tree ?? []).map((t) => ({ path: t.path, type: t.type === "tree" ? "tree" : "blob" }));
+  const json = (await res.json()) as { tree?: { path: string; type: string; sha?: string }[] };
+  return (json.tree ?? []).map((t) => ({ path: t.path, type: t.type === "tree" ? "tree" : "blob", sha: t.sha ?? "" }));
 }
 
 /** Fetch one file as text via raw.githubusercontent. null on 404. */
