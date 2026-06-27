@@ -125,16 +125,21 @@ async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget): P
       const bundled = refsPluginRoot(serverDefParts(def));
       const envUnresolved = def.env ? Object.values(def.env).some(hasUnresolvedPlaceholder) : false;
       const sid = await upsertStdioServer({ ...target, name: sname, command: def.command, args: def.args, env: def.env, source: tag });
+      // Consent gate: EVERY stdio server from a marketplace runs third-party code in
+      // the user's sandbox — a bundled plugin's code OR a bare `npx`/`uvx`/`pip`
+      // command that fetches and executes a remote package. The bundled vs
+      // bare-command distinction is irrelevant to the threat, so install ALL of them
+      // OFF; an admin reviews and enables from Extensions. (Sandbox isolation is the
+      // containment; this is informed consent.) Previously only bundled/unconfigured
+      // servers were gated, so a bare-command server auto-ran on the next chat turn.
+      await setEnabled(sid, false);
       if (bundled) {
-        // Safety gate for a mass-user platform: a bundled server runs third-party
-        // CODE in every user's sandbox. Install it OFF; an admin reviews + enables
-        // it from Extensions. (Sandbox isolation is the containment; this is consent.)
         needsFiles = true;
-        await setEnabled(sid, false);
         manifest.notes.push(`${sname}: ships code that runs in users' sandboxes — review and enable it in Extensions`);
       } else if (envUnresolved) {
-        await setEnabled(sid, false);
         manifest.notes.push(`${sname}: needs configuration — open Connectors to finish`);
+      } else {
+        manifest.notes.push(`${sname}: runs third-party code in your sandbox — review and enable it in Extensions`);
       }
       manifest.connectors.push(sname);
       return;

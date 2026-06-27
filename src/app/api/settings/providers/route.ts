@@ -15,6 +15,20 @@ function normalizeApiStyle(value: unknown): string | null {
   return value === "chat" || value === "responses" ? value : null;
 }
 
+// Validate a custom base URL's FORMAT at write time (catch typos / reject non-http
+// schemes early). The SSRF policy (private-range blocking, DNS) is still enforced at
+// USE time via assertSafeProviderConfig — that's the security boundary; this is UX
+// so a bad URL fails on save, not mid-stream. Empty/absent is allowed (optional).
+function validBaseUrl(value: unknown): boolean {
+  if (!value) return true;
+  try {
+    const p = new URL(String(value)).protocol;
+    return p === "http:" || p === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export const GET = apiHandler(async () => {
   const { userId } = await requireSession();
 
@@ -49,6 +63,9 @@ export const POST = apiHandler(async (req: Request) => {
   const { provider, apiKey, baseUrl, defaultModel, label, iconSlug, shared, apiStyle } = await req.json();
   if (!provider || !PROVIDERS.includes(provider)) {
     return Response.json({ error: "Invalid or missing provider" }, { status: 400 });
+  }
+  if (!validBaseUrl(baseUrl)) {
+    return Response.json({ error: "Base URL must be a valid http(s) URL." }, { status: 400 });
   }
 
   const masterKey = await getMasterKey();

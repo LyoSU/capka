@@ -6,6 +6,7 @@ import { providerConfigs, users } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { getSetting, setSetting, isSetupComplete, getMasterKey } from "@/lib/settings";
 import { getAuth } from "@/lib/auth";
+import { PROVIDERS } from "@/lib/providers";
 
 export async function POST(req: Request) {
   const complete = await isSetupComplete();
@@ -48,8 +49,16 @@ export async function POST(req: Request) {
 
     const userId = session.user.id;
     const { provider, apiKey, baseUrl, defaultModel } = body;
-    if (!provider) {
-      return Response.json({ error: "Missing provider" }, { status: 400 });
+    if (!provider || !PROVIDERS.includes(provider)) {
+      return Response.json({ error: "Invalid or missing provider" }, { status: 400 });
+    }
+    if (baseUrl) {
+      try {
+        const p = new URL(String(baseUrl)).protocol;
+        if (p !== "http:" && p !== "https:") throw new Error("scheme");
+      } catch {
+        return Response.json({ error: "Base URL must be a valid http(s) URL." }, { status: 400 });
+      }
     }
 
     const masterKey = await getMasterKey();
