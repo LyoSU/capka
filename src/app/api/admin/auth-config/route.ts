@@ -8,6 +8,7 @@ import {
   getEmailSignupEnabled,
 } from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
+import { audit } from "@/lib/governance/audit";
 
 /**
  * Admin config for "Login with Telegram". The client secret is write-only —
@@ -44,7 +45,7 @@ const bodySchema = z.object({
 });
 
 export const POST = apiHandler(async (req: Request) => {
-  await requireAdmin();
+  const { userId: adminId } = await requireAdmin();
   const body = bodySchema.parse(await req.json());
 
   if (body.clientId !== undefined) await setSetting("telegram_oidc_client_id", body.clientId, false);
@@ -52,6 +53,18 @@ export const POST = apiHandler(async (req: Request) => {
   if (body.enabled !== undefined) await setSetting("telegram_login_enabled", body.enabled ? "true" : "false", false);
   if (body.registrationMode !== undefined) await setSetting("registration_mode", body.registrationMode, false);
   if (body.emailSignupEnabled !== undefined) await setSetting("email_signup_enabled", body.emailSignupEnabled ? "true" : "false", false);
+
+  // Audit the change (never the secret value itself — just which knobs moved).
+  await audit({
+    actorId: adminId, action: "auth_config.update", targetType: "auth_config",
+    detail: {
+      ...(body.clientId !== undefined ? { clientId: true } : {}),
+      ...(body.clientSecret ? { clientSecret: "changed" } : {}),
+      ...(body.enabled !== undefined ? { telegramLogin: body.enabled } : {}),
+      ...(body.registrationMode !== undefined ? { registrationMode: body.registrationMode } : {}),
+      ...(body.emailSignupEnabled !== undefined ? { emailSignup: body.emailSignupEnabled } : {}),
+    },
+  });
 
   // The better-auth instance caches its plugin config — drop it so the next
   // request rebuilds with the new credentials/toggle.

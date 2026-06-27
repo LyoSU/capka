@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { requireAdmin, apiHandler, type Role } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
+import { audit } from "@/lib/governance/audit";
 
 export const GET = apiHandler(async () => {
   await requireAdmin();
@@ -24,6 +25,7 @@ export const PUT = apiHandler(async (req: Request) => {
     if (!["active", "pending"].includes(status)) return Response.json({ error: "Invalid status" }, { status: 400 });
     const [updated] = await db.update(users).set({ status }).where(eq(users.id, userId)).returning();
     if (!updated) return Response.json({ error: "User not found" }, { status: 404 });
+    await audit({ actorId: adminId, action: "user.status_change", targetType: "user", targetKey: userId, detail: { status } });
     return Response.json({ id: updated.id, status: updated.status });
   }
 
@@ -32,6 +34,7 @@ export const PUT = apiHandler(async (req: Request) => {
 
   const [updated] = await db.update(users).set({ role }).where(eq(users.id, userId)).returning();
   if (!updated) return Response.json({ error: "User not found" }, { status: 404 });
+  await audit({ actorId: adminId, action: "user.role_change", targetType: "user", targetKey: userId, detail: { role } });
   return Response.json({ id: updated.id, role: updated.role });
 });
 
@@ -44,5 +47,6 @@ export const DELETE = apiHandler(async (req: Request) => {
   if (userId === adminId) return Response.json({ error: "Cannot delete own account" }, { status: 400 });
   const [deleted] = await db.delete(users).where(eq(users.id, userId)).returning({ id: users.id });
   if (!deleted) return Response.json({ error: "User not found" }, { status: 404 });
+  await audit({ actorId: adminId, action: "user.remove", targetType: "user", targetKey: userId });
   return Response.json({ ok: true });
 });

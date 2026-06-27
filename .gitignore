@@ -52,3 +52,7 @@ next-env.d.ts
 
 # Superpowers brainstorming companion
 .superpowers/
+
+# Maintainer-private deploy runbook + internal audit (not for the public tree)
+DEPLOY.md
+AUDIT-2026-06-09.md
