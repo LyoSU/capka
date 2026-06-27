@@ -111,6 +111,13 @@ export function toUIMessages(rows: {
         model: meta?.model,
         usage: meta?.usage,
         costUsd: meta?.costUsd,
+        costSource: meta?.costSource,
+        upstreamProvider: meta?.upstreamProvider,
+        // Whether this turn has an OpenRouter generation to pull latency + the
+        // provider chain from. The raw gen id stays server-side (the popover hits
+        // /api/messages/[id]/generation, which resolves it); the client only needs
+        // to know the affordance exists.
+        hasGeneration: meta?.generationId ? true : undefined,
         contextWindow: meta?.contextWindow,
       },
     };

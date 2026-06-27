@@ -51,8 +51,23 @@ export type MessageMeta = {
   // for …" label reflects thinking time rather than the whole turn.
   reasoningMs?: number;
   model?: string;
-  usage?: { input: number; output: number; cached: number };
+  // cacheWrite + reasoning are display-only splits (reasoning is already part of
+  // `output`); present only when non-zero. Captured generically from the AI SDK's
+  // normalized usage, so they work for every provider, not just OpenRouter.
+  usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number };
   costUsd?: number;
+  // Where `costUsd` came from: "provider" = the gateway's real billed charge
+  // (authoritative, may legitimately be 0 for a free/subscription model),
+  // "catalog" = our price-book estimate. Lets the UI mark estimates as approximate.
+  costSource?: "provider" | "catalog";
+  // The real upstream provider that served this turn (OpenRouter routes one model
+  // id across many providers). Shown in the (i) popover's route section.
+  upstreamProvider?: string;
+  // OpenRouter generation id (`gen-…`) + the provider config it ran on. Together
+  // they let the (i) popover lazily fetch this turn's latency + provider chain via
+  // GET /api/v1/generation, billed to the same key. OpenRouter turns only.
+  generationId?: string;
+  configId?: string;
   // Effective context window (model window ∩ admin cap) at this turn. With
   // `usage`, lets the UI render a "context full" meter: (input+cached)/this.
   contextWindow?: number;

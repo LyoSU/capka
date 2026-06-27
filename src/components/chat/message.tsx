@@ -778,8 +778,28 @@ function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram
 type TechDetails = {
   durationMs?: number;
   model?: string;
-  usage?: { input: number; output: number; cached: number };
+  usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number };
   costUsd?: number;
+  /** Whether costUsd is the provider's billed charge or our catalog estimate. */
+  costSource?: "provider" | "catalog";
+  /** The real upstream that served the turn (OpenRouter routes one id to many). */
+  upstreamProvider?: string;
+  /** This turn has an OpenRouter generation → latency + provider chain are lazily
+   *  fetchable from /api/messages/[id]/generation. */
+  hasGeneration?: boolean;
+  messageId?: string;
+};
+
+/** OpenRouter per-generation stats, fetched lazily when the popover opens. */
+type GenStats = {
+  available: boolean;
+  pending?: boolean;
+  provider?: string;
+  latencyMs?: number;
+  generationMs?: number;
+  cacheDiscount?: number;
+  finishReason?: string;
+  chain?: { provider?: string; latencyMs?: number; status?: number }[];
 };
 
 /** Render the AI work time as "12.3s" under a minute, "1m 3s" beyond it. */
@@ -814,7 +834,30 @@ function MessageDetails({
 }) {
   const t = useTranslations("chat.details");
   const locale = useLocale();
-  const { durationMs, model, usage, costUsd } = details;
+  const { durationMs, model, usage, costUsd, costSource, upstreamProvider, hasGeneration, messageId } = details;
+
+  // Latency + provider chain ride a separate, on-demand fetch (see the route):
+  // only kicked off the first time the popover actually opens.
+  const [gen, setGen] = useState<GenStats | null>(null);
+  const [loadingGen, setLoadingGen] = useState(false);
+  const fetchedRef = useRef(false);
+  const loadGen = () => {
+    // Latency + routing are admin-only plumbing (see the grouped block below), so
+    // only an admin's open ever triggers the lookup.
+    if (fetchedRef.current || !isAdmin || !hasGeneration || !messageId) return;
+    fetchedRef.current = true;
+    setLoadingGen(true);
+    fetch(`/api/messages/${messageId}/generation`)
+      .then((r) => (r.ok ? (r.json() as Promise<GenStats>) : null))
+      .then((d) => {
+        // Not propagated yet — let the next open retry instead of caching a miss.
+        if (d?.pending) fetchedRef.current = false;
+        setGen(d?.available ? d : null);
+      })
+      .catch(() => { fetchedRef.current = false; })
+      .finally(() => setLoadingGen(false));
+  };
+
   // Nothing meaningful to show (e.g. a failed/cancelled turn, or a message from
   // before this feature) — don't render the icon at all.
   if (durationMs == null && model == null && usage == null) return null;
@@ -829,9 +872,12 @@ function MessageDetails({
     usage && durationMs && durationMs >= 500 && usage.output > 0
       ? Math.round(usage.output / (durationMs / 1000))
       : null;
+  const ms = (n: number) => (n < 1000 ? `${nf.format(n)} ms` : t("durationSec", { s: (n / 1000).toFixed(1) }));
+  // A fallback happened if OpenRouter tried more than one upstream this turn.
+  const chain = gen?.chain?.filter((c) => c.provider) ?? [];
 
   return (
-    <Popover>
+    <Popover onOpenChange={(open) => open && loadGen()}>
       <PopoverTrigger
         className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground"
         aria-label={t("show")}
@@ -839,23 +885,56 @@ function MessageDetails({
       >
         <Info className="h-3.5 w-3.5" />
       </PopoverTrigger>
-      <PopoverContent className="min-w-56 space-y-1.5 text-xs" side="top" align="start">
+      <PopoverContent className="min-w-60 space-y-1.5 text-xs" side="top" align="start">
+        {/* Everyone's view: plain, calm facts about the reply — nothing that reads
+            as developer plumbing (cf. PRODUCT.md "hide the machinery"). */}
         {model && <DetailRow label={t("model")} value={model} />}
         {steps != null && steps > 0 && <DetailRow label={t("steps")} value={nf.format(steps)} />}
         {usage && <DetailRow label={t("inputTokens")} value={nf.format(usage.input)} />}
         {usage && <DetailRow label={t("outputTokens")} value={nf.format(usage.output)} />}
-        {usage && usage.cached > 0 && <DetailRow label={t("cache")} value={nf.format(usage.cached)} />}
         {durationMs != null && <DetailRow label={t("duration")} value={formatDuration(durationMs, t)} />}
         {tokensPerSec != null && <DetailRow label={t("speed")} value={t("speedValue", { n: nf.format(tokensPerSec) })} />}
-        {isAdmin && costUsd != null && (
-          <DetailRow
-            label={t("cost")}
-            value={new Intl.NumberFormat(locale, {
-              style: "currency", currency: "USD", maximumFractionDigits: 4,
-            }).format(costUsd)}
-          />
-        )}
         <DetailRow label={t("sentAt")} value={exactTime} />
+
+        {/* Admin technical block: the routing/cost/cache internals an operator
+            cares about, walled off behind a labelled divider so the surface stays
+            two clear sections rather than one undifferentiated dump. */}
+        {isAdmin && (upstreamProvider || costUsd != null || (usage && (usage.reasoning || usage.cached || usage.cacheWrite)) || (hasGeneration && (loadingGen || gen))) && (
+          <div className="mt-2 space-y-1.5 border-t pt-2">
+            <div className="text-[0.6875rem] font-medium text-muted-foreground">{t("technical")}</div>
+            {upstreamProvider && <DetailRow label={t("provider")} value={upstreamProvider} />}
+            {costUsd != null && (
+              <DetailRow
+                label={t("cost")}
+                // A catalog estimate is marked "≈" so it's never mistaken for the
+                // billed amount; a provider-reported figure shows bare.
+                value={`${costSource === "catalog" ? "≈ " : ""}${new Intl.NumberFormat(locale, {
+                  style: "currency", currency: "USD", maximumFractionDigits: 4,
+                }).format(costUsd)}`}
+              />
+            )}
+            {usage && usage.reasoning != null && usage.reasoning > 0 && <DetailRow label={t("reasoningTokens")} value={nf.format(usage.reasoning)} />}
+            {usage && usage.cached > 0 && <DetailRow label={t("cache")} value={nf.format(usage.cached)} />}
+            {usage && usage.cacheWrite != null && usage.cacheWrite > 0 && <DetailRow label={t("cacheWrite")} value={nf.format(usage.cacheWrite)} />}
+            {loadingGen && !gen && <div className="text-muted-foreground">{t("loadingRoute")}</div>}
+            {gen?.latencyMs != null && <DetailRow label={t("latency")} value={ms(gen.latencyMs)} />}
+            {gen?.generationMs != null && <DetailRow label={t("generationTime")} value={ms(gen.generationMs)} />}
+            {chain.length > 1 && (
+              <div className="space-y-1 pt-0.5">
+                <span className="text-muted-foreground">{t("route")}</span>
+                {chain.map((c, i) => (
+                  <div key={i} className="flex items-baseline justify-between gap-6 pl-2">
+                    <span className="font-medium">{c.provider}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {c.latencyMs != null ? ms(c.latencyMs) : ""}
+                      {c.status != null && c.status !== 200 ? ` · ${c.status}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -911,7 +990,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number }; costUsd?: number; notice?: { kind: string; modalities: string[] }; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; notice?: { kind: string; modalities: string[] }; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -1051,7 +1130,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
               )}
               {onFork && <ForkButton messageId={message.id} onFork={onFork} />}
               <MessageDetails
-                details={{ durationMs: metadata?.durationMs, model: metadata?.model, usage: metadata?.usage, costUsd: metadata?.costUsd }}
+                details={{ durationMs: metadata?.durationMs, model: metadata?.model, usage: metadata?.usage, costUsd: metadata?.costUsd, costSource: metadata?.costSource, upstreamProvider: metadata?.upstreamProvider, hasGeneration: metadata?.hasGeneration, messageId: message.id }}
                 createdAt={createdAt}
                 isAdmin={isAdmin}
                 steps={parts.filter(isToolPart).length}

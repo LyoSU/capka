@@ -199,7 +199,9 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
   // provider rejects a modality it claimed — so trusting the metadata never turns
   // into a hard failure for the user.
   const modelInput = await getModelInputModalities(modelId, config.provider);
-  return { model, provider: config.provider, modelId, modelInput, isShared: config.isShared };
+  // configId lets a later request (e.g. the (i) popover's GET /generation) re-resolve
+  // the very same key this turn ran on, without re-deriving it from the chat model.
+  return { model, provider: config.provider, modelId, modelInput, isShared: config.isShared, configId: config.id };
 }
 
 export async function resolveUserModel(userId: string, requestModel?: string) {

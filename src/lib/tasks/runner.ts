@@ -267,7 +267,7 @@ async function injectNativeFiles(
 async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string) {
   // A project chat sees its project memory doc + the user-global doc. A
   // standalone chat sees only the user-global doc, so projects don't leak.
-  const [{ model, provider, modelId, modelInput, isShared }, project, memoryDocs, user, chat] = await Promise.all([
+  const [{ model, provider, modelId, modelInput, isShared, configId }, project, memoryDocs, user, chat] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
@@ -364,7 +364,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
 
   // Dispose both sandbox and MCP clients when the run ends.
   const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
-  return { model, provider, modelId, modelInput, isShared, tools, closeMcp: closeAll, prompt, contextLength, adminCap };
+  return { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: closeAll, prompt, contextLength, adminCap };
 }
 
 /**
@@ -478,7 +478,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, modelInput, isShared, tools, closeMcp: close, prompt, contextLength, adminCap } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: close, prompt, contextLength, adminCap } =
       await prepareRun(userId, sessionKey, payload, chatId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
@@ -659,7 +659,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // usage (and skipped billing) on every cancel/break. Per-step usages sum to
     // totalUsage on a clean run and survive an abort (steps emit usage before the
     // `abort` event).
-    const liveUsage = { input: 0, output: 0, cached: 0 };
+    // input/output/cached drive billing; cacheWrite + reasoning are display-only
+    // splits for the (i) popover (reasoning is already part of `output` for cost).
+    const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
+    // Real spend + routing reported by OpenRouter on each generation (one per
+    // step). `cost` sums across steps; `generationId` keeps the LAST step's id so
+    // the (i) popover can lazily pull that generation's latency + provider chain
+    // from GET /api/v1/generation. Empty for every non-OpenRouter provider.
+    const orLive: { cost: number; upstreamProvider?: string; generationId?: string } = { cost: 0 };
     // Spend on attempts thrown away by a capability/context/empty discard — billed
     // by the provider (usage-table truth), but NOT in the (i) popover, which shows
     // only the final attempt that produced the visible answer.
@@ -675,6 +682,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       liveUsage.input = 0;
       liveUsage.output = 0;
       liveUsage.cached = 0;
+      liveUsage.cacheWrite = 0;
+      liveUsage.reasoning = 0;
+      // The discarded attempt's real cost is sunk; the next attempt re-reports its
+      // own. Reset routing too so the popover reflects only the final generation.
+      orLive.cost = 0;
+      orLive.upstreamProvider = undefined;
+      orLive.generationId = undefined;
     };
 
     const appendText = (delta: string) => {
@@ -915,6 +929,27 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             liveUsage.input += event.usage.inputTokenDetails?.noCacheTokens ?? Math.max(0, (event.usage.inputTokens ?? 0) - cached);
             liveUsage.output += event.usage.outputTokens ?? 0;
             liveUsage.cached += cached;
+            // Generic splits via the AI SDK's normalized usage (every provider):
+            // cache WRITE is distinct from read, reasoning is a slice of output.
+            liveUsage.cacheWrite += event.usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+            liveUsage.reasoning += event.usage.outputTokenDetails?.reasoningTokens ?? 0;
+            // OpenRouter reports the REAL charge + the upstream that served this
+            // step. `cost` is what OpenRouter billed; when it's 0 the request was
+            // BYOK (you pay upstream directly), so fall to the upstream inference
+            // cost. The SDK only types a subset of usage-accounting, so read loose.
+            const or = (event.providerMetadata?.openrouter ?? undefined) as
+              | { provider?: string; usage?: { cost?: number; costDetails?: { upstreamInferenceCost?: number } } }
+              | undefined;
+            if (or?.usage) {
+              orLive.cost += or.usage.cost && or.usage.cost > 0
+                ? or.usage.cost
+                : or.usage.costDetails?.upstreamInferenceCost ?? 0;
+              if (or.provider) orLive.upstreamProvider = or.provider;
+            }
+            // The OpenRouter generation id (`gen-…`) keys GET /api/v1/generation.
+            if (typeof event.response?.id === "string" && event.response.id.startsWith("gen-")) {
+              orLive.generationId = event.response.id;
+            }
             // Flush buffered text, force a snapshot (streamSeq + parts) + renew
             // the lease per step. force=true bypasses the ~1s throttle so each
             // step boundary is durably persisted.
@@ -1119,14 +1154,33 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // input rate, cached reads at the discounted rate (avoids double-counting).
     // Usage from the live accumulator (robust to cancel/abort), not result.totalUsage.
     const usageMeta = liveUsage.input || liveUsage.output || liveUsage.cached
-      ? { input: liveUsage.input, output: liveUsage.output, cached: liveUsage.cached }
+      ? {
+          input: liveUsage.input, output: liveUsage.output, cached: liveUsage.cached,
+          // Display-only splits — omitted when zero so old/simple turns stay clean.
+          ...(liveUsage.cacheWrite > 0 ? { cacheWrite: liveUsage.cacheWrite } : {}),
+          ...(liveUsage.reasoning > 0 ? { reasoning: liveUsage.reasoning } : {}),
+        }
       : undefined;
+    // Cost, resolved universally with a clear source of truth:
+    //   • the provider's REAL charge wins whenever the provider reported one
+    //     (OpenRouter served this turn — `orServed`). That figure is authoritative
+    //     even when it's 0 (a `:free` model, or a flat-rate subscription gateway):
+    //     a real 0 must NOT be overwritten by a catalog estimate.
+    //   • otherwise fall back to the catalog price book (every other provider).
+    // `costSource` is persisted so the UI can mark an estimate as approximate
+    // rather than presenting it as the billed amount.
+    const orServed = orLive.generationId != null || orLive.upstreamProvider != null;
     let costMeta: number | null = null;
-    if (usageMeta) {
+    let costSource: "provider" | "catalog" | undefined;
+    if (orServed) {
+      costMeta = orLive.cost;
+      costSource = "provider";
+    } else if (usageMeta) {
       try {
         costMeta = await costUsd(modelId, {
           inputTokens: usageMeta.input, outputTokens: usageMeta.output, cachedInputTokens: usageMeta.cached,
         });
+        if (costMeta != null) costSource = "catalog";
       } catch (e) {
         tlog.error("cost compute failed", { err: String(e) });
       }
@@ -1164,6 +1218,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           model: modelId,
           ...(usageMeta ? { usage: usageMeta } : {}),
           ...(costMeta != null ? { costUsd: costMeta } : {}),
+          ...(costSource ? { costSource } : {}),
+          // The real upstream that served the turn (OpenRouter routes one model id
+          // to many providers) — shown in the (i) popover's route section.
+          ...(orLive.upstreamProvider ? { upstreamProvider: orLive.upstreamProvider } : {}),
+          // OpenRouter generation id + the config it ran on: together they let the
+          // (i) popover lazily fetch this turn's latency + provider chain from
+          // GET /api/v1/generation, using the same key the turn was billed to.
+          ...(orLive.generationId ? { generationId: orLive.generationId, configId } : {}),
           // Effective window (model ∩ admin cap) so the UI's context meter can
           // show how full the window is: (usage.input + usage.cached) / this.
           ...(budget ? { contextWindow: budget.effectiveLimit } : {}),
