@@ -217,6 +217,7 @@ export async function syncModelCatalog(): Promise<{ openrouter: number; litellm:
     console.error("[catalog] Models.dev enrichment failed (non-fatal):", err);
   }
   priceCache.clear();
+  contextCache.clear(); // was never cleared on sync — context windows could go stale
   console.log(`[catalog] synced ${or} OpenRouter + ${ll} LiteLLM models, enriched ${md} from Models.dev`);
   return { openrouter: or, litellm: ll, modelsdev: md };
 }
@@ -316,7 +317,25 @@ export interface ModelPrice {
   cacheRead: number;
 }
 
-const priceCache = new Map<string, ModelPrice | null>();
+// Read-through caches. Bounded (a flood of distinct/mistyped ids can't grow them
+// forever) and null is cached only briefly — without a short negative TTL a model
+// priced AFTER the last sync would stay "unpriceable" (and thus blocked on the
+// shared key) for the whole 12h sync interval. Positive hits live until the next
+// sync clears the cache.
+const CACHE_MAX = 5000;
+const NULL_TTL_MS = 60_000;
+type CacheEntry<T> = { v: T; exp: number };
+function cacheGet<T>(m: Map<string, CacheEntry<T>>, key: string): { hit: true; v: T } | { hit: false } {
+  const e = m.get(key);
+  if (e && (e.exp === Infinity || e.exp > Date.now())) return { hit: true, v: e.v };
+  return { hit: false };
+}
+function cacheSet<T>(m: Map<string, CacheEntry<T>>, key: string, v: T, isNull: boolean): void {
+  if (m.size > CACHE_MAX) m.clear();
+  m.set(key, { v, exp: isNull ? Date.now() + NULL_TTL_MS : Infinity });
+}
+
+const priceCache = new Map<string, CacheEntry<ModelPrice | null>>();
 
 /**
  * Resolve a model's per-token price from the catalog. Tries the exact id,
@@ -324,7 +343,8 @@ const priceCache = new Map<string, ModelPrice | null>();
  * Cached in-process; cache is cleared on each sync.
  */
 export async function getModelPrice(modelId: string): Promise<ModelPrice | null> {
-  if (priceCache.has(modelId)) return priceCache.get(modelId)!;
+  const cached = cacheGet(priceCache, modelId);
+  if (cached.hit) return cached.v;
   const stripped = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
   const rows = await db
     .select({
@@ -346,11 +366,11 @@ export async function getModelPrice(modelId: string): Promise<ModelPrice | null>
         cacheRead: parseFloat(exact.cacheReadPrice ?? "0"),
       }
     : null;
-  priceCache.set(modelId, price);
+  cacheSet(priceCache, modelId, price, price === null);
   return price;
 }
 
-const contextCache = new Map<string, number | null>();
+const contextCache = new Map<string, CacheEntry<number | null>>();
 
 /**
  * The model's context window (tokens) from the synced catalog, or null when the
@@ -359,7 +379,8 @@ const contextCache = new Map<string, number | null>();
  * then provider-stripped). Cached in-process.
  */
 export async function getModelContextLength(modelId: string): Promise<number | null> {
-  if (contextCache.has(modelId)) return contextCache.get(modelId)!;
+  const cached = cacheGet(contextCache, modelId);
+  if (cached.hit) return cached.v;
   const stripped = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
   const rows = await db
     .select({ id: models.id, contextLength: models.contextLength })
@@ -369,6 +390,6 @@ export async function getModelContextLength(modelId: string): Promise<number | n
 
   const exact = rows.find((r) => r.id === modelId) ?? rows.find((r) => r.contextLength != null);
   const ctx = exact?.contextLength ?? null;
-  contextCache.set(modelId, ctx);
+  cacheSet(contextCache, modelId, ctx, ctx === null);
   return ctx;
 }
