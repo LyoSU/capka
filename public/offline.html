@@ -1,14 +1,14 @@
 <!doctype html>
 <!--
-  Static fallback served by the service worker (public/sw.js) when a navigation
-  can't reach the origin. Two causes, two tones:
-    • the device has no internet  → "you're offline" (calm, it's not our fault)
-    • our origin is unreachable    → "we're updating" (a redeploy gap, ~seconds)
-  It must work with ZERO server/bundle dependency — everything (styles, icon,
-  copy, both locales) is inline. i18n mirrors the server's resolveLocale path:
-  primary subtag of navigator.languages, English default (see src/i18n/config.ts).
-  Strings live here on purpose; messages/*.json can't be loaded when the server
-  is down, so duplicating them in the catalog would just be dead keys.
+  Static fallback served by the service worker (public/sw.js) when a page
+  navigation can't reach the origin. Two honest states, no guessing the cause:
+    • the device reports no connectivity → "you're offline"
+    • online but the origin is unreachable → "temporarily unavailable"
+      (kept generic on purpose: could be a deploy OR a crash — never claim
+       "we're updating" when we don't actually know)
+  Must work with ZERO server/bundle dependency: styles, icon, copy and both
+  locales are inline. i18n mirrors src/i18n/config.ts (primary subtag of
+  navigator.languages, English default).
 -->
 <html lang="en">
 <head>
@@ -20,23 +20,19 @@
   <title>unClaw</title>
   <style>
     :root {
-      --paper: #f0ede8;
+      --bg: #f0ede8;
       --ink: #1f1e1d;
       --muted: #6b6862;
-      --line: rgba(31, 30, 29, 0.12);
-      --card: rgba(255, 255, 255, 0.5);
-      --accent: #c47a3d;      /* warm amber — "coming back" */
-      --idle: #9a968e;        /* muted grey — "you're offline" */
+      --line: rgba(31, 30, 29, 0.14);
+      --line-strong: rgba(31, 30, 29, 0.5);
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --paper: #1f1e1d;
+        --bg: #1f1e1d;
         --ink: #f0ede8;
         --muted: #a3a097;
-        --line: rgba(240, 237, 232, 0.14);
-        --card: rgba(255, 255, 255, 0.04);
-        --accent: #e0a062;
-        --idle: #7d7a72;
+        --line: rgba(240, 237, 232, 0.16);
+        --line-strong: rgba(240, 237, 232, 0.55);
       }
     }
     * { box-sizing: border-box; }
@@ -46,138 +42,86 @@
       align-items: center;
       justify-content: center;
       padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
-      background: var(--paper);
+      background: var(--bg);
       color: var(--ink);
       font-family: "Onest", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      line-height: 1.5;
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;
     }
-    .card {
+    main {
       width: 100%;
-      max-width: 400px;
+      max-width: 320px;
       text-align: center;
     }
-    .logo {
-      width: 56px;
-      height: 56px;
-      margin: 0 auto 28px;
-      display: block;
-    }
-    .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 5px 12px 5px 10px;
-      margin-bottom: 20px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--card);
-      font-size: 13px;
-      color: var(--muted);
-    }
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--idle);
-      flex: none;
-    }
-    body[data-state="server"] .dot {
-      background: var(--accent);
-      box-shadow: 0 0 0 0 var(--accent);
-      animation: pulse 1.8s ease-out infinite;
-    }
-    @keyframes pulse {
-      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
-      70%  { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); }
-      100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
-    }
+    .logo { width: 44px; height: 44px; margin: 0 auto 32px; display: block; }
     h1 {
-      margin: 0 0 10px;
-      font-size: 22px;
+      margin: 0 0 8px;
+      font-size: 1.25rem;
       font-weight: 600;
       letter-spacing: -0.01em;
+      text-wrap: balance;
     }
     p {
-      margin: 0 auto;
-      max-width: 34ch;
+      margin: 0;
       color: var(--muted);
-      font-size: 15px;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      text-wrap: pretty;
     }
-    .retry {
+    button {
       margin-top: 28px;
       appearance: none;
       border: 1px solid var(--line);
-      background: var(--card);
+      background: transparent;
       color: var(--ink);
       font: inherit;
-      font-size: 14px;
+      font-size: 0.875rem;
       font-weight: 500;
-      padding: 10px 20px;
-      border-radius: 10px;
+      padding: 9px 18px;
+      border-radius: 9px;
       cursor: pointer;
-      transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+      transition: border-color 0.15s ease, opacity 0.15s ease;
     }
-    .retry:hover { border-color: var(--ink); }
-    .retry:active { opacity: 0.7; }
-    .retry:disabled { opacity: 0.5; cursor: default; }
-    @media (prefers-reduced-motion: reduce) {
-      body[data-state="server"] .dot { animation: none; }
-    }
+    button:hover { border-color: var(--line-strong); }
+    button:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 2px; }
+    button:disabled { opacity: 0.45; cursor: default; }
   </style>
 </head>
-<body data-state="server">
-  <main class="card" role="status" aria-live="polite">
-    <div class="logo" aria-hidden="true">
-      <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" fill="#fafafa">
-        <path d="M 176.41 150.54 L 175.50 187.09 L 176.16 209.99 L 179.81 231.55 L 184.96 256.77 L 190.24 280.11 L 195.63 301.57 L 201.09 321.13 L 206.57 338.81 L 211.96 354.62 L 216.00 366.00 L 213.07 351.07 L 211.08 334.28 L 209.74 315.72 L 208.85 259.24 L 209.40 234.35 L 210.17 213.16 L 208.55 191.00 L 205.86 167.71 L 203.59 149.46 Z"/>
-        <path d="M 241.60 134.00 L 239.16 159.46 L 238.01 185.01 L 240.20 205.51 L 243.25 231.21 L 246.12 257.00 L 248.80 282.88 L 251.23 308.84 L 253.37 334.89 L 255.40 361.03 L 256.00 382.00 L 256.60 366.27 L 258.63 334.89 L 261.24 303.64 L 263.72 277.69 L 266.43 251.84 L 269.35 226.06 L 272.42 154.36 L 270.40 134.00 Z"/>
-        <path d="M 308.41 149.46 L 306.14 167.71 L 302.89 196.64 L 302.25 223.90 L 302.98 249.50 L 303.25 273.33 L 303.01 295.40 L 301.80 323.36 L 299.81 344.57 L 297.33 360.27 L 296.00 366.00 L 300.04 354.62 L 304.34 342.12 L 308.72 328.43 L 313.10 313.54 L 317.46 297.43 L 321.76 280.11 L 335.84 209.99 L 335.59 150.54 Z"/>
-      </svg>
-    </div>
+<body>
+  <main role="status" aria-live="polite">
+    <svg class="logo" aria-hidden="true" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+      <rect width="512" height="512" rx="114" fill="#0a0a0a"/>
+      <g fill="#fafafa">
+        <path d="M 176.41 150.54 L 176.16 156.81 L 175.94 163.01 L 175.75 169.14 L 175.61 175.19 L 175.52 181.18 L 175.50 187.09 L 175.54 192.93 L 175.66 198.69 L 175.87 204.38 L 176.16 209.99 L 176.80 215.51 L 177.80 220.93 L 178.80 226.28 L 179.81 231.55 L 180.83 236.74 L 181.85 241.86 L 182.88 246.91 L 183.92 251.88 L 184.96 256.77 L 186.01 261.59 L 187.06 266.34 L 188.11 271.00 L 189.17 275.60 L 190.24 280.11 L 191.31 284.56 L 192.38 288.92 L 193.46 293.21 L 194.54 297.43 L 195.63 301.57 L 196.71 305.63 L 197.81 309.62 L 198.90 313.54 L 199.99 317.37 L 201.09 321.13 L 202.18 324.82 L 203.28 328.43 L 204.38 331.97 L 205.47 335.43 L 206.57 338.81 L 207.66 342.12 L 208.74 345.36 L 209.82 348.52 L 210.90 351.61 L 211.96 354.62 L 213.01 357.57 L 214.04 360.44 L 215.05 363.25 L 216.00 366.00 L 215.30 363.18 L 214.67 360.27 L 214.10 357.28 L 213.57 354.21 L 213.07 351.07 L 212.61 347.85 L 212.19 344.57 L 211.79 341.21 L 211.42 337.78 L 211.08 334.28 L 210.76 330.71 L 210.47 327.07 L 210.20 323.36 L 209.96 319.57 L 209.74 315.72 L 209.55 311.80 L 209.37 307.80 L 209.22 303.74 L 209.09 299.61 L 208.99 295.40 L 208.90 291.13 L 208.83 286.79 L 208.79 282.37 L 208.76 277.89 L 208.75 273.33 L 208.77 268.70 L 208.80 264.01 L 208.85 259.24 L 208.93 254.40 L 209.02 249.50 L 209.13 244.52 L 209.26 239.47 L 209.40 234.35 L 209.57 229.16 L 209.75 223.90 L 209.95 218.57 L 210.17 213.16 L 210.06 207.71 L 209.62 202.21 L 209.11 196.64 L 208.55 191.00 L 207.94 185.29 L 207.28 179.50 L 206.58 173.64 L 205.86 167.71 L 205.11 161.70 L 204.35 155.62 L 203.59 149.46 Z"/>
+        <path d="M 241.60 134.00 L 241.07 139.09 L 240.54 144.17 L 240.05 149.27 L 239.58 154.36 L 239.16 159.46 L 238.80 164.56 L 238.49 169.67 L 238.26 174.78 L 238.10 179.89 L 238.01 185.01 L 238.28 190.13 L 238.93 195.25 L 239.57 200.38 L 240.20 205.51 L 240.82 210.64 L 241.44 215.78 L 242.05 220.92 L 242.65 226.06 L 243.25 231.21 L 243.84 236.36 L 244.42 241.52 L 245.00 246.67 L 245.57 251.84 L 246.12 257.00 L 246.68 262.17 L 247.22 267.34 L 247.75 272.52 L 248.28 277.69 L 248.80 282.88 L 249.30 288.06 L 249.80 293.25 L 250.29 298.44 L 250.76 303.64 L 251.23 308.84 L 251.68 314.04 L 252.13 319.25 L 252.56 324.46 L 252.97 329.67 L 253.37 334.89 L 253.76 340.11 L 254.13 345.34 L 254.48 350.56 L 254.81 355.79 L 255.12 361.03 L 255.40 366.27 L 255.66 371.51 L 255.86 376.75 L 256.00 382.00 L 256.14 376.75 L 256.34 371.51 L 256.60 366.27 L 256.88 361.03 L 257.19 355.79 L 257.52 350.56 L 257.87 345.34 L 258.24 340.11 L 258.63 334.89 L 259.03 329.67 L 259.44 324.46 L 259.87 319.25 L 260.32 314.04 L 260.77 308.84 L 261.24 303.64 L 261.71 298.44 L 262.20 293.25 L 262.70 288.06 L 263.20 282.88 L 263.72 277.69 L 264.25 272.52 L 264.78 267.34 L 265.32 262.17 L 265.88 257.00 L 266.43 251.84 L 267.00 246.67 L 267.58 241.52 L 268.16 236.36 L 268.75 231.21 L 269.35 226.06 L 269.95 220.92 L 270.56 215.78 L 271.18 210.64 L 271.80 205.51 L 272.43 200.38 L 273.07 195.25 L 273.72 190.13 L 273.99 185.01 L 273.90 179.89 L 273.74 174.78 L 273.51 169.67 L 273.20 164.56 L 272.84 159.46 L 272.42 154.36 L 271.95 149.27 L 271.46 144.17 L 270.93 139.09 L 270.40 134.00 Z"/>
+        <path d="M 308.41 149.46 L 307.65 155.62 L 306.89 161.70 L 306.14 167.71 L 305.42 173.64 L 304.72 179.50 L 304.06 185.29 L 303.45 191.00 L 302.89 196.64 L 302.38 202.21 L 301.94 207.71 L 301.83 213.16 L 302.05 218.57 L 302.25 223.90 L 302.43 229.16 L 302.60 234.35 L 302.74 239.47 L 302.87 244.52 L 302.98 249.50 L 303.07 254.40 L 303.15 259.24 L 303.20 264.01 L 303.23 268.70 L 303.25 273.33 L 303.24 277.89 L 303.21 282.37 L 303.17 286.79 L 303.10 291.13 L 303.01 295.40 L 302.91 299.61 L 302.78 303.74 L 302.63 307.80 L 302.45 311.80 L 302.26 315.72 L 302.04 319.57 L 301.80 323.36 L 301.53 327.07 L 301.24 330.71 L 300.92 334.28 L 300.58 337.78 L 300.21 341.21 L 299.81 344.57 L 299.39 347.85 L 298.93 351.07 L 298.43 354.21 L 297.90 357.28 L 297.33 360.27 L 296.70 363.18 L 296.00 366.00 L 296.95 363.25 L 297.96 360.44 L 298.99 357.57 L 300.04 354.62 L 301.10 351.61 L 302.18 348.52 L 303.26 345.36 L 304.34 342.12 L 305.43 338.81 L 306.53 335.43 L 307.62 331.97 L 308.72 328.43 L 309.82 324.82 L 310.91 321.13 L 312.01 317.37 L 313.10 313.54 L 314.19 309.62 L 315.29 305.63 L 316.37 301.57 L 317.46 297.43 L 318.54 293.21 L 319.62 288.92 L 320.69 284.56 L 321.76 280.11 L 322.83 275.60 L 323.89 271.00 L 324.94 266.34 L 325.99 261.59 L 327.04 256.77 L 328.08 251.88 L 329.12 246.91 L 330.15 241.86 L 331.17 236.74 L 332.19 231.55 L 333.20 226.28 L 334.20 220.93 L 335.20 215.51 L 335.84 209.99 L 336.13 204.38 L 336.34 198.69 L 336.46 192.93 L 336.50 187.09 L 336.48 181.18 L 336.39 175.19 L 336.25 169.14 L 336.06 163.01 L 335.84 156.81 L 335.59 150.54 Z"/>
+      </g>
+    </svg>
 
-    <span class="status"><span class="dot"></span><span id="status"></span></span>
     <h1 id="title"></h1>
     <p id="body"></p>
-    <button class="retry" id="retry" type="button"></button>
+    <button id="retry" type="button"></button>
   </main>
 
   <script>
     (function () {
       var dict = {
         en: {
-          server: {
-            status: "Reconnecting…",
-            title: "We'll be right back",
-            body: "The app is updating to a new version. This usually takes a few seconds — the page will refresh on its own.",
-          },
-          offline: {
-            status: "No connection",
-            title: "You're offline",
-            body: "Your device isn't connected to the internet. Check your Wi-Fi or mobile data — we'll reconnect you automatically.",
-          },
-          retry: "Try now",
+          server: { title: "Temporarily unavailable", body: "The service is down for a moment. It will be back shortly." },
+          offline: { title: "You're offline", body: "Check your internet connection, then try again." },
+          retry: "Try again",
           checking: "Checking…",
         },
         uk: {
-          server: {
-            status: "Відновлюємо з'єднання…",
-            title: "Скоро повернемось",
-            body: "Застосунок оновлюється до нової версії. Зазвичай це кілька секунд — сторінку буде оновлено автоматично.",
-          },
-          offline: {
-            status: "Немає з'єднання",
-            title: "Ви офлайн",
-            body: "Пристрій не підключено до інтернету. Перевірте Wi-Fi або мобільний інтернет — ми відновимо з'єднання автоматично.",
-          },
-          retry: "Спробувати зараз",
+          server: { title: "Технічні роботи", body: "Сервіс тимчасово недоступний. Скоро все запрацює." },
+          offline: { title: "Немає інтернету", body: "Перевірте підключення до мережі та спробуйте ще раз." },
+          retry: "Спробувати знову",
           checking: "Перевіряємо…",
         },
       };
 
-      // Mirror src/i18n/config.ts matchAcceptLanguage: first language whose
-      // primary subtag we support, English otherwise.
+      // Mirror matchAcceptLanguage (src/i18n/config.ts): first supported primary
+      // subtag of navigator.languages, English default.
       function pickLocale() {
         var langs = navigator.languages && navigator.languages.length
           ? navigator.languages
@@ -189,26 +133,21 @@
         return "en";
       }
 
-      var t = dict[pickLocale()];
-      var els = {
-        body: document.body,
-        status: document.getElementById("status"),
-        title: document.getElementById("title"),
-        text: document.getElementById("body"),
-        retry: document.getElementById("retry"),
-      };
-      els.retry.textContent = t.retry;
-      document.documentElement.lang = pickLocale();
+      var locale = pickLocale();
+      var t = dict[locale];
+      document.documentElement.lang = locale;
+
+      var titleEl = document.getElementById("title");
+      var bodyEl = document.getElementById("body");
+      var retryEl = document.getElementById("retry");
+      retryEl.textContent = t.retry;
 
       function render() {
-        // Offline only when the device itself reports no connectivity; a flaky
-        // origin while online reads as "we're updating", not "your fault".
-        var state = navigator.onLine ? "server" : "offline";
-        var s = t[state];
-        els.body.dataset.state = state;
-        els.status.textContent = s.status;
-        els.title.textContent = s.title;
-        els.text.textContent = s.body;
+        // "offline" only when the device itself reports no connectivity; an
+        // unreachable origin while online is ours to own, not the user's fault.
+        var s = t[navigator.onLine ? "server" : "offline"];
+        titleEl.textContent = s.title;
+        bodyEl.textContent = s.body;
       }
 
       var checking = false;
@@ -216,23 +155,21 @@
         render();
         if (!navigator.onLine || checking) return;
         checking = true;
-        els.retry.disabled = true;
-        els.retry.textContent = t.checking;
+        retryEl.disabled = true;
+        retryEl.textContent = t.checking;
         try {
-          // HEAD the origin (no-store so no cache lies). Back up → just reload
-          // into the real app; the service worker passes the navigation through.
           var res = await fetch("/", { method: "HEAD", cache: "no-store" });
           if (res.ok) { location.reload(); return; }
-        } catch (e) { /* still down — keep waiting */ }
+        } catch (e) { /* still unreachable — keep waiting */ }
         checking = false;
-        els.retry.disabled = false;
-        els.retry.textContent = t.retry;
+        retryEl.disabled = false;
+        retryEl.textContent = t.retry;
       }
 
-      els.retry.addEventListener("click", check);
+      retryEl.addEventListener("click", check);
       window.addEventListener("online", check);
       window.addEventListener("offline", render);
-      setInterval(check, 4000);
+      setInterval(check, 5000);
       check();
     })();
   </script>
