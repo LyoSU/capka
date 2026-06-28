@@ -1,8 +1,11 @@
 {
+  "id": "/",
   "name": "unClaw",
   "short_name": "unClaw",
   "description": "Personal AI Platform",
   "start_url": "/",
+  "scope": "/",
+  "categories": ["productivity"],
   "display": "standalone",
   "background_color": "#f0ede8",
   "theme_color": "#f0ede8",

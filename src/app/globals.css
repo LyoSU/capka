@@ -313,9 +313,35 @@
      change the viewport width otherwise). */
   html {
     scrollbar-gutter: stable;
+    /* Native-app feel: no iOS font inflation on rotate, and no document-level
+       rubber-band / pull-to-refresh — the app owns its own scrolling. */
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
   }
   body {
     @apply bg-background text-foreground;
+  }
+  /* Kill the grey tap-flash and the legacy 300ms double-tap-zoom delay on
+     controls, so taps feel instant and chrome stops reading like a web page.
+     Pinch-zoom stays (accessibility); only the double-tap gesture is dropped.
+     Inputs keep default touch-action so the caret/selection still work. */
+  button,
+  a,
+  label,
+  summary,
+  [role="button"],
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button,
+  a,
+  label,
+  summary,
+  [role="button"] {
+    touch-action: manipulation;
   }
 }
 

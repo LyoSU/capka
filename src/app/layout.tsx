@@ -31,6 +31,15 @@ const lora = Lora({
 export const metadata: Metadata = {
   title: "unClaw",
   description: "Personal AI Platform",
+  // iOS ignores the manifest's `display: standalone`; this is what makes the
+  // app launch full-screen (no Safari chrome) once added to the home screen.
+  // statusBarStyle "default" keeps content below the status bar — safe-area
+  // insets are already handled, but this avoids any edge-to-edge surprises.
+  appleWebApp: {
+    capable: true,
+    title: "unClaw",
+    statusBarStyle: "default",
+  },
   icons: {
     icon: [
       { url: "/favicon.png", sizes: "32x32", type: "image/png" },

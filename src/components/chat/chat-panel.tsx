@@ -681,7 +681,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
           <div
             ref={scrollRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto pt-16 [scrollbar-gutter:stable]"
+            className="flex-1 overflow-y-auto overscroll-contain pt-16 [scrollbar-gutter:stable]"
             // Bottom room tracks the composer's live height (+a little air, +the
             // keyboard inset) so the last message always clears the overlaid
             // composer — even after attachments grow it.
