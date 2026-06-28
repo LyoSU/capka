@@ -153,7 +153,10 @@ const server = createServer(async (req, res) => {
   const method = req.method;
 
   if (method === "GET" && path === "/health") {
-    return jsonRes(res, ready ? 200 : 503, { ok: true, ready, sessions: liveCount });
+    // `allowNetwork` lets the platform's admin UI tell the truth about egress:
+    // the in-app toggle only sets intent, but THIS deployment-level kill-switch
+    // decides whether a bridge request actually gets network (see /sessions).
+    return jsonRes(res, ready ? 200 : 503, { ok: true, ready, sessions: liveCount, allowNetwork: ALLOW_NETWORK });
   }
 
   // Boot-gate: 503 everything until reconcile finished.

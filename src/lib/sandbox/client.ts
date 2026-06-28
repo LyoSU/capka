@@ -71,6 +71,25 @@ async function request(path: string, method: string, body?: unknown) {
   return data;
 }
 
+// ── Deployment capabilities ──────────────────────────────────
+
+/** Deployment-level egress kill-switch, read from the controller (the single
+ *  source of truth — SANDBOX_ALLOW_NETWORK lives on the controller, not here).
+ *  Returns null when the controller is unreachable: callers must treat that as
+ *  "unknown", not as "blocked", so a transient outage never mislabels the UI. */
+export async function getSandboxAllowNetwork(): Promise<boolean | null> {
+  try {
+    const res = await sandboxFetch(`${CONTROLLER_URL}/health`, {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(5_000),
+    });
+    const data = await res.json().catch(() => null);
+    return typeof data?.allowNetwork === "boolean" ? data.allowNetwork : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Session lifecycle ────────────────────────────────────────
 
 export async function createSession(sessionId: string, userId: string, networkMode?: string) {

@@ -1052,7 +1052,8 @@
       "sandboxNet": "Internet access",
       "sandboxNetHint": "Let sandboxed code and local (stdio) connectors reach the public internet. Tools that self-install on first use (e.g. npx) need this. Private/internal ranges and cloud metadata stay blocked.",
       "netEnabled": "Internet access on for the sandbox.",
-      "netDisabled": "Internet access off for the sandbox."
+      "netDisabled": "Internet access off for the sandbox.",
+      "sandboxNetBlocked": "Blocked at the deployment level — set SANDBOX_ALLOW_NETWORK=true and restart the sandbox controller to enable this."
     }
   },
   "setup": {

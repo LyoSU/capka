@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -16,6 +17,19 @@ export default function SecuritySettingsPage() {
   const sandbox = useSetting("sandbox_enabled", "false");
   const sandboxNet = useSetting("sandbox_network", "none");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
+
+  // Deployment-level egress kill-switch, read from the controller. When false,
+  // the in-app toggle has no effect (the controller downgrades bridge→none), so
+  // we disable it and say why instead of letting the switch silently lie.
+  // null = controller unreachable (unknown) → leave the toggle interactive.
+  const [allowNetwork, setAllowNetwork] = useState<boolean | null>(null);
+  useEffect(() => {
+    fetch("/api/settings/sandbox-capabilities")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setAllowNetwork(d?.allowNetwork ?? null))
+      .catch(() => {});
+  }, []);
+  const netBlocked = allowNetwork === false;
 
   const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading;
 
@@ -100,8 +114,11 @@ export default function SecuritySettingsPage() {
         <div className="pr-4">
           <p className="text-sm font-medium">{t("sandboxNet")}</p>
           <p className="text-xs text-muted-foreground">{t("sandboxNetHint")}</p>
+          {netBlocked && (
+            <p className="mt-1.5 text-xs font-medium text-amber-600 dark:text-amber-500">{t("sandboxNetBlocked")}</p>
+          )}
         </div>
-        <Switch checked={sandboxNet.value === "bridge"} onCheckedChange={toggleNet} />
+        <Switch checked={sandboxNet.value === "bridge"} onCheckedChange={toggleNet} disabled={netBlocked} />
       </div>
 
       <Separator />
