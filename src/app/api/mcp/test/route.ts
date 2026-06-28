@@ -1,7 +1,8 @@
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireActive } from "@/lib/auth";
 import { probeConfig } from "@/lib/mcp/health";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
+import { take } from "@/lib/rate-limit";
 
 export type AuthMethod = "none" | "token" | "oauth";
 
@@ -31,7 +32,11 @@ function nameFromHost(url: string): string | undefined {
  *     open (`none`); a 401/403 means it wants a key (`token`). A token in the request
  *     (the explicit "Test" button) that connects confirms `token`. */
 export const POST = apiHandler(async (req: Request) => {
-  await requireSession();
+  // requireActive (not session): probing connects out to an arbitrary URL, so a
+  // pending/rejected account must not be able to use it.
+  const { userId } = await requireActive();
+  const rl = take(`mcp-test:${userId}`);
+  if (!rl.ok) return Response.json({ error: "Too many requests — please slow down." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   const { url, headers } = await req.json();
   if (typeof url !== "string" || !url.trim()) {
     return Response.json({ error: "url required" }, { status: 400 });

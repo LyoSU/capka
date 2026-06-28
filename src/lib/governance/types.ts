@@ -27,6 +27,7 @@ export interface PolicyMatcher {
 export type AuditAction =
   | "plugin.install" | "plugin.uninstall" | "plugin.update" | "plugin.enable" | "plugin.disable"
   | "connector.add" | "connector.remove" | "connector.enable" | "connector.disable"
+  | "skill.add"
   | "policy.set" | "policy.clear"
   // Sensitive admin/security actions — privilege, account lifecycle, auth config,
   // and master-key exposure all belong in the tamper-evident trail for companies.

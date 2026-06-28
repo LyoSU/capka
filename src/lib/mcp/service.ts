@@ -235,3 +235,19 @@ export async function setEnabled(id: string, enabled: boolean): Promise<void> {
 export async function deleteServer(id: string): Promise<void> {
   await db.delete(mcpServers).where(eq(mcpServers.id, id));
 }
+
+/** Scope of a connector by id, or null if it doesn't exist. Lets the admin route
+ *  refuse (404) to manage a member's PERSONAL (`user`-scope) connector, mirroring
+ *  the skills route's getSkillMeta scope guard. */
+export async function getServerScope(id: string): Promise<McpScope | null> {
+  const row = (await db.select({ scope: mcpServers.scope }).from(mcpServers).where(eq(mcpServers.id, id)).limit(1))[0];
+  return row ? (row.scope as McpScope) : null;
+}
+
+/** True if a real project with this id exists — the admin connector route trusts a
+ *  projectId from the request body, so it must verify the target before attaching a
+ *  connector (with secret headers/env) to it. */
+export async function projectExists(projectId: string): Promise<boolean> {
+  const row = (await db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).limit(1))[0];
+  return !!row;
+}

@@ -1,14 +1,23 @@
 import { apiHandler, requireAdmin } from "@/lib/auth";
-import { upsertServer, upsertStdioServer, setEnabled, deleteServer } from "@/lib/mcp/service";
+import { upsertServer, upsertStdioServer, setEnabled, deleteServer, getServerScope, projectExists } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { saveOAuthClientFromInput } from "@/lib/mcp/oauth/admin-client";
 import { audit } from "@/lib/governance/audit";
+import { take } from "@/lib/rate-limit";
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireAdmin();
+  const rl = take(`admin-mcp:${userId}`);
+  if (!rl.ok) return Response.json({ error: "Too many requests — please slow down." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   const body = await req.json();
   const { name, url, headers, scope, projectId, oauthClientId, oauthClientSecret, command, args, env, authKind: pick } = body;
   const s = scope === "project" ? "project" : "system";
+  // A project-scoped connector carries secret headers/env; never attach it to a
+  // projectId the request invented — verify the project exists first.
+  if (s === "project") {
+    if (typeof projectId !== "string" || !projectId.trim()) return Response.json({ error: "projectId required" }, { status: 400 });
+    if (!(await projectExists(projectId))) return Response.json({ error: "Unknown project" }, { status: 404 });
+  }
 
   // Local (stdio) connector — admin only; runs inside the session sandbox.
   if (typeof command === "string" && command.trim()) {
@@ -44,6 +53,10 @@ export const PATCH = apiHandler(async (req: Request) => {
   if (typeof id !== "string" || typeof enabled !== "boolean") {
     return Response.json({ error: "Bad request" }, { status: 400 });
   }
+  // This route manages shared (system/project) connectors only; a member's
+  // PERSONAL (user-scope) connector is owner-managed via /api/mcp.
+  const scope = await getServerScope(id);
+  if (!scope || scope === "user") return Response.json({ error: "Not found" }, { status: 404 });
   await setEnabled(id, enabled);
   await audit({ actorId: userId, action: enabled ? "connector.enable" : "connector.disable", targetType: "connector", targetKey: id });
   return Response.json({ ok: true });
@@ -53,6 +66,8 @@ export const DELETE = apiHandler(async (req: Request) => {
   const { userId } = await requireAdmin();
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return Response.json({ error: "id required" }, { status: 400 });
+  const scope = await getServerScope(id);
+  if (!scope || scope === "user") return Response.json({ error: "Not found" }, { status: 404 });
   await deleteServer(id);
   await audit({ actorId: userId, action: "connector.remove", targetType: "connector", targetKey: id });
   return Response.json({ ok: true });

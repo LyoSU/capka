@@ -55,16 +55,18 @@ export const POST = apiHandler(async (req: Request) => {
  * it on for everyone else (admins manage the global flag via /api/admin/skills).
  */
 export const PATCH = apiHandler(async (req: Request) => {
-  const { userId } = await requireSession();
+  const { userId, role } = await requireSession();
   const { id, enabled } = await req.json();
   if (typeof id !== "string" || typeof enabled !== "boolean") {
     return Response.json({ error: "Bad request" }, { status: 400 });
   }
-  const skill = await getSkillMeta(id);
+  // Only let the caller toggle a skill they can actually see/use. An unknown id
+  // and a shared skill the caller has no access to return the SAME not-found, so
+  // this can't be used to enumerate skill ids by probing.
+  const skill = (await listManagedSkills(userId, role === "admin")).find((s) => s.id === id);
   if (!skill) return Response.json({ error: "Not found" }, { status: 404 });
 
-  if (skill.scope === "user") {
-    if (skill.userId !== userId) return Response.json({ error: "Not yours" }, { status: 404 });
+  if (skill.mine) {
     await setSkillEnabled(id, enabled);
   } else {
     // Shared skill: mute/unmute for this user only (enabled=false → muted).

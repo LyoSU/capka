@@ -7,6 +7,7 @@ import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
 import { recordConnectError } from "@/lib/mcp/connect-errors";
 import { errorText } from "@/lib/errors/message";
+import { take } from "@/lib/rate-limit";
 
 /** Begin the OAuth sign-in for a connector: discover + (DCR) + PKCE, then 302 the
  *  user's browser to the provider's authorization page. On any failure we bounce
@@ -22,6 +23,9 @@ export async function GET(req: Request) {
   } catch {
     return Response.redirect(`${base}/login`, 302);
   }
+  // This kicks off outbound discovery/DCR against the connector URL — throttle so
+  // it can't be driven in a loop.
+  if (!take(`mcp-oauth:${userId}`).ok) return settings("?error=oauth");
   const serverId = new URL(req.url).searchParams.get("serverId");
   try {
     if (!serverId) return settings("?error=oauth");

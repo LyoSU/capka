@@ -2,9 +2,13 @@ import { requireAdmin, apiHandler } from "@/lib/auth";
 import { ingestSkillZip, MAX_SKILL_ZIP_BYTES, SkillZipError } from "@/lib/skills/ingest-zip";
 import { deleteSkill, getSkillMeta, setSkillEnabled } from "@/lib/skills/service";
 import { SkillParseError, type SkillScope } from "@/lib/skills/types";
+import { audit } from "@/lib/governance/audit";
+import { take } from "@/lib/rate-limit";
 
 export const POST = apiHandler(async (req: Request) => {
-  await requireAdmin();
+  const { userId } = await requireAdmin();
+  const rl = take(`admin-skills:${userId}`);
+  if (!rl.ok) return Response.json({ error: "Too many requests — please slow down." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   const form = await req.formData();
   const file = form.get("file");
   const scope = (form.get("scope") as string) || "system";
@@ -21,6 +25,8 @@ export const POST = apiHandler(async (req: Request) => {
       projectId: null,
       source: "manual",
     });
+    // A shared skill can carry executable content — record who added what.
+    await audit({ actorId: userId, action: "skill.add", targetType: "skill", targetKey: res.name, detail: { scope } });
     return Response.json({ ok: true, ...res });
   } catch (e) {
     if (e instanceof SkillParseError || e instanceof SkillZipError) {

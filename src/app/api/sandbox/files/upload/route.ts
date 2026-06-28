@@ -3,9 +3,12 @@ import { uploadFile } from "@/lib/sandbox/client";
 import { requireOwned } from "@/lib/db/ownership";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { chats } from "@/lib/db/schema";
+import { take } from "@/lib/rate-limit";
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
+  const rl = take(`sandbox-upload:${userId}`);
+  if (!rl.ok) return Response.json({ error: "Too many uploads — please slow down." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   const formData = await req.formData();
   const chatId = formData.get("chatId") as string;
   const path = (formData.get("path") as string) || ".";
