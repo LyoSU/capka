@@ -1,8 +1,55 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { realtime } from "../realtime";
 
 // Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run realtime.integration
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
+
+// Count every pg Client opened, so the C6 test can assert single-flight. Hoisted
+// so it applies to the statically-imported realtime singleton too — keeping this
+// a pure unit test (no live DB).
+const opened = vi.hoisted(() => ({ count: 0 }));
+// vi.mock is hoisted to the top of the module regardless of where it sits, so the
+// stub-vs-real choice has to live INSIDE the factory: the opt-in integration block
+// needs the real pg (live LISTEN/NOTIFY), the unit test below needs the stub.
+vi.mock("pg", async (importOriginal) => {
+  if (process.env.RUN_INTEGRATION) return importOriginal();
+  return {
+    // db/index.ts opens a Pool at import; a no-op stand-in keeps it lazy.
+    Pool: class {},
+    Client: class {
+      constructor() {
+        opened.count++;
+      }
+      on() {}
+      async connect() {
+        // A real connect isn't instant; the await lets a second concurrent
+        // publish reach the guard and (correctly) reuse the in-flight connect.
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      async query() {}
+    },
+  };
+});
+
+// C6 regression: two concurrent publishes when pub === null must open exactly
+// one Client (the single-flight guard), never leak a clobbered second one.
+describe("realtime.publish connection single-flight (C6)", () => {
+  beforeEach(() => {
+    opened.count = 0;
+  });
+
+  it("opens exactly one client under concurrent publishes", async () => {
+    await Promise.all([
+      realtime.publish("user:race", { n: 1 }),
+      realtime.publish("user:race", { n: 2 }),
+      realtime.publish("user:race", { n: 3 }),
+    ]);
+    expect(opened.count).toBe(1);
+    // A subsequent publish reuses the same connected client.
+    await realtime.publish("user:race", { n: 4 });
+    expect(opened.count).toBe(1);
+  });
+});
 
 run("realtime LISTEN/NOTIFY round-trip", () => {
   it("delivers a published event to a subscriber", async () => {

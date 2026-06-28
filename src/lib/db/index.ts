@@ -9,9 +9,12 @@ export const DATABASE_URL =
 // (FOR UPDATE SKIP LOCKED, lease math) so we don't open redundant connections.
 // Bound the pool explicitly — API routes and the in-process worker share it, so
 // an unbounded default could exhaust Postgres connections under load.
+// Default sized for the worker: WORKER_MAX_CONCURRENCY (default 3) tasks each
+// burst several parallel queries, and API routes draw from the same pool — 10
+// starved them, so the floor is 20. Raise PG_POOL_MAX alongside concurrency.
 export const pool = new Pool({
   connectionString: DATABASE_URL,
-  max: Number(process.env.PG_POOL_MAX) || 10,
+  max: Number(process.env.PG_POOL_MAX) || 20,
   idleTimeoutMillis: 30_000,
 });
 

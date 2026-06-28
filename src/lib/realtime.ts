@@ -23,6 +23,7 @@ class Realtime {
   private sub: Client | null = null;
   private pub: Client | null = null;
   private subConnecting: Promise<void> | null = null;
+  private pubConnecting: Promise<Client> | null = null;
   private chans = new Map<string, Set<Cb>>();
   private reconnectDelay = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -116,8 +117,14 @@ class Realtime {
     };
   }
 
-  async publish(channel: string, data: unknown): Promise<void> {
-    if (!this.pub) {
+  private async ensurePub(): Promise<Client> {
+    if (this.pub) return this.pub;
+    // Single-flight the connect: without it, two concurrent publishes each open
+    // their own Client and the second clobbers `this.pub`, leaking the first
+    // (its error/end guards key on `this.pub === client`, now false, so it's
+    // never .end()ed). Concurrent callers await the same in-flight connect.
+    if (this.pubConnecting) return this.pubConnecting;
+    this.pubConnecting = (async () => {
       const client = new Client({ connectionString: DATABASE_URL });
       // Drop the handle on error/end so the next publish lazily reconnects.
       client.on("error", (err) => {
@@ -129,7 +136,17 @@ class Realtime {
       });
       await client.connect();
       this.pub = client;
+      return client;
+    })();
+    try {
+      return await this.pubConnecting;
+    } finally {
+      this.pubConnecting = null;
     }
+  }
+
+  async publish(channel: string, data: unknown): Promise<void> {
+    const pub = await this.ensurePub();
     let payload = JSON.stringify(data ?? {});
     if (Buffer.byteLength(payload) > NOTIFY_LIMIT) {
       // Too big for NOTIFY — send a marker so the client re-reads from the DB.
@@ -151,7 +168,7 @@ class Realtime {
         _truncated: true,
       });
     }
-    await this.pub.query("SELECT pg_notify($1, $2)", [channelName(channel), payload]);
+    await pub.query("SELECT pg_notify($1, $2)", [channelName(channel), payload]);
   }
 }
 

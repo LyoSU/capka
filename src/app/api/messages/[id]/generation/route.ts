@@ -21,7 +21,7 @@ import type { MessageMeta } from "@/lib/chat/contracts";
  * see the generation on OpenRouter's side.
  */
 export const GET = apiHandler(async (_req, { params }) => {
-  const { userId } = await requireRole("admin", "user");
+  const { userId, role } = await requireRole("admin", "user");
   const { id } = await params;
 
   // Ownership: the message must live in a chat this user owns. One join, and we
@@ -79,8 +79,14 @@ export const GET = apiHandler(async (_req, { params }) => {
     })
     .filter((r) => r.provider || r.latencyMs != null);
 
+  // Cost + the real provider chain are sensitive on a SHARED admin key: they
+  // expose org spend and routing to ordinary staff. Strip them unless the caller
+  // is an admin (or it's the user's own key, where the spend is theirs to see).
+  // The non-cost technical fields stay for everyone.
+  const showCost = role === "admin" || !config.isShared;
+
   // A curated subset — only fields the popover renders, never the raw upstream
-  // ids or referer. Cost stays admin-gated client-side, like the message cost.
+  // ids or referer.
   return Response.json(
     {
       available: true,
@@ -97,10 +103,14 @@ export const GET = apiHandler(async (_req, { params }) => {
         reasoning: num(data.native_tokens_reasoning),
         cached: num(data.native_tokens_cached),
       },
-      totalCost: num(data.total_cost),
-      upstreamCost: num(data.upstream_inference_cost),
-      isByok: typeof data.is_byok === "boolean" ? data.is_byok : undefined,
-      chain,
+      ...(showCost
+        ? {
+            totalCost: num(data.total_cost),
+            upstreamCost: num(data.upstream_inference_cost),
+            isByok: typeof data.is_byok === "boolean" ? data.is_byok : undefined,
+            chain,
+          }
+        : {}),
     },
     // Per-user, immutable once settled — let the browser keep it for the session.
     { headers: { "Cache-Control": "private, max-age=300" } },
