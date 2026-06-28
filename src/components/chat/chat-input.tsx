@@ -4,7 +4,7 @@ import { useRef, useCallback, useMemo, useEffect, type KeyboardEvent } from "rea
 import { useTranslations } from "next-intl";
 import { ArrowUp, Loader2, Paperclip, RotateCw, Square, X } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsMobile, MOBILE_BREAKPOINT } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { BinaryFileThumb, FileTile, SandboxFileTile, type PreviewFile } from "./file-preview";
 import type { FileRef } from "@/lib/constants";
@@ -100,6 +100,19 @@ export function ChatInput({
   useEffect(() => {
     resize();
   }, [value, resize]);
+
+  // Land the caret in the composer when a chat opens. Desktop: always — the
+  // keyboard is physical, so focus costs nothing. Mobile: only for a fresh chat,
+  // since raising the on-screen keyboard over an existing thread would cover the
+  // conversation the user came to read. We read matchMedia directly rather than
+  // `isMobile`, because the hook reports `false` until its own effect resolves —
+  // so a mount-time `autoFocus` prop would focus on mobile before we knew it was
+  // mobile, popping the keyboard on every open. Keyed on `chatId` so switching
+  // threads re-evaluates.
+  useEffect(() => {
+    const isMobileNow = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches;
+    if (!isMobileNow || isNewChat) textareaRef.current?.focus();
+  }, [chatId, isNewChat]);
 
   // Something is uploading → hold the send until it settles, so we never send a
   // message whose attachment isn't in the sandbox yet.
@@ -210,10 +223,6 @@ export function ChatInput({
             <textarea
               ref={textareaRef}
               value={value}
-              // Land the caret in the composer on mount. On desktop always (ready
-              // to type, no downside); on mobile only for a fresh chat — popping
-              // the keyboard every time you open an existing thread would cover it.
-              autoFocus={!isMobile || isNewChat}
               onChange={(e) => {
                 onChange(e.target.value);
                 resize();
