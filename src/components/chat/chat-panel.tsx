@@ -220,7 +220,13 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     const spacer = spacerRef.current;
     if (!el || !userEl || !end || !spacer) return;
     const contentBelowUser = end.getBoundingClientRect().top - userEl.getBoundingClientRect().top;
-    const h = `${Math.max(0, el.clientHeight - contentBelowUser - TOP_INSET)}px`;
+    // Subtract the composer's own footer (its live height + the 16px of air) —
+    // the scroll area already reserves exactly that as paddingBottom. Counting
+    // only the viewport here would stack the two and leave a composer-tall band
+    // of dead scroll below the turn. (--kb is left in the padding on purpose:
+    // that slack is what lets the list rise above the on-screen keyboard.)
+    const footer = prevComposerH.current + 16;
+    const h = `${Math.max(0, el.clientHeight - footer - contentBelowUser - TOP_INSET)}px`;
     // Only write when it actually changes — a no-op write would re-trigger the
     // ResizeObserver that calls this, risking a feedback loop.
     if (spacer.style.height !== h) spacer.style.height = h;
@@ -289,6 +295,33 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     const onResize = () => { resizeSpacer(); updateScrollDown(); };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Glue the conversation to the rising keyboard. iOS overlays the on-screen
+  // keyboard without resizing layout, so the --kb padding only adds room *below*
+  // — it never lifts what you're looking at, and the newest message slips behind
+  // the keyboard. Mirror the keyboard's height change into scrollTop so the list
+  // moves up in lockstep with it, the way every messenger does: your position
+  // (latest reply, or mid-history) is preserved, just raised above the keyboard —
+  // expected, not a jump. Deferred to a frame so useKeyboardInset's matching
+  // padding bump has committed first; otherwise the scroll would clamp for lack
+  // of room. Android resizes layout instead (inset stays ~0), so this is a no-op.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let prevInset = Math.max(0, window.innerHeight - vv.height);
+    const onResize = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height);
+      const delta = inset - prevInset;
+      prevInset = inset;
+      if (Math.abs(delta) <= 1) return;
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (el) el.scrollTop += delta;
+      });
+    };
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
   }, []);
 
   // As the reply streams in, keep the spacer trimmed to just-enough and refresh
