@@ -219,7 +219,7 @@ export function ChatInput({
             </div>
           )}
 
-          <div className="mx-4 mt-3 mb-1 max-h-52 overflow-y-auto scrollbar-thin">
+          <div className="relative mx-4 mt-3 mb-1 max-h-52 overflow-y-auto scrollbar-thin">
             <textarea
               ref={textareaRef}
               value={value}
@@ -229,10 +229,21 @@ export function ChatInput({
               }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={files.length > 0 ? t("placeholderFiles") : t("placeholder")}
+              aria-label={files.length > 0 ? t("placeholderFiles") : t("placeholder")}
               rows={1}
-              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-base leading-relaxed placeholder:text-muted-foreground focus-visible:outline-none md:text-[15px]"
+              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none md:text-[15px]"
             />
+            {/* Overlay placeholder instead of the native one: a textarea's own
+                placeholder wraps to a second line on a narrow screen and can't be
+                ellipsised. This single-line, truncating span never does. */}
+            {!value && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 top-0 truncate pr-2 text-base leading-relaxed text-muted-foreground md:text-[15px]"
+              >
+                {files.length > 0 ? t("placeholderFiles") : t("placeholder")}
+              </span>
+            )}
           </div>
           <div className="flex items-center justify-between px-3 pb-2.5">
             {/* Attach button */}
