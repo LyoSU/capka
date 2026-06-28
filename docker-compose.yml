@@ -23,6 +23,13 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    # Resource ceilings so one runaway service (memory leak, fork bomb) can't take
+    # the whole host down with it. Defaults are deliberately generous — they cap
+    # true runaway, not normal load — and every value is env-overridable to tune
+    # for the box. (mem_limit/pids_limit apply with `docker compose up`; the swarm
+    # `deploy.resources` block would be ignored here.)
+    mem_limit: ${POSTGRES_MEM_LIMIT:-2g}
+    pids_limit: ${POSTGRES_PIDS_LIMIT:-512}
 
   sandbox:
     build:
@@ -61,6 +68,8 @@ services:
     networks:
       - docker-proxy
     restart: unless-stopped
+    mem_limit: ${SOCKET_PROXY_MEM_LIMIT:-128m}
+    pids_limit: ${SOCKET_PROXY_PIDS_LIMIT:-128}
 
   sandbox-controller:
     build: ./sandbox-controller
@@ -116,6 +125,8 @@ services:
       socket-proxy:
         condition: service_started
     restart: unless-stopped
+    mem_limit: ${CONTROLLER_MEM_LIMIT:-1g}
+    pids_limit: ${CONTROLLER_PIDS_LIMIT:-512}
 
   platform:
     build: .
@@ -134,6 +145,10 @@ services:
       # Public origin. Optional: unset → derived from proxy headers (X-Forwarded-*).
       # Set it (recommended in prod) so the value can't be spoofed via headers.
       - PUBLIC_URL=${PUBLIC_URL:-}
+      # Bootstrap secret for the first-run wizard: only the holder can claim the
+      # admin account, so a stranger who reaches a fresh public deploy first can't
+      # seize it. scripts/up.sh generates and prints one. Setup is locked until set.
+      - SETUP_TOKEN=${SETUP_TOKEN:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -146,6 +161,8 @@ services:
       sandbox-controller:
         condition: service_healthy
     restart: unless-stopped
+    mem_limit: ${PLATFORM_MEM_LIMIT:-4g}
+    pids_limit: ${PLATFORM_PIDS_LIMIT:-1024}
 
 networks:
   # Isolated link between the controller and the socket-proxy. Nothing else joins
