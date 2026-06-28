@@ -44,9 +44,13 @@ function StepBars({ current }: { current: number }) {
 export function SetupWizard({
   initialStep,
   signedIn,
+  setupTokenRequired,
 }: {
   initialStep: SetupStep;
   signedIn: boolean;
+  /** Only true when the operator opted into the SETUP_TOKEN hardening (env). When
+   *  false the wizard shows no token step at all — first-run stays zero-friction. */
+  setupTokenRequired: boolean;
 }) {
   const router = useRouter();
   const t = useTranslations("setup");
@@ -73,6 +77,7 @@ export function SetupWizard({
   const [tokenFromLink, setTokenFromLink] = useState(false);
 
   useEffect(() => {
+    if (!setupTokenRequired) return;
     const fromHash = new URLSearchParams(window.location.hash.slice(1)).get("token");
     const token = fromHash || sessionStorage.getItem("unclaw_setup_token");
     if (!token) return;
@@ -82,7 +87,7 @@ export function SetupWizard({
     if (fromHash) {
       window.history.replaceState({}, "", window.location.pathname + window.location.search);
     }
-  }, []);
+  }, [setupTokenRequired]);
 
   // Step 2 - Provider
   const [provider, setProvider] = useState<ProviderName>("litellm");
@@ -114,7 +119,7 @@ export function SetupWizard({
         return;
       }
     }
-    if (!setupToken.trim()) {
+    if (setupTokenRequired && !setupToken.trim()) {
       toast.error(t("account.setupTokenRequired"));
       return;
     }
@@ -132,7 +137,7 @@ export function SetupWizard({
       const res = await fetch("/api/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ step: "account", setupToken: setupToken.trim() }),
+        body: JSON.stringify({ step: "account", setupToken: setupToken.trim() || undefined }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -292,7 +297,7 @@ export function SetupWizard({
                       </div>
                     </>
                   )}
-                  {!tokenFromLink && (
+                  {setupTokenRequired && !tokenFromLink && (
                     <div className="space-y-1.5">
                       <Label htmlFor="setupToken">{t("account.setupToken")}</Label>
                       <Input

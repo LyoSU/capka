@@ -10,16 +10,16 @@ import { getAuth } from "@/lib/auth";
 import { PROVIDERS } from "@/lib/providers";
 
 /**
- * The bootstrap secret. Only the operator who holds it (printed by
- * scripts/up.sh, or set in the environment) may claim the admin account on a
- * fresh, possibly internet-reachable instance. Returns false fail-closed when
- * unset — setup stays locked rather than letting the first stranger to reach
- * the box become admin. `null` signals "not configured" so we can give the
- * operator an actionable message without helping an attacker.
+ * Optional bootstrap hardening (advanced, opt-in via the SETUP_TOKEN env var).
+ * When set, claiming the admin account requires presenting it — so a stranger
+ * who races to a fresh, internet-reachable deploy can't seize admin. When UNSET
+ * (the default) first-run is frictionless: whoever runs setup becomes admin,
+ * which is fine for the common local / trusted-network install. Returns true
+ * when no token is configured (gate disabled) or the provided one matches.
  */
-function setupTokenState(provided: unknown): boolean | null {
+function setupTokenOk(provided: unknown): boolean {
   const expected = process.env.SETUP_TOKEN?.trim();
-  if (!expected) return null;
+  if (!expected) return true;
   if (typeof provided !== "string" || !provided) return false;
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);
@@ -36,19 +36,11 @@ export async function POST(req: Request) {
   const { step } = body;
 
   if (step === "account") {
-    // Possession of SETUP_TOKEN is what authorizes becoming admin — not merely
-    // being signed in, and not being first to register. Without it a stranger
-    // who reaches a fresh deploy before the operator could claim the admin
-    // email and lock the operator out. Checked here (the admin-email claim);
-    // the later "complete" step is bound to that email, so it inherits the gate.
-    const tokenOk = setupTokenState(body.setupToken);
-    if (tokenOk === null) {
-      return Response.json(
-        { error: "Setup is locked: SETUP_TOKEN is not configured. Set it (scripts/up.sh generates one) and restart, then enter it here." },
-        { status: 403 },
-      );
-    }
-    if (!tokenOk) {
+    // If the operator opted into the SETUP_TOKEN hardening, claiming admin
+    // requires presenting it (checked here, on the admin-email claim; the later
+    // "complete" step is bound to that email, so it inherits the gate). When no
+    // token is configured this is a no-op and first-run stays frictionless.
+    if (!setupTokenOk(body.setupToken)) {
       return Response.json({ error: "Invalid setup token." }, { status: 403 });
     }
 

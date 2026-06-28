@@ -145,9 +145,9 @@ services:
       # Public origin. Optional: unset → derived from proxy headers (X-Forwarded-*).
       # Set it (recommended in prod) so the value can't be spoofed via headers.
       - PUBLIC_URL=${PUBLIC_URL:-}
-      # Bootstrap secret for the first-run wizard: only the holder can claim the
-      # admin account, so a stranger who reaches a fresh public deploy first can't
-      # seize it. scripts/up.sh generates and prints one. Setup is locked until set.
+      # Optional, opt-in hardening for the first-run wizard. Unset (default) ⇒
+      # frictionless setup. Set it for a public deploy and claiming admin requires
+      # the token, so a stranger can't race you to the setup page. See .env.example.
       - SETUP_TOKEN=${SETUP_TOKEN:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

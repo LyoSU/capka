@@ -17,15 +17,19 @@ export async function getSetupState(): Promise<{
   complete: boolean;
   signedIn: boolean;
   step: SetupStep;
+  /** Whether a SETUP_TOKEN is configured (advanced, opt-in hardening). When unset
+   *  the wizard shows no token step at all — first-run stays zero-friction. */
+  setupTokenRequired: boolean;
 }> {
+  const setupTokenRequired = !!process.env.SETUP_TOKEN?.trim();
   if (await isSetupComplete()) {
-    return { complete: true, signedIn: false, step: "account" };
+    return { complete: true, signedIn: false, step: "account", setupTokenRequired };
   }
 
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
-    return { complete: false, signedIn: false, step: "account" };
+    return { complete: false, signedIn: false, step: "account", setupTokenRequired };
   }
 
   // Admin is claimed when admin_email matches this session — only then is the
@@ -38,5 +42,6 @@ export async function getSetupState(): Promise<{
     complete: false,
     signedIn: true,
     step: resumeStep({ hasSession: true, adminClaimed }),
+    setupTokenRequired,
   };
 }

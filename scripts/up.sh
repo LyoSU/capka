@@ -50,9 +50,9 @@ echo "Ensuring secrets in $ENV_FILE ..."
 ensure_secret POSTGRES_PASSWORD
 ensure_secret CONTROLLER_SECRET
 ensure_secret UNCLAW_MASTER_KEY
-# Bootstrap secret: the first-run wizard requires it to claim the admin account,
-# so a stranger who reaches a fresh public deploy first can't seize it.
-ensure_secret SETUP_TOKEN
+# SETUP_TOKEN is intentionally NOT auto-generated: first-run is frictionless by
+# default. It's an opt-in hardening for public deploys — set it in .env yourself
+# to require it when claiming the admin account (see .env.example).
 
 # Public origin is optional: unset → unClaw derives it from proxy headers. When
 # provided (recommended in production), persist it so the value isn't spoofable.
@@ -89,12 +89,15 @@ else
 fi
 
 echo
-echo "unClaw is starting. Open this link to finish setup:"
-# The link carries the one-time setup token so the operator never has to copy it
-# by hand — the wizard reads it, then strips it. It rides in the URL FRAGMENT
-# (#token=…), which the browser never sends to the server, so it stays out of
-# proxy/access logs and Referer headers. Anyone who can see this console/.env is
-# already trusted; the token only blocks a stranger who races to a fresh public
-# deploy, and it stops working once setup is complete.
-echo "    ${OPEN_URL%/}/setup#token=$(sed -n 's/^SETUP_TOKEN=//p' "$ENV_FILE" | head -n1)"
+# If the operator opted into the SETUP_TOKEN hardening, hand them a ready-to-click
+# link with the token in the URL FRAGMENT (#token=…) — the browser never sends a
+# fragment to the server, so it stays out of proxy/access logs and Referer; the
+# wizard reads it and scrubs it. Otherwise just point at the app (no token step).
+SETUP_TOKEN_VALUE="$(sed -n 's/^SETUP_TOKEN=//p' "$ENV_FILE" | head -n1)"
+if [ "${SETUP_TOKEN_VALUE:-}" != "" ]; then
+  echo "unClaw is starting. Open this link to finish setup:"
+  echo "    ${OPEN_URL%/}/setup#token=$SETUP_TOKEN_VALUE"
+else
+  echo "unClaw is starting. Open $OPEN_URL and finish setup."
+fi
 echo "(First HTTPS request may take ~30s while Caddy provisions the certificate.)"

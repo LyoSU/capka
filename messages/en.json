@@ -1087,7 +1087,7 @@
       "passwordTooShort": "Password must be at least 8 characters",
       "error": "Could not create account. Please try again.",
       "claimTitle": "Claim the admin account",
-      "claimSubtitle": "Enter the setup token to finish becoming the administrator.",
+      "claimSubtitle": "Finish becoming the administrator.",
       "setupToken": "Setup token",
       "setupTokenPlaceholder": "Paste the token from installation",
       "setupTokenHint": "Open the setup link you were given when the server was installed and this fills in by itself — otherwise paste the setup token from that link, or ask whoever set up the server.",
