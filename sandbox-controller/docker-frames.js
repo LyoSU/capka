@@ -12,10 +12,23 @@
  *
  *  Payloads are accumulated as raw bytes and decoded once at the end, so a
  *  multi-byte UTF-8 character split across two frames still decodes correctly. */
-export function createFrameDemux() {
+
+/** Hard ceiling on how many output bytes we KEEP in memory for one command. A
+ *  runaway command (`yes`, an infinite print loop, `cat /dev/zero`) would otherwise
+ *  grow this buffer without bound and OOM the controller — whose prod memory-cgroup
+ *  is tight. Past the ceiling we keep draining the stream (so the exec still ends
+ *  cleanly) but throw the overflow away and flag it. This is the ONE layer where
+ *  "you can't get the rest" is physically true — the bytes never existed in a
+ *  buffer — so the platform surfaces it to the model as a distinct "discarded"
+ *  state, separate from the cosmetic per-result clamp it applies on top. */
+const MAX_EXEC_OUTPUT_BYTES = Number(process.env.MAX_EXEC_OUTPUT_BYTES) || 1_000_000;
+
+export function createFrameDemux(maxBytes = MAX_EXEC_OUTPUT_BYTES) {
   let buf = Buffer.alloc(0);
   const out = [];
   const err = [];
+  let bytes = 0;
+  let truncated = false;
 
   return {
     /** Feed one chunk from the stream's 'data' event. */
@@ -26,9 +39,11 @@ export function createFrameDemux() {
         const size = buf.readUInt32BE(4);
         if (buf.length < 8 + size) break; // wait for the rest of this frame
         const payload = Buffer.from(buf.subarray(8, 8 + size));
+        buf = buf.subarray(8 + size);
+        if (bytes >= maxBytes) { truncated = true; continue; } // drain & drop the overflow
+        bytes += payload.length;
         if (type === 1) out.push(payload);
         else if (type === 2) err.push(payload);
-        buf = buf.subarray(8 + size);
       }
     },
     /** Decode the accumulated stdout/stderr. Call after the stream ends. */
@@ -36,6 +51,7 @@ export function createFrameDemux() {
       return {
         stdout: Buffer.concat(out).toString("utf8"),
         stderr: Buffer.concat(err).toString("utf8"),
+        truncated,
       };
     },
   };

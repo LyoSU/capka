@@ -105,6 +105,9 @@ export async function execCommand(sessionId: string, command: string, timeout?: 
     stdout: string;
     stderr: string;
     exitCode: number;
+    /** True when the controller hit its in-memory output ceiling and discarded
+     *  the overflow at the source — the rest cannot be retrieved by reading more. */
+    truncated?: boolean;
   }>;
 }
 

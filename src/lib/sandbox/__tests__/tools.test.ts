@@ -78,6 +78,80 @@ describe("sandbox tools — workspace-full (quota) recovery", () => {
     const { tools } = await load();
     await expect(tools.execute_bash.execute!({ command: "ls" }, opts)).rejects.toThrow("controller down");
   });
+});
+
+describe("sandbox tools — output truncation safeguards", () => {
+  beforeEach(() => {
+    execCommand.mockReset();
+    execCommand.mockResolvedValue({ stdout: "ok", stderr: "", exitCode: 0 });
+  });
+
+  it("clips an oversized command output to a recoverable 'clip' state with a narrowing hint", async () => {
+    execCommand.mockResolvedValue({ stdout: "A".repeat(200_000), stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "cat big.log" }, opts)) as {
+      output: string; truncated: string;
+    };
+    expect(res.truncated).toBe("clip");
+    expect(res.output.length).toBeLessThan(200_000);
+    expect(res.output).toContain("TRUNCATED");
+    expect(res.output).toContain("read_file"); // actionable recovery advice
+  });
+
+  it("surfaces a controller-side discard as a non-recoverable 'discarded' state", async () => {
+    execCommand.mockResolvedValue({ stdout: "partial output", stderr: "", exitCode: 0, truncated: true });
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "yes" }, opts)) as {
+      output: string; truncated: string;
+    };
+    expect(res.truncated).toBe("discarded");
+    expect(res.output).toContain("DISCARDED"); // tells the model the rest is gone, not paginable
+  });
+
+  it("a normal result reports truncated: none", async () => {
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "echo hi" }, opts)) as { truncated: string };
+    expect(res.truncated).toBe("none");
+  });
+
+  it("read_file reads a bounded window with sed and supports offset paging", async () => {
+    execCommand.mockResolvedValue({ stdout: "a\nb\nc\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    await tools.read_file.execute!({ path: "f.txt", max_lines: 50, offset: 10 }, opts);
+    const cmd = lastCmd();
+    // window starts at line 10, sentinel line at 60, then quits
+    expect(cmd).toBe("sed -n '10,60p;60q' 'f.txt'");
+  });
+
+  it("read_file flags more-to-come and points at the next offset", async () => {
+    // 3 lines returned for a 2-line window → the sentinel proves more follows.
+    execCommand.mockResolvedValue({ stdout: "l1\nl2\nl3\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.read_file.execute!({ path: "f.txt", max_lines: 2 }, opts)) as {
+      content: string; truncated: boolean;
+    };
+    expect(res.truncated).toBe(true);
+    expect(res.content).toContain("offset=3"); // resume point
+    expect(res.content).not.toContain("l3"); // sentinel line not shown
+  });
+
+  it("search_files marks a capped match list instead of silently hiding extras", async () => {
+    execCommand.mockResolvedValue({ stdout: Array.from({ length: 101 }, (_, i) => `m${i}`).join("\n"), stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.search_files.execute!({ pattern: "x" }, opts)) as {
+      matches: string; truncated: boolean;
+    };
+    expect(res.truncated).toBe(true);
+    expect(res.matches).toContain("first 100 matches");
+    expect(res.matches).not.toContain("m100"); // the 101st is dropped from the shown set
+  });
+});
+
+describe("sandbox tools — delete_path", () => {
+  beforeEach(() => {
+    execCommand.mockReset();
+    deleteFile.mockReset();
+  });
 
   it("delete_path frees space via the ungated delete endpoint (handles files and folders)", async () => {
     deleteFile.mockResolvedValue({ ok: true });

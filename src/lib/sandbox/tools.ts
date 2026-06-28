@@ -1,6 +1,36 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { execCommand, deleteFile } from "./client";
+import { clampOutput, DEFAULT_READ_LINES } from "@/lib/tool-output";
+
+/** Recovery hint baked into the truncation marker so the model narrows next time.
+ *  Steers toward grep / redirect-to-file rather than a blind `| head`/`| tail`,
+ *  which silently drops the error lines before the model ever reads them. */
+const NARROW_NOTE =
+  "To get the rest, re-run narrowed: grep for the lines you need, or redirect to a file and page it with read_file(offset). Avoid a blind head/tail — it can hide the error.";
+
+/**
+ * Shape an exec result for the model with a THREE-state truncation signal:
+ *  - "discarded": the controller hit its in-memory ceiling and threw the overflow
+ *    away at the source — the rest is gone, the model must re-run producing less;
+ *  - "clip": the full output existed but we trimmed it for the model — recoverable
+ *    by narrowing/re-running;
+ *  - "none": complete output.
+ * stderr is kept (clamped on its own budget) because it usually holds the error —
+ * it must never be the part that gets dropped when stdout is huge.
+ */
+function execResult(result: { stdout: string; stderr: string; exitCode: number; truncated?: boolean }) {
+  const stdout = clampOutput(result.stdout, { note: NARROW_NOTE });
+  const stderr = clampOutput(result.stderr);
+  let output = [stdout.text, stderr.text].filter(Boolean).join("\n");
+  let truncated: "none" | "clip" | "discarded" = stdout.clipped || stderr.clipped ? "clip" : "none";
+  if (result.truncated) {
+    truncated = "discarded";
+    output +=
+      "\n\n[… unClaw: output exceeded the sandbox limit and was stopped at the source — the rest was DISCARDED and cannot be read. Re-run the command so it produces less output (filter, or redirect to a file).]";
+  }
+  return { output: output || "(no output)", exitCode: result.exitCode, success: result.exitCode === 0, truncated };
+}
 
 /**
  * Create sandbox tools for a chat session.
@@ -39,11 +69,7 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         command: z.string().describe("Bash command to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
       }),
-      execute: async ({ command, timeout }) => {
-        const result = await run(command, timeout);
-        const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-        return { output: output || "(no output)", exitCode: result.exitCode, success: result.exitCode === 0 };
-      },
+      execute: async ({ command, timeout }) => execResult(await run(command, timeout)),
     }),
 
     execute_python: tool({
@@ -62,9 +88,7 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         // editing. Base64 still guards against shell-escaping/delimiter collisions.
         const encoded = Buffer.from(code).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | python3 -`;
-        const result = await run(cmd, timeout);
-        const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-        return { output: output || "(no output)", exitCode: result.exitCode, success: result.exitCode === 0 };
+        return execResult(await run(cmd, timeout));
       },
     }),
 
@@ -81,24 +105,31 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         // execution never depends on writable /tmp. See execute_python above.
         const encoded = Buffer.from(code).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | node --input-type=module`;
-        const result = await run(cmd, timeout);
-        const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-        return { output: output || "(no output)", exitCode: result.exitCode, success: result.exitCode === 0 };
+        return execResult(await run(cmd, timeout));
       },
     }),
 
     read_file: tool({
       description:
         "Read a file from the workspace. Returns file contents. Use for viewing code, configs, " +
-        "logs, CSV data, or any text file. For binary files, use execute_bash with appropriate tools.",
+        "logs, CSV data, or any text file. Reads a bounded window: up to ~" +
+        `${DEFAULT_READ_LINES} lines by default — read only what you need, and page through a big ` +
+        "file with `offset` rather than pulling it all at once. For binary files, use execute_bash.",
       inputSchema: z.object({
         path: z.string().describe("File path relative to /workspace"),
-        max_lines: z.number().optional().describe("Max lines to return (default: all)"),
+        max_lines: z.number().optional().describe(`Max lines to return (default: ${DEFAULT_READ_LINES})`),
+        offset: z.number().optional().describe("1-based line to start from (default: 1) — use to page through a large file"),
       }),
-      execute: async ({ path, max_lines }) => {
+      execute: async ({ path, max_lines, offset }) => {
         const safePath = path.replace(/'/g, "'\\''");
-        const cmd = max_lines ? `head -n ${max_lines} '${safePath}'` : `cat '${safePath}'`;
-        const result = await run(cmd);
+        const start = Math.max(1, offset ?? 1);
+        const count = Math.max(1, max_lines ?? DEFAULT_READ_LINES);
+        // Print [start .. start+count] — one sentinel line past the window so we can
+        // tell whether more follows — then quit so a huge file isn't read to the end.
+        // sed (not `tail|head`) keeps the exit code reflecting a missing file and
+        // sidesteps the head-closes-the-pipe SIGPIPE trap.
+        const last = start + count;
+        const result = await run(`sed -n '${start},${last}p;${last}q' '${safePath}'`);
         if (result.exitCode !== 0) return { error: result.stderr || "File not found", content: null };
         // A NUL byte means this is binary, not text. Returning the raw bytes
         // would (a) feed the model useless mojibake that bloats context and
@@ -113,7 +144,19 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
             content: null,
           };
         }
-        return { content: result.stdout, error: null };
+        // We asked for one line past the window; if it arrived, more of the file
+        // follows and we tell the model exactly where to resume.
+        const body = result.stdout.endsWith("\n") ? result.stdout.slice(0, -1) : result.stdout;
+        const lines = body === "" ? [] : body.split("\n");
+        const more = lines.length > count;
+        const shown = more ? lines.slice(0, count).join("\n") : result.stdout;
+        // Char-only guard for a window of very long lines (the line budget is already met).
+        const guard = clampOutput(shown, { mode: "head", maxLines: count + 1 });
+        if (!more && !guard.clipped) return { content: guard.text, error: null };
+        const note = more
+          ? `\n[… unClaw: showing lines ${start}–${start + count - 1} — more follows. Read the next page: read_file(path, offset=${start + count}). Display limit, not the end of the file.]`
+          : "";
+        return { content: guard.text + note, error: null, truncated: true };
       },
     }),
 
@@ -175,7 +218,11 @@ print('OK')`;
       execute: async ({ path }) => {
         const target = (path || ".").replace(/'/g, "'\\''");
         const result = await run(`ls -la '${target}'`);
-        return { listing: result.stdout, error: result.exitCode !== 0 ? result.stderr : null };
+        const clamped = clampOutput(result.stdout, {
+          mode: "head",
+          note: "Narrow it: pass a subdirectory, or use search_files by name.",
+        });
+        return { listing: clamped.text, error: result.exitCode !== 0 ? result.stderr : null, truncated: clamped.clipped };
       },
     }),
 
@@ -210,8 +257,17 @@ print('OK')`;
         const safePattern = pattern.replace(/'/g, "'\\''");
         const target = (path || ".").replace(/'/g, "'\\''");
         const globFlag = glob ? `--glob '${glob.replace(/'/g, "'\\''")}'` : "";
-        const result = await run(`rg --no-heading -n '${safePattern}' '${target}' ${globFlag} | head -100`);
-        return { matches: result.stdout || "(no matches)", error: result.exitCode > 1 ? result.stderr : null };
+        // One past the cap so we can tell the model whether matches were hidden —
+        // a silent `| head -100` makes it believe there are exactly ≤100 matches.
+        const result = await run(`rg --no-heading -n '${safePattern}' '${target}' ${globFlag} | head -101`);
+        const body = result.stdout.endsWith("\n") ? result.stdout.slice(0, -1) : result.stdout;
+        const all = body === "" ? [] : body.split("\n");
+        const capped = all.length > 100;
+        const matches = (capped ? all.slice(0, 100) : all).join("\n") || "(no matches)";
+        const note = capped
+          ? "\n[… unClaw: showing the first 100 matches — more exist. Narrow the pattern, path, or glob.]"
+          : "";
+        return { matches: matches + note, error: result.exitCode > 1 ? result.stderr : null, truncated: capped };
       },
     }),
   };

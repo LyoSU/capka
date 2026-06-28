@@ -18,16 +18,25 @@ describe("createFrameDemux", () => {
       encodeFrame(2, "err-1 "),
       encodeFrame(1, "out-b"),
     ]);
-    expect(replay(bytes, bytes.length)).toEqual({ stdout: "out-a out-b", stderr: "err-1 " });
+    expect(replay(bytes, bytes.length)).toEqual({ stdout: "out-a out-b", stderr: "err-1 ", truncated: false });
   });
 
   it("reassembles frames split across chunk boundaries (incl. mid-header, 1-byte chunks)", () => {
     const bytes = Buffer.concat([encodeFrame(1, "hello world"), encodeFrame(2, "oops")]);
     // The previous parser dropped the partial frame at a chunk edge; verify byte-
     // by-byte delivery still yields the exact output.
-    expect(replay(bytes, 1)).toEqual({ stdout: "hello world", stderr: "oops" });
-    expect(replay(bytes, 3)).toEqual({ stdout: "hello world", stderr: "oops" });
-    expect(replay(bytes, 7)).toEqual({ stdout: "hello world", stderr: "oops" });
+    expect(replay(bytes, 1)).toEqual({ stdout: "hello world", stderr: "oops", truncated: false });
+    expect(replay(bytes, 3)).toEqual({ stdout: "hello world", stderr: "oops", truncated: false });
+    expect(replay(bytes, 7)).toEqual({ stdout: "hello world", stderr: "oops", truncated: false });
+  });
+
+  it("caps in-memory output and flags it, draining the rest (RAM guard against runaway commands)", () => {
+    const demux = createFrameDemux(50); // tiny ceiling for the test
+    demux.push(encodeFrame(1, "x".repeat(60))); // reaches the ceiling
+    demux.push(encodeFrame(1, "y".repeat(40))); // now over — dropped & flagged
+    const { stdout, truncated } = demux.result();
+    expect(truncated).toBe(true);
+    expect(stdout).toBe("x".repeat(60)); // overflow frame dropped, not appended
   });
 
   it("does not truncate large multi-frame output spanning many chunks", () => {

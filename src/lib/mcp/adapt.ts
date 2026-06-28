@@ -1,4 +1,5 @@
 import { dynamicTool, jsonSchema } from "ai";
+import { clampOutput } from "@/lib/tool-output";
 
 /** Minimal shape we need from an MCP client + tool (avoids SDK type coupling). */
 interface McpToolDef {
@@ -78,18 +79,24 @@ function textOf(result: McpCallResult): string {
  *  text + inline media instead of a JSON envelope. Unknown blocks degrade to text. */
 function toModelContent(result: McpCallResult) {
   const blocks = result.content ?? [];
+  // A chatty connector (a scraper, a DB query over thousands of rows) can return
+  // arbitrarily large text — unbounded, it floods the model's context and is
+  // persisted+re-sent every turn, exactly like an unclamped shell command. Route
+  // text through the same per-result clamp the sandbox tools use. Media blocks
+  // pass through untouched (the model needs the bytes whole).
+  const text = (s: string) => ({ type: "text" as const, text: clampOutput(s).text });
   const parts = blocks.map((b) => {
-    if (b.type === "text" && typeof b.text === "string") return { type: "text" as const, text: b.text };
+    if (b.type === "text" && typeof b.text === "string") return text(b.text);
     if ((b.type === "image" || b.type === "audio") && b.data && b.mimeType) {
       return { type: "media" as const, data: b.data, mediaType: b.mimeType };
     }
     if (b.type === "resource" && b.resource) {
-      if (typeof b.resource.text === "string") return { type: "text" as const, text: b.resource.text };
+      if (typeof b.resource.text === "string") return text(b.resource.text);
       if (b.resource.blob && b.resource.mimeType) {
         return { type: "media" as const, data: b.resource.blob, mediaType: b.resource.mimeType };
       }
     }
-    return { type: "text" as const, text: JSON.stringify(b) };
+    return text(JSON.stringify(b));
   });
   return parts.length ? parts : [{ type: "text" as const, text: "" }];
 }

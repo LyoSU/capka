@@ -101,12 +101,14 @@ export class DockerBackend {
         stream.on("data", (chunk) => demux.push(chunk));
         stream.on("end", async () => {
           clearTimeout(timer);
-          const { stdout, stderr } = demux.result();
+          // The demux already bounds what it keeps (RAM guard) and flags an
+          // overflow as `truncated` — so no post-hoc .slice() is needed here.
+          const { stdout, stderr, truncated } = demux.result();
           try {
             const info = await execObj.inspect();
-            resolve({ stdout: stdout.slice(0, 100_000), stderr: stderr.slice(0, 50_000), exitCode: info.ExitCode });
+            resolve({ stdout, stderr, exitCode: info.ExitCode, truncated });
           } catch {
-            resolve({ stdout: stdout.slice(0, 100_000), stderr: stderr.slice(0, 50_000), exitCode: -1 });
+            resolve({ stdout, stderr, exitCode: -1, truncated });
           }
         });
         stream.on("error", (e) => { clearTimeout(timer); reject(e); });
