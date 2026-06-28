@@ -51,7 +51,9 @@ export const POST = apiHandler(async (req: Request) => {
   if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
   // toSha binds the upgrade to the commit the user reviewed (see previewUpgrade).
   // Required and fail-closed: no blind "pull latest" path that skips the review.
-  if (typeof toSha !== "string" || !toSha) return Response.json({ error: "toSha (reviewed commit) required" }, { status: 400 });
+  // Must be a full 40-hex commit SHA — a branch/tag/"HEAD" would re-dereference to
+  // live upstream HEAD at apply time and defeat the pin (upgradePlugin re-checks).
+  if (typeof toSha !== "string" || !/^[0-9a-f]{40}$/.test(toSha)) return Response.json({ error: "toSha (reviewed commit) must be a full 40-character commit SHA" }, { status: 400 });
   if (!(await canManage(installId, userId, role === "admin"))) return Response.json({ error: "Not allowed" }, { status: 403 });
   const manifest = await upgradePlugin(installId, toSha);
   await audit({ actorId: userId, action: "plugin.update", targetType: "plugin", targetKey: installId, detail: { skills: manifest.skills.length, connectors: manifest.connectors.length } });
