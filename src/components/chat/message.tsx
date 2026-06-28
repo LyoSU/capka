@@ -6,6 +6,7 @@ import {
 import { ModelPicker } from "@/components/chat/model-picker";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Markdown } from "@/components/chat/markdown";
 import { haptic } from "@/lib/haptics";
 import { useLongPress } from "@/hooks/use-long-press";
@@ -655,24 +656,12 @@ function UserBubble({
   const [draft, setDraft] = useState(text);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // The edit/fork actions sit hidden until hover on the web; on touch there's no
-  // hover, so a long-press reveals them. A following tap or scroll hides them.
-  const [revealed, setRevealed] = useState(false);
-  const longPress = useLongPress(() => { setRevealed(true); haptic("tap"); });
-  useEffect(() => {
-    if (!revealed) return;
-    const close = () => setRevealed(false);
-    // Defer arming so the press that opened it doesn't immediately close it.
-    const id = setTimeout(() => {
-      document.addEventListener("pointerdown", close, { once: true, capture: true });
-      window.addEventListener("scroll", close, { once: true, capture: true });
-    }, 0);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener("pointerdown", close, true);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [revealed]);
+  // The edit/fork actions sit hidden until hover on the web; touch has no hover,
+  // so a long-press opens a labelled action menu anchored to the message (Base UI
+  // handles the dismiss-on-outside-tap and focus). Clearer than silently
+  // un-hiding the tiny icon row.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const longPress = useLongPress(() => { setMenuOpen(true); haptic("tap"); });
 
   useEffect(() => {
     if (!editing) return;
@@ -719,46 +708,74 @@ function UserBubble({
   return (
     <div
       className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4 pointer-coarse:select-none"
-      data-revealed={revealed || undefined}
       {...longPress}
     >
-      <div className="flex max-w-[75%] flex-col items-end lg:max-w-[65%] [-webkit-touch-callout:none]">
-        {hasFiles && <MessageAttachments chatId={chatId!} files={attachedFiles!} />}
-        {/* When the turn is files-only, the thumbnails are the content — skip the
-            empty "…" bubble. */}
-        {(text || !hasFiles) && (
-          <div className="inline-block whitespace-pre-wrap break-words rounded-2xl border border-border bg-card text-card-foreground px-5 py-3 text-[15px] shadow-sm">
-            {text || "…"}
-          </div>
-        )}
-        <div className="mt-1 flex items-center gap-1">
-          {onSwitchBranch && (
-            <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} />
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <div className="relative flex max-w-[75%] flex-col items-end lg:max-w-[65%] [-webkit-touch-callout:none]">
+          {/* Invisible anchor for the long-press menu. pointer-events-none so it
+              never opens on a normal tap — only the long-press (setMenuOpen). */}
+          <DropdownMenuTrigger
+            aria-hidden
+            tabIndex={-1}
+            render={<span />}
+            className="pointer-events-none absolute right-2 bottom-1 h-0 w-0"
+          />
+          {hasFiles && <MessageAttachments chatId={chatId!} files={attachedFiles!} />}
+          {/* When the turn is files-only, the thumbnails are the content — skip the
+              empty "…" bubble. */}
+          {(text || !hasFiles) && (
+            <div className="inline-block whitespace-pre-wrap break-words rounded-2xl border border-border bg-card text-card-foreground px-5 py-3 text-[15px] shadow-sm">
+              {text || "…"}
+            </div>
           )}
+          <div className="mt-1 flex items-center gap-1">
+            {onSwitchBranch && (
+              <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} />
+            )}
+            {/* Inline icons are the desktop (hover) affordance; touch uses the
+                long-press menu instead, so these stay hover-only. */}
+            {text && (
+              <span className="opacity-0 transition group-hover/msg:opacity-100">
+                <CopyButton text={text} />
+              </span>
+            )}
+            {onEdit && text && (
+              <button
+                type="button"
+                onClick={() => { setDraft(text); setEditing(true); }}
+                title={tMsg("edit")}
+                aria-label={tMsg("edit")}
+                className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground opacity-0 transition hover:bg-accent/50 hover:text-foreground group-hover/msg:opacity-100"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {onFork && (
+              <span className="opacity-0 transition group-hover/msg:opacity-100">
+                <ForkButton messageId={messageId} onFork={onFork} />
+              </span>
+            )}
+            <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
+          </div>
+        </div>
+        <DropdownMenuContent align="end" side="bottom" className="min-w-40">
           {text && (
-            <span className="opacity-0 transition group-hover/msg:opacity-100 group-data-[revealed]/msg:opacity-100">
-              <CopyButton text={text} />
-            </span>
+            <DropdownMenuItem onClick={() => { navigator.clipboard?.writeText(text).catch(() => {}); haptic("tap"); }}>
+              <Copy /> {tMsg("copy")}
+            </DropdownMenuItem>
           )}
           {onEdit && text && (
-            <button
-              type="button"
-              onClick={() => { setDraft(text); setEditing(true); }}
-              title={tMsg("edit")}
-              aria-label={tMsg("edit")}
-              className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground opacity-0 transition hover:bg-accent/50 hover:text-foreground group-hover/msg:opacity-100 group-data-[revealed]/msg:opacity-100"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
+            <DropdownMenuItem onClick={() => { setDraft(text); setEditing(true); }}>
+              <Pencil /> {tMsg("edit")}
+            </DropdownMenuItem>
           )}
           {onFork && (
-            <span className="opacity-0 transition group-hover/msg:opacity-100 group-data-[revealed]/msg:opacity-100">
-              <ForkButton messageId={messageId} onFork={onFork} />
-            </span>
+            <DropdownMenuItem onClick={() => onFork(messageId)}>
+              <GitBranch /> {tMsg("fork")}
+            </DropdownMenuItem>
           )}
-          <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
-        </div>
-      </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
