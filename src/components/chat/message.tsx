@@ -567,7 +567,7 @@ function BranchSwitcher({
         disabled={index <= 0}
         title={t("prevVersion")}
         aria-label={t("prevVersion")}
-        className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+        className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <ChevronLeft className="h-3.5 w-3.5" />
       </button>
@@ -578,7 +578,7 @@ function BranchSwitcher({
         disabled={index >= count - 1}
         title={t("nextVersion")}
         aria-label={t("nextVersion")}
-        className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+        className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <ChevronRight className="h-3.5 w-3.5" />
       </button>

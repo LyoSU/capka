@@ -153,7 +153,7 @@ export function ChatInput({
     <button
       type="button"
       onClick={() => onRemoveFile(af.id)}
-      className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition hover:bg-foreground/80"
+      className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition before:absolute before:-inset-2.5 before:content-[''] hover:bg-foreground/80"
       aria-label={t("remove", { name: af.name })}
     >
       <X className="h-3 w-3" />

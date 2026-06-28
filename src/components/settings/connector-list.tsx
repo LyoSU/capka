@@ -298,11 +298,13 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
   // connector → a personal mute (/api/mcp), an admin on a shared one → the
   // global flag (/api/admin/mcp).
   const toggle = async (srv: Server, enabled: boolean) => {
-    const prev = servers;
     setServers((s) => s.map((x) => x.id === srv.id ? { ...x, enabled } : x));
     const endpoint = srv.scope === "user" || !isAdmin ? "/api/mcp" : "/api/admin/mcp";
     const res = await fetch(endpoint, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: srv.id, enabled }) });
-    if (!res.ok) { setServers(prev); toast.error(t("toggleFailed")); }
+    // Roll back only this connector's flag on failure — a whole-state snapshot
+    // would clobber any other toggle that resolved while this request was in
+    // flight (rapid toggling of different connectors).
+    if (!res.ok) { setServers((s) => s.map((x) => x.id === srv.id ? { ...x, enabled: !enabled } : x)); toast.error(t("toggleFailed")); }
     else if (enabled) loadHealth();
   };
 
