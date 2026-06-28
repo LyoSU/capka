@@ -114,19 +114,30 @@ export interface RegistrationDecision {
 }
 
 /**
- * Decide what happens when a Telegram identity that maps to NO existing user
- * tries to sign in. The very first account on a fresh instance is always the
- * admin (bootstrap), regardless of mode — someone has to be able to finish
- * setup. After that, the admin-chosen mode governs:
+ * Decide what happens when an identity that maps to NO existing user tries to
+ * sign in (Telegram OAuth callback or email sign-up).
+ *
+ * Registration NEVER grants admin. Admin is a separate, deliberate act: the
+ * operator proves possession of the boot-generated SETUP_TOKEN in the first-run
+ * wizard, which is the ONLY thing that promotes an account (see
+ * /api/setup → step "account"/"complete"). Tying admin to "first account to
+ * register" was an account-takeover vector on an internet-reachable fresh
+ * deploy — a stranger who raced to register became admin.
+ *
+ * Before setup completes the instance has no admin and no working provider, so
+ * sign-up is simply open (active, plain users) regardless of mode — that lets
+ * the real operator create the bootstrap account (and shrugs off a squatter,
+ * who only ever gets a powerless account). After setup, the admin-chosen mode
+ * governs:
  *   - open:     created active immediately
  *   - approval: created but parked as pending until an admin approves
  *   - closed:   rejected — only already-known accounts may sign in
  */
 export function resolveRegistration(opts: {
   mode: RegistrationMode;
-  isFirstUser: boolean;
+  setupDone: boolean;
 }): RegistrationDecision {
-  if (opts.isFirstUser) return { allow: true, role: "admin", status: "active" };
+  if (!opts.setupDone) return { allow: true, role: "user", status: "active" };
   switch (opts.mode) {
     case "open":
       return { allow: true, role: "user", status: "active" };

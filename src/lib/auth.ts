@@ -7,7 +7,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "./db";
 import * as schema from "./db/schema";
-import { getMasterKey, getTelegramOidcConfig, getRegistrationMode } from "./settings";
+import { getMasterKey, getTelegramOidcConfig, getRegistrationMode, isSetupComplete } from "./settings";
 import { getPublicUrl } from "./url";
 import {
   decodeTelegramClaims,
@@ -106,16 +106,17 @@ export async function getAuth() {
           // Single registration policy for BOTH new Telegram identities (OAuth
           // callback) and email sign-ups: open → active, approval → pending,
           // closed → rejected (email is also blocked earlier in the [...all]
-          // route; this is defense-in-depth). The first account ever is always
-          // the active admin, regardless of mode (bootstrap).
+          // route; this is defense-in-depth). Registration never confers admin —
+          // before setup completes sign-up is open (plain active users) so the
+          // operator can bootstrap; admin is granted only by the SETUP_TOKEN-gated
+          // /api/setup flow, never by being first to register.
           before: async (user, ctx) => {
             const isOAuth = !!ctx?.path?.includes("callback");
             const isEmailSignup = ctx?.path === "/sign-up/email";
             if (!isOAuth && !isEmailSignup) return;
-            const [first] = await db.select({ id: schema.users.id }).from(schema.users).limit(1);
             const decision = resolveRegistration({
               mode: await getRegistrationMode(),
-              isFirstUser: !first,
+              setupDone: await isSetupComplete(),
             });
             if (!decision.allow) {
               throw new APIError("FORBIDDEN", {

@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { getAuth } from "@/lib/auth";
-import { isSetupComplete } from "@/lib/settings";
+import { getSetting, isSetupComplete } from "@/lib/settings";
 import { resumeStep, type SetupStep } from "@/lib/setup-steps";
 
 // Client-safe primitives (SETUP_STEPS, SetupStep, resumeStep) live in
@@ -28,9 +28,15 @@ export async function getSetupState(): Promise<{
     return { complete: false, signedIn: false, step: "account" };
   }
 
+  // Admin is claimed when admin_email matches this session — only then is the
+  // account step truly done. Otherwise resume there so the operator can submit
+  // the SETUP_TOKEN (a refresh after sign-up but before the token must not skip
+  // the claim and dead-end on the provider step).
+  const adminEmail = await getSetting("admin_email");
+  const adminClaimed = !!adminEmail && adminEmail === session.user.email;
   return {
     complete: false,
     signedIn: true,
-    step: resumeStep({ hasSession: true }),
+    step: resumeStep({ hasSession: true, adminClaimed }),
   };
 }

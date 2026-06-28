@@ -64,18 +64,20 @@ describe("parseRegistrationMode", () => {
 });
 
 describe("resolveRegistration", () => {
-  it("makes the very first account an active admin regardless of mode", () => {
+  it("before setup completes, creates a plain active user (never admin) regardless of mode", () => {
+    // Admin is granted only by the SETUP_TOKEN-gated /api/setup flow — being
+    // first to register must NOT confer admin (account-takeover vector).
     for (const mode of ["open", "approval", "closed"] as const) {
-      expect(resolveRegistration({ mode, isFirstUser: true })).toEqual({
+      expect(resolveRegistration({ mode, setupDone: false })).toEqual({
         allow: true,
-        role: "admin",
+        role: "user",
         status: "active",
       });
     }
   });
 
   it("open mode admits new users immediately as active", () => {
-    expect(resolveRegistration({ mode: "open", isFirstUser: false })).toEqual({
+    expect(resolveRegistration({ mode: "open", setupDone: true })).toEqual({
       allow: true,
       role: "user",
       status: "active",
@@ -83,7 +85,7 @@ describe("resolveRegistration", () => {
   });
 
   it("approval mode parks new users as pending", () => {
-    expect(resolveRegistration({ mode: "approval", isFirstUser: false })).toEqual({
+    expect(resolveRegistration({ mode: "approval", setupDone: true })).toEqual({
       allow: true,
       role: "user",
       status: "pending",
@@ -91,7 +93,7 @@ describe("resolveRegistration", () => {
   });
 
   it("closed mode rejects new identities", () => {
-    expect(resolveRegistration({ mode: "closed", isFirstUser: false }).allow).toBe(false);
+    expect(resolveRegistration({ mode: "closed", setupDone: true }).allow).toBe(false);
   });
 });
 

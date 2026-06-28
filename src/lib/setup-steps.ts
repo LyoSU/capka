@@ -11,11 +11,12 @@ export type SetupStep = (typeof SETUP_STEPS)[number];
 
 /**
  * Pure: where the wizard should resume given the progress we observe on the
- * server. The account is created the moment a session exists (better-auth sets
- * the cookie on sign-up), so a signed-in visitor has already cleared step 1 —
- * re-showing it would only dead-end on a duplicate sign-up. The only remaining
- * step is the provider, which also completes setup.
+ * server. A session means the account row exists, but admin is only granted
+ * once the operator proves the SETUP_TOKEN on the account step — so a signed-in
+ * visitor who hasn't yet claimed admin stays on the account step (which, in
+ * resume mode, asks only for the token, not a fresh sign-up). Once admin is
+ * claimed the only remaining step is the provider, which also completes setup.
  */
-export function resumeStep(o: { hasSession: boolean }): SetupStep {
-  return o.hasSession ? "provider" : "account";
+export function resumeStep(o: { hasSession: boolean; adminClaimed: boolean }): SetupStep {
+  return o.hasSession && o.adminClaimed ? "provider" : "account";
 }

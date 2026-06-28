@@ -1,16 +1,15 @@
 import { Bot } from "grammy";
-import { requireAdmin, requireSession, apiHandler } from "@/lib/auth";
-import { setSetting, isSetupComplete } from "@/lib/settings";
+import { requireAdmin, apiHandler } from "@/lib/auth";
+import { setSetting } from "@/lib/settings";
 import { restartBot } from "@/lib/telegram/bot";
 
 export const POST = apiHandler(async (req: Request) => {
-  // After setup, this is an admin-only action. DURING setup the caller isn't admin
-  // yet — but the route stores a bot token and restarts the bot, so it must never
-  // run fully unauthenticated. Require at least a signed-in session in the setup
-  // window (the bootstrap account); only drop the admin check, not all auth.
-  const setupDone = await isSetupComplete();
-  if (setupDone) await requireAdmin();
-  else await requireSession();
+  // Admin-only, always. Telegram is configured from Settings after onboarding —
+  // it's never part of the first-run wizard — so an admin always exists by the
+  // time this runs. The old "signed-in session is enough during setup" branch
+  // let any registered account swap in its own bot token and hijack the
+  // platform's Telegram channel during the setup window.
+  await requireAdmin();
 
   const { botToken } = await req.json();
   if (!botToken?.trim()) {

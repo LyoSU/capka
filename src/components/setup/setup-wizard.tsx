@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Eye, EyeOff } from "lucide-react";
@@ -60,6 +60,29 @@ export function SetupWizard({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // The boot-generated bootstrap secret (scripts/up.sh / SETUP_TOKEN). Possession
+  // of it — not registration order — is what authorizes the admin account.
+  const [setupToken, setSetupToken] = useState("");
+  // When the token arrives in the setup link (the happy path: up.sh prints a
+  // ready-to-click URL), consume it silently — no field, no copy/paste — so a
+  // non-technical operator never sees a token at all. Persist it for the rest of
+  // the flow (survives a refresh) and scrub it from the address bar so it doesn't
+  // linger in history. The field below appears only as a manual fallback.
+  const [tokenFromLink, setTokenFromLink] = useState(false);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const fromUrl = url.searchParams.get("token");
+    const token = fromUrl || sessionStorage.getItem("unclaw_setup_token");
+    if (!token) return;
+    setSetupToken(token);
+    setTokenFromLink(true);
+    sessionStorage.setItem("unclaw_setup_token", token);
+    if (fromUrl) {
+      url.searchParams.delete("token");
+      window.history.replaceState({}, "", url);
+    }
+  }, []);
 
   // Step 2 - Provider
   const [provider, setProvider] = useState<ProviderName>("litellm");
@@ -79,31 +102,37 @@ export function SetupWizard({
   const [showApiKey, setShowApiKey] = useState(false);
 
   async function handleAccount() {
-    if (!name || !email || !password) {
-      toast.error(t("account.allFieldsRequired"));
-      return;
+    // On resume (already signed in) the account row exists — only the setup
+    // token is still needed to claim admin, so the sign-up fields are skipped.
+    if (!signedIn) {
+      if (!name || !email || !password) {
+        toast.error(t("account.allFieldsRequired"));
+        return;
+      }
+      if (password.length < 8) {
+        toast.error(t("account.passwordTooShort"));
+        return;
+      }
     }
-    if (password.length < 8) {
-      toast.error(t("account.passwordTooShort"));
+    if (!setupToken.trim()) {
+      toast.error(t("account.setupTokenRequired"));
       return;
     }
 
     setLoading(true);
     try {
-      const { error } = await authClient.signUp.email({
-        name,
-        email,
-        password,
-      });
-      if (error) {
-        toast.error(error.message || t("account.error"));
-        return;
+      if (!signedIn) {
+        const { error } = await authClient.signUp.email({ name, email, password });
+        if (error) {
+          toast.error(error.message || t("account.error"));
+          return;
+        }
       }
 
       const res = await fetch("/api/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ step: "account" }),
+        body: JSON.stringify({ step: "account", setupToken: setupToken.trim() }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -186,6 +215,7 @@ export function SetupWizard({
         return;
       }
 
+      sessionStorage.removeItem("unclaw_setup_token");
       router.push("/chat");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("provider.verifyError"));
@@ -217,47 +247,66 @@ export function SetupWizard({
             <div key={step} className="animate-blur-rise mt-6 space-y-6">
               <div className="space-y-1.5">
                 <h1 className="font-display text-[1.75rem] leading-tight tracking-tight text-balance">
-                  {step === 0 ? t("account.title") : t("provider.title")}
+                  {step === 0 ? (signedIn ? t("account.claimTitle") : t("account.title")) : t("provider.title")}
                 </h1>
                 <p className="text-sm leading-relaxed text-muted-foreground text-pretty">
-                  {step === 0 ? t("account.subtitle") : t("provider.subtitle")}
+                  {step === 0 ? (signedIn ? t("account.claimSubtitle") : t("account.subtitle")) : t("provider.subtitle")}
                 </p>
               </div>
 
               {step === 0 && (
                 <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="name">{t("account.name")}</Label>
-                    <Input
-                      id="name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder={t("account.namePlaceholder")}
-                      className={INPUT_CLASS}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="email">{t("account.email")}</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder={t("account.emailPlaceholder")}
-                      className={INPUT_CLASS}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="password">{t("account.password")}</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={t("account.passwordPlaceholder")}
-                      className={INPUT_CLASS}
-                    />
-                  </div>
+                  {!signedIn && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="name">{t("account.name")}</Label>
+                        <Input
+                          id="name"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          placeholder={t("account.namePlaceholder")}
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="email">{t("account.email")}</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder={t("account.emailPlaceholder")}
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="password">{t("account.password")}</Label>
+                        <Input
+                          id="password"
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder={t("account.passwordPlaceholder")}
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {!tokenFromLink && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="setupToken">{t("account.setupToken")}</Label>
+                      <Input
+                        id="setupToken"
+                        value={setupToken}
+                        onChange={(e) => setSetupToken(e.target.value)}
+                        placeholder={t("account.setupTokenPlaceholder")}
+                        className={INPUT_CLASS}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <p className="text-xs leading-snug text-muted-foreground">{t("account.setupTokenHint")}</p>
+                    </div>
+                  )}
                   <Button className="h-11 w-full rounded-xl text-[15px]" onClick={handleAccount} disabled={loading}>
                     {loading ? t("account.submitting") : t("account.submit")}
                   </Button>

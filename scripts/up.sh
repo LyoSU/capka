@@ -50,6 +50,9 @@ echo "Ensuring secrets in $ENV_FILE ..."
 ensure_secret POSTGRES_PASSWORD
 ensure_secret CONTROLLER_SECRET
 ensure_secret UNCLAW_MASTER_KEY
+# Bootstrap secret: the first-run wizard requires it to claim the admin account,
+# so a stranger who reaches a fresh public deploy first can't seize it.
+ensure_secret SETUP_TOKEN
 
 # Public origin is optional: unset → unClaw derives it from proxy headers. When
 # provided (recommended in production), persist it so the value isn't spoofable.
@@ -86,5 +89,10 @@ else
 fi
 
 echo
-echo "unClaw is starting. Open $OPEN_URL and finish setup."
+echo "unClaw is starting. Open this link to finish setup:"
+# The link carries the one-time setup token so the operator never has to copy it
+# by hand — the wizard reads it from the URL, then strips it. Anyone who can see
+# this console/.env is already trusted; the token only blocks a stranger who
+# races to a fresh public deploy. It stops working once setup is complete.
+echo "    ${OPEN_URL%/}/setup?token=$(sed -n 's/^SETUP_TOKEN=//p' "$ENV_FILE" | head -n1)"
 echo "(First HTTPS request may take ~30s while Caddy provisions the certificate.)"
