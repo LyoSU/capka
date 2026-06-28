@@ -433,6 +433,15 @@
    Tailwind v4 / Lightning CSS drops such a top-level rule, so selectors are
    spelled out. */
 
+/* Long, unbreakable tokens — URLs, hashes, file paths — would otherwise jut
+   past the right edge and drag a horizontal scroll across the whole page
+   (worst on mobile). Break them anywhere as a last resort; ordinary words are
+   untouched. Inherited, so it reaches links/inline-code too; pre/code keep
+   their own overflow-x scroll (white-space: pre wins over wrapping). */
+.chat-prose {
+  overflow-wrap: anywhere;
+}
+
 /* Vertical rhythm: even gaps between blocks, flush with the bubble edges. */
 .chat-prose p,
 .chat-prose ul,
