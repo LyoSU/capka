@@ -65,22 +65,22 @@ export function SetupWizard({
   const [setupToken, setSetupToken] = useState("");
   // When the token arrives in the setup link (the happy path: up.sh prints a
   // ready-to-click URL), consume it silently — no field, no copy/paste — so a
-  // non-technical operator never sees a token at all. Persist it for the rest of
-  // the flow (survives a refresh) and scrub it from the address bar so it doesn't
-  // linger in history. The field below appears only as a manual fallback.
+  // non-technical operator never sees a token at all. It rides in the URL
+  // FRAGMENT (#token=…): the browser never sends a fragment to the server, so it
+  // stays out of proxy/access logs and Referer headers. Persist it for the rest
+  // of the flow (survives a refresh) and scrub it from the address bar. The field
+  // below appears only as a manual fallback.
   const [tokenFromLink, setTokenFromLink] = useState(false);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const fromUrl = url.searchParams.get("token");
-    const token = fromUrl || sessionStorage.getItem("unclaw_setup_token");
+    const fromHash = new URLSearchParams(window.location.hash.slice(1)).get("token");
+    const token = fromHash || sessionStorage.getItem("unclaw_setup_token");
     if (!token) return;
     setSetupToken(token);
     setTokenFromLink(true);
     sessionStorage.setItem("unclaw_setup_token", token);
-    if (fromUrl) {
-      url.searchParams.delete("token");
-      window.history.replaceState({}, "", url);
+    if (fromHash) {
+      window.history.replaceState({}, "", window.location.pathname + window.location.search);
     }
   }, []);
 

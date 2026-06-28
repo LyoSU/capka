@@ -91,8 +91,10 @@ fi
 echo
 echo "unClaw is starting. Open this link to finish setup:"
 # The link carries the one-time setup token so the operator never has to copy it
-# by hand — the wizard reads it from the URL, then strips it. Anyone who can see
-# this console/.env is already trusted; the token only blocks a stranger who
-# races to a fresh public deploy. It stops working once setup is complete.
-echo "    ${OPEN_URL%/}/setup?token=$(sed -n 's/^SETUP_TOKEN=//p' "$ENV_FILE" | head -n1)"
+# by hand — the wizard reads it, then strips it. It rides in the URL FRAGMENT
+# (#token=…), which the browser never sends to the server, so it stays out of
+# proxy/access logs and Referer headers. Anyone who can see this console/.env is
+# already trusted; the token only blocks a stranger who races to a fresh public
+# deploy, and it stops working once setup is complete.
+echo "    ${OPEN_URL%/}/setup#token=$(sed -n 's/^SETUP_TOKEN=//p' "$ENV_FILE" | head -n1)"
 echo "(First HTTPS request may take ~30s while Caddy provisions the certificate.)"
