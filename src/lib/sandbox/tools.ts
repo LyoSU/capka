@@ -99,7 +99,7 @@ function captureResult(result: { stdout: string; stderr: string; exitCode: numbe
  * `ensureSession` is the run's shared, memoized session creator: the container is
  * spun up on the FIRST tool call (lazy) and shared with the MCP/skill paths.
  */
-export async function loadSandboxTools(sessionKey: string, ensureSession: () => Promise<unknown>) {
+export async function loadSandboxTools(sessionKey: string, userId: string, ensureSession: () => Promise<unknown>) {
   const run = async (cmd: string, timeout?: number) => {
     await ensureSession();
     try {
@@ -295,7 +295,7 @@ print('OK')`;
       execute: async ({ path }) => {
         await ensureSession();
         try {
-          await deleteFile(sessionKey, path);
+          await deleteFile(sessionKey, path, userId);
           return { success: true, path };
         } catch (e) {
           return { success: false, error: e instanceof Error ? e.message : "Delete failed" };

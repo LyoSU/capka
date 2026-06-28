@@ -19,4 +19,9 @@ describe("assertRuntimeAvailable", () => {
       assertRuntimeAvailable(dockerWith({ runc: {} }), { profile: "dev", runtime: "runc" }),
     ).resolves.toBeUndefined();
   });
+  it("throws (fail-closed) when secure profile is paired with runc", async () => {
+    await expect(
+      assertRuntimeAvailable(dockerWith({ runc: {}, runsc: {} }), { profile: "secure", runtime: "runc" }),
+    ).rejects.toThrow(/secure profile requires the gVisor runtime/);
+  });
 });

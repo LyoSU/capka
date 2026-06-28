@@ -22,24 +22,24 @@ export function workspaceToken(secret, userId, sessionId) {
 /** Decide the owner of a file operation. Pure (no I/O) so it is unit-testable;
  *  the caller fetches `session` from the store and passes it in.
  *
- *  - Live session: its stored OWNER wins — and deliberately so. A project workspace
- *    is shared: a chat is keyed by its projectId, the session is owned by whoever
- *    created it first, and other project members (each authorized upstream by the
- *    platform's requireOwned) browse that same owner's folder. Resolving to the
- *    session owner regardless of the requesting userId is what implements the
- *    "shared project folder". The supplied userId is therefore NOT cross-checked
- *    here; per-user authorization is the platform's responsibility (it holds the
- *    secret and gates every call). Creation already pins single-owner-per-session
- *    (POST /sessions returns 403 on a userId mismatch).
- *  - No live session: there is no owner to trust, so require a valid HMAC token
- *    bound to the supplied userId+sessionId.
+ *  EVERY file op — live session or stopped — must carry the caller's userId and a
+ *  valid HMAC token bound to userId+sessionId. The token proves possession of the
+ *  shared secret AND the user↔session binding; the bearer secret alone is not
+ *  enough. A workspace is keyed by its project and owned by a single user (every
+ *  chat in a project shares that owner), so the verified caller userId must equal
+ *  a live session's stored owner — a token minted for a different user must never
+ *  reach this owner's files just because the container happens to be running.
+ *  Creation already pins single-owner-per-session (POST /sessions returns 403 on a
+ *  userId mismatch), so for a live session this is a redundant but cheap re-check.
  *
  *  Returns { userId, sessionId } | { missing: true } | { forbidden: true }. */
 export function resolveOwnerDecision({ session, sessionId, fallbackUserId, token, secret }) {
-  if (session) return { userId: session.userId, sessionId: session.sessionId };
   if (!fallbackUserId) return { missing: true };
   if (!token || !safeEqual(workspaceToken(secret, fallbackUserId, sessionId), token)) {
     return { forbidden: true };
   }
-  return { userId: sanitize(fallbackUserId), sessionId: sanitize(sessionId) };
+  const userId = sanitize(fallbackUserId);
+  // A live session has a pinned owner: the verified caller must be that owner.
+  if (session && session.userId !== userId) return { forbidden: true };
+  return { userId, sessionId: sanitize(sessionId) };
 }

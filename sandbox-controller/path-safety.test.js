@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, mkdir, writeFile, symlink, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { sanitize, safeJoin, safeRealPath } from "./path-safety.js";
+import { sanitize, safeJoin, safeRealPath, assertNoSymlinkEscape } from "./path-safety.js";
 
 describe("sanitize", () => {
   it("keeps safe id characters", () => {
@@ -104,5 +104,43 @@ describe("safeRealPath", () => {
     // dirs); the deepest existing ancestor is base/sub, which is contained.
     const p = await safeRealPath(base, "sub/a/b/c/new.txt");
     expect(p).toBe(resolve(base, "sub/a/b/c/new.txt"));
+  });
+});
+
+describe("assertNoSymlinkEscape", () => {
+  let base;
+  let root;
+
+  beforeAll(async () => {
+    root = await realpath(await mkdtemp(join(tmpdir(), "unclaw-noescape-")));
+    base = resolve(root, "ws");
+    await mkdir(join(base, "sub"), { recursive: true });
+    await writeFile(join(base, "sub", "ok.txt"), "hi");
+    await mkdir(join(root, "outside"), { recursive: true });
+    // An intermediate component that is a symlink out of the workspace.
+    await symlink(join(root, "outside"), join(base, "link"));
+  });
+
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("passes for a real path whose ancestors are all real dirs", async () => {
+    await expect(assertNoSymlinkEscape(base, resolve(base, "sub/ok.txt"))).resolves.toBeUndefined();
+  });
+
+  it("passes for the base itself", async () => {
+    await expect(assertNoSymlinkEscape(base, base)).resolves.toBeUndefined();
+  });
+
+  it("rejects when an INTERMEDIATE component is a symlink (the TOCTOU swap)", async () => {
+    // `link` is a symlink dir; a leaf under it would let an op escape even though
+    // the leaf doesn't exist yet. The pre-syscall re-walk must catch the symlinked
+    // ancestor.
+    await expect(assertNoSymlinkEscape(base, resolve(base, "link/new.txt"))).rejects.toThrow(/symlink escape/i);
+  });
+
+  it("rejects a path outside the base", async () => {
+    await expect(assertNoSymlinkEscape(base, resolve(root, "outside/x"))).rejects.toThrow(/traversal/i);
   });
 });

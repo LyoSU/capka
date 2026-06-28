@@ -24,8 +24,8 @@ run("project workspaces (controller two-mount)", () => {
   afterAll(async () => {
     // Best-effort cleanup of files + containers.
     await execCommand(PROJECT_KEY, "rm -f /workspace/projfile.txt /shared/globalfile.txt", 5000).catch(() => {});
-    await destroySession(PROJECT_KEY).catch(() => {});
-    await destroySession(SOLO_KEY).catch(() => {});
+    await destroySession(PROJECT_KEY, USER).catch(() => {});
+    await destroySession(SOLO_KEY, USER).catch(() => {});
   });
 
   it("shares /workspace across sessions that use the same project key", async () => {

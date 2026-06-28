@@ -31,8 +31,11 @@ describe("reapStaleWorkspaces", () => {
 });
 
 describe("gcOrphanWorkspaces", () => {
+  // Mirror the real store: get(id) resolves to the row if present.
+  const storeOf = (rows) => ({ all: async () => rows, get: async (id) => rows.find((r) => r.sessionId === id) ?? null });
+
   it("removes orphaned workspaces older than grace", async () => {
-    const store = { all: async () => [{ sessionId: "live" }] };
+    const store = storeOf([{ sessionId: "live" }]);
     const remove = vi.fn();
     const listOnDisk = async () => [
       { userId: "u1", sessionId: "live", mtimeMs: 0 },
@@ -44,9 +47,19 @@ describe("gcOrphanWorkspaces", () => {
   });
 
   it("keeps young orphans within grace", async () => {
-    const store = { all: async () => [] };
+    const store = storeOf([]);
     const remove = vi.fn();
     const listOnDisk = async () => [{ userId: "u1", sessionId: "new", mtimeMs: 9_500 }];
+    await gcOrphanWorkspaces({ store, workspace: { remove }, listOnDisk, graceMs: 1000, now: 10_000 });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("does NOT remove a workspace that became live between the snapshot and the remove (TOCTOU)", async () => {
+    // Snapshot has no row for "racing"; by the time we re-check, get() returns it
+    // (a session was created mid-pass). The re-check must spare its fresh files.
+    const store = { all: async () => [], get: async (id) => (id === "racing" ? { sessionId: "racing" } : null) };
+    const remove = vi.fn();
+    const listOnDisk = async () => [{ userId: "u1", sessionId: "racing", mtimeMs: 0 }];
     await gcOrphanWorkspaces({ store, workspace: { remove }, listOnDisk, graceMs: 1000, now: 10_000 });
     expect(remove).not.toHaveBeenCalled();
   });

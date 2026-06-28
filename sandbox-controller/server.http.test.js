@@ -103,9 +103,21 @@ d("controller HTTP API (lifecycle)", () => {
     expect(rows.filter((s) => !s.handle).length).toBe(1);    // evicted one is STOPPED, not deleted
   });
 
+  it("DELETE refuses teardown without a valid owner token", async () => {
+    expect((await post("sauth", "u2")).status).toBe(201);
+    const noTok = await fetch(`${base}/sessions/sauth`, { method: "DELETE", headers: auth });
+    expect(noTok.status).toBe(400); // missing userId
+    const wrong = await fetch(`${base}/sessions/sauth?userId=u2&token=deadbeef`, { method: "DELETE", headers: auth });
+    expect(wrong.status).toBe(403); // bad token
+    const otherUser = await fetch(`${base}/sessions/sauth?userId=u9&token=${token("u9", "sauth")}`, { method: "DELETE", headers: auth });
+    expect(otherUser.status).toBe(403); // valid token, but not the owner of the live session
+    expect(await store.get("sauth")).not.toBeNull(); // nothing torn down
+  });
+
   it("DELETE tears down the container and wipes the workspace row", async () => {
     expect((await post("sdel", "u2")).status).toBe(201);
-    const del = await fetch(`${base}/sessions/sdel`, { method: "DELETE", headers: auth });
+    const q = new URLSearchParams({ userId: "u2", token: token("u2", "sdel") });
+    const del = await fetch(`${base}/sessions/sdel?${q}`, { method: "DELETE", headers: auth });
     expect(del.status).toBe(200);
     expect(await store.get("sdel")).toBeNull();
   });

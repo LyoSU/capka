@@ -1,5 +1,24 @@
 import { PassThrough } from "node:stream";
 
+// Caller-supplied MCP env is untrusted: a connector spec can come from a user.
+// Drop names that influence how the shell/interpreter loads code, so a spec can't
+// inject a library/preload/script into the in-sandbox process (which runs as the
+// separate `mcp` uid and would otherwise honor e.g. LD_PRELOAD or BASH_ENV).
+const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/i;
+const ENV_BLOCK = new Set([
+  "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+  "BASH_ENV", "ENV", "IFS", "PS4", "SHELLOPTS", "BASHOPTS",
+  "PATH", "PYTHONPATH", "PYTHONSTARTUP", "NODE_OPTIONS", "NODE_PATH", "PERL5LIB", "RUBYOPT", "RUBYLIB",
+]);
+export function sanitizeEnv(env = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (!ENV_NAME.test(k) || k.startsWith("LD_") || k.startsWith("DYLD_") || ENV_BLOCK.has(k.toUpperCase())) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 /**
  * Bridges a stdio MCP server running INSIDE a sandbox container to the platform.
  *
@@ -38,7 +57,7 @@ export function createMcpBridge(docker, { user, rpcTimeoutMs = 60000 } = {}) {
       NPM_CONFIG_FUND: "false",
       UV_CACHE_DIR: `${MCP_HOME}/.uv`,
       XDG_CACHE_HOME: `${MCP_HOME}/.cache`,
-      ...env,
+      ...sanitizeEnv(env),
     }).map(([k, v]) => `${k}=${v}`);
     const exec = await container.exec({
       Cmd: ["bash", "-lc", `mkdir -p ${MCP_HOME} && exec ${shellJoin([command, ...args])}`],

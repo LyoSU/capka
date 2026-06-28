@@ -47,6 +47,10 @@ export async function gcOrphanWorkspaces({ store, workspace, listOnDisk, graceMs
   for (const ws of onDisk) {
     if (live.has(ws.sessionId)) continue;
     if (now - ws.mtimeMs <= graceMs) continue; // young orphan, keep within grace
+    // Re-check liveness right before the destructive remove: the snapshot above is
+    // stale by the time we get here, so a session created/revived mid-pass would
+    // otherwise have its fresh workspace wiped (TOCTOU). A row now means it's owned.
+    if (await store.get(ws.sessionId)) continue;
     await workspace.remove(ws.userId, ws.sessionId);
     removed++;
     log?.("gc", { userId: ws.userId, sessionId: ws.sessionId });

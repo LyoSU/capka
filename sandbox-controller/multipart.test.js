@@ -32,6 +32,11 @@ describe("parseBoundary", () => {
     expect(parseBoundary("application/json")).toBeNull();
     expect(parseBoundary("")).toBeNull();
   });
+  it("returns null for a non-multipart type that merely contains boundary=", () => {
+    // A request that isn't multipart/form-data must not be treated as an upload
+    // just because the header string happens to include a boundary= token.
+    expect(parseBoundary(`application/json; boundary=${B}`)).toBeNull();
+  });
 });
 
 describe("parseMultipart", () => {
@@ -82,6 +87,31 @@ describe("parseMultipart", () => {
 
   it("returns empty result when the boundary never appears in the body", () => {
     const r = parseMultipart(Buffer.from("not multipart at all"), ct);
-    expect(r).toEqual({ fields: {}, files: [] });
+    expect(Object.keys(r.fields)).toHaveLength(0);
+    expect(r.files).toEqual([]);
+  });
+
+  it("ignores prototype-polluting field names and uses a null-prototype object", () => {
+    const body = build([
+      { name: "__proto__", data: "polluted" },
+      { name: "constructor", data: "polluted" },
+      { name: "prototype", data: "polluted" },
+      { name: "path", data: "ok" },
+    ]);
+    const r = parseMultipart(body, ct);
+    expect(r.fields.path).toBe("ok");
+    expect(Object.prototype.hasOwnProperty.call(r.fields, "__proto__")).toBe(false);
+    expect(({}).polluted).toBeUndefined(); // Object.prototype untouched
+    expect(Object.getPrototypeOf(r.fields)).toBeNull();
+  });
+
+  it("drops a text field larger than the per-field cap", () => {
+    const body = build([
+      { name: "path", data: "x".repeat(64 * 1024 + 1) },
+      { name: "file", filename: "a.bin", data: Buffer.from([1]) },
+    ]);
+    const r = parseMultipart(body, ct);
+    expect(r.fields.path).toBeUndefined(); // oversize field skipped
+    expect(r.files).toHaveLength(1); // file content is NOT subject to the field cap
   });
 });

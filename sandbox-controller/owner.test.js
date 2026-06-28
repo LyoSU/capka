@@ -14,17 +14,29 @@ describe("safeEqual", () => {
 describe("resolveOwnerDecision", () => {
   const session = { sessionId: "s1", userId: "alice" };
 
-  it("trusts a live session's owner when no userId is supplied", () => {
+  it("reports missing when no userId is supplied, even for a live session", () => {
+    // A live session no longer skips auth: every op must carry a userId + token.
     expect(resolveOwnerDecision({ session, sessionId: "s1", secret: SECRET }))
+      .toEqual({ missing: true });
+  });
+
+  it("allows a live session's OWNER with a valid token", () => {
+    const token = workspaceToken(SECRET, "alice", "s1");
+    expect(resolveOwnerDecision({ session, sessionId: "s1", fallbackUserId: "alice", token, secret: SECRET }))
       .toEqual({ userId: "alice", sessionId: "s1" });
   });
 
-  it("resolves to the session OWNER even when another (authorized) user asks", () => {
-    // Shared project folder: a project member browses the session owner's workspace.
-    // Per-user authz is the platform's job (requireOwned); the controller trusts it
-    // on the live path. So bob asking for alice's project session resolves to alice.
-    expect(resolveOwnerDecision({ session, sessionId: "s1", fallbackUserId: "bob", secret: SECRET }))
-      .toEqual({ userId: "alice", sessionId: "s1" });
+  it("forbids a live session with no token, even from the owner", () => {
+    expect(resolveOwnerDecision({ session, sessionId: "s1", fallbackUserId: "alice", secret: SECRET }))
+      .toEqual({ forbidden: true });
+  });
+
+  it("forbids a different user on a live session even with a token valid for THEM", () => {
+    // bob holds a token bound to (bob, s1) — valid HMAC — but the live session is
+    // owned by alice. A token minted for another user must never reach her files.
+    const token = workspaceToken(SECRET, "bob", "s1");
+    expect(resolveOwnerDecision({ session, sessionId: "s1", fallbackUserId: "bob", token, secret: SECRET }))
+      .toEqual({ forbidden: true });
   });
 
   it("reports missing when no session and no userId", () => {

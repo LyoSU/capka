@@ -42,6 +42,21 @@ if (!SECRET || (SECRET === DEFAULT_SECRET && process.env.ALLOW_DEFAULT_SECRET !=
   process.exit(1);
 }
 
+// Parse a non-negative integer env var that gates a security control. Unset →
+// documented default. Present-but-garbage → FAIL CLOSED (throw at boot): a quota
+// silently disabled by `parseInt("abc") === NaN` would leave the disk-bomb guard
+// off without anyone noticing. Refuse to start instead.
+function intEnv(name, def) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return def;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) {
+    console.error(`[sandbox-controller] FATAL: ${name}="${raw}" is not a non-negative integer.`);
+    process.exit(1);
+  }
+  return n;
+}
+
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "unclaw-sandbox";
 const TMP_MB = parseInt(process.env.SANDBOX_TMP_MB || "64");
 const MCP_TMP_MB = parseInt(process.env.SANDBOX_MCP_TMP_MB || "256");
@@ -52,12 +67,12 @@ const IDLE_TTL = parseInt(process.env.SANDBOX_IDLE_TTL_MS || "900000"); // 15 mi
 const WORKSPACE_TTL_MS = parseInt(process.env.WORKSPACE_TTL_MS || "2592000000"); // 30d — delete a workspace (row + disk) unused this long
 const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
-const MAX_WORKSPACE_MB = parseInt(process.env.MAX_WORKSPACE_MB || "500");
+const MAX_WORKSPACE_MB = intEnv("MAX_WORKSPACE_MB", 500);
 // Hard per-file size cap (RLIMIT_FSIZE), kernel-enforced. Defaults to the whole
 // workspace budget: no single file may exceed the total quota anyway, and this
 // stops a one-command disk bomb (`fallocate -l 100G`) that the poll-based quota
 // can't catch until the NEXT exec. Set MAX_FILE_MB=0 to disable.
-const MAX_FILE_MB = parseInt(process.env.MAX_FILE_MB || String(MAX_WORKSPACE_MB));
+const MAX_FILE_MB = intEnv("MAX_FILE_MB", MAX_WORKSPACE_MB);
 // How long a measured workspace size is trusted before re-walking the tree. Keeps
 // the expensive du off the hot exec path and coalesces command bursts.
 const QUOTA_CACHE_TTL_MS = parseInt(process.env.QUOTA_CACHE_TTL_MS || "5000");
@@ -93,6 +108,16 @@ const store = new PostgresSessionStore({ pool });
 // (1001) is baked into the sandbox image.
 const MCP_UID = parseInt(process.env.SANDBOX_MCP_UID || "1001");
 const MCP_GID = parseInt(process.env.SANDBOX_MCP_GID || "1001");
+// The isolation above only holds if the MCP uid is non-root AND distinct from the
+// agent's uid. Root would let an MCP server escape the uid boundary; the same uid
+// as the agent would let agent code read the server's secret env. Refuse to boot
+// on a misconfiguration rather than run with the isolation comment quietly false.
+if (!(MCP_UID > 0 && MCP_UID !== SANDBOX_UID)) {
+  console.error(
+    `[sandbox-controller] FATAL: SANDBOX_MCP_UID must be > 0 and != SANDBOX_UID (${SANDBOX_UID}); got ${MCP_UID}.`,
+  );
+  process.exit(1);
+}
 const mcpBridge = createMcpBridge(docker, { user: `${MCP_UID}:${MCP_GID}` });
 let workspace;
 let backend;
@@ -108,23 +133,28 @@ const quota = createQuotaTracker({
   ttlMs: QUOTA_CACHE_TTL_MS,
 });
 
-/** Resolve the owner of a file op: a live session's owner (cross-checked against
- *  any supplied userId), else a platform-supplied userId backed by a valid HMAC
- *  token. Decision logic is pure + unit-tested in owner.js. */
+/** Resolve the owner of a file op: a platform-supplied userId backed by a valid
+ *  HMAC token bound to userId+sessionId — required whether the session is live or
+ *  stopped, and (for a live session) cross-checked against its pinned owner.
+ *  Decision logic is pure + unit-tested in owner.js. */
 async function resolveOwner(sessionId, fallbackUserId, token) {
   const session = await store.get(sessionId);
   return resolveOwnerDecision({ session, sessionId, fallbackUserId, token, secret: SECRET });
 }
 
 // --- On-disk workspace listing (for GC). Skips the per-user _global shared dir. ---
+// Validate every raw FS name here, at the read point: a dir whose name doesn't
+// round-trip through sanitize() was never created by our store (our ids are already
+// sanitized), so it's untrusted junk — skip it rather than feed it back into a
+// remove() path. Don't rely on the store re-sanitizing later.
 async function listWorkspacesOnDisk() {
   const out = [];
   const users = await readdir(DATA_ROOT, { withFileTypes: true }).catch(() => []);
   for (const u of users) {
-    if (!u.isDirectory()) continue;
+    if (!u.isDirectory() || sanitize(u.name) !== u.name) continue;
     const sessions = await readdir(join(DATA_ROOT, u.name), { withFileTypes: true }).catch(() => []);
     for (const s of sessions) {
-      if (!s.isDirectory() || s.name === "_global") continue;
+      if (!s.isDirectory() || s.name === "_global" || sanitize(s.name) !== s.name) continue;
       const st = await stat(join(DATA_ROOT, u.name, s.name)).catch(() => null);
       if (st) out.push({ userId: u.name, sessionId: s.name, mtimeMs: st.mtimeMs });
     }
@@ -133,11 +163,23 @@ async function listWorkspacesOnDisk() {
 }
 
 // --- HTTP helpers ---
+// JSON control bodies are tiny; cap them so a hostile/runaway request can't buffer
+// unbounded memory. Uploads use the separate streaming MAX_UPLOAD gate, not this.
+const MAX_BODY = 1024 * 1024; // 1 MB
 function parseBody(req) {
   return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (c) => { body += c; });
-    req.on("end", () => { try { resolve(JSON.parse(body || "{}")); } catch { resolve({}); } });
+    const chunks = [];
+    let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > MAX_BODY) {
+        reject(Object.assign(new Error("Request body too large"), { statusCode: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")); } catch { resolve({}); } });
     req.on("error", reject);
   });
 }
@@ -174,6 +216,9 @@ const server = createServer(async (req, res) => {
       if (!sessionId || !userId) return jsonRes(res, 400, { error: "Missing sessionId or userId" });
       const sid = sanitize(sessionId);
       const uid = sanitize(userId);
+      // `_global` is the reserved per-user shared dir (see LocalFsStore#sharedPath);
+      // GC skips it. A session by that id would collide with it and never be reaped.
+      if (sid === "_global") return jsonRes(res, 400, { error: "Reserved sessionId" });
 
       const pre = await store.get(sid);
       if (pre && pre.userId !== uid) return jsonRes(res, 403, { error: "Session belongs to another user" });
@@ -255,9 +300,15 @@ const server = createServer(async (req, res) => {
       }
       const { command, timeout } = await parseBody(req);
       if (!command) return jsonRes(res, 400, { error: "Missing command" });
+      // Validate the caller timeout: a finite ms value, clamped to a sane band.
+      // Garbage (NaN, negative, absurdly large) falls back to / is bounded by the
+      // default so it can't disable the cap or pin a worker open indefinitely.
+      const execTimeout = Number.isFinite(timeout)
+        ? Math.min(Math.max(timeout, 1000), 300000)
+        : EXEC_TIMEOUT;
       store.touch(session.sessionId);
       try {
-        const result = await backend.exec(session.handle, command, timeout || EXEC_TIMEOUT);
+        const result = await backend.exec(session.handle, command, execTimeout);
         return jsonRes(res, 200, result);
       } catch (e) {
         if (/no such container/i.test(e.message)) {
@@ -283,7 +334,8 @@ const server = createServer(async (req, res) => {
         await mcpBridge.start(session.handle, mcpStartMatch[2], { command, args, env });
         return jsonRes(res, 200, { ok: true });
       } catch (e) {
-        return jsonRes(res, 502, { error: `mcp start failed: ${e.message}` });
+        console.error(`[mcp] start failed for ${mcpStartMatch[2]}:`, e.message);
+        return jsonRes(res, 502, { error: "mcp start failed" });
       }
     }
 
@@ -298,7 +350,8 @@ const server = createServer(async (req, res) => {
         const response = await mcpBridge.rpc(session.handle, mcpRpcMatch[2], message);
         return jsonRes(res, 200, { message: response });
       } catch (e) {
-        return jsonRes(res, 502, { error: `mcp rpc failed: ${e.message}` });
+        console.error(`[mcp] rpc failed for ${mcpRpcMatch[2]}:`, e.message);
+        return jsonRes(res, 502, { error: "mcp rpc failed" });
       }
     }
 
@@ -403,7 +456,12 @@ const server = createServer(async (req, res) => {
     // DELETE /sessions/:id
     const deleteMatch = path.match(/^\/sessions\/([^/]+)$/);
     if (method === "DELETE" && deleteMatch) {
-      const s = await store.get(deleteMatch[1]);
+      // Teardown wipes the workspace, so it is owner-gated exactly like the file
+      // ops: a valid HMAC token bound to userId+sessionId is required.
+      const r = await resolveOwner(deleteMatch[1], url.searchParams.get("userId"), url.searchParams.get("token"));
+      if (r.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (r.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
+      const s = await store.get(r.sessionId);
       if (s) {
         // Explicit teardown: kill the container (if any) AND wipe the workspace.
         if (s.handle != null) {
@@ -419,7 +477,11 @@ const server = createServer(async (req, res) => {
       return jsonRes(res, 200, { ok: true });
     }
 
-    // GET /sessions
+    // GET /sessions — SECRET-GATED INTERNAL ADMIN LISTING ONLY. This returns every
+    // user's sessions, so it is deliberately NOT a per-user endpoint: the bearer
+    // secret check above is the only caller (the platform's own admin/GC tooling).
+    // There is no userId-scoped variant — file ops use the per-session owner-gated
+    // routes instead. Do not expose this to end-user-derived requests.
     if (method === "GET" && path === "/sessions") {
       const all = await store.all();
       return jsonRes(res, 200, all.map((s) => ({ id: s.sessionId, userId: s.userId, lastActivity: s.lastActivity })));
@@ -427,8 +489,14 @@ const server = createServer(async (req, res) => {
 
     jsonRes(res, 404, { error: "Not found" });
   } catch (e) {
+    // Log the detail server-side, but never echo it to the client: e.message can
+    // carry host paths, container ids, or pg/mcp text. A tagged statusCode (e.g.
+    // 413 from parseBody) is the only thing we surface, with a generic message.
     console.error(`[error] ${method} ${path}:`, e.message);
-    if (!res.headersSent) jsonRes(res, 500, { error: e.message });
+    if (!res.headersSent) {
+      const status = e.statusCode || 500;
+      jsonRes(res, status, { error: status === 413 ? "Request body too large" : "Internal error" });
+    }
   }
 });
 

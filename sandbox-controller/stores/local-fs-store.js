@@ -1,7 +1,7 @@
 import { createReadStream, constants as FS } from "node:fs";
-import { readdir, stat, mkdir, chown, rm, open } from "node:fs/promises";
+import { readdir, stat, lstat, mkdir, chown, rm, open } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
-import { sanitize, safeRealPath } from "../path-safety.js";
+import { sanitize, safeRealPath, assertNoSymlinkEscape } from "../path-safety.js";
 
 /** WorkspaceStore backed by the local filesystem (Stage 1 default). All file
  *  endpoints in the controller core go through this port, so swapping in an
@@ -78,9 +78,10 @@ export class LocalFsStore {
     const base = this.#wsPath(userId, sessionId);
     const full = await safeRealPath(base, relPath);
     await mkdir(dirname(full), { recursive: true }).catch(() => {});
-    // O_NOFOLLOW closes the residual TOCTOU window: even if a symlink is planted
-    // at the leaf between safeRealPath() and open(), the write refuses to follow
-    // it (ELOOP). Overwriting an existing *regular* file still works.
+    // Re-validate the ancestor chain right before opening: an intermediate dir could
+    // have been swapped for a symlink since safeRealPath ran (TOCTOU). O_NOFOLLOW
+    // then covers the leaf; together they make the open race-free.
+    await assertNoSymlinkEscape(base, full);
     const fh = await open(full, FS.O_WRONLY | FS.O_CREAT | FS.O_TRUNC | FS.O_NOFOLLOW, 0o644);
     try {
       await fh.writeFile(data);
@@ -119,9 +120,14 @@ export class LocalFsStore {
   async delete(userId, sessionId, relPath) {
     const base = this.#wsPath(userId, sessionId);
     const full = await safeRealPath(base, relPath);
-    const s = await stat(full).catch(() => null);
+    // rm has no O_NOFOLLOW equivalent, so re-walk the ancestor chain right before
+    // removing: a symlink swapped into an intermediate component since safeRealPath
+    // ran (TOCTOU) must not let the rm escape the workspace.
+    await assertNoSymlinkEscape(base, full);
+    const s = await lstat(full).catch(() => null);
     if (!s) return;
-    await rm(full, { recursive: s.isDirectory(), force: true });
+    // A symlink leaf: remove the link itself, never recurse through it.
+    await rm(full, { recursive: s.isDirectory() && !s.isSymbolicLink(), force: true });
   }
 }
 

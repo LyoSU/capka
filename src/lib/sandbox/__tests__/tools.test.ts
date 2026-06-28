@@ -10,7 +10,7 @@ vi.mock("../client", () => ({ execCommand, deleteFile }));
 import { loadSandboxTools } from "../tools";
 
 const lastCmd = (): string => execCommand.mock.calls.at(-1)![1] as string;
-const load = () => loadSandboxTools("sess1", async () => {});
+const load = () => loadSandboxTools("sess1", "user1", async () => {});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const opts = {} as any;
 
@@ -199,7 +199,7 @@ describe("sandbox tools — delete_path", () => {
     deleteFile.mockResolvedValue({ ok: true });
     const { tools } = await load();
     const res = (await tools.delete_path.execute!({ path: "venv" }, opts)) as { success: boolean; path: string };
-    expect(deleteFile).toHaveBeenCalledWith("sess1", "venv");
+    expect(deleteFile).toHaveBeenCalledWith("sess1", "venv", "user1");
     expect(res).toEqual({ success: true, path: "venv" });
   });
 

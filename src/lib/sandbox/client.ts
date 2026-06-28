@@ -111,8 +111,9 @@ export async function execCommand(sessionId: string, command: string, timeout?: 
   }>;
 }
 
-export async function destroySession(sessionId: string) {
-  return request(`/sessions/${sanitizeId(sessionId)}`, "DELETE");
+export async function destroySession(sessionId: string, userId: string) {
+  const params = new URLSearchParams({ userId, token: workspaceToken(userId, sessionId) });
+  return request(`/sessions/${sanitizeId(sessionId)}?${params}`, "DELETE");
 }
 
 // ── stdio MCP bridge (server runs inside the sandbox, controller relays frames) ─

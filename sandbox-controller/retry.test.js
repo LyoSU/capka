@@ -19,8 +19,14 @@ describe("withRetry", () => {
     expect(await withRetry(fn, { attempts: 5, baseMs: 10, sleep })).toBe("recovered");
     expect(fn).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenNthCalledWith(1, 10); // linear backoff: baseMs * attempt
-    expect(sleep).toHaveBeenNthCalledWith(2, 20);
+    // Linear backoff (baseMs * attempt) with full jitter: each delay lands in
+    // [50% .. 100%] of its nominal window.
+    const [d1] = sleep.mock.calls[0];
+    const [d2] = sleep.mock.calls[1];
+    expect(d1).toBeGreaterThanOrEqual(5);
+    expect(d1).toBeLessThanOrEqual(10);
+    expect(d2).toBeGreaterThanOrEqual(10);
+    expect(d2).toBeLessThanOrEqual(20);
   });
 
   it("re-throws the last error after exhausting the budget (no sleep after final try)", async () => {

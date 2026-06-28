@@ -13,9 +13,13 @@ const LF = 0x0a;
 const DASH = 0x2d;
 
 /** Extract the boundary token from a Content-Type header, tolerating an
- *  optionally-quoted value and trailing parameters (`; charset=...`). */
+ *  optionally-quoted value and trailing parameters (`; charset=...`). Requires the
+ *  media type to actually be multipart/form-data — an unrelated content type that
+ *  merely contains a `boundary=` token must not be parsed as an upload. */
 export function parseBoundary(contentType) {
-  const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType || "");
+  const ct = contentType || "";
+  if (!/^\s*multipart\/form-data\s*;/i.test(ct)) return null;
+  const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ct);
   if (!m) return null;
   const b = (m[1] ?? m[2] ?? "").trim();
   return b || null;
@@ -27,12 +31,19 @@ export function parseBoundary(contentType) {
  * { field, filename, data:Buffer }. Returns null only when no boundary can be
  * derived (malformed Content-Type).
  */
+// Text fields are small control values (just "path"); cap them so a crafted body
+// can't stash megabytes in a field. The file content uses the separate upload cap.
+const MAX_FIELD_BYTES = 64 * 1024;
+// Reserved keys that would pollute Object.prototype if assigned. We also use a
+// null-prototype fields object, so this is belt-and-suspenders.
+const POLLUTING = new Set(["__proto__", "constructor", "prototype"]);
+
 export function parseMultipart(body, contentType) {
   const boundary = parseBoundary(contentType);
   if (!boundary) return null;
 
   const delim = Buffer.from(`--${boundary}`);
-  const fields = {};
+  const fields = Object.create(null);
   const files = [];
 
   let pos = body.indexOf(delim);
@@ -62,7 +73,7 @@ export function parseMultipart(body, contentType) {
       const filename = /filename="([^"]*)"/i.exec(headers)?.[1];
       if (filename !== undefined) {
         files.push({ field: name ?? "", filename, data: content });
-      } else if (name !== undefined) {
+      } else if (name !== undefined && !POLLUTING.has(name) && content.length <= MAX_FIELD_BYTES) {
         fields[name] = content.toString("utf8");
       }
     }

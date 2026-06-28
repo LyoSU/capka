@@ -14,7 +14,10 @@ export async function withRetry(fn, {
     } catch (e) {
       lastErr = e;
       log?.("retry", { label, attempt: i, attempts, error: e.message }, "warn");
-      if (i < attempts) await sleep(baseMs * i);
+      // Linear backoff with full jitter: when several controllers boot against the
+      // same daemon/DB at once, deterministic delays make them retry in lockstep
+      // (thundering herd). Randomizing within the window spreads the load.
+      if (i < attempts) await sleep(Math.round(baseMs * i * (0.5 + Math.random() * 0.5)));
     }
   }
   throw lastErr;

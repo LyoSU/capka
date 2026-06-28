@@ -1,5 +1,5 @@
-import { resolve, dirname, basename, join, relative } from "node:path";
-import { realpath } from "node:fs/promises";
+import { resolve, dirname, basename, join, relative, sep } from "node:path";
+import { realpath, lstat } from "node:fs/promises";
 
 /**
  * Path-safety primitives for the sandbox controller. Extracted from server.js so
@@ -73,5 +73,31 @@ export async function safeRealPath(base, userPath) {
     }
     if (!contained(realBase, real)) throw new Error("Symlink escape blocked");
     return trailing.length ? join(real, ...trailing) : real;
+  }
+}
+
+/** Final, race-free containment check, run IMMEDIATELY before the open()/rm() that
+ *  acts on the path. safeRealPath canonicalizes the deepest *existing* ancestor at
+ *  call time, but an attacker inside the sandbox can swap an intermediate directory
+ *  for a symlink in the window between that check and the syscall (TOCTOU); O_NOFOLLOW
+ *  guards only the leaf, and rm has no such flag at all. So we re-walk every path
+ *  component from the workspace root down to the leaf's PARENT and lstat each one,
+ *  refusing if any is a symlink — a planted intermediate link can no longer redirect
+ *  the operation out of the workspace. The leaf itself is intentionally not lstat'd:
+ *  write protects it with O_NOFOLLOW, and rm removes a symlink leaf (the link, not
+ *  its target) harmlessly. `base` must already be a real (canonical) path. */
+export async function assertNoSymlinkEscape(base, full) {
+  const realBase = await realpath(base).catch(() => base);
+  const rel = relative(realBase, full);
+  if (rel === "" || rel === ".") return; // base itself
+  if (rel.startsWith("..") || resolve(realBase, rel) !== full) throw new Error("Path traversal blocked");
+  const parts = rel.split(sep).filter(Boolean);
+  let cur = realBase;
+  // Stop before the leaf: walk only the ancestor directories.
+  for (let i = 0; i < parts.length - 1; i++) {
+    cur = join(cur, parts[i]);
+    const st = await lstat(cur).catch((e) => { if (e.code === "ENOENT") return null; throw e; });
+    if (!st) continue; // not yet created (mkdir -p will make a real dir under the verified base)
+    if (st.isSymbolicLink()) throw new Error("Symlink escape blocked");
   }
 }
