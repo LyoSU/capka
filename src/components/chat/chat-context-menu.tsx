@@ -167,7 +167,7 @@ export function ChatContextMenu({
         <DropdownMenuTrigger
           data-sidebar="menu-action"
           aria-label={t("menu.options")}
-          className="absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 data-[popup-open]:bg-sidebar-accent data-[popup-open]:text-sidebar-accent-foreground data-[popup-open]:opacity-100 sm:opacity-0 sm:group-hover/menu-item:opacity-100"
+          className="absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 data-[popup-open]:bg-sidebar-accent data-[popup-open]:text-sidebar-accent-foreground data-[popup-open]:opacity-100 sm:opacity-0 sm:group-hover/menu-item:opacity-100"
         >
           <MoreVertical className="size-4" />
         </DropdownMenuTrigger>

@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { Loader2, TrendingDown, TrendingUp } from "lucide-react";
+import { TrendingDown, TrendingUp } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 interface Totals {
@@ -151,9 +152,7 @@ export default function UsagePage() {
       </ToggleGroup>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
+        <UsageSkeleton />
       ) : !data || data.totals.calls === 0 ? (
         <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
           {t("empty")}
@@ -243,6 +242,31 @@ export default function UsagePage() {
           ) : null}
         </>
       )}
+    </div>
+  );
+}
+
+/** Loading shell shaped like the loaded report: KPI grid, trend chart, efficiency strip, breakdowns. */
+function UsageSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-[68px] rounded-lg" />
+        ))}
+      </div>
+      <Skeleton className="h-[164px] w-full rounded-lg" />
+      <div className="grid grid-cols-3 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-[68px] rounded-lg" />
+        ))}
+      </div>
+      {Array.from({ length: 2 }).map((_, i) => (
+        <div key={i} className="space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-[120px] w-full rounded-lg" />
+        </div>
+      ))}
     </div>
   );
 }

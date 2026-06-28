@@ -718,7 +718,7 @@ function UserBubble({
 
   return (
     <div
-      className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4"
+      className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4 pointer-coarse:select-none"
       data-revealed={revealed || undefined}
       {...longPress}
     >

@@ -631,7 +631,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                 />
                 <ClawMark animated className="relative h-20 w-20 text-foreground md:h-24 md:w-24" />
               </div>
-              <h1 className="animate-claw-greet mt-6 font-display text-balance text-center text-3xl font-medium tracking-tight text-foreground md:text-[2.75rem] md:leading-[1.1]">
+              <h1 className="animate-claw-greet mt-6 font-display text-balance text-center text-fluid-display font-medium tracking-tight text-foreground">
                 {greeting ?? t("panel.greeting")}
               </h1>
             </div>

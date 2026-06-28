@@ -279,6 +279,15 @@
 }
 .animate-fade-in { animation: fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
+/* Skeleton pulse: Tailwind's default `animate-pulse` runs a slow 2s ease-in-out,
+   which reads as sluggish for a loading state. This is the same opacity pulse at
+   a livelier ~1.5s cadence. The global reduced-motion block freezes it. */
+@keyframes pulse-fast {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+.animate-pulse-fast { animation: pulse-fast 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
 /* A smooth "comet" spinner: a conic gradient fading from transparent to the
    current text colour, masked into a thin ring. Premium-feeling alternative to a
    segmented spinner; inherits colour via currentColor and spins via animate-spin. */
@@ -343,6 +352,19 @@
   [role="button"] {
     touch-action: manipulation;
   }
+}
+
+/* Fluid display heading: scales smoothly with the viewport instead of jumping at
+   a breakpoint. Spans the same range the hero greeting hand-codes today
+   (text-3xl 1.875rem at mobile → 2.75rem at md+) but interpolates continuously,
+   so the heading never sits awkwardly between the two fixed steps. clamp's middle
+   term mixes rem (respects user font scaling) with vw (tracks the viewport).
+   Apply by replacing the size+breakpoint utilities on a hero/greeting <h1>, e.g.
+   chat-panel's greeting (`text-3xl md:text-[2.75rem] md:leading-[1.1]`) or the
+   auth/setup titles (`text-[1.75rem]`). */
+.text-fluid-display {
+  font-size: clamp(1.875rem, 1.5rem + 1.9vw, 2.75rem);
+  line-height: 1.1;
 }
 
 /* Reading measure for assistant answers. Long prose past ~70ch tires the eye on

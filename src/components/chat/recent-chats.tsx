@@ -39,7 +39,7 @@ export function RecentChats({ initial }: { initial?: ChatRow[] }) {
           <Link
             key={c.id}
             href={`/chat/${c.id}`}
-            className={`flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition-colors hover:bg-muted/60 ${
+            className={`flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition duration-150 hover:bg-muted/60 hover:shadow-sm active:scale-[0.99] ${
               i > 0 ? "border-t" : ""
             }`}
           >
