@@ -15,6 +15,12 @@ const BASE_CSP = "object-src 'none'; base-uri 'self'; form-action 'self'";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Enables React's <ViewTransition>, so route navigations crossfade like an app
+  // instead of hard-cutting. Progressive enhancement: browsers without the View
+  // Transitions API just navigate instantly, no animation.
+  experimental: {
+    viewTransition: true,
+  },
   async headers() {
     return [
       {

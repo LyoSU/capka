@@ -396,6 +396,14 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* View-transition snapshots are pseudo-elements outside the * reset above, so
+     the cross-page crossfade needs its own opt-out — content swaps instantly. */
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
 }
 
 /* Thin scrollbar for textareas and overflow areas */

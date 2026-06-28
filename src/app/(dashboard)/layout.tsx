@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ViewTransition } from "react";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { CommandPalette } from "@/components/layout/command-palette";
@@ -29,7 +30,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <AppSidebar />
       <SidebarInset>
         <ProviderStatusBanner />
-        {children}
+        {/* Crossfade the main pane on navigation so moving between chats /
+            settings feels like an app, not a page reload. The sidebar + banner
+            sit outside it, staying anchored as the content swaps. */}
+        <ViewTransition>{children}</ViewTransition>
       </SidebarInset>
       <CommandPalette />
       <TimezoneSync />
