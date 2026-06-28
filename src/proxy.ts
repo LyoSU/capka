@@ -23,7 +23,10 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname === "/manifest.json" ||
-    pathname === "/sw.js"
+    pathname === "/sw.js" ||
+    // Precached by the service worker and shown when the origin is unreachable —
+    // it must never bounce to /login (the worker would cache that instead).
+    pathname === "/offline.html"
   ) {
     return NextResponse.next();
   }

@@ -17,8 +17,9 @@
  */
 
 /** Per-call output budget (characters ≈ the cost knob — chars map to tokens).
- *  Operators tune it without a redeploy. */
-const MAX_CHARS = Number(process.env.MAX_TOOL_OUTPUT_CHARS) || 30_000;
+ *  Operators tune it without a redeploy. Exported so the capture-to-file path can
+ *  use the same threshold to decide a result is small enough to skip the log file. */
+export const MAX_TOOL_OUTPUT_CHARS = Number(process.env.MAX_TOOL_OUTPUT_CHARS) || 30_000;
 /** Default line budget for file reads (mirrors Claude Code's 2000-line Read). */
 export const DEFAULT_READ_LINES = Number(process.env.MAX_TOOL_OUTPUT_LINES) || 1500;
 
@@ -59,7 +60,7 @@ export function clampOutput(
   text: string,
   opts: { mode?: "clip" | "head"; maxChars?: number; maxLines?: number; note?: string } = {},
 ): ClampResult {
-  const { mode = "clip", maxChars = MAX_CHARS, maxLines = DEFAULT_READ_LINES, note } = opts;
+  const { mode = "clip", maxChars = MAX_TOOL_OUTPUT_CHARS, maxLines = DEFAULT_READ_LINES, note } = opts;
   const hint = note ? ` ${note}` : "";
 
   if (mode === "head") {

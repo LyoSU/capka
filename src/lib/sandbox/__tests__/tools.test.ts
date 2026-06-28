@@ -147,6 +147,48 @@ describe("sandbox tools — output truncation safeguards", () => {
   });
 });
 
+describe("sandbox tools — capture full output to a workspace log file", () => {
+  beforeEach(() => {
+    execCommand.mockReset();
+    execCommand.mockResolvedValue({ stdout: "ok", stderr: "", exitCode: 0 });
+  });
+
+  it("execute_bash mirrors output to a rotated log under .unclaw/output via tee", async () => {
+    const { tools } = await load();
+    await tools.execute_bash.execute!({ command: "echo hi" }, opts);
+    const cmd = lastCmd();
+    expect(cmd).toContain("/workspace/.unclaw/output");
+    expect(cmd).toContain("tee");
+    expect(cmd).toContain("echo hi"); // the user command is embedded intact
+  });
+
+  it("points the model at the saved log (not 're-run') when output was clipped", async () => {
+    execCommand.mockResolvedValue({
+      stdout: "X".repeat(200_000),
+      stderr: "\x1e204800\x1e/workspace/.unclaw/output/123.log\n",
+      exitCode: 0,
+    });
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "cat big" }, opts)) as {
+      output: string; truncated: string; logPath?: string;
+    };
+    expect(res.truncated).toBe("clip");
+    expect(res.logPath).toBe("/workspace/.unclaw/output/123.log");
+    expect(res.output).toContain("saved at /workspace/.unclaw/output/123.log");
+  });
+
+  it("keeps no log and stays 'none' when output fit inline (trailer path is '-')", async () => {
+    execCommand.mockResolvedValue({ stdout: "small", stderr: "\x1e5\x1e-\n", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "echo small" }, opts)) as {
+      output: string; truncated: string; logPath?: string;
+    };
+    expect(res.truncated).toBe("none");
+    expect(res.logPath).toBeUndefined();
+    expect(res.output).toBe("small");
+  });
+});
+
 describe("sandbox tools — delete_path", () => {
   beforeEach(() => {
     execCommand.mockReset();

@@ -1,0 +1,240 @@
+<!doctype html>
+<!--
+  Static fallback served by the service worker (public/sw.js) when a navigation
+  can't reach the origin. Two causes, two tones:
+    • the device has no internet  → "you're offline" (calm, it's not our fault)
+    • our origin is unreachable    → "we're updating" (a redeploy gap, ~seconds)
+  It must work with ZERO server/bundle dependency — everything (styles, icon,
+  copy, both locales) is inline. i18n mirrors the server's resolveLocale path:
+  primary subtag of navigator.languages, English default (see src/i18n/config.ts).
+  Strings live here on purpose; messages/*.json can't be loaded when the server
+  is down, so duplicating them in the catalog would just be dead keys.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f0ede8" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1f1e1d" />
+  <title>unClaw</title>
+  <style>
+    :root {
+      --paper: #f0ede8;
+      --ink: #1f1e1d;
+      --muted: #6b6862;
+      --line: rgba(31, 30, 29, 0.12);
+      --card: rgba(255, 255, 255, 0.5);
+      --accent: #c47a3d;      /* warm amber — "coming back" */
+      --idle: #9a968e;        /* muted grey — "you're offline" */
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #1f1e1d;
+        --ink: #f0ede8;
+        --muted: #a3a097;
+        --line: rgba(240, 237, 232, 0.14);
+        --card: rgba(255, 255, 255, 0.04);
+        --accent: #e0a062;
+        --idle: #7d7a72;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Onest", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    .card {
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .logo {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 28px;
+      display: block;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px 5px 10px;
+      margin-bottom: 20px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--card);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--idle);
+      flex: none;
+    }
+    body[data-state="server"] .dot {
+      background: var(--accent);
+      box-shadow: 0 0 0 0 var(--accent);
+      animation: pulse 1.8s ease-out infinite;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+      70%  { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); }
+      100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    p {
+      margin: 0 auto;
+      max-width: 34ch;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .retry {
+      margin-top: 28px;
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--ink);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 500;
+      padding: 10px 20px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+    }
+    .retry:hover { border-color: var(--ink); }
+    .retry:active { opacity: 0.7; }
+    .retry:disabled { opacity: 0.5; cursor: default; }
+    @media (prefers-reduced-motion: reduce) {
+      body[data-state="server"] .dot { animation: none; }
+    }
+  </style>
+</head>
+<body data-state="server">
+  <main class="card" role="status" aria-live="polite">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" fill="#fafafa">
+        <path d="M 176.41 150.54 L 175.50 187.09 L 176.16 209.99 L 179.81 231.55 L 184.96 256.77 L 190.24 280.11 L 195.63 301.57 L 201.09 321.13 L 206.57 338.81 L 211.96 354.62 L 216.00 366.00 L 213.07 351.07 L 211.08 334.28 L 209.74 315.72 L 208.85 259.24 L 209.40 234.35 L 210.17 213.16 L 208.55 191.00 L 205.86 167.71 L 203.59 149.46 Z"/>
+        <path d="M 241.60 134.00 L 239.16 159.46 L 238.01 185.01 L 240.20 205.51 L 243.25 231.21 L 246.12 257.00 L 248.80 282.88 L 251.23 308.84 L 253.37 334.89 L 255.40 361.03 L 256.00 382.00 L 256.60 366.27 L 258.63 334.89 L 261.24 303.64 L 263.72 277.69 L 266.43 251.84 L 269.35 226.06 L 272.42 154.36 L 270.40 134.00 Z"/>
+        <path d="M 308.41 149.46 L 306.14 167.71 L 302.89 196.64 L 302.25 223.90 L 302.98 249.50 L 303.25 273.33 L 303.01 295.40 L 301.80 323.36 L 299.81 344.57 L 297.33 360.27 L 296.00 366.00 L 300.04 354.62 L 304.34 342.12 L 308.72 328.43 L 313.10 313.54 L 317.46 297.43 L 321.76 280.11 L 335.84 209.99 L 335.59 150.54 Z"/>
+      </svg>
+    </div>
+
+    <span class="status"><span class="dot"></span><span id="status"></span></span>
+    <h1 id="title"></h1>
+    <p id="body"></p>
+    <button class="retry" id="retry" type="button"></button>
+  </main>
+
+  <script>
+    (function () {
+      var dict = {
+        en: {
+          server: {
+            status: "Reconnecting…",
+            title: "We'll be right back",
+            body: "The app is updating to a new version. This usually takes a few seconds — the page will refresh on its own.",
+          },
+          offline: {
+            status: "No connection",
+            title: "You're offline",
+            body: "Your device isn't connected to the internet. Check your Wi-Fi or mobile data — we'll reconnect you automatically.",
+          },
+          retry: "Try now",
+          checking: "Checking…",
+        },
+        uk: {
+          server: {
+            status: "Відновлюємо з'єднання…",
+            title: "Скоро повернемось",
+            body: "Застосунок оновлюється до нової версії. Зазвичай це кілька секунд — сторінку буде оновлено автоматично.",
+          },
+          offline: {
+            status: "Немає з'єднання",
+            title: "Ви офлайн",
+            body: "Пристрій не підключено до інтернету. Перевірте Wi-Fi або мобільний інтернет — ми відновимо з'єднання автоматично.",
+          },
+          retry: "Спробувати зараз",
+          checking: "Перевіряємо…",
+        },
+      };
+
+      // Mirror src/i18n/config.ts matchAcceptLanguage: first language whose
+      // primary subtag we support, English otherwise.
+      function pickLocale() {
+        var langs = navigator.languages && navigator.languages.length
+          ? navigator.languages
+          : [navigator.language || ""];
+        for (var i = 0; i < langs.length; i++) {
+          var primary = String(langs[i]).toLowerCase().split("-")[0];
+          if (dict[primary]) return primary;
+        }
+        return "en";
+      }
+
+      var t = dict[pickLocale()];
+      var els = {
+        body: document.body,
+        status: document.getElementById("status"),
+        title: document.getElementById("title"),
+        text: document.getElementById("body"),
+        retry: document.getElementById("retry"),
+      };
+      els.retry.textContent = t.retry;
+      document.documentElement.lang = pickLocale();
+
+      function render() {
+        // Offline only when the device itself reports no connectivity; a flaky
+        // origin while online reads as "we're updating", not "your fault".
+        var state = navigator.onLine ? "server" : "offline";
+        var s = t[state];
+        els.body.dataset.state = state;
+        els.status.textContent = s.status;
+        els.title.textContent = s.title;
+        els.text.textContent = s.body;
+      }
+
+      var checking = false;
+      async function check() {
+        render();
+        if (!navigator.onLine || checking) return;
+        checking = true;
+        els.retry.disabled = true;
+        els.retry.textContent = t.checking;
+        try {
+          // HEAD the origin (no-store so no cache lies). Back up → just reload
+          // into the real app; the service worker passes the navigation through.
+          var res = await fetch("/", { method: "HEAD", cache: "no-store" });
+          if (res.ok) { location.reload(); return; }
+        } catch (e) { /* still down — keep waiting */ }
+        checking = false;
+        els.retry.disabled = false;
+        els.retry.textContent = t.retry;
+      }
+
+      els.retry.addEventListener("click", check);
+      window.addEventListener("online", check);
+      window.addEventListener("offline", render);
+      setInterval(check, 4000);
+      check();
+    })();
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { execCommand, deleteFile } from "./client";
-import { clampOutput, DEFAULT_READ_LINES } from "@/lib/tool-output";
+import { clampOutput, MAX_TOOL_OUTPUT_CHARS, DEFAULT_READ_LINES } from "@/lib/tool-output";
 
 /** Recovery hint baked into the truncation marker so the model narrows next time.
  *  Steers toward grep / redirect-to-file rather than a blind `| head`/`| tail`,
@@ -9,27 +9,84 @@ import { clampOutput, DEFAULT_READ_LINES } from "@/lib/tool-output";
 const NARROW_NOTE =
   "To get the rest, re-run narrowed: grep for the lines you need, or redirect to a file and page it with read_file(offset). Avoid a blind head/tail — it can hide the error.";
 
+// ── Capture-to-file (tee-in-sandbox) ─────────────────────────────────────────
+// Every command's FULL combined output is mirrored to a log file in the
+// workspace, so the model can grep/read the rest instead of re-running. The
+// inline view still streams back normally (and is clamped as before); the log is
+// the recovery path. A byte cap bounds one runaway, and rotation bounds the dir.
+const CAPTURE_DIR = "/workspace/.unclaw/output";
+const CAPTURE_FILE_BYTES = (Number(process.env.OUTPUT_FILE_CAP_MB) || 10) * 1024 * 1024;
+const CAPTURE_KEEP = Number(process.env.OUTPUT_KEEP_FILES) || 5;
+/** RS-delimited trailer the wrapper prints on stderr: \x1e<bytes>\x1e<path|->.
+ *  stderr is otherwise empty (the command's own stderr is merged into the log via
+ *  2>&1), so this never collides with real output. */
+const TRAILER = /\x1e(\d+)\x1e(.*?)\s*$/;
+
+/** Wrap a command so its full output is tee'd to a rotated, size-capped log file.
+ *  Built with real newlines (not `;`) so a `#` comment or trailing `;` in the
+ *  user's command can't swallow the wrapper. The user command keeps its own exit
+ *  code via PIPESTATUS + `exit`. */
+function withCapture(inner: string): string {
+  return `__d=${CAPTURE_DIR}
+mkdir -p "$__d" 2>/dev/null
+( cd "$__d" && ls -1t 2>/dev/null | tail -n +${CAPTURE_KEEP + 1} | xargs -r rm -f )
+__f="$__d/$(date +%s%N)-$$.log"
+{
+${inner}
+} 2>&1 | head -c ${CAPTURE_FILE_BYTES} | tee --output-error=warn "$__f"
+__rc=\${PIPESTATUS[0]}
+__sz=$(wc -c < "$__f" 2>/dev/null || echo 0)
+if [ "$__sz" -le ${MAX_TOOL_OUTPUT_CHARS} ]; then rm -f "$__f"; __f=-; fi
+printf '\\n\\036%s\\036%s\\n' "$__sz" "$__f" >&2
+exit $__rc`;
+}
+
+const kbBytes = (n: number) => `${Math.round(n / 1024)} KB`;
+
 /**
- * Shape an exec result for the model with a THREE-state truncation signal:
- *  - "discarded": the controller hit its in-memory ceiling and threw the overflow
- *    away at the source — the rest is gone, the model must re-run producing less;
- *  - "clip": the full output existed but we trimmed it for the model — recoverable
- *    by narrowing/re-running;
- *  - "none": complete output.
- * stderr is kept (clamped on its own budget) because it usually holds the error —
- * it must never be the part that gets dropped when stdout is huge.
+ * Shape a captured exec result for the model with a THREE-state truncation signal:
+ *  - "discarded": the controller hit its in-memory ceiling AND no log survived —
+ *    the rest is gone, re-run producing less;
+ *  - "clip": output was trimmed for the model but the FULL log is on disk —
+ *    recoverable by reading/grepping `logPath` (no re-run needed);
+ *  - "none": complete output, nothing kept.
  */
-function execResult(result: { stdout: string; stderr: string; exitCode: number; truncated?: boolean }) {
-  const stdout = clampOutput(result.stdout, { note: NARROW_NOTE });
-  const stderr = clampOutput(result.stderr);
-  let output = [stdout.text, stderr.text].filter(Boolean).join("\n");
-  let truncated: "none" | "clip" | "discarded" = stdout.clipped || stderr.clipped ? "clip" : "none";
-  if (result.truncated) {
+function captureResult(result: { stdout: string; stderr: string; exitCode: number; truncated?: boolean }) {
+  const m = result.stderr.match(TRAILER);
+  const sz = m ? parseInt(m[1], 10) : 0;
+  const logPath = m && m[2] && m[2] !== "-" ? m[2] : null;
+  const capped = logPath !== null && sz >= CAPTURE_FILE_BYTES;
+  // Anything on stderr BEFORE the trailer is real (the command's stderr is merged
+  // into the log via 2>&1, so this is normally empty — except the synthetic 413
+  // quota message, which run() puts here and the model must see).
+  const residualStderr = (m ? result.stderr.slice(0, m.index) : result.stderr).trim();
+
+  // When a log survived, the recovery is "read the file", not "re-run".
+  const note = logPath
+    ? `Full output (${kbBytes(sz)}) is saved at ${logPath} — read or grep it (read_file/execute_bash) instead of re-running${capped ? `; that log was itself capped at ${CAPTURE_FILE_BYTES / 1024 / 1024} MB` : ""}.`
+    : NARROW_NOTE;
+
+  const clamped = clampOutput(result.stdout, { note });
+  let output = [clamped.text, residualStderr && clampOutput(residualStderr).text].filter(Boolean).join("\n");
+  let truncated: "none" | "clip" | "discarded" = clamped.clipped ? "clip" : "none";
+
+  if (logPath) {
+    truncated = "clip";
+    // If the inline view fit (no marker) but a log was still kept, point at it.
+    if (!clamped.clipped) output += `\n[… unClaw: ${note}]`;
+  } else if (result.truncated) {
     truncated = "discarded";
     output +=
       "\n\n[… unClaw: output exceeded the sandbox limit and was stopped at the source — the rest was DISCARDED and cannot be read. Re-run the command so it produces less output (filter, or redirect to a file).]";
   }
-  return { output: output || "(no output)", exitCode: result.exitCode, success: result.exitCode === 0, truncated };
+
+  return {
+    output: output || "(no output)",
+    exitCode: result.exitCode,
+    success: result.exitCode === 0,
+    truncated,
+    ...(logPath ? { logPath } : {}),
+  };
 }
 
 /**
@@ -69,7 +126,7 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         command: z.string().describe("Bash command to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
       }),
-      execute: async ({ command, timeout }) => execResult(await run(command, timeout)),
+      execute: async ({ command, timeout }) => captureResult(await run(withCapture(command), timeout)),
     }),
 
     execute_python: tool({
@@ -88,7 +145,7 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         // editing. Base64 still guards against shell-escaping/delimiter collisions.
         const encoded = Buffer.from(code).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | python3 -`;
-        return execResult(await run(cmd, timeout));
+        return captureResult(await run(withCapture(cmd), timeout));
       },
     }),
 
@@ -105,7 +162,7 @@ export async function loadSandboxTools(sessionKey: string, ensureSession: () => 
         // execution never depends on writable /tmp. See execute_python above.
         const encoded = Buffer.from(code).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | node --input-type=module`;
-        return execResult(await run(cmd, timeout));
+        return captureResult(await run(withCapture(cmd), timeout));
       },
     }),
 
