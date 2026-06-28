@@ -11,6 +11,30 @@ import { realtime } from "@/lib/realtime";
 
 export const LEASE_SECONDS = 60;
 
+/**
+ * Count of in-flight AUXILIARY work — the fire-and-forget LLM calls a finished
+ * turn spawns (memory maintenance, chat-title generation, compaction). These
+ * outlive the task that launched them (runAgentTask resolves the moment the main
+ * reply is finalized), so the worker's drain — which only watches the task
+ * in-flight count — used to exit on SIGTERM while they were still running,
+ * killing them mid-flight (lost spend, dropped compaction checkpoints).
+ *
+ * `trackAux` wraps such a promise so the count rises for its lifetime and falls
+ * when it settles; the worker's drain adds `auxInFlight()` to its wait condition
+ * so a deploy/restart lets this work finish within the existing grace window.
+ * Module-level (not per-request) so the single worker loop can observe it.
+ */
+const g = globalThis as unknown as { __auxInFlight?: number };
+export function auxInFlight(): number {
+  return g.__auxInFlight ?? 0;
+}
+export function trackAux<T>(p: Promise<T>): Promise<T> {
+  g.__auxInFlight = (g.__auxInFlight ?? 0) + 1;
+  return p.finally(() => {
+    g.__auxInFlight = (g.__auxInFlight ?? 1) - 1;
+  });
+}
+
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface TaskRow {
@@ -200,12 +224,20 @@ export const INTERRUPTED_MESSAGE =
   "The task was interrupted before it finished. Please try again.";
 
 /**
- * Fail any running task whose lease has expired (its worker died), AND reconcile
- * its abandoned assistant message in the same statement. The two live in
- * separate tables (`tasks.status` vs `messages.metadata.status`) but represent
- * one logical state — leaving the message at "running" makes the client revive a
- * stuck spinner on every history reload, so both must move together atomically.
- * Returns the reconciled task rows so the caller can notify connected clients.
+ * Fail any running task whose lease has expired (its worker died), reconcile its
+ * abandoned assistant message, AND settle its outstanding budget hold — all in
+ * one statement. tasks.status, messages.metadata.status, and the pending usage
+ * row represent one logical state: leaving the message at "running" revives a
+ * stuck spinner on reload, and leaving the hold pending inflates the user's
+ * budget until the 30-day window rolls. So all three move together atomically.
+ *
+ * The hold sweep is deliberately broader than the reaped set: it also clears any
+ * pending hold whose owning task is ALREADY terminal (completed/failed/cancelled
+ * — e.g. a crash between finalizeTask and reconcileUsage left a completed task
+ * holding a pending estimate forever, or releaseHold's DB delete failed and was
+ * swallowed). This makes a leaked hold recoverable on the next sweep instead of
+ * permanent-until-30-days. Returns the reaped task rows so the caller notifies
+ * connected clients.
  */
 export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "user_id" | "chat_id">>> {
   const { rows } = await pool.query<Pick<TaskRow, "id" | "user_id" | "chat_id">>(
@@ -227,6 +259,20 @@ export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "us
           FROM dead
          WHERE m.metadata->>'taskId' = dead.id
            AND m.metadata->>'status' = 'running'
+     ), swept_holds AS (
+        -- Release every pending hold whose task is no longer live: the ones we
+        -- just reaped (the dead CTE flips them this same statement, so a sibling
+        -- read of tasks would not see it yet -- union them in explicitly), plus
+        -- any whose owning task already reached a terminal status (H5 crash-window
+        -- holds, swallowed releaseHold failures). A terminal task real spend, if
+        -- any, was reconciled to its own row, so whatever is still pending here is
+        -- a stale estimate -- delete it.
+        DELETE FROM usage u
+         USING tasks t
+         WHERE u.pending = true
+           AND u.task_id = t.id
+           AND (t.status IN ('completed', 'failed', 'cancelled')
+                OR u.task_id IN (SELECT id FROM dead))
      )
      SELECT id, user_id, chat_id FROM dead`,
     [INTERRUPTED_MESSAGE],

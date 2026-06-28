@@ -13,7 +13,7 @@ import { extractWorkspacePaths } from "@/lib/chat/artifacts";
 import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
-import { heartbeat, isCancelRequested, finalizeTask, absorbQueuedTasks } from "@/lib/tasks/queue";
+import { heartbeat, isCancelRequested, finalizeTask, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { providerNativeTools } from "@/lib/providers";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
@@ -304,7 +304,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     }
     return sessionEnsured;
   };
-  const sandbox = await loadSandboxTools(sessionKey, ensureSession);
+  const sandbox = await loadSandboxTools(sessionKey, userId, ensureSession);
   const mcp = await loadMcpTools({
     userId,
     projectId: payload.projectId ?? null,
@@ -312,59 +312,68 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     ensureSession,
     isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
   });
-  const availableSkills = (await listAvailableSkills(userId, payload.projectId ?? null))
-    .filter((s) => isUsable(policy.effect("skill", s.name)));
-  const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null, ensureSession });
-  // Provider-executed tools (e.g. Gemini's Google Search grounding) join the
-  // sandbox/MCP/skill + memory tools; empty for providers without any.
-  const tools = {
-    ...sandbox.tools,
-    ...mcp.tools,
-    skill: skillTool,
-    ...makeMemoryTools({ userId, projectId: payload.projectId ?? null }),
-    ...providerNativeTools(provider),
-  };
-
-  // Workspace snapshot — read straight off disk via the controller's file API
-  // (HMAC-token, no live container). This keeps the sandbox lazy: a chat that
-  // never runs code stays container-free, yet the model still sees existing files.
-  let workspaceSnapshot: string | undefined;
-  try {
-    const { listFiles } = await import("@/lib/sandbox/client");
-    // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no container).
-    const { entries } = await listFiles(sessionKey, ".", userId, 3);
-    if (entries?.length) {
-      workspaceSnapshot = entries
-        .slice(0, 50)
-        .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
-        .join("\n");
-    }
-  } catch { /* no workspace yet */ }
-
-  const prompt = buildSystemPrompt({
-    project,
-    memoryDocs,
-    skills: availableSkills.map((s) => ({ name: s.name, description: s.description, body: s.body })),
-    workspaceSnapshot,
-    attachedFiles: payload.attachedFiles,
-    provider,
-    modelInput,
-    user: user ? { name: user.name, timezone: user.timezone } : null,
-    conversationStartedAt: chat?.createdAt ?? null,
-    locale: user?.locale ?? payload.origin?.locale ?? null,
-  });
-
-  // Context-window budget inputs: the model's real window (catalog) and any
-  // admin cap (which only ever tightens it). Both feed contextBudget() after the
-  // turn to decide whether the NEXT turn should compact.
-  const [contextLength, adminCap] = await Promise.all([
-    getModelContextLength(modelId),
-    getMaxContextTokens(),
-  ]);
-
-  // Dispose both sandbox and MCP clients when the run ends.
+  // The sandbox + MCP clients are now LIVE (stdio MCP servers may hold child
+  // processes). Define their disposer immediately so any throw in the rest of
+  // prepareRun — listAvailableSkills, buildSystemPrompt, getModelContextLength —
+  // closes them instead of leaking them: the caller only learns of `closeAll`
+  // from a successful return, so it can't clean up after a mid-function throw.
   const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
-  return { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: closeAll, prompt, contextLength, adminCap };
+  try {
+    const availableSkills = (await listAvailableSkills(userId, payload.projectId ?? null))
+      .filter((s) => isUsable(policy.effect("skill", s.name)));
+    const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null, ensureSession });
+    // Provider-executed tools (e.g. Gemini's Google Search grounding) join the
+    // sandbox/MCP/skill + memory tools; empty for providers without any.
+    const tools = {
+      ...sandbox.tools,
+      ...mcp.tools,
+      skill: skillTool,
+      ...makeMemoryTools({ userId, projectId: payload.projectId ?? null }),
+      ...providerNativeTools(provider),
+    };
+
+    // Workspace snapshot — read straight off disk via the controller's file API
+    // (HMAC-token, no live container). This keeps the sandbox lazy: a chat that
+    // never runs code stays container-free, yet the model still sees existing files.
+    let workspaceSnapshot: string | undefined;
+    try {
+      const { listFiles } = await import("@/lib/sandbox/client");
+      // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no container).
+      const { entries } = await listFiles(sessionKey, ".", userId, 3);
+      if (entries?.length) {
+        workspaceSnapshot = entries
+          .slice(0, 50)
+          .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
+          .join("\n");
+      }
+    } catch { /* no workspace yet */ }
+
+    const prompt = buildSystemPrompt({
+      project,
+      memoryDocs,
+      skills: availableSkills.map((s) => ({ name: s.name, description: s.description, body: s.body })),
+      workspaceSnapshot,
+      attachedFiles: payload.attachedFiles,
+      provider,
+      modelInput,
+      user: user ? { name: user.name, timezone: user.timezone } : null,
+      conversationStartedAt: chat?.createdAt ?? null,
+      locale: user?.locale ?? payload.origin?.locale ?? null,
+    });
+
+    // Context-window budget inputs: the model's real window (catalog) and any
+    // admin cap (which only ever tightens it). Both feed contextBudget() after the
+    // turn to decide whether the NEXT turn should compact.
+    const [contextLength, adminCap] = await Promise.all([
+      getModelContextLength(modelId),
+      getMaxContextTokens(),
+    ]);
+
+    return { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: closeAll, prompt, contextLength, adminCap };
+  } catch (e) {
+    await closeAll();
+    throw e;
+  }
 }
 
 /**
@@ -432,6 +441,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   let streamError: string | undefined;
   let closeMcp: (() => Promise<void>) | undefined;
 
+  // Run identity + the LIVE usage accumulator, hoisted to the outer scope so the
+  // catch path can reconcile REAL spend (not just release the hold) when a turn
+  // is aborted/failed mid-stream after tokens were already billed on the shared
+  // key — cancel, deadline, lost lease, or a thrown provider error. Undefined
+  // until prepareRun resolves; the catch reconciles only when there's real usage.
+  let runProvider: string | undefined;
+  let runModelId: string | undefined;
+  let runShared = false;
+  const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
+  const discarded = { input: 0, output: 0, cached: 0, cost: 0 };
+  const orLive: { cost: number; upstreamProvider?: string; generationId?: string } = { cost: 0 };
+  let discardedOrServed = false;
+
   // Admin role gates the raw technical detail an error shows in-chat. Looked up
   // lazily and memoized — only failures need it, so a successful task pays nothing.
   let _isAdmin: boolean | undefined;
@@ -482,6 +504,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       await prepareRun(userId, sessionKey, payload, chatId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
+    // Publish the run identity to the outer scope so the catch path can reconcile
+    // real spend (H6) on an abort/throw mid-stream.
+    runProvider = provider;
+    runModelId = modelId;
+    runShared = isShared;
 
 
 
@@ -661,16 +688,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // `abort` event).
     // input/output/cached drive billing; cacheWrite + reasoning are display-only
     // splits for the (i) popover (reasoning is already part of `output` for cost).
-    const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
-    // Real spend + routing reported by OpenRouter on each generation (one per
-    // step). `cost` sums across steps; `generationId` keeps the LAST step's id so
-    // the (i) popover can lazily pull that generation's latency + provider chain
-    // from GET /api/v1/generation. Empty for every non-OpenRouter provider.
-    const orLive: { cost: number; upstreamProvider?: string; generationId?: string } = { cost: 0 };
-    // Spend on attempts thrown away by a capability/context/empty discard — billed
-    // by the provider (usage-table truth), but NOT in the (i) popover, which shows
-    // only the final attempt that produced the visible answer.
-    const discarded = { input: 0, output: 0, cached: 0 };
+    // liveUsage / orLive / discarded are hoisted to the outer scope (so the catch
+    // can reconcile real spend on an abort) — accumulated in place here.
     let hadDiscard = false;
     // Roll the current visible-answer usage into `discarded` when a retry wipes
     // `parts`. Stall/transient resumes KEEP their output, so they don't fold.
@@ -679,13 +698,22 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       discarded.input += liveUsage.input;
       discarded.output += liveUsage.output;
       discarded.cached += liveUsage.cached;
+      // Capture the discarded attempt's real provider cost BEFORE the reset below
+      // zeroes it — otherwise this spend is recomputed from the catalog and the
+      // provider's authoritative figure is lost. Only meaningful when OpenRouter
+      // actually served the attempt (orServed).
+      if (orLive.generationId != null || orLive.upstreamProvider != null) {
+        discarded.cost += orLive.cost;
+        discardedOrServed = true;
+      }
       liveUsage.input = 0;
       liveUsage.output = 0;
       liveUsage.cached = 0;
       liveUsage.cacheWrite = 0;
       liveUsage.reasoning = 0;
-      // The discarded attempt's real cost is sunk; the next attempt re-reports its
-      // own. Reset routing too so the popover reflects only the final generation.
+      // The discarded attempt's real cost is now banked in `discarded.cost`; the
+      // next attempt re-reports its own. Reset routing too so the popover reflects
+      // only the final generation.
       orLive.cost = 0;
       orLive.upstreamProvider = undefined;
       orLive.generationId = undefined;
@@ -1232,6 +1260,36 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         } : {}),
       },
     }).where(eq(messages.id, msgId));
+
+    // Settle the turn's budget hold to the REAL figures BEFORE flipping the task
+    // to its terminal status — so a completed task can never be left holding a
+    // pending estimate (a crash between the two used to strand the hold until the
+    // 30-day window; reconcileZombies' sweep is the backstop, this is the fix).
+    // Reuses the split computed above; never throws on its own.
+    if (usageMeta) {
+      // Real-cost-aware fold of any retried-then-discarded attempts (billing
+      // truth), even though the (i) popover above shows only the final one:
+      //  • if the provider reported a real charge for a discarded attempt
+      //    (discardedOrServed), add that authoritative cost to the final cost —
+      //    don't lose it to a catalog recompute;
+      //  • otherwise (catalog providers) let recordUsage recompute the cost from
+      //    the combined token totals.
+      const folded = discardedOrServed
+        ? (costMeta ?? 0) + discarded.cost
+        : hadDiscard
+          ? undefined // recompute from combined tokens below
+          : costMeta;
+      await reconcileUsage({
+        taskId, messageId: msgId, userId, provider, model: modelId, onSharedKey: isShared,
+        usage: {
+          inputTokens: usageMeta.input + discarded.input,
+          outputTokens: usageMeta.output + discarded.output,
+          cachedInputTokens: usageMeta.cached + discarded.cached,
+        },
+        costUsd: folded,
+      });
+    }
+
     await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
     // One structured line per finished run — the happy path used to leave no
@@ -1266,25 +1324,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    // Settle the turn's budget hold to the real figures (or insert if there was
-    // no hold). Reuses the split computed above; never throws on its own.
-    if (usageMeta) {
-      await reconcileUsage({
-        taskId, messageId: msgId, userId, provider, model: modelId, onSharedKey: isShared,
-        // Fold in the spend of any retried-then-discarded attempts (billing
-        // truth), even though the (i) popover above shows only the final one.
-        usage: {
-          inputTokens: usageMeta.input + discarded.input,
-          outputTokens: usageMeta.output + discarded.output,
-          cachedInputTokens: usageMeta.cached + discarded.cached,
-        },
-        // No retries → reuse the figure already computed for the popover (skips a
-        // second catalog lookup). With discarded spend folded in the totals
-        // differ, so let recordUsage recompute the cost from the combined usage.
-        costUsd: hadDiscard ? undefined : costMeta,
-      });
-    }
-
     // Fold the turn into long-term memory (fire-and-forget). One reconcile call
     // maintains the doc for the current scope — the project doc in a project, else
     // the user-global doc; the agent's remember() tool covers the other scope on
@@ -1300,7 +1339,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .join("\n");
     })();
     if (finalStatus === "completed" && lastUserText.trim()) {
-      maintainMemoryDoc({
+      // trackAux: keep the worker's shutdown drain waiting on this fire-and-forget
+      // call so a deploy doesn't kill it mid-flight (lost spend / dropped facts).
+      void trackAux(maintainMemoryDoc({
         model,
         provider,
         userId,
@@ -1311,7 +1352,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // Long chat → ride the hot prefix for full-context, cache-priced
         // reconcile; short chat → undefined keeps the cheap standalone call.
         hotContext: longChat ? { systemMessages, modelMessages } : undefined,
-      }).catch((e) => tlog.error("memory maintenance failed", { err: String(e) }));
+      }).catch((e) => tlog.error("memory maintenance failed", { err: String(e) })));
     }
 
     // Auto-title the chat on its FIRST completed turn. "First turn" = no prior
@@ -1321,13 +1362,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // this lands, so the sidebar always shows *something* in the meantime.
     const isFirstTurn = !modelMessages.some((m) => m.role === "assistant");
     if (finalStatus === "completed" && isFirstTurn && lastUserText.trim()) {
-      generateChatTitle(model, lastUserText, getFullText(), recordAuxUsage)
+      void trackAux(generateChatTitle(model, lastUserText, getFullText(), recordAuxUsage)
         .then(async (title) => {
           if (!title) return;
           await db.update(chats).set({ title: stripNul(title) }).where(eq(chats.id, chatId));
           await publishTaskEvent(userId, { type: "chat:title", chatId, title });
         })
-        .catch((e) => tlog.error("chat title generation failed", { err: String(e) }));
+        .catch((e) => tlog.error("chat title generation failed", { err: String(e) })));
     }
 
     // Compaction. If this turn's INPUT neared the context-window budget, summarize
@@ -1338,7 +1379,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // title/memory; gated on a clean completion. `used` counts the FULL input
     // (cached reads included), since the whole prefix occupies the window.
     if (finalStatus === "completed" && budget && budget.shouldCompact) {
-      {
+      void trackAux(
         compactConversation(model, systemMessages, modelMessages, recordAuxUsage)
           .then(async (summary) => {
             if (!summary) return;
@@ -1376,8 +1417,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               usedTokens: budget.used, effectiveLimit: budget.effectiveLimit, checkpointId,
             });
           })
-          .catch((e) => tlog.error("compaction failed", { err: String(e) }));
-      }
+          .catch((e) => tlog.error("compaction failed", { err: String(e) })),
+      );
     }
   } catch (e) {
     const isAbort = e instanceof Error && e.name === "AbortError";
@@ -1423,13 +1464,37 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt,
     });
+
+    // Bill the REAL spend already incurred before the abort/throw. A cancel,
+    // deadline, lost lease, or thrown provider error can still leave tokens spent
+    // on the shared key (live + any discarded-attempt tokens). The old path only
+    // releaseHold'd here, silently discarding that real spend; reconcile it to the
+    // hold instead so the shared key is billed. When NOTHING was spent (or
+    // prepareRun threw before resolving the run), there's no usage to bill — the
+    // finally's releaseHold then correctly cancels the untouched hold.
+    const spentInput = liveUsage.input + discarded.input;
+    const spentOutput = liveUsage.output + discarded.output;
+    const spentCached = liveUsage.cached + discarded.cached;
+    if (runModelId && (spentInput || spentOutput || spentCached)) {
+      // Prefer the provider's authoritative real charge whenever one was reported
+      // (this attempt's orLive, plus any discarded attempts'); else let
+      // reconcileUsage recompute from the catalog over the combined tokens.
+      const orServed = orLive.generationId != null || orLive.upstreamProvider != null;
+      const realCost = orServed || discardedOrServed ? orLive.cost + discarded.cost : undefined;
+      await reconcileUsage({
+        taskId, messageId: msgId, userId, provider: runProvider ?? "shared", model: runModelId, onSharedKey: runShared,
+        usage: { inputTokens: spentInput, outputTokens: spentOutput, cachedInputTokens: spentCached },
+        costUsd: realCost,
+      }).catch(() => {});
+    }
   } finally {
     clearTimeout(deadline);
     clearInterval(monitor);
-    // Self-heal the budget hold: a completed turn already reconciled it to the
-    // real cost above (so this deletes nothing), while a failed/cancelled turn
-    // leaves it pending — release it here so a stuck estimate never inflates the
-    // budget. A hard process crash skips this; reconcileZombies releases those.
+    // Self-heal the budget hold: a turn that produced real spend (completed, or a
+    // failed/cancelled turn that still billed tokens) already reconciled the hold
+    // to its real cost above, so this deletes nothing; a turn that spent NOTHING
+    // leaves the estimate pending — release it here so it never inflates the
+    // budget. A hard process crash skips this; reconcileZombies sweeps those.
     await releaseHold(taskId).catch(() => {});
     await closeMcp?.().catch(() => {});
   }

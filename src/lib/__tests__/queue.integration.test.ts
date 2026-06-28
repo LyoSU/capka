@@ -139,6 +139,46 @@ run("durable queue", () => {
     expect(rows[0].metadata.taskId).toBe("qt4");
   });
 
+  // H10 + M10: reconcileZombies must settle outstanding holds, not just tasks —
+  // both the ones it reaps this run AND any orphaned hold whose owning task is
+  // already terminal (a crash between finalize and reconcile, or a swallowed
+  // releaseHold). Otherwise a stale estimate inflates the budget until 30 days.
+  it("settles pending holds: freshly-reaped zombies and already-terminal orphans", async () => {
+    // A zombie: running with an expired lease + an outstanding pending hold.
+    await enqueueTask({ id: "qz1", chatId: C, userId: U, payload: {} });
+    await pool.query(
+      `UPDATE tasks SET status='running', worker_id='w1', lease_expires_at = now() - interval '1 minute' WHERE id='qz1'`,
+    );
+    await pool.query(
+      `INSERT INTO usage (id, task_id, user_id, provider, model, cost_usd, on_shared_key, pending)
+       VALUES ('uz1','qz1',$1,'shared','m','0.01',true,true)`,
+      [U],
+    );
+    // An orphan: a task already flipped to completed but whose hold was never
+    // settled (H5 crash window / swallowed releaseHold).
+    await enqueueTask({ id: "qz2", chatId: "qz2-chat", userId: U, payload: {} });
+    await pool.query(`INSERT INTO chats (id, user_id) VALUES ('qz2-chat',$1) ON CONFLICT (id) DO NOTHING`, [U]);
+    await pool.query(`UPDATE tasks SET status='completed' WHERE id='qz2'`);
+    await pool.query(
+      `INSERT INTO usage (id, task_id, user_id, provider, model, cost_usd, on_shared_key, pending)
+       VALUES ('uz2','qz2',$1,'shared','m','0.02',true,true)`,
+      [U],
+    );
+
+    await reconcileZombies();
+
+    const { rows } = await pool.query<{ task_id: string }>(
+      `SELECT task_id FROM usage WHERE task_id IN ('qz1','qz2') AND pending = true`,
+    );
+    // Both stale holds are gone — neither the reaped zombie nor the terminal
+    // orphan keeps a pending estimate.
+    expect(rows.length).toBe(0);
+
+    await pool.query(`DELETE FROM usage WHERE task_id IN ('qz1','qz2')`);
+    await pool.query(`DELETE FROM tasks WHERE id IN ('qz1','qz2')`);
+    await pool.query(`DELETE FROM chats WHERE id = 'qz2-chat'`);
+  });
+
   it("leaves messages of healthy tasks untouched", async () => {
     await enqueueTask({ id: "qt5", chatId: C, userId: U, payload: {} });
     await pool.query(

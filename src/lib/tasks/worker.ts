@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models } from "@/lib/db/schema";
 import { realtime } from "@/lib/realtime";
-import { claimNextTask, reconcileZombies, INTERRUPTED_MESSAGE } from "@/lib/tasks/queue";
+import { claimNextTask, reconcileZombies, auxInFlight, INTERRUPTED_MESSAGE } from "@/lib/tasks/queue";
 import { drainInFlight } from "@/lib/tasks/drain";
 import { releaseHold } from "@/lib/billing/limits";
 import { runAgentTask } from "@/lib/tasks/runner";
@@ -147,7 +147,9 @@ export async function startWorker(): Promise<void> {
     clearInterval(reconcileTimer);
     clearInterval(catalogTimer);
     log.info("worker draining on signal — no new tasks; waiting for in-flight", { signal, workerId: s.workerId, inFlight: s.inFlight });
-    const { drained, remaining } = await drainInFlight(() => state().inFlight, DRAIN_GRACE_MS);
+    // Also wait on fire-and-forget aux work (title/memory/compaction) so a deploy
+    // doesn't kill an in-flight LLM call mid-write and lose the spend/checkpoint.
+    const { drained, remaining } = await drainInFlight(() => state().inFlight + auxInFlight(), DRAIN_GRACE_MS);
     log.info("worker drain complete", { signal, workerId: s.workerId, drained, remaining });
     process.exit(0);
   };

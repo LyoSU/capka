@@ -129,9 +129,13 @@ async function sharedSpendWindows(userId: string): Promise<SpendSplit> {
 
 function capFor(tier: Tier, w: WindowKey): number | null {
   const raw = w === "h5" ? tier.limit5h : w === "d7" ? tier.limitWeek : tier.limitMonth;
+  // Unset (null/absent) means unlimited. A CONFIGURED value — including an
+  // explicit 0 (a hard "no shared-key budget" deny) — is the cap, so 0 must
+  // block spend, not be misread as "no limit". Only a non-finite/negative
+  // garbage value falls back to unlimited.
   if (raw === null || raw === undefined) return null;
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 /** Full status for the UI (% per window) and for enforcement (blocked flag). */
@@ -143,7 +147,9 @@ export async function getLimitStatus(userId: string): Promise<LimitStatus> {
     const reserved = spend.reserved[w];
     const used = committed + reserved;
     const limit = capFor(tier, w);
-    const pct = limit ? Math.min(999, Math.round((used / limit) * 100)) : 0;
+    // null = unlimited → 0%. A finite cap (incl. an explicit 0, a hard deny)
+    // reads as full: any use over a 0 budget — or a divide-by-zero — pins to 999.
+    const pct = limit === null ? 0 : limit > 0 ? Math.min(999, Math.round((used / limit) * 100)) : used > 0 ? 999 : 100;
     return { window: w, committed, reserved, used, limit, pct };
   });
 
@@ -207,7 +213,10 @@ export async function reserveBudget(input: {
   return await db.transaction(async (tx) => {
     // Serialize this user's budget ops so concurrent reserves see each other's
     // just-written holds. Transaction-scoped: released on commit/rollback.
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${input.userId}))`);
+    // 64-bit key: hashtext() is 32-bit, so two distinct users could collide and
+    // needlessly serialize each other's budget ops. hashtextextended widens the
+    // space to the full bigint the advisory-lock API takes.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`);
 
     const spend = await spendWindows(tx, input.userId);
 
