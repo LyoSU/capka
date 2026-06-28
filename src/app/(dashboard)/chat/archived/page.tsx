@@ -50,7 +50,7 @@ export default function ArchivedChatsPage() {
   return (
     <>
       <Header title={t("archived.title")} />
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 [scrollbar-gutter:stable]">
         <div className="mx-auto max-w-2xl">
           <Link
             href="/chat"

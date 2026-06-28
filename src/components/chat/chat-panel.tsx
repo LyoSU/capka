@@ -580,7 +580,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
               viewport — otherwise centering clips the logo off the top with no
               way to scroll back to it (mobile, keyboard open). */}
           <div
-            className="flex-1 overflow-y-auto overflow-x-hidden"
+            className="flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
             // Keyboard inset as bottom padding so the centered composer rises above
             // the keyboard instead of being covered (iOS).
             style={{ paddingBottom: "calc(2.5rem + var(--kb, 0px))" }}
@@ -648,7 +648,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
           <div
             ref={scrollRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto pt-16"
+            className="flex-1 overflow-y-auto pt-16 [scrollbar-gutter:stable]"
             // Bottom room tracks the composer's live height (+a little air, +the
             // keyboard inset) so the last message always clears the overlaid
             // composer — even after attachments grow it.
