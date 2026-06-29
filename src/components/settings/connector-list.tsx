@@ -509,6 +509,14 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                   <span className="text-sm font-medium">{s.name}</span>
                   <Badge variant="secondary">{scopeLabel[s.scope]}</Badge>
                   {s.transport === "stdio" && <Badge variant="outline">{t("localBadge")}</Badge>}
+                  {/* At-a-glance "this connector is broken" flag — the detail still
+                      streams in the HealthLine below. Only for genuine failures
+                      (can't reach / token rejected); needs_login has its own Sign in. */}
+                  {s.enabled && (h?.status === "unreachable" || h?.status === "unauthorized") && (
+                    <Badge variant="destructive" className="gap-1">
+                      <AlertTriangle className="h-3 w-3" />{t("health.problem")}
+                    </Badge>
+                  )}
                 </div>
                 {s.url && <p className="truncate text-xs text-muted-foreground">{s.url}</p>}
                 {s.transport === "stdio" && <p className="truncate text-xs text-muted-foreground">{t("localRuns")}</p>}

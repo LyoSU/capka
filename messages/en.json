@@ -882,7 +882,8 @@
         "ok": "Connected · {count} tools",
         "needsLogin": "Sign-in needed",
         "unauthorized": "Token rejected, check the access key",
-        "unreachable": "Couldn't connect, check the address"
+        "unreachable": "Couldn't connect, check the address",
+        "problem": "Not working"
       },
       "scope": {
         "system": "Shared",
