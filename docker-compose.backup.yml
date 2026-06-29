@@ -22,10 +22,10 @@ services:
         echo "pg-backup: dumping every $$BACKUP_INTERVAL_SECONDS s, keeping $$RETENTION_DAYS days"
         while true; do
           STAMP=$$(date -u +%Y%m%dT%H%M%SZ)
-          pg_dump -h postgres -U unClaw -d unClaw --clean --if-exists \
-            | gzip > /backups/unclaw-$$STAMP.sql.gz \
-            && echo "pg-backup: wrote unclaw-$$STAMP.sql.gz" \
+          pg_dump -h postgres -U Capka -d Capka --clean --if-exists \
+            | gzip > /backups/capka-$$STAMP.sql.gz \
+            && echo "pg-backup: wrote capka-$$STAMP.sql.gz" \
             || echo "pg-backup: dump FAILED at $$STAMP"
-          find /backups -name 'unclaw-*.sql.gz' -mtime +$$RETENTION_DAYS -delete 2>/dev/null || true
+          find /backups -name 'capka-*.sql.gz' -mtime +$$RETENTION_DAYS -delete 2>/dev/null || true
           sleep "$$BACKUP_INTERVAL_SECONDS"
         done

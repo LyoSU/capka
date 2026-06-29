@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildSandboxConfig, resolveNetworkMode } from "./sandbox-spec.js";
 
 const base = {
-  image: "unclaw-sandbox",
+  image: "capka-sandbox",
   sessionId: "sess1",
   userId: "user1",
   wsHostPath: "/data/storage/user1/sess1/sandbox",

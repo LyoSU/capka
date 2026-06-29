@@ -5,7 +5,7 @@
 // lives in the user's browser, so it doesn't care what proxy fronts the origin.
 //
 // Bump CACHE when offline.html changes so clients re-precache it.
-const CACHE = "unclaw-shell-v2";
+const CACHE = "capka-shell-v2";
 const OFFLINE_URL = "/offline.html";
 
 self.addEventListener("install", (event) => {

@@ -1,4 +1,4 @@
-# fly.toml — deploy the unClaw platform on Fly.io.
+# fly.toml — deploy the Capka platform on Fly.io.
 #
 # NOTE: Fly.io gives your app no Docker daemon, so the sandbox-controller and the
 # per-session sandboxes can't run here — this deploys the chat/agent PLATFORM
@@ -9,16 +9,16 @@
 # Setup (see deploy/fly.md):
 #   fly launch --no-deploy --copy-config   # uses this file
 #   fly postgres create && fly postgres attach <db>   # sets DATABASE_URL
-#   fly secrets set UNCLAW_MASTER_KEY=$(openssl rand -hex 32) \
+#   fly secrets set CAPKA_MASTER_KEY=$(openssl rand -hex 32) \
 #                   CONTROLLER_SECRET=$(openssl rand -hex 32) \
 #                   PUBLIC_URL=https://<app>.fly.dev
 #   fly deploy
 
-app = "unclaw"
+app = "capka"
 primary_region = "fra"
 
 [build]
-  image = "ghcr.io/lyosu/unclaw-platform:latest"
+  image = "ghcr.io/lyosu/capka-platform:latest"
 
 [http_service]
   internal_port = 3000

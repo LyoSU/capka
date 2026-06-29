@@ -23,10 +23,10 @@ describe("getPublicUrl", () => {
   it("derives from X-Forwarded-Proto and X-Forwarded-Host behind a proxy", () => {
     const headers = new Headers({
       host: "platform:3000",
-      "x-forwarded-host": "unclaw.example.com",
+      "x-forwarded-host": "capka.example.com",
       "x-forwarded-proto": "https",
     });
-    expect(getPublicUrl({ env: {}, headers })).toBe("https://unclaw.example.com");
+    expect(getPublicUrl({ env: {}, headers })).toBe("https://capka.example.com");
   });
 
   it("takes the first value when X-Forwarded-Proto is a comma list", () => {

@@ -89,7 +89,7 @@ function formatValue(value: unknown): string {
   if (typeof obj.result === "string" && obj.result.trim()) return obj.result;
   if (typeof obj.message === "string" && obj.message.trim()) return obj.message;
 
-  // unClaw sandbox tool shapes — show the human-meaningful field, never the
+  // Capka sandbox tool shapes — show the human-meaningful field, never the
   // raw { output, exitCode, success } wrapper (that JSON is dev noise).
   if (typeof obj.output === "string") return obj.output.trim(); // execute_bash/python/node
   if (typeof obj.listing === "string") return obj.listing.trim(); // list_files

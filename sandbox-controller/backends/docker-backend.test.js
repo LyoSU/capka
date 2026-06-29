@@ -18,14 +18,14 @@ describe("DockerBackend (mocked dockerode)", () => {
     expect(start).toHaveBeenCalled();
     const cfg = createContainer.mock.calls[0][0];
     expect(cfg.HostConfig.Runtime).toBe("runsc");
-    expect(cfg.Labels["unclaw.session"]).toBe("s1");
-    expect(cfg.Labels["unclaw.user"]).toBe("u1");
+    expect(cfg.Labels["capka.session"]).toBe("s1");
+    expect(cfg.Labels["capka.user"]).toBe("u1");
   });
 
   it("list() maps labeled containers to RecoveredSandbox shape", async () => {
     const listContainers = vi.fn().mockResolvedValue([
-      { Id: "c1", State: "running", Labels: { "unclaw.session": "s1", "unclaw.user": "u1" } },
-      { Id: "c2", State: "exited", Labels: { "unclaw.session": "s2", "unclaw.user": "u2" } },
+      { Id: "c1", State: "running", Labels: { "capka.session": "s1", "capka.user": "u1" } },
+      { Id: "c2", State: "exited", Labels: { "capka.session": "s2", "capka.user": "u2" } },
     ]);
     const b = new DockerBackend({ docker: { ...imagePresent, listContainers }, image: "img:1", runtime: "runc" });
     const out = await b.list();

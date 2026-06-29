@@ -1,6 +1,6 @@
-# Contributing to unClaw
+# Contributing to Capka
 
-Thanks for helping build unClaw. Contributions to the core are accepted under
+Thanks for helping build Capka. Contributions to the core are accepted under
 the **AGPL-3.0** and a Contributor License Agreement (see below).
 
 ## Before you start
@@ -30,7 +30,7 @@ the platform container — HMR does not reload the in-process worker loop.
 
 ## Contributor License Agreement (CLA)
 
-unClaw is **open-core**: the core is AGPL-3.0, and some enterprise features ship
+Capka is **open-core**: the core is AGPL-3.0, and some enterprise features ship
 under a separate commercial license. To allow that dual-licensing, every
 contributor must sign the CLA. A bot will prompt you to sign on your first PR;
 signing is a one-time, one-click step recorded in `signatures/cla.json`.

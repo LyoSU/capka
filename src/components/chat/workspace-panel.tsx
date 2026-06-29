@@ -90,10 +90,10 @@ export function WorkspacePanel({
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const [view, setView] = usePref<View>("unclaw.files.view", "list");
-  const [sortKey, setSortKey] = usePref<SortKey>("unclaw.files.sortKey", "name");
-  const [sortDir, setSortDir] = usePref<SortDir>("unclaw.files.sortDir", "asc");
-  const [grouped, setGrouped] = usePref<"0" | "1">("unclaw.files.group", "0");
+  const [view, setView] = usePref<View>("capka.files.view", "list");
+  const [sortKey, setSortKey] = usePref<SortKey>("capka.files.sortKey", "name");
+  const [sortDir, setSortDir] = usePref<SortDir>("capka.files.sortDir", "asc");
+  const [grouped, setGrouped] = usePref<"0" | "1">("capka.files.group", "0");
 
   // `silent` refreshes (live updates while the agent works) don't toggle the
   // spinner or wipe the list on a transient blip — they just swap in new entries.

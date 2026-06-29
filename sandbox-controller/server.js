@@ -33,7 +33,7 @@ const PORT = process.env.PORT || 3001;
 const SECRET = process.env.CONTROLLER_SECRET;
 
 // Root-equivalent service: refuse to boot without a strong secret.
-const DEFAULT_SECRET = "unclaw-sandbox-secret";
+const DEFAULT_SECRET = "capka-sandbox-secret";
 if (!SECRET || (SECRET === DEFAULT_SECRET && process.env.ALLOW_DEFAULT_SECRET !== "true")) {
   console.error(
     "[sandbox-controller] FATAL: CONTROLLER_SECRET is unset or left at the default value.\n" +
@@ -57,7 +57,7 @@ function intEnv(name, def) {
   return n;
 }
 
-const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "unclaw-sandbox";
+const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "capka-sandbox";
 const TMP_MB = parseInt(process.env.SANDBOX_TMP_MB || "64");
 const MCP_TMP_MB = parseInt(process.env.SANDBOX_MCP_TMP_MB || "256");
 const MEMORY_LIMIT = parseInt(process.env.SANDBOX_MEMORY_MB || "512") * 1024 * 1024;

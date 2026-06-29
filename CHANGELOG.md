@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to unClaw are documented here. Format follows
+All notable changes to Capka are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
@@ -18,7 +18,7 @@ All notable changes to unClaw are documented here. Format follows
 - One-variable automatic HTTPS via the Caddy TLS overlay (`DOMAIN=…`).
 - Railway and Coolify deploy templates.
 - Postgres backup/restore scripts and an optional scheduled-backup overlay.
-- `UNCLAW_VERSION` image pinning and an upgrade runbook (`docs/UPGRADE.md`).
+- `CAPKA_VERSION` image pinning and an upgrade runbook (`docs/UPGRADE.md`).
 - `ee/` boundary reserved for the commercial edition.
 - Marketplace install review: every plugin install is **pinned to a concrete git
   commit** (provenance recorded), all third-party code execution is **disabled by
@@ -58,8 +58,8 @@ All notable changes to unClaw are documented here. Format follows
   require an approved account; one billing hold per task (partial unique index);
   marketplace raw fetches and catalog size are byte/count-capped.
 - **Production master key is fail-closed**: with `NODE_ENV=production` and no
-  `UNCLAW_MASTER_KEY`, the app now refuses to start rather than silently storing the
-  key in the DB. Set `UNCLAW_MASTER_KEY` (recommended) or `ALLOW_DB_MASTER_KEY=true`
+  `CAPKA_MASTER_KEY`, the app now refuses to start rather than silently storing the
+  key in the DB. Set `CAPKA_MASTER_KEY` (recommended) or `ALLOW_DB_MASTER_KEY=true`
   to knowingly keep the insecure fallback. (`npm run up` already generates the env
   key, so turnkey deploys are unaffected.)
 - HSTS is now sent by the platform too, not only the Caddy TLS profile.

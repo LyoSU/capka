@@ -2,7 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-const PREFIX = "unclaw:draft:";
+const PREFIX = "capka:draft:";
 
 /**
  * Per-chat composer draft, persisted to localStorage so a typed-but-unsent

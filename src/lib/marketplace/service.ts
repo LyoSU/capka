@@ -12,7 +12,7 @@ import type { CatalogItem } from "./types";
 
 async function ghFetch(): Promise<typeof fetch> {
   const token = await getSetting("github_token");
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "unclaw" };
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "capka" };
   if (token) headers.Authorization = `Bearer ${token}`;
   return createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), headers, timeoutMs: 15_000 });
 }

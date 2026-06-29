@@ -1,5 +1,5 @@
 /**
- * unClaw's three-claw mark, mirroring `public/icon.svg` as three tapered blades
+ * Capka's three-claw mark, mirroring `public/icon.svg` as three tapered blades
  * that fill with `currentColor` — wide at the top, sharp at the tip. Used as the
  * brand badge and, scaled up at low element-opacity, as the calm background
  * monogram on auth / setup surfaces.

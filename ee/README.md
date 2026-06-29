@@ -1,6 +1,6 @@
-# unClaw Enterprise Edition (reserved)
+# Capka Enterprise Edition (reserved)
 
-This directory is reserved for the **commercial edition** of unClaw. It is **not**
+This directory is reserved for the **commercial edition** of Capka. It is **not**
 covered by the repository's AGPL-3.0 license — see `ee/LICENSE`.
 
 ## What lives here (when built)

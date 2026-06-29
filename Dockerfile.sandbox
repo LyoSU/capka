@@ -6,7 +6,7 @@
 ARG UBUNTU_REF=ubuntu:24.04
 FROM ${UBUNTU_REF}
 
-LABEL description="unClaw AI Agent Sandbox"
+LABEL description="Capka AI Agent Sandbox"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1

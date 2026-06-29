@@ -121,9 +121,9 @@ export function buildSandboxConfig({
     WorkingDir: "/workspace",
     Tty: false,
     Labels: {
-      "unclaw.session": sessionId,
-      "unclaw.user": userId,
-      "unclaw.network": networkMode,
+      "capka.session": sessionId,
+      "capka.user": userId,
+      "capka.network": networkMode,
     },
   };
 }

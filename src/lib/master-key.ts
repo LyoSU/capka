@@ -10,7 +10,7 @@ import { decrypt } from "./crypto";
  *
  * Bump the suffix only if the canary format ever changes.
  */
-export const CANARY_PLAINTEXT = "unclaw-master-key-check-v1";
+export const CANARY_PLAINTEXT = "capka-master-key-check-v1";
 
 export type MasterKeyCheck =
   /** No canary persisted yet — first boot (or pre-KCV install). Caller writes one. */

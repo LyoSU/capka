@@ -32,7 +32,7 @@ export function AuthShell({
             <span className="flex h-16 w-16 items-center justify-center rounded-[1.4rem] bg-primary text-primary-foreground shadow-sm">
               <ClawMark animated className="h-9 w-9" />
             </span>
-            <span className="text-sm font-medium tracking-tight text-muted-foreground">unClaw</span>
+            <span className="text-sm font-medium tracking-tight text-muted-foreground">Capka</span>
           </div>
 
           <div className="animate-blur-rise mt-7 space-y-6">

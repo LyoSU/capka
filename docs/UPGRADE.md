@@ -1,6 +1,6 @@
-# Upgrading unClaw
+# Upgrading Capka
 
-unClaw runs database migrations **automatically on platform boot** from the
+Capka runs database migrations **automatically on platform boot** from the
 `drizzle/` SQL files baked into the image. Upgrades are forward-only by default.
 
 ## Standard upgrade
@@ -9,8 +9,8 @@ unClaw runs database migrations **automatically on platform boot** from the
 # 1. Back up first — migrations are forward-only.
 ./scripts/backup.sh
 
-# 2. Pin the target release (or leave UNCLAW_VERSION unset for latest).
-echo 'UNCLAW_VERSION=v0.2.0' >> .env   # edit if already present
+# 2. Pin the target release (or leave CAPKA_VERSION unset for latest).
+echo 'CAPKA_VERSION=v0.2.0' >> .env   # edit if already present
 
 # 3. Pull the new images and recreate. The platform migrates the DB on boot.
 docker compose pull
@@ -30,9 +30,9 @@ schema back. To revert:
 
 ```bash
 docker compose stop platform
-./scripts/restore.sh ./data/backups/unclaw-<timestamp-before-upgrade>.sql.gz
-echo 'UNCLAW_VERSION=<previous-tag>' > /tmp/v && \
-  sed -i.bak '/^UNCLAW_VERSION=/d' .env && cat /tmp/v >> .env
+./scripts/restore.sh ./data/backups/capka-<timestamp-before-upgrade>.sql.gz
+echo 'CAPKA_VERSION=<previous-tag>' > /tmp/v && \
+  sed -i.bak '/^CAPKA_VERSION=/d' .env && cat /tmp/v >> .env
 docker compose pull && docker compose up -d
 ```
 

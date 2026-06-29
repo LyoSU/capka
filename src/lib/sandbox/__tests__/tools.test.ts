@@ -153,11 +153,11 @@ describe("sandbox tools — capture full output to a workspace log file", () => 
     execCommand.mockResolvedValue({ stdout: "ok", stderr: "", exitCode: 0 });
   });
 
-  it("execute_bash mirrors output to a rotated log under .unclaw/output via tee", async () => {
+  it("execute_bash mirrors output to a rotated log under .capka/output via tee", async () => {
     const { tools } = await load();
     await tools.execute_bash.execute!({ command: "echo hi" }, opts);
     const cmd = lastCmd();
-    expect(cmd).toContain("/workspace/.unclaw/output");
+    expect(cmd).toContain("/workspace/.capka/output");
     expect(cmd).toContain("tee");
     expect(cmd).toContain("echo hi"); // the user command is embedded intact
   });
@@ -165,7 +165,7 @@ describe("sandbox tools — capture full output to a workspace log file", () => 
   it("points the model at the saved log (not 're-run') when output was clipped", async () => {
     execCommand.mockResolvedValue({
       stdout: "X".repeat(200_000),
-      stderr: "\x1e204800\x1e/workspace/.unclaw/output/123.log\n",
+      stderr: "\x1e204800\x1e/workspace/.capka/output/123.log\n",
       exitCode: 0,
     });
     const { tools } = await load();
@@ -173,8 +173,8 @@ describe("sandbox tools — capture full output to a workspace log file", () => 
       output: string; truncated: string; logPath?: string;
     };
     expect(res.truncated).toBe("clip");
-    expect(res.logPath).toBe("/workspace/.unclaw/output/123.log");
-    expect(res.output).toContain("saved at /workspace/.unclaw/output/123.log");
+    expect(res.logPath).toBe("/workspace/.capka/output/123.log");
+    expect(res.output).toContain("saved at /workspace/.capka/output/123.log");
   });
 
   it("keeps no log and stays 'none' when output fit inline (trailer path is '-')", async () => {

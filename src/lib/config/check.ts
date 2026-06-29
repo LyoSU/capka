@@ -21,22 +21,22 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
   // real misconfigurations in production, so they're escalated from warn to error.
   const isProd = env.NODE_ENV === "production";
 
-  const masterKey = env.UNCLAW_MASTER_KEY?.trim();
+  const masterKey = env.CAPKA_MASTER_KEY?.trim();
   if (masterKey && !isValidMasterKey(masterKey)) {
     issues.push({
       level: "error",
-      key: "UNCLAW_MASTER_KEY",
+      key: "CAPKA_MASTER_KEY",
       message:
         "set but malformed — must be 64 hex characters (32 bytes). Generate one with: " +
         "openssl rand -hex 32. Encryption/decryption of every stored key will fail until fixed.",
     });
   } else if (!masterKey) {
-    // The whole point of UNCLAW_MASTER_KEY is to keep the key OUT of the DB, so a
+    // The whole point of CAPKA_MASTER_KEY is to keep the key OUT of the DB, so a
     // DB leak can't decrypt provider keys. Falling back to a DB-stored key defeats
     // that — tolerable for a quick local run, a real hole in production.
     issues.push({
       level: isProd ? "error" : "warn",
-      key: "UNCLAW_MASTER_KEY",
+      key: "CAPKA_MASTER_KEY",
       message:
         "not set — a master key will be generated and stored in the DB. This is insecure " +
         "(a DB leak then exposes every provider key). Set it in production: openssl rand -hex 32.",

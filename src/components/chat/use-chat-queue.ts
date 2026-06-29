@@ -3,7 +3,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { FileRef } from "@/lib/constants";
 
-export const QUEUE_PREFIX = "unclaw:queue:";
+export const QUEUE_PREFIX = "capka:queue:";
 
 /** A message typed while a reply was streaming, waiting its turn to be sent.
  *  Attachments are already-uploaded refs (eager upload), so a queued turn just

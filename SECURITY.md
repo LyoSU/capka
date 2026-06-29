@@ -98,9 +98,9 @@ marketplace sources as you would any dependency: install from repos you trust.
 
 ## Secret handling
 
-- `UNCLAW_MASTER_KEY` encrypts provider API keys at rest and lives **outside** the
+- `CAPKA_MASTER_KEY` encrypts provider API keys at rest and lives **outside** the
   database, so a DB leak alone cannot decrypt them. 64 hex chars. In production the
-  app is **fail-closed**: with no `UNCLAW_MASTER_KEY` it refuses to start rather than
+  app is **fail-closed**: with no `CAPKA_MASTER_KEY` it refuses to start rather than
   fall back to a DB-stored key. Set `ALLOW_DB_MASTER_KEY=true` to knowingly accept
   the insecure fallback (dev/testing).
 - `CONTROLLER_SECRET` gates the platform↔controller channel; the controller
@@ -111,12 +111,12 @@ marketplace sources as you would any dependency: install from repos you trust.
 ## Known limitations & residual risks
 
 We'd rather state these plainly than imply a stronger posture than ships today.
-unClaw is a **self-hosted Docker app for solo operators and small/medium teams**,
+Capka is a **self-hosted Docker app for solo operators and small/medium teams**,
 with sandboxed execution and a documented hardening path for higher-trust
 deployments — not a turnkey-certified multi-tenant platform.
 
 - **Long-running process required.** The agent worker runs **in-process** inside
-  the platform container via Next.js instrumentation. unClaw must run as a
+  the platform container via Next.js instrumentation. Capka must run as a
   long-lived process (Docker/VM); serverless/edge hosts that freeze between
   requests are unsupported. A separate `worker` service running the same code is a
   planned option, not a current one.

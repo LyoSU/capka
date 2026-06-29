@@ -5,6 +5,6 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL || "postgresql://unClaw:unClaw@localhost:5432/unClaw",
+    url: process.env.DATABASE_URL || "postgresql://Capka:Capka@localhost:5432/Capka",
   },
 });

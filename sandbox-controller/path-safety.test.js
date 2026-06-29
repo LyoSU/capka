@@ -59,7 +59,7 @@ describe("safeRealPath", () => {
     // /private/var/..., which would otherwise trip the symlink-containment check.
     // In production DATA_ROOT is already a real path, so this only normalizes the
     // test fixture, not the behaviour under test.
-    root = await realpath(await mkdtemp(join(tmpdir(), "unclaw-pathsafety-")));
+    root = await realpath(await mkdtemp(join(tmpdir(), "capka-pathsafety-")));
     base = resolve(root, "ws");
     await mkdir(join(base, "sub"), { recursive: true });
     await writeFile(join(base, "sub", "ok.txt"), "hi");
@@ -112,7 +112,7 @@ describe("assertNoSymlinkEscape", () => {
   let root;
 
   beforeAll(async () => {
-    root = await realpath(await mkdtemp(join(tmpdir(), "unclaw-noescape-")));
+    root = await realpath(await mkdtemp(join(tmpdir(), "capka-noescape-")));
     base = resolve(root, "ws");
     await mkdir(join(base, "sub"), { recursive: true });
     await writeFile(join(base, "sub", "ok.txt"), "hi");
