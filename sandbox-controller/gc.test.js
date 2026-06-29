@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces } from "./gc.js";
+import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces, quotaWarnings } from "./gc.js";
 
 describe("reapStaleWorkspaces", () => {
   it("deletes row + dir for workspaces idle beyond the TTL, stopping live ones", async () => {
@@ -79,5 +79,22 @@ describe("findOverQuota", () => {
 
   it("returns nothing when all workspaces are under the limit", async () => {
     expect(await findOverQuota({ store, workspace, limitBytes: 1000 })).toEqual([]);
+  });
+});
+
+describe("quotaWarnings", () => {
+  const over = (ids) => ids.map((id) => ({ sessionId: id, userId: "u", bytes: 1 }));
+
+  it("warns only newly-over workspaces, staying quiet on repeat ticks", () => {
+    const warned = new Set();
+    expect(quotaWarnings(over(["a", "b"]), warned).map((o) => o.sessionId)).toEqual(["a", "b"]);
+    expect(quotaWarnings(over(["a", "b"]), warned)).toEqual([]); // already warned this tick
+  });
+
+  it("re-warns after a workspace drops under quota and crosses again", () => {
+    const warned = new Set();
+    quotaWarnings(over(["a"]), warned);                          // first crossing → warned
+    expect(quotaWarnings(over([]), warned)).toEqual([]);         // recovered → cleared, no log
+    expect(quotaWarnings(over(["a"]), warned).map((o) => o.sessionId)).toEqual(["a"]); // crosses again
   });
 });

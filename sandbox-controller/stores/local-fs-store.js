@@ -1,7 +1,11 @@
 import { createReadStream, constants as FS } from "node:fs";
 import { readdir, stat, lstat, mkdir, chown, rm, open } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { sanitize, safeRealPath, assertNoSymlinkEscape } from "../path-safety.js";
+
+const execFileP = promisify(execFile);
 
 /** WorkspaceStore backed by the local filesystem (Stage 1 default). All file
  *  endpoints in the controller core go through this port, so swapping in an
@@ -92,17 +96,29 @@ export class LocalFsStore {
   }
 
   async size(userId, sessionId) {
-    const dirSize = async (dir) => {
+    const dir = this.#wsPath(userId, sessionId);
+    // `du` (C, warm inode cache) is dramatically cheaper than recursing the tree
+    // with readdir+stat in JS — a bloated workspace can hold tens of thousands of
+    // files, and this runs on the exec quota gate AND the periodic sweep, so a JS
+    // walk meant ~N stat syscalls per call. `-sk` reports KB blocks (disk usage);
+    // ×1024 → bytes. Fall back to the JS walk only if `du` can't run, so the quota
+    // gate never silently reads 0 and lets a full workspace through.
+    try {
+      const { stdout } = await execFileP("du", ["-sk", dir]);
+      const kb = parseInt(stdout, 10);
+      if (Number.isFinite(kb)) return kb * 1024;
+    } catch { /* du missing/failed (or dir absent) → fall through */ }
+    const dirSize = async (d) => {
       let total = 0;
       try {
-        for (const entry of await readdir(dir, { withFileTypes: true })) {
-          const full = join(dir, entry.name);
+        for (const entry of await readdir(d, { withFileTypes: true })) {
+          const full = join(d, entry.name);
           total += entry.isDirectory() ? await dirSize(full) : (await stat(full)).size;
         }
       } catch { /* missing */ }
       return total;
     };
-    return dirSize(this.#wsPath(userId, sessionId));
+    return dirSize(dir);
   }
 
   async remove(userId, sessionId) {

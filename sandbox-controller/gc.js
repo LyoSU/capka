@@ -17,6 +17,19 @@ export async function findOverQuota({ store, workspace, limitBytes, onSize }) {
   return over;
 }
 
+/** Decide which over-quota workspaces to log THIS pass, so the breach is recorded
+ *  once per crossing instead of on every sweep (the old code logged all of them
+ *  every tick — pure spam). Mutates `warned` to match the current breach set:
+ *  a workspace that dropped back under quota is forgotten, so if it later crosses
+ *  again it warns afresh. Pure but for the `warned` set it owns. */
+export function quotaWarnings(over, warned) {
+  const overIds = new Set(over.map((o) => o.sessionId));
+  for (const id of [...warned]) if (!overIds.has(id)) warned.delete(id); // recovered
+  const toWarn = over.filter((o) => !warned.has(o.sessionId));
+  for (const o of toWarn) warned.add(o.sessionId);
+  return toWarn;
+}
+
 /** Reap workspaces unused for longer than the (long) workspace TTL: delete the
  *  row AND its on-disk dir, stopping any lingering container first. This is the
  *  ONLY path that destroys a user's files — idle eviction merely stops the

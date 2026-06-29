@@ -16,7 +16,7 @@ import { PostgresSessionStore } from "./session-store.js";
 import { assertRuntimeAvailable } from "./runtime-check.js";
 import { resolveRuntimeProfile } from "./profile.js";
 import { reconcile } from "./reconcile.js";
-import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces } from "./gc.js";
+import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces, quotaWarnings } from "./gc.js";
 import { createQuotaTracker } from "./workspace-quota.js";
 import { pickLruVictim } from "./session-policy.js";
 import { notReadyGuard } from "./readiness.js";
@@ -81,6 +81,9 @@ const SANDBOX_UID = parseInt(process.env.SANDBOX_UID || "1000");
 const SANDBOX_GID = parseInt(process.env.SANDBOX_GID || "1000");
 const GC_GRACE_MS = parseInt(process.env.GC_GRACE_MS || "3600000"); // 1h
 const FLUSH_INTERVAL_MS = parseInt(process.env.FLUSH_INTERVAL_MS || "60000");
+// The over-quota breach is advisory (ops alerting only) — no need to `du` every
+// live workspace each minute. Scan on a slow cadence and warn once per crossing.
+const OVER_QUOTA_SCAN_MS = parseInt(process.env.OVER_QUOTA_SCAN_MS || "600000"); // 10min
 // Deployment-level egress kill-switch. The platform resolves a per-run mode
 // (org default + per-project "bridge"), but a deployment that never sets
 // SANDBOX_ALLOW_NETWORK=true gets NO network for any sandbox, regardless of what
@@ -529,13 +532,25 @@ async function flushAndGc() {
     // sweep any TRUE orphan dirs (no row at all) past the grace window.
     await reapStaleWorkspaces({ store, backend, workspace, ttlMs: WORKSPACE_TTL_MS, log });
     await gcOrphanWorkspaces({ store, workspace, listOnDisk: listWorkspacesOnDisk, graceMs: GC_GRACE_MS, log });
-    // Soft quota is advisory only — the sandbox can write to its bind mount past
-    // MAX_WORKSPACE_MB. Surface the breach for ops; real enforcement is host-level.
-    for (const o of await findOverQuota({ store, workspace, limitBytes: MAX_WORKSPACE_MB * 1024 * 1024, onSize: quota.note })) {
+  } catch (e) {
+    console.error("[gc] failed:", e.message);
+  }
+}
+
+// Soft quota is advisory only — the sandbox can write to its bind mount past
+// MAX_WORKSPACE_MB. Surface the breach for ops (host-level quota is the real
+// enforcement). Runs on its own slow cadence and logs once per crossing, not on
+// every sweep — the old code re-`du`'d every workspace each minute and re-logged
+// the same breaches, which dominated the controller's idle CPU and the logs.
+const overQuotaWarned = new Set();
+async function overQuotaScan() {
+  try {
+    const over = await findOverQuota({ store, workspace, limitBytes: MAX_WORKSPACE_MB * 1024 * 1024, onSize: quota.note });
+    for (const o of quotaWarnings(over, overQuotaWarned)) {
       log("workspace.over_quota", { ...o, mb: Math.round(o.bytes / 1048576), limitMb: MAX_WORKSPACE_MB }, "warn");
     }
   } catch (e) {
-    console.error("[gc] failed:", e.message);
+    console.error("[quota] scan failed:", e.message);
   }
 }
 
@@ -582,6 +597,8 @@ async function boot() {
 
   setInterval(idleSweep, 60_000);
   setInterval(flushAndGc, FLUSH_INTERVAL_MS);
+  void overQuotaScan(); // one breach report on boot, then on the slow cadence
+  setInterval(overQuotaScan, OVER_QUOTA_SCAN_MS);
 }
 
 // Test seam: with CONTROLLER_NO_BOOT set, skip the Docker-dependent boot so the
