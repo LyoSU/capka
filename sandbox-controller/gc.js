@@ -49,6 +49,33 @@ export async function reapStaleWorkspaces({ store, backend, workspace, ttlMs, no
   return { reaped };
 }
 
+/** Reclaim disk from REGENERABLE build/dependency dirs (node_modules, .venv,
+ *  __pycache__, site-packages, …) in workspaces that are over the soft quota,
+ *  WITHOUT deleting the user's actual files. Tightly gated so it never surprises
+ *  anyone: only workspaces whose container is stopped (`handle == null` → no
+ *  process is using the deps), that have been idle past `idleMs`, AND that are
+ *  actually over quota. A workspace under quota is left untouched; an active or
+ *  recently-used one is left untouched. The deps simply reinstall on the next run
+ *  — and only over-quota workspaces, which couldn't run until freed anyway, ever
+ *  pay that. `prune(userId, sessionId)` removes the regenerable dirs; freed bytes
+ *  are measured as size-before − size-after so it works for any store. */
+export async function reclaimRegenerable({ store, workspace, limitBytes, idleMs, prune, now = Date.now(), log }) {
+  let reclaimed = 0;
+  for (const s of await store.all()) {
+    if (s.handle != null) continue;              // container live → deps may be in use
+    if (now - s.lastActivity <= idleMs) continue; // not idle long enough
+    const before = await workspace.size(s.userId, s.sessionId);
+    if (before <= limitBytes) continue;          // under quota → nothing to reclaim
+    await prune(s.userId, s.sessionId);
+    const freed = before - (await workspace.size(s.userId, s.sessionId));
+    if (freed > 0) {
+      reclaimed += freed;
+      log?.("workspace.reclaim", { userId: s.userId, sessionId: s.sessionId, freedMb: Math.round(freed / 1048576) });
+    }
+  }
+  return { reclaimed };
+}
+
 /** Garbage-collect TRULY orphaned workspaces: directories on disk with no row in
  *  Postgres at all (e.g. pre-migration leftovers or manual junk), older than a
  *  grace window. Stopped workspaces still HAVE a row, so they are NOT touched

@@ -121,6 +121,36 @@ export class LocalFsStore {
     return dirSize(dir);
   }
 
+  // Dependency/bytecode/build-cache dirs the agent regenerates on demand (pip/npm
+  // install, recompile). Deleting these frees space without losing the user's own
+  // files. Deliberately NOT including `.git` (version history isn't regenerable) or
+  // generic output dirs like `dist`/`build` (could be the user's deliverable).
+  static #REGENERABLE = new Set([
+    "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", "site-packages", ".ipynb_checkpoints",
+  ]);
+
+  /** Remove regenerable dep/cache dirs anywhere in the workspace tree. Walks with
+   *  `withFileTypes` + skips symlinks entirely, so it can only ever `rm` a real
+   *  directory reached through real directories — a sandbox-planted symlink named
+   *  `node_modules` pointing outside is never followed or deleted through. */
+  async pruneRegenerable(userId, sessionId) {
+    const walk = async (dir) => {
+      let entries;
+      try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (e.isSymbolicLink() || !e.isDirectory()) continue; // never cross a symlink
+        const full = join(dir, e.name);
+        if (LocalFsStore.#REGENERABLE.has(e.name)) {
+          await rm(full, { recursive: true, force: true }).catch(() => {});
+        } else {
+          await walk(full);
+        }
+      }
+    };
+    await walk(this.#wsPath(userId, sessionId));
+  }
+
   async remove(userId, sessionId) {
     await rm(this.#wsPath(userId, sessionId), { recursive: true, force: true });
   }

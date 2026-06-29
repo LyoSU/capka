@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces, quotaWarnings } from "./gc.js";
+import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces, quotaWarnings, reclaimRegenerable } from "./gc.js";
 
 describe("reapStaleWorkspaces", () => {
   it("deletes row + dir for workspaces idle beyond the TTL, stopping live ones", async () => {
@@ -96,5 +96,38 @@ describe("quotaWarnings", () => {
     quotaWarnings(over(["a"]), warned);                          // first crossing → warned
     expect(quotaWarnings(over([]), warned)).toEqual([]);         // recovered → cleared, no log
     expect(quotaWarnings(over(["a"]), warned).map((o) => o.sessionId)).toEqual(["a"]); // crosses again
+  });
+});
+
+describe("reclaimRegenerable", () => {
+  // active-over: container live → never touch (deps may be in use mid-task)
+  // idle-under: under quota → no reason to prune
+  // fresh-over: over quota but recently active → leave the user's setup alone
+  // stale-over: stopped + idle + over quota → safe to strip regenerable deps
+  const rows = [
+    { sessionId: "active-over", userId: "u", handle: "c", lastActivity: 0 },
+    { sessionId: "idle-under", userId: "u", handle: null, lastActivity: 0 },
+    { sessionId: "fresh-over", userId: "u", handle: null, lastActivity: 9_500 },
+    { sessionId: "stale-over", userId: "u", handle: null, lastActivity: 0 },
+  ];
+
+  it("prunes regenerable dirs only from stopped, idle, over-quota workspaces", async () => {
+    const pruned = new Set();
+    const sizeBefore = { "active-over": 9999, "idle-under": 10, "fresh-over": 9999, "stale-over": 9999 };
+    const store = { all: async () => rows };
+    const workspace = { size: async (_u, sid) => (pruned.has(sid) ? 100 : sizeBefore[sid]) };
+    const prune = vi.fn(async (_u, sid) => { pruned.add(sid); });
+    const out = await reclaimRegenerable({ store, workspace, limitBytes: 500, idleMs: 1000, prune, now: 10_000 });
+    expect(prune).toHaveBeenCalledTimes(1);
+    expect(prune).toHaveBeenCalledWith("u", "stale-over");
+    expect(out.reclaimed).toBe(9999 - 100); // freed = size before − size after
+  });
+
+  it("does nothing when no workspace qualifies", async () => {
+    const store = { all: async () => [{ sessionId: "live", userId: "u", handle: "c", lastActivity: 0 }] };
+    const prune = vi.fn();
+    const out = await reclaimRegenerable({ store, workspace: { size: async () => 9999 }, limitBytes: 500, idleMs: 1000, prune, now: 10_000 });
+    expect(prune).not.toHaveBeenCalled();
+    expect(out.reclaimed).toBe(0);
   });
 });

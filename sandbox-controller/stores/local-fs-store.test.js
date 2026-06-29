@@ -76,3 +76,52 @@ describe("LocalFsStore symlink containment on write", () => {
     }
   });
 });
+
+describe("LocalFsStore.pruneRegenerable", () => {
+  it("removes regenerable dep/build dirs but keeps the user's files and .git history", async () => {
+    const dataRoot = join(TMP, `ws-prune-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      const { wsHostPath } = await store.ensure("u1", "s1");
+      await mkdir(join(wsHostPath, "node_modules", "pkg"), { recursive: true });
+      await writeFile(join(wsHostPath, "node_modules", "pkg", "a.js"), "junk");
+      await mkdir(join(wsHostPath, "src", "__pycache__"), { recursive: true });
+      await writeFile(join(wsHostPath, "src", "__pycache__", "m.pyc"), "bytecode");
+      await mkdir(join(wsHostPath, ".venv", "lib", "python3.12", "site-packages"), { recursive: true });
+      await mkdir(join(wsHostPath, ".git"), { recursive: true });
+      await writeFile(join(wsHostPath, ".git", "HEAD"), "ref: refs/heads/main");
+      await writeFile(join(wsHostPath, "src", "main.py"), "print(1)");
+      await writeFile(join(wsHostPath, "report.csv"), "1,2,3");
+
+      await store.pruneRegenerable("u1", "s1");
+
+      expect(existsSync(join(wsHostPath, "node_modules"))).toBe(false);
+      expect(existsSync(join(wsHostPath, "src", "__pycache__"))).toBe(false);
+      expect(existsSync(join(wsHostPath, ".venv"))).toBe(false);
+      expect(existsSync(join(wsHostPath, ".git"))).toBe(true);            // version history is NOT regenerable
+      expect(existsSync(join(wsHostPath, "src", "main.py"))).toBe(true);  // the user's code stays
+      expect(existsSync(join(wsHostPath, "report.csv"))).toBe(true);      // the user's data stays
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("never deletes THROUGH a symlink named like a regenerable dir (sandbox can plant it)", async () => {
+    const dataRoot = join(TMP, `ws-prune-sec-${Math.random().toString(36).slice(2)}`);
+    const outside = join(TMP, `outside-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      await mkdir(outside, { recursive: true });
+      await writeFile(join(outside, "victim.txt"), "precious");
+      const { wsHostPath } = await store.ensure("u1", "s1");
+      await symlink(outside, join(wsHostPath, "node_modules")); // looks reapable, but it's a link out
+
+      await store.pruneRegenerable("u1", "s1");
+
+      expect(existsSync(join(outside, "victim.txt"))).toBe(true); // the link's target is untouched
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+});

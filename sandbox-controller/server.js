@@ -16,7 +16,7 @@ import { PostgresSessionStore } from "./session-store.js";
 import { assertRuntimeAvailable } from "./runtime-check.js";
 import { resolveRuntimeProfile } from "./profile.js";
 import { reconcile } from "./reconcile.js";
-import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces, quotaWarnings } from "./gc.js";
+import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces, quotaWarnings, reclaimRegenerable } from "./gc.js";
 import { createQuotaTracker } from "./workspace-quota.js";
 import { pickLruVictim } from "./session-policy.js";
 import { notReadyGuard } from "./readiness.js";
@@ -84,6 +84,13 @@ const FLUSH_INTERVAL_MS = parseInt(process.env.FLUSH_INTERVAL_MS || "60000");
 // The over-quota breach is advisory (ops alerting only) — no need to `du` every
 // live workspace each minute. Scan on a slow cadence and warn once per crossing.
 const OVER_QUOTA_SCAN_MS = parseInt(process.env.OVER_QUOTA_SCAN_MS || "600000"); // 10min
+// Before warning, try to reclaim space from regenerable deps (node_modules,
+// .venv, __pycache__, …) in workspaces that are over quota AND have sat idle this
+// long with their container stopped — safe because nothing's using the deps and
+// they reinstall on the next run. Only over-quota workspaces (which can't run
+// until freed anyway) ever pay that reinstall. The 30d whole-workspace reap is
+// the harder backstop; this is the gentler, files-preserving step.
+const REGEN_REAP_IDLE_MS = parseInt(process.env.REGEN_REAP_IDLE_MS || "86400000"); // 1d
 // Deployment-level egress kill-switch. The platform resolves a per-run mode
 // (org default + per-project "bridge"), but a deployment that never sets
 // SANDBOX_ALLOW_NETWORK=true gets NO network for any sandbox, regardless of what
@@ -545,7 +552,17 @@ async function flushAndGc() {
 const overQuotaWarned = new Set();
 async function overQuotaScan() {
   try {
-    const over = await findOverQuota({ store, workspace, limitBytes: MAX_WORKSPACE_MB * 1024 * 1024, onSize: quota.note });
+    const limitBytes = MAX_WORKSPACE_MB * 1024 * 1024;
+    // Reclaim regenerable deps from idle, stopped, over-quota workspaces first, so
+    // the warning below fires only for genuinely-stuck ones (full of real files).
+    if (typeof workspace.pruneRegenerable === "function") {
+      await reclaimRegenerable({
+        store, workspace, limitBytes, idleMs: REGEN_REAP_IDLE_MS,
+        prune: async (u, s) => { await workspace.pruneRegenerable(u, s); quota.forget(s); },
+        log,
+      });
+    }
+    const over = await findOverQuota({ store, workspace, limitBytes, onSize: quota.note });
     for (const o of quotaWarnings(over, overQuotaWarned)) {
       log("workspace.over_quota", { ...o, mb: Math.round(o.bytes / 1048576), limitMb: MAX_WORKSPACE_MB }, "warn");
     }
