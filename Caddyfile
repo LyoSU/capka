@@ -1,4 +1,4 @@
-# unClaw automatic-HTTPS reverse proxy.
+# Capka automatic-HTTPS reverse proxy.
 # {$DOMAIN} is read from the environment at startup; Caddy provisions and renews
 # a Let's Encrypt cert for it automatically (no account email required).
 {$DOMAIN} {

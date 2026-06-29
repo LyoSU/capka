@@ -1,4 +1,4 @@
-# Deploying unClaw on Coolify
+# Deploying Capka on Coolify
 
 Coolify runs the full compose stack (including the Docker-socket sandbox) since
 it deploys onto a host with a Docker daemon.
@@ -8,7 +8,7 @@ it deploys onto a host with a Docker daemon.
    Traefik-routed variant; the default `docker-compose.yml` publishes a raw port).
 3. Set environment variables:
    - `PUBLIC_URL` = `https://<your-domain>` (drives Traefik routing + app origin)
-   - `UNCLAW_MASTER_KEY`, `CONTROLLER_SECRET`, `POSTGRES_PASSWORD` = `openssl rand -hex 32` each
+   - `CAPKA_MASTER_KEY`, `CONTROLLER_SECRET`, `POSTGRES_PASSWORD` = `openssl rand -hex 32` each
    - `SANDBOX_ALLOW_NETWORK` = `false` (default)
    - `SANDBOX_RUNTIME` = `runc` (default — standard Docker isolation, boots with no
      host setup). For untrusted/multi-tenant code, install gVisor on the host

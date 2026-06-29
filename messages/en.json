@@ -521,7 +521,7 @@
       "nameSaved": "Name updated",
       "nameSaveFailed": "Failed to update name",
       "appearance": "Appearance",
-      "appearanceDesc": "Choose how unClaw looks on your device.",
+      "appearanceDesc": "Choose how Capka looks on your device.",
       "theme": "Theme",
       "registration": "Registration",
       "registrationDesc": "Control whether new users can create accounts.",
@@ -549,7 +549,7 @@
     },
     "integrations": {
       "title": "Integrations",
-      "subtitle": "Connect external services to unClaw.",
+      "subtitle": "Connect external services to Capka.",
       "checking": "Checking…",
       "tokenConfigured": "Token configured",
       "notConfigured": "Not configured",
@@ -565,7 +565,7 @@
       },
       "link": {
         "title": "Link Telegram Account",
-        "desc": "Connect your Telegram account to chat with unClaw from Telegram.",
+        "desc": "Connect your Telegram account to chat with Capka from Telegram.",
         "checkingStatus": "Checking status…",
         "linked": "Linked",
         "linkedAs": "Linked as @{username}",
@@ -1029,7 +1029,7 @@
       "encryptionKeyDesc": "Protects the AI provider API keys stored in your database.",
       "masterKey": {
         "insecureTitle": "Protect your provider keys",
-        "insecureBody": "The key that encrypts your AI provider keys is stored in the database. Anyone who can read the database can read those keys. Copy this line into your server's environment file, then restart unClaw:",
+        "insecureBody": "The key that encrypts your AI provider keys is stored in the database. Anyone who can read the database can read those keys. Copy this line into your server's environment file, then restart Capka:",
         "restartHint": "After restarting, this warning disappears.",
         "secureLeftover": "Protected by an environment key. An old copy is still in the database. Remove it to finish.",
         "removeDbCopy": "Remove database copy",
@@ -1060,7 +1060,7 @@
   "setup": {
     "back": "Back",
     "brand": {
-      "wordmark": "unClaw",
+      "wordmark": "Capka",
       "headline": "Calm access to AI for your whole team",
       "sub": "Connect a provider once. After that everyone just opens a chat and works, in the browser or in Telegram.",
       "point1": "One shared key for the whole company",
@@ -1154,7 +1154,7 @@
     "passwordLabel": "Password",
     "login": {
       "title": "Sign in",
-      "description": "Enter your credentials to access unClaw.",
+      "description": "Enter your credentials to access Capka.",
       "submit": "Sign in",
       "submitting": "Signing in…",
       "invalidCredentials": "Invalid email or password. Please try again.",
@@ -1163,7 +1163,7 @@
     },
     "register": {
       "title": "Create account",
-      "description": "Sign up to start using unClaw.",
+      "description": "Sign up to start using Capka.",
       "nameLabel": "Name",
       "namePlaceholder": "Your name",
       "nameRequired": "Name is required",
@@ -1191,17 +1191,17 @@
     }
   },
   "telegram": {
-    "start": "👋 **Welcome to unClaw!**\n\nI'm your AI assistant right here in Telegram — I answer questions and work with text, photos and files.\n\nTo get started, open unClaw and sign in with Telegram — your account will be linked automatically.\n\nAlready have a connection code? Send `/link CODE`.",
+    "start": "👋 **Welcome to Capka!**\n\nI'm your AI assistant right here in Telegram — I answer questions and work with text, photos and files.\n\nTo get started, open Capka and sign in with Telegram — your account will be linked automatically.\n\nAlready have a connection code? Send `/link CODE`.",
     "startLinked": "👋 **Welcome back!** Your account is already connected.\n\nJust message me and I'll get going. You can send text, photos and files, and /new opens a fresh chat.",
-    "openApp": "🦀 Open unClaw",
+    "openApp": "🦀 Open Capka",
     "openInBrowser": "💬 Open in browser",
     "tooManyAttempts": "⏳ Too many attempts. Please wait a minute and try again.",
-    "linkUsage": "Send the code right after the command: `/link CODE`\n\nYou'll find your connection code in unClaw's settings.",
-    "invalidCode": "🤔 That code is invalid or has expired. Generate a new one in unClaw and try again.",
+    "linkUsage": "Send the code right after the command: `/link CODE`\n\nYou'll find your connection code in Capka's settings.",
+    "invalidCode": "🤔 That code is invalid or has expired. Generate a new one in Capka and try again.",
     "linked": "✅ **Account linked!**\n\nJust message me and I'll get going. You can send text, photos and files.",
-    "linkFirst": "Connect your account first. Open unClaw and sign in with Telegram — it takes a few seconds and links automatically.",
+    "linkFirst": "Connect your account first. Open Capka and sign in with Telegram — it takes a few seconds and links automatically.",
     "newChat": "🆕 **New chat**\n\nYour previous conversation is saved. Go ahead — we're starting fresh.",
-    "notLinked": "To let me reply, connect your account first.\n\nOpen unClaw and sign in with Telegram — it takes a few seconds and links automatically.",
+    "notLinked": "To let me reply, connect your account first.\n\nOpen Capka and sign in with Telegram — it takes a few seconds and links automatically.",
     "tooFast": "⏳ Hold on a moment — you're sending messages too fast.",
     "budgetReached": "💳 Spending limit reached. Please contact your admin to raise it.",
     "fileTooBig": "📎 `{name}` is larger than 20 MB, so Telegram won't let me fetch it.",
@@ -1224,7 +1224,7 @@
     },
     "modelPrompt": "🧠 Pick a model for this chat:",
     "modelSet": "✅ Now using *{model}* in this chat.",
-    "modelEmpty": "No models available yet. Add a provider in unClaw settings.",
+    "modelEmpty": "No models available yet. Add a provider in Capka settings.",
     "modelStale": "That list is out of date — send /model again."
   }
 }

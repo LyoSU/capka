@@ -25,7 +25,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: 'signatures/cla.json'
-          path-to-document: 'https://github.com/lyosu/unclaw/blob/master/docs/CLA.md'
+          path-to-document: 'https://github.com/lyosu/capka/blob/master/docs/CLA.md'
           branch: 'cla-signatures'
           allowlist: 'LyoSU,dependabot[bot]'
-          custom-notsigned-prcomment: 'Thanks for your PR. Please sign the [CLA](https://github.com/lyosu/unclaw/blob/master/docs/CLA.md) by commenting below.'
+          custom-notsigned-prcomment: 'Thanks for your PR. Please sign the [CLA](https://github.com/lyosu/capka/blob/master/docs/CLA.md) by commenting below.'

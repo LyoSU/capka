@@ -53,7 +53,7 @@ export async function connectMcpServer(
   const timeoutMs = opts.timeoutMs ?? (cfg.transport === "stdio" ? STDIO_CONNECT_TIMEOUT_MS : CONNECT_TIMEOUT_MS);
   const blockPrivate = opts.blockPrivate ?? false;
 
-  const client = new Client({ name: "unclaw", version: "0.1.0" });
+  const client = new Client({ name: "capka", version: "0.1.0" });
   let transport: Transport;
 
   if (cfg.transport === "stdio") {

@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# One command to stand unClaw up on a fresh box.
+# One command to stand Capka up on a fresh box.
 #
 # Generates the three required secrets into .env on first run (idempotent — it
 # never overwrites an existing value, and self-heals a missing one on upgrade),
@@ -14,7 +14,7 @@ set -eu
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
-ENV_FILE="${UNCLAW_ENV_FILE:-.env}"
+ENV_FILE="${CAPKA_ENV_FILE:-.env}"
 START=1
 for arg in "$@"; do
   case "$arg" in
@@ -49,12 +49,12 @@ chmod 600 "$ENV_FILE"
 echo "Ensuring secrets in $ENV_FILE ..."
 ensure_secret POSTGRES_PASSWORD
 ensure_secret CONTROLLER_SECRET
-ensure_secret UNCLAW_MASTER_KEY
+ensure_secret CAPKA_MASTER_KEY
 # SETUP_TOKEN is intentionally NOT auto-generated: first-run is frictionless by
 # default. It's an opt-in hardening for public deploys — set it in .env yourself
 # to require it when claiming the admin account (see .env.example).
 
-# Public origin is optional: unset → unClaw derives it from proxy headers. When
+# Public origin is optional: unset → Capka derives it from proxy headers. When
 # provided (recommended in production), persist it so the value isn't spoofable.
 if [ "${PUBLIC_URL:-}" != "" ] && ! grep -q '^PUBLIC_URL=' "$ENV_FILE"; then
   printf 'PUBLIC_URL=%s\n' "$PUBLIC_URL" >>"$ENV_FILE"
@@ -79,11 +79,11 @@ fi
 DOMAIN_EFFECTIVE="${DOMAIN:-$(sed -n 's/^DOMAIN=//p' "$ENV_FILE" 2>/dev/null | head -n1)}"
 
 if [ "${DOMAIN_EFFECTIVE:-}" != "" ]; then
-  echo "Starting unClaw with automatic HTTPS for $DOMAIN_EFFECTIVE ..."
+  echo "Starting Capka with automatic HTTPS for $DOMAIN_EFFECTIVE ..."
   docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build -d
   OPEN_URL="https://$DOMAIN_EFFECTIVE"
 else
-  echo "Starting unClaw (docker compose up --build -d) ..."
+  echo "Starting Capka (docker compose up --build -d) ..."
   docker compose up --build -d
   OPEN_URL="${PUBLIC_URL:-http://localhost:3000}"
 fi
@@ -95,9 +95,9 @@ echo
 # wizard reads it and scrubs it. Otherwise just point at the app (no token step).
 SETUP_TOKEN_VALUE="$(sed -n 's/^SETUP_TOKEN=//p' "$ENV_FILE" | head -n1)"
 if [ "${SETUP_TOKEN_VALUE:-}" != "" ]; then
-  echo "unClaw is starting. Open this link to finish setup:"
+  echo "Capka is starting. Open this link to finish setup:"
   echo "    ${OPEN_URL%/}/setup#token=$SETUP_TOKEN_VALUE"
 else
-  echo "unClaw is starting. Open $OPEN_URL and finish setup."
+  echo "Capka is starting. Open $OPEN_URL and finish setup."
 fi
 echo "(First HTTPS request may take ~30s while Caddy provisions the certificate.)"

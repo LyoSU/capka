@@ -1,7 +1,7 @@
 /**
  * Single source of truth for the supported locales.
  *
- * unClaw runs without locale-based URL routing: there is no `/[locale]` segment
+ * Capka runs without locale-based URL routing: there is no `/[locale]` segment
  * and no middleware. The active locale is resolved per request (see `locale.ts`)
  * and English is the default — message keys in the codebase are English.
  */

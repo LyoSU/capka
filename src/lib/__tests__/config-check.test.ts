@@ -4,7 +4,7 @@ import { checkConfig } from "../config/check";
 // A fully-valid environment as the baseline; each case overrides one var so the
 // assertions stay about that var alone.
 const VALID: Record<string, string | undefined> = {
-  UNCLAW_MASTER_KEY: "a".repeat(64),
+  CAPKA_MASTER_KEY: "a".repeat(64),
   DATABASE_URL: "postgresql://u:p@db:5432/app",
   PUBLIC_URL: "https://app.example.com",
 };
@@ -17,11 +17,11 @@ describe("checkConfig", () => {
   });
 
   it("errors on a malformed master key but warns when it is absent", () => {
-    const bad = checkConfig({ ...VALID, UNCLAW_MASTER_KEY: "nope" });
-    expect(bad).toContainEqual(expect.objectContaining({ key: "UNCLAW_MASTER_KEY", level: "error" }));
+    const bad = checkConfig({ ...VALID, CAPKA_MASTER_KEY: "nope" });
+    expect(bad).toContainEqual(expect.objectContaining({ key: "CAPKA_MASTER_KEY", level: "error" }));
 
-    const absent = checkConfig({ ...VALID, UNCLAW_MASTER_KEY: undefined });
-    expect(absent).toContainEqual(expect.objectContaining({ key: "UNCLAW_MASTER_KEY", level: "warn" }));
+    const absent = checkConfig({ ...VALID, CAPKA_MASTER_KEY: undefined });
+    expect(absent).toContainEqual(expect.objectContaining({ key: "CAPKA_MASTER_KEY", level: "warn" }));
   });
 
   it("warns when DATABASE_URL is absent and errors on a non-postgres scheme", () => {
@@ -49,12 +49,12 @@ describe("checkConfig", () => {
   });
 
   it("escalates insecure-but-tolerable defaults to errors in production", () => {
-    const dev = checkConfig({ ...VALID, UNCLAW_MASTER_KEY: undefined, DATABASE_URL: undefined });
-    expect(dev.find((i) => i.key === "UNCLAW_MASTER_KEY")?.level).toBe("warn");
+    const dev = checkConfig({ ...VALID, CAPKA_MASTER_KEY: undefined, DATABASE_URL: undefined });
+    expect(dev.find((i) => i.key === "CAPKA_MASTER_KEY")?.level).toBe("warn");
     expect(dev.find((i) => i.key === "DATABASE_URL")?.level).toBe("warn");
 
-    const prod = checkConfig({ ...VALID, NODE_ENV: "production", UNCLAW_MASTER_KEY: undefined, DATABASE_URL: undefined });
-    expect(prod.find((i) => i.key === "UNCLAW_MASTER_KEY")?.level).toBe("error");
+    const prod = checkConfig({ ...VALID, NODE_ENV: "production", CAPKA_MASTER_KEY: undefined, DATABASE_URL: undefined });
+    expect(prod.find((i) => i.key === "CAPKA_MASTER_KEY")?.level).toBe("error");
     expect(prod.find((i) => i.key === "DATABASE_URL")?.level).toBe("error");
   });
 

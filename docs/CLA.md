@@ -1,10 +1,10 @@
-# unClaw Contributor License Agreement
+# Capka Contributor License Agreement
 
 By signing this CLA you agree that:
 
 1. You are legally entitled to grant this license and the contribution is your
    original work (or you have rights to submit it).
-2. You grant the unClaw maintainers a perpetual, worldwide, non-exclusive,
+2. You grant the Capka maintainers a perpetual, worldwide, non-exclusive,
    royalty-free license to use, reproduce, modify, and distribute your
    contribution, including the right to **relicense** it under the AGPL-3.0 for
    the open-source core and under a commercial license for the enterprise edition.

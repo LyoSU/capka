@@ -55,7 +55,7 @@ export function SharedChatView({
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border/60 bg-background/80 px-4 py-3 backdrop-blur">
-        <Link href="/" aria-label="unClaw" className="shrink-0 text-foreground">
+        <Link href="/" aria-label="Capka" className="shrink-0 text-foreground">
           <ClawMark className="size-6" />
         </Link>
         <div className="min-w-0 flex-1">

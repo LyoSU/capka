@@ -1,6 +1,6 @@
 /**
  * Turn a raw LLM/provider error into something an ORDINARY user understands,
- * while keeping the technical detail for admins. unClaw is used by non-technical
+ * while keeping the technical detail for admins. Capka is used by non-technical
  * staff on a shared admin-configured key, so a raw "402 insufficient credits"
  * (which only the admin can fix) must never be shown as-is to an end user.
  *

@@ -5,7 +5,7 @@
  * is the worst thing a tool can hand the model: it is persisted to Postgres and
  * re-sent every turn (real $ on a real-cost platform), it drowns the useful
  * signal, and one oversized result can trip the reactive `context_too_long` path
- * that mechanically drops recent conversation. unClaw's compaction trims OLD
+ * that mechanically drops recent conversation. Capka's compaction trims OLD
  * history; nothing capped a FRESH result at the moment it was produced. This does.
  *
  * The marker is deliberate: it sits AT the cut (not merely appended), states that
@@ -73,11 +73,11 @@ export function clampOutput(
     }
     if (!clipped) return { text, clipped: false };
     const shown = kept.split("\n").length;
-    const marker = `\n[… unClaw: showing the first ${shown} of ${lines.length} lines — display limit, not the end of the data.${hint}]`;
+    const marker = `\n[… Capka: showing the first ${shown} of ${lines.length} lines — display limit, not the end of the data.${hint}]`;
     return { text: kept + marker, clipped: true };
   }
 
   if (text.length <= maxChars) return { text, clipped: false };
-  const marker = `\n\n[… unClaw: OUTPUT TRUNCATED — middle omitted (~${kb(text.length)} total). This is NOT the program's real output here.${hint} …]\n\n`;
+  const marker = `\n\n[… Capka: OUTPUT TRUNCATED — middle omitted (~${kb(text.length)} total). This is NOT the program's real output here.${hint} …]\n\n`;
   return { text: clipMiddle(text, maxChars, marker), clipped: true };
 }

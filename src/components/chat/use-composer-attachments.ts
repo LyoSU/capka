@@ -9,7 +9,7 @@ import type { AttachedFile } from "./chat-input";
 /** Max single file size for upload (100MB). */
 export const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
-const PREFIX = "unclaw:draft-files:";
+const PREFIX = "capka:draft-files:";
 
 function genId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

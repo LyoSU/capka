@@ -14,7 +14,7 @@ const NARROW_NOTE =
 // workspace, so the model can grep/read the rest instead of re-running. The
 // inline view still streams back normally (and is clamped as before); the log is
 // the recovery path. A byte cap bounds one runaway, and rotation bounds the dir.
-const CAPTURE_DIR = "/workspace/.unclaw/output";
+const CAPTURE_DIR = "/workspace/.capka/output";
 const CAPTURE_FILE_BYTES = (Number(process.env.OUTPUT_FILE_CAP_MB) || 10) * 1024 * 1024;
 const CAPTURE_KEEP = Number(process.env.OUTPUT_KEEP_FILES) || 5;
 /** RS-delimited trailer the wrapper prints on stderr: \x1e<bytes>\x1e<path|->.
@@ -73,11 +73,11 @@ function captureResult(result: { stdout: string; stderr: string; exitCode: numbe
   if (logPath) {
     truncated = "clip";
     // If the inline view fit (no marker) but a log was still kept, point at it.
-    if (!clamped.clipped) output += `\n[… unClaw: ${note}]`;
+    if (!clamped.clipped) output += `\n[… Capka: ${note}]`;
   } else if (result.truncated) {
     truncated = "discarded";
     output +=
-      "\n\n[… unClaw: output exceeded the sandbox limit and was stopped at the source — the rest was DISCARDED and cannot be read. Re-run the command so it produces less output (filter, or redirect to a file).]";
+      "\n\n[… Capka: output exceeded the sandbox limit and was stopped at the source — the rest was DISCARDED and cannot be read. Re-run the command so it produces less output (filter, or redirect to a file).]";
   }
 
   return {
@@ -211,7 +211,7 @@ export async function loadSandboxTools(sessionKey: string, userId: string, ensur
         const guard = clampOutput(shown, { mode: "head", maxLines: count + 1 });
         if (!more && !guard.clipped) return { content: guard.text, error: null };
         const note = more
-          ? `\n[… unClaw: showing lines ${start}–${start + count - 1} — more follows. Read the next page: read_file(path, offset=${start + count}). Display limit, not the end of the file.]`
+          ? `\n[… Capka: showing lines ${start}–${start + count - 1} — more follows. Read the next page: read_file(path, offset=${start + count}). Display limit, not the end of the file.]`
           : "";
         return { content: guard.text + note, error: null, truncated: true };
       },
@@ -322,7 +322,7 @@ print('OK')`;
         const capped = all.length > 100;
         const matches = (capped ? all.slice(0, 100) : all).join("\n") || "(no matches)";
         const note = capped
-          ? "\n[… unClaw: showing the first 100 matches — more exist. Narrow the pattern, path, or glob.]"
+          ? "\n[… Capka: showing the first 100 matches — more exist. Narrow the pattern, path, or glob.]"
           : "";
         return { matches: matches + note, error: result.exitCode > 1 ? result.stderr : null, truncated: capped };
       },

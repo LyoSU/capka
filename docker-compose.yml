@@ -4,21 +4,21 @@
 # Postgres and the root-equivalent controller to the internet. They talk to each
 # other over the compose network by DNS name; only `platform` is published.
 # Secrets have NO defaults: prod must supply POSTGRES_PASSWORD, CONTROLLER_SECRET
-# and UNCLAW_MASTER_KEY (via env / .env). For local debugging with defaults and
+# and CAPKA_MASTER_KEY (via env / .env). For local debugging with defaults and
 # host-published ports, layer docker-compose.dev.yml (see `npm run docker:dev`).
 services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: unClaw
+      POSTGRES_USER: Capka
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: unClaw
+      POSTGRES_DB: Capka
     expose:
       - "5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U unClaw"]
+      test: ["CMD-SHELL", "pg_isready -U Capka"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,7 +37,7 @@ services:
       dockerfile: Dockerfile.sandbox
     # Prebuilt image (published by .github/workflows/publish-images.yml). `build:`
     # stays as a fallback so cloning + building works with no image present.
-    image: ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
+    image: ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
     entrypoint: ["echo", "sandbox image built"]
 
   # Narrows the Docker API the controller can reach: only container + exec
@@ -75,7 +75,7 @@ services:
     build: ./sandbox-controller
     # Prebuilt image (published by .github/workflows/publish-images.yml). `build:`
     # stays as a fallback — `up --build` builds locally, `pull` fetches the image.
-    image: ghcr.io/lyosu/unclaw-controller:${UNCLAW_VERSION:-latest}
+    image: ghcr.io/lyosu/capka-controller:${CAPKA_VERSION:-latest}
     expose:
       - "3001"
     # No host Docker socket here anymore — it reaches the daemon through the
@@ -89,7 +89,7 @@ services:
       - DATA_ROOT=/data/storage
       # Durable session state (replaces the old in-memory Map): controller survives
       # restarts and reconciles against the daemon on boot.
-      - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD}@postgres:5432/unClaw
+      - DATABASE_URL=postgresql://Capka:${POSTGRES_PASSWORD}@postgres:5432/Capka
       - COMPUTE_BACKEND=docker
       - WORKSPACE_STORE=local
       # Isolation runtime. Default runc — boots on any Docker host with no extra
@@ -102,7 +102,7 @@ services:
       # mounts resolve correctly regardless of the launcher's working directory
       # (the old ${PWD} guess broke under Coolify/systemd/non-repo-root launches).
       # Set HOST_DATA_ROOT only to override the auto-detected value.
-      - SANDBOX_IMAGE=ghcr.io/lyosu/unclaw-sandbox:${UNCLAW_VERSION:-latest}
+      - SANDBOX_IMAGE=ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
       # Sandbox egress kill-switch (deployment-level, FAIL-CLOSED). The admin panel
       # (Security → Internet access) and the per-project override choose the INTENT,
       # but a sandbox only ever gets network when the deployment also opts in here.
@@ -132,16 +132,16 @@ services:
     build: .
     # Prebuilt image (published on release tags). `build:` stays as a fallback so
     # cloning + building works with no image present; `pull` fetches the image.
-    image: ghcr.io/lyosu/unclaw-platform:${UNCLAW_VERSION:-latest}
+    image: ghcr.io/lyosu/capka-platform:${CAPKA_VERSION:-latest}
     ports:
       - "3000:3000"
     volumes:
       - ./data:/app/data
     environment:
-      - DATABASE_URL=postgresql://unClaw:${POSTGRES_PASSWORD}@postgres:5432/unClaw
+      - DATABASE_URL=postgresql://Capka:${POSTGRES_PASSWORD}@postgres:5432/Capka
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
-      - UNCLAW_MASTER_KEY=${UNCLAW_MASTER_KEY}
+      - CAPKA_MASTER_KEY=${CAPKA_MASTER_KEY}
       # Public origin. Optional: unset → derived from proxy headers (X-Forwarded-*).
       # Set it (recommended in prod) so the value can't be spoofed via headers.
       - PUBLIC_URL=${PUBLIC_URL:-}

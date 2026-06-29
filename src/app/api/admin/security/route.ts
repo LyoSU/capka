@@ -15,12 +15,12 @@ export const GET = apiHandler(async () => {
 });
 
 /** Remove the leftover DB copy after the admin has moved the key to env. Refuses
- *  unless UNCLAW_MASTER_KEY is set, so an admin can never lock themselves out. */
+ *  unless CAPKA_MASTER_KEY is set, so an admin can never lock themselves out. */
 export const DELETE = apiHandler(async () => {
   const { userId: adminId } = await requireAdmin();
-  if (!process.env.UNCLAW_MASTER_KEY?.trim()) {
+  if (!process.env.CAPKA_MASTER_KEY?.trim()) {
     return Response.json(
-      { error: "Set UNCLAW_MASTER_KEY in the environment and restart before removing the database copy." },
+      { error: "Set CAPKA_MASTER_KEY in the environment and restart before removing the database copy." },
       { status: 400 },
     );
   }

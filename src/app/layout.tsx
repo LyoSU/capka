@@ -29,7 +29,7 @@ const lora = Lora({
 });
 
 export const metadata: Metadata = {
-  title: "unClaw",
+  title: "Capka",
   description: "Personal AI Platform",
   // iOS ignores the manifest's `display: standalone`; this is what makes the
   // app launch full-screen (no Safari chrome) once added to the home screen.
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
   // insets are already handled, but this avoids any edge-to-edge surprises.
   appleWebApp: {
     capable: true,
-    title: "unClaw",
+    title: "Capka",
     statusBarStyle: "default",
   },
   icons: {

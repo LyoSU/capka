@@ -11,8 +11,8 @@ let masterKeyCache: string | null = null;
 export async function getMasterKey(): Promise<string> {
   // Root of trust: prefer an explicit env/secret outside the DB. Encrypting
   // provider keys with a key stored in the same DB gives ~zero protection
-  // against a DB leak, so production must set UNCLAW_MASTER_KEY.
-  const envKey = process.env.UNCLAW_MASTER_KEY?.trim();
+  // against a DB leak, so production must set CAPKA_MASTER_KEY.
+  const envKey = process.env.CAPKA_MASTER_KEY?.trim();
   if (envKey) {
     masterKeyCache = envKey;
     return envKey;
@@ -20,13 +20,13 @@ export async function getMasterKey(): Promise<string> {
 
   // Fail-CLOSED in production: a DB-stored master key encrypts provider keys with a
   // value sitting in the same DB, so a dump leaks both — the exact thing
-  // UNCLAW_MASTER_KEY exists to prevent. Refuse to use or mint one unless the
+  // CAPKA_MASTER_KEY exists to prevent. Refuse to use or mint one unless the
   // operator explicitly opts into the insecure fallback.
   if (process.env.NODE_ENV === "production" && process.env.ALLOW_DB_MASTER_KEY !== "true") {
     throw new Error(
-      "UNCLAW_MASTER_KEY is not set. In production the master key must come from the " +
+      "CAPKA_MASTER_KEY is not set. In production the master key must come from the " +
       "environment — a DB-stored key is insecure (a DB leak then exposes every provider " +
-      "key). Generate one with `openssl rand -hex 32` and set UNCLAW_MASTER_KEY, or set " +
+      "key). Generate one with `openssl rand -hex 32` and set CAPKA_MASTER_KEY, or set " +
       "ALLOW_DB_MASTER_KEY=true to knowingly accept the insecure DB fallback.",
     );
   }
@@ -41,8 +41,8 @@ export async function getMasterKey(): Promise<string> {
   }
 
   console.warn(
-    "[security] UNCLAW_MASTER_KEY is not set — generating a master key and storing it in the DB. " +
-    "This is insecure (a DB leak exposes all provider keys). Set UNCLAW_MASTER_KEY in production.",
+    "[security] CAPKA_MASTER_KEY is not set — generating a master key and storing it in the DB. " +
+    "This is insecure (a DB leak exposes all provider keys). Set CAPKA_MASTER_KEY in production.",
   );
   const secret = generateSecret();
   await db.insert(settings).values({ key: "auth_secret", value: secret, isEncrypted: false });
@@ -52,7 +52,7 @@ export async function getMasterKey(): Promise<string> {
 
 /**
  * Where the master key lives, for the admin security banner.
- * - "env":  UNCLAW_MASTER_KEY is set (the secure root of trust, outside the DB).
+ * - "env":  CAPKA_MASTER_KEY is set (the secure root of trust, outside the DB).
  * - "db":   no env var; the key is stored PLAINTEXT in the DB — a DB leak exposes
  *           every provider key. `dbKey` is returned so an admin can copy the SAME
  *           value into the env (changing it would break decryption + all sessions).
@@ -66,7 +66,7 @@ export async function getMasterKeyStatus(): Promise<{
   dbKeyPresent: boolean;
   dbKey: string | null;
 }> {
-  const envKey = process.env.UNCLAW_MASTER_KEY?.trim();
+  const envKey = process.env.CAPKA_MASTER_KEY?.trim();
   const row = await db.select().from(settings).where(eq(settings.key, "auth_secret")).limit(1);
   const dbKey = row[0]?.value ?? null;
   if (envKey) return { source: "env", dbKeyPresent: !!dbKey, dbKey: null };
@@ -127,7 +127,7 @@ export async function assertMasterKeyConsistent(): Promise<void> {
   }
 
   throw new Error(
-    "UNCLAW_MASTER_KEY does not match the key that encrypted the stored data — " +
+    "CAPKA_MASTER_KEY does not match the key that encrypted the stored data — " +
     "provider keys cannot be decrypted. Restore the original key (the admin → security " +
     "page shows the value to copy) or clear the database to start fresh.",
   );

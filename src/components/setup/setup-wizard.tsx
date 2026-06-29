@@ -79,11 +79,11 @@ export function SetupWizard({
   useEffect(() => {
     if (!setupTokenRequired) return;
     const fromHash = new URLSearchParams(window.location.hash.slice(1)).get("token");
-    const token = fromHash || sessionStorage.getItem("unclaw_setup_token");
+    const token = fromHash || sessionStorage.getItem("capka_setup_token");
     if (!token) return;
     setSetupToken(token);
     setTokenFromLink(true);
-    sessionStorage.setItem("unclaw_setup_token", token);
+    sessionStorage.setItem("capka_setup_token", token);
     if (fromHash) {
       window.history.replaceState({}, "", window.location.pathname + window.location.search);
     }
@@ -220,7 +220,7 @@ export function SetupWizard({
         return;
       }
 
-      sessionStorage.removeItem("unclaw_setup_token");
+      sessionStorage.removeItem("capka_setup_token");
       router.push("/chat");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("provider.verifyError"));

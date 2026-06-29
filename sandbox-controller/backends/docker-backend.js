@@ -128,11 +128,11 @@ export class DockerBackend {
   async list() {
     const containers = await this.docker.listContainers({
       all: true,
-      filters: { label: ["unclaw.session"] },
+      filters: { label: ["capka.session"] },
     });
     return containers.map((c) => ({
-      sessionId: c.Labels["unclaw.session"],
-      userId: c.Labels["unclaw.user"],
+      sessionId: c.Labels["capka.session"],
+      userId: c.Labels["capka.user"],
       handle: c.Id,
       running: c.State === "running",
     }));

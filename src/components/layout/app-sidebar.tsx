@@ -536,11 +536,11 @@ export function AppSidebar() {
               className={cn("shrink-0 rounded-md transition-opacity", sidebarState === "collapsed" && "hover:opacity-70 cursor-pointer")}
               title={sidebarState === "collapsed" ? t("expandSidebar") : undefined}
             >
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#0a0a0a] text-[#fafafa]" aria-label="unClaw">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#0a0a0a] text-[#fafafa]" aria-label="Capka">
                 <ClawMark className="h-3.5 w-3.5" />
               </span>
             </button>
-            <span className="text-base font-medium group-data-[collapsible=icon]:hidden">unClaw</span>
+            <span className="text-base font-medium group-data-[collapsible=icon]:hidden">Capka</span>
           </div>
           <SidebarTrigger className="group-data-[collapsible=icon]:hidden" />
         </div>

@@ -7,7 +7,7 @@ product
 ## Users
 
 Non-technical office staff inside a company — people whose job is not software.
-They open unClaw to get a work task done with AI (draft a document, analyze a
+They open Capka to get a work task done with AI (draft a document, analyze a
 spreadsheet, answer a question against company files), not to configure models or
 think about providers. A single **admin** sets up one shared provider key and the
 available models once; everyone else just picks a chat and works. The admin is the
@@ -18,7 +18,7 @@ Calm focus, short sessions, low tolerance for jargon or things that look broken.
 
 ## Product Purpose
 
-unClaw is a self-hosted, extensible AI work platform a company runs itself. It gives
+Capka is a self-hosted, extensible AI work platform a company runs itself. It gives
 non-technical staff a safe, shared way to use frontier AI on real work — chat with
 file attachments, a per-project workspace, and the same assistant reachable from
 Telegram — without each person needing their own API key or any setup knowledge.

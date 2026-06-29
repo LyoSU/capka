@@ -48,11 +48,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # metadata-action lowercases the image name, so a mixed-case owner (LyoSU)
-      # still produces a valid ghcr.io/lyosu/unclaw-* reference.
+      # still produces a valid ghcr.io/lyosu/capka-* reference.
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/unclaw-${{ matrix.name }}
+          images: ghcr.io/${{ github.repository_owner }}/capka-${{ matrix.name }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

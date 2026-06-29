@@ -34,7 +34,7 @@ export function MasterKeyBanner() {
 
   if (!status || status.source === "none") return null;
 
-  const envLine = `UNCLAW_MASTER_KEY=${status.key ?? ""}`;
+  const envLine = `CAPKA_MASTER_KEY=${status.key ?? ""}`;
 
   async function copyEnv() {
     try {
