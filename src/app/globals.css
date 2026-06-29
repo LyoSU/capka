@@ -405,21 +405,6 @@
     animation-delay: 0s !important;
   }
 }
-
-/* On phones the side menu is a slide-out sheet, and navigating from it already
-   animates the sheet closing. Running the route crossfade at the same time reads
-   as a double animation, so disable view transitions at the mobile breakpoint:
-   the content swaps instantly under the closing sheet, the way native drawers
-   behave. Desktop (persistent sidebar) keeps the crossfade. Matches
-   MOBILE_BREAKPOINT (768) in use-mobile.ts. */
-@media (max-width: 767px) {
-  ::view-transition-old(*),
-  ::view-transition-new(*),
-  ::view-transition-group(*) {
-    animation: none !important;
-  }
-}
-
 /* Thin scrollbar for textareas and overflow areas */
 .scrollbar-thin {
   scrollbar-width: thin;
