@@ -86,4 +86,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # mode=min (not max): multi-arch builds of the heavy sandbox image blow
+          # past the repo's 10 GB GHA cache budget with mode=max. min still caches
+          # the exported image layers (incl. the expensive apt layer), just not
+          # every intermediate build stage.
+          cache-to: type=gha,mode=min
