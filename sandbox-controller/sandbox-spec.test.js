@@ -33,6 +33,15 @@ describe("buildSandboxConfig — locked security posture", () => {
     expect(buildSandboxConfig(base).HostConfig.CapAdd).toEqual(["CHOWN", "SETUID", "SETGID"]);
   });
 
+  it("grants NET_ADMIN *and* NET_RAW for the egress firewall when networking is on", () => {
+    // The entrypoint's iptables firewall needs NET_ADMIN to write rules and NET_RAW
+    // for the rules' `filter` table to initialize — under gVisor (CapDrop ALL means
+    // nothing is inherited) the table can't exist without NET_RAW, so the firewall
+    // fails closed and the container dies. Both are dropped again at the setpriv-drop.
+    expect(buildSandboxConfig({ ...base, networkMode: "bridge" }).HostConfig.CapAdd)
+      .toEqual(["CHOWN", "SETUID", "SETGID", "NET_ADMIN", "NET_RAW"]);
+  });
+
   it("does NOT pin the container user — the entrypoint needs root to chown mounts, then drops to 1000", () => {
     // The persistent process and every `docker exec` (the agent's actual commands)
     // run as uid 1000 — that's enforced by the entrypoint's privilege drop and by

@@ -6,21 +6,28 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-07-01
+## [0.1.2] - 2026-07-01
 
 ### Fixed
 - **Sandbox egress under gVisor no longer kills every container.** With
   `SANDBOX_ALLOW_NETWORK=true` on the `runsc` profile, the fail-closed egress
   firewall (added in 0.1.0) could not install its iptables rules and exited the
-  container the instant it started — so every command failed. The firewall now
-  works under gVisor: the image pins iptables to the legacy backend gVisor speaks
-  (not nft), and `scripts/install-gvisor.sh` registers the runtime with
-  `--net-raw=true` so the rules' `filter` table can initialize. **Existing gVisor
-  hosts must re-run the install script (or add `--net-raw=true` to the runsc
-  runtimeArgs) and restart Docker** for egress to work.
+  container the instant it started — so every command failed. Three pieces were
+  needed: the image pins iptables to the **legacy** backend gVisor speaks (not
+  nft); the controller grants the sandbox **NET_RAW** alongside NET_ADMIN so the
+  rules' `filter` table can initialize under `CapDrop: ALL`; and
+  `scripts/install-gvisor.sh` registers the runtime with **`--net-raw=true`** so
+  gVisor honors that capability. **Existing gVisor hosts must re-run the install
+  script (or add `--net-raw=true` to the runsc `runtimeArgs`) and reload Docker.**
 - Controller now recovers from a present-but-stopped sandbox container, not only a
   removed one: a stale handle is invalidated so the session is recreated instead of
   looping on "container is not running".
+
+## [0.1.1] - 2026-07-01
+
+Partial gVisor egress fix (legacy iptables backend in the image + the
+`--net-raw=true` install step) — **superseded by 0.1.2**, which adds the missing
+`NET_RAW` container capability without which the firewall still fails. Use 0.1.2.
 
 ## [0.1.0] - 2026-06-30
 

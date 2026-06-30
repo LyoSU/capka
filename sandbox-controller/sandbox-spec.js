@@ -103,11 +103,15 @@ export function buildSandboxConfig({
       CapDrop: ["ALL"],
       // Minimal caps for the boot sequence only: CHOWN lets the (root) entrypoint
       // fix ownership of the bind-mounted /workspace + /shared, and SETUID/SETGID
-      // let it setpriv-drop to the unprivileged sandbox user. NET_ADMIN (only when
-      // egress is on) lets the entrypoint install the egress firewall before the
-      // drop. After the setpriv-drop, and for every agent command (exec runs as
-      // uid 1000 with no caps), these buy nothing — the rules can't be undone.
-      CapAdd: ["CHOWN", "SETUID", "SETGID", ...(networkMode === "bridge" ? ["NET_ADMIN"] : [])],
+      // let it setpriv-drop to the unprivileged sandbox user. When egress is on the
+      // entrypoint installs the iptables firewall before the drop, which needs
+      // NET_ADMIN (write rules) *and* NET_RAW — under gVisor, with CapDrop ALL, the
+      // iptables `filter` table can't initialize without NET_RAW ("Table does not
+      // exist"), so the firewall fails closed and the container dies on startup.
+      // (NET_RAW is honored only when runsc itself runs with --net-raw=true; see
+      // scripts/install-gvisor.sh.) After the setpriv-drop, and for every agent
+      // command (exec runs as uid 1000 with no caps), these buy nothing.
+      CapAdd: ["CHOWN", "SETUID", "SETGID", ...(networkMode === "bridge" ? ["NET_ADMIN", "NET_RAW"] : [])],
       NetworkMode: networkMode,
       Binds: [`${wsHostPath}:/workspace`, `${sharedHostPath}:/shared`],
       Init: true,
