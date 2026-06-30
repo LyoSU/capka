@@ -1,5 +1,11 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { Github } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { ClawMark } from "@/components/brand/claw-mark";
+
+const REPO_URL = "https://github.com/LyoSU/capka";
 
 /** Shared field styling for auth/setup forms — filled, rounded, calm. */
 export const AUTH_FIELD =
@@ -22,6 +28,7 @@ export function AuthShell({
   children: ReactNode;
   footer?: ReactNode;
 }) {
+  const t = useTranslations("settings.general");
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background">
       <ClawMark className="pointer-events-none absolute left-1/2 top-1/2 h-[165vmin] w-[165vmin] -translate-x-1/2 -translate-y-1/2 text-foreground opacity-[0.03]" />
@@ -46,6 +53,18 @@ export function AuthShell({
           </div>
 
           {footer && <div className="mt-6 text-center text-sm text-muted-foreground">{footer}</div>}
+
+          {/* Open-source attribution — shown on every pre-app surface (login,
+              register, pending) since AuthShell wraps them all. */}
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-7 inline-flex w-full items-center justify-center gap-1.5 text-xs text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+          >
+            <Github className="size-3.5" />
+            {t("openSourceShort")}
+          </a>
         </div>
       </div>
     </div>
