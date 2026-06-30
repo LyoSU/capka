@@ -321,8 +321,12 @@ const server = createServer(async (req, res) => {
         const result = await backend.exec(session.handle, command, execTimeout);
         return jsonRes(res, 200, result);
       } catch (e) {
-        if (/no such container/i.test(e.message)) {
-          // Mid-op invalidation: container died (e.g. OOM) — drop the stale record.
+        if (/no such container|is not running/i.test(e.message)) {
+          // Mid-op invalidation: the container is gone (removed → "no such
+          // container") OR present-but-stopped (its PID 1 exited → Docker 409
+          // "container is not running", e.g. the entrypoint died at startup).
+          // Both mean the handle is dead — drop the stale record so the platform's
+          // ensureSession recreates a fresh container against the same files.
           await store.delete(session.sessionId);
           liveCount = Math.max(0, liveCount - 1);
           log("session.invalidate", { sessionId: session.sessionId }, "warn");

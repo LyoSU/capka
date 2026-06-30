@@ -94,6 +94,24 @@ d("controller HTTP API (lifecycle)", () => {
     expect((await store.get("s1")).handle).not.toBeNull();
   });
 
+  it("invalidates the record when exec hits a STOPPED-but-present container (e.g. entrypoint died on startup)", async () => {
+    expect((await post("sdead", "udead")).status).toBe(201);
+    const orig = backend.exec;
+    // Docker's 409 when the container EXISTS but its PID 1 has exited — distinct
+    // from "no such container". Under gVisor a misconfigured egress firewall kills
+    // the entrypoint instantly, so exec races into this state.
+    backend.exec = async () => { throw new Error("(HTTP code 409) container stopped/paused - container abc123 is not running"); };
+    try {
+      const r = await fetch(`${base}/sessions/sdead/exec`, { method: "POST", headers: auth, body: JSON.stringify({ command: "echo hi" }) });
+      expect(r.status).toBe(409);
+      // The stale handle must be dropped so the platform's ensureSession recreates
+      // a fresh container against the same files instead of looping on the dead one.
+      expect(await store.get("sdead")).toBeNull();
+    } finally {
+      backend.exec = orig;
+    }
+  });
+
   it("caps concurrent live containers per user by STOPPING the LRU (no files lost)", async () => {
     await post("s2", "u1"); // s1, s2 live → at cap of 2
     await post("s3", "u1"); // must evict the LRU live one
