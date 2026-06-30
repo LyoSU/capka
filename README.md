@@ -14,7 +14,7 @@ the agent accepts files, writes and runs code, scrapes the web, converts
 documents, and uses MCP connectors — safely, in its own container, behind your
 own API keys.
 
-![Capka demo](./docs/assets/demo.gif)
+<p align="center"><img src="./docs/assets/logo.webp" alt="Capka" width="180"></p>
 
 > 🌐 **Try the live demo → [capka.yuri.ly](https://capka.yuri.ly/)** — poke around
 > a running instance before you host your own.
@@ -33,7 +33,7 @@ on a cheap VPS for myself, my friends, and my team.
 Drop in a file and just ask — Capka runs real tools (`ffprobe`, `ffmpeg`, …)
 inside its sandbox and reports back:
 
-![Capka processing a file in its sandbox](./docs/assets/demo-files.webp)
+![Capka processing a file in its sandbox](./docs/assets/demo.webp)
 
 What you get:
 
