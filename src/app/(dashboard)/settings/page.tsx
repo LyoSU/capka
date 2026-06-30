@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
+import { Github } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
+import { version } from "../../../../package.json";
+
+const REPO_URL = "https://github.com/LyoSU/capka";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
@@ -108,6 +112,54 @@ export default function GeneralSettingsPage() {
           configured by an admin in Settings → Integrations. */}
       <Separator />
       <TelegramLinkCard />
+
+      {/* About — open-source attribution. Every role sees it; the source link
+          and license are public anyway. */}
+      <Separator />
+      <div>
+        <h2 className="text-base font-medium">{t("about")}</h2>
+        <p className="text-sm text-muted-foreground">{t("aboutDesc")}</p>
+      </div>
+      <div className="space-y-1.5 text-sm">
+        <p className="text-muted-foreground">
+          {t.rich("openSource", {
+            license: (chunks) => (
+              <a
+                href={`${REPO_URL}/blob/master/LICENSE`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                {chunks}
+              </a>
+            ),
+          })}
+        </p>
+        <p className="text-muted-foreground">
+          {t.rich("author", {
+            author: (chunks) => (
+              <a
+                href="https://github.com/LyoSU"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                {chunks}
+              </a>
+            ),
+          })}
+        </p>
+        <a
+          href={REPO_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 font-medium text-foreground underline-offset-4 hover:underline"
+        >
+          <Github className="size-4" />
+          {t("sourceCode")}
+        </a>
+        <p className="text-xs text-muted-foreground">{t("version", { version })}</p>
+      </div>
     </div>
   );
 }

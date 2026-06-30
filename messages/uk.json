@@ -532,7 +532,13 @@
       "shareProviders": "Спільний ключ адміністратора",
       "shareProvidersHint": "Коли ввімкнено, люди без власного ключа працюють на вашому (і вашому бюджеті). За замовчуванням вимкнено.",
       "shareEnabled": "Спільні ключі ввімкнено",
-      "shareDisabled": "Спільні ключі вимкнено"
+      "shareDisabled": "Спільні ключі вимкнено",
+      "about": "Про застосунок",
+      "aboutDesc": "Capka — застосунок із відкритим кодом.",
+      "openSource": "Відкритий код під ліцензією <license>AGPL-3.0</license>.",
+      "sourceCode": "Код на GitHub",
+      "version": "Версія {version}",
+      "author": "Створив <author>@LyoSU</author>"
     },
     "memory": {
       "title": "Пам'ять асистента",
