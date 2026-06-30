@@ -78,14 +78,28 @@ fi
 # when it wasn't passed in the environment this run.
 DOMAIN_EFFECTIVE="${DOMAIN:-$(sed -n 's/^DOMAIN=//p' "$ENV_FILE" 2>/dev/null | head -n1)}"
 
+# Compose file set: the TLS overlay is layered in only when a DOMAIN is configured.
+set -- -f docker-compose.yml
 if [ "${DOMAIN_EFFECTIVE:-}" != "" ]; then
-  echo "Starting Capka with automatic HTTPS for $DOMAIN_EFFECTIVE ..."
-  docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build -d
+  set -- "$@" -f docker-compose.tls.yml
   OPEN_URL="https://$DOMAIN_EFFECTIVE"
+  echo "Starting Capka with automatic HTTPS for $DOMAIN_EFFECTIVE ..."
 else
-  echo "Starting Capka (docker compose up --build -d) ..."
-  docker compose up --build -d
   OPEN_URL="${PUBLIC_URL:-http://localhost:3000}"
+  echo "Starting Capka ..."
+fi
+
+# Prefer the prebuilt GHCR images (fast — no toolchain needed on the box): `pull`
+# fetches them so the following `up` finds them present and skips the build. If a
+# pull fails (offline, rate-limited, or you're on an unpublished commit), `up`
+# falls back to building locally because the `build:` stanzas remain. Set
+# CAPKA_BUILD=1 to always compile from source (e.g. when developing on the host).
+if [ "${CAPKA_BUILD:-}" = "1" ]; then
+  echo "  building images from source (CAPKA_BUILD=1) ..."
+  docker compose "$@" up --build -d
+else
+  docker compose "$@" pull --ignore-pull-failures || true
+  docker compose "$@" up -d
 fi
 
 echo
