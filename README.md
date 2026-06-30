@@ -174,11 +174,11 @@ It keeps your `.env` and data, and pins the image tag to the code it checks out.
 ## Security & sandboxing
 
 Out of the box, sandboxes run on the standard `runc` runtime (works on any Docker
-host). Containers are unprivileged (the entrypoint drops to `1000:1000`), drop
-all capabilities, and have **no outbound network** by default — set
-`SANDBOX_ALLOW_NETWORK=true` if your agents need the internet. This is
-defense-in-depth; for a true "escape ≠ host root" boundary, run a **rootless**
-Docker daemon.
+host). Containers are unprivileged (the entrypoint drops to `1000:1000`) and drop
+all capabilities. Sandbox internet access is managed in the admin panel
+(**Security → Internet access**) and, when on, firewalled to block private ranges
+and cloud metadata. This is defense-in-depth; for a true "escape ≠ host root"
+boundary, run a **rootless** Docker daemon.
 
 For untrusted or multi-tenant workloads, opt into **gVisor** — a user-space
 kernel with a much stronger container↔host boundary, and no KVM needed (so it

@@ -177,22 +177,49 @@ fetch_repo() {
   fi
 }
 
-# When piped (curl | sh) stdin is the script, so an interactive prompt must read
-# from the controlling terminal. Skip silently if there's no tty or the origin
-# was already chosen — the no-DOMAIN path just serves HTTP on :3000.
+# Best-effort public IPv4, via an external echo service (the box already has
+# egress — it just installed Docker / pulled images). Empty if every probe fails.
+public_ip() {
+  for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+    ip="$(curl -fsS --max-time 5 "$url" 2>/dev/null | tr -d '[:space:]')"
+    case "$ip" in
+      *.*.*.*) printf '%s' "$ip"; return 0 ;;
+    esac
+  done
+}
+
+# Choose the public origin. With no DOMAIN/PUBLIC_URL we offer a free, zero-setup
+# HTTPS hostname derived from the host's public IP: sslip.io resolves
+# <ip>.sslip.io → <ip>, so Caddy can fetch a real Let's Encrypt cert without the
+# user owning a domain. Interactive runs are prompted (the suggestion is the
+# default); piped runs (curl | sh) can't prompt, so they stay on HTTP and we print
+# the ready-to-use command.
 prompt_domain() {
   DOMAIN="${DOMAIN:-}"
   PUBLIC_URL="${PUBLIC_URL:-}"
   SETUP_TOKEN="${SETUP_TOKEN:-}"
   CAPKA_BUILD="${CAPKA_BUILD:-}"
   if [ -n "$DOMAIN" ] || [ -n "$PUBLIC_URL" ]; then return 0; fi
+
+  ip="$(public_ip)"
+  suggested=""
+  [ -n "$ip" ] && suggested="$(echo "$ip" | tr '.' '-').sslip.io"
+
   # `-r /dev/tty` is true even with no controlling terminal (the node exists and
-  # is mode-readable), yet the open then fails with ENXIO. Probe the actual open
-  # in a subshell — piped/detached runs have no tty, so we fall through to HTTP.
-  ( exec </dev/tty ) 2>/dev/null || return 0
-  printf '%s\n' "Domain for automatic HTTPS, e.g. capka.example.com" >&2
-  printf '%s' "(leave blank to serve plain HTTP on :3000): " >&2
-  read -r DOMAIN </dev/tty || DOMAIN=""
+  # is mode-readable), yet the open then fails with ENXIO. Probe the actual open.
+  if ( exec </dev/tty ) 2>/dev/null; then
+    printf '%s\n' "Domain for automatic HTTPS (blank = the free hostname below, or plain HTTP):" >&2
+    [ -n "$suggested" ] && printf '%s\n' "  suggested: $suggested" >&2
+    printf '%s' "> " >&2
+    read -r DOMAIN </dev/tty || DOMAIN=""
+    if [ -z "$DOMAIN" ] && [ -n "$suggested" ]; then
+      printf '%s' "Use $suggested for instant HTTPS? [Y/n]: " >&2
+      read -r ans </dev/tty || ans=""
+      case "$ans" in [Nn]*) ;; *) DOMAIN="$suggested" ;; esac
+    fi
+  elif [ -n "$suggested" ]; then
+    info "No domain set — serving HTTP on :3000. For instant HTTPS, re-run with: DOMAIN=$suggested"
+  fi
 }
 
 main "$@"

@@ -103,12 +103,13 @@ services:
       # (the old ${PWD} guess broke under Coolify/systemd/non-repo-root launches).
       # Set HOST_DATA_ROOT only to override the auto-detected value.
       - SANDBOX_IMAGE=ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
-      # Sandbox egress kill-switch (deployment-level, FAIL-CLOSED). The admin panel
-      # (Security → Internet access) and the per-project override choose the INTENT,
-      # but a sandbox only ever gets network when the deployment also opts in here.
-      # Unset/false ⇒ NO sandbox egress, no matter what any in-app toggle says — so
-      # an operator can hard-forbid egress that a user/admin couldn't re-enable.
-      - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-false}
+      # Sandbox egress kill-switch (deployment-level). The admin panel (Security →
+      # Internet access) and the per-project override choose the INTENT; this flag
+      # is the deployment gate. Defaults to true so agents can reach the internet
+      # out of the box (web scraping, package installs) — granted egress is still
+      # firewalled to block private/internal ranges + cloud metadata. Set false to
+      # HARD-FORBID egress regardless of any in-app toggle (for untrusted tenants).
+      - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-true}
     networks:
       - default
       - docker-proxy
