@@ -141,7 +141,10 @@ prompt_domain() {
   SETUP_TOKEN="${SETUP_TOKEN:-}"
   CAPKA_BUILD="${CAPKA_BUILD:-}"
   if [ -n "$DOMAIN" ] || [ -n "$PUBLIC_URL" ]; then return 0; fi
-  if [ ! -r /dev/tty ]; then return 0; fi
+  # `-r /dev/tty` is true even with no controlling terminal (the node exists and
+  # is mode-readable), yet the open then fails with ENXIO. Probe the actual open
+  # in a subshell — piped/detached runs have no tty, so we fall through to HTTP.
+  ( exec </dev/tty ) 2>/dev/null || return 0
   printf '%s\n' "Domain for automatic HTTPS, e.g. capka.example.com" >&2
   printf '%s' "(leave blank to serve plain HTTP on :3000): " >&2
   read -r DOMAIN </dev/tty || DOMAIN=""
