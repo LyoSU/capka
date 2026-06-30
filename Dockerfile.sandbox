@@ -31,7 +31,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     # fd-find installs the binary as `fdfind` on Debian/Ubuntu (name clash with
     # another package); give the agent the `fd` it expects.
-    && ln -sf "$(command -v fdfind)" /usr/local/bin/fd
+    && ln -sf "$(command -v fdfind)" /usr/local/bin/fd \
+    # iptables backend: Ubuntu 24.04 defaults `iptables` to the nft backend, which
+    # gVisor (runsc — the secure profile's runtime) does NOT implement at all
+    # ("Failed to initialize nft: Protocol not supported"). gVisor's netstack only
+    # speaks the LEGACY xtables interface, so the egress firewall in
+    # sandbox-entrypoint.sh — which is fail-closed and kills the container if a rule
+    # can't be installed — only works when iptables points at the legacy backend.
+    # (The legacy table also needs CAP_NET_RAW, which runsc strips unless installed
+    # with --net-raw=true; see scripts/install-gvisor.sh.)
+    && update-alternatives --set iptables /usr/sbin/iptables-legacy \
+    && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
 
 # ---------------------------------------------------------------------------
 # 2. Java (for tabula-py, pdftk)
