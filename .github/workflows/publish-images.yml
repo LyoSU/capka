@@ -60,9 +60,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/capka-${{ matrix.name }}
+          # Keep the `v` prefix so image tags match the git tag (v0.1.0): the
+          # default {{version}} pattern strips it, which would make the scripts'
+          # `:v0.1.0` pull 404 and fall back to a local build.
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
             type=raw,value=latest
 
       - uses: docker/build-push-action@v6
@@ -74,9 +77,11 @@ jobs:
           push: true
           provenance: false
           # Stamp the version into the platform image so Settings → Updates can
-          # report it. The controller/sandbox images ignore these args.
+          # report it. Use the exact git ref (v0.1.0 on a tag) so it matches the
+          # release tag the in-app check compares against. controller/sandbox
+          # ignore these args.
           build-args: |
-            CAPKA_VERSION=${{ steps.meta.outputs.version }}
+            CAPKA_VERSION=${{ github.ref_name }}
             CAPKA_GIT_SHA=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
