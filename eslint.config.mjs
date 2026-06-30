@@ -33,6 +33,11 @@ const eslintConfig = defineConfig([
           message: "The AGPL core (src/**) must not import from ee/** — keep the enterprise boundary clean.",
         }],
       }],
+      // XSS gate: every raw-HTML sink must be a conscious, justified decision.
+      // The two existing uses (static theme-init script; Shiki-escaped code) carry
+      // an inline disable explaining why they're safe; any new one fails lint and
+      // forces a review instead of silently shipping a sink for unsanitized input.
+      "react/no-danger": "error",
     },
   },
 ]);
