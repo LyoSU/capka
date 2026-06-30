@@ -76,17 +76,33 @@ Open http://localhost:3000 and create your admin account.
 
 ## Deployment (production)
 
-If your DNS already points at the host, you get the full stack with automatic
-HTTPS (via Caddy) in one command:
+On a fresh Linux box, one command installs Docker (if missing), fetches Capka,
+and brings the full stack up with automatic HTTPS (via Caddy) — point your DNS
+at the host first:
 
 ```bash
-git clone https://github.com/lyosu/capka && cd capka
-DOMAIN=capka.example.com npm run up
+curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | DOMAIN=capka.example.com sh
 ```
 
-`npm run up` generates strong secrets into `.env` on first run (it never
-overwrites values you've set), then starts the stack. Without `DOMAIN` it boots
-on `:3000` (HTTP) so you can front it with your own reverse proxy.
+Omit `DOMAIN` (or just run it with no env) and it boots on `:3000` (HTTP) so you
+can front it with your own reverse proxy; run it without piping and it'll prompt
+for the domain interactively. Prefer to read before you run? Good instinct:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+Already have Docker and a clone? The installer just wraps this:
+
+```bash
+git clone https://github.com/LyoSU/capka && cd capka
+DOMAIN=capka.example.com ./scripts/up.sh     # or: npm run up
+```
+
+`up.sh` generates strong secrets into `.env` on first run (it never overwrites
+values you've set), pulls the prebuilt images, then starts the stack. Re-running
+the installer upgrades in place (`git pull` + image refresh).
 
 > Capka runs as a **long-lived process** — serverless/edge hosts that freeze
 > between requests won't work.
@@ -115,15 +131,14 @@ on `:3000` (HTTP) so you can front it with your own reverse proxy.
 ### Prebuilt images
 
 Release tags publish `platform`, `controller`, and `sandbox` images to GHCR
-(`ghcr.io/lyosu/capka-*`), so a host with no build toolchain can just pull them
-instead of compiling:
+(`ghcr.io/lyosu/capka-*`), so a host with no build toolchain doesn't compile
+anything — `up.sh` pulls them by default. The `build:` stanzas stay as a
+fallback: if a pull fails (offline, or you're on an unpublished commit), the
+affected images build locally. To always compile from source instead:
 
 ```bash
-docker compose pull
-npm run up
+CAPKA_BUILD=1 ./scripts/up.sh
 ```
-
-The `build:` stanzas stay as a fallback, so cloning and building still works.
 
 ## Security & sandboxing
 
