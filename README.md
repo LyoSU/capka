@@ -84,9 +84,13 @@ at the host first:
 curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | DOMAIN=capka.example.com sh
 ```
 
-Omit `DOMAIN` (or just run it with no env) and it boots on `:3000` (HTTP) so you
-can front it with your own reverse proxy; run it without piping and it'll prompt
-for the domain interactively. Prefer to read before you run? Good instinct:
+No domain? You still get HTTPS for free: the installer offers a hostname based on
+your server's public IP via [sslip.io](https://sslip.io) (`<ip>.sslip.io` resolves
+straight to the IP, so Caddy fetches a real Let's Encrypt cert — no DNS to set up).
+Run it interactively and it suggests this as the default; piped, it prints the
+exact `DOMAIN=…sslip.io` command to re-run. Or omit HTTPS entirely and it serves
+plain `:3000` to front with your own reverse proxy. Prefer to read before you run?
+Good instinct:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh -o install.sh
