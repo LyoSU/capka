@@ -87,6 +87,7 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {/* eslint-disable-next-line react/no-danger -- static, build-time THEME_INIT string; no user/runtime input ever reaches it */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <link rel="manifest" href="/manifest.json" />
       </head>
