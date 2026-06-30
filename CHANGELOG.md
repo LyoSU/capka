@@ -6,6 +6,24 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-01
+
+### Fixed
+- **Sandbox egress under gVisor no longer kills every container.** With
+  `SANDBOX_ALLOW_NETWORK=true` on the `runsc` profile, the fail-closed egress
+  firewall (added in 0.1.0) could not install its iptables rules and exited the
+  container the instant it started — so every command failed. The firewall now
+  works under gVisor: the image pins iptables to the legacy backend gVisor speaks
+  (not nft), and `scripts/install-gvisor.sh` registers the runtime with
+  `--net-raw=true` so the rules' `filter` table can initialize. **Existing gVisor
+  hosts must re-run the install script (or add `--net-raw=true` to the runsc
+  runtimeArgs) and restart Docker** for egress to work.
+- Controller now recovers from a present-but-stopped sandbox container, not only a
+  removed one: a stale handle is invalidated so the session is recreated instead of
+  looping on "container is not running".
+
+## [0.1.0] - 2026-06-30
+
 > **⚠ Breaking — sandbox network egress is now fail-closed.** Sandboxes have
 > **no outbound network** unless you explicitly set `SANDBOX_ALLOW_NETWORK=true`.
 > Deployments that relied on sandboxes reaching the internet (package installs,
