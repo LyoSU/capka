@@ -27,6 +27,15 @@ CMD ["npm", "run", "dev"]
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Stamp the build version into the image so the app can report what's running and
+# compare it against the latest release (Settings → Updates). Defaults to "dev"
+# for local builds; the publish workflow passes the release tag + commit SHA.
+ARG CAPKA_VERSION=dev
+ARG CAPKA_GIT_SHA=""
+ENV CAPKA_VERSION=$CAPKA_VERSION CAPKA_GIT_SHA=$CAPKA_GIT_SHA
+LABEL org.opencontainers.image.version=$CAPKA_VERSION \
+      org.opencontainers.image.revision=$CAPKA_GIT_SHA \
+      org.opencontainers.image.source="https://github.com/LyoSU/capka"
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./

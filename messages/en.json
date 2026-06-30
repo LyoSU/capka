@@ -490,7 +490,8 @@
       "sections": {
         "personal": "Personal",
         "admin": "Administration"
-      }
+      },
+      "updates": "Updates"
     },
     "usersPage": {
       "title": "Users",
@@ -1062,6 +1063,28 @@
       "netEnabled": "Internet access on for the sandbox.",
       "netDisabled": "Internet access off for the sandbox.",
       "sandboxNetBlocked": "Blocked at the deployment level — set SANDBOX_ALLOW_NETWORK=true and restart the sandbox controller to enable this."
+    },
+    "updates": {
+      "title": "Updates",
+      "subtitle": "Keep Capka up to date with the latest release.",
+      "adminOnly": "Only admins can manage updates.",
+      "running": "Running version",
+      "devBuild": "development build",
+      "updateAvailable": "{version} available",
+      "checksOff": "Checks off",
+      "checkFailed": "Couldn't check",
+      "upToDate": "Up to date",
+      "viewChangelog": "View changelog",
+      "howTo": "How to update",
+      "howToHint": "Run this on the host where Capka is installed. It pulls the new images and restarts the stack — your data and settings are kept.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy",
+      "autoCheck": "Check for updates automatically",
+      "autoCheckHint": "Periodically asks GitHub for the latest release. Turn off to make no outbound calls.",
+      "checkEnabled": "Update checks on",
+      "checkDisabled": "Update checks off",
+      "updateFailed": "Couldn't save the change"
     }
   },
   "setup": {
@@ -1233,5 +1256,9 @@
     "modelSet": "✅ Now using *{model}* in this chat.",
     "modelEmpty": "No models available yet. Add a provider in Capka settings.",
     "modelStale": "That list is out of date — send /model again."
+  },
+  "updateBanner": {
+    "message": "Capka {version} is available.",
+    "action": "Update"
   }
 }
