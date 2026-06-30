@@ -538,7 +538,8 @@
       "openSource": "Відкритий код під ліцензією <license>AGPL-3.0</license>.",
       "sourceCode": "Код на GitHub",
       "version": "Версія {version}",
-      "author": "Створив <author>@LyoSU</author>"
+      "author": "Створив <author>@LyoSU</author>",
+      "openSourceShort": "Відкритий код · AGPL-3.0"
     },
     "memory": {
       "title": "Пам'ять асистента",

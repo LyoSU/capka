@@ -538,7 +538,8 @@
       "openSource": "Open source under the <license>AGPL-3.0</license> license.",
       "sourceCode": "Source on GitHub",
       "version": "Version {version}",
-      "author": "Built by <author>@LyoSU</author>"
+      "author": "Built by <author>@LyoSU</author>",
+      "openSourceShort": "Open source · AGPL-3.0"
     },
     "memory": {
       "title": "Agent Memory",
