@@ -1,6 +1,6 @@
 /** Fail-closed: the secure profile MUST run on the gVisor runtime (runsc), and
  *  that runtime MUST be registered on the daemon — else refuse to boot, never
- *  silently downgrade to plain runc. The dev profile imposes no requirement. */
+ *  silently downgrade to plain runc. The standard profile imposes no requirement. */
 export async function assertRuntimeAvailable(docker, { profile, runtime }) {
   if (profile !== "secure") return;
   // A secure profile on runc (or anything but runsc) is the silent-downgrade hole:

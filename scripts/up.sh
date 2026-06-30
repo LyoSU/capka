@@ -54,6 +54,14 @@ ensure_secret CAPKA_MASTER_KEY
 # default. It's an opt-in hardening for public deploys — set it in .env yourself
 # to require it when claiming the admin account (see .env.example).
 
+# Pin the image tag so later runs pull the same version that was installed here
+# (the installer passes the release tag it checked out). Compose reads this from
+# .env for ${CAPKA_VERSION} substitution; unset → defaults to :latest.
+if [ "${CAPKA_VERSION:-}" != "" ] && ! grep -q '^CAPKA_VERSION=' "$ENV_FILE"; then
+  printf 'CAPKA_VERSION=%s\n' "$CAPKA_VERSION" >>"$ENV_FILE"
+  echo "  pinned CAPKA_VERSION=$CAPKA_VERSION"
+fi
+
 # Public origin is optional: unset → Capka derives it from proxy headers. When
 # provided (recommended in production), persist it so the value isn't spoofable.
 if [ "${PUBLIC_URL:-}" != "" ] && ! grep -q '^PUBLIC_URL=' "$ENV_FILE"; then
@@ -65,7 +73,12 @@ fi
 # so auth callbacks and absolute links are correct.
 if [ "${DOMAIN:-}" != "" ]; then
   grep -q '^DOMAIN=' "$ENV_FILE" || printf 'DOMAIN=%s\n' "$DOMAIN" >>"$ENV_FILE"
-  grep -q '^PUBLIC_URL=' "$ENV_FILE" || printf 'PUBLIC_URL=https://%s\n' "$DOMAIN" >>"$ENV_FILE"
+  existing_pub="$(sed -n 's/^PUBLIC_URL=//p' "$ENV_FILE" | head -n1)"
+  if [ -z "$existing_pub" ]; then
+    printf 'PUBLIC_URL=https://%s\n' "$DOMAIN" >>"$ENV_FILE"
+  elif [ "$existing_pub" != "https://$DOMAIN" ]; then
+    echo "  WARNING: PUBLIC_URL ($existing_pub) doesn't match DOMAIN ($DOMAIN) — leaving it; fix $ENV_FILE if wrong"
+  fi
   echo "  configured HTTPS for $DOMAIN (Caddy will fetch a Let's Encrypt cert)"
 fi
 
@@ -87,6 +100,11 @@ if [ "${DOMAIN_EFFECTIVE:-}" != "" ]; then
 else
   OPEN_URL="${PUBLIC_URL:-http://localhost:3000}"
   echo "Starting Capka ..."
+  if [ -z "${PUBLIC_URL:-}" ] && ! grep -q '^PUBLIC_URL=' "$ENV_FILE"; then
+    echo "  NOTE: no DOMAIN/PUBLIC_URL — serving plain HTTP on :3000 (auth callbacks need a real origin)."
+    echo "        Re-run with DOMAIN=… for turnkey HTTPS, or front it with a TLS proxy and set PUBLIC_URL."
+    echo "        Exposing /setup over plain HTTP? Set SETUP_TOKEN in $ENV_FILE first (see .env.example)."
+  fi
 fi
 
 # Prefer the prebuilt GHCR images (fast — no toolchain needed on the box): `pull`
