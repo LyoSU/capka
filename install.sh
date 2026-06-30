@@ -182,9 +182,12 @@ fetch_repo() {
 public_ip() {
   for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
     ip="$(curl -fsS --max-time 5 "$url" 2>/dev/null | tr -d '[:space:]')"
-    case "$ip" in
-      *.*.*.*) printf '%s' "$ip"; return 0 ;;
-    esac
+    # Strict IPv4 only — the value becomes a hostname we hand to Caddy and the
+    # compose env, so reject anything a compromised echo service could smuggle in
+    # (whitespace, shell metacharacters), not just "has dots".
+    if printf '%s' "$ip" | grep -Eq '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+      printf '%s' "$ip"; return 0
+    fi
   done
 }
 
