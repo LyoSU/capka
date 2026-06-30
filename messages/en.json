@@ -532,7 +532,13 @@
       "shareProviders": "Share admin provider keys",
       "shareProvidersHint": "When enabled, users without their own provider key use the admin's key (and budget). Off by default.",
       "shareEnabled": "Key sharing enabled",
-      "shareDisabled": "Key sharing disabled"
+      "shareDisabled": "Key sharing disabled",
+      "about": "About",
+      "aboutDesc": "Capka is open-source software.",
+      "openSource": "Open source under the <license>AGPL-3.0</license> license.",
+      "sourceCode": "Source on GitHub",
+      "version": "Version {version}",
+      "author": "Built by <author>@LyoSU</author>"
     },
     "memory": {
       "title": "Agent Memory",
