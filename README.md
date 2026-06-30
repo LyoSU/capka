@@ -95,8 +95,8 @@ on `:3000` (HTTP) so you can front it with your own reverse proxy.
 
 | Your setup | Do this |
 |---|---|
-| Just testing | One-click template: **Coolify** (`deploy/coolify.md`, full stack) or **Railway** (`deploy/railway.json`) / **Fly.io** (`deploy/fly.md`) — *platform only, no Docker daemon → no code sandbox there*. |
-| Solo / small team on a VPS | `DOMAIN=… npm run up` (turnkey HTTPS above). |
+| Just testing (no sandbox) | One-click PaaS: **Railway** (`deploy/railway.json`) or **Fly.io** (`deploy/fly.md`) — *platform only, no Docker daemon → no code sandbox there*. |
+| Solo / small team on a VPS | `DOMAIN=… npm run up` (turnkey HTTPS above), or one-click **Coolify** (`deploy/coolify.md`) — deploys onto a host with a Docker daemon, so you get the **full stack incl. the sandbox**. |
 | Higher-trust / company | External managed Postgres, rootless Docker, SSO — see `SECURITY.md`. |
 
 ### Secrets
