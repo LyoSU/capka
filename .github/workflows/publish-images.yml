@@ -73,6 +73,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           provenance: false
+          # Stamp the version into the platform image so Settings → Updates can
+          # report it. The controller/sandbox images ignore these args.
+          build-args: |
+            CAPKA_VERSION=${{ steps.meta.outputs.version }}
+            CAPKA_GIT_SHA=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

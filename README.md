@@ -156,6 +156,20 @@ affected images build locally. To always compile from source instead:
 CAPKA_BUILD=1 ./scripts/up.sh
 ```
 
+### Updating
+
+**Settings → Updates** (admin) shows the running version against the latest
+release, with the changelog and a one-line update command; a banner appears when
+you're behind. The check is cached and can be turned off (no outbound calls).
+Capka can't restart itself from inside its sandboxed container, so updating is a
+host action:
+
+```bash
+cd /opt/capka && sudo ./scripts/update.sh   # fetch newest release, pull images, recreate
+```
+
+It keeps your `.env` and data, and pins the image tag to the code it checks out.
+
 ## Security & sandboxing
 
 Out of the box, sandboxes run on the standard `runc` runtime (works on any Docker
