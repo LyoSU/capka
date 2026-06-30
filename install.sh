@@ -19,8 +19,13 @@
 #   SETUP_TOKEN   require this token when claiming the admin account (hardening)
 #   CAPKA_DIR     install location           (default: /opt/capka)
 #   CAPKA_REPO    git remote                 (default: https://github.com/LyoSU/capka.git)
-#   CAPKA_BRANCH  git branch                 (default: master)
+#   CAPKA_BRANCH  git ref to install         (default: newest release tag, else master)
+#   CAPKA_VERSION image tag to pull          (default: matches the installed ref)
 #   CAPKA_BUILD=1 compile from source instead of pulling prebuilt images
+#
+# Re-running upgrades in place: it resets the checkout to the target ref (your
+# .env config is gitignored and preserved, but local edits to tracked files are
+# discarded).
 set -eu
 
 # The whole installer lives in main() and is only invoked on the last line. If
@@ -38,6 +43,8 @@ main() {
   setup_privilege
   ensure_git
   ensure_docker
+  preflight_disk
+  resolve_version
   fetch_repo
   prompt_domain
 
@@ -50,6 +57,7 @@ main() {
     ${DOMAIN:+DOMAIN=$DOMAIN} \
     ${PUBLIC_URL:+PUBLIC_URL=$PUBLIC_URL} \
     ${SETUP_TOKEN:+SETUP_TOKEN=$SETUP_TOKEN} \
+    ${CAPKA_VERSION:+CAPKA_VERSION=$CAPKA_VERSION} \
     ${CAPKA_BUILD:+CAPKA_BUILD=$CAPKA_BUILD} \
     sh scripts/up.sh
 }
@@ -121,13 +129,50 @@ ensure_docker() {
   $SUDO docker version >/dev/null 2>&1 || err "Docker is installed but the daemon isn't reachable — start it and re-run"
 }
 
+# The prebuilt stack lands ~8-9 GB of images, plus headroom for Postgres data
+# and the per-session sandbox containers. Refuse on a box that clearly can't hold
+# it; warn on a tight one. (CAPKA_BUILD or an unpublished arch needs even more.)
+preflight_disk() {
+  target="$CAPKA_DIR"
+  while [ ! -d "$target" ] && [ "$target" != "/" ]; do target=$(dirname "$target"); done
+  avail_gb=$(df -Pk "$target" 2>/dev/null | awk 'NR==2 { printf "%d", $4 / 1048576 }')
+  [ -n "$avail_gb" ] || return 0   # df unavailable — don't block the install
+  if [ "$avail_gb" -lt 10 ]; then
+    err "only ${avail_gb} GB free on $target — Capka needs ~10 GB minimum (20+ GB recommended)"
+  elif [ "$avail_gb" -lt 20 ]; then
+    warn "${avail_gb} GB free on $target — workable, but 20+ GB is recommended (sandbox image alone is ~7.5 GB)"
+  fi
+}
+
+# Keep the cloned code and the pulled images on the same version: install the
+# newest published release tag by default. Skipped if the operator pinned a
+# version or a non-default branch — then they've explicitly chosen what to run.
+resolve_version() {
+  CAPKA_VERSION="${CAPKA_VERSION:-}"
+  if [ -n "$CAPKA_VERSION" ] || [ "$CAPKA_BRANCH" != "master" ]; then return 0; fi
+  latest=$(git ls-remote --tags --refs "$CAPKA_REPO" 'v*' 2>/dev/null \
+    | awk -F/ '{ print $NF }' | sort -V | tail -n1)
+  if [ -n "$latest" ]; then
+    info "Newest release is $latest — installing it (set CAPKA_BRANCH=master for the development tip)."
+    CAPKA_BRANCH="$latest"
+    CAPKA_VERSION="$latest"
+  else
+    info "No tagged release yet — installing the development tip (master + :latest images)."
+  fi
+}
+
 fetch_repo() {
   if [ -d "$CAPKA_DIR/.git" ]; then
-    info "Updating existing install at $CAPKA_DIR ..."
-    $SUDO git -C "$CAPKA_DIR" pull --ff-only
+    info "Updating $CAPKA_DIR to $CAPKA_BRANCH ..."
+    $SUDO git -C "$CAPKA_DIR" fetch --tags --depth 1 origin "$CAPKA_BRANCH" 2>/dev/null \
+      || err "couldn't fetch '$CAPKA_BRANCH' from $CAPKA_REPO — check network and the ref name"
+    # checkout -f resets to the target ref (clean, predictable upgrade); .env is
+    # gitignored so config survives, but edits to tracked files are discarded.
+    $SUDO git -C "$CAPKA_DIR" checkout -f FETCH_HEAD >/dev/null 2>&1 \
+      || err "couldn't switch $CAPKA_DIR to '$CAPKA_BRANCH'"
   else
     [ -e "$CAPKA_DIR" ] && err "$CAPKA_DIR exists but isn't a git checkout — remove it or set CAPKA_DIR"
-    info "Cloning Capka into $CAPKA_DIR ..."
+    info "Cloning Capka ($CAPKA_BRANCH) into $CAPKA_DIR ..."
     $SUDO git clone --depth 1 --branch "$CAPKA_BRANCH" "$CAPKA_REPO" "$CAPKA_DIR"
   fi
 }

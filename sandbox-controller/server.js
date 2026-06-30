@@ -583,11 +583,11 @@ async function boot() {
   backend = makeComputeBackend({ kind: COMPUTE_BACKEND, docker, image: SANDBOX_IMAGE, runtime: RUNTIME });
 
   // Fail-closed: if the secure profile was opted into, refuse to boot unless the
-  // gVisor runtime is on the daemon. The dev profile (default) skips this.
+  // gVisor runtime is on the daemon. The standard profile (default) skips this.
   await assertRuntimeAvailable(docker, { profile: PROFILE, runtime: RUNTIME });
 
-  // Make the weaker default posture loud rather than silent: a dev-profile deploy
-  // runs untrusted code with standard Docker isolation only.
+  // Make the weaker default posture loud rather than silent: a standard-profile
+  // deploy runs untrusted code with ordinary Docker isolation only.
   if (PROFILE !== "secure") {
     log("isolation.unhardened", {
       profile: PROFILE, runtime: RUNTIME,

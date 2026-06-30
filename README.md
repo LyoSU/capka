@@ -107,6 +107,22 @@ the installer upgrades in place (`git pull` + image refresh).
 > Capka runs as a **long-lived process** — serverless/edge hosts that freeze
 > between requests won't work.
 
+### Server requirements
+
+Capka runs practically anywhere: any Linux host with Docker, on **x86_64 or
+arm64** (the prebuilt images are multi-arch, so a cheap ARM VPS works too — the
+host pulls its native arch, no local compile).
+
+| | CPU | RAM | Disk |
+|---|---|---|---|
+| **Minimum** | 1–2 vCPU | 2 GB | 20 GB |
+| **Recommended** | 2 vCPU | 4 GB | 40 GB |
+
+A ~$5/mo VPS (e.g. Hetzner CX22 / the ARM CAX11) comfortably runs the full
+stack. Disk is dominated by the sandbox image (~7.5 GB); pulling prebuilt images
+means no RAM-hungry build on the box. Heavier or many-concurrent-user workloads
+want more RAM and the [gVisor](#security--sandboxing) hardening.
+
 ### Which path is for me?
 
 | Your setup | Do this |
