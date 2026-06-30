@@ -37,7 +37,7 @@ jobs:
             file: Dockerfile.sandbox
             target: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # QEMU lets a single amd64 runner cross-build the arm64 variant too, so each
       # published image is a multi-arch manifest list. This is what lets Capka run
