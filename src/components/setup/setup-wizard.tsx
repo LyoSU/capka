@@ -129,8 +129,18 @@ export function SetupWizard({
       if (!signedIn) {
         const { error } = await authClient.signUp.email({ name, email, password });
         if (error) {
-          toast.error(error.message || t("account.error"));
-          return;
+          // A returning operator whose half-finished setup already created their
+          // account — but whose session was lost (e.g. a non-secure cookie that
+          // never round-tripped) — can't sign up again. Recover by signing IN with
+          // the same credentials so they resume and claim admin, instead of dead-
+          // ending on "user already exists". Wrong password just re-surfaces the
+          // original error.
+          const exists = /exists|already/i.test(error.message ?? "");
+          const recovered = exists && !(await authClient.signIn.email({ email, password })).error;
+          if (!recovered) {
+            toast.error(error.message || t("account.error"));
+            return;
+          }
         }
       }
 

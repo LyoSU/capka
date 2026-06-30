@@ -54,14 +54,17 @@ export async function POST(req: Request) {
     if (!email) {
       return Response.json({ error: "Account has no email" }, { status: 400 });
     }
-    // Anti-hijack: the admin email is claimed once and never reassigned. But a
-    // re-run by the SAME signed-in admin (e.g. a page refresh mid-setup) is
-    // idempotent — only a different account is rejected.
-    const existing = await getSetting("admin_email");
-    if (existing && existing !== email) {
-      return Response.json({ error: "Admin account already configured" }, { status: 403 });
-    }
-    if (!existing) await setSetting("admin_email", email);
+    // Setup is NOT complete here (guarded at the top) and the SETUP_TOKEN gate
+    // (when configured) already passed above — so there is no real admin yet to
+    // protect. Always (re)bind the bootstrap email to the CURRENT authenticated
+    // session. Pinning it permanently the first time was a footgun: a half-
+    // finished setup (e.g. the provider step failed, then the session was lost to
+    // a non-secure cookie that never round-tripped) left admin_email stuck on an
+    // account the operator could no longer sign into — so a fresh attempt with a
+    // different email dead-ended on "Admin account already configured". Letting it
+    // be re-claimed until completion keeps first-run recoverable; the SETUP_TOKEN
+    // (or the trusted-network trust model when it's unset) remains the real gate.
+    await setSetting("admin_email", email);
     return Response.json({ ok: true });
   }
 
