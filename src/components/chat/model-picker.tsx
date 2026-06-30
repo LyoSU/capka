@@ -367,13 +367,28 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
         if (!cancelled) {
           setState((s) => ({
             ...s,
-            // tool-capable so the picker's hasTools filter keeps it — the user
-            // must still see (and keep) their current model when a load fails.
-            models: s.models.length ? s.models : [{ id: fallbackValue, name: displayModelName(fallbackValue), provider: "", context: 0, pricing: { prompt: 0, completion: 0 }, capabilities: { vision: false, tools: true, reasoning: false } }],
+            // Keep whatever already loaded; else, when there's a current selection
+            // to preserve, synthesize a tool-capable stand-in (so the user keeps —
+            // and can re-pick — it through a transient failure). With NO current
+            // value (first-run setup / "add provider"), synthesizing a row would
+            // render a bogus, selectable "select model" entry and HIDE the error —
+            // so leave the list empty and let the error state surface honestly.
+            models: s.models.length
+              ? s.models
+              : fallbackValue
+                ? [{ id: fallbackValue, name: displayModelName(fallbackValue), provider: "", context: 0, pricing: { prompt: 0, completion: 0 }, capabilities: { vision: false, tools: true, reasoning: false } }]
+                : [],
             loading: false,
             error: loadErrorMsg,
             syncing: false,
           }));
+          // The effect only re-runs when the credentials change, so a network blip
+          // would otherwise strand the picker on this error forever. The common
+          // cause on first run is the origin being briefly unreachable — the page
+          // rendered, but the API isn't answering yet during boot/redeploy (the
+          // very gap the offline service worker exists for). Retry in the
+          // background so the list fills in on its own once the server responds.
+          retry = setTimeout(load, 4000);
         }
       }
     };
