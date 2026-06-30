@@ -2,6 +2,7 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Images on GHCR](https://img.shields.io/badge/images-ghcr-green.svg)](#prebuilt-images)
+[![Live demo](https://img.shields.io/badge/live%20demo-capka.yuri.ly-ff6f3c.svg)](https://capka.yuri.ly/)
 
 Hi — I'm building **Capka** because I couldn't find a decent open-source web UI
 that treats AI as a real *agent*, not just a chatbot.
@@ -14,6 +15,9 @@ documents, and uses MCP connectors — safely, in its own container, behind your
 own API keys.
 
 ![Capka demo](./docs/assets/demo.gif)
+
+> 🌐 **Try the live demo → [capka.yuri.ly](https://capka.yuri.ly/)** — poke around
+> a running instance before you host your own.
 
 > 💡 **What's in the name?** *Capka* (say *[tsap-ka]* — or just "cap-ka", I won't
 > mind) comes from the Ukrainian *цап-царап*, the quick swipe of a cat's claws —
