@@ -30,10 +30,13 @@ The internet is flooded with weekend-project chat apps that look generic, choke
 on real tasks, or leak raw JSON errors at users. I wanted a runtime I could host
 on a cheap VPS for myself, my friends, and my team.
 
-Drop in a file and just ask — Capka runs real tools (`ffprobe`, `ffmpeg`, …)
-inside its sandbox and reports back:
+Drop in a messy ZIP of work files — spreadsheets, PDFs, meeting notes — and ask
+for the *outcome*, not the steps: *"prepare our weekly business review."* Capka
+cleans the data, reads the documents, runs the numbers, builds the charts, and
+hands back finished deliverables — a polished PDF report and an Excel workbook,
+not just another chat reply:
 
-![Capka processing a file in its sandbox](./docs/assets/demo.webp)
+![Capka turning a ZIP of messy work files into a finished PDF report and Excel workbook](./docs/assets/demo.webp)
 
 What you get:
 
