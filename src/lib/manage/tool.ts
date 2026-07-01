@@ -85,7 +85,7 @@ Collections (target="mcp" for connectors, target="skill" for agent skills):
 - Some connectors need the user to sign in via a browser (OAuth). action="add" or action="connect" then returns status="action_required" with a URL — DON'T try to open it yourself; tell the user to use the button/link, then re-check with action="debug".
 - action="debug" reports a connector's live state (ok / needs login / unreachable) and a hint. NEVER ask the user to paste API keys or tokens into chat — a connector needing a secret token is configured on the settings page, not here.
 
-Role enforcement is server-side: a non-admin can't touch org settings or add shared/local connectors, so don't promise changes you can't make.`;
+Permission and info are different things. Permission is server-side — just attempt the action; never infer what YOU can do from a setting's value (a toggle like "members can install connectors" restricts other end-users, not you-as-caller). If you're only missing INPUT to act — most often a connector's url (remote) or command (local) — ask the user for exactly that in one plain question, and never dress a missing url up as a permissions/admin problem.`;
 
 export function makeManageTool(identity: ManageIdentity) {
   return {
@@ -95,7 +95,7 @@ export function makeManageTool(identity: ManageIdentity) {
       execute: async (args): Promise<ManageResult> => {
         const input = toInput(args);
         if (!input) {
-          return { status: "error", render: "error", code: "bad_request", summary: "Бракує обов'язкових полів для цієї дії." };
+          return { status: "error", render: "error", code: "bad_request", summary: "Missing required fields for this action." };
         }
         const ctx: ManageContext = {
           userId: identity.userId,
