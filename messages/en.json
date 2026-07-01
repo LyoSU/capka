@@ -444,7 +444,10 @@
       "undoMsg": "Undo the change to \"{title}\" — restore the previous value.",
       "debugTitle": "Diagnostics",
       "connectorsTitle": "Connectors",
-      "openHint": "Open the link to continue"
+      "openHint": "Open the link to continue",
+      "statusOn": "on",
+      "statusOff": "off",
+      "statusSignin": "sign-in"
     }
   },
   "projects": {
@@ -981,6 +984,12 @@
           "remove": "Removed connector",
           "enable": "Enabled connector",
           "disable": "Disabled connector"
+        },
+        "skill": {
+          "add": "Added skill",
+          "remove": "Removed skill",
+          "enable": "Enabled skill",
+          "disable": "Disabled skill"
         },
         "policy": {
           "set": "Changed permission",

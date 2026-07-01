@@ -37,6 +37,13 @@ function orgSetting(o: {
 const bool = z.enum(["true", "false"]);
 const boolFmt = (v: string) => (v === "true" ? "Enabled" : "Disabled");
 const int = z.string().regex(/^\d+$/, "Must be a whole number.");
+// A whole number with a sane ceiling. Without it, a fat-fingered
+// "999999999999999" for model_min_context would silently hide EVERY model, or a
+// huge max_context_tokens would demand an impossible window — a confusing dead
+// end for a non-technical admin. 10M tokens is far above any real model.
+const boundedInt = (max: number) =>
+  int.refine((v) => Number(v) <= max, `Must be at most ${max.toLocaleString("en-US")}.`);
+const TOKENS_CEILING = 10_000_000;
 
 export const orgControls: Control[] = [
   orgSetting({
@@ -104,7 +111,7 @@ export const orgControls: Control[] = [
     key: "model_min_context",
     title: "Minimum model context",
     description: "Hide models whose context window is smaller than this (in tokens).",
-    schema: int,
+    schema: boundedInt(TOKENS_CEILING),
     def: String(DEFAULT_MODEL_MIN_CONTEXT),
     format: (v) => `${v} tokens`,
   }),
@@ -112,7 +119,7 @@ export const orgControls: Control[] = [
     key: "max_context_tokens",
     title: "Context limit",
     description: 'Upper bound on context tokens per turn ("0" = auto, per model).',
-    schema: int,
+    schema: boundedInt(TOKENS_CEILING),
     def: "0",
     format: (v) => (v === "0" ? "auto (per model)" : `${v} tokens`),
   }),
@@ -120,7 +127,7 @@ export const orgControls: Control[] = [
     key: "model_max_price",
     title: "Maximum model price",
     description: 'Hide models more expensive than this (per 1M tokens; "0" = no limit).',
-    schema: z.string().regex(/^\d+(\.\d+)?$/, "Must be a number."),
+    schema: z.string().regex(/^\d+(\.\d+)?$/, "Must be a number.").refine((v) => Number(v) <= 100_000, "Price is unreasonably high (max 100000)."),
     def: "0",
     format: (v) => (v === "0" ? "no limit" : `$${v}`),
   }),

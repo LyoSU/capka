@@ -35,21 +35,29 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "The action could not be completed.";
 }
 
-/** Record a mutation in the tamper-evident audit trail. Best-effort and lazy:
- *  the governance audit (and thus the DB) is only imported when no test override
- *  is supplied, so pure dispatch tests never touch a database. */
+/** Record a mutation in the tamper-evident audit trail. Best-effort (a failed
+ *  audit write must NOT turn an already-applied change into an error the user
+ *  sees, nor swallow the undo token) and lazy: the governance audit (and thus the
+ *  DB) is only imported when no test override is supplied, so pure dispatch tests
+ *  never touch a database. `action` is typed AuditAction — the cast that let a
+ *  skill change get logged as a connector change is gone. */
 async function record(
   ctx: ManageContext,
-  action: string,
+  action: AuditAction,
   targetKey: string,
   detail: Record<string, unknown>,
 ): Promise<void> {
-  if (ctx.audit) {
-    await ctx.audit({ action, targetType: "manage", targetKey, detail });
-    return;
+  try {
+    if (ctx.audit) {
+      await ctx.audit({ action, targetType: "manage", targetKey, detail });
+      return;
+    }
+    const { audit } = await import("@/lib/governance/audit");
+    await audit({ actorId: ctx.userId, action, targetType: "manage", targetKey, detail });
+  } catch (e) {
+    const { log } = await import("@/lib/log");
+    log.warn("manage audit write failed", { action, targetKey, err: String(e) });
   }
-  const { audit } = await import("@/lib/governance/audit");
-  await audit({ actorId: ctx.userId, action: action as AuditAction, targetType: "manage", targetKey, detail });
 }
 
 function issueConfirm(ctx: ManageContext, controlKey: string, argsHash: string): string {
@@ -253,6 +261,15 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
   const parsed = coll!.addSchema.safeParse(input.args);
   if (!parsed.success) return err("invalid_value", parsed.error.issues[0]?.message ?? "Invalid data.");
   const args = parsed.data as Record<string, unknown>;
+  // Pre-flight BOTH phases: refuse up front rather than show (or, on the confirmed
+  // call, apply) a change the caller can't make or whose content is invalid.
+  if (coll!.validateAdd) {
+    try {
+      await coll!.validateAdd(ctx, args);
+    } catch (e) {
+      return err("apply_failed", errMsg(e));
+    }
+  }
   const key = `${coll!.id}:add`;
   const argsHash = hashArgs(args);
 
@@ -271,7 +288,7 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
   }
   try {
     const { itemTitle, action } = await coll!.add(ctx, args);
-    await record(ctx, "connector.add", coll!.id, { item: itemTitle });
+    await record(ctx, `${coll!.auditNoun}.add`, coll!.id, { item: itemTitle });
     const t = manageT(ctx.locale);
     return {
       status: "ok",
@@ -309,7 +326,7 @@ async function remove(reg: Registry, ctx: ManageContext, input: Extract<ManageIn
   }
   try {
     const { itemTitle } = await coll!.remove(ctx, input.itemId);
-    await record(ctx, "connector.remove", coll!.id, { item: itemTitle });
+    await record(ctx, `${coll!.auditNoun}.remove`, coll!.id, { item: itemTitle });
     return {
       status: "ok",
       render: "resource",
@@ -328,7 +345,7 @@ async function toggle(reg: Registry, ctx: ManageContext, target: string, itemId:
   if (!coll!.setEnabled) return err("unsupported", "This resource doesn't support enable/disable.");
   try {
     const { itemTitle } = await coll!.setEnabled(ctx, itemId, enabled);
-    await record(ctx, enabled ? "connector.enable" : "connector.disable", coll!.id, { item: itemTitle });
+    await record(ctx, `${coll!.auditNoun}.${enabled ? "enable" : "disable"}`, coll!.id, { item: itemTitle });
     const opKey = enabled ? "op.enabled" : "op.disabled";
     return {
       status: "ok",

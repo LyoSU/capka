@@ -16,7 +16,11 @@ type SignOpts = { ttlMs?: number; now?: number };
 /** Stable hash of an action's arguments — key order must not matter, so the same
  *  logical change always produces the same confirm token binding. */
 export function hashArgs(args: unknown): string {
-  return createHmac("sha256", "args").update(canonical(args)).digest("hex").slice(0, 16);
+  // Full 256-bit digest, not a 64-bit prefix: the HMAC "key" here is a public
+  // constant (it's a plain content hash, not a secret), so a truncated hash would
+  // be collision-searchable offline — letting a token bound to one set of args be
+  // reused for a colliding set. Full width closes that for free.
+  return createHmac("sha256", "args").update(canonical(args)).digest("hex");
 }
 
 function canonical(v: unknown): string {
@@ -63,6 +67,7 @@ export function verifyToken(token: string, secret: string, now = Date.now()): Ve
   } catch {
     return { ok: false, reason: "malformed" };
   }
+  if (typeof decoded !== "object" || decoded === null) return { ok: false, reason: "malformed" };
   if (typeof decoded.exp !== "number") return { ok: false, reason: "malformed" };
   if (now >= decoded.exp) return { ok: false, reason: "expired" };
 

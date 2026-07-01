@@ -215,7 +215,7 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
                   {it.subtitle && <span className="ml-2 truncate text-xs text-muted-foreground">{it.subtitle}</span>}
                 </span>
                 <span className={`shrink-0 text-xs ${it.enabled === false ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
-                  {it.enabled === false ? "off" : it.status ?? "on"}
+                  {it.enabled === false ? t("statusOff") : it.status === "oauth" ? t("statusSignin") : t("statusOn")}
                 </span>
               </li>
             ))}

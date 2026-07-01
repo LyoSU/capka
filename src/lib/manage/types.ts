@@ -90,6 +90,10 @@ export interface Collection {
   title: string;
   description: string;
   requiredRole: Role;
+  /** Audit-log noun for this collection's mutations — the trail records
+   *  `${auditNoun}.{add,remove,enable,disable}` so a skill change never masquerades
+   *  as a connector change. */
+  auditNoun: "connector" | "skill";
   addSchema?: z.ZodTypeAny;
   /** Resolved, authoritative "may THIS caller add here" — surfaced to the model
    *  (UI-style, like the settings page's capability endpoint) so it never has to
@@ -98,6 +102,11 @@ export interface Collection {
   canAdd?(ctx: ManageContext): Promise<boolean>;
   list(ctx: ManageContext): Promise<CollectionItem[]>;
   add?(ctx: ManageContext, args: Record<string, unknown>): Promise<{ itemTitle: string; action?: RequiredAction }>;
+  /** Cheap pre-flight run BEFORE a confirm card is shown: throws a friendly Error
+   *  if this payload could never be added (caller not authorized, or invalid
+   *  content), so the dispatcher refuses up front instead of previewing a change
+   *  that apply would then reject. */
+  validateAdd?(ctx: ManageContext, args: Record<string, unknown>): Promise<void>;
   /** Human summary of what an add would do, for the confirm preview. */
   previewAdd?(ctx: ManageContext, args: Record<string, unknown>): { title: string; after: string; impact?: string };
   remove?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string }>;

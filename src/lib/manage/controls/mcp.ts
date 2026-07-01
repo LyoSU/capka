@@ -44,6 +44,19 @@ export function planMcpAdd(args: { scope?: string; command?: string }): {
   return { transport, scope, needsAdmin: scope === "system" || transport === "stdio" };
 }
 
+/** Authorization for adding a connector, shared by the dispatcher's confirm-phase
+ *  pre-flight (`validateAdd`) and the apply-phase (`add`). Throws a friendly Error
+ *  the caller surfaces verbatim. */
+async function assertCanAddMcp(ctx: ManageContext, a: AddArgs): Promise<void> {
+  const { needsAdmin } = planMcpAdd(a);
+  if (needsAdmin && !ctx.isAdmin) {
+    throw new Error("Local and shared (org) connectors can only be added by an administrator.");
+  }
+  if (!(await canInstallExtensions(ctx.isAdmin))) {
+    throw new Error("The administrator has disabled self-service connector installation for members.");
+  }
+}
+
 /** Build the absolute OAuth sign-in URL the user's browser must open. Absolute
  *  (via the public origin) so it also works as a Telegram link, not just a web
  *  same-origin relative path. Labels localized to the caller's locale. */
@@ -69,9 +82,12 @@ export const mcpCollection: Collection = {
   title: "Connectors (MCP)",
   description: "External MCP connectors — add, enable/disable, debug, authorize.",
   requiredRole: "user",
+  auditNoun: "connector",
   addSchema,
 
   canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),
+
+  validateAdd: (ctx, args) => assertCanAddMcp(ctx, args as AddArgs),
 
   async list(ctx) {
     const t = manageT(ctx.locale);
@@ -99,13 +115,8 @@ export const mcpCollection: Collection = {
 
   async add(ctx, args) {
     const a = args as AddArgs;
-    const { transport, scope, needsAdmin } = planMcpAdd(a);
-    if (needsAdmin && !ctx.isAdmin) {
-      throw new Error("Local and shared (org) connectors can only be added by an administrator.");
-    }
-    if (!(await canInstallExtensions(ctx.isAdmin))) {
-      throw new Error("The administrator has disabled self-service connector installation for members.");
-    }
+    await assertCanAddMcp(ctx, a); // defense-in-depth: dispatch pre-flights this too
+    const { transport, scope } = planMcpAdd(a);
     const projectId = scope === "project" ? ctx.projectId : null;
     if (scope === "project" && !projectId) throw new Error("A project connector can only be added inside a project.");
     const userId = scope === "user" ? ctx.userId : scope === "project" ? ctx.userId : null;
@@ -162,7 +173,7 @@ export const mcpCollection: Collection = {
     return {
       itemTitle: s.name,
       state: loc(t, `state.${health.status}`, PROBE_TO_STATE[health.status] ?? health.status),
-      detail: health.detail ?? (health.status === "ok" ? loc(t, "mcp.toolCount", `${health.toolCount ?? 0} tools`, { n: health.toolCount ?? 0 }) : undefined),
+      detail: health.detail ?? (health.status === "ok" ? loc(t, "mcp.toolCount", `${health.toolCount ?? 0} ${health.toolCount === 1 ? "tool" : "tools"}`, { n: health.toolCount ?? 0 }) : undefined),
       hint: needsLogin && s.authKind === "oauth" ? loc(t, "mcp.needsLoginHint", "Looks like it needs a fresh sign-in — authorize the connector.") : undefined,
       action: needsLogin && s.authKind === "oauth" ? oauthAction(ctx, s.id) : undefined,
     };
@@ -181,7 +192,10 @@ export const mcpCollection: Collection = {
 async function mustManage(ctx: ManageContext, itemId: string) {
   const s = await getAccessibleServer(ctx.userId, itemId);
   if (!s) throw new Error("No such connector.");
-  if (s.scope === "user" && s.userId === ctx.userId) return s;
+  // The owner of a personal OR project-scoped connector may manage it — a member
+  // can add a project connector (planMcpAdd allows scope:"project" for non-admins),
+  // so they must be able to remove/toggle it too, not just admins.
+  if ((s.scope === "user" || s.scope === "project") && s.userId === ctx.userId) return s;
   if (ctx.isAdmin) return s;
   throw new Error("Only the owner or an administrator can manage this connector.");
 }

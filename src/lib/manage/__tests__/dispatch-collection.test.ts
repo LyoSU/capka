@@ -19,6 +19,7 @@ function memCollection(over: Partial<Collection> = {}): { collection: Collection
     title: "Connectors",
     description: "",
     requiredRole: "user",
+    auditNoun: "connector",
     addSchema: z.object({ name: z.string(), url: z.string() }),
     list: async () => items,
     previewAdd: (_ctx, args) => ({ title: "Connectors", after: String(args.name) }),
@@ -120,6 +121,38 @@ describe("manage/dispatch collections", () => {
     const res = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok" } });
     expect(res.status).toBe("error");
     if (res.status === "error") expect(res.code).toBe("invalid_value");
+  });
+
+  it("validateAdd refuses UP FRONT — a doomed add never reaches a confirm card", async () => {
+    const { collection, items } = memCollection({
+      validateAdd: async () => { throw new Error("only an admin can add this"); },
+    });
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "x", url: "https://y" } });
+    expect(res.status).toBe("error");
+    if (res.status === "error") expect(res.summary).toBe("only an admin can add this");
+    expect(items).toHaveLength(1); // nothing added
+  });
+
+  it("audit action is derived from the collection's auditNoun (a skill is logged as skill.*, not connector.*)", async () => {
+    const audit = vi.fn();
+    const { collection } = memCollection({ auditNoun: "skill" });
+    const reg = createRegistry([], [collection]);
+    const first = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
+    if (first.status !== "confirm_required") throw new Error("expected confirm");
+    await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" }, confirmToken: first.confirmToken });
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "skill.add" }));
+  });
+
+  it("a failed audit write does not fail an already-applied change (best-effort)", async () => {
+    const audit = vi.fn().mockRejectedValue(new Error("audit backend down"));
+    const { collection, items } = memCollection();
+    const reg = createRegistry([], [collection]);
+    const first = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
+    if (first.status !== "confirm_required") throw new Error("expected confirm");
+    const second = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" }, confirmToken: first.confirmToken });
+    expect(second.status).toBe("ok"); // the add succeeded despite the audit failure
+    expect(items).toHaveLength(2);
   });
 
   it("enable/disable apply directly", async () => {

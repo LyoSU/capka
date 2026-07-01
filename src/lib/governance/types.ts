@@ -27,7 +27,7 @@ export interface PolicyMatcher {
 export type AuditAction =
   | "plugin.install" | "plugin.uninstall" | "plugin.update" | "plugin.enable" | "plugin.disable"
   | "connector.add" | "connector.remove" | "connector.enable" | "connector.disable"
-  | "skill.add"
+  | "skill.add" | "skill.remove" | "skill.enable" | "skill.disable"
   | "policy.set" | "policy.clear"
   // Chat-driven configuration changes via the `manage` control plane.
   | "settings.update" | "settings.undo"

@@ -25,14 +25,31 @@ export function skillScope(args: { scope?: string }): { scope: SkillScope; needs
   return { scope, needsAdmin: scope === "system" };
 }
 
+/** Authorization for adding a skill, shared by the dispatcher's confirm-phase
+ *  pre-flight (`validateAdd`) and the apply-phase (`add`). */
+async function assertCanAddSkill(ctx: ManageContext, a: AddArgs): Promise<void> {
+  const { needsAdmin } = skillScope(a);
+  if (needsAdmin && !ctx.isAdmin) throw new Error("Shared (org) skills can only be added by an administrator.");
+  if (!(await canInstallExtensions(ctx.isAdmin))) {
+    throw new Error("The administrator has disabled self-service skill installation for members.");
+  }
+}
+
 export const skillCollection: Collection = {
   id: "skill",
   title: "Skills",
   description: "Agent skills — list, add (SKILL.md), enable/disable, remove.",
   requiredRole: "user",
+  auditNoun: "skill",
   addSchema,
 
   canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),
+
+  async validateAdd(ctx, args) {
+    const a = args as AddArgs;
+    await assertCanAddSkill(ctx, a);
+    parseSkillMarkdown(a.content); // throws SkillParseError (friendly) BEFORE a card is shown
+  },
 
   async list(ctx) {
     const skills = await listManagedSkills(ctx.userId, ctx.isAdmin);
@@ -62,11 +79,8 @@ export const skillCollection: Collection = {
 
   async add(ctx, args) {
     const a = args as AddArgs;
-    const { scope, needsAdmin } = skillScope(a);
-    if (needsAdmin && !ctx.isAdmin) throw new Error("Shared (org) skills can only be added by an administrator.");
-    if (!(await canInstallExtensions(ctx.isAdmin))) {
-      throw new Error("The administrator has disabled self-service skill installation for members.");
-    }
+    await assertCanAddSkill(ctx, a); // defense-in-depth: dispatch pre-flights this too
+    const { scope } = skillScope(a);
     const parsed = parseSkillMarkdown(a.content); // throws SkillParseError → surfaced as a friendly error
     await ingestSkill(parsed, [], { scope, userId: scope === "user" ? ctx.userId : null, projectId: null });
     return { itemTitle: parsed.name };
