@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-07-01
+
 ### Fixed
 - **Reasoning models behind an OpenAI-compatible endpoint now survive a
   tool-calling turn too, not just plain multi-turn chat.** The v0.1.4 fix stripped
