@@ -19,6 +19,9 @@ export interface ManageContext {
   projectId: string | null;
   /** HMAC secret for confirm/undo tokens (the master key in production). */
   secret: string;
+  /** The user's locale — all user-facing strings are resolved to it server-side
+   *  (default English). Undefined → English. */
+  locale?: string;
   audit?: (e: { action: string; targetType?: string; targetKey?: string; detail?: Record<string, unknown> }) => Promise<void> | void;
   now?: () => number;
 }
@@ -98,7 +101,9 @@ export interface Collection {
   connect?(ctx: ManageContext, itemId: string): Promise<RequiredAction | null>;
 }
 
-/** A change the UI renders as a SettingChangeCard (before→after diff + Undo). */
+/** A change the UI renders as a SettingChangeCard (before→after diff + Undo).
+ *  Strings arrive already localized to the user's locale (resolved server-side),
+ *  so the card is a dumb renderer. */
 export interface SettingChange {
   controlId: string;
   title: string;

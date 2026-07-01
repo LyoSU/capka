@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { decrypt } from "@/lib/crypto";
-import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
+import { getMasterKey, getBlockPrivateProviderUrls, membersCanInstallPlugins } from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
 import {
   listServers,
@@ -12,19 +12,20 @@ import {
 } from "@/lib/mcp/service";
 import { probeConfig, type ProbeStatus } from "@/lib/mcp/health";
 import type { McpAuthKind, McpScope, McpSecrets } from "@/lib/mcp/types";
+import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext, RequiredAction } from "../types";
 
 const addSchema = z
   .object({
-    name: z.string().min(1, "Потрібна назва конектора."),
-    url: z.string().url("URL має бути коректним https-посиланням.").optional(),
+    name: z.string().min(1, "A connector name is required."),
+    url: z.string().url("URL must be a valid https link.").optional(),
     command: z.string().min(1).optional(),
     args: z.array(z.string()).optional(),
     scope: z.enum(["user", "project", "org"]).optional(),
     authKind: z.enum(["oauth", "none"]).optional(),
   })
   .refine((v) => Boolean(v.url) !== Boolean(v.command), {
-    message: 'Вкажіть АБО "url" (віддалений конектор), АБО "command" (локальний stdio).',
+    message: 'Provide EITHER "url" (a remote connector) OR "command" (a local stdio one).',
   });
 
 type AddArgs = z.infer<typeof addSchema>;
@@ -45,49 +46,52 @@ export function planMcpAdd(args: { scope?: string; command?: string }): {
 
 /** Build the absolute OAuth sign-in URL the user's browser must open. Absolute
  *  (via the public origin) so it also works as a Telegram link, not just a web
- *  same-origin relative path. */
-function oauthAction(serverId: string): RequiredAction {
+ *  same-origin relative path. Labels localized to the caller's locale. */
+function oauthAction(ctx: ManageContext, serverId: string): RequiredAction {
+  const t = manageT(ctx.locale);
   return {
     kind: "oauth",
     url: `${getPublicUrl()}/api/mcp/oauth/start?serverId=${encodeURIComponent(serverId)}`,
-    label: "Підключити",
-    description: "Відкрийте посилання, щоб увійти й авторизувати цей конектор.",
+    label: loc(t, "action.connect", "Connect"),
+    description: loc(t, "action.oauthDesc", "Open the link to sign in and authorize this connector."),
   };
 }
 
 const PROBE_TO_STATE: Record<ProbeStatus, string> = {
-  ok: "працює",
-  unauthorized: "не авторизовано",
-  unreachable: "недоступний",
-  needs_login: "потрібен вхід",
+  ok: "working",
+  unauthorized: "unauthorized",
+  unreachable: "unreachable",
+  needs_login: "needs sign-in",
 };
 
 export const mcpCollection: Collection = {
   id: "mcp",
-  title: "Конектори (MCP)",
-  description: "Зовнішні MCP-конектори — додати, увімкнути/вимкнути, діагностувати, авторизувати.",
+  title: "Connectors (MCP)",
+  description: "External MCP connectors — add, enable/disable, debug, authorize.",
   requiredRole: "user",
   addSchema,
 
   async list(ctx) {
+    const t = manageT(ctx.locale);
     const servers = await listServers(ctx.userId, ctx.projectId);
     return servers.map((s) => ({
       id: s.id,
       title: s.name,
-      subtitle: s.transport === "stdio" ? "локальний (stdio)" : s.url ?? undefined,
+      subtitle: s.transport === "stdio" ? loc(t, "mcp.stdio", "local (stdio)") : s.url ?? undefined,
       enabled: s.enabled,
       status: s.authKind === "oauth" ? "oauth" : undefined,
       owned: s.mine,
     }));
   },
 
-  previewAdd(_ctx, args) {
+  previewAdd(ctx, args) {
+    const t = manageT(ctx.locale);
     const a = args as AddArgs;
     const { scope } = planMcpAdd(a);
     return {
-      title: "Додати конектор",
-      after: `${a.name}${a.url ? ` (${a.url})` : " (локальний)"}`,
-      impact: scope === "system" ? "Спільний конектор — стане доступним усім користувачам." : undefined,
+      title: loc(t, "mcp.addTitle", "Add connector"),
+      after: `${a.name}${a.url ? ` (${a.url})` : ` (${loc(t, "mcp.local", "local")})`}`,
+      impact: scope === "system" ? loc(t, "mcp.sharedImpact", "Shared connector — available to all users.") : undefined,
     };
   },
 
@@ -95,10 +99,13 @@ export const mcpCollection: Collection = {
     const a = args as AddArgs;
     const { transport, scope, needsAdmin } = planMcpAdd(a);
     if (needsAdmin && !ctx.isAdmin) {
-      throw new Error("Локальні та спільні (org) конектори може додавати лише адміністратор.");
+      throw new Error("Local and shared (org) connectors can only be added by an administrator.");
+    }
+    if (!ctx.isAdmin && !(await membersCanInstallPlugins())) {
+      throw new Error("The administrator has disabled self-service connector installation for members.");
     }
     const projectId = scope === "project" ? ctx.projectId : null;
-    if (scope === "project" && !projectId) throw new Error("Проєктний конектор можна додати лише всередині проєкту.");
+    if (scope === "project" && !projectId) throw new Error("A project connector can only be added inside a project.");
     const userId = scope === "user" ? ctx.userId : scope === "project" ? ctx.userId : null;
 
     let id: string;
@@ -114,7 +121,7 @@ export const mcpCollection: Collection = {
         authKind: a.authKind === "oauth" ? "oauth" : "token",
       });
     }
-    return { itemTitle: a.name, action: a.authKind === "oauth" ? oauthAction(id) : undefined };
+    return { itemTitle: a.name, action: a.authKind === "oauth" ? oauthAction(ctx, id) : undefined };
   },
 
   async remove(ctx, itemId) {
@@ -130,10 +137,15 @@ export const mcpCollection: Collection = {
   },
 
   async debug(ctx, itemId) {
+    const t = manageT(ctx.locale);
     const s = await getAccessibleServer(ctx.userId, itemId);
-    if (!s) throw new Error("Немає такого конектора.");
+    if (!s) throw new Error("No such connector.");
     if (s.transport !== "http" || !s.url) {
-      return { itemTitle: s.name, state: "локальний", hint: "Локальні (stdio) конектори перевіряються під час запуску пісочниці." };
+      return {
+        itemTitle: s.name,
+        state: loc(t, "state.local", "local"),
+        hint: loc(t, "mcp.stdioHint", "Local (stdio) connectors are checked when the sandbox starts."),
+      };
     }
     let secrets: McpSecrets | undefined;
     if (s.secrets) {
@@ -147,18 +159,18 @@ export const mcpCollection: Collection = {
     const needsLogin = health.status === "needs_login" || health.status === "unauthorized";
     return {
       itemTitle: s.name,
-      state: PROBE_TO_STATE[health.status] ?? health.status,
-      detail: health.detail ?? (health.status === "ok" ? `${health.toolCount ?? 0} інструментів` : undefined),
-      hint: needsLogin && s.authKind === "oauth" ? "Схоже, потрібен повторний вхід — авторизуйте конектор." : undefined,
-      action: needsLogin && s.authKind === "oauth" ? oauthAction(s.id) : undefined,
+      state: loc(t, `state.${health.status}`, PROBE_TO_STATE[health.status] ?? health.status),
+      detail: health.detail ?? (health.status === "ok" ? loc(t, "mcp.toolCount", `${health.toolCount ?? 0} tools`, { n: health.toolCount ?? 0 }) : undefined),
+      hint: needsLogin && s.authKind === "oauth" ? loc(t, "mcp.needsLoginHint", "Looks like it needs a fresh sign-in — authorize the connector.") : undefined,
+      action: needsLogin && s.authKind === "oauth" ? oauthAction(ctx, s.id) : undefined,
     };
   },
 
   async connect(ctx, itemId) {
     const s = await getAccessibleServer(ctx.userId, itemId);
-    if (!s) throw new Error("Немає такого конектора.");
+    if (!s) throw new Error("No such connector.");
     if (s.authKind !== "oauth") return null;
-    return oauthAction(s.id);
+    return oauthAction(ctx, s.id);
   },
 };
 
@@ -166,8 +178,8 @@ export const mcpCollection: Collection = {
  *  personal one, or be an admin for a shared/project one. Returns the row. */
 async function mustManage(ctx: ManageContext, itemId: string) {
   const s = await getAccessibleServer(ctx.userId, itemId);
-  if (!s) throw new Error("Немає такого конектора.");
+  if (!s) throw new Error("No such connector.");
   if (s.scope === "user" && s.userId === ctx.userId) return s;
   if (ctx.isAdmin) return s;
-  throw new Error("Керувати цим конектором може лише його власник або адміністратор.");
+  throw new Error("Only the owner or an administrator can manage this connector.");
 }

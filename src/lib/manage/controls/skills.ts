@@ -7,13 +7,13 @@ import {
   getSkillMeta,
 } from "@/lib/skills/service";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
+import { membersCanInstallPlugins } from "@/lib/settings";
 import type { SkillScope } from "@/lib/skills/types";
+import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
 
 const addSchema = z.object({
-  content: z
-    .string()
-    .min(1, "Потрібен вміст SKILL.md (з frontmatter: name, description — і тілом інструкції)."),
+  content: z.string().min(1, "SKILL.md content is required (frontmatter: name, description — plus the instruction body)."),
   scope: z.enum(["user", "org"]).optional(),
 });
 
@@ -27,8 +27,8 @@ export function skillScope(args: { scope?: string }): { scope: SkillScope; needs
 
 export const skillCollection: Collection = {
   id: "skill",
-  title: "Скіли",
-  description: "Навички агента — переглянути, додати (SKILL.md), увімкнути/вимкнути, видалити.",
+  title: "Skills",
+  description: "Agent skills — list, add (SKILL.md), enable/disable, remove.",
   requiredRole: "user",
   addSchema,
 
@@ -43,24 +43,28 @@ export const skillCollection: Collection = {
     }));
   },
 
-  previewAdd(_ctx, args) {
+  previewAdd(ctx, args) {
+    const t = manageT(ctx.locale);
     const a = args as AddArgs;
-    let name = "(новий скіл)";
+    let name = loc(t, "skill.newSkill", "(new skill)");
     try {
       name = parseSkillMarkdown(a.content).name;
     } catch { /* previewing invalid markdown — the add will surface the real error */ }
     const { scope } = skillScope(a);
     return {
-      title: "Додати скіл",
+      title: loc(t, "skill.addTitle", "Add skill"),
       after: name,
-      impact: scope === "system" ? "Спільний скіл — стане доступним усім користувачам." : undefined,
+      impact: scope === "system" ? loc(t, "skill.sharedImpact", "Shared skill — available to all users.") : undefined,
     };
   },
 
   async add(ctx, args) {
     const a = args as AddArgs;
     const { scope, needsAdmin } = skillScope(a);
-    if (needsAdmin && !ctx.isAdmin) throw new Error("Спільні (org) скіли може додавати лише адміністратор.");
+    if (needsAdmin && !ctx.isAdmin) throw new Error("Shared (org) skills can only be added by an administrator.");
+    if (!ctx.isAdmin && !(await membersCanInstallPlugins())) {
+      throw new Error("The administrator has disabled self-service skill installation for members.");
+    }
     const parsed = parseSkillMarkdown(a.content); // throws SkillParseError → surfaced as a friendly error
     await ingestSkill(parsed, [], { scope, userId: scope === "user" ? ctx.userId : null, projectId: null });
     return { itemTitle: parsed.name };
@@ -83,11 +87,9 @@ export const skillCollection: Collection = {
  *  for a shared one. Returns a minimal descriptor (name for the result). */
 async function mustManageSkill(ctx: ManageContext, itemId: string): Promise<{ name: string }> {
   const meta = await getSkillMeta(itemId);
-  if (!meta) throw new Error("Немає такого скіла.");
+  if (!meta) throw new Error("No such skill.");
   const owned = meta.scope === "user" && meta.userId === ctx.userId;
-  if (!owned && !ctx.isAdmin) throw new Error("Керувати цим скілом може лише його власник або адміністратор.");
-  // getSkillMeta doesn't return the name; a lightweight list lookup gives a
-  // friendly title for the result card (falls back to the id).
+  if (!owned && !ctx.isAdmin) throw new Error("Only the owner or an administrator can manage this skill.");
   const found = (await listManagedSkills(ctx.userId, true)).find((s) => s.id === itemId);
   return { name: found?.name ?? itemId };
 }

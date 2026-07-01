@@ -17,14 +17,17 @@ function isValidTimezone(tz: string): boolean {
   }
 }
 
+const LOCALE_NAMES: Record<string, string> = { en: "English", uk: "Ukrainian" };
+
 const locale: Control = {
   id: "user.locale",
-  title: "Мова інтерфейсу",
-  description: `Мова інтерфейсу й відповідей. Доступні: ${locales.join(", ")}.`,
+  title: "Interface language",
+  description: `Language of the interface and replies. Available: ${locales.join(", ")}.`,
   scope: "user",
   requiredRole: "user",
   risk: "safe",
-  schema: z.string().refine((v) => (locales as readonly string[]).includes(v), "Непідтримувана мова."),
+  schema: z.string().refine((v) => (locales as readonly string[]).includes(v), "Unsupported language."),
+  format: (v) => LOCALE_NAMES[v] ?? v,
   read: async (ctx) =>
     (await db.select({ locale: users.locale }).from(users).where(eq(users.id, ctx.userId)).limit(1))[0]?.locale ?? "en",
   apply: async (ctx, v) => {
@@ -34,12 +37,12 @@ const locale: Control = {
 
 const timezone: Control = {
   id: "user.timezone",
-  title: "Часовий пояс",
-  description: 'Ваш IANA-часовий пояс (наприклад, "Europe/Kyiv"). Агент використовує його для дат у розмові.',
+  title: "Time zone",
+  description: 'Your IANA time zone (e.g. "Europe/Kyiv"). The agent uses it for dates in the conversation.',
   scope: "user",
   requiredRole: "user",
   risk: "safe",
-  schema: z.string().refine(isValidTimezone, "Некоректний часовий пояс."),
+  schema: z.string().refine(isValidTimezone, "Invalid time zone."),
   read: async (ctx) =>
     (await db.select({ timezone: users.timezone }).from(users).where(eq(users.id, ctx.userId)).limit(1))[0]?.timezone ??
     "UTC",

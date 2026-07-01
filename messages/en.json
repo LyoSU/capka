@@ -985,6 +985,10 @@
         "policy": {
           "set": "Changed permission",
           "clear": "Reset permission"
+        },
+        "settings": {
+          "update": "Updated setting",
+          "undo": "Reverted change"
         }
       }
     },
@@ -1274,5 +1278,6 @@
     "message": "Capka {version} is available.",
     "action": "Update",
     "dismiss": "Dismiss"
-  }
+  },
+  "manage": {}
 }

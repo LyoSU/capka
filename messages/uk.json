@@ -985,6 +985,10 @@
         "policy": {
           "set": "Змінено дозвіл",
           "clear": "Скинуто дозвіл"
+        },
+        "settings": {
+          "update": "Змінено налаштування",
+          "undo": "Скасовано зміну"
         }
       }
     },
@@ -1274,5 +1278,105 @@
     "message": "Доступна Capka {version}.",
     "action": "Оновити",
     "dismiss": "Сховати"
+  },
+  "manage": {
+    "control": {
+      "user_locale": {
+        "title": "Мова інтерфейсу"
+      },
+      "user_timezone": {
+        "title": "Часовий пояс"
+      },
+      "org_platform_name": {
+        "title": "Назва платформи"
+      },
+      "org_sandbox_enabled": {
+        "title": "Виконання в пісочниці"
+      },
+      "org_sandbox_network": {
+        "title": "Мережа пісочниці"
+      },
+      "org_block_private_provider_urls": {
+        "title": "Блокувати приватні URL провайдера"
+      },
+      "org_share_admin_providers": {
+        "title": "Спільний ключ провайдера"
+      },
+      "org_members_can_install_plugins": {
+        "title": "Учасники можуть ставити плагіни"
+      },
+      "org_update_check_enabled": {
+        "title": "Перевірка оновлень"
+      },
+      "org_model_min_context": {
+        "title": "Мін. контекст моделі"
+      },
+      "org_max_context_tokens": {
+        "title": "Ліміт контексту"
+      },
+      "org_model_max_price": {
+        "title": "Макс. ціна моделі"
+      }
+    },
+    "value": {
+      "bool": {
+        "true": "Увімкнено",
+        "false": "Вимкнено"
+      },
+      "org_sandbox_network": {
+        "none": "Ізольовано (без мережі)",
+        "bridge": "З доступом до мережі"
+      },
+      "user_locale": {
+        "en": "English",
+        "uk": "Українська"
+      },
+      "org_max_context_tokens": {
+        "0": "авто (за моделлю)"
+      },
+      "org_model_max_price": {
+        "0": "без обмеження"
+      }
+    },
+    "impact": {
+      "org_sandbox_network": "Пісочниці отримають вихід у мережу — і лише якщо на сервері виставлено SANDBOX_ALLOW_NETWORK=true.",
+      "org_block_private_provider_urls": "Вимкнення послаблює захист від SSRF — робіть це свідомо."
+    },
+    "collection": {
+      "mcp": "Конектори (MCP)",
+      "skill": "Скіли"
+    },
+    "op": {
+      "added": "Додано {name}.",
+      "removed": "Видалено {name}.",
+      "enabled": "«{name}» увімкнено.",
+      "disabled": "«{name}» вимкнено.",
+      "removeTitle": "Видалити з «{coll}»"
+    },
+    "mcp": {
+      "stdio": "локальний (stdio)",
+      "local": "локальний",
+      "addTitle": "Додати конектор",
+      "sharedImpact": "Спільний конектор — буде доступний усім користувачам.",
+      "stdioHint": "Локальні (stdio) конектори перевіряються під час запуску пісочниці.",
+      "needsLoginHint": "Схоже, потрібен повторний вхід — авторизуйте конектор.",
+      "toolCount": "{n} інструментів"
+    },
+    "skill": {
+      "newSkill": "(новий скіл)",
+      "addTitle": "Додати скіл",
+      "sharedImpact": "Спільний скіл — буде доступний усім користувачам."
+    },
+    "state": {
+      "local": "локальний",
+      "ok": "працює",
+      "unauthorized": "не авторизовано",
+      "unreachable": "недоступний",
+      "needs_login": "потрібен вхід"
+    },
+    "action": {
+      "connect": "Підключити",
+      "oauthDesc": "Відкрийте посилання, щоб увійти й авторизувати цей конектор."
+    }
   }
 }

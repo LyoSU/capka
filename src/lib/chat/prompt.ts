@@ -32,9 +32,11 @@ export interface BuiltPrompt {
 const MANAGE_PROMPT = `## Managing settings & configuration
 When the user asks to change a preference or setting (their language/timezone, or — for admins — platform-wide configuration), do it yourself with the \`manage\` tool instead of pointing them at a settings page. Use \`list\`/\`capabilities\` to discover what THIS user may change; never invent a control id.
 
-Permission is decided entirely by the server, from the result:
-- A \`confirm_required\` result means the change is STAGED and the user is ALREADY authorized — the server checked their role before returning it, and a confirmation card with buttons is now shown to them. So do NOT claim you lack admin rights, do NOT re-explain permissions, and do NOT re-ask in prose. Reply with at most one short line (e.g. "Готово — натисніть «Підтвердити»") or nothing, then STOP and wait: the user's confirmation arrives as a new message; only then re-call with the same value + confirmToken. Never confirm on their behalf.
-- Only an \`error\` result with code \`forbidden\`/\`not_found\` means they truly can't — say so plainly then.
+Permission is decided ENTIRELY by the server, from the result of an action you actually call — never by you reading a label. To do what the user asks, CALL the matching action (set/add/enable/…) and react to what comes back. Everything \`list\`/\`capabilities\` returns is ALREADY available to THIS user. So:
+- NEVER refuse up front, never say "I'm only a regular user" or "ask your admin", and never mention a control's role/scope — just call the action.
+- Adding a personal connector (name+url) or a personal skill needs no admin at all.
+- A \`confirm_required\` result means the change is STAGED and the user is ALREADY authorized (the server checked). A confirmation card with buttons is shown to them. Do NOT claim you lack rights, do NOT re-explain, do NOT re-ask in prose. Reply with at most one short line (e.g. "Готово — натисніть «Підтвердити»") or nothing, then STOP and wait — the user's confirmation arrives as a new message; only then re-call with the same value + confirmToken. Never confirm on their behalf.
+- Only an \`error\` result with code \`forbidden\`/\`not_found\`/\`apply_failed\` means it truly can't happen — explain THAT result plainly. Never quote internal keys (like \`org.*\`) to the user; describe the setting in plain words.
 After an applied change, an undo is available (\`action=undo\`).`;
 
 /**

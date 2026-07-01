@@ -14,6 +14,8 @@ export interface ManageIdentity {
   projectId: string | null;
   /** HMAC secret for confirm/undo tokens — the platform master key. */
   secret: string;
+  /** The user's locale — all user-facing strings resolve to it (default English). */
+  locale?: string;
 }
 
 const inputSchema = z.object({
@@ -70,6 +72,8 @@ function toInput(a: z.infer<typeof inputSchema>): ManageInput | null {
 
 const DESCRIPTION = `Manage the user's own preferences, platform-wide configuration (admins), AND connectors (MCP) — all through chat.
 
+Permission is decided by the SERVER from each action's result — not by you reading a role/scope. Everything list/capabilities returns is already available to THIS user, so never refuse up front, never say "you're only a regular user / ask an admin", and never quote internal keys (org.*) to the user. To do something, just call the action and react to the result; only an error result (forbidden/not_found/apply_failed) means it can't happen.
+
 Settings/controls:
 - action="list" (or "capabilities") discovers what THIS user may manage. Never invent an id.
 - action="get" reads a control; action="set" changes it (value is always a string).
@@ -98,6 +102,7 @@ export function makeManageTool(identity: ManageIdentity) {
           isAdmin: identity.isAdmin,
           projectId: identity.projectId,
           secret: identity.secret,
+          locale: identity.locale,
         };
         return dispatch(registry, ctx, input);
       },

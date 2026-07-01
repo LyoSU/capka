@@ -16,6 +16,7 @@ interface AuditEntry { id: string; action: string; targetKey: string | null; cre
 const KNOWN_ACTIONS = new Set([
   "plugin.install", "plugin.uninstall", "connector.add", "connector.remove",
   "connector.enable", "connector.disable", "policy.set", "policy.clear",
+  "settings.update", "settings.undo",
 ]);
 
 /** Three-way segmented control: Allow / Ask / Deny. */

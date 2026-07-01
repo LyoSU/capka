@@ -11,6 +11,29 @@ All notable changes to Capka are documented here. Format follows
 > `docker-compose.yml` is now the single canonical pull-only stack every target
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
+### Fixed
+- **The agent no longer refuses config changes it's actually allowed to make.**
+  A weak model would read a control's `requiredRole: "admin"` label (or the
+  `members_can_install_plugins` setting) and pre-emptively refuse — telling an
+  admin "you're only a regular user, ask your admin" — without ever calling the
+  action. The `manage` tool now decides permission entirely from the action's
+  result: `list`/`capabilities` no longer expose role/scope labels, and the
+  prompt directs the model to CALL the action and only refuse on an actual
+  `error` result. Non-admin connector/skill installs now correctly honour
+  `members_can_install_plugins` server-side (admins always may).
+
+### Changed
+- **All `manage` user-facing text is English in code + localized via i18n
+  (default English).** Control titles, values, states and messages were
+  Ukrainian string literals; they are now English in the source (the single
+  source of truth and fallback) and translated through `messages/<locale>.json`
+  under a new `manage` namespace, resolved server-side to the user's locale.
+  Values render as words, not raw codes (e.g. sandbox network shows "Network
+  access", not `bridge`). i18n keys are derived from the control id, so a missing
+  translation falls back to English rather than breaking — guarded by tests that
+  fail if a control lacks a Ukrainian title. The audit log ("Activity") now
+  labels `settings.update`/`settings.undo` instead of showing the raw code.
+
 ### Added
 - **Conversational settings control plane — users and admins manage config from
   chat via a new `manage` agent tool.** A regular user can change their own

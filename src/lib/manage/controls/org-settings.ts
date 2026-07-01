@@ -6,7 +6,8 @@ import type { Control, ManageContext } from "../types";
 /** Build an org-wide setting control over the existing key/value settings store.
  *  Every org control is admin-only and confirm-risk by construction, so a
  *  platform-wide change can never be applied from chat without a preview + an
- *  explicit second confirmation. */
+ *  explicit second confirmation. Strings are English (the source of truth +
+ *  fallback); Ukrainian is layered on via i18n keyed by the control id. */
 function orgSetting(o: {
   key: string;
   title: string;
@@ -34,89 +35,93 @@ function orgSetting(o: {
 }
 
 const bool = z.enum(["true", "false"]);
-const boolFmt = (v: string) => (v === "true" ? "Увімкнено" : "Вимкнено");
-const int = z.string().regex(/^\d+$/, "Має бути цілим числом.");
+const boolFmt = (v: string) => (v === "true" ? "Enabled" : "Disabled");
+const int = z.string().regex(/^\d+$/, "Must be a whole number.");
 
 export const orgControls: Control[] = [
   orgSetting({
     key: "platform_name",
-    title: "Назва платформи",
-    description: "Відображувана назва інсталяції.",
-    schema: z.string().min(1, "Назва не може бути порожньою.").max(60, "Задовга назва (макс. 60)."),
+    title: "Platform name",
+    description: "The installation name shown in the browser tab, the sidebar header, and the sign-in page.",
+    schema: z.string().min(1, "Name can't be empty.").max(60, "Name too long (max 60)."),
     def: "Capka",
   }),
   orgSetting({
     key: "sandbox_enabled",
-    title: "Пісочниця увімкнена",
-    description: "Чи може агент виконувати код у Docker-пісочниці.",
+    title: "Sandbox execution",
+    description: "Whether the agent may run code in its Docker sandbox.",
     schema: bool,
     def: "true",
     format: boolFmt,
   }),
   orgSetting({
     key: "sandbox_network",
-    title: "Мережа пісочниці",
-    description: 'Доступ пісочниці до мережі: "none" (ізольовано) або "bridge" (є вихід у мережу).',
+    title: "Sandbox network",
+    description: 'Sandbox network access: "none" (isolated) or "bridge" (outbound network).',
     schema: z.enum(["none", "bridge"]),
     def: "none",
+    format: (v) => (v === "bridge" ? "Network access" : "Isolated (no network)"),
     impact: async (_ctx, next) =>
       next === "bridge"
-        ? "Пісочниці отримають вихід у мережу — і лише якщо на сервері виставлено SANDBOX_ALLOW_NETWORK=true."
+        ? "Sandboxes gain outbound network access — and only if SANDBOX_ALLOW_NETWORK=true is set on the server."
         : undefined,
   }),
   orgSetting({
     key: "block_private_provider_urls",
-    title: "Блокувати приватні URL провайдера",
-    description: "Захист від SSRF: забороняти провайдерські базові URL, що вказують на приватну мережу.",
+    title: "Block private provider URLs",
+    description: "SSRF protection: reject provider base URLs pointing at a private network.",
     schema: bool,
     def: "true",
     format: boolFmt,
     impact: async (_ctx, next) =>
-      next === "false" ? "Вимкнення послаблює захист від SSRF — вмикайте лише свідомо." : undefined,
+      next === "false" ? "Turning this off weakens SSRF protection — only do so deliberately." : undefined,
   }),
   orgSetting({
     key: "share_admin_providers",
-    title: "Спільний ключ провайдера",
-    description: "Чи використовують звичайні користувачі спільний ключ провайдера, підключений адміном.",
+    title: "Shared provider key",
+    description: "Whether regular users run on the shared provider key the admin connected.",
     schema: bool,
     def: "true",
     format: boolFmt,
   }),
   orgSetting({
     key: "members_can_install_plugins",
-    title: "Учасники можуть ставити плагіни",
-    description: "Дозволити звичайним користувачам самостійно встановлювати плагіни/скіли/конектори.",
+    title: "Members can install plugins",
+    description: "Allow regular users to install plugins/skills/connectors themselves.",
     schema: bool,
     def: "false",
     format: boolFmt,
   }),
   orgSetting({
     key: "update_check_enabled",
-    title: "Перевірка оновлень",
-    description: "Періодично перевіряти наявність нових версій Capka.",
+    title: "Update checks",
+    description: "Periodically check for new Capka versions.",
     schema: bool,
     def: "true",
     format: boolFmt,
   }),
   orgSetting({
     key: "model_min_context",
-    title: "Мін. контекст моделі",
-    description: "Приховувати моделі з контекстним вікном меншим за це значення (у токенах).",
+    title: "Minimum model context",
+    description: "Hide models whose context window is smaller than this (in tokens).",
     schema: int,
     def: String(DEFAULT_MODEL_MIN_CONTEXT),
+    format: (v) => `${v} tokens`,
   }),
   orgSetting({
     key: "max_context_tokens",
-    title: "Ліміт контексту",
-    description: 'Верхня межа токенів контексту на хід ("0" = авто, за моделлю).',
+    title: "Context limit",
+    description: 'Upper bound on context tokens per turn ("0" = auto, per model).',
     schema: int,
     def: "0",
+    format: (v) => (v === "0" ? "auto (per model)" : `${v} tokens`),
   }),
   orgSetting({
     key: "model_max_price",
-    title: "Макс. ціна моделі",
-    description: 'Приховувати моделі, дорожчі за це (за 1M токенів; "0" = без обмеження).',
-    schema: z.string().regex(/^\d+(\.\d+)?$/, "Має бути числом."),
+    title: "Maximum model price",
+    description: 'Hide models more expensive than this (per 1M tokens; "0" = no limit).',
+    schema: z.string().regex(/^\d+(\.\d+)?$/, "Must be a number."),
     def: "0",
+    format: (v) => (v === "0" ? "no limit" : `$${v}`),
   }),
 ];
