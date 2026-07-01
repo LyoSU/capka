@@ -71,6 +71,12 @@ export type MessageMeta = {
   // Effective context window (model window ∩ admin cap) at this turn. With
   // `usage`, lets the UI render a "context full" meter: (input+cached)/this.
   contextWindow?: number;
+  // The LAST LLM call's actual prompt size (that step's input+cached), i.e. the
+  // real context size at the end of this turn. `usage.input`/`usage.cached` sum
+  // across every step of a multi-step tool-calling turn, so they overstate the
+  // window fill once the turn made more than one call — this is the number the
+  // "context full" meter should divide by contextWindow, not the turn total.
+  contextTokens?: number;
   // Files the user attached to THIS message — reference metadata only (name +
   // type, no bytes). Same shape as FileRef / chatRequestSchema.attachedFiles.
   // Lets the chat history show what was attached; the bytes live in the sandbox

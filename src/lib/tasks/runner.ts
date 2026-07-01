@@ -450,6 +450,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   let runModelId: string | undefined;
   let runShared = false;
   const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
+  // The LAST step's raw prompt size (input incl. cached), overwritten (not summed)
+  // on every finish-step — unlike liveUsage above, this is a snapshot of the final
+  // call's context, not a running total across a multi-step tool-calling turn.
+  let lastStepContextTokens = 0;
   const discarded = { input: 0, output: 0, cached: 0, cost: 0 };
   const orLive: { cost: number; upstreamProvider?: string; generationId?: string } = { cost: 0 };
   let discardedOrServed = false;
@@ -957,6 +961,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             liveUsage.input += event.usage.inputTokenDetails?.noCacheTokens ?? Math.max(0, (event.usage.inputTokens ?? 0) - cached);
             liveUsage.output += event.usage.outputTokens ?? 0;
             liveUsage.cached += cached;
+            lastStepContextTokens = event.usage.inputTokens ?? 0;
             // Generic splits via the AI SDK's normalized usage (every provider):
             // cache WRITE is distinct from read, reasoning is a slice of output.
             liveUsage.cacheWrite += event.usage.inputTokenDetails?.cacheWriteTokens ?? 0;
@@ -1214,12 +1219,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    // Context budget from this turn's ACTUAL input (cached reads included — the
-    // whole prefix occupies the window). Computed once and reused: it drives both
-    // the long-chat aux path (memory rides the hot prefix) and the compaction
-    // trigger below. "Long" = at least half the effective window full.
+    // Context budget from the LAST step's actual prompt size (cached reads
+    // included — the whole prefix occupies the window), NOT usageMeta's sum
+    // across every step: a multi-step tool-calling turn re-reads the same
+    // growing prefix from cache on each call, so summing would count that
+    // prefix once per step and wildly overstate how full the window really is.
+    // Computed once and reused: it drives both the long-chat aux path (memory
+    // rides the hot prefix) and the compaction trigger below. "Long" = at least
+    // half the effective window full.
     const budget = usageMeta
-      ? contextBudget({ usedTokens: usageMeta.input + usageMeta.cached, modelContextLength: contextLength, adminCap: adminCap || null })
+      ? contextBudget({ usedTokens: lastStepContextTokens, modelContextLength: contextLength, adminCap: adminCap || null })
       : undefined;
     const longChat = (budget?.fraction ?? 0) >= 0.5;
 
@@ -1255,8 +1264,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // GET /api/v1/generation, using the same key the turn was billed to.
           ...(orLive.generationId ? { generationId: orLive.generationId, configId } : {}),
           // Effective window (model ∩ admin cap) so the UI's context meter can
-          // show how full the window is: (usage.input + usage.cached) / this.
-          ...(budget ? { contextWindow: budget.effectiveLimit } : {}),
+          // show how full the window is: contextTokens / this.
+          ...(budget ? { contextWindow: budget.effectiveLimit, contextTokens: lastStepContextTokens } : {}),
         } : {}),
       },
     }).where(eq(messages.id, msgId));

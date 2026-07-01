@@ -119,6 +119,7 @@ export function toUIMessages(rows: {
         // to know the affordance exists.
         hasGeneration: meta?.generationId ? true : undefined,
         contextWindow: meta?.contextWindow,
+        contextTokens: meta?.contextTokens,
       },
     };
   });

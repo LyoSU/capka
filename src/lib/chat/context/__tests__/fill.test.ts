@@ -28,4 +28,20 @@ describe("deriveContextFill", () => {
       window: 100,
     });
   });
+
+  it("prefers contextTokens (last LLM call's real prompt size) over the turn's cumulative usage sum", () => {
+    // A multi-step tool-calling turn racks up cache-read tokens on EVERY step
+    // (e.g. 9 LLM calls re-reading a growing prefix), so usage.input+cached can
+    // land far above the model's actual window even though the real context at
+    // the end of the turn is nowhere near full. contextTokens is the last
+    // step's actual prompt size and must win when present.
+    const multiStepReply = {
+      metadata: {
+        usage: { input: 781_796, output: 11_698, cached: 5_529_472 },
+        contextTokens: 900_000,
+        contextWindow: 2_000_000,
+      },
+    };
+    expect(deriveContextFill([multiStepReply])).toEqual({ used: 900_000, window: 2_000_000 });
+  });
 });

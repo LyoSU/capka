@@ -1,5 +1,9 @@
 interface FillMeta {
   usage?: { input: number; cached: number };
+  // Last LLM call's actual prompt size (input+cached at that one step). Preferred
+  // over `usage` below, which sums across every step of a multi-step tool-calling
+  // turn and so overstates the real context size once more than one call was made.
+  contextTokens?: number;
   contextWindow?: number;
   compaction?: unknown;
 }
@@ -23,7 +27,8 @@ export function deriveContextFill(
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i].metadata as FillMeta | undefined;
     if (m?.usage && m.contextWindow) {
-      return { used: m.usage.input + m.usage.cached, window: m.contextWindow };
+      const used = m.contextTokens ?? m.usage.input + m.usage.cached;
+      return { used, window: m.contextWindow };
     }
   }
   return null;
