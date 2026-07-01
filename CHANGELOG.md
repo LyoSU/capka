@@ -38,6 +38,12 @@ All notable changes to Capka are documented here. Format follows
   be added by any user; local (stdio) and org-wide connectors remain admin-only,
   enforced server-side. Secrets are never entered through chat — a token-auth
   connector is still configured on the settings page.
+- **Agent skills are manageable from chat as well.** `get skill` lists skills;
+  `add` ingests a SKILL.md the agent composes (frontmatter name/description +
+  body), `enable`/`disable`/`remove` operate on them. Personal skills are open to
+  any user; org-wide skills are admin-only, enforced server-side. Same collection
+  abstraction as connectors — new manageable resources are a registration, not a
+  dispatcher change.
 - **`PLATFORM_BIND` env var to bind the platform port to a single interface.**
   Defaults to `0.0.0.0` (all interfaces — works out of the box). Set
   `PLATFORM_BIND=127.0.0.1` to publish loopback-only when a reverse proxy fronts
