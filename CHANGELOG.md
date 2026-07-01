@@ -6,6 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- The "update available" banner is now **dismissible** — a close button hides it
+  and remembers the release, so it stays gone for that version but returns when a
+  newer one ships (it previously reappeared on every page load with no way to
+  silence it).
+- Release notes on **Settings → Updates** now render as Markdown (via the same
+  renderer the chat uses) instead of raw preformatted text, and the "how to update"
+  hint is trimmed.
+
 ## [0.1.3] - 2026-07-01
 
 ### Fixed
