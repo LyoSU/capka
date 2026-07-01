@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-07-01
+
 ### Changed
 - **A large MCP connector result no longer floods the context window or the
   database.** A connector is untrusted and can return an arbitrarily large text
