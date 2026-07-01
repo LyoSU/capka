@@ -14,6 +14,29 @@ disposable Docker container. Licensed AGPL-3.0, open-core (`ee/` holds the
 separate commercial edition: SSO/OIDC, SCIM, advanced RBAC, Helm — do not
 conflate it with the AGPL core in `src/`).
 
+### Who it's for (drives UI/UX decisions — see `PRODUCT.md` for the full brief)
+
+The end user is **non-technical office staff**, not a developer — someone
+drafting a document or analyzing a spreadsheet on a normal workday, with low
+tolerance for jargon or anything that looks broken. A single **admin** persona
+connects one shared provider key and picks the available models; everyone
+else just opens a chat. This has concrete code consequences:
+
+- Provider/model/key plumbing is an **admin-only** concern — never surface it
+  to a regular user (see `resolveIsAdmin` gating in `runner.ts`, and the
+  admin-only fields in the (i) popover, e.g. reasoning/cache-token counts).
+  Regular users see costs and errors in plain language, not raw numbers.
+  This is why so much of `src/lib/chat/` and the error-classification code in
+  `src/lib/errors.ts` is split by role.
+- Failure states must read as calm, role-aware sentences (user vs admin), never
+  a stack trace or a bare provider error code — that's the whole point of
+  `classifyLLMError` and the friendly-error machinery in `src/lib/errors/`.
+- Brand personality is **calm, trustworthy, unobtrusive** — avoid the "generic
+  AI SaaS" look (gradients, card-grids, eyebrow labels) and the "developer
+  tool" look (terminal aesthetics, exposed jargon, mono-everywhere-density)
+  when touching `src/components/`. Target WCAG 2.1 AA and honor
+  `prefers-reduced-motion`.
+
 ## Commands
 
 ```bash
