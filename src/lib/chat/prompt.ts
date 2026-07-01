@@ -25,6 +25,13 @@ export interface BuiltPrompt {
   volatile: string;
 }
 
+/** Makes the agent AWARE of the `manage` control plane so it uses it proactively
+ *  when a user asks to change something, rather than saying "open settings".
+ *  Role is enforced server-side inside the tool, so this stays role-neutral and
+ *  cache-stable — a non-admin's attempt at an org setting simply fails. */
+const MANAGE_PROMPT = `## Managing settings & configuration
+When the user asks to change a preference or setting (their language/timezone, or — for admins — platform-wide configuration), do it yourself with the \`manage\` tool instead of pointing them at a settings page. Use \`list\`/\`capabilities\` to discover exactly what THIS user may change; never invent a control id. Org-wide changes return a confirmation request with a before→after preview and a confirmToken — surface that to the user, wait for their explicit yes, then re-call with the same value plus that token. After a change, an undo is available if they regret it. If a control isn't listed for this user, they lack permission — say so plainly rather than promising a change you can't make.`;
+
 /**
  * Per-conversation context block (tier 2). Fixed for the whole conversation.
  *
@@ -92,6 +99,7 @@ export function buildSystemPrompt(opts: {
   if (skillsBlock) {
     stable += `\n\n${skillsBlock}`;
   }
+  stable += `\n\n${MANAGE_PROMPT}`;
 
   // ── Session tier (cacheable, conversation-stable) ───────────────────────
   const session = buildSessionContext({
