@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { decrypt } from "@/lib/crypto";
-import { getMasterKey, getBlockPrivateProviderUrls, membersCanInstallPlugins } from "@/lib/settings";
+import { getMasterKey, getBlockPrivateProviderUrls, canInstallExtensions } from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
 import {
   listServers,
@@ -71,6 +71,8 @@ export const mcpCollection: Collection = {
   requiredRole: "user",
   addSchema,
 
+  canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),
+
   async list(ctx) {
     const t = manageT(ctx.locale);
     const servers = await listServers(ctx.userId, ctx.projectId);
@@ -101,7 +103,7 @@ export const mcpCollection: Collection = {
     if (needsAdmin && !ctx.isAdmin) {
       throw new Error("Local and shared (org) connectors can only be added by an administrator.");
     }
-    if (!ctx.isAdmin && !(await membersCanInstallPlugins())) {
+    if (!(await canInstallExtensions(ctx.isAdmin))) {
       throw new Error("The administrator has disabled self-service connector installation for members.");
     }
     const projectId = scope === "project" ? ctx.projectId : null;

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { planMcpAdd, mcpCollection } from "../controls/mcp";
+import type { ManageContext } from "../types";
 
 describe("manage/mcp planMcpAdd", () => {
   it("a personal remote connector needs no admin", () => {
@@ -29,5 +30,14 @@ describe("manage/mcp addSchema", () => {
   });
   it("rejects a connector with BOTH url and command", () => {
     expect(schema.safeParse({ name: "x", url: "https://a.b", command: "npx y" }).success).toBe(false);
+  });
+});
+
+describe("manage/mcp canAdd", () => {
+  // The regression that made the agent refuse: it read "installs disabled for
+  // members" and wrongly applied it to an ADMIN. An admin short-circuits the
+  // members toggle, so canAdd is true without ever touching the DB.
+  it("an admin can always add, regardless of the members toggle", async () => {
+    expect(await mcpCollection.canAdd!({ isAdmin: true } as ManageContext)).toBe(true);
   });
 });

@@ -7,7 +7,7 @@ import {
   getSkillMeta,
 } from "@/lib/skills/service";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
-import { membersCanInstallPlugins } from "@/lib/settings";
+import { canInstallExtensions } from "@/lib/settings";
 import type { SkillScope } from "@/lib/skills/types";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
@@ -31,6 +31,8 @@ export const skillCollection: Collection = {
   description: "Agent skills — list, add (SKILL.md), enable/disable, remove.",
   requiredRole: "user",
   addSchema,
+
+  canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),
 
   async list(ctx) {
     const skills = await listManagedSkills(ctx.userId, ctx.isAdmin);
@@ -62,7 +64,7 @@ export const skillCollection: Collection = {
     const a = args as AddArgs;
     const { scope, needsAdmin } = skillScope(a);
     if (needsAdmin && !ctx.isAdmin) throw new Error("Shared (org) skills can only be added by an administrator.");
-    if (!ctx.isAdmin && !(await membersCanInstallPlugins())) {
+    if (!(await canInstallExtensions(ctx.isAdmin))) {
       throw new Error("The administrator has disabled self-service skill installation for members.");
     }
     const parsed = parseSkillMarkdown(a.content); // throws SkillParseError → surfaced as a friendly error

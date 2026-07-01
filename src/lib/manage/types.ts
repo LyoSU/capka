@@ -91,6 +91,11 @@ export interface Collection {
   description: string;
   requiredRole: Role;
   addSchema?: z.ZodTypeAny;
+  /** Resolved, authoritative "may THIS caller add here" — surfaced to the model
+   *  (UI-style, like the settings page's capability endpoint) so it never has to
+   *  infer its own permission from an unrelated setting's value. Defaults to the
+   *  coarse `requiredRole` check when omitted. */
+  canAdd?(ctx: ManageContext): Promise<boolean>;
   list(ctx: ManageContext): Promise<CollectionItem[]>;
   add?(ctx: ManageContext, args: Record<string, unknown>): Promise<{ itemTitle: string; action?: RequiredAction }>;
   /** Human summary of what an add would do, for the confirm preview. */
@@ -119,7 +124,7 @@ export type ManageResult =
       status: "ok";
       render: "collection";
       summary: string;
-      data: { collectionId: string; title: string; items: CollectionItem[] };
+      data: { collectionId: string; title: string; items: CollectionItem[]; canAdd: boolean };
     }
   | {
       status: "ok";

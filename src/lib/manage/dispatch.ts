@@ -20,6 +20,13 @@ function collLabel(t: ManageT, coll: Collection): string {
   return loc(t, `collection.${keyOf(coll.id)}`, coll.title);
 }
 
+/** Resolve the authoritative "may THIS caller add here" — the collection's own
+ *  check if it has one, else the coarse role gate. Surfaced to the model so it
+ *  reads its permission as fact instead of inferring it from other settings. */
+function resolveCanAdd(ctx: ManageContext, coll: Collection): Promise<boolean> {
+  return coll.canAdd ? coll.canAdd(ctx) : Promise.resolve(canAccess(ctx, coll));
+}
+
 function err(code: string, summary: string): ManageResult {
   return { status: "error", render: "error", code, summary };
 }
@@ -101,7 +108,7 @@ function capabilities(reg: Registry, ctx: ManageContext): ManageResult {
     (groups[c.scope] ??= []).push({ id: c.id, title: title(t, c), description: c.description });
   }
   for (const coll of reg.visibleCollectionsTo(ctx)) {
-    (groups.collections ??= []).push({ id: coll.id, title: coll.title, description: coll.description });
+    (groups.collections ??= []).push({ id: coll.id, title: collLabel(t, coll), description: coll.description });
   }
   return { status: "ok", render: "capabilities", summary: "Available management capabilities", data: groups };
 }
@@ -121,7 +128,14 @@ async function list(reg: Registry, ctx: ManageContext): Promise<ManageResult> {
       current: fmt(t, c, await c.read(ctx)),
     })),
   );
-  const collections = reg.visibleCollectionsTo(ctx).map((c) => ({ id: c.id, title: c.title, description: c.description }));
+  const collections = await Promise.all(
+    reg.visibleCollectionsTo(ctx).map(async (c) => ({
+      id: c.id,
+      title: collLabel(t, c),
+      description: c.description,
+      canAdd: await resolveCanAdd(ctx, c),
+    })),
+  );
   return { status: "ok", render: "list", summary: `${items.length} settings, ${collections.length} collections`, data: { settings: items, collections } };
 }
 
@@ -139,12 +153,12 @@ async function get(reg: Registry, ctx: ManageContext, target: string): Promise<M
   }
   const coll = reg.collection(target);
   if (coll && canAccess(ctx, coll)) {
-    const items = await coll.list(ctx);
+    const [items, canAdd] = await Promise.all([coll.list(ctx), resolveCanAdd(ctx, coll)]);
     return {
       status: "ok",
       render: "collection",
-      summary: `${coll.title}: ${items.length}`,
-      data: { collectionId: coll.id, title: collLabel(t, coll), items },
+      summary: `${collLabel(t, coll)}: ${items.length}${canAdd ? " (you can add here)" : ""}`,
+      data: { collectionId: coll.id, title: collLabel(t, coll), items, canAdd },
     };
   }
   return err("not_found", `No setting "${target}".`);

@@ -56,6 +56,40 @@ describe("manage/dispatch collections", () => {
     }
   });
 
+  it("get resolves and surfaces the collection's canAdd (authoritative, not inferred by the model)", async () => {
+    const { collection } = memCollection({ canAdd: async () => true });
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx(), { action: "get", target: "mcp" });
+    if (res.status === "ok" && res.render === "collection") {
+      expect(res.data.canAdd).toBe(true);
+    } else {
+      throw new Error("expected collection render");
+    }
+  });
+
+  it("canAdd defaults to the coarse role check when the collection omits it", async () => {
+    const { collection } = memCollection(); // no canAdd, requiredRole "user"
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx(), { action: "get", target: "mcp" });
+    if (res.status === "ok" && res.render === "collection") {
+      expect(res.data.canAdd).toBe(true); // a non-admin may add to a user-role collection
+    } else {
+      throw new Error("expected collection render");
+    }
+  });
+
+  it("list surfaces canAdd per collection", async () => {
+    const { collection } = memCollection({ canAdd: async () => false });
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx(), { action: "list" });
+    if (res.status === "ok" && res.render === "list") {
+      const data = res.data as { collections: { id: string; canAdd: boolean }[] };
+      expect(data.collections[0].canAdd).toBe(false);
+    } else {
+      throw new Error("expected list render");
+    }
+  });
+
   it("add is confirm-gated: first call previews, does not add", async () => {
     const { collection, items } = memCollection();
     const reg = createRegistry([], [collection]);

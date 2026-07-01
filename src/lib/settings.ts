@@ -227,6 +227,15 @@ export async function membersCanInstallPlugins(): Promise<boolean> {
   return (await getSetting("members_can_install_plugins")) === "true";
 }
 
+/** The ONE source of truth for "may this caller install extensions (connectors,
+ *  skills, plugins) at all". An admin always may; a regular member only when the
+ *  admin opted in via `members_can_install_plugins`. Shared by the settings-page
+ *  capability endpoint AND the conversational `manage` tool so the two can never
+ *  diverge on who can install. */
+export async function canInstallExtensions(isAdmin: boolean): Promise<boolean> {
+  return isAdmin || (await membersCanInstallPlugins());
+}
+
 /**
  * Telegram "Login with Telegram" (OIDC) configuration, sourced at runtime from
  * the DB so nothing is baked into the image. The secret is encrypted at rest
