@@ -1,0 +1,46 @@
+name: CI
+
+# Gate every push to master and every PR on the same checks a maintainer runs
+# locally: typecheck, lint, unit tests, and a production build. Integration tests
+# (RUN_INTEGRATION=1) need Docker/Postgres and are not run here.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# A newer push to the same ref cancels the in-progress run — don't burn minutes
+# on stale commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            sandbox-controller/package-lock.json
+
+      - run: npm ci
+      # The sandbox-controller is a separate Node package; its unit tests (run in
+      # the same vitest pass) import its own deps (pg), so install them too.
+      - run: npm ci --prefix sandbox-controller
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

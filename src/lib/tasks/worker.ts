@@ -31,7 +31,7 @@ const CATALOG_STALE_MS = 12 * 60 * 60 * 1000;
 /** On shutdown, how long to let already-running tasks finish before exiting.
  *  Most turns finish well inside this; the rare long one is reconciled as a
  *  retryable "interrupted" by the next instance. Keep the platform's
- *  stop_grace_period comfortably above this (see docker-compose.coolify.yml). */
+ *  stop_grace_period comfortably above this (see docker-compose.yml). */
 const DRAIN_GRACE_MS = 25_000;
 
 interface WorkerState {

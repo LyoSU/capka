@@ -107,12 +107,12 @@ else
   fi
 fi
 
-# Prefer the prebuilt GHCR images (fast — no toolchain needed on the box): `pull`
-# fetches them so the following `up` finds them present and skips the build. If a
-# pull fails (offline, rate-limited, or you're on an unpublished commit), `up`
-# falls back to building locally because the `build:` stanzas remain. Set
-# CAPKA_BUILD=1 to always compile from source (e.g. when developing on the host).
+# Default: pull the prebuilt GHCR images (fast — no build toolchain on the box).
+# The base compose is pull-only, so there is no silent build fallback: to compile
+# your own changes or run an unpublished commit, set CAPKA_BUILD=1 — it layers
+# docker-compose.build.yml and builds from source instead.
 if [ "${CAPKA_BUILD:-}" = "1" ]; then
+  set -- "$@" -f docker-compose.build.yml
   echo "  building images from source (CAPKA_BUILD=1) ..."
   docker compose "$@" up --build -d
 else

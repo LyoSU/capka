@@ -1,11 +1,21 @@
-# Base compose — used by `docker compose up` and `npm run docker:prod`.
-# SECURITY: postgres & sandbox-controller are NOT published to the host here.
-# On many hosts Docker publishes ports past the firewall (UFW), which would leak
-# Postgres and the root-equivalent controller to the internet. They talk to each
-# other over the compose network by DNS name; only `platform` is published.
-# Secrets have NO defaults: prod must supply POSTGRES_PASSWORD, CONTROLLER_SECRET
-# and CAPKA_MASTER_KEY (via env / .env). For local debugging with defaults and
-# host-published ports, layer docker-compose.dev.yml (see `npm run docker:dev`).
+# Canonical stack — this is the file you deploy.
+#
+# PULL-ONLY: it references the prebuilt GHCR images (published on each release),
+# so `docker compose up -d` on a fresh box pulls and runs them with no build
+# toolchain. This is the file a runner (Coolify) points at, and the one
+# `scripts/up.sh` / `install.sh` bring up. Pin a release with CAPKA_VERSION
+# (e.g. v0.1.6); unset ⇒ :latest.
+#
+# Overlays (layer with `-f docker-compose.yml -f …`):
+#   docker-compose.dev.yml     local dev — hot reload, dev secrets, loopback ports
+#   docker-compose.build.yml   build the images from source instead of pulling
+#   docker-compose.tls.yml     automatic HTTPS via Caddy
+#   docker-compose.backup.yml  scheduled pg_dump sidecar
+#
+# SECURITY: postgres & sandbox-controller are never published — only `platform`
+# is, and only on 127.0.0.1 (a host reverse-proxy fronts it). Secrets have NO
+# defaults: supply POSTGRES_PASSWORD, CONTROLLER_SECRET, CAPKA_MASTER_KEY via
+# .env (`up.sh` generates them). Services reach each other by compose DNS name.
 services:
   postgres:
     image: postgres:17-alpine
@@ -23,45 +33,25 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    # Resource ceilings so one runaway service (memory leak, fork bomb) can't take
-    # the whole host down with it. Defaults are deliberately generous — they cap
-    # true runaway, not normal load — and every value is env-overridable to tune
-    # for the box. (mem_limit/pids_limit apply with `docker compose up`; the swarm
-    # `deploy.resources` block would be ignored here.)
+    # Resource ceilings so one runaway service can't take the host down. Generous
+    # by default (they cap true runaway, not normal load); every value is
+    # env-overridable to tune for the box.
     mem_limit: ${POSTGRES_MEM_LIMIT:-2g}
     pids_limit: ${POSTGRES_PIDS_LIMIT:-512}
 
-  sandbox:
-    build:
-      context: .
-      dockerfile: Dockerfile.sandbox
-    # Prebuilt image (published by .github/workflows/publish-images.yml). `build:`
-    # stays as a fallback so cloning + building works with no image present.
-    image: ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
-    entrypoint: ["echo", "sandbox image built"]
-
   # Narrows the Docker API the controller can reach: only container + exec
-  # endpoints (create/start/stop/remove/exec), everything else (build, pull,
-  # images, networks, volumes, swarm, host info) denied. The raw host socket is
-  # mounted ONLY here (read-only) and lives on an isolated network the controller
-  # alone can reach. This is defense-in-depth, NOT a hard root boundary — a
-  # compromised controller can still create a non-privileged sandbox. For a true
-  # "escape ≠ host root" boundary, run a rootless Docker daemon (see README).
+  # endpoints, plus image inspect/pull (IMAGES) so the controller can self-heal a
+  # pruned sandbox image, and read-only GET /info (INFO) required by the
+  # fail-closed gVisor runtime probe. DELETE stays off. The raw host socket is
+  # mounted read-only HERE ALONE, on an isolated network the controller alone can
+  # reach — defense-in-depth, not a hard root boundary (see SECURITY.md).
   socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
     environment:
       - CONTAINERS=1
       - EXEC=1
       - POST=1
-      # IMAGES enables inspect + pull so the controller's ensureRuntime() can
-      # self-heal a pruned sandbox image. DELETE stays off (unset) — the controller
-      # can pull/inspect images but not remove them. NOTE: IMAGES also exposes
-      # POST /images/load (tar image-injection); the controller never calls it, but
-      # treat this as a deliberate, audited widening of the proxy surface.
       - IMAGES=1
-      # INFO exposes GET /info (read-only daemon metadata). REQUIRED: the fail-closed
-      # secure profile probes /info to confirm the gVisor runtime is registered before
-      # booting; without it the probe gets 403 and the controller crash-loops.
       - INFO=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -72,44 +62,46 @@ services:
     pids_limit: ${SOCKET_PROXY_PIDS_LIMIT:-128}
 
   sandbox-controller:
-    build: ./sandbox-controller
-    # Prebuilt image (published by .github/workflows/publish-images.yml). `build:`
-    # stays as a fallback — `up --build` builds locally, `pull` fetches the image.
     image: ghcr.io/lyosu/capka-controller:${CAPKA_VERSION:-latest}
     expose:
       - "3001"
-    # No host Docker socket here anymore — it reaches the daemon through the
-    # restricted socket-proxy via DOCKER_HOST. To roll back, drop DOCKER_HOST and
-    # re-add `- /var/run/docker.sock:/var/run/docker.sock`.
+    # Reaches the daemon via the restricted socket-proxy (DOCKER_HOST), never the
+    # host socket. It pulls the sandbox image on demand (ensureRuntime), so no
+    # one-shot builder service is needed here.
     volumes:
       - ./data:/data
     environment:
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - DOCKER_HOST=tcp://socket-proxy:2375
       - DATA_ROOT=/data/storage
-      # Durable session state (replaces the old in-memory Map): controller survives
-      # restarts and reconciles against the daemon on boot.
+      # Durable session state; reconciles against the daemon on boot.
       - DATABASE_URL=postgresql://Capka:${POSTGRES_PASSWORD}@postgres:5432/Capka
       - COMPUTE_BACKEND=docker
       - WORKSPACE_STORE=local
-      # Isolation runtime. Default runc — boots on any Docker host with no extra
-      # setup. gVisor is OPT-IN: set SANDBOX_RUNTIME=runsc AND install gVisor on the
-      # host (scripts/install-gvisor.sh) to get the hardened, fail-closed secure
-      # profile. Recommended for untrusted/multi-tenant workloads.
+      # Default runc — boots on any Docker host. gVisor is opt-in: set runsc AND
+      # install gVisor on the host (scripts/install-gvisor.sh) for the hardened,
+      # fail-closed secure profile (untrusted/multi-tenant workloads).
       - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runc}
-      # NOTE: no HOST_DATA_ROOT here. The controller auto-detects the daemon-host
-      # path backing ./data by inspecting its own mount at startup, so sandbox bind
-      # mounts resolve correctly regardless of the launcher's working directory
-      # (the old ${PWD} guess broke under Coolify/systemd/non-repo-root launches).
-      # Set HOST_DATA_ROOT only to override the auto-detected value.
+      # Controller auto-detects the daemon-host path backing ./data by inspecting
+      # its own mount at boot, so bind mounts resolve regardless of launch cwd.
+      # Set HOST_DATA_ROOT only to override.
       - SANDBOX_IMAGE=ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
-      # Sandbox egress kill-switch (deployment-level). The admin panel (Security →
-      # Internet access) and the per-project override choose the INTENT; this flag
-      # is the deployment gate. Defaults to true so agents can reach the internet
-      # out of the box (web scraping, package installs) — granted egress is still
-      # firewalled to block private/internal ranges + cloud metadata. Set false to
-      # HARD-FORBID egress regardless of any in-app toggle (for untrusted tenants).
+      # Egress kill-switch. Default true (agents reach the internet; granted
+      # egress is still firewalled off private/metadata ranges). Set false to
+      # hard-forbid egress regardless of the in-app toggle (untrusted tenants).
       - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-true}
+      # Per-sandbox RAM. The /tmp + /opt/mcp tmpfs are charged to this same
+      # cgroup, so keep headroom.
+      - SANDBOX_MEMORY_MB=${SANDBOX_MEMORY_MB:-1024}
+      - MAX_SESSIONS_PER_USER=${MAX_SESSIONS_PER_USER:-2}
+      # Stop an idle CONTAINER after this (files + row survive, revived on the
+      # next tool call).
+      - SANDBOX_IDLE_TTL_MS=${SANDBOX_IDLE_TTL_MS:-900000}
+      # Delete a WORKSPACE (row + disk) unused this long — the real "how long do
+      # my files live" knob.
+      - WORKSPACE_TTL_MS=${WORKSPACE_TTL_MS:-2592000000}
+      # Grace for TRULY orphaned dirs (no DB row) before the sweep removes them.
+      - GC_GRACE_MS=${GC_GRACE_MS:-604800000}
     networks:
       - default
       - docker-proxy
@@ -119,8 +111,6 @@ services:
       timeout: 5s
       retries: 5
     depends_on:
-      sandbox:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       socket-proxy:
@@ -130,14 +120,17 @@ services:
     pids_limit: ${CONTROLLER_PIDS_LIMIT:-512}
 
   platform:
-    build: .
-    # Prebuilt image (published on release tags). `build:` stays as a fallback so
-    # cloning + building works with no image present; `pull` fetches the image.
     image: ghcr.io/lyosu/capka-platform:${CAPKA_VERSION:-latest}
-    # Host port is env-tunable so multiple stacks (or another app already on 3000)
-    # can coexist on one box without a port clash. Container port stays 3000.
+    # Published on all interfaces by default so it works out of the box with zero
+    # config. Behind a reverse proxy (or on a host where Docker publishes past the
+    # firewall), set PLATFORM_BIND=127.0.0.1 to bind loopback-only and let the
+    # proxy reach it via localhost / the compose network. Container port is 3000.
     ports:
-      - "${PLATFORM_PORT:-3000}:3000"
+      - "${PLATFORM_BIND:-0.0.0.0}:${PLATFORM_PORT:-3000}:3000"
+    # Let the in-process worker drain on redeploy: it stops claiming new tasks on
+    # SIGTERM and lets running turns finish (DRAIN_GRACE_MS=25s in worker.ts)
+    # before exiting. Must exceed that so Docker doesn't SIGKILL mid-drain.
+    stop_grace_period: 35s
     volumes:
       - ./data:/app/data
     environment:
@@ -145,12 +138,11 @@ services:
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - CAPKA_MASTER_KEY=${CAPKA_MASTER_KEY}
-      # Public origin. Optional: unset → derived from proxy headers (X-Forwarded-*).
-      # Set it (recommended in prod) so the value can't be spoofed via headers.
+      # Public origin. Set it (recommended in prod) so it can't be spoofed via
+      # proxy headers; unset → derived from X-Forwarded-*.
       - PUBLIC_URL=${PUBLIC_URL:-}
-      # Optional, opt-in hardening for the first-run wizard. Unset (default) ⇒
-      # frictionless setup. Set it for a public deploy and claiming admin requires
-      # the token, so a stranger can't race you to the setup page. See .env.example.
+      # Opt-in hardening for the first-run wizard — require this token to claim the
+      # admin account on a public deploy. Unset ⇒ frictionless setup.
       - SETUP_TOKEN=${SETUP_TOKEN:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -168,8 +160,8 @@ services:
     pids_limit: ${PLATFORM_PIDS_LIMIT:-1024}
 
 networks:
-  # Isolated link between the controller and the socket-proxy. Nothing else joins
-  # it, so the (restricted) Docker API isn't reachable from the rest of the stack.
+  # Isolated controller↔socket-proxy link; the (restricted) Docker API isn't
+  # reachable from the rest of the stack.
   docker-proxy:
 
 volumes:

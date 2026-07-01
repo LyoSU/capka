@@ -1,7 +1,11 @@
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-# Layers dev-only conveniences over the secure base: zero-config default secrets,
-# host-published ports bound to 127.0.0.1 (loopback only — never the public iface),
-# and hot-reloading `next dev`.
+# Usage: npm run docker:dev
+#   (= docker compose -f docker-compose.yml -f docker-compose.build.yml \
+#        -f docker-compose.dev.yml up --build)
+# Layers dev-only conveniences over the base + build-from-source overlay:
+# zero-config default secrets, host-published ports bound to 127.0.0.1 (loopback
+# only — never the public iface), and hot-reloading `next dev` (target: dev
+# overrides the build overlay's prod `runner` target). The base already binds the
+# platform to 127.0.0.1:3000, so no platform port override is needed here.
 services:
   postgres:
     environment:
@@ -25,6 +29,10 @@ services:
       - "127.0.0.1:3001:3001"
 
   platform:
+    # Tag the dev build separately so it never clobbers the pulled prod
+    # `capka-platform:latest` locally — otherwise a later `docker compose up`
+    # (pull path) would run this `next dev` image instead of `node server.js`.
+    image: capka-platform:dev
     build:
       context: .
       target: dev # full deps, no prod build — gives `next dev` hot-reload

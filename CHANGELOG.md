@@ -6,6 +6,47 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+> **⚠ Breaking — Coolify `docker_compose_location` must be `/docker-compose.yml`.**
+> `docker-compose.coolify.yml` and `docker-compose.prod.yml` were removed;
+> `docker-compose.yml` is now the single canonical pull-only stack every target
+> deploys. Update the Coolify setting (Configuration → Build) and redeploy.
+
+### Added
+- **`PLATFORM_BIND` env var to bind the platform port to a single interface.**
+  Defaults to `0.0.0.0` (all interfaces — works out of the box). Set
+  `PLATFORM_BIND=127.0.0.1` to publish loopback-only when a reverse proxy fronts
+  the app — recommended on hosts where Docker publishes past the firewall (UFW).
+- **CI (`.github/workflows/ci.yml`)** runs typecheck, lint, tests and a build on
+  every push and pull request.
+
+### Changed
+- **One canonical `docker-compose.yml` replaces the three near-duplicate stack
+  files.** Previously `docker-compose.yml` (build), `docker-compose.prod.yml`
+  (pull-only copy) and `docker-compose.coolify.yml` (host-nginx copy) each carried
+  the full four-service stack and had to be hand-synced — and had already drifted.
+  Now there is one pull-only `docker-compose.yml` that every target deploys
+  (self-host and Coolify alike); building from source moved to an opt-in overlay
+  `docker-compose.build.yml`, layered by `CAPKA_BUILD=1` and `npm run docker:dev`.
+  `npm run docker:prod` is now `docker compose up -d` (pull), not `up --build`.
+
+### Fixed
+- **Coolify deploys regain their sandbox tuning and redeploy drain, silently lost
+  in the earlier move to `docker-compose.prod.yml`.** That file shipped without the
+  controller tuning and `stop_grace_period` the old `coolify.yml` carried, so prod
+  fell back to the controller's lighter code defaults: 512 MB per sandbox (not
+  1 GB — risky, since the sandbox tmpfs is charged to the same cgroup), 5 sessions
+  per user (not 2), a 1 h orphaned-dir GC grace (not 7 d) and no worker-drain grace
+  on redeploy (in-flight turns were SIGKILLed mid-run). These are now explicit
+  `${VAR:-…}` defaults in `docker-compose.yml` (`SANDBOX_MEMORY_MB=1024`,
+  `MAX_SESSIONS_PER_USER=2`, `GC_GRACE_MS=604800000`, …) with `stop_grace_period:
+  35s` restored, all overridable from the Coolify environment.
+
+### Removed
+- **Fly.io and Railway deploy manifests (the `deploy/` directory) removed.** They
+  deployed the platform only (no Docker daemon → no code sandbox), which isn't a
+  supported configuration. Self-host via the installer or Coolify; the Coolify
+  how-to moved into `DEPLOY.md`, now the single deploy guide.
+
 ## [0.1.6] - 2026-07-01
 
 ### Fixed

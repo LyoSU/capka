@@ -1,0 +1,28 @@
+# Build-from-source overlay. Layer it to compile the images locally instead of
+# pulling the prebuilt GHCR ones — e.g. on an unpublished commit or a fork:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+# `scripts/up.sh` layers this automatically when CAPKA_BUILD=1. The `image:` tags
+# from the base still apply, so a local build is tagged the same as a pull.
+services:
+  # One-shot service that builds & tags the sandbox execution image locally (the
+  # base has no such service — there the controller pulls it). It exits 0 right
+  # after building; the controller waits for that so the image exists on first use.
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
+    entrypoint: ["echo", "sandbox image built"]
+
+  sandbox-controller:
+    build: ./sandbox-controller
+    # Merges with the base controller's depends_on (postgres, socket-proxy) — wait
+    # for the local sandbox build to finish before starting.
+    depends_on:
+      sandbox:
+        condition: service_completed_successfully
+
+  platform:
+    build:
+      context: .
+      target: runner

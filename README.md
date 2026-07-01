@@ -1,235 +1,133 @@
-# Capka 🐾
+# Capka
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Images on GHCR](https://img.shields.io/badge/images-ghcr-green.svg)](#prebuilt-images)
+[![Images on GHCR](https://img.shields.io/badge/images-ghcr-green.svg)](DEPLOY.md)
 [![Live demo](https://img.shields.io/badge/live%20demo-capka.yuri.ly-ff6f3c.svg)](https://capka.yuri.ly/)
-
-Hi — I'm building **Capka** because I couldn't find a decent open-source web UI
-that treats AI as a real *agent*, not just a chatbot.
-
-Think of it as an **open-source, self-hosted take on Claude's Cowork** — an agent
-with its own computer, not a chat box. Most AI UIs are thin wrappers around an
-API. Capka gives every user and every chat its own **isolated Linux sandbox**:
-the agent accepts files, writes and runs code, scrapes the web, converts
-documents, and uses MCP connectors — safely, in its own container, behind your
-own API keys.
 
 <p align="center"><img src="./docs/assets/logo.webp" alt="Capka" width="180"></p>
 
-> 🌐 **Try the live demo → [capka.yuri.ly](https://capka.yuri.ly/)** — poke around
-> a running instance before you host your own.
+Capka is a self-hosted workspace for AI agents.
 
-> 💡 **What's in the name?** *Capka* (say *[tsap-ka]* — or just "cap-ka", I won't
-> mind) comes from the Ukrainian *цап-царап*, the quick swipe of a cat's claws —
-> yep, that's the logo. I liked the picture: an agent that grabs your files and
-> digs right into them.
+You run it on your own server, connect your model provider, and use it for work
+that needs more than a chat box: reading files, running code, converting
+documents, building reports, debugging projects, and calling MCP tools.
 
-## Why I built this
+The important part is the sandbox. Each chat gets its own Linux container, so the
+agent can work with files and tools without direct access to the host.
 
-The internet is flooded with weekend-project chat apps that look generic, choke
-on real tasks, or leak raw JSON errors at users. I wanted a runtime I could host
-on a cheap VPS for myself, my friends, and my team.
+This is a solo-built open-source project. The goal is not to look like a big
+platform. The goal is to be useful, understandable, and careful enough to run for
+yourself, your friends, or a small team.
 
-Drop in a messy ZIP of work files — spreadsheets, PDFs, meeting notes — and ask
-for the *outcome*, not the steps: *"prepare our weekly business review."* Capka
-cleans the data, reads the documents, runs the numbers, builds the charts, and
-hands back finished deliverables — a polished PDF report and an Excel workbook,
-not just another chat reply:
+[Try the live demo](https://capka.yuri.ly/).
 
-![Capka turning a ZIP of messy work files into a finished PDF report and Excel workbook](./docs/assets/demo.webp)
+![Capka turning uploaded files into a PDF report and Excel workbook](./docs/assets/demo.webp)
 
-What you get:
+## What It Is For
 
-- **Real isolation** — code execution and document work run inside a per-session
-  Docker container (Python 3.12, Node 22, Java, FFmpeg, ImageMagick, LibreOffice,
-  LaTeX, Playwright, OCR, …). The agent never touches the host.
-- **It doesn't forget** — every turn is an independent task on a Postgres-backed
-  queue, run by an in-process worker. Close your laptop or restart the server and
-  the agent keeps going — the reply isn't lost.
-- **No "AI slop" UX** — I polished the UI by hand to feel like a real, considered
-  tool. Provider timeouts and rate limits are caught and turned into calm,
-  localized messages — the end user never sees a raw `402`.
-- **Extensible** — Anthropic-compatible skills, MCP connectors (incl. OAuth), and
-  a small marketplace, with per-capability allow/ask/deny governance and an audit
-  log.
+Use Capka when you want:
 
-## How it works under the hood
+- a private AI agent UI that you can self-host
+- file, code, and document workflows, not only chat
+- per-chat containers for safer tool and code execution
+- long-running tasks that survive browser closes and restarts
+- your own provider keys, models, MCP connectors, and governance rules
 
-A flat, efficient architecture so it's easy to self-host — even on one box.
+It is not a serverless app. Capka needs a long-running Docker host because the
+agent worker runs inside the platform process.
 
-| Service | What it is |
+## What It Runs
+
+| Service | Purpose |
 |---|---|
-| **platform** | The Next.js app + the in-process task worker (UI, APIs, agent loop). |
-| **postgres** | The brain: system of record **and** the realtime task queue (`LISTEN/NOTIFY`). |
-| **sandbox-controller** | A tiny HTTP service that spawns/kills per-session containers. It reaches Docker only through the socket-proxy, never the raw socket — guarded by `CONTROLLER_SECRET`. |
-| **socket-proxy** | A firewall for the Docker API: only container + exec endpoints. The host socket is mounted read-only here alone, on an isolated network. |
-| **sandbox** | The execution image (`Dockerfile.sandbox`) — built once, reused per session. |
+| `platform` | Next.js app, APIs, agent loop, and worker |
+| `postgres` | Database and task queue |
+| `sandbox-controller` | Creates and removes per-chat containers |
+| `socket-proxy` | Gives the controller restricted Docker API access |
+| `sandbox` | Execution image used by agent sessions |
 
-## Getting started (local dev)
+Sandboxes include Python, Node, Java, FFmpeg, ImageMagick, LibreOffice, LaTeX,
+Playwright, OCR tooling, and other common utilities.
 
-Zero-config — the dev compose file uses loopback-only ports and dev secrets, so
-there's no `.env` to write:
+## Run Locally
 
 ```bash
 npm run docker:dev
 ```
 
-Open http://localhost:3000 and create your admin account.
+Open <http://localhost:3000>, create the admin account, then add a provider key
+in **Settings -> Connections**.
 
-## Deployment (production)
+## Deploy
 
-On a fresh Linux box, one command installs Docker (if missing), fetches Capka,
-and brings the full stack up with automatic HTTPS (via Caddy) — point your DNS
-at the host first:
+On a Linux server with DNS pointed at the host:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | DOMAIN=capka.example.com sh
 ```
 
-No domain? You still get HTTPS for free: the installer offers a hostname based on
-your server's public IP via [sslip.io](https://sslip.io) (`<ip>.sslip.io` resolves
-straight to the IP, so Caddy fetches a real Let's Encrypt cert — no DNS to set up).
-Run it interactively and it suggests this as the default; piped, it prints the
-exact `DOMAIN=…sslip.io` command to re-run. Or omit HTTPS entirely and it serves
-plain `:3000` to front with your own reverse proxy. Prefer to read before you run?
-Good instinct:
+Already cloned:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh -o install.sh
-less install.sh && sh install.sh
+git clone https://github.com/LyoSU/capka
+cd capka
+DOMAIN=capka.example.com ./scripts/up.sh
 ```
 
-Already have Docker and a clone? The installer just wraps this:
+`DOMAIN` enables automatic HTTPS through Caddy. Without it, Capka serves plain
+HTTP on `:3000`; put it behind your own TLS proxy and set `PUBLIC_URL`.
+
+See [`DEPLOY.md`](DEPLOY.md) for Coolify, compose files, host nginx, and common
+deployment gotchas.
+
+## Requirements
+
+Linux with Docker, on `x86_64` or `arm64`.
+
+| Profile | CPU | RAM | Disk |
+|---|---:|---:|---:|
+| Minimum | 1-2 vCPU | 2 GB | 20 GB |
+| Recommended | 2 vCPU | 4 GB | 40 GB |
+
+Use more RAM for concurrent users, large document jobs, or gVisor.
+
+## First Run
+
+1. Open `/setup` and create the admin account
+2. Add provider keys in **Settings -> Connections**
+3. Choose default models
+4. Invite users from the admin panel
+5. Optional: add a Telegram bot token in **Settings -> Integrations**
+
+Registration is invite-only by default.
+
+## Security Short Version
+
+Sandboxes are unprivileged containers with dropped Linux capabilities and no host
+filesystem access. The controller reaches Docker through `socket-proxy`, not the
+raw Docker socket.
+
+Sandbox internet access is controlled in **Settings -> Security -> Internet
+access**. When enabled, Capka blocks private ranges and cloud metadata endpoints.
+
+For untrusted or multi-tenant use, read [`SECURITY.md`](SECURITY.md). Prefer
+rootless Docker and gVisor:
 
 ```bash
-git clone https://github.com/LyoSU/capka && cd capka
-DOMAIN=capka.example.com ./scripts/up.sh     # or: npm run up
+sudo sh scripts/install-gvisor.sh
+# restart Docker
+SANDBOX_RUNTIME=runsc
 ```
 
-`up.sh` generates strong secrets into `.env` on first run (it never overwrites
-values you've set), pulls the prebuilt images, then starts the stack. Re-running
-the installer upgrades in place (`git pull` + image refresh).
+## Useful Links
 
-> Capka runs as a **long-lived process** — serverless/edge hosts that freeze
-> between requests won't work.
-
-### Server requirements
-
-Capka runs practically anywhere: any Linux host with Docker, on **x86_64 or
-arm64** (the prebuilt images are multi-arch, so a cheap ARM VPS works too — the
-host pulls its native arch, no local compile).
-
-| | CPU | RAM | Disk |
-|---|---|---|---|
-| **Minimum** | 1–2 vCPU | 2 GB | 20 GB |
-| **Recommended** | 2 vCPU | 4 GB | 40 GB |
-
-An entry-level VPS comfortably runs the full stack — around $7/mo at current
-prices (e.g. Hetzner CX23, or the ARM CAX11). Disk is dominated by the sandbox
-image (~7.5 GB); pulling prebuilt images means no RAM-hungry build on the box.
-Heavier or many-concurrent-user workloads want more RAM and the
-[gVisor](#security--sandboxing) hardening.
-
-### Which path is for me?
-
-| Your setup | Do this |
-|---|---|
-| Just testing (no sandbox) | One-click PaaS: **Railway** (`deploy/railway.json`) or **Fly.io** (`deploy/fly.md`) — *platform only, no Docker daemon → no code sandbox there*. |
-| Solo / small team on a VPS | `DOMAIN=… npm run up` (turnkey HTTPS above), or one-click **Coolify** (`deploy/coolify.md`) — deploys onto a host with a Docker daemon, so you get the **full stack incl. the sandbox**. |
-| Higher-trust / company | External managed Postgres, rootless Docker, SSO — see `SECURITY.md`. |
-
-### Secrets
-
-`npm run up` generates these for you, or set them yourself (see `.env.example`):
-
-- `POSTGRES_PASSWORD` — Postgres password; `DATABASE_URL` is derived from it.
-- `CONTROLLER_SECRET` — shared platform↔controller secret. The controller
-  **refuses to boot** on the default value — `openssl rand -hex 32`.
-- `CAPKA_MASTER_KEY` — 64-hex key that encrypts provider API keys at rest, kept
-  *outside* the DB so a DB leak alone can't decrypt them.
-- `PUBLIC_URL` *(optional)* — your public origin; unset → derived from proxy
-  headers. Set it behind a proxy (it's the non-spoofable source for auth
-  callbacks and absolute links).
-
-### Prebuilt images
-
-Release tags publish `platform`, `controller`, and `sandbox` images to GHCR
-(`ghcr.io/lyosu/capka-*`), so a host with no build toolchain doesn't compile
-anything — `up.sh` pulls them by default. The `build:` stanzas stay as a
-fallback: if a pull fails (offline, or you're on an unpublished commit), the
-affected images build locally. To always compile from source instead:
-
-```bash
-CAPKA_BUILD=1 ./scripts/up.sh
-```
-
-### Updating
-
-**Settings → Updates** (admin) shows the running version against the latest
-release, with the changelog and a one-line update command; a banner appears when
-you're behind. The check is cached and can be turned off (no outbound calls).
-Capka can't restart itself from inside its sandboxed container, so updating is a
-host action:
-
-```bash
-cd /opt/capka && sudo ./scripts/update.sh   # fetch newest release, pull images, recreate
-```
-
-It keeps your `.env` and data, and pins the image tag to the code it checks out.
-
-## Security & sandboxing
-
-Out of the box, sandboxes run on the standard `runc` runtime (works on any Docker
-host). Containers are unprivileged (the entrypoint drops to `1000:1000`) and drop
-all capabilities. Sandbox internet access is managed in the admin panel
-(**Security → Internet access**) and, when on, firewalled to block private ranges
-and cloud metadata. This is defense-in-depth; for a true "escape ≠ host root"
-boundary, run a **rootless** Docker daemon.
-
-For untrusted or multi-tenant workloads, opt into **gVisor** — a user-space
-kernel with a much stronger container↔host boundary, and no KVM needed (so it
-works on ordinary VPS hosts):
-
-1. On the host: `sudo sh scripts/install-gvisor.sh`, then restart Docker.
-2. Set `SANDBOX_RUNTIME=runsc` and redeploy.
-
-It's then **fail-closed** — the controller refuses to boot if `runsc` isn't
-registered, never silently downgrading to `runc`. See **[`SECURITY.md`](SECURITY.md)**
-for the full threat model and rootless setup before exposing Capka to untrusted
-users.
-
-## First run
-
-1. Open the app → you're routed to **`/setup`** to create the admin account.
-2. **Settings → Connections** — add an AI provider key (Anthropic, OpenAI,
-   OpenRouter, Ollama, …) and pick default models.
-3. Registration is **invite-only** by default — add your friends/team from the
-   admin panel.
-4. *(Bonus)* **Settings → Integrations** — add a Telegram bot token and chat with
-   the same agent, through the same durable sandbox engine, from Telegram.
-
-## Development scripts
-
-```bash
-npm run dev            # Next.js dev server (needs an external Postgres via DATABASE_URL)
-npm run docker:dev     # full stack with dev defaults (recommended)
-npm run up             # prod: generate secrets into .env (if needed), then start
-npm run docker:prod    # build + run detached (secrets already set)
-npm run docker:down    # stop the stack
-npm run sandbox:build  # (re)build the sandbox execution image
-npm test               # vitest unit tests (integration tests gated behind RUN_INTEGRATION=1)
-```
-
-After editing the worker, runner, instrumentation, or the Telegram bot, restart
-the platform container — HMR doesn't reload the in-process worker loop.
+- [`DEPLOY.md`](DEPLOY.md): production deploys and Coolify
+- [`SECURITY.md`](SECURITY.md): threat model and hardening
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): local development
+- [`docs/UPGRADE.md`](docs/UPGRADE.md): upgrade notes
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): contributions and CLA
 
 ## License
 
-Capka is open source under the **GNU AGPL-3.0** (see `LICENSE`). Self-host it,
-modify it, share it — and if you run it as a public network service, the AGPL's
-source-availability terms apply.
-
-I build this mostly solo. A few enterprise bits (SSO/OIDC & SCIM, advanced RBAC,
-Helm packaging) live in a separate edition — if your company needs them, reach
-out. Contributions are very welcome and go through a quick **Contributor License
-Agreement** — see `CONTRIBUTING.md`.
+Capka is licensed under the [GNU AGPL-3.0](LICENSE). If you run a modified
+version as a public network service, the AGPL source-availability terms apply.
