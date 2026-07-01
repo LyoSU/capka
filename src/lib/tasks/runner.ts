@@ -28,7 +28,7 @@ import { getModelContextLength } from "@/lib/models/catalog";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions } from "@/lib/chat/context/provider-edits";
-import { stepSettings } from "@/lib/chat/context/step-control";
+import { stepSettings, stripReasoningFromMessages } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
@@ -662,6 +662,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       attemptAc.abort();
     });
 
+    // Set once a backend 400s on echoed `reasoning_content` (see
+    // retryOnCapabilityError). Hoisted above makeStream because prepareStep reads
+    // it on the very first step — declaring it later would TDZ-throw.
+    let reasoningStripped = false;
     const makeStream = () => {
       // reasoning + context-management may both target the same provider
       // namespace (e.g. anthropic) — merge so neither clobbers the other.
@@ -674,8 +678,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // prepareStep forces a text answer after FORCE_TEXT_AFTER_STEPS so a long
         // tool loop wraps up instead of hitting the hard step cap mid-tool. It
         // only tweaks toolChoice — never rewrites messages — so it can't break the
-        // prompt cache mid-turn (see stepSettings).
-        ...(hasTools ? { tools: tools as never, stopWhen: stepCountIs(25), prepareStep: ({ stepNumber }) => stepSettings(stepNumber) } : {}),
+        // prompt cache mid-turn (see stepSettings). EXCEPTION: once a backend has
+        // rejected echoed reasoning_content, we DO rewrite messages per-step to
+        // strip reasoning — the offending echo is an intermediate tool-loop
+        // message invisible to modelMessages, so this is the only place to catch
+        // it. Breaking the cache is the accepted cost of not 400ing every turn.
+        ...(hasTools
+          ? {
+              tools: tools as never,
+              stopWhen: stepCountIs(25),
+              prepareStep: ({ stepNumber, messages }) => ({
+                ...stepSettings(stepNumber),
+                ...(reasoningStripped ? { messages: stripReasoningFromMessages(messages) } : {}),
+              }),
+            }
+          : {}),
         messages: [...systemMessages, ...modelMessages, ...resumeMessages],
         ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
         // Either signal aborts the stream; only `attemptAc` aborts are retryable.
@@ -829,7 +846,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     };
 
     let retried = false;
-    let reasoningStripped = false;
     const consume = async () => {
       // Arm the stall watchdog for this attempt: it fires only while we're waiting
       // on the model (paused during local tool runs) and is torn down whatever way
@@ -1056,20 +1072,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       if (!reasoningStripped && isReasoningEchoRejectedError(err)) {
         // The backend behind this OpenAI-compatible endpoint (e.g. Cerebras via a
         // LiteLLM proxy) rejects the model's own `reasoning_content` when it's
-        // echoed back in history — the openai-compatible SDK serializes prior
-        // reasoning parts as that field unconditionally (vercel/ai#15042). We
-        // can't know the backend up front, so strip reasoning from the historical
-        // assistant turns and re-stream once. `reasoning` parts are display-only
-        // here; the DB/UI transcript keeps them, only the model's view drops them.
-        tlog.info("provider rejects reasoning_content echo — retrying with reasoning stripped from history");
+        // echoed back — the openai-compatible SDK serializes prior reasoning parts
+        // as that field unconditionally (vercel/ai#15042). We can't know the
+        // backend up front, so flip reasoningStripped and re-stream. Two echo
+        // sources, two removals: strip it from the historical modelMessages here
+        // (covers a no-tool multi-turn chat, which has no tool loop / prepareStep),
+        // AND — now that the flag is set — prepareStep strips it from every
+        // intermediate tool-loop message going forward. `reasoning` is display-only
+        // for the model; the DB/UI transcript keeps it.
+        tlog.info("provider rejects reasoning_content echo — retrying with reasoning stripped");
         reasoningStripped = true;
         streamError = undefined;
         await discardPartial();
-        for (const m of modelMessages) {
-          if (m.role === "assistant" && Array.isArray(m.content)) {
-            m.content = m.content.filter((p) => p.type !== "reasoning");
-          }
-        }
+        modelMessages = stripReasoningFromMessages(modelMessages);
         foldDiscarded();
         result = makeStream();
         await consume();

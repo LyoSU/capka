@@ -6,6 +6,20 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Reasoning models behind an OpenAI-compatible endpoint now survive a
+  tool-calling turn too, not just plain multi-turn chat.** The v0.1.4 fix stripped
+  the echoed `reasoning_content` only from the input history (`modelMessages`),
+  which covered a multi-turn chat but not a turn that calls a tool: with tools,
+  the offending echo is an *intermediate* assistant message that the AI SDK
+  generates and re-feeds inside its own tool loop (`streamText` step 2+), so it
+  never appears in the history we strip — the request still 400'd with
+  `messages.N.assistant.reasoning_content … is unsupported` (seen on Cerebras
+  `gpt-oss-120b` via LiteLLM the moment the model used a connector like Firecrawl).
+  The strip is now also applied per-step in `prepareStep`, so reasoning is removed
+  from every intermediate tool-loop message as well. Still reactive (only after an
+  actual rejection) so DeepSeek, which requires the field, is untouched.
+
 ## [0.1.4] - 2026-07-01
 
 ### Changed
