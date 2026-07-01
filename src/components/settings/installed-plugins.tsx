@@ -54,6 +54,9 @@ interface UpgradePreview {
  *  pieces a plugin adds are managed together instead of scattered. */
 export default function InstalledPlugins() {
   const t = useTranslations("settings.skills.installed");
+  // Reuse the same "reach" wording the Library/Connectors tabs already use, so
+  // shared-vs-personal reads identically everywhere in Settings > Skills.
+  const tReach = useTranslations("settings.skills");
   const isAdmin = useIsAdmin();
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [health, setHealth] = useState<Record<string, Health>>({});
@@ -189,6 +192,15 @@ export default function InstalledPlugins() {
                     </code>
                   )}
                   <Badge variant={stateVariant(p.enabledState)}>{t(`state.${p.enabledState}`)}</Badge>
+                  {/* Every other tab in Settings > Skills marks shared vs personal — this
+                      card was the one place that didn't, leaving members unable to tell
+                      whether a plugin came from the admin or was their own install. */}
+                  <Badge
+                    variant="secondary"
+                    className={cn("font-normal", p.scope === "system" ? "bg-success/10 text-success" : "text-muted-foreground")}
+                  >
+                    {p.scope === "system" ? tReach("reach.shared") : tReach("reach.personal")}
+                  </Badge>
                 </div>
                 {p.author && <p className="text-xs text-muted-foreground">{t("by", { author: p.author })}</p>}
                 <p className="mt-0.5 text-xs text-muted-foreground">
