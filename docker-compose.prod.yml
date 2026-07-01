@@ -1,0 +1,126 @@
+# Production compose — PULL-ONLY, no `build:`.
+#
+# This is a standalone mirror of docker-compose.yml with every `build:` stanza
+# removed, so a runner (Coolify, a plain box, CI) PULLS the prebuilt GHCR images
+# instead of compiling from source. Point Coolify at THIS file (not the base
+# compose) and it will `docker compose pull` the release images rather than run a
+# git build.
+#
+#   REQUIRED: set CAPKA_VERSION to the release tag you want (e.g. v0.1.6), so the
+#   image tags resolve to a concrete published release, not the moving :latest.
+#   Also supply POSTGRES_PASSWORD, CONTROLLER_SECRET, CAPKA_MASTER_KEY as usual.
+#
+# KEEP IN SYNC with docker-compose.yml: the ONLY intended difference is the
+# absence of `build:`. If you change env/healthcheck/volumes/limits in the base,
+# mirror it here. (Same security posture: only `platform` is published; postgres
+# and the controller stay on the internal network.)
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: Capka
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: Capka
+    expose:
+      - "5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U Capka"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: ${POSTGRES_MEM_LIMIT:-2g}
+    pids_limit: ${POSTGRES_PIDS_LIMIT:-512}
+
+  sandbox:
+    # Prebuilt only — pulled from GHCR. The run just tags the image as present;
+    # the controller pulls/uses it per session.
+    image: ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
+    entrypoint: ["echo", "sandbox image built"]
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      - CONTAINERS=1
+      - EXEC=1
+      - POST=1
+      - IMAGES=1
+      - INFO=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-proxy
+    restart: unless-stopped
+    mem_limit: ${SOCKET_PROXY_MEM_LIMIT:-128m}
+    pids_limit: ${SOCKET_PROXY_PIDS_LIMIT:-128}
+
+  sandbox-controller:
+    image: ghcr.io/lyosu/capka-controller:${CAPKA_VERSION:-latest}
+    expose:
+      - "3001"
+    volumes:
+      - ./data:/data
+    environment:
+      - CONTROLLER_SECRET=${CONTROLLER_SECRET}
+      - DOCKER_HOST=tcp://socket-proxy:2375
+      - DATA_ROOT=/data/storage
+      - DATABASE_URL=postgresql://Capka:${POSTGRES_PASSWORD}@postgres:5432/Capka
+      - COMPUTE_BACKEND=docker
+      - WORKSPACE_STORE=local
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-runc}
+      - SANDBOX_IMAGE=ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
+      - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-true}
+    networks:
+      - default
+      - docker-proxy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      sandbox:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      socket-proxy:
+        condition: service_started
+    restart: unless-stopped
+    mem_limit: ${CONTROLLER_MEM_LIMIT:-1g}
+    pids_limit: ${CONTROLLER_PIDS_LIMIT:-512}
+
+  platform:
+    image: ghcr.io/lyosu/capka-platform:${CAPKA_VERSION:-latest}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=postgresql://Capka:${POSTGRES_PASSWORD}@postgres:5432/Capka
+      - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
+      - CONTROLLER_SECRET=${CONTROLLER_SECRET}
+      - CAPKA_MASTER_KEY=${CAPKA_MASTER_KEY}
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - SETUP_TOKEN=${SETUP_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sandbox-controller:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: ${PLATFORM_MEM_LIMIT:-4g}
+    pids_limit: ${PLATFORM_PIDS_LIMIT:-1024}
+
+networks:
+  docker-proxy:
+
+volumes:
+  postgres-data:
