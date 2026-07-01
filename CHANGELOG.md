@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-01
+
 ### Fixed
 - **Cerebras gpt-oss (and similar reasoning models) now complete a tool-calling
   turn instead of hanging.** v0.1.5 fixed the `reasoning_content` 400 by
