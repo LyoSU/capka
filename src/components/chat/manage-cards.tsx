@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power } from "lucide-react";
+import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
 
@@ -8,16 +9,20 @@ type RequiredAction = { kind: string; url: string; label: string; description?: 
 /** The subset of a `manage` tool result the chat renders as a card. Kept loose
  *  (all optional) because it arrives as opaque tool output. */
 type ManageOutput = {
+  status?: string;
   render?: string;
   summary?: string;
-  confirmToken?: string;
-  preview?: { title: string; before: string; after: string; impact?: string };
+  code?: string;
+  /** Opaque handle to a server-staged change (confirm). Applying it needs the
+   *  session/callback — the model never holds anything replayable. */
+  pendingId?: string;
+  preview?: { title: string; before: string; after: string; impact?: string; details?: string; body?: string };
   action?: RequiredAction;
   data?: {
     title?: string;
     before?: string;
     after?: string;
-    undoToken?: string;
+    undoPendingId?: string;
     // collection
     collectionId?: string;
     items?: { id: string; title: string; subtitle?: string; enabled?: boolean; status?: string; owned?: boolean }[];
@@ -40,6 +45,17 @@ const CARD_RENDERS = new Set(["confirm", "setting", "action_required", "resource
 export function isManageCard(output: unknown): boolean {
   const r = (output as ManageOutput | null)?.render;
   return r ? CARD_RENDERS.has(r) : false;
+}
+
+/** Consume a staged pending id via the session-authed endpoint — the ONLY path a
+ *  confirm-gated change (or an undo) applies. Returns the resulting manage result. */
+async function consumePending(pendingId: string): Promise<ManageOutput> {
+  const res = await fetch("/api/manage/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pendingId }),
+  });
+  return (await res.json()) as ManageOutput;
 }
 
 /** OAuth / open-url handoff — the agent can't click, so the user does. Rendered
@@ -79,67 +95,155 @@ function CardShell({ children }: { children: React.ReactNode }) {
   return <div className="animate-blur-rise my-3 rounded-xl border border-border bg-card p-4 shadow-sm">{children}</div>;
 }
 
+type T = ReturnType<typeof useTranslations>;
+
+/** A terminal one-line footer (applied / reverted / expired / cancelled / error)
+ *  the confirm & setting cards collapse to after the user acts. */
+function Outcome({ kind, text }: { kind: "done" | "expired" | "cancelled" | "error"; text: string }) {
+  const tone =
+    kind === "done" ? "text-emerald-600 dark:text-emerald-500"
+    : kind === "error" ? "text-destructive"
+    : "text-muted-foreground";
+  const Icon = kind === "done" ? Check : kind === "error" ? AlertTriangle : Undo2;
+  return (
+    <div className={`mt-3 flex items-center gap-1.5 text-sm ${tone}`}>
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+/** Staged change awaiting the USER's confirmation. Confirm/Cancel act via the
+ *  session-authed endpoint (never the model), then the card collapses to its
+ *  outcome — so a button can't be clicked twice and a stale card reads clearly. */
+function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
+  const { title, before, after, impact, details, body } = o.preview!;
+  const [phase, setPhase] = useState<"idle" | "applying" | "done" | "expired" | "cancelled" | "error">("idle");
+  const [errText, setErrText] = useState("");
+
+  const confirm = async () => {
+    if (!o.pendingId || phase !== "idle") return;
+    setPhase("applying");
+    haptic("success");
+    try {
+      const r = await consumePending(o.pendingId);
+      if (r.status === "ok") setPhase("done");
+      else if (r.code === "confirm_expired") setPhase("expired");
+      else { setErrText(r.summary || t("applyError")); setPhase("error"); }
+    } catch {
+      setErrText(t("applyError"));
+      setPhase("error");
+    }
+  };
+
+  return (
+    <CardShell>
+      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+        {t("confirmTitle")}
+      </div>
+      <div className="mt-2 text-sm text-muted-foreground">{title}</div>
+      <Diff before={before} after={after} />
+      {/* What the user is actually approving — description + the full text (e.g. a
+          SKILL.md), collapsed — so a permanent instruction is never confirmed blind. */}
+      {details && <div className="mt-2 text-sm text-muted-foreground">{details}</div>}
+      {body && (
+        <details className="mt-2 text-sm">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{t("viewInstructions")}</summary>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2.5 text-xs text-muted-foreground">{body}</pre>
+        </details>
+      )}
+      {impact && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{impact}</span>
+        </div>
+      )}
+      {phase === "idle" && (
+        <div className="mt-3 flex gap-2">
+          <Button size="sm" onClick={confirm}>{t("apply")}</Button>
+          <Button size="sm" variant="ghost" onClick={() => setPhase("cancelled")}>{t("cancel")}</Button>
+        </div>
+      )}
+      {phase === "applying" && (
+        <div className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("applying")}
+        </div>
+      )}
+      {phase === "done" && <Outcome kind="done" text={t("confirmed")} />}
+      {phase === "expired" && <Outcome kind="expired" text={t("expired")} />}
+      {phase === "cancelled" && <Outcome kind="cancelled" text={t("cancelled")} />}
+      {phase === "error" && <Outcome kind="error" text={errText} />}
+    </CardShell>
+  );
+}
+
+/** An applied setting (before → after) with an Undo that also travels the
+ *  human-authed endpoint (the model can't trigger an undo either). */
+function SettingCard({ o, t }: { o: ManageOutput; t: T }) {
+  const { title = "", before = "", after = "", undoPendingId } = o.data!;
+  const [phase, setPhase] = useState<"idle" | "applying" | "done" | "error">("idle");
+
+  const undo = async () => {
+    if (!undoPendingId || phase !== "idle") return;
+    setPhase("applying");
+    haptic("tap");
+    try {
+      const r = await consumePending(undoPendingId);
+      setPhase(r.status === "ok" ? "done" : "error");
+    } catch {
+      setPhase("error");
+    }
+  };
+
+  return (
+    <CardShell>
+      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+        <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-500" />
+        {t("settingTitle")}
+      </div>
+      <div className="mt-2 text-sm text-muted-foreground">{title}</div>
+      <Diff before={before} after={after} />
+      {undoPendingId && phase === "idle" && (
+        <div className="mt-3">
+          <Button size="sm" variant="ghost" onClick={undo}>
+            <Undo2 className="h-3.5 w-3.5" />
+            {t("undo")}
+          </Button>
+        </div>
+      )}
+      {phase === "applying" && (
+        <div className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("applying")}
+        </div>
+      )}
+      {phase === "done" && <Outcome kind="done" text={t("reverted")} />}
+      {phase === "error" && <Outcome kind="error" text={t("applyError")} />}
+    </CardShell>
+  );
+}
+
+/** A colored dot + localized word for a connector's state — no raw "oauth"/on/off
+ *  jargon (PRODUCT.md forbids it for the non-technical audience). */
+function StatusBadge({ enabled, status, t }: { enabled?: boolean; status?: string; t: T }) {
+  const kind = enabled === false ? "off" : status === "oauth" ? "signin" : "on";
+  const dot = kind === "on" ? "bg-emerald-500" : kind === "signin" ? "bg-amber-500" : "bg-muted-foreground/40";
+  const label = kind === "off" ? t("statusOff") : kind === "signin" ? t("statusSignin") : t("statusOn");
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs ${enabled === false ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
+      {label}
+    </span>
+  );
+}
+
 export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text: string) => void }) {
   const t = useTranslations("chat.manage");
   const o = output as ManageOutput;
 
-  if (o?.render === "confirm" && o.preview) {
-    const { title, before, after, impact } = o.preview;
-    return (
-      <CardShell>
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-          {t("confirmTitle")}
-        </div>
-        <div className="mt-2 text-sm text-muted-foreground">{title}</div>
-        <Diff before={before} after={after} />
-        {impact && (
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{impact}</span>
-          </div>
-        )}
-        {onSend && (
-          <div className="mt-3 flex gap-2">
-            <Button
-              size="sm"
-              onClick={() => {
-                haptic("success");
-                onSend(t("applyMsg", { title, after }));
-              }}
-            >
-              {t("apply")}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => onSend(t("cancelMsg", { title }))}>
-              {t("cancel")}
-            </Button>
-          </div>
-        )}
-      </CardShell>
-    );
-  }
+  if (o?.render === "confirm" && o.preview) return <ConfirmCard o={o} t={t} />;
 
-  if (o?.render === "setting" && o.data) {
-    const { title = "", before = "", after = "", undoToken } = o.data;
-    return (
-      <CardShell>
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-500" />
-          {t("settingTitle")}
-        </div>
-        <div className="mt-2 text-sm text-muted-foreground">{title}</div>
-        <Diff before={before} after={after} />
-        {onSend && undoToken && (
-          <div className="mt-3">
-            <Button size="sm" variant="ghost" onClick={() => onSend(t("undoMsg", { title }))}>
-              <Undo2 className="h-3.5 w-3.5" />
-              {t("undo")}
-            </Button>
-          </div>
-        )}
-      </CardShell>
-    );
-  }
+  if (o?.render === "setting" && o.data) return <SettingCard o={o} t={t} />;
 
   // OAuth / browser hand-off — the agent returned a URL only the user can open.
   if (o?.render === "action_required" && o.action) {
@@ -176,11 +280,12 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
   }
 
   if (o?.render === "debug" && o.data) {
+    const itemTitle = o.data.itemTitle;
     return (
       <CardShell>
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Stethoscope className="h-4 w-4 text-muted-foreground" />
-          {t("debugTitle")}: {o.data.itemTitle}
+          {t("debugTitle")}: {itemTitle}
         </div>
         <div className="mt-2 text-sm">
           <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{o.data.state}</span>
@@ -190,6 +295,15 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
         {o.data.action && (
           <div className="mt-3">
             <ConnectLink action={o.data.action} />
+          </div>
+        )}
+        {/* Close the OAuth loop: one tap re-runs the live probe via the agent. */}
+        {onSend && itemTitle && (
+          <div className="mt-3">
+            <Button size="sm" variant="ghost" onClick={() => onSend(t("recheckMsg", { name: itemTitle }))}>
+              <RefreshCw className="h-3.5 w-3.5" />
+              {t("recheck")}
+            </Button>
           </div>
         )}
       </CardShell>
@@ -205,7 +319,7 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
           {o.data.title ?? t("connectorsTitle")}
         </div>
         {items.length === 0 ? (
-          <div className="mt-2 text-sm text-muted-foreground">—</div>
+          <div className="mt-2 text-sm text-muted-foreground">{t("emptyConnectors")}</div>
         ) : (
           <ul className="mt-2 space-y-1.5">
             {items.map((it) => (
@@ -214,9 +328,7 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
                   <span className="font-medium text-foreground">{it.title}</span>
                   {it.subtitle && <span className="ml-2 truncate text-xs text-muted-foreground">{it.subtitle}</span>}
                 </span>
-                <span className={`shrink-0 text-xs ${it.enabled === false ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
-                  {it.enabled === false ? t("statusOff") : it.status === "oauth" ? t("statusSignin") : t("statusOn")}
-                </span>
+                <StatusBadge enabled={it.enabled} status={it.status} t={t} />
               </li>
             ))}
           </ul>

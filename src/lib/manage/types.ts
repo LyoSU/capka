@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { PendingStore } from "./pending";
 
 /** Where a control lives, and thus who may touch it. `user` = the caller's own
  *  preference (any authenticated user, their own row). `org` = a shared,
@@ -17,11 +18,12 @@ export interface ManageContext {
   userId: string;
   isAdmin: boolean;
   projectId: string | null;
-  /** HMAC secret for confirm/undo tokens (the master key in production). */
-  secret: string;
   /** The user's locale — all user-facing strings are resolved to it server-side
    *  (default English). Undefined → English. */
   locale?: string;
+  /** Store for staged confirmations. Injected in tests; production falls back to
+   *  the DB-backed store (lazy-imported), like `audit`. */
+  pending?: PendingStore;
   audit?: (e: { action: string; targetType?: string; targetKey?: string; detail?: Record<string, unknown> }) => Promise<void> | void;
   now?: () => number;
 }
@@ -49,11 +51,12 @@ export type ManageInput =
   | { action: "capabilities" }
   | { action: "list" }
   | { action: "get"; target: string }
-  | { action: "set"; target: string; value: unknown; confirmToken?: string }
-  | { action: "undo"; undoToken: string }
+  // set/add/remove only STAGE a confirmation (risky) or apply directly (safe) —
+  // the model can never carry a token to apply a staged change itself.
+  | { action: "set"; target: string; value: unknown }
   // Collection actions — target is a collection id (e.g. "mcp").
-  | { action: "add"; target: string; args: Record<string, unknown>; confirmToken?: string }
-  | { action: "remove"; target: string; itemId: string; confirmToken?: string }
+  | { action: "add"; target: string; args: Record<string, unknown> }
+  | { action: "remove"; target: string; itemId: string }
   | { action: "enable"; target: string; itemId: string }
   | { action: "disable"; target: string; itemId: string }
   | { action: "debug"; target: string; itemId: string }
@@ -107,8 +110,11 @@ export interface Collection {
    *  content), so the dispatcher refuses up front instead of previewing a change
    *  that apply would then reject. */
   validateAdd?(ctx: ManageContext, args: Record<string, unknown>): Promise<void>;
-  /** Human summary of what an add would do, for the confirm preview. */
-  previewAdd?(ctx: ManageContext, args: Record<string, unknown>): { title: string; after: string; impact?: string };
+  /** Human summary of what an add would do, for the confirm preview. `details` is
+   *  a short human description (e.g. what a skill does); `body` is the full text
+   *  the user is approving (e.g. the SKILL.md) shown collapsibly — so nobody
+   *  confirms an unseen permanent instruction. */
+  previewAdd?(ctx: ManageContext, args: Record<string, unknown>): { title: string; after: string; impact?: string; details?: string; body?: string };
   remove?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string }>;
   setEnabled?(ctx: ManageContext, itemId: string, enabled: boolean): Promise<{ itemTitle: string }>;
   debug?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string; state: string; detail?: string; hint?: string; action?: RequiredAction }>;
@@ -123,7 +129,9 @@ export interface SettingChange {
   title: string;
   before: string;
   after: string;
-  undoToken?: string;
+  /** Opaque id of a staged undo — the Undo button/callback consumes it via the
+   *  same human-authed path (the model never applies an undo either). */
+  undoPendingId?: string;
 }
 
 export type ManageResult =
@@ -152,7 +160,9 @@ export type ManageResult =
       status: "confirm_required";
       render: "confirm";
       summary: string;
-      confirmToken: string;
-      preview: { controlId: string; title: string; before: string; after: string; impact?: string };
+      /** Opaque handle to the server-staged change. Safe to expose — applying it
+       *  requires the session cookie / Telegram callback, which the model lacks. */
+      pendingId: string;
+      preview: { controlId: string; title: string; before: string; after: string; impact?: string; details?: string; body?: string };
     }
   | { status: "error"; render: "error"; summary: string; code: string };

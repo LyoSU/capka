@@ -1,13 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { createRegistry } from "../registry";
-import { dispatch } from "../dispatch";
+import { dispatch, applyPending } from "../dispatch";
+import { memPendingStore } from "./mem-pending";
 import type { Control, ManageContext } from "../types";
 
-const SECRET = "0123456789abcdef0123456789abcdef";
-
 /** An in-memory control backed by a mutable cell, so tests exercise the real
- *  dispatch flow (role gate, confirm token, undo) without any DB. */
+ *  dispatch flow (role gate, staged confirm, undo) without any DB. */
 function memControl(over: Partial<Control> & Pick<Control, "id" | "scope" | "requiredRole" | "risk">): {
   control: Control;
   cell: { value: string };
@@ -24,8 +23,11 @@ function memControl(over: Partial<Control> & Pick<Control, "id" | "scope" | "req
   return { control, cell };
 }
 
+// One shared pending store per ctx() family so a stage() in one call can be
+// consumed by applyPending() in the next — the human-authed apply path.
+const store = memPendingStore();
 function ctx(over: Partial<ManageContext> = {}): ManageContext {
-  return { userId: "u1", isAdmin: false, projectId: null, secret: SECRET, audit: vi.fn(), ...over };
+  return { userId: "u1", isAdmin: false, projectId: null, pending: store, audit: vi.fn(), ...over };
 }
 
 describe("manage/dispatch", () => {
@@ -49,7 +51,7 @@ describe("manage/dispatch", () => {
     if (res.status === "error") expect(res.code).toBe("not_found");
   });
 
-  it("applies a safe user setting immediately and returns an undo token", async () => {
+  it("applies a safe user setting immediately and stages an undo", async () => {
     const { control, cell } = memControl({ id: "user.locale", scope: "user", requiredRole: "user", risk: "safe" });
     const reg = createRegistry([control]);
     const audit = vi.fn();
@@ -59,58 +61,66 @@ describe("manage/dispatch", () => {
     if (res.status === "ok" && res.render === "setting") {
       expect(res.data.before).toBe("user.locale:init");
       expect(res.data.after).toBe("uk");
-      expect(res.data.undoToken).toBeTruthy();
+      expect(res.data.undoPendingId).toBeTruthy();
     }
     expect(audit).toHaveBeenCalledOnce();
   });
 
-  it("does NOT apply a confirm-risk change on the first call — returns confirm_required + token", async () => {
+  it("does NOT apply a confirm-risk change — it STAGES one and returns a pendingId; the model can't apply it", async () => {
     const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([control]);
     const res = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
-    expect(cell.value).toBe("org.net:init"); // unchanged
+    expect(cell.value).toBe("org.net:init"); // unchanged — nothing applied
     expect(res.status).toBe("confirm_required");
     if (res.status === "confirm_required") {
-      expect(res.confirmToken).toBeTruthy();
+      expect(res.pendingId).toBeTruthy();
       expect(res.preview.after).toBe("bridge");
     }
+    // There is NO model-facing action to apply — set/add/remove only stage.
   });
 
-  it("applies the confirm-risk change on the second call with a matching token", async () => {
+  it("applyPending applies exactly the staged change (human-authed path)", async () => {
     const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([control]);
-    const first = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
-    if (first.status !== "confirm_required") throw new Error("expected confirm_required");
-    const second = await dispatch(reg, ctx({ isAdmin: true }), {
-      action: "set", target: "org.net", value: "bridge", confirmToken: first.confirmToken,
-    });
-    expect(second.status).toBe("ok");
+    const staged = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm_required");
+    const applied = await applyPending(reg, ctx({ isAdmin: true }), staged.pendingId);
+    expect(applied.status).toBe("ok");
     expect(cell.value).toBe("bridge");
   });
 
-  it("rejects a confirm token issued for a DIFFERENT value (no bait-and-switch)", async () => {
+  it("a pendingId is single-use — a second apply is refused", async () => {
     const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([control]);
-    const first = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
-    if (first.status !== "confirm_required") throw new Error("expected confirm_required");
-    const swapped = await dispatch(reg, ctx({ isAdmin: true }), {
-      action: "set", target: "org.net", value: "none", confirmToken: first.confirmToken,
-    });
-    expect(swapped.status).toBe("error");
-    if (swapped.status === "error") expect(swapped.code).toBe("confirm_invalid");
+    const staged = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm_required");
+    await applyPending(reg, ctx({ isAdmin: true }), staged.pendingId);
+    cell.value = "none"; // pretend something changed it back
+    const again = await applyPending(reg, ctx({ isAdmin: true }), staged.pendingId);
+    expect(again.status).toBe("error");
+    if (again.status === "error") expect(again.code).toBe("confirm_expired");
+    expect(cell.value).toBe("none"); // not re-applied
+  });
+
+  it("a pending staged by one user cannot be applied by another (no cross-user apply)", async () => {
+    const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
+    const reg = createRegistry([control]);
+    const staged = await dispatch(reg, ctx({ userId: "attacker", isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm_required");
+    const asVictim = await applyPending(reg, ctx({ userId: "victim", isAdmin: true }), staged.pendingId);
+    expect(asVictim.status).toBe("error");
+    if (asVictim.status === "error") expect(asVictim.code).toBe("confirm_expired");
     expect(cell.value).toBe("org.net:init");
   });
 
-  it("rejects a confirm token minted by a different user", async () => {
-    const { control } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
+  it("applyPending re-checks the role at apply time (a demoted user can't apply an admin change)", async () => {
+    const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([control]);
-    const first = await dispatch(reg, ctx({ userId: "attacker", isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
-    if (first.status !== "confirm_required") throw new Error("expected confirm_required");
-    const asVictim = await dispatch(reg, ctx({ userId: "victim", isAdmin: true }), {
-      action: "set", target: "org.net", value: "bridge", confirmToken: first.confirmToken,
-    });
-    expect(asVictim.status).toBe("error");
-    if (asVictim.status === "error") expect(asVictim.code).toBe("confirm_invalid");
+    const staged = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm_required");
+    const applied = await applyPending(reg, ctx({ isAdmin: false }), staged.pendingId); // no longer admin
+    expect(applied.status).toBe("error");
+    expect(cell.value).toBe("org.net:init");
   });
 
   it("refuses a non-admin setting an admin control even with a value (not_found, unchanged)", async () => {
@@ -133,24 +143,14 @@ describe("manage/dispatch", () => {
     expect(cell.value).toBe("org.net:init");
   });
 
-  it("undoes a change with a valid undo token", async () => {
+  it("undo restores the previous value via its staged pendingId", async () => {
     const { control, cell } = memControl({ id: "user.locale", scope: "user", requiredRole: "user", risk: "safe" });
     const reg = createRegistry([control]);
     const applied = await dispatch(reg, ctx(), { action: "set", target: "user.locale", value: "uk" });
     if (applied.status !== "ok" || applied.render !== "setting") throw new Error("expected setting");
     expect(cell.value).toBe("uk");
-    const undone = await dispatch(reg, ctx(), { action: "undo", undoToken: applied.data.undoToken! });
+    const undone = await applyPending(reg, ctx(), applied.data.undoPendingId!);
     expect(undone.status).toBe("ok");
     expect(cell.value).toBe("user.locale:init");
-  });
-
-  it("rejects an undo token minted by a different user", async () => {
-    const { control, cell } = memControl({ id: "user.locale", scope: "user", requiredRole: "user", risk: "safe" });
-    const reg = createRegistry([control]);
-    const applied = await dispatch(reg, ctx({ userId: "u1" }), { action: "set", target: "user.locale", value: "uk" });
-    if (applied.status !== "ok" || applied.render !== "setting") throw new Error("expected setting");
-    const undone = await dispatch(reg, ctx({ userId: "u2" }), { action: "undo", undoToken: applied.data.undoToken! });
-    expect(undone.status).toBe("error");
-    expect(cell.value).toBe("uk");
   });
 });

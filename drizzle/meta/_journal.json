@@ -260,6 +260,13 @@
       "when": 1782592212079,
       "tag": "0036_usage_one_pending_per_task",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1782942328066,
+      "tag": "0037_special_sauron",
+      "breakpoints": true
     }
   ]
 }

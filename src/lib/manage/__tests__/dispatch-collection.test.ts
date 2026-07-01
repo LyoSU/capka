@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { createRegistry } from "../registry";
-import { dispatch } from "../dispatch";
+import { dispatch, applyPending } from "../dispatch";
+import { memPendingStore } from "./mem-pending";
 import type { Collection, CollectionItem, ManageContext } from "../types";
 
-const SECRET = "0123456789abcdef0123456789abcdef";
-
+const store = memPendingStore();
 function ctx(over: Partial<ManageContext> = {}): ManageContext {
-  return { userId: "u1", isAdmin: false, projectId: null, secret: SECRET, audit: vi.fn(), ...over };
+  return { userId: "u1", isAdmin: false, projectId: null, pending: store, audit: vi.fn(), ...over };
 }
 
 /** In-memory MCP-like collection so the collection dispatch paths are exercised
@@ -99,19 +99,17 @@ describe("manage/dispatch collections", () => {
     expect(items).toHaveLength(1);
   });
 
-  it("add applies on the confirmed second call and surfaces a follow-up action", async () => {
+  it("add applies via applyPending (human-authed) and surfaces a follow-up action", async () => {
     const { collection, items } = memCollection();
     const reg = createRegistry([], [collection]);
-    const first = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
-    if (first.status !== "confirm_required") throw new Error("expected confirm");
-    const second = await dispatch(reg, ctx(), {
-      action: "add", target: "mcp", args: { name: "grok", url: "https://x" }, confirmToken: first.confirmToken,
-    });
-    expect(second.status).toBe("ok");
+    const staged = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm");
+    const applied = await applyPending(reg, ctx(), staged.pendingId);
+    expect(applied.status).toBe("ok");
     expect(items).toHaveLength(2);
-    if (second.status === "ok" && second.render === "resource") {
-      expect(second.data.op).toBe("added");
-      expect(second.data.action?.kind).toBe("oauth");
+    if (applied.status === "ok" && applied.render === "resource") {
+      expect(applied.data.op).toBe("added");
+      expect(applied.data.action?.kind).toBe("oauth");
     }
   });
 
@@ -138,9 +136,9 @@ describe("manage/dispatch collections", () => {
     const audit = vi.fn();
     const { collection } = memCollection({ auditNoun: "skill" });
     const reg = createRegistry([], [collection]);
-    const first = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
-    if (first.status !== "confirm_required") throw new Error("expected confirm");
-    await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" }, confirmToken: first.confirmToken });
+    const staged = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm");
+    await applyPending(reg, ctx({ audit }), staged.pendingId);
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "skill.add" }));
   });
 
@@ -148,10 +146,10 @@ describe("manage/dispatch collections", () => {
     const audit = vi.fn().mockRejectedValue(new Error("audit backend down"));
     const { collection, items } = memCollection();
     const reg = createRegistry([], [collection]);
-    const first = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
-    if (first.status !== "confirm_required") throw new Error("expected confirm");
-    const second = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" }, confirmToken: first.confirmToken });
-    expect(second.status).toBe("ok"); // the add succeeded despite the audit failure
+    const staged = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm");
+    const applied = await applyPending(reg, ctx({ audit }), staged.pendingId);
+    expect(applied.status).toBe("ok"); // the add succeeded despite the audit failure
     expect(items).toHaveLength(2);
   });
 
@@ -198,11 +196,11 @@ describe("manage/dispatch collections", () => {
   it("remove is confirm-gated and then removes", async () => {
     const { collection, items } = memCollection();
     const reg = createRegistry([], [collection]);
-    const first = await dispatch(reg, ctx(), { action: "remove", target: "mcp", itemId: "s1" });
-    if (first.status !== "confirm_required") throw new Error("expected confirm");
+    const staged = await dispatch(reg, ctx(), { action: "remove", target: "mcp", itemId: "s1" });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm");
     expect(items).toHaveLength(1);
-    const second = await dispatch(reg, ctx(), { action: "remove", target: "mcp", itemId: "s1", confirmToken: first.confirmToken });
-    expect(second.status).toBe("ok");
+    const applied = await applyPending(reg, ctx(), staged.pendingId);
+    expect(applied.status).toBe("ok");
     expect(items).toHaveLength(0);
   });
 });

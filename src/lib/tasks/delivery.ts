@@ -10,7 +10,7 @@
  * streaming uses `sendRichMessageDraft` (an ephemeral, animated 30s preview);
  * the final answer is persisted with `sendRichMessage`.
  */
-import { InputFile } from "grammy";
+import { InputFile, InlineKeyboard } from "grammy";
 import { log } from "@/lib/log";
 import { getTranslator, type Translator } from "@/lib/i18n/translator";
 import { formatShortDuration } from "@/lib/chat/duration";
@@ -44,6 +44,10 @@ export interface TaskResult {
    *  the answer, pointing at /model — the user otherwise can't tell the model
    *  never heard them. */
   blindModalities?: Modality[];
+  /** A change the turn STAGED for the user to confirm. On Telegram the final
+   *  message carries native Confirm/Cancel buttons bound to `pendingId` — the tap
+   *  (not the model) applies it, so this channel gets a real confirm boundary. */
+  confirm?: { pendingId: string; title: string; before: string; after: string };
 }
 
 /** The transient activity shown while the answer streams in. The live reasoning
@@ -303,17 +307,22 @@ class TelegramSink implements DeliverySink {
   // Send one rich message, falling back to plain-text chunks if the Markdown is
   // rejected (so a formatting quirk never drops the message). `plain` is the
   // markup-free text for that fallback; `silent` suppresses the notification.
-  private async sendRich(markdown: string, plain: string, silent: boolean): Promise<void> {
+  private async sendRich(markdown: string, plain: string, silent: boolean, keyboard?: InlineKeyboard): Promise<void> {
     const bot = await this.getBot();
     if (!bot) return;
-    const other = silent ? { disable_notification: true } : undefined;
+    const other = silent || keyboard
+      ? { ...(silent ? { disable_notification: true } : {}), ...(keyboard ? { reply_markup: keyboard } : {}) }
+      : undefined;
     try {
       await bot.api.sendRichMessage(this.chatId, { markdown }, other);
     } catch (e) {
       log.warn("telegram rich send failed; falling back to plain", { chatId: this.chatId, err: String(e) });
       try {
-        for (const part of chunk(plain, TELEGRAM_LIMIT)) {
-          await bot.api.sendMessage(this.chatId, part, other);
+        // Keep the buttons on the plain-text fallback too — they're the whole point.
+        const parts = chunk(plain, TELEGRAM_LIMIT);
+        for (let i = 0; i < parts.length; i++) {
+          const isLast = i === parts.length - 1;
+          await bot.api.sendMessage(this.chatId, parts[i], isLast ? other : (silent ? { disable_notification: true } : undefined));
         }
       } catch (e2) {
         log.error("telegram delivery failed", { chatId: this.chatId, err: String(e2) });
@@ -376,6 +385,22 @@ class TelegramSink implements DeliverySink {
         })
       : null;
     if (notice) markdown = markdown ? `${notice}\n\n${markdown}` : notice;
+
+    // A staged confirmation: append a compact before→after preview and native
+    // Confirm/Cancel buttons. The tap (bound to this Telegram user) applies it —
+    // the model can't, so Telegram gets the same real confirm boundary as web.
+    if (result.confirm) {
+      const c = result.confirm;
+      const diff = c.before && c.before !== c.after ? `${c.before} → ${c.after}` : c.after;
+      const preview = `> ${escapeHtml(c.title)}${diff ? `: ${escapeHtml(diff)}` : ""}`;
+      markdown = markdown ? `${markdown}\n\n${preview}` : preview;
+      const keyboard = new InlineKeyboard()
+        .text(this.t("confirmApply"), `mc:${c.pendingId}`)
+        .text(this.t("confirmCancel"), `mx:${c.pendingId}`);
+      await this.sendRich(markdown, `${body || c.title}`, false, keyboard);
+      return;
+    }
+
     if (markdown) await this.sendRich(markdown, notice ? `${notice}\n\n${body}` : body || this.t("noText"), false);
   }
 

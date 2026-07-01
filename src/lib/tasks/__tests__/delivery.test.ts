@@ -197,6 +197,20 @@ describe("TelegramSink streaming", () => {
     expect(api.sendRichMessage.mock.calls[0][2]).toBeUndefined(); // final pings
   });
 
+  it("attaches Confirm/Cancel buttons (bound to the pendingId) when the turn staged a confirmation", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 77, locale: "en" });
+    await sink.finish({
+      status: "completed", text: "Ready — tap Confirm.", toolCount: 1, elapsedMs: 1000,
+      confirm: { pendingId: "pend123", title: "Sandbox network", before: "Isolated", after: "Network access" },
+    });
+    const opts = api.sendRichMessage.mock.calls[0][2];
+    const rows = opts.reply_markup.inline_keyboard;
+    expect(rows[0][0].callback_data).toBe("mc:pend123"); // confirm applies this exact pending
+    expect(rows[0][1].callback_data).toBe("mx:pend123"); // cancel drops it
+    // The before→after preview rides along so the Telegram user sees what they confirm.
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toContain("Isolated → Network access");
+  });
+
   it("persists the whole answer (reasoning folded into <details>) as one final message", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 13, locale: "uk" });
     sink.push("Готово.", "Зважую варіанти", undefined);

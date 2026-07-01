@@ -66,13 +66,20 @@ export const skillCollection: Collection = {
     const t = manageT(ctx.locale);
     const a = args as AddArgs;
     let name = loc(t, "skill.newSkill", "(new skill)");
+    let details: string | undefined;
     try {
-      name = parseSkillMarkdown(a.content).name;
+      const parsed = parseSkillMarkdown(a.content);
+      name = parsed.name;
+      details = parsed.description ?? undefined;
     } catch { /* previewing invalid markdown — the add will surface the real error */ }
     const { scope } = skillScope(a);
     return {
       title: loc(t, "skill.addTitle", "Add skill"),
       after: name,
+      // The user is approving a PERMANENT instruction the agent wrote — show what
+      // it does (description) and the full SKILL.md, so it's never confirmed blind.
+      details,
+      body: a.content,
       impact: scope === "system" ? loc(t, "skill.sharedImpact", "Shared skill — available to all users.") : undefined,
     };
   },

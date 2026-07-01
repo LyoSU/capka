@@ -515,3 +515,23 @@ export const auditLog = pgTable("audit_log", {
   index("idx_audit_log_created").on(table.createdAt),
   index("idx_audit_log_action").on(table.action),
 ]);
+
+// Server-staged, single-use, short-TTL confirmations for the chat-driven `manage`
+// control plane. A risky change (org setting, connector/skill add/remove) is
+// STAGED here and applied only by a human-controlled path — the web Confirm
+// button (session cookie) or a Telegram callback — so the model, which never
+// sees this row's id in a replayable form, cannot apply a change on its own
+// (defeating prompt-injection self-confirm). `payload` holds the exact mutation
+// to run, so the applied change can't be swapped for a different one.
+export const managePending = pgTable("manage_pending", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: text("project_id"), // captured at stage time; apply runs in the same scope
+  kind: text("kind").notNull(), // "apply" | "undo"
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"), // single-use latch
+}, (table) => [
+  index("idx_manage_pending_expires").on(table.expiresAt),
+]);

@@ -1,8 +1,16 @@
-import { hashArgs, signToken, verifyToken } from "./token";
 import { canAccess, type Registry } from "./registry";
 import { manageT, loc, locValue, keyOf, type ManageT } from "./i18n";
+import type { PendingStore } from "./pending";
 import type { Collection, Control, ManageContext, ManageInput, ManageResult } from "./types";
 import type { AuditAction } from "@/lib/governance/types";
+
+/** The exact mutation a staged confirmation will run when the human approves it.
+ *  Stored server-side (never handed to the model), so a confirmed change can't be
+ *  swapped for a different one. An `undo` is just an `apply` of the prior value. */
+export type PendingPayload =
+  | { op: "set"; controlId: string; value: string }
+  | { op: "add"; collectionId: string; args: Record<string, unknown> }
+  | { op: "remove"; collectionId: string; itemId: string };
 
 /** Localized display of a control's raw value (uk via i18n, else the control's
  *  own English format/raw). */
@@ -35,9 +43,16 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "The action could not be completed.";
 }
 
+/** The pending store: injected in tests, else the DB-backed one (lazy-imported so
+ *  pure dispatch tests never touch a database — the same pattern as `record`). */
+async function pendingStore(ctx: ManageContext): Promise<PendingStore> {
+  if (ctx.pending) return ctx.pending;
+  return (await import("./pending")).dbPendingStore;
+}
+
 /** Record a mutation in the tamper-evident audit trail. Best-effort (a failed
  *  audit write must NOT turn an already-applied change into an error the user
- *  sees, nor swallow the undo token) and lazy: the governance audit (and thus the
+ *  sees, nor swallow the undo handle) and lazy: the governance audit (and thus the
  *  DB) is only imported when no test override is supplied, so pure dispatch tests
  *  never touch a database. `action` is typed AuditAction — the cast that let a
  *  skill change get logged as a connector change is gone. */
@@ -60,27 +75,12 @@ async function record(
   }
 }
 
-function issueConfirm(ctx: ManageContext, controlKey: string, argsHash: string): string {
-  return signToken({ purpose: "confirm", controlId: controlKey, argsHash, userId: ctx.userId }, ctx.secret, {
-    now: ctx.now?.(),
-  });
-}
-
-function confirmOk(ctx: ManageContext, controlKey: string, argsHash: string, token: string): boolean {
-  const v = verifyToken(token, ctx.secret, ctx.now?.());
-  return (
-    v.ok &&
-    v.payload.purpose === "confirm" &&
-    v.payload.userId === ctx.userId &&
-    v.payload.controlId === controlKey &&
-    v.payload.argsHash === argsHash
-  );
-}
-
 /** Instruction handed back to the model on a confirm request. English (the model
- *  relays to the user in their own language); the visible card is localized. */
+ *  relays to the user in their own language); the visible card is localized. The
+ *  model has NO way to apply the change — the confirmation is applied only by the
+ *  human via the card button / Telegram tap. */
 const CONFIRM_NOTE =
-  "The change is staged and shown to the user as a card with a Confirm button. The user is ALREADY authorized (the server checked). Do not claim missing permission and do not re-ask in prose. Reply with at most one short line, then STOP and wait — the confirmation arrives as a new message; only then re-call with the same value + confirmToken.";
+  "The change is staged and shown to the user as a card with a Confirm button (or Confirm/Cancel buttons in Telegram). The user is ALREADY authorized (the server checked). You CANNOT apply it yourself and there is no token to re-send — only the user's click applies it. Do not claim missing permission, do not re-ask in prose. Reply with at most one short line, then STOP and wait; the applied change arrives on its own.";
 
 export async function dispatch(reg: Registry, ctx: ManageContext, input: ManageInput): Promise<ManageResult> {
   switch (input.action) {
@@ -92,8 +92,6 @@ export async function dispatch(reg: Registry, ctx: ManageContext, input: ManageI
       return get(reg, ctx, input.target);
     case "set":
       return set(reg, ctx, input);
-    case "undo":
-      return undo(reg, ctx, input.undoToken);
     case "add":
       return add(reg, ctx, input);
     case "remove":
@@ -172,6 +170,8 @@ async function get(reg: Registry, ctx: ManageContext, target: string): Promise<M
   return err("not_found", `No setting "${target}".`);
 }
 
+// ── Settings ─────────────────────────────────────────────────────────────────
+
 async function set(
   reg: Registry,
   ctx: ManageContext,
@@ -189,59 +189,133 @@ async function set(
   }
   const value = parsed.data;
   const before = await c.read(ctx);
-  const argsHash = hashArgs({ target: c.id, value });
 
+  // Risky changes are STAGED — never applied by the model. Only the user's click
+  // (web session / Telegram callback) consumes the pending id and applies it.
   if (c.risk === "confirm") {
-    if (!input.confirmToken) {
-      const rawImpact = c.impact ? await c.impact(ctx, value) : undefined;
-      const impact = rawImpact ? loc(t, `impact.${keyOf(c.id)}`, rawImpact) : undefined;
-      return {
-        status: "confirm_required",
-        render: "confirm",
-        summary: CONFIRM_NOTE,
-        confirmToken: issueConfirm(ctx, c.id, argsHash),
-        preview: { controlId: c.id, title: title(t, c), before: fmt(t, c, before), after: fmt(t, c, value), impact },
-      };
-    }
-    if (!confirmOk(ctx, c.id, argsHash, input.confirmToken)) {
-      return err("confirm_invalid", "The confirmation is invalid or expired — review the change again.");
-    }
+    const rawImpact = c.impact ? await c.impact(ctx, value) : undefined;
+    const impact = rawImpact ? loc(t, `impact.${keyOf(c.id)}`, rawImpact) : undefined;
+    const store = await pendingStore(ctx);
+    const pendingId = await store.stage({
+      userId: ctx.userId,
+      projectId: ctx.projectId,
+      kind: "apply",
+      payload: { op: "set", controlId: c.id, value } satisfies PendingPayload,
+    });
+    return {
+      status: "confirm_required",
+      render: "confirm",
+      summary: CONFIRM_NOTE,
+      pendingId,
+      preview: { controlId: c.id, title: title(t, c), before: fmt(t, c, before), after: fmt(t, c, value), impact },
+    };
   }
 
+  // Safe controls (a user's own low-risk preference) apply immediately; the undo
+  // still goes through the human-authed path, so we stage it.
   await c.apply(ctx, value);
   await record(ctx, "settings.update", c.id, { before, after: value });
-  const undoToken = signToken({ purpose: "undo", controlId: c.id, prev: before, userId: ctx.userId }, ctx.secret, {
-    now: ctx.now?.(),
-  });
-  return {
-    status: "ok",
-    render: "setting",
-    summary: `"${title(t, c)}" → ${fmt(t, c, value)}`,
-    data: { controlId: c.id, title: title(t, c), before: fmt(t, c, before), after: fmt(t, c, value), undoToken },
-  };
+  return settingResult(t, c, before, value, await stageUndo(ctx, c.id, before));
 }
 
-async function undo(reg: Registry, ctx: ManageContext, undoToken: string): Promise<ManageResult> {
-  const t = manageT(ctx.locale);
-  const v = verifyToken(undoToken, ctx.secret, ctx.now?.());
-  if (!v.ok || v.payload.purpose !== "undo" || v.payload.userId !== ctx.userId) {
-    return err("undo_invalid", "The undo is invalid or expired.");
+// ── Server-side apply (the ONLY path a confirm-gated change or an undo runs) ───
+
+/** Consume a staged pending id (authorized by the caller's session/callback, NOT
+ *  the model) and execute it. This is what the web confirm endpoint and the
+ *  Telegram callback call. */
+export async function applyPending(reg: Registry, ctx: ManageContext, pendingId: string): Promise<ManageResult> {
+  const store = await pendingStore(ctx);
+  const rec = await store.consume(pendingId, ctx.userId);
+  if (!rec) return err("confirm_expired", "This confirmation is no longer valid — please ask again.");
+  // Apply in the SCOPE it was staged in — the web endpoint / Telegram callback
+  // has no project context, but a project-scoped change captured its projectId.
+  const ectx: ManageContext = { ...ctx, projectId: rec.projectId };
+  const p = rec.payload as PendingPayload;
+  switch (p.op) {
+    case "set":
+      return applySet(reg, ectx, p.controlId, p.value);
+    case "add":
+      return applyAdd(reg, ectx, p.collectionId, p.args);
+    case "remove":
+      return applyRemove(reg, ectx, p.collectionId, p.itemId);
   }
-  const c = reg.get(v.payload.controlId);
+}
+
+async function applySet(reg: Registry, ctx: ManageContext, controlId: string, value: string): Promise<ManageResult> {
+  const t = manageT(ctx.locale);
+  const c = reg.get(controlId);
   if (!c || !canAccess(ctx, c)) return err("not_found", "Setting unavailable.");
   if (c.requiredRole === "admin" && !ctx.isAdmin) return err("forbidden", "This action is admin-only.");
-
-  const parsed = c.schema.safeParse(v.payload.prev);
-  if (!parsed.success) return err("undo_invalid", "The previous value is no longer valid.");
-
-  const current = await c.read(ctx);
+  // Re-validate: state and the value's validity may have changed since staging.
+  const parsed = c.schema.safeParse(value);
+  if (!parsed.success) return err("invalid_value", parsed.error.issues[0]?.message ?? "Invalid value.");
+  const before = await c.read(ctx);
   await c.apply(ctx, parsed.data);
-  await record(ctx, "settings.undo", c.id, { restored: parsed.data });
+  await record(ctx, "settings.update", c.id, { before, after: parsed.data });
+  return settingResult(t, c, before, parsed.data, await stageUndo(ctx, c.id, before));
+}
+
+async function applyAdd(reg: Registry, ctx: ManageContext, collectionId: string, args: Record<string, unknown>): Promise<ManageResult> {
+  const t = manageT(ctx.locale);
+  const { coll, error } = resolveCollection(reg, ctx, collectionId);
+  if (error) return error;
+  if (!coll!.add) return err("unsupported", "This resource doesn't support adding.");
+  try {
+    if (coll!.validateAdd) await coll!.validateAdd(ctx, args); // re-check at apply time
+    const { itemTitle, action } = await coll!.add(ctx, args);
+    await record(ctx, `${coll!.auditNoun}.add`, coll!.id, { item: itemTitle });
+    return {
+      status: "ok",
+      render: "resource",
+      summary: loc(t, "op.added", `Added ${itemTitle}.`, { name: itemTitle }),
+      data: { op: "added", collectionId: coll!.id, title: coll!.title, itemTitle, action },
+    };
+  } catch (e) {
+    return err("apply_failed", errMsg(e));
+  }
+}
+
+async function applyRemove(reg: Registry, ctx: ManageContext, collectionId: string, itemId: string): Promise<ManageResult> {
+  const t = manageT(ctx.locale);
+  const { coll, error } = resolveCollection(reg, ctx, collectionId);
+  if (error) return error;
+  if (!coll!.remove) return err("unsupported", "This resource doesn't support removal.");
+  try {
+    const { itemTitle } = await coll!.remove(ctx, itemId);
+    await record(ctx, `${coll!.auditNoun}.remove`, coll!.id, { item: itemTitle });
+    return {
+      status: "ok",
+      render: "resource",
+      summary: loc(t, "op.removed", `Removed ${itemTitle}.`, { name: itemTitle }),
+      data: { op: "removed", collectionId: coll!.id, title: coll!.title, itemTitle },
+    };
+  } catch (e) {
+    return err("apply_failed", errMsg(e));
+  }
+}
+
+/** Stage an undo for a just-applied setting change (restoring `prev`). Best-effort
+ *  — losing the undo handle must not fail the change that already happened. */
+async function stageUndo(ctx: ManageContext, controlId: string, prev: string): Promise<string | undefined> {
+  try {
+    const store = await pendingStore(ctx);
+    return await store.stage({
+      userId: ctx.userId,
+      projectId: ctx.projectId,
+      kind: "undo",
+      payload: { op: "set", controlId, value: prev } satisfies PendingPayload,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function settingResult(t: ManageT, c: Control, before: string, after: string, undoPendingId?: string): ManageResult {
   return {
     status: "ok",
     render: "setting",
-    summary: `"${title(t, c)}" restored.`,
-    data: { controlId: c.id, title: title(t, c), before: fmt(t, c, current), after: fmt(t, c, parsed.data) },
+    summary: `"${title(t, c)}" → ${fmt(t, c, after)}`,
+    data: { controlId: c.id, title: title(t, c), before: fmt(t, c, before), after: fmt(t, c, after), undoPendingId },
   };
 }
 
@@ -261,8 +335,8 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
   const parsed = coll!.addSchema.safeParse(input.args);
   if (!parsed.success) return err("invalid_value", parsed.error.issues[0]?.message ?? "Invalid data.");
   const args = parsed.data as Record<string, unknown>;
-  // Pre-flight BOTH phases: refuse up front rather than show (or, on the confirmed
-  // call, apply) a change the caller can't make or whose content is invalid.
+  // Pre-flight so a doomed add is refused UP FRONT rather than shown as a card the
+  // user confirms only to hit apply_failed (authorization / invalid content).
   if (coll!.validateAdd) {
     try {
       await coll!.validateAdd(ctx, args);
@@ -270,35 +344,21 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
       return err("apply_failed", errMsg(e));
     }
   }
-  const key = `${coll!.id}:add`;
-  const argsHash = hashArgs(args);
-
-  if (!input.confirmToken) {
-    const preview = coll!.previewAdd?.(ctx, args) ?? { title: coll!.title, after: "" };
-    return {
-      status: "confirm_required",
-      render: "confirm",
-      summary: CONFIRM_NOTE,
-      confirmToken: issueConfirm(ctx, key, argsHash),
-      preview: { controlId: key, title: preview.title, before: "", after: preview.after, impact: preview.impact },
-    };
-  }
-  if (!confirmOk(ctx, key, argsHash, input.confirmToken)) {
-    return err("confirm_invalid", "The confirmation is invalid or expired — review again.");
-  }
-  try {
-    const { itemTitle, action } = await coll!.add(ctx, args);
-    await record(ctx, `${coll!.auditNoun}.add`, coll!.id, { item: itemTitle });
-    const t = manageT(ctx.locale);
-    return {
-      status: "ok",
-      render: "resource",
-      summary: loc(t, "op.added", `Added ${itemTitle}.`, { name: itemTitle }),
-      data: { op: "added", collectionId: coll!.id, title: coll!.title, itemTitle, action },
-    };
-  } catch (e) {
-    return err("apply_failed", errMsg(e));
-  }
+  const preview = coll!.previewAdd?.(ctx, args) ?? { title: coll!.title, after: "" };
+  const store = await pendingStore(ctx);
+  const pendingId = await store.stage({
+    userId: ctx.userId,
+    projectId: ctx.projectId,
+    kind: "apply",
+    payload: { op: "add", collectionId: coll!.id, args } satisfies PendingPayload,
+  });
+  return {
+    status: "confirm_required",
+    render: "confirm",
+    summary: CONFIRM_NOTE,
+    pendingId,
+    preview: { controlId: `${coll!.id}:add`, title: preview.title, before: "", after: preview.after, impact: preview.impact, details: preview.details, body: preview.body },
+  };
 }
 
 async function remove(reg: Registry, ctx: ManageContext, input: Extract<ManageInput, { action: "remove" }>): Promise<ManageResult> {
@@ -307,35 +367,23 @@ async function remove(reg: Registry, ctx: ManageContext, input: Extract<ManageIn
   if (error) return error;
   if (!coll!.remove) return err("unsupported", "This resource doesn't support removal.");
 
-  const key = `${coll!.id}:remove`;
-  const argsHash = hashArgs({ itemId: input.itemId });
-  if (!input.confirmToken) {
-    const items = await coll!.list(ctx);
-    const it = items.find((x) => x.id === input.itemId);
-    if (!it) return err("not_found", "No such item.");
-    return {
-      status: "confirm_required",
-      render: "confirm",
-      summary: CONFIRM_NOTE,
-      confirmToken: issueConfirm(ctx, key, argsHash),
-      preview: { controlId: key, title: loc(t, "op.removeTitle", `Remove from ${collLabel(t, coll!)}`, { coll: collLabel(t, coll!) }), before: it.title, after: "—" },
-    };
-  }
-  if (!confirmOk(ctx, key, argsHash, input.confirmToken)) {
-    return err("confirm_invalid", "The confirmation is invalid or expired — review again.");
-  }
-  try {
-    const { itemTitle } = await coll!.remove(ctx, input.itemId);
-    await record(ctx, `${coll!.auditNoun}.remove`, coll!.id, { item: itemTitle });
-    return {
-      status: "ok",
-      render: "resource",
-      summary: loc(t, "op.removed", `Removed ${itemTitle}.`, { name: itemTitle }),
-      data: { op: "removed", collectionId: coll!.id, title: coll!.title, itemTitle },
-    };
-  } catch (e) {
-    return err("apply_failed", errMsg(e));
-  }
+  const items = await coll!.list(ctx);
+  const it = items.find((x) => x.id === input.itemId);
+  if (!it) return err("not_found", "No such item.");
+  const store = await pendingStore(ctx);
+  const pendingId = await store.stage({
+    userId: ctx.userId,
+    projectId: ctx.projectId,
+    kind: "apply",
+    payload: { op: "remove", collectionId: coll!.id, itemId: input.itemId } satisfies PendingPayload,
+  });
+  return {
+    status: "confirm_required",
+    render: "confirm",
+    summary: CONFIRM_NOTE,
+    pendingId,
+    preview: { controlId: `${coll!.id}:remove`, title: loc(t, "op.removeTitle", `Remove from ${collLabel(t, coll!)}`, { coll: collLabel(t, coll!) }), before: it.title, after: "—" },
+  };
 }
 
 async function toggle(reg: Registry, ctx: ManageContext, target: string, itemId: string, enabled: boolean): Promise<ManageResult> {

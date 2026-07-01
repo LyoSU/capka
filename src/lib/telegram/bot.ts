@@ -409,6 +409,42 @@ async function buildBot(): Promise<Bot | null> {
     await reply(ctx, "modelSet", { values: { model: choice.label } });
   });
 
+  // A staged `manage` confirmation was tapped. Applying is done HERE (server-side,
+  // keyed to the tapping Telegram user), never by the model — so a prompt-injected
+  // agent can stage but never self-confirm. callback_data is `mc:<pendingId>`;
+  // the pending id is a nanoid, well under the 64-byte callback limit.
+  bot.callbackQuery(/^mc:(.+)$/, async (ctx) => {
+    const t = tFor(ctx);
+    const link = await findLink(ctx.from!.id);
+    if (!link) { await ctx.answerCallbackQuery(); return; }
+    const [u] = await db.select({ role: users.role, locale: users.locale }).from(users).where(eq(users.id, link.userId)).limit(1);
+    const [{ applyPending }, { buildRegistry }] = await Promise.all([
+      import("@/lib/manage/dispatch"),
+      import("@/lib/manage/controls"),
+    ]);
+    const result = await applyPending(buildRegistry(), {
+      userId: link.userId, isAdmin: u?.role === "admin", projectId: null, locale: u?.locale ?? undefined,
+    }, ctx.match![1]);
+    const msg =
+      result.status === "ok" ? t("confirmApplied")
+      : result.status === "error" && result.code === "confirm_expired" ? t("confirmExpired")
+      : t("confirmFailed");
+    await ctx.answerCallbackQuery({ text: msg });
+    await ctx.editMessageReplyMarkup().catch(() => {}); // drop the buttons so it can't be re-tapped
+    await ctx.reply(msg).catch(() => {}); // durable trail of the outcome
+  });
+
+  // Cancel a staged confirmation — drop it and clear the buttons.
+  bot.callbackQuery(/^mx:(.+)$/, async (ctx) => {
+    const link = await findLink(ctx.from!.id);
+    await ctx.answerCallbackQuery({ text: tFor(ctx)("confirmCancelled") });
+    await ctx.editMessageReplyMarkup().catch(() => {});
+    if (link) {
+      const { dbPendingStore } = await import("@/lib/manage/pending");
+      await dbPendingStore.cancel(ctx.match![1], link.userId).catch(() => {});
+    }
+  });
+
   // Plain text → straight into the engine.
   bot.on("message:text", (ctx) => ingest(ctx, ctx.message.text, []));
 

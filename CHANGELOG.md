@@ -44,13 +44,17 @@ All notable changes to Capka are documented here. Format follows
   `max_context_tokens`, `model_max_price`) — all in plain language, no settings
   page required. Role is enforced server-side from the session identity (never
   the model's arguments): a non-admin cannot even see, let alone change, org
-  settings. Risky org-wide changes are two-phase — the agent shows a
-  before→after preview and only applies after an explicit confirmation
-  (HMAC-signed, single-purpose, 10-minute confirm token bound to user + control +
-  value, so a confirmed change can't be swapped for a different one). Every
-  change is recorded in the audit log (`settings.update` / `settings.undo`) and
-  is reversible via an undo token. The existing `/settings` pages are unchanged
-  and remain the alternative.
+  settings. Risky org-wide changes are two-phase and the confirmation is a real
+  security boundary, not a prompt: the agent can only STAGE a change (server-side,
+  single-use, 10-minute TTL, bound to the user); it never receives a token it
+  could replay. Only the user's own click — the web Confirm button (session
+  cookie) or a Telegram inline button (callback) — applies it, so a
+  prompt-injected agent in an admin session cannot self-confirm a change (e.g.
+  disable the SSRF guard). The exact staged mutation is stored, so a confirmed
+  change can't be swapped for a different one. Every change is recorded in the
+  audit log (`settings.update` / `settings.undo`) and is reversible via an Undo
+  that travels the same human-authed path. The existing `/settings` pages are
+  unchanged and remain the alternative.
 - **MCP connectors are now manageable from chat too.** The `manage` tool gained a
   collection abstraction: `get mcp` lists connectors; `add`/`remove` (confirm-gated),
   `enable`/`disable`, `debug` (live reachability/auth probe) and `connect` operate

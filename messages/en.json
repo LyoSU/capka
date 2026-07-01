@@ -439,15 +439,22 @@
       "apply": "Confirm",
       "cancel": "Cancel",
       "undo": "Undo change",
-      "applyMsg": "Yes, apply the change to \"{title}\" → \"{after}\".",
-      "cancelMsg": "No, leave \"{title}\" unchanged.",
-      "undoMsg": "Undo the change to \"{title}\" — restore the previous value.",
+      "recheckMsg": "Re-check the {name} connector.",
       "debugTitle": "Diagnostics",
       "connectorsTitle": "Connectors",
       "openHint": "Open the link to continue",
       "statusOn": "on",
       "statusOff": "off",
-      "statusSignin": "sign-in"
+      "statusSignin": "sign-in",
+      "applying": "Applying…",
+      "confirmed": "Confirmed",
+      "reverted": "Reverted",
+      "expired": "This confirmation expired — just ask again.",
+      "applyError": "Couldn't apply that — please try again.",
+      "cancelled": "Cancelled.",
+      "recheck": "Re-check",
+      "viewInstructions": "View full instructions",
+      "emptyConnectors": "No connectors yet. Just ask — e.g. \"connect Linear\"."
     }
   },
   "projects": {
@@ -1281,7 +1288,13 @@
     "modelPrompt": "🧠 Pick a model for this chat:",
     "modelSet": "✅ Now using *{model}* in this chat.",
     "modelEmpty": "No models available yet. Add a provider in Capka settings.",
-    "modelStale": "That list is out of date — send /model again."
+    "modelStale": "That list is out of date — send /model again.",
+    "confirmApply": "✓ Confirm",
+    "confirmCancel": "Cancel",
+    "confirmApplied": "✓ Done.",
+    "confirmCancelled": "Cancelled.",
+    "confirmExpired": "This confirmation expired — just ask again.",
+    "confirmFailed": "Couldn't apply that — please try again."
   },
   "updateBanner": {
     "message": "Capka {version} is available.",

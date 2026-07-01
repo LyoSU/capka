@@ -23,7 +23,7 @@ import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
-import { getSandboxNetworkDefault, getMaxContextTokens, getMasterKey } from "@/lib/settings";
+import { getSandboxNetworkDefault, getMaxContextTokens } from "@/lib/settings";
 import { makeManageTool } from "@/lib/manage/tool";
 import { getModelContextLength } from "@/lib/models/catalog";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
@@ -328,12 +328,12 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     // Conversational control plane: lets the user manage their own preferences,
     // and admins manage platform-wide config, all in chat. Role is fixed here
     // from the session identity (not the model's arguments), and risky org-wide
-    // changes are gated behind a confirm-token round-trip inside the tool.
+    // changes are STAGED — applied only by the user's own click (web/Telegram),
+    // never by the model, so this tool can't self-confirm a change.
     const manage = makeManageTool({
       userId,
       isAdmin: user?.role === "admin",
       projectId: payload.projectId ?? null,
-      secret: await getMasterKey(),
       locale: user?.locale ?? payload.origin?.locale ?? undefined,
     });
     const tools = {
@@ -432,6 +432,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // sees what went wrong.
   let messageInserted = false;
   const parts: StoredPart[] = [];
+  // If a turn ends staging a `manage` confirmation, the finished Telegram message
+  // carries native Confirm/Cancel buttons (the web renders its own card). Last
+  // confirm_required in the turn wins — that's the one still awaiting the user.
+  let pendingConfirm: { pendingId: string; title: string; before: string; after: string } | undefined;
   // Per-message monotonic event counter. Stamped on every realtime event that
   // mutates/finalizes this reply (text/reasoning deltas, tool steps, reset,
   // finish). The persisted snapshot records the seq it covers (metadata.streamSeq),
@@ -955,6 +959,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // the realtime publish below can choke. See stripNul.
             const output = stripNul(event.output);
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output });
+            // Surface a staged confirmation to the (Telegram) delivery sink so the
+            // final message can carry Confirm/Cancel buttons tied to the pending id.
+            if (event.toolName === "manage") {
+              const o = output as { status?: string; pendingId?: string; preview?: { title?: string; before?: string; after?: string } } | null;
+              if (o?.status === "confirm_required" && o.pendingId) {
+                pendingConfirm = { pendingId: o.pendingId, title: o.preview?.title ?? "", before: o.preview?.before ?? "", after: o.preview?.after ?? "" };
+              }
+            }
             // The full output is in `parts` (saved to the DB at finish-step). Over
             // realtime we ship it only if it fits NOTIFY's budget; an oversized
             // body (e.g. a loaded skill) is dropped here so the small state-flip
@@ -1373,6 +1385,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt, reasoningMs,
       ...(blindModalities.length ? { blindModalities } : {}),
+      ...(pendingConfirm ? { confirm: pendingConfirm } : {}),
     });
     // Deliver any files the agent created/edited this run to the origin channel
     // (Telegram). Best-effort and only on success — never fail the task over it.
