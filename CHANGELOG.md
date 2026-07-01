@@ -34,6 +34,19 @@ All notable changes to Capka are documented here. Format follows
   hint is trimmed.
 
 ### Fixed
+- **Reasoning models behind an OpenAI-compatible endpoint (Cerebras via a LiteLLM
+  proxy, etc.) no longer die on the second turn.** The `@ai-sdk/openai-compatible`
+  adapter echoes a model's own prior `reasoning_content` back into the request
+  history (vercel/ai#15042); some backends accept that field only on output and
+  reject it on input, so any tool-calling or multi-turn chat 400'd with
+  `messages.N.assistant.reasoning_content: property … is unsupported`. The runner
+  now detects that specific rejection and re-streams once with reasoning stripped
+  from the historical assistant turns (the DB/UI transcript keeps it — only the
+  model's view drops it). Reactive by design: because the backend is opaque behind
+  a LiteLLM proxy, it only strips after a rejection, so DeepSeek — which *requires*
+  `reasoning_content` passed back — is never touched. Setting LiteLLM's
+  `merge_reasoning_content_in_choices` does not fix this: Capka re-extracts inline
+  `<think>` back into reasoning parts, so the field returns on the next turn.
 - **The context-window "full" meter and auto-compaction no longer overstate usage
   on multi-step turns.** A turn that makes several LLM calls (a tool-calling loop)
   re-reads the same growing prefix from cache on every step; `usage.input`/

@@ -37,7 +37,7 @@ import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { maintainMemoryDoc, readMemoryDocs } from "@/lib/memory/store";
 import { makeMemoryTools } from "@/lib/memory/tool";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
 import { delay } from "@ai-sdk/provider-utils";
 import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
@@ -829,6 +829,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     };
 
     let retried = false;
+    let reasoningStripped = false;
     const consume = async () => {
       // Arm the stall watchdog for this attempt: it fires only while we're waiting
       // on the model (paused during local tool runs) and is torn down whatever way
@@ -1047,6 +1048,28 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         useReasoning = false;
         streamError = undefined;
         await discardPartial();
+        foldDiscarded();
+        result = makeStream();
+        await consume();
+        return true;
+      }
+      if (!reasoningStripped && isReasoningEchoRejectedError(err)) {
+        // The backend behind this OpenAI-compatible endpoint (e.g. Cerebras via a
+        // LiteLLM proxy) rejects the model's own `reasoning_content` when it's
+        // echoed back in history — the openai-compatible SDK serializes prior
+        // reasoning parts as that field unconditionally (vercel/ai#15042). We
+        // can't know the backend up front, so strip reasoning from the historical
+        // assistant turns and re-stream once. `reasoning` parts are display-only
+        // here; the DB/UI transcript keeps them, only the model's view drops them.
+        tlog.info("provider rejects reasoning_content echo — retrying with reasoning stripped from history");
+        reasoningStripped = true;
+        streamError = undefined;
+        await discardPartial();
+        for (const m of modelMessages) {
+          if (m.role === "assistant" && Array.isArray(m.content)) {
+            m.content = m.content.filter((p) => p.type !== "reasoning");
+          }
+        }
         foldDiscarded();
         result = makeStream();
         await consume();

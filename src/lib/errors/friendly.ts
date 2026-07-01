@@ -139,6 +139,28 @@ export function isReasoningUnsupportedError(raw: unknown): boolean {
 }
 
 /**
+ * A DIFFERENT failure from `isReasoningUnsupportedError`: here the model DID
+ * reason, but the backend rejects the model's OWN prior `reasoning_content` when
+ * it's echoed back in history. `@ai-sdk/openai-compatible` serializes past
+ * reasoning parts as `reasoning_content` unconditionally (vercel/ai#15042), and
+ * some OpenAI-compatible backends (Cerebras — often behind a LiteLLM proxy, so we
+ * can't tell up front) accept that field only on OUTPUT and 400 on input. On a
+ * hit the runner strips reasoning from history and re-streams once. Tied to the
+ * literal wire field `reasoning_content` + a rejection verb so it can't fire on
+ * DeepSeek's opposite demand ("reasoning_content ... must be passed back"), where
+ * stripping would loop the turn.
+ */
+export function isReasoningEchoRejectedError(raw: unknown): boolean {
+  const detail = errorText(raw);
+  return (
+    /reasoning_content/i.test(detail) &&
+    /\b(unsupported|not supported|not allowed|not permitted|invalid|unexpected|unrecognized|unknown)\b/i.test(
+      detail,
+    )
+  );
+}
+
+/**
  * Any native attachment a provider rejects — image/vision, audio, or file/PDF.
  * A superset of `isVisionUnsupportedError`: the runner optimistically trusts the
  * catalog's per-model modalities (which can over-claim for a custom backend), so
