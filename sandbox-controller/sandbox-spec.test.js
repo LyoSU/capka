@@ -42,6 +42,14 @@ describe("buildSandboxConfig — locked security posture", () => {
       .toEqual(["CHOWN", "SETUID", "SETGID", "NET_ADMIN", "NET_RAW"]);
   });
 
+  it("points iptables at a writable lock file when networking is on (/run is read-only)", () => {
+    // ReadonlyRootfs means iptables-legacy can't create its default /run/xtables.lock;
+    // redirect it to the writable /tmp tmpfs or the fail-closed firewall dies on startup.
+    expect(buildSandboxConfig({ ...base, networkMode: "bridge" }).Env).toContain("XTABLES_LOCKFILE=/tmp/xtables.lock");
+    // Not set when there's no firewall to run.
+    expect(buildSandboxConfig(base).Env).not.toContain("XTABLES_LOCKFILE=/tmp/xtables.lock");
+  });
+
   it("does NOT pin the container user — the entrypoint needs root to chown mounts, then drops to 1000", () => {
     // The persistent process and every `docker exec` (the agent's actual commands)
     // run as uid 1000 — that's enforced by the entrypoint's privilege drop and by

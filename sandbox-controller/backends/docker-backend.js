@@ -61,6 +61,13 @@ export class DockerBackend {
         this._ensured = false;
         await this.ensureRuntime();
         container = await this.docker.createContainer(config);
+      } else if (/already in use/i.test(e.message)) {
+        // A prior container with this session's fixed name crashed and was never
+        // reaped, so its name blocks the new one. We ARE the session's owner
+        // (re)creating it, so force-remove the stale husk and retry — otherwise the
+        // session is wedged forever on a 409 name conflict.
+        await this.docker.getContainer(config.name).remove({ force: true }).catch(() => {});
+        container = await this.docker.createContainer(config);
       } else {
         throw e;
       }

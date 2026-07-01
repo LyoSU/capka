@@ -22,6 +22,27 @@ describe("DockerBackend (mocked dockerode)", () => {
     expect(cfg.Labels["capka.user"]).toBe("u1");
   });
 
+  it("create() self-heals a stale name conflict — force-removes the leftover container and retries", async () => {
+    const start = vi.fn().mockResolvedValue();
+    // A prior container crashed and was never reaped; its fixed name blocks the new one.
+    const createContainer = vi.fn()
+      .mockRejectedValueOnce(new Error('Conflict. The container name "/sandbox-s1" is already in use by container "old123"'))
+      .mockResolvedValue({ id: "c-new", start });
+    const remove = vi.fn().mockResolvedValue();
+    const getContainer = vi.fn(() => ({ remove }));
+    const docker = { ...imagePresent, createContainer, getContainer };
+    const b = new DockerBackend({ docker, image: "img:1", runtime: "runsc" });
+    const { handle } = await b.create({
+      sessionId: "s1", userId: "u1", wsHostPath: "/w", sharedHostPath: "/s",
+      networkMode: "none", memoryBytes: 1, nanoCpus: 1,
+    });
+    expect(handle).toBe("c-new");
+    expect(getContainer).toHaveBeenCalledWith("sandbox-s1");
+    expect(remove).toHaveBeenCalledWith({ force: true });
+    expect(createContainer).toHaveBeenCalledTimes(2);
+    expect(start).toHaveBeenCalled();
+  });
+
   it("list() maps labeled containers to RecoveredSandbox shape", async () => {
     const listContainers = vi.fn().mockResolvedValue([
       { Id: "c1", State: "running", Labels: { "capka.session": "s1", "capka.user": "u1" } },

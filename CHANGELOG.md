@@ -6,6 +6,19 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-01
+
+### Fixed
+- **Completes the gVisor egress fix** (0.1.2 was still partial). Two more pieces,
+  both automatic — **no config/env change needed**:
+  - iptables-legacy needs a writable lock, but the sandbox rootfs is read-only and
+    `/run` isn't a writable mount, so the firewall died on `/run/xtables.lock`. The
+    controller now points it at the writable `/tmp` tmpfs (`XTABLES_LOCKFILE`),
+    set automatically only when egress is on.
+  - a crashed sandbox container left its fixed name behind, so recreating the
+    session failed with a 409 name conflict forever. The controller now
+    force-removes the stale husk and retries.
+
 ## [0.1.2] - 2026-07-01
 
 ### Fixed

@@ -55,7 +55,11 @@ export function buildSandboxConfig({
     Env: [
       "PYTHONUNBUFFERED=1",
       "LANG=C.UTF-8",
-      ...(networkMode === "bridge" ? ["SANDBOX_EGRESS_FILTER=1"] : []),
+      // XTABLES_LOCKFILE: iptables-legacy defaults its lock to /run/xtables.lock,
+      // but the rootfs is read-only and /run isn't a writable mount — so the lock
+      // open fails and the fail-closed egress firewall kills the container. Point
+      // it at the writable /tmp tmpfs. (Only meaningful alongside the firewall.)
+      ...(networkMode === "bridge" ? ["SANDBOX_EGRESS_FILTER=1", "XTABLES_LOCKFILE=/tmp/xtables.lock"] : []),
     ],
     HostConfig: {
       Memory: memoryBytes,
