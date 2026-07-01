@@ -93,8 +93,11 @@ services:
 
   platform:
     image: ghcr.io/lyosu/capka-platform:${CAPKA_VERSION:-latest}
+    # Host port is env-tunable so this stack can coexist with another app already
+    # bound to 3000 on the same box (set PLATFORM_PORT in the deploy env, e.g.
+    # 3005, then point that host's routing at the new port). Container port is 3000.
     ports:
-      - "3000:3000"
+      - "${PLATFORM_PORT:-3000}:3000"
     volumes:
       - ./data:/app/data
     environment:

@@ -134,8 +134,10 @@ services:
     # Prebuilt image (published on release tags). `build:` stays as a fallback so
     # cloning + building works with no image present; `pull` fetches the image.
     image: ghcr.io/lyosu/capka-platform:${CAPKA_VERSION:-latest}
+    # Host port is env-tunable so multiple stacks (or another app already on 3000)
+    # can coexist on one box without a port clash. Container port stays 3000.
     ports:
-      - "3000:3000"
+      - "${PLATFORM_PORT:-3000}:3000"
     volumes:
       - ./data:/app/data
     environment:
