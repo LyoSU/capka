@@ -5,6 +5,14 @@ name: Publish images
 # needed on the host. The base compose keeps its `build:` stanzas as a fallback,
 # so cloning + building still works without any of these images existing.
 #
+# Architecture: each image is built once PER architecture on a native runner
+# (amd64 on ubuntu-24.04, arm64 on ubuntu-24.04-arm — both free on public repos),
+# then a separate `merge` job stitches the two per-arch digests into one
+# multi-arch manifest list carrying the semver tags. This replaces the old
+# single-runner QEMU cross-build: arm64 is no longer emulated instruction-by-
+# instruction (which crawled on the heavy `sandbox` apt layer), and the two
+# arches build in parallel, so total time is ≈ max(amd64, arm64), not their sum.
+#
 # First run prerequisites (one-time, in the GitHub repo): Settings → Actions →
 # Workflow permissions must allow read/write, and the resulting packages default
 # to private — make them public (or pull with a token) for unauthenticated pulls.
@@ -18,12 +26,14 @@ permissions:
   packages: write
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  build:
+    # One job per (image, arch) cell → 6 native jobs, no QEMU. arm64 cells land
+    # on GitHub's free public-repo ARM runner; amd64 on the standard one.
+    runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        image:
           - name: platform
             context: .
             file: Dockerfile
@@ -36,15 +46,20 @@ jobs:
             context: .
             file: Dockerfile.sandbox
             target: ""
+        platform:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
 
-      # QEMU lets a single amd64 runner cross-build the arm64 variant too, so each
-      # published image is a multi-arch manifest list. This is what lets Capka run
-      # on cheap ARM VPSes (e.g. Hetzner CAX) — the host pulls its native arch and
-      # never falls back to compiling locally. arm64 emulation is slower, but this
-      # only runs on release tags, not per push.
-      - uses: docker/setup-qemu-action@v3
+      # GHCR rejects a mixed-case path, but github.repository_owner is "LyoSU".
+      # metadata-action lowercases its own output, but here we hand-build the
+      # image ref for both build-push's outputs.name and the merge step, so
+      # lowercase it once ourselves (bash ${var,,}) and reuse it.
+      - id: img
+        run: echo "ref=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/capka-${{ matrix.image.name }}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -54,27 +69,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # metadata-action lowercases the image name, so a mixed-case owner (LyoSU)
-      # still produces a valid ghcr.io/lyosu/capka-* reference.
+      # Only labels here — no tags. The per-arch image is pushed by digest and
+      # stays untagged; the merge job attaches the human tags to the manifest.
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/capka-${{ matrix.name }}
-          # Keep the `v` prefix so image tags match the git tag (v0.1.0): the
-          # default {{version}} pattern strips it, which would make the scripts'
-          # `:v0.1.0` pull 404 and fall back to a local build.
-          tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=raw,value=latest
+          images: ${{ steps.img.outputs.ref }}
 
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          target: ${{ matrix.target }}
-          platforms: linux/amd64,linux/arm64
-          push: true
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          target: ${{ matrix.image.target }}
+          platforms: linux/${{ matrix.platform.arch }}
           provenance: false
           # Stamp the version into the platform image so Settings → Updates can
           # report it. Use the exact git ref (v0.1.0 on a tag) so it matches the
@@ -83,11 +91,83 @@ jobs:
           build-args: |
             CAPKA_VERSION=${{ github.ref_name }}
             CAPKA_GIT_SHA=${{ github.sha }}
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          # mode=min (not max): multi-arch builds of the heavy sandbox image blow
-          # past the repo's 10 GB GHA cache budget with mode=max. min still caches
-          # the exported image layers (incl. the expensive apt layer), just not
-          # every intermediate build stage.
-          cache-to: type=gha,mode=min
+          # push-by-digest: publish the layers under a content-addressed digest
+          # with no tag. The merge job references these digests to assemble the
+          # manifest list.
+          outputs: type=image,name=${{ steps.img.outputs.ref }},push-by-digest=true,name-canonical=true,push=true
+          # One cache scope per (image, arch): a native arm64 build no longer
+          # shares (and invalidates) the amd64 scope. mode=max is affordable now
+          # that each arch is a single-platform build — no more doubling the
+          # heavy sandbox layers into one 10 GB-budgeted key.
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }},mode=max
+
+      # Hand the digest to the merge job. The filename is the digest itself; the
+      # file is empty — merge only needs the names.
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [platform, controller, sandbox]
+    steps:
+      # Pull both per-arch digest markers for this image (merge-multiple flattens
+      # the two upload-artifact names into one /tmp/digests dir).
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.name }}-*
+          merge-multiple: true
+
+      - id: img
+        run: echo "ref=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/capka-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Keep the `v` prefix so image tags match the git tag (v0.1.0): the default
+      # {{version}} pattern strips it, which would make the scripts' `:v0.1.0`
+      # pull 404 and fall back to a local build.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.img.outputs.ref }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=raw,value=latest
+
+      # Stitch the per-arch digests into one manifest list per tag. jq builds the
+      # `-t ref:tag` flags from metadata's JSON; the trailing loop appends each
+      # digest as a source (ref@sha256:...).
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ steps.img.outputs.ref }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect ${{ steps.img.outputs.ref }}:${{ steps.meta.outputs.version }}
