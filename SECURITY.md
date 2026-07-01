@@ -108,6 +108,30 @@ marketplace sources as you would any dependency: install from repos you trust.
 - `scripts/up.sh` generates strong values into `.env` (mode `600`) on first run
   and never overwrites an operator-set value.
 
+## Chat-driven configuration (the `manage` tool)
+
+Users and admins can change settings, connectors and skills by asking the agent
+(see `src/lib/manage/`). This is designed so the **agent cannot change anything
+sensitive on its own** — important because the agent processes untrusted content
+(scraped pages, uploaded files, MCP tool results) that could carry a prompt
+injection.
+
+- **Role from the session, never the prompt.** Every action is authorized from
+  the signed-in identity in `dispatch.ts`; a non-admin cannot even see org
+  settings (`get` on a hidden control returns `not_found`, no enumeration leak).
+- **Confirmation is a real boundary, not the model's word.** A risky change
+  (any org setting, adding/removing a connector or skill) is only ever *staged*:
+  the server stores the exact pending mutation (single-use, 10-minute TTL, bound
+  to the user) and hands the model only an opaque id it cannot replay. The change
+  applies **only** when the human acts on their own authenticated channel — the
+  web Confirm button (session cookie) or a Telegram inline button (callback tied
+  to the Telegram user). So a prompt-injected agent in an admin session can *ask*
+  to disable the egress firewall, but cannot apply it; the staged change dies at
+  its TTL unless the human clicks. Undo travels the same path.
+- **Secrets never transit chat.** Connectors that need an API token are
+  configured on the settings page, not dictated to the agent; the agent only
+  wires up OAuth (a browser sign-in handoff) and non-secret config.
+
 ## Known limitations & residual risks
 
 We'd rather state these plainly than imply a stronger posture than ships today.
