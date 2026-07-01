@@ -60,6 +60,9 @@ export async function loadMcpTools(opts: {
   warming: Promise<unknown>;
 }> {
   const allow = opts.isServerAllowed ?? (() => true);
+  // Passed to every adapted tool so an oversized result can be parked in the
+  // workspace (off-disk via the controller file API — no container needed).
+  const spillCtx = { sessionKey: opts.sessionKey, userId: opts.userId };
   const configs = (await listEnabledServerConfigs(opts.userId, opts.projectId))
     .filter((c) => allow(c.name))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -124,7 +127,7 @@ export async function loadMcpTools(opts: {
     await Promise.allSettled(batch.map(async (c) => {
       const conn = await connect(c);
       for (const mt of [...conn.tools].sort((a, b) => a.name.localeCompare(b.name))) {
-        tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(conn.client, c.name, mt);
+        tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(conn.client, c.name, mt, spillCtx);
       }
     }));
   }
@@ -136,7 +139,7 @@ export async function loadMcpTools(opts: {
     if (cached) {
       const caller = lazyCaller(c);
       for (const mt of [...cached].sort((a, b) => a.name.localeCompare(b.name))) {
-        tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(caller, c.name, mt);
+        tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(caller, c.name, mt, spillCtx);
       }
     } else if (!(c.id && recentlyFailed(opts.userId, c.id, CONNECT_BACKOFF_MS))) {
       warmups.push(connect(c).catch(() => {})); // failures already recorded above

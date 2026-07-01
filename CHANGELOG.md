@@ -7,6 +7,24 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Changed
+- **A large MCP connector result no longer floods the context window or the
+  database.** A connector is untrusted and can return an arbitrarily large text
+  blob or a multi-megabyte base64 image/file; previously the text was clamped for
+  the model but the *full* result (including whole media blobs) was still
+  persisted to Postgres and re-sent to the model every turn — real cost, and a big
+  enough blob could trip the reactive `context_too_long` recovery. Now every MCP
+  result is bounded at the moment it is produced: oversized **text** is parked in
+  the session workspace (`/workspace/.capka/output/mcp/`, off-disk via the
+  controller file API — no container needed) and the model gets a clamped view
+  that points at the file to `read_file`/grep, exactly like the sandbox
+  capture-to-file logs; an oversized **image/audio/file** blob (over
+  `MAX_MCP_MEDIA_BYTES`, default 5 MB) is likewise parked and replaced with a
+  text pointer the model can process programmatically (OCR/ffprobe/convert)
+  instead of being inlined. Tune with `MAX_MCP_MEDIA_BYTES` and the existing
+  `MAX_TOOL_OUTPUT_CHARS`.
+- **MCP tool descriptions are now capped** at `MAX_MCP_TOOL_DESC_CHARS` (default
+  1024) before they reach the model. Some servers ship enormous per-tool
+  descriptions that tax the context of *every* call before any tool even runs.
 - The "update available" banner is now **dismissible** — a close button hides it
   and remembers the release, so it stays gone for that version but returns when a
   newer one ships (it previously reappeared on every page load with no way to

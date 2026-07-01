@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mcpToolName, adaptMcpTool, sanitizeToolSchema } from "../adapt";
+import { spillToWorkspace } from "../spill";
+
+vi.mock("../spill", () => ({ spillToWorkspace: vi.fn() }));
+const mockedSpill = vi.mocked(spillToWorkspace);
 
 const opts = { toolCallId: "1", messages: [] };
 
@@ -106,5 +110,73 @@ describe("adaptMcpTool", () => {
         { type: "media", data: "BASE64", mediaType: "image/png" },
       ],
     });
+  });
+
+  it("clamps a runaway tool description (the per-call menu tax)", () => {
+    const huge = "x".repeat(5000);
+    const t = adaptMcpTool({ callTool: vi.fn() } as never, "srv", { name: "tool", description: huge });
+    expect((t.description as string).length).toBeLessThan(huge.length);
+    expect(t.description as string).toMatch(/…$/);
+  });
+});
+
+describe("adaptMcpTool bounding (execute)", () => {
+  beforeEach(() => mockedSpill.mockReset());
+
+  const run = (result: unknown, ctx = { sessionKey: "s", userId: "u" }) => {
+    const client = { callTool: vi.fn().mockResolvedValue(result) };
+    const t = adaptMcpTool(client as never, "x", { name: "y" }, ctx);
+    return t.execute!({}, { ...opts, abortSignal: new AbortController().signal } as never) as Promise<{
+      content: { type: string; text?: string; data?: string; mimeType?: string }[];
+    }>;
+  };
+
+  it("leaves small text and small media untouched", async () => {
+    const out = await run({ content: [
+      { type: "text", text: "short" },
+      { type: "image", data: "SMALL", mimeType: "image/png" },
+    ] });
+    expect(out.content).toEqual([
+      { type: "text", text: "short" },
+      { type: "image", data: "SMALL", mimeType: "image/png" },
+    ]);
+    expect(mockedSpill).not.toHaveBeenCalled();
+  });
+
+  it("spills oversized text and points the model at the saved file", async () => {
+    mockedSpill.mockResolvedValue("/workspace/.capka/output/mcp/1-abc.txt");
+    const big = "A".repeat(40_000);
+    const out = await run({ content: [{ type: "text", text: big }] });
+    expect(mockedSpill).toHaveBeenCalledTimes(1);
+    expect(out.content[0].type).toBe("text");
+    expect(out.content[0].text!.length).toBeLessThan(big.length);
+    expect(out.content[0].text).toContain("/workspace/.capka/output/mcp/1-abc.txt");
+  });
+
+  it("still clamps oversized text when spill fails (no file to point at)", async () => {
+    mockedSpill.mockResolvedValue(null);
+    const big = "A".repeat(40_000);
+    const out = await run({ content: [{ type: "text", text: big }] });
+    expect(out.content[0].text!.length).toBeLessThan(big.length);
+    expect(out.content[0].text).toContain("TRUNCATED");
+  });
+
+  it("replaces an oversized image with a text pointer instead of inlining megabytes", async () => {
+    mockedSpill.mockResolvedValue("/workspace/.capka/output/mcp/2-def.png");
+    const bigB64 = "A".repeat(6 * 1024 * 1024); // > MAX_MCP_MEDIA_BYTES (5 MB)
+    const out = await run({ content: [{ type: "image", data: bigB64, mimeType: "image/png" }] });
+    expect(mockedSpill).toHaveBeenCalledTimes(1);
+    expect(out.content[0]).toMatchObject({ type: "text" });
+    expect(out.content[0].data).toBeUndefined();
+    expect(out.content[0].text).toContain("/workspace/.capka/output/mcp/2-def.png");
+    expect(out.content[0].text).toContain("image/png");
+  });
+
+  it("omits an oversized image with an actionable note when it can't be saved", async () => {
+    mockedSpill.mockResolvedValue(null);
+    const bigB64 = "A".repeat(6 * 1024 * 1024);
+    const out = await run({ content: [{ type: "image", data: bigB64, mimeType: "image/png" }] });
+    expect(out.content[0].type).toBe("text");
+    expect(out.content[0].text).toContain("could not be saved");
   });
 });
