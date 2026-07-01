@@ -13,6 +13,14 @@ name: Publish images
 # instruction (which crawled on the heavy `sandbox` apt layer), and the two
 # arches build in parallel, so total time is ≈ max(amd64, arm64), not their sum.
 #
+# Release ordering matters: the in-app update banner keys off the newest GitHub
+# *Release* (api /releases/latest), while the host updater pulls the matching
+# image *tag*. If the Release existed before its images did, an operator who hit
+# "update" in that window would 404 on the pull and silently fall back to a slow
+# local build. So the `release` job publishes the GitHub Release LAST — only
+# after `merge` has pushed the images — which is why you do NOT `gh release
+# create` by hand: just push a vX.Y.Z tag and this workflow does the rest.
+#
 # First run prerequisites (one-time, in the GitHub repo): Settings → Actions →
 # Workflow permissions must allow read/write, and the resulting packages default
 # to private — make them public (or pull with a token) for unauthenticated pulls.
@@ -171,3 +179,44 @@ jobs:
 
       - name: Inspect image
         run: docker buildx imagetools inspect ${{ steps.img.outputs.ref }}:${{ steps.meta.outputs.version }}
+
+  # Publish the GitHub Release LAST — after merge has pushed every image tag — so
+  # the in-app update banner (which watches /releases/latest) can never point at a
+  # version whose images aren't pullable yet. Runs only on a real tag push, never
+  # on workflow_dispatch. Notes come from the matching CHANGELOG section, so the
+  # release procedure is just: bump CHANGELOG, commit, push a vX.Y.Z tag.
+  release:
+    runs-on: ubuntu-latest
+    needs: merge
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Via env, not inline in run: — keeps a tag value out of the shell command
+          # string (workflow-injection hygiene), even though vX.Y.Z tags are trusted.
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          version="${TAG#v}"
+          # Slice this version's section out of CHANGELOG: from its `## [x.y.z]`
+          # heading to the next `## [` heading. awk is fed $version as a variable
+          # (no shell interpolation into the program).
+          notes="$(awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { f = 1; next }
+            /^## \[/ { f = 0 }
+            f' CHANGELOG.md)"
+          notes="${notes}
+
+          **Full changelog:** https://github.com/${REPO}/blob/master/CHANGELOG.md"
+          # Idempotent and forgiving of a pre-created draft: if a release already
+          # exists for this tag (e.g. an operator staged notes as a draft), publish
+          # it as latest; otherwise create it fresh from the CHANGELOG slice.
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$REPO" --draft=false --latest --title "Capka $TAG 🐾" --notes "$notes"
+          else
+            gh release create "$TAG" --repo "$REPO" --latest --title "Capka $TAG 🐾" --notes "$notes"
+          fi
