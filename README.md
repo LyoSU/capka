@@ -65,11 +65,6 @@ A flat, efficient architecture so it's easy to self-host — even on one box.
 | **socket-proxy** | A firewall for the Docker API: only container + exec endpoints. The host socket is mounted read-only here alone, on an isolated network. |
 | **sandbox** | The execution image (`Dockerfile.sandbox`) — built once, reused per session. |
 
-> ⚠️ **Heads up if you want to contribute:** this runs on a heavily customized
-> **Next.js 16**. Because of the in-process worker loop, it's *not* a stock
-> Next.js app — read `AGENTS.md` and check `node_modules/next/dist/docs/` before
-> touching framework internals.
-
 ## Getting started (local dev)
 
 Zero-config — the dev compose file uses loopback-only ports and dev secrets, so
