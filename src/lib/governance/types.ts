@@ -29,6 +29,8 @@ export type AuditAction =
   | "connector.add" | "connector.remove" | "connector.enable" | "connector.disable"
   | "skill.add"
   | "policy.set" | "policy.clear"
+  // Chat-driven configuration changes via the `manage` control plane.
+  | "settings.update" | "settings.undo"
   // Sensitive admin/security actions — privilege, account lifecycle, auth config,
   // and master-key exposure all belong in the tamper-evident trail for companies.
   | "user.role_change" | "user.status_change" | "user.remove"

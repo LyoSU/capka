@@ -23,7 +23,8 @@ import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
-import { getSandboxNetworkDefault, getMaxContextTokens } from "@/lib/settings";
+import { getSandboxNetworkDefault, getMaxContextTokens, getMasterKey } from "@/lib/settings";
+import { makeManageTool } from "@/lib/manage/tool";
 import { getModelContextLength } from "@/lib/models/catalog";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
@@ -273,7 +274,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
     readMemoryDocs(userId, payload.projectId ?? null),
-    db.select({ name: users.name, timezone: users.timezone, locale: users.locale })
+    db.select({ name: users.name, timezone: users.timezone, locale: users.locale, role: users.role })
       .from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]),
     db.select({ createdAt: chats.createdAt }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
   ]);
@@ -324,10 +325,21 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null, ensureSession });
     // Provider-executed tools (e.g. Gemini's Google Search grounding) join the
     // sandbox/MCP/skill + memory tools; empty for providers without any.
+    // Conversational control plane: lets the user manage their own preferences,
+    // and admins manage platform-wide config, all in chat. Role is fixed here
+    // from the session identity (not the model's arguments), and risky org-wide
+    // changes are gated behind a confirm-token round-trip inside the tool.
+    const manage = makeManageTool({
+      userId,
+      isAdmin: user?.role === "admin",
+      projectId: payload.projectId ?? null,
+      secret: await getMasterKey(),
+    });
     const tools = {
       ...sandbox.tools,
       ...mcp.tools,
       skill: skillTool,
+      ...manage,
       ...makeMemoryTools({ userId, projectId: payload.projectId ?? null }),
       ...providerNativeTools(provider),
     };

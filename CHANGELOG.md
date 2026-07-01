@@ -12,6 +12,22 @@ All notable changes to Capka are documented here. Format follows
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
 ### Added
+- **Conversational settings control plane — users and admins manage config from
+  chat via a new `manage` agent tool.** A regular user can change their own
+  preferences (interface language, timezone); an admin can additionally change
+  platform-wide settings (`platform_name`, `sandbox_enabled`, `sandbox_network`,
+  `block_private_provider_urls`, `share_admin_providers`,
+  `members_can_install_plugins`, `update_check_enabled`, `model_min_context`,
+  `max_context_tokens`, `model_max_price`) — all in plain language, no settings
+  page required. Role is enforced server-side from the session identity (never
+  the model's arguments): a non-admin cannot even see, let alone change, org
+  settings. Risky org-wide changes are two-phase — the agent shows a
+  before→after preview and only applies after an explicit confirmation
+  (HMAC-signed, single-purpose, 10-minute confirm token bound to user + control +
+  value, so a confirmed change can't be swapped for a different one). Every
+  change is recorded in the audit log (`settings.update` / `settings.undo`) and
+  is reversible via an undo token. The existing `/settings` pages are unchanged
+  and remain the alternative.
 - **`PLATFORM_BIND` env var to bind the platform port to a single interface.**
   Defaults to `0.0.0.0` (all interfaces — works out of the box). Set
   `PLATFORM_BIND=127.0.0.1` to publish loopback-only when a reverse proxy fronts
