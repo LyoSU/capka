@@ -1,15 +1,17 @@
 import { describe, it, expect } from "vitest";
 import type { ModelMessage } from "ai";
 import { isReasoningEchoRejectedError } from "@/lib/errors/friendly";
-import { stripReasoningFromMessages } from "@/lib/chat/context/step-control";
+import { foldReasoningIntoText } from "@/lib/chat/context/step-control";
 
-describe("stripReasoningFromMessages", () => {
-  it("drops reasoning parts from an intermediate tool-loop assistant message while keeping the tool call", () => {
+describe("foldReasoningIntoText", () => {
+  it("folds an intermediate tool-loop assistant's reasoning into text, keeping the tool call", () => {
     // This is the shape streamText re-feeds INSIDE its own tool loop: the
     // assistant turn that reasoned and then called a tool. The openai-compatible
     // SDK serializes the `reasoning` part back as `reasoning_content`, which
-    // Cerebras 400s — so it must be stripped, but the tool-call part must survive
-    // or the following tool result is orphaned.
+    // Cerebras 400s. Cerebras' own docs say to retain the reasoning by prepending
+    // it into `content` instead — so the reasoning must become a text part (no
+    // reasoning_content field → no 400; context kept → no stall), and the
+    // tool-call part must survive or the following tool result is orphaned.
     const messages: ModelMessage[] = [
       { role: "user", content: "які ліміти на безкоштовний апі" },
       {
@@ -22,12 +24,25 @@ describe("stripReasoningFromMessages", () => {
       { role: "tool", content: [{ type: "tool-result", toolCallId: "c1", toolName: "firecrawl_search", output: { type: "text", value: "..." } }] },
     ] as ModelMessage[];
 
-    const out = stripReasoningFromMessages(messages);
-    const assistant = out[1];
-    expect(Array.isArray(assistant.content)).toBe(true);
-    const parts = assistant.content as Array<{ type: string }>;
-    expect(parts.some((p) => p.type === "reasoning")).toBe(false);
-    expect(parts.some((p) => p.type === "tool-call")).toBe(true);
+    const out = foldReasoningIntoText(messages);
+    const parts = out[1].content as Array<{ type: string; text?: string }>;
+    expect(parts.some((p) => p.type === "reasoning")).toBe(false); // no reasoning_content on the wire
+    expect(parts.some((p) => p.type === "tool-call")).toBe(true); // tool call preserved
+    const text = parts.find((p) => p.type === "text");
+    expect(text?.text).toContain("search the web for Cerebras limits"); // reasoning retained as text
+  });
+
+  it("prepends reasoning before existing answer text", () => {
+    const messages: ModelMessage[] = [
+      { role: "assistant", content: [
+        { type: "reasoning", text: "think" },
+        { type: "text", text: "answer" },
+      ] },
+    ] as ModelMessage[];
+    const parts = foldReasoningIntoText(messages)[0].content as Array<{ type: string; text: string }>;
+    expect(parts).toHaveLength(1);
+    expect(parts[0].type).toBe("text");
+    expect(parts[0].text).toBe("think\n\nanswer");
   });
 
   it("passes through messages with no reasoning parts untouched", () => {
@@ -35,7 +50,7 @@ describe("stripReasoningFromMessages", () => {
       { role: "user", content: "hi" },
       { role: "assistant", content: [{ type: "text", text: "hello" }] },
     ] as ModelMessage[];
-    expect(stripReasoningFromMessages(messages)).toEqual(messages);
+    expect(foldReasoningIntoText(messages)).toEqual(messages);
   });
 });
 

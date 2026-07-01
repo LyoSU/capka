@@ -28,7 +28,7 @@ import { getModelContextLength } from "@/lib/models/catalog";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions } from "@/lib/chat/context/provider-edits";
-import { stepSettings, stripReasoningFromMessages } from "@/lib/chat/context/step-control";
+import { stepSettings, foldReasoningIntoText } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
@@ -680,16 +680,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // only tweaks toolChoice — never rewrites messages — so it can't break the
         // prompt cache mid-turn (see stepSettings). EXCEPTION: once a backend has
         // rejected echoed reasoning_content, we DO rewrite messages per-step to
-        // strip reasoning — the offending echo is an intermediate tool-loop
-        // message invisible to modelMessages, so this is the only place to catch
-        // it. Breaking the cache is the accepted cost of not 400ing every turn.
+        // fold reasoning into content — the offending echo is an intermediate
+        // tool-loop message invisible to modelMessages, so this is the only place
+        // to catch it. Breaking the cache is the accepted cost of not 400ing.
         ...(hasTools
           ? {
               tools: tools as never,
               stopWhen: stepCountIs(25),
               prepareStep: ({ stepNumber, messages }) => ({
                 ...stepSettings(stepNumber),
-                ...(reasoningStripped ? { messages: stripReasoningFromMessages(messages) } : {}),
+                ...(reasoningStripped ? { messages: foldReasoningIntoText(messages) } : {}),
               }),
             }
           : {}),
@@ -1075,16 +1075,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // echoed back — the openai-compatible SDK serializes prior reasoning parts
         // as that field unconditionally (vercel/ai#15042). We can't know the
         // backend up front, so flip reasoningStripped and re-stream. Two echo
-        // sources, two removals: strip it from the historical modelMessages here
-        // (covers a no-tool multi-turn chat, which has no tool loop / prepareStep),
-        // AND — now that the flag is set — prepareStep strips it from every
-        // intermediate tool-loop message going forward. `reasoning` is display-only
-        // for the model; the DB/UI transcript keeps it.
-        tlog.info("provider rejects reasoning_content echo — retrying with reasoning stripped");
+        // sources, two folds: fold it into content on the historical modelMessages
+        // here (covers a no-tool multi-turn chat, which has no tool loop /
+        // prepareStep), AND — now that the flag is set — prepareStep folds it on
+        // every intermediate tool-loop message going forward. Reasoning is kept as
+        // content (Cerebras needs it back, just not as reasoning_content); the
+        // DB/UI transcript keeps the original reasoning parts untouched.
+        tlog.info("provider rejects reasoning_content echo — retrying with reasoning folded into content");
         reasoningStripped = true;
         streamError = undefined;
         await discardPartial();
-        modelMessages = stripReasoningFromMessages(modelMessages);
+        modelMessages = foldReasoningIntoText(modelMessages);
         foldDiscarded();
         result = makeStream();
         await consume();

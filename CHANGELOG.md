@@ -6,6 +6,19 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Cerebras gpt-oss (and similar reasoning models) now complete a tool-calling
+  turn instead of hanging.** v0.1.5 fixed the `reasoning_content` 400 by
+  *removing* the echoed reasoning — but Cerebras' gpt-oss is a reasoning model
+  that needs its own prior thinking to continue a tool-calling turn, so dropping
+  it entirely just traded the 400 for a silent 60s-per-attempt stall until the
+  turn failed. Per Cerebras' own docs, prior reasoning must be retained by
+  prepending it into the assistant message's `content` (not the `reasoning_content`
+  field, which it rejects on input). The recovery now *folds* reasoning into
+  content instead of dropping it: no `reasoning_content` on the wire (no 400) and
+  the thinking is preserved (no stall). Still reactive (only after a rejection),
+  so DeepSeek — which requires the field passed back verbatim — is untouched.
+
 ## [0.1.5] - 2026-07-01
 
 ### Fixed
