@@ -1076,7 +1076,7 @@
       "upToDate": "Up to date",
       "viewChangelog": "View changelog",
       "howTo": "How to update",
-      "howToHint": "Run this on the host where Capka is installed. It pulls the new images and restarts the stack — your data and settings are kept.",
+      "howToHint": "Run this on the host where Capka is installed — your data and settings are kept.",
       "copy": "Copy",
       "copied": "Copied",
       "copyFailed": "Couldn't copy",
@@ -1259,6 +1259,7 @@
   },
   "updateBanner": {
     "message": "Capka {version} is available.",
-    "action": "Update"
+    "action": "Update",
+    "dismiss": "Dismiss"
   }
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ArrowUpCircle, Check, CheckCircle2, Copy, ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { Markdown } from "@/components/chat/markdown";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useIsAdmin } from "@/hooks/use-is-admin";
@@ -130,9 +131,9 @@ export default function UpdatesSettingsPage() {
               )}
             </div>
             {status.notes && (
-              <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-                {status.notes}
-              </pre>
+              <div className="chat-prose mt-2 max-h-48 overflow-y-auto rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+                <Markdown>{status.notes}</Markdown>
+              </div>
             )}
             {status.releaseUrl && (
               <a
