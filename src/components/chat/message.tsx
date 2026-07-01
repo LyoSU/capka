@@ -19,6 +19,7 @@ import { cleanReasoning } from "@/lib/chat/reasoning";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
+import { ManageCard, isManageCard } from "./manage-cards";
 
 // --- Helpers ---
 
@@ -976,6 +977,10 @@ interface ChatMessageProps {
    *  one-tap switch to a model that can actually see/hear the attachment. */
   model?: string;
   onModelChange?: (model: string) => void;
+  /** Sends a message as the user — used by manage cards' confirm/undo buttons,
+   *  so a config change is driven through the same chat turn (works in Telegram
+   *  too, where the agent still holds the confirm/undo token in its context). */
+  onSend?: (text: string) => void;
 }
 
 /** A compaction checkpoint in the transcript: a labelled divider where earlier
@@ -1000,7 +1005,7 @@ function CompactionDivider({ summary }: { summary: string }) {
   );
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, model, onModelChange }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, model, onModelChange, onSend }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -1045,9 +1050,16 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const parts = message.parts;
   type Group =
     | { kind: "text"; text: string }
-    | { kind: "activity"; items: ActivityItem[] };
+    | { kind: "activity"; items: ActivityItem[] }
+    | { kind: "manage"; output: unknown };
   const groups: Group[] = [];
   for (const part of parts) {
+    // A completed `manage` result that's a confirmation or an applied change
+    // escapes the quiet activity rail and renders as its own prominent card.
+    if (isToolPart(part) && getToolName(part as ToolPart) === "manage" && isManageCard((part as ToolPart).output)) {
+      groups.push({ kind: "manage", output: (part as ToolPart).output });
+      continue;
+    }
     if (part.type === "text") {
       const text = (part as { text: string }).text;
       if (text) groups.push({ kind: "text", text });
@@ -1093,6 +1105,9 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
                   <TextContent text={g.text} isStreaming={isStreaming && gi === lastTextIdx} chatId={chatId} />
                 </div>
               );
+            }
+            if (g.kind === "manage") {
+              return <ManageCard key={gi} output={g.output} onSend={onSend} />;
             }
             // No wrapper blur-rise here — the spoiler header animates itself in,
             // and on expand each rail row surfaces with .animate-step-in.

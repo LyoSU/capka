@@ -432,7 +432,17 @@
       "rateLimited": "Too many messages, please wait a moment.",
       "budgetReached": "Spending limit reached. Please contact your admin."
     },
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "manage": {
+      "settingTitle": "Setting updated",
+      "confirmTitle": "Confirm change",
+      "apply": "Confirm",
+      "cancel": "Cancel",
+      "undo": "Undo change",
+      "applyMsg": "Yes, apply the change to \"{title}\" → \"{after}\".",
+      "cancelMsg": "No, leave \"{title}\" unchanged.",
+      "undoMsg": "Undo the change to \"{title}\" — restore the previous value."
+    }
   },
   "projects": {
     "title": "Projects",

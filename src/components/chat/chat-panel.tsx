@@ -376,6 +376,15 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     }
   };
 
+  // Stable sender for manage cards' confirm/undo buttons — kept referentially
+  // stable (via a ref to the latest `send`) so it doesn't bust ChatMessage's memo
+  // and re-render the whole transcript on every keystroke.
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const handleManageSend = useCallback((text: string) => {
+    void sendRef.current(text, []);
+  }, []);
+
   const handleSubmit = async () => {
     const text = input.trim();
     const refs = attachments.readyRefs;
@@ -711,6 +720,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                       onFork={!isLoading ? handleFork : undefined}
                       model={model}
                       onModelChange={readOnly ? undefined : setModel}
+                      onSend={readOnly ? undefined : handleManageSend}
                     />
                   </div>
                 );
