@@ -13,32 +13,33 @@
   <a href="SECURITY.md">Security</a>
 </p>
 
-Capka is my open-source take on the AI coworker idea
+Capka is a self-hosted AI workspace where every chat gets its own Linux sandbox
+and file storage
 
 I wanted something I could run myself, connect to my own models and API keys, and
-share with a small team. Not another hosted chat product locked to one vendor
+share with a small team. Not another hosted chat product locked to one vendor.
 
 I have followed LLMs and agent tools since the start, and tried a lot of them in
 real work. A lot of them still feel like chat wrappers, are hard to self-host, or
-are unpleasant to use every day
+are unpleasant to use every day.
 
 Capka is where I put the parts I actually wanted: files, tools, code execution,
-durable tasks, isolated workspaces, MCP, and a UI that does not fight you
+durable tasks, isolated workspaces, MCP, and a UI that does not fight you.
 
-Right now the model is intentionally simple:
+The workflow is intentionally simple:
 
 1. You upload files, or the agent downloads or creates them during the chat
 2. Each chat gets its own Linux sandbox and its own file storage
-3. The agent works inside that workspace and returns files you can use
+3. The agent works inside that workspace and returns files you can use.
 
 That covers a lot of real work: reports, spreadsheets, PDFs, research, document
 conversion, file cleanup, small code changes, and other tasks where the useful
-output is not just a message
+output is not just a message.
 
-You can close the tab while it works. The task keeps running
+You can close the tab while it works. The task keeps running.
 
 This is a solo project, built seriously. I am trying to make the AI tool I
-actually want to use
+actually want to use.
 
 [Try the live demo](https://capka.yuri.ly/)
 
@@ -49,7 +50,7 @@ actually want to use
 | | |
 |---|---|
 | **Runs on** | Your Linux server with Docker |
-| **Works with** | Files uploaded by the user, or files downloaded and created by the agent |
+| **Works with** | Files uploaded by the user, plus files the agent downloads or creates inside the chat |
 | **Isolation** | One sandbox and one file workspace per chat |
 | **Models** | Cloud providers or local models through Ollama |
 | **Users** | Multi-user, registration closed by default |
@@ -70,8 +71,8 @@ work, not only a chat reply:
 
 ## For teams
 
-Capka works well as a shared AI workspace for a small team, not just a personal
-toy
+Capka works well for small teams that want shared models, tools, and admin
+control without putting everyone in the same workspace.
 
 Admins get one place to manage the instance:
 
@@ -84,7 +85,7 @@ Admins get one place to manage the instance:
 | Ops | usage, billing status, updates, Telegram bot setup |
 
 Each chat still gets its own sandbox and file storage, so team members can work
-on separate tasks without sharing one messy workspace
+on separate tasks without sharing one messy workspace.
 
 ## How It Runs
 
@@ -97,7 +98,7 @@ on separate tasks without sharing one messy workspace
 | `sandbox` | Execution image used by agent sessions |
 
 Sandboxes include Python, Node, Java, FFmpeg, ImageMagick, LibreOffice, LaTeX,
-Playwright, OCR tooling, and other common utilities
+Playwright, OCR tooling, and other common utilities.
 
 ## Run Locally
 
@@ -106,7 +107,7 @@ npm run docker:dev
 ```
 
 Open <http://localhost:3000>. If no admin account exists, Capka redirects you to
-setup. After that, add a provider key in **Settings -> Connections**
+setup. After that, add a provider key in **Settings -> Connections**.
 
 ## Deploy
 
@@ -125,21 +126,21 @@ DOMAIN=capka.example.com ./scripts/up.sh
 ```
 
 `DOMAIN` enables automatic HTTPS through Caddy. Without it, Capka serves plain
-HTTP on `:3000`; put it behind your own TLS proxy and set `PUBLIC_URL`
+HTTP on `:3000`; put it behind your own TLS proxy and set `PUBLIC_URL`.
 
 See [`DEPLOY.md`](DEPLOY.md) for Coolify, compose files, host nginx, and common
-deployment gotchas
+deployment gotchas.
 
 ## Requirements
 
-Linux with Docker, on `x86_64` or `arm64`
+Linux with Docker, on `x86_64` or `arm64`.
 
 | Profile | CPU | RAM | Disk |
 |---|---:|---:|---:|
 | Minimum | 1-2 vCPU | 2 GB | 20 GB |
 | Recommended | 2 vCPU | 4 GB | 40 GB |
 
-Use more RAM for concurrent users, large document jobs, or gVisor
+Use more RAM for concurrent users, large document jobs, or gVisor.
 
 ## First Run
 
@@ -151,16 +152,16 @@ Use more RAM for concurrent users, large document jobs, or gVisor
 6. Optional: add a Telegram bot token in **Settings -> Integrations**
 
 Registration is closed by default after setup. Admins can switch it to open or
-approval mode in **Settings -> Authentication**
+approval mode in **Settings -> Authentication**.
 
 ## Security Short Version
 
 Sandboxes are unprivileged containers with dropped Linux capabilities and no host
 filesystem access. The controller reaches Docker through `socket-proxy`, not the
-raw Docker socket
+raw Docker socket.
 
 Sandbox internet access is controlled in **Settings -> Security -> Internet
-access**. When enabled, Capka blocks private ranges and cloud metadata endpoints
+access**. When enabled, Capka blocks private ranges and cloud metadata endpoints.
 
 For untrusted or multi-tenant use, read [`SECURITY.md`](SECURITY.md). Prefer
 rootless Docker and gVisor:
@@ -182,4 +183,4 @@ SANDBOX_RUNTIME=runsc
 ## License
 
 Capka is licensed under the [GNU AGPL-3.0](LICENSE). If you run a modified
-version as a public network service, the AGPL source-availability terms apply
+version as a public network service, the AGPL source-availability terms apply.
