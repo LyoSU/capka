@@ -36,7 +36,8 @@ describe("manage/dispatch", () => {
     ]);
     const asUser = await dispatch(reg, ctx(), { action: "list" });
     const asAdmin = await dispatch(reg, ctx({ isAdmin: true }), { action: "list" });
-    const ids = (r: typeof asUser) => (r.status === "ok" ? (r.data as { id: string }[]).map((c) => c.id) : []);
+    const ids = (r: typeof asUser) =>
+      r.status === "ok" ? (r.data as { settings: { id: string }[] }).settings.map((c) => c.id) : [];
     expect(ids(asUser)).toEqual(["user.locale"]);
     expect(ids(asAdmin)).toEqual(["user.locale", "org.net"]);
   });

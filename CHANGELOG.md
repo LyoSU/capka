@@ -28,6 +28,16 @@ All notable changes to Capka are documented here. Format follows
   change is recorded in the audit log (`settings.update` / `settings.undo`) and
   is reversible via an undo token. The existing `/settings` pages are unchanged
   and remain the alternative.
+- **MCP connectors are now manageable from chat too.** The `manage` tool gained a
+  collection abstraction: `get mcp` lists connectors; `add`/`remove` (confirm-gated),
+  `enable`/`disable`, `debug` (live reachability/auth probe) and `connect` operate
+  on them. Connectors needing a browser sign-in (OAuth) return an
+  `action_required` result with a URL — rendered as a Connect button in web / a
+  link in Telegram — since the agent can't perform the redirect itself; the
+  existing `/api/mcp/oauth/start` flow is reused. A personal remote connector can
+  be added by any user; local (stdio) and org-wide connectors remain admin-only,
+  enforced server-side. Secrets are never entered through chat — a token-auth
+  connector is still configured on the settings page.
 - **`PLATFORM_BIND` env var to bind the platform port to a single interface.**
   Defaults to `0.0.0.0` (all interfaces — works out of the box). Set
   `PLATFORM_BIND=127.0.0.1` to publish loopback-only when a reverse proxy fronts

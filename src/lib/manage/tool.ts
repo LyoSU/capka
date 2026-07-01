@@ -18,10 +18,18 @@ export interface ManageIdentity {
 
 const inputSchema = z.object({
   action: z
-    .enum(["capabilities", "list", "get", "set", "undo"])
+    .enum(["capabilities", "list", "get", "set", "undo", "add", "remove", "enable", "disable", "debug", "connect"])
     .describe("What to do. Start with `list` or `capabilities` to discover what can be managed."),
-  target: z.string().optional().describe('Control id for get/set, e.g. "user.locale" or "org.sandbox_network".'),
+  target: z
+    .string()
+    .optional()
+    .describe('A setting/control id (get/set) OR a collection id (get/add/remove/…), e.g. "user.locale", "org.sandbox_network", "mcp".'),
   value: z.string().optional().describe("New value for `set`, always as a string (e.g. \"uk\", \"true\", \"bridge\", \"200000\")."),
+  itemId: z.string().optional().describe("Id of a collection item for remove/enable/disable/debug/connect."),
+  args: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe('Fields for `add` to a collection, e.g. for mcp: {name, url, authKind:"oauth"} or {name, command, args}.'),
   confirmToken: z
     .string()
     .optional()
@@ -43,17 +51,37 @@ function toInput(a: z.infer<typeof inputSchema>): ManageInput | null {
         : null;
     case "undo":
       return a.undoToken ? { action: "undo", undoToken: a.undoToken } : null;
+    case "add":
+      return a.target && a.args ? { action: "add", target: a.target, args: a.args, confirmToken: a.confirmToken } : null;
+    case "remove":
+      return a.target && a.itemId
+        ? { action: "remove", target: a.target, itemId: a.itemId, confirmToken: a.confirmToken }
+        : null;
+    case "enable":
+      return a.target && a.itemId ? { action: "enable", target: a.target, itemId: a.itemId } : null;
+    case "disable":
+      return a.target && a.itemId ? { action: "disable", target: a.target, itemId: a.itemId } : null;
+    case "debug":
+      return a.target && a.itemId ? { action: "debug", target: a.target, itemId: a.itemId } : null;
+    case "connect":
+      return a.target && a.itemId ? { action: "connect", target: a.target, itemId: a.itemId } : null;
   }
 }
 
-const DESCRIPTION = `Manage the user's own preferences AND (for admins) platform-wide configuration, all through chat.
+const DESCRIPTION = `Manage the user's own preferences, platform-wide configuration (admins), AND connectors (MCP) — all through chat.
 
-Flow:
-- Use action="list" (or "capabilities") to discover what you may manage for THIS user. You only ever see controls allowed for their role — never invent a control id.
-- action="get" reads one control; action="set" changes it (value is always a string).
-- Risky org-wide changes are two-phase: the first "set" returns status="confirm_required" with a human preview (before → after) and a confirmToken. Show the user the preview, ask them to confirm, and only then call "set" again with the SAME target/value plus that confirmToken. Never confirm on the user's behalf.
-- After any change you get an undoToken — offer to undo if the user regrets it (action="undo").
-Role enforcement is server-side: a non-admin simply cannot touch org settings, so don't promise changes you can't make.`;
+Settings/controls:
+- action="list" (or "capabilities") discovers what THIS user may manage. Never invent an id.
+- action="get" reads a control; action="set" changes it (value is always a string).
+- Risky org-wide changes are two-phase: the first "set" returns status="confirm_required" with a before→after preview and a confirmToken. Show the preview, ask the user to confirm, then call "set" again with the SAME target/value plus that confirmToken. Never confirm on their behalf. After a change you get an undoToken (action="undo").
+
+Collections (target="mcp"):
+- action="get" with target="mcp" lists connectors; add/remove/enable/disable/debug/connect operate on them (itemId identifies one).
+- action="add" needs args, e.g. {name, url, authKind:"oauth"} for a remote connector, or {name, command, args} for a local (stdio) one. add/remove are confirm-gated like risky settings.
+- Some connectors need the user to sign in via a browser (OAuth). action="add" or action="connect" then returns status="action_required" with a URL — DON'T try to open it yourself; tell the user to use the button/link, then re-check with action="debug".
+- action="debug" reports a connector's live state (ok / needs login / unreachable) and a hint. NEVER ask the user to paste API keys or tokens into chat — a connector needing a secret token is configured on the settings page, not here.
+
+Role enforcement is server-side: a non-admin can't touch org settings or add shared/local connectors, so don't promise changes you can't make.`;
 
 export function makeManageTool(identity: ManageIdentity) {
   return {

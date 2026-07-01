@@ -47,7 +47,56 @@ export type ManageInput =
   | { action: "list" }
   | { action: "get"; target: string }
   | { action: "set"; target: string; value: unknown; confirmToken?: string }
-  | { action: "undo"; undoToken: string };
+  | { action: "undo"; undoToken: string }
+  // Collection actions — target is a collection id (e.g. "mcp").
+  | { action: "add"; target: string; args: Record<string, unknown>; confirmToken?: string }
+  | { action: "remove"; target: string; itemId: string; confirmToken?: string }
+  | { action: "enable"; target: string; itemId: string }
+  | { action: "disable"; target: string; itemId: string }
+  | { action: "debug"; target: string; itemId: string }
+  | { action: "connect"; target: string; itemId: string };
+
+/** One row of a collection (an MCP connector, later a skill/plugin). */
+export interface CollectionItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  enabled?: boolean;
+  /** A short status word the UI can badge (e.g. "ok", "needs_login"). */
+  status?: string;
+  /** The requesting user personally owns this item (vs a shared/org one). */
+  owned?: boolean;
+}
+
+/** A hand-back to the human for something the agent can't do itself (an OAuth
+ *  redirect, a folder picker). Rendered as a button in web, a link in Telegram. */
+export interface RequiredAction {
+  kind: "oauth" | "open_url";
+  url: string;
+  label: string;
+  description?: string;
+}
+
+/** A managed collection of items with CRUD + connector-specific ops. `list` is
+ *  visible to anyone who can see the collection; `requiredRole` gates mutation
+ *  (add/remove/enable). add/remove are always confirm-gated by the dispatcher;
+ *  enable/disable/debug/connect apply directly. Register one to add a whole new
+ *  manageable resource (MCP today, skills next) without touching the dispatcher. */
+export interface Collection {
+  id: string;
+  title: string;
+  description: string;
+  requiredRole: Role;
+  addSchema?: z.ZodTypeAny;
+  list(ctx: ManageContext): Promise<CollectionItem[]>;
+  add?(ctx: ManageContext, args: Record<string, unknown>): Promise<{ itemTitle: string; action?: RequiredAction }>;
+  /** Human summary of what an add would do, for the confirm preview. */
+  previewAdd?(ctx: ManageContext, args: Record<string, unknown>): { title: string; after: string; impact?: string };
+  remove?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string }>;
+  setEnabled?(ctx: ManageContext, itemId: string, enabled: boolean): Promise<{ itemTitle: string }>;
+  debug?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string; state: string; detail?: string; hint?: string; action?: RequiredAction }>;
+  connect?(ctx: ManageContext, itemId: string): Promise<RequiredAction | null>;
+}
 
 /** A change the UI renders as a SettingChangeCard (before→after diff + Undo). */
 export interface SettingChange {
@@ -61,6 +110,25 @@ export interface SettingChange {
 export type ManageResult =
   | { status: "ok"; render: "setting"; summary: string; data: SettingChange }
   | { status: "ok"; render: "list" | "value" | "capabilities"; summary: string; data?: unknown }
+  | {
+      status: "ok";
+      render: "collection";
+      summary: string;
+      data: { collectionId: string; title: string; items: CollectionItem[] };
+    }
+  | {
+      status: "ok";
+      render: "resource";
+      summary: string;
+      data: { op: "added" | "removed" | "enabled" | "disabled"; collectionId: string; title: string; itemTitle: string; action?: RequiredAction };
+    }
+  | {
+      status: "ok";
+      render: "debug";
+      summary: string;
+      data: { title: string; itemTitle: string; state: string; detail?: string; hint?: string; action?: RequiredAction };
+    }
+  | { status: "action_required"; render: "action_required"; summary: string; action: RequiredAction }
   | {
       status: "confirm_required";
       render: "confirm";

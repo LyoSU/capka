@@ -1,24 +1,62 @@
 import { useTranslations } from "next-intl";
-import { Check, Undo2, AlertTriangle, SlidersHorizontal } from "lucide-react";
+import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
+
+type RequiredAction = { kind: string; url: string; label: string; description?: string };
 
 /** The subset of a `manage` tool result the chat renders as a card. Kept loose
  *  (all optional) because it arrives as opaque tool output. */
 type ManageOutput = {
   render?: string;
+  summary?: string;
   confirmToken?: string;
   preview?: { title: string; before: string; after: string; impact?: string };
-  data?: { title: string; before: string; after: string; undoToken?: string };
+  action?: RequiredAction;
+  data?: {
+    title?: string;
+    before?: string;
+    after?: string;
+    undoToken?: string;
+    // collection
+    collectionId?: string;
+    items?: { id: string; title: string; subtitle?: string; enabled?: boolean; status?: string; owned?: boolean }[];
+    // resource
+    op?: "added" | "removed" | "enabled" | "disabled";
+    itemTitle?: string;
+    action?: RequiredAction;
+    // debug
+    state?: string;
+    detail?: string;
+    hint?: string;
+  };
 };
 
-/** A `manage` result becomes a prominent card (not a quiet rail step) only when
- *  it's something the user must SEE or ACT on: a confirmation request or an
- *  applied change. Everything else (lists, reads) stays in the activity rail. */
+const CARD_RENDERS = new Set(["confirm", "setting", "action_required", "resource", "debug", "collection"]);
+
+/** A `manage` result becomes a prominent card (not a quiet rail step) when it's
+ *  something the user must SEE or ACT on. Plain reads (`value`, `list`) stay in
+ *  the activity rail. */
 export function isManageCard(output: unknown): boolean {
   const r = (output as ManageOutput | null)?.render;
-  return r === "confirm" || r === "setting";
+  return r ? CARD_RENDERS.has(r) : false;
 }
+
+/** OAuth / open-url handoff — the agent can't click, so the user does. Rendered
+ *  as a link-button (a real navigation, not an onSend). */
+function ConnectLink({ action }: { action: RequiredAction }) {
+  return (
+    <a
+      href={action.url}
+      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+    >
+      <Plug className="h-3.5 w-3.5" />
+      {action.label}
+    </a>
+  );
+}
+
+const OP_ICON = { added: Plug, removed: Trash2, enabled: Power, disabled: Power } as const;
 
 /** before → after, with the old value dimmed/struck and the new value emphasised.
  *  When there's no meaningful "before" (e.g. an empty default) only the new value
@@ -82,7 +120,7 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
   }
 
   if (o?.render === "setting" && o.data) {
-    const { title, before, after, undoToken } = o.data;
+    const { title = "", before = "", after = "", undoToken } = o.data;
     return (
       <CardShell>
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -98,6 +136,90 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
               {t("undo")}
             </Button>
           </div>
+        )}
+      </CardShell>
+    );
+  }
+
+  // OAuth / browser hand-off — the agent returned a URL only the user can open.
+  if (o?.render === "action_required" && o.action) {
+    return (
+      <CardShell>
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <ExternalLink className="h-4 w-4 text-muted-foreground" />
+          {o.action.description ?? t("openHint")}
+        </div>
+        <div className="mt-3">
+          <ConnectLink action={o.action} />
+        </div>
+      </CardShell>
+    );
+  }
+
+  // A connector was added/removed/enabled/disabled — with an optional follow-up
+  // (e.g. "now sign in" after adding an OAuth connector).
+  if (o?.render === "resource" && o.data) {
+    const Icon = OP_ICON[o.data.op ?? "added"] ?? Check;
+    return (
+      <CardShell>
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+          {o.summary}
+        </div>
+        {o.data.action && (
+          <div className="mt-3">
+            <ConnectLink action={o.data.action} />
+          </div>
+        )}
+      </CardShell>
+    );
+  }
+
+  if (o?.render === "debug" && o.data) {
+    return (
+      <CardShell>
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <Stethoscope className="h-4 w-4 text-muted-foreground" />
+          {t("debugTitle")}: {o.data.itemTitle}
+        </div>
+        <div className="mt-2 text-sm">
+          <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{o.data.state}</span>
+        </div>
+        {o.data.detail && <div className="mt-2 text-sm text-muted-foreground">{o.data.detail}</div>}
+        {o.data.hint && <div className="mt-1 text-sm text-muted-foreground">{o.data.hint}</div>}
+        {o.data.action && (
+          <div className="mt-3">
+            <ConnectLink action={o.data.action} />
+          </div>
+        )}
+      </CardShell>
+    );
+  }
+
+  if (o?.render === "collection" && o.data?.items) {
+    const items = o.data.items;
+    return (
+      <CardShell>
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <Plug className="h-4 w-4 text-muted-foreground" />
+          {o.data.title ?? t("connectorsTitle")}
+        </div>
+        {items.length === 0 ? (
+          <div className="mt-2 text-sm text-muted-foreground">—</div>
+        ) : (
+          <ul className="mt-2 space-y-1.5">
+            {items.map((it) => (
+              <li key={it.id} className="flex items-center justify-between gap-3 text-sm">
+                <span className="min-w-0">
+                  <span className="font-medium text-foreground">{it.title}</span>
+                  {it.subtitle && <span className="ml-2 truncate text-xs text-muted-foreground">{it.subtitle}</span>}
+                </span>
+                <span className={`shrink-0 text-xs ${it.enabled === false ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+                  {it.enabled === false ? "off" : it.status ?? "on"}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
       </CardShell>
     );

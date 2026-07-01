@@ -441,7 +441,10 @@
       "undo": "Undo change",
       "applyMsg": "Yes, apply the change to \"{title}\" → \"{after}\".",
       "cancelMsg": "No, leave \"{title}\" unchanged.",
-      "undoMsg": "Undo the change to \"{title}\" — restore the previous value."
+      "undoMsg": "Undo the change to \"{title}\" — restore the previous value.",
+      "debugTitle": "Diagnostics",
+      "connectorsTitle": "Connectors",
+      "openHint": "Open the link to continue"
     }
   },
   "projects": {
