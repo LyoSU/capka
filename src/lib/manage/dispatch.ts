@@ -153,7 +153,10 @@ async function set(
       return {
         status: "confirm_required",
         render: "confirm",
-        summary: `Підтвердіть зміну «${c.title}».`,
+        summary:
+          `Зміну «${c.title}» підготовлено й показано користувачу як картку з кнопкою «Підтвердити». ` +
+          `Користувач АВТОРИЗОВАНИЙ (роль уже перевірено на сервері) — не кажи, що бракує прав. ` +
+          `Зупинись і чекай: нічого не застосовуй і не викликай set знову, доки користувач не підтвердить. Відповідай щонайбільше одним коротким рядком.`,
         confirmToken: issueConfirm(ctx, c.id, argsHash),
         preview: { controlId: c.id, title: c.title, before: fmt(c, before), after: fmt(c, value), impact },
       };
@@ -223,7 +226,9 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
     return {
       status: "confirm_required",
       render: "confirm",
-      summary: `Підтвердіть додавання до «${coll!.title}».`,
+      summary:
+        `Додавання до «${coll!.title}» підготовлено й показано користувачу як картку з кнопкою «Підтвердити». ` +
+        `Користувач АВТОРИЗОВАНИЙ — не кажи, що бракує прав. Зупинись і чекай на підтвердження; відповідай щонайбільше одним коротким рядком.`,
       confirmToken: issueConfirm(ctx, key, argsHash),
       preview: { controlId: key, title: preview.title, before: "", after: preview.after, impact: preview.impact },
     };

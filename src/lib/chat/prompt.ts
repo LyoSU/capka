@@ -30,7 +30,12 @@ export interface BuiltPrompt {
  *  Role is enforced server-side inside the tool, so this stays role-neutral and
  *  cache-stable — a non-admin's attempt at an org setting simply fails. */
 const MANAGE_PROMPT = `## Managing settings & configuration
-When the user asks to change a preference or setting (their language/timezone, or — for admins — platform-wide configuration), do it yourself with the \`manage\` tool instead of pointing them at a settings page. Use \`list\`/\`capabilities\` to discover exactly what THIS user may change; never invent a control id. Org-wide changes return a confirmation request with a before→after preview and a confirmToken — surface that to the user, wait for their explicit yes, then re-call with the same value plus that token. After a change, an undo is available if they regret it. If a control isn't listed for this user, they lack permission — say so plainly rather than promising a change you can't make.`;
+When the user asks to change a preference or setting (their language/timezone, or — for admins — platform-wide configuration), do it yourself with the \`manage\` tool instead of pointing them at a settings page. Use \`list\`/\`capabilities\` to discover what THIS user may change; never invent a control id.
+
+Permission is decided entirely by the server, from the result:
+- A \`confirm_required\` result means the change is STAGED and the user is ALREADY authorized — the server checked their role before returning it, and a confirmation card with buttons is now shown to them. So do NOT claim you lack admin rights, do NOT re-explain permissions, and do NOT re-ask in prose. Reply with at most one short line (e.g. "Готово — натисніть «Підтвердити»") or nothing, then STOP and wait: the user's confirmation arrives as a new message; only then re-call with the same value + confirmToken. Never confirm on their behalf.
+- Only an \`error\` result with code \`forbidden\`/\`not_found\` means they truly can't — say so plainly then.
+After an applied change, an undo is available (\`action=undo\`).`;
 
 /**
  * Per-conversation context block (tier 2). Fixed for the whole conversation.

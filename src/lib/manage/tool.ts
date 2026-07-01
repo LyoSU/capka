@@ -73,7 +73,7 @@ const DESCRIPTION = `Manage the user's own preferences, platform-wide configurat
 Settings/controls:
 - action="list" (or "capabilities") discovers what THIS user may manage. Never invent an id.
 - action="get" reads a control; action="set" changes it (value is always a string).
-- Risky org-wide changes are two-phase: the first "set" returns status="confirm_required" with a before→after preview and a confirmToken. Show the preview, ask the user to confirm, then call "set" again with the SAME target/value plus that confirmToken. Never confirm on their behalf. After a change you get an undoToken (action="undo").
+- Risky org-wide changes are two-phase: the first "set" returns status="confirm_required" with a before→after preview and a confirmToken. This ALREADY means the user is authorized (the server checked their role) and a confirmation card is shown to them — do NOT say you lack permission, do NOT re-ask in prose. Reply at most one short line, STOP, and wait; the user's confirmation comes as a new message, and only then do you re-call "set" with the SAME target/value + that confirmToken. Never confirm on their behalf. After a change you get an undoToken (action="undo").
 
 Collections (target="mcp" for connectors, target="skill" for agent skills):
 - action="get" with a collection target lists its items; add/remove/enable/disable/debug/connect operate on them (itemId identifies one).
