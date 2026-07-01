@@ -15,6 +15,16 @@ All notable changes to Capka are documented here. Format follows
   renderer the chat uses) instead of raw preformatted text, and the "how to update"
   hint is trimmed.
 
+### Fixed
+- **The context-window "full" meter and auto-compaction no longer overstate usage
+  on multi-step turns.** A turn that makes several LLM calls (a tool-calling loop)
+  re-reads the same growing prefix from cache on every step; `usage.input`/
+  `usage.cached` correctly sum that across steps for cost and the (i) popover, but
+  the context meter and the compaction trigger were reusing the same cumulative
+  sum to represent "how full is the window" — so a 9-step turn could show up to 9x
+  its real size, and compaction could fire well before the window was actually
+  full. Both now key off the last step's actual prompt size instead.
+
 ## [0.1.3] - 2026-07-01
 
 ### Fixed
