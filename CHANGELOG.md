@@ -12,6 +12,15 @@ All notable changes to Capka are documented here. Format follows
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
 ### Added
+- **The agent can now ask you a structured question mid-task (`ask` tool).**
+  Instead of guessing or answering blind when it's genuinely blocked on your
+  input, the model can pause a turn to collect a choice or a short text answer
+  (one field or several). The turn suspends DURABLY — it survives a worker restart
+  like the native approval flow — and resumes the moment you answer. On the web a
+  form card appears and the composer is blocked until you answer or skip; on
+  Telegram it asks field by field (inline buttons for choices, your next message
+  for text). Skipping is always allowed — the agent proceeds with a sensible
+  default. No operator configuration.
 - **The GitHub token for marketplace installs is now set from the UI (Settings →
   Marketplace), not only by hand-writing a `github_token` settings row.** Without
   a token, Capka calls GitHub anonymously (60 requests/hour per IP) and installs
