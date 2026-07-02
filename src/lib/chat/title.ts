@@ -1,7 +1,7 @@
-import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import { log } from "@/lib/log";
 import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
+import { auxGenerate } from "@/lib/chat/context/aux";
 
 // Tweak point: tone/length of auto-generated chat titles lives here. The model
 // detects the conversation language itself — keep the "same language" rule so a
@@ -28,6 +28,7 @@ const MAX_TITLE_LEN = 80;
  */
 export async function generateChatTitle(
   model: LanguageModel,
+  provider: string,
   userText: string,
   assistantText?: string,
   /** Called with the spend of this (otherwise unbilled) auxiliary LLM call, so
@@ -44,14 +45,12 @@ export async function generateChatTitle(
       : "");
 
   try {
-    const { text, usage } = await generateText({
-      model,
+    // auxGenerate suppresses reasoning per-provider (a title needs none). The
+    // budget stays generous as the safety net for gateway models that ignore the
+    // knob and inline <think> anyway — sanitizeTitle strips what leaks through.
+    const { text, usage } = await auxGenerate(model, provider, {
       system: TITLE_PROMPT,
       prompt,
-      // Generous budget so reasoning models (DeepSeek-R1 et al.) can finish their
-      // <think> block AND still emit the title — a tight cap left them cut off
-      // mid-thought with nothing to title. Non-reasoning models stop after the
-      // 3–6 words anyway, so this costs ~nothing extra for them.
       maxOutputTokens: 1000,
     });
     const billable = toTokenUsage(usage);

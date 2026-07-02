@@ -1,9 +1,7 @@
-import { generateText } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
 import { log } from "@/lib/log";
 import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
-import { buildAuxRequest } from "@/lib/chat/context/aux";
-import { isReasoningUnsupportedError } from "@/lib/errors/friendly";
+import { buildAuxRequest, auxGenerate } from "@/lib/chat/context/aux";
 import { MEMORY_DOC_MAX_CHARS, MEMORY_CONSOLIDATE_EVERY } from "@/lib/constants";
 
 /** A scope is one memory document: the user-global doc or a single project's. */
@@ -118,45 +116,6 @@ export function needsConsolidation(doc: string, turnsSince: number): boolean {
 export interface ConversationTurn {
   userText: string;
   assistantText?: string;
-}
-
-/**
- * Reasoning is pointless for these mechanical extraction calls and — worse — on
- * an always-thinking model the thinking tokens eat the output budget before any
- * answer lands (reconcile → empty ops, consolidate → truncated rewrite). So we
- * ask each provider for the least/no reasoning. Mirror image of the runner's
- * reasoningOptions(); unknown providers keep their default.
- */
-function auxReasoningOptions(provider: string): Record<string, Record<string, unknown>> | undefined {
-  switch (provider) {
-    case "anthropic": return { anthropic: { thinking: { type: "disabled" } } };
-    case "openrouter": return { openrouter: { reasoning: { enabled: false } } };
-    case "openai": return { openai: { reasoningEffort: "low" } };
-    case "google": return { google: { thinkingConfig: { thinkingBudget: 0 } } };
-    case "litellm":
-    case "deepseek":
-    case "mistral":
-    case "xai":
-    case "zhipu": return { [provider]: { reasoningEffort: "low" } };
-    default: return undefined;
-  }
-}
-
-type AuxArgs =
-  | { messages: ModelMessage[]; maxOutputTokens: number }
-  | { system: string; prompt: string; maxOutputTokens: number };
-
-/** generateText for aux calls: suppress reasoning, but if a non-reasoning model
- *  rejects the knob (gpt-4o, claude-3.5…), retry once without it — same
- *  optimistic-then-fallback philosophy as the main run. */
-async function auxGenerate(model: LanguageModel, provider: string, args: AuxArgs) {
-  const providerOptions = auxReasoningOptions(provider);
-  try {
-    return await generateText({ model, ...args, ...(providerOptions ? { providerOptions: providerOptions as never } : {}) });
-  } catch (e) {
-    if (providerOptions && isReasoningUnsupportedError(e)) return await generateText({ model, ...args });
-    throw e;
-  }
 }
 
 const SCOPE_TARGET: Record<MemoryScope, string> = {

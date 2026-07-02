@@ -56,17 +56,17 @@ describe("sanitizeTitle", () => {
 describe("generateChatTitle", () => {
   it("returns a sanitized title from the model", async () => {
     generateTextMock.mockResolvedValue({ text: '  "Fix login bug"  ' });
-    expect(await generateChatTitle(model, "the login button is broken")).toBe("Fix login bug");
+    expect(await generateChatTitle(model, "openai", "the login button is broken")).toBe("Fix login bug");
   });
 
   it("skips empty user input without calling the model", async () => {
-    expect(await generateChatTitle(model, " ")).toBeNull();
+    expect(await generateChatTitle(model, "openai", " ")).toBeNull();
     expect(generateTextMock).not.toHaveBeenCalled();
   });
 
   it("returns null (keeps the placeholder) when the model abstains", async () => {
     generateTextMock.mockResolvedValue({ text: "-" });
-    expect(await generateChatTitle(model, "hello there friend")).toBeNull();
+    expect(await generateChatTitle(model, "openai", "hello there friend")).toBeNull();
   });
 
   it("reports this call's spend via onUsage so it isn't billed-blind", async () => {
@@ -75,7 +75,7 @@ describe("generateChatTitle", () => {
       usage: { inputTokens: 1200, outputTokens: 8, cachedInputTokens: 200 },
     });
     const onUsage = vi.fn();
-    await generateChatTitle(model, "the login button is broken", undefined, onUsage);
+    await generateChatTitle(model, "openai", "the login button is broken", undefined, onUsage);
     // Billable input excludes the cached portion (see toTokenUsage).
     expect(onUsage).toHaveBeenCalledWith({ inputTokens: 1000, outputTokens: 8, cachedInputTokens: 200 });
   });
@@ -83,7 +83,7 @@ describe("generateChatTitle", () => {
   it("does not call onUsage when the provider reports no usage", async () => {
     generateTextMock.mockResolvedValue({ text: "Fix login bug" });
     const onUsage = vi.fn();
-    await generateChatTitle(model, "the login button is broken", undefined, onUsage);
+    await generateChatTitle(model, "openai", "the login button is broken", undefined, onUsage);
     expect(onUsage).not.toHaveBeenCalled();
   });
 });

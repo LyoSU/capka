@@ -691,6 +691,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // on. Safe here — `uiMessages` is settled history, never the live reply.
     let modelMessages = await convertToModelMessages(sealOrphanToolCalls(uiMessages));
 
+    // Cache breakpoint on the conversation tail. Providers with Anthropic-style
+    // EXPLICIT caching (anthropic direct; Claude via OpenRouter, whose SDK reads
+    // the same `anthropic` namespace as a fallback) otherwise cache only the
+    // system prefix and re-bill the whole history at full input price on every
+    // turn. The marker travels with the message OBJECT, so the compaction/memory
+    // aux calls that reuse this array (buildAuxRequest) hit the same cache.
+    // Implicit-caching providers (OpenAI/DeepSeek/Gemini) ignore the namespace.
+    // Breakpoint budget (Anthropic max 4): stable + session + this + the
+    // top-level auto one in makeStream = 4 — don't add a fifth.
+    const markCacheTail = (msgs: ModelMessage[]) => {
+      const last = msgs.at(-1);
+      if (last) last.providerOptions = { ...last.providerOptions, ...ephemeral };
+    };
+    markCacheTail(modelMessages);
+
     let injectedNative = false;
     const turnFiles = [...(payload.attachedFiles ?? []), ...extraAttachedFiles];
     const { nativeFiles } = classifyFiles(turnFiles, provider, modelInput);
@@ -746,11 +761,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // it on the very first step — declaring it later would TDZ-throw.
     let reasoningStripped = false;
     const makeStream = () => {
-      // reasoning + context-management may both target the same provider
-      // namespace (e.g. anthropic) — merge so neither clobbers the other.
+      // reasoning + context-management + caching may all target the same provider
+      // namespace (e.g. anthropic) — merge so none clobbers the others.
       const providerOptions = mergeProviderOptions(
         useReasoning ? (reasoning as Record<string, Record<string, unknown>>) : undefined,
         ctxMgmt as Record<string, Record<string, unknown>> | undefined,
+        // Call-level cacheControl = Anthropic's TOP-LEVEL auto-breakpoint: the API
+        // places it on the LAST block of each request, so every step of a tool
+        // loop reads the previous step's cache instead of re-paying the growing
+        // tail (the message-level tail marker above stays fixed at the last user
+        // message all turn). Anthropic-only; other providers ignore the namespace.
+        ephemeral as unknown as Record<string, Record<string, unknown>>,
       );
       return streamText({
         model,
@@ -1239,6 +1260,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the very failure this path exists to recover from.
       const trimmedUi = trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT);
       modelMessages = await convertToModelMessages(sealOrphanToolCalls(trimmedUi));
+      markCacheTail(modelMessages); // fresh objects — re-mark the cache tail
       // Re-attach the turn's native files (the trim+reconvert produced fresh
       // model messages, dropping the bytes injected into the original set).
       if (injectedNative && nativeFiles.length) {
@@ -1564,7 +1586,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // this lands, so the sidebar always shows *something* in the meantime.
     const isFirstTurn = !modelMessages.some((m) => m.role === "assistant");
     if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && isFirstTurn && lastUserText.trim()) {
-      void trackAux(generateChatTitle(model, lastUserText, getFullText(), recordAuxUsage)
+      void trackAux(generateChatTitle(model, provider, lastUserText, getFullText(), recordAuxUsage)
         .then(async (title) => {
           if (!title) return;
           await db.update(chats).set({ title: stripNul(title) }).where(eq(chats.id, chatId));

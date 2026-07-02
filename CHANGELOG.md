@@ -53,6 +53,28 @@ All notable changes to Capka are documented here. Format follows
   persist in plaintext in the message transcript.
 
 ### Changed
+- **Claude models now cache the conversation history, not just the system
+  prompt.** Cache breakpoints were set only on the two system-prompt tiers, so
+  on providers with explicit (Anthropic-style) caching — the `anthropic`
+  provider and Claude models via OpenRouter — every turn re-billed the entire
+  chat history at full input price, and every step of a tool-calling turn
+  re-billed the growing tail again; the auxiliary title/memory/compaction calls
+  missed the cache the same way. Now a breakpoint rides the last conversation
+  message (read by both the Anthropic and OpenRouter SDKs) and a top-level
+  auto-breakpoint moves to the end of each request, so consecutive tool steps
+  read each other's cache. Long Claude chats bill their history at roughly
+  cache-read pricing (~0.1×) instead of full price. Providers with implicit
+  caching (OpenAI, DeepSeek, Gemini) are unaffected. Claude behind a LiteLLM
+  proxy still needs caching configured on the proxy itself
+  (`cache_control_injection_points` in the LiteLLM model config) — the
+  OpenAI-compatible wire format Capka speaks to LiteLLM has no cache field.
+- **Chat-title generation no longer spends reasoning tokens on thinking
+  models.** The title call relied on a large output budget so an
+  always-thinking model could finish its `<think>` block before emitting the
+  3–6-word title. It now suppresses reasoning per-provider (same mechanism the
+  memory calls already used), so titles on reasoning models are faster and
+  cheaper; the budget and `<think>`-stripping remain as a safety net for
+  gateway models that ignore the knob.
 - **Confirming a `manage` change in chat is now native tool approval — the agent
   continues the same turn after you decide, instead of dead-ending.** Before, a
   risky change (a platform-wide setting, a connector/skill install) returned a

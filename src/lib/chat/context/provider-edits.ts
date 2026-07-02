@@ -43,20 +43,24 @@ export function contextManagementOptions(
 type ProviderOptions = Record<string, Record<string, unknown>>;
 
 /**
- * Deep-merge two provider-options objects one level into each provider namespace,
- * so reasoning knobs and context-management knobs that both target e.g.
- * `anthropic` combine into one `{ anthropic: { thinking, contextManagement } }`
- * instead of clobbering each other. Returns undefined when both are empty.
+ * Deep-merge provider-options objects one level into each provider namespace,
+ * so reasoning, context-management, and caching knobs that all target e.g.
+ * `anthropic` combine into one `{ anthropic: { thinking, contextManagement, … } }`
+ * instead of clobbering each other. Returns undefined when all are empty.
  */
 export function mergeProviderOptions(
-  a: ProviderOptions | undefined,
-  b: ProviderOptions | undefined,
+  ...opts: (ProviderOptions | undefined)[]
 ): ProviderOptions | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  const out: ProviderOptions = { ...a };
-  for (const [provider, opts] of Object.entries(b)) {
-    out[provider] = { ...(out[provider] ?? {}), ...opts };
+  let out: ProviderOptions | undefined;
+  for (const o of opts) {
+    if (!o) continue;
+    if (!out) {
+      out = { ...o };
+      continue;
+    }
+    for (const [provider, po] of Object.entries(o)) {
+      out[provider] = { ...(out[provider] ?? {}), ...po };
+    }
   }
   return out;
 }

@@ -27,18 +27,13 @@ export interface BuiltPrompt {
 
 /** Makes the agent AWARE of the `manage` control plane so it uses it proactively
  *  when a user asks to change something, rather than saying "open settings".
- *  Role is enforced server-side inside the tool, so this stays role-neutral and
- *  cache-stable — a non-admin's attempt at an org setting simply fails. */
+ *  Only the proactive TRIGGERS live here — the behavioral rules (permission
+ *  model, approvals, collections) live in the tool's own description, so the
+ *  two can't drift apart. Role is enforced server-side inside the tool, so this
+ *  stays role-neutral and cache-stable — a non-admin's attempt at an org
+ *  setting simply fails. */
 const MANAGE_PROMPT = `## Managing settings & configuration
-When the user asks to change a preference or setting (their language/timezone, or — for admins — platform-wide configuration), do it yourself with the \`manage\` tool instead of pointing them at a settings page. Use \`list\`/\`capabilities\` to discover what THIS user may change; never invent a control id.
-
-Permission is decided ENTIRELY by the server, from the result of an action you actually call — never by you reading a label. To do what the user asks, CALL the matching action (set/add/enable/…) and react to what comes back. Everything \`list\`/\`capabilities\` returns is ALREADY available to THIS user. So:
-- NEVER refuse up front, never say "I'm only a regular user" or "ask your admin", and never mention a control's role/scope — just call the action.
-- NEVER decide what YOU may do by reading a setting's value. Toggles like "members can install connectors" govern OTHER end-users; they do not restrict you-as-caller, and the server already applies your own role. So never cite such a setting as a reason you "can't" do something. Each collection in a list/get result carries a resolved \`canAdd\` boolean — that, and ONLY that, tells you whether you may add there; trust it over any inference.
-- If you're only missing INFORMATION to act (e.g. a connector's URL or command), ask the user for exactly that, in one plain question — do NOT turn a missing URL into a story about permissions, admins, or disabled settings. To add a remote connector you need its \`url\`; for a local one, its \`command\`.
-- Adding a personal connector (name+url) or a personal skill needs no admin at all.
-- A \`confirm_required\` result means the change is STAGED and the user is ALREADY authorized (the server checked). A confirmation card/button is shown to them, and ONLY their click applies it — you CANNOT apply it yourself and there is no token to re-send. Do NOT claim you lack rights, do NOT re-explain, do NOT re-ask in prose, do NOT call the action again. Reply with at most one short line (e.g. "Ready — tap Confirm", in the user's language) or nothing, then STOP and wait — the applied change arrives on its own. Undo is a button too, not something you trigger.
-- Only an \`error\` result with code \`forbidden\`/\`not_found\`/\`apply_failed\` means it truly can't happen — explain THAT result plainly. Never quote internal keys (like \`org.*\`) to the user; describe the setting in plain words.
+- When the user asks to change a preference or setting (their language/timezone, connectors, skills, or — for admins — platform-wide configuration), do it yourself with the \`manage\` tool instead of pointing them at a settings page, following that tool's rules: discover with \`list\`/\`capabilities\` (never invent a control id), then CALL the matching action and react to its result — permission is decided entirely by the server, so never refuse up front.
 - When the user describes a RECURRING intent ("щотижня", "щоранку", "стеж за", "нагадуй", "every Monday"), offer to create an automation (\`add\` on \`automations\`): the platform will run the instruction on schedule and deliver results as a new chat (+ Telegram if linked). Translate the schedule into a cron expression in the user's timezone yourself — the user must never see cron syntax; the approval card shows them the next run dates instead. For "remind me once at X" use \`once_at\`. After creating one, offer to run the instruction right now yourself as a test.`;
 
 /**
