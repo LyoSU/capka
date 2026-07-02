@@ -8,6 +8,7 @@ import { getBlockPrivateProviderUrls, getSetting } from "@/lib/settings";
 import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl } from "./source";
 import { ghRaw, parseMarketplace } from "./fetch";
+import { discoverSkills } from "./discover";
 import type { CatalogItem } from "./types";
 
 async function ghFetch(): Promise<typeof fetch> {
@@ -25,10 +26,34 @@ async function fetchCatalog(url: string): Promise<{ name: string; owner: string 
   const raw =
     (await ghRaw(repo.owner, repo.repo, "HEAD", ".claude-plugin/marketplace.json", fetchFn)) ??
     (await ghRaw(repo.owner, repo.repo, "HEAD", "marketplace.json", fetchFn));
-  if (!raw) throw new ValidationError("No marketplace.json found in that repo.");
-  let json: unknown;
-  try { json = JSON.parse(raw); } catch { throw new ValidationError("That marketplace.json isn't valid JSON."); }
-  return parseMarketplace(json, repo);
+  if (raw) {
+    let json: unknown;
+    try { json = JSON.parse(raw); } catch { throw new ValidationError("That marketplace.json isn't valid JSON."); }
+    return parseMarketplace(json, repo);
+  }
+  // No marketplace.json — but a plain skills repo (skills/<name>/SKILL.md, à la
+  // `npx skills add owner/repo`) is still installable: model the repo itself as a
+  // single plugin (source ".") whose install pulls every skill. Fail only if it has
+  // neither a catalog nor any skills.
+  const { skills } = await discoverSkills({ owner: repo.owner, repo: repo.repo, ref: "HEAD", subdir: "" }, fetchFn);
+  if (!skills.length) throw new ValidationError("No marketplace.json or skills/ folder found in that repo.");
+  const item: CatalogItem = {
+    name: repo.repo, description: `${skills.length} skill${skills.length === 1 ? "" : "s"}`,
+    author: repo.owner, category: null, homepage: null, kind: "plugin", source: ".", installable: true,
+  };
+  return { name: `${repo.owner}/${repo.repo}`, owner: repo.owner, items: [item] };
+}
+
+/** Dry-run the skills a repo would install (name + description), pinned to the
+ *  current HEAD commit — the pre-install preview for "add a whole skills repo".
+ *  Accepts a full github.com URL OR the `owner/repo` shorthand (parseGitHubUrl
+ *  handles both). Advisory: throws only on a bad URL / unreachable repo. */
+export async function discoverRepoSkills(url: string): Promise<{ owner: string; repo: string; sha: string; skills: { name: string; description: string | null }[] }> {
+  const repo = parseGitHubUrl(url);
+  if (!repo) throw new ValidationError("Only GitHub repositories are supported. Paste a github.com repo URL or owner/repo.");
+  const fetchFn = await ghFetch();
+  const { commit, skills } = await discoverSkills({ owner: repo.owner, repo: repo.repo, ref: "HEAD", subdir: "" }, fetchFn);
+  return { owner: repo.owner, repo: repo.repo, sha: commit.sha, skills };
 }
 
 export async function addMarketplace(url: string): Promise<string> {

@@ -68,7 +68,7 @@ Settings/controls:
 
 Collections (target="mcp" for connectors, target="skill" for agent skills):
 - action="get" with a collection target lists its items; add/remove/enable/disable/debug/connect operate on them (itemId identifies one).
-- add args for mcp: {name, url, authKind:"oauth"} (remote) or {name, command, args} (local/stdio). add args for skill: {content} where content is a full SKILL.md (frontmatter name+description, then the instruction body). add/remove are confirmed by the user (confirm_required), exactly like risky settings — you stage, the user applies.
+- add args for mcp: {name, url, authKind:"oauth"} (remote) or {name, command, args} (local/stdio). add args for skill: EITHER {content} (a single full SKILL.md — frontmatter name+description then the instruction body) OR {repo} to install EVERY skill from a GitHub skills repo at once (e.g. {repo:"owner/repo"} or a github.com URL); add {only:["name",...]} to install just some of them. The confirm card lists all the skills that will be installed. add/remove are confirmed by the user (confirm_required), exactly like risky settings — you stage, the user applies.
 - Some connectors need the user to sign in via a browser (OAuth). action="add" or action="connect" then returns status="action_required" with a URL — DON'T try to open it yourself; tell the user to use the button/link, then re-check with action="debug".
 - action="debug" reports a connector's live state (ok / needs login / unreachable) and a hint. NEVER ask the user to paste API keys or tokens into chat — a connector needing a secret token is configured on the settings page, not here.
 

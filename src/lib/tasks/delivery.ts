@@ -50,7 +50,7 @@ export interface TaskResult {
    *  `impact` (a risk warning) and `body` (the full text being approved, e.g. a
    *  SKILL.md) travel too, so the Telegram user sees exactly what the web card
    *  shows — nobody approves a change blind on any channel. */
-  confirm?: { pendingId: string; title: string; before: string; after: string; impact?: string; body?: string };
+  confirm?: { pendingId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] };
 }
 
 /** The transient activity shown while the answer streams in. The live reasoning
@@ -185,7 +185,7 @@ export function composeFinal(
  *  rendered into BOTH the rich markdown and the plain-text fallback, so a Markdown
  *  rejection can never silently strip the impact line or the body the web card shows. */
 export function composeConfirmPreview(
-  c: { title: string; before: string; after: string; impact?: string; body?: string },
+  c: { title: string; before: string; after: string; impact?: string; body?: string; items?: string[] },
   t: Translator,
 ): { markdown: string; plain: string } {
   const diff = c.before && c.before !== c.after ? `${c.before} → ${c.after}` : c.after;
@@ -195,6 +195,12 @@ export function composeConfirmPreview(
   if (c.impact) {
     quote.push(`> ⚠️ ${escapeHtml(c.impact)}`);
     plain.push(`⚠️ ${c.impact}`);
+  }
+  // The full SET being approved (e.g. every skill a repo installs) — listed on
+  // every channel so a bulk install is never confirmed as an opaque "add repo".
+  if (c.items?.length) {
+    for (const it of c.items) quote.push(`> • ${escapeHtml(it)}`);
+    plain.push(c.items.map((it) => `• ${it}`).join("\n"));
   }
   let markdown = quote.join("\n");
   if (c.body) {

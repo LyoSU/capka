@@ -8,14 +8,27 @@ import {
 } from "@/lib/skills/service";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
 import { canInstallExtensions, assertCanInstall } from "@/lib/settings";
+import { discoverRepoSkills } from "@/lib/marketplace/service";
+import { installSkillRepo } from "@/lib/marketplace/install";
+import { parseGitHubUrl } from "@/lib/marketplace/source";
 import type { SkillScope } from "@/lib/skills/types";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
 
-const addSchema = z.object({
-  content: z.string().min(1, "SKILL.md content is required (frontmatter: name, description — plus the instruction body)."),
-  scope: z.enum(["user", "org"]).optional(),
-});
+// Add a skill EITHER inline (one SKILL.md) OR from a whole GitHub repo (install
+// every skill under skills/<name>/, à la `npx skills add owner/repo`; `only`
+// narrows to specific ones). `repo` accepts a github.com URL or `owner/repo`.
+const addSchema = z.union([
+  z.object({
+    content: z.string().min(1, "SKILL.md content is required (frontmatter: name, description — plus the instruction body)."),
+    scope: z.enum(["user", "org"]).optional(),
+  }),
+  z.object({
+    repo: z.string().min(1, "A GitHub repo is required — a github.com URL or owner/repo (e.g. publora/skills)."),
+    only: z.array(z.string()).optional(),
+    scope: z.enum(["user", "org"]).optional(),
+  }),
+]);
 
 type AddArgs = z.infer<typeof addSchema>;
 
@@ -27,7 +40,7 @@ export function skillScope(args: { scope?: string }): { scope: SkillScope; needs
 
 /** Authorization for adding a skill, shared by the dispatcher's confirm-phase
  *  pre-flight (`validateAdd`) and the apply-phase (`add`). */
-async function assertCanAddSkill(ctx: ManageContext, a: AddArgs): Promise<void> {
+async function assertCanAddSkill(ctx: ManageContext, a: { scope?: string }): Promise<void> {
   const { needsAdmin } = skillScope(a);
   if (needsAdmin && !ctx.isAdmin) throw new Error("Shared (org) skills can only be added by an administrator.");
   await assertCanInstall(ctx.isAdmin, "skill");
@@ -47,7 +60,11 @@ export const skillCollection: Collection = {
   async validateAdd(ctx, args) {
     const a = args as AddArgs;
     await assertCanAddSkill(ctx, a);
-    parseSkillMarkdown(a.content); // throws SkillParseError (friendly) BEFORE a card is shown
+    // Fail up front (before a card): a single skill's markdown must parse; a repo
+    // must at least look like a GitHub reference. The repo's real content is read
+    // in previewAdd (which lists the skills it would install).
+    if ("content" in a) parseSkillMarkdown(a.content);
+    else if (!parseGitHubUrl(a.repo)) throw new Error("That doesn't look like a GitHub repo — use a github.com URL or owner/repo (e.g. publora/skills).");
   },
 
   async list(ctx) {
@@ -61,9 +78,39 @@ export const skillCollection: Collection = {
     }));
   },
 
-  previewAdd(ctx, args) {
+  async previewAdd(ctx, args) {
     const t = manageT(ctx.locale);
     const a = args as AddArgs;
+    const { scope } = skillScope(a);
+    const impact = scope === "system" ? loc(t, "skill.sharedImpact", "Shared skill — available to all users.") : undefined;
+
+    // Repo install: enumerate the skills it would install so the user approves the
+    // whole SET before confirming (like `npx skills add owner/repo --list`).
+    if ("repo" in a) {
+      try {
+        const { owner, repo, skills } = await discoverRepoSkills(a.repo);
+        const only = a.only?.length ? new Set(a.only) : null;
+        const names = (only ? skills.filter((s) => only.has(s.name)) : skills).map((s) => s.name);
+        return {
+          title: loc(t, "skill.addRepoTitle", `Install skills from ${owner}/${repo}`, { repo: `${owner}/${repo}` }),
+          after: `${owner}/${repo}`,
+          items: names,
+          details: names.length ? undefined : loc(t, "skill.repoEmpty", "No matching skills found in that repo."),
+          impact,
+        };
+      } catch {
+        // Advisory probe — a read failure must never block the add.
+        return {
+          title: loc(t, "skill.addRepoTitle", `Install skills from ${a.repo}`, { repo: a.repo }),
+          after: a.repo,
+          details: loc(t, "skill.repoUnreachable", "Couldn't read the repo just now — you can still install; it'll pull on confirm."),
+          impact,
+        };
+      }
+    }
+
+    // Single inline skill — the user approves a PERMANENT instruction the agent
+    // wrote, so show what it does (description) + the full SKILL.md collapsibly.
     let name = loc(t, "skill.newSkill", "(new skill)");
     let details: string | undefined;
     try {
@@ -71,22 +118,26 @@ export const skillCollection: Collection = {
       name = parsed.name;
       details = parsed.description ?? undefined;
     } catch { /* previewing invalid markdown — the add will surface the real error */ }
-    const { scope } = skillScope(a);
-    return {
-      title: loc(t, "skill.addTitle", "Add skill"),
-      after: name,
-      // The user is approving a PERMANENT instruction the agent wrote — show what
-      // it does (description) and the full SKILL.md, so it's never confirmed blind.
-      details,
-      body: a.content,
-      impact: scope === "system" ? loc(t, "skill.sharedImpact", "Shared skill — available to all users.") : undefined,
-    };
+    return { title: loc(t, "skill.addTitle", "Add skill"), after: name, details, body: a.content, impact };
   },
 
   async add(ctx, args) {
+    const t = manageT(ctx.locale);
     const a = args as AddArgs;
     await assertCanAddSkill(ctx, a); // defense-in-depth: dispatch pre-flights this too
     const { scope } = skillScope(a);
+
+    if ("repo" in a) {
+      const manifest = await installSkillRepo({
+        url: a.repo,
+        installedBy: ctx.userId,
+        scope: scope === "system" ? "system" : "user",
+        only: a.only,
+      });
+      const n = manifest.skills.length;
+      return { itemTitle: loc(t, "skill.repoInstalled", `${n} skill${n === 1 ? "" : "s"} from ${a.repo}`, { n, repo: a.repo }) };
+    }
+
     const parsed = parseSkillMarkdown(a.content); // throws SkillParseError → surfaced as a friendly error
     await ingestSkill(parsed, [], { scope, userId: scope === "user" ? ctx.userId : null, projectId: null });
     return { itemTitle: parsed.name };

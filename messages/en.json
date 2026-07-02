@@ -1312,6 +1312,12 @@
       "probeUnreachable": "Couldn't reach it just now — you can still add it and fix later.",
       "probeNeedsAuth": "Reachable, but it needs a sign-in or token (set on the settings page).",
       "probeOauth": "You'll sign in through your browser after adding it."
+    },
+    "skill": {
+      "addRepoTitle": "Install skills from {repo}",
+      "repoEmpty": "No matching skills found in that repo.",
+      "repoUnreachable": "Couldn't read the repo just now — you can still install; it'll pull on confirm.",
+      "repoInstalled": "{n, plural, one {# skill} other {# skills}} from {repo}"
     }
   },
   "orgChangeBanner": {

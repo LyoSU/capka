@@ -391,7 +391,7 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
     render: "confirm",
     summary: CONFIRM_NOTE,
     pendingId,
-    preview: { controlId: `${coll!.id}:add`, title: preview.title, before: "", after: preview.after, impact: preview.impact, details: preview.details, body: preview.body },
+    preview: { controlId: `${coll!.id}:add`, title: preview.title, before: "", after: preview.after, impact: preview.impact, details: preview.details, body: preview.body, items: preview.items },
   };
 }
 

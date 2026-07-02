@@ -128,10 +128,11 @@ export interface Collection {
     ctx: ManageContext,
     args: Record<string, unknown>,
   ):
-    | { title: string; after: string; impact?: string; details?: string; body?: string }
+    | { title: string; after: string; impact?: string; details?: string; body?: string; items?: string[] }
     // May be async so it can PROBE before the confirm card is shown (e.g. try to
-    // reach a remote connector and report its tool count / that it's unreachable).
-    | Promise<{ title: string; after: string; impact?: string; details?: string; body?: string }>;
+    // reach a remote connector and report its tool count, or enumerate the skills a
+    // repo would install so the user approves the whole set — `items`).
+    | Promise<{ title: string; after: string; impact?: string; details?: string; body?: string; items?: string[] }>;
   remove?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string }>;
   setEnabled?(ctx: ManageContext, itemId: string, enabled: boolean): Promise<{ itemTitle: string }>;
   debug?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string; state: string; detail?: string; hint?: string; action?: RequiredAction }>;
@@ -192,6 +193,6 @@ export type ManageResult =
       /** Opaque handle to the server-staged change. Safe to expose — applying it
        *  requires the session cookie / Telegram callback, which the model lacks. */
       pendingId: string;
-      preview: { controlId: string; title: string; before: string; after: string; impact?: string; details?: string; body?: string };
+      preview: { controlId: string; title: string; before: string; after: string; impact?: string; details?: string; body?: string; items?: string[] };
     }
   | { status: "error"; render: "error"; summary: string; code: string };

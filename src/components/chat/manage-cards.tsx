@@ -18,7 +18,7 @@ type ManageOutput = {
   /** Opaque handle to a server-staged change (confirm). Applying it needs the
    *  session/callback — the model never holds anything replayable. */
   pendingId?: string;
-  preview?: { title: string; before: string; after: string; impact?: string; details?: string; body?: string };
+  preview?: { title: string; before: string; after: string; impact?: string; details?: string; body?: string; items?: string[] };
   action?: RequiredAction;
   data?: {
     title?: string;
@@ -159,7 +159,7 @@ function Outcome({ kind, text }: { kind: "done" | "expired" | "cancelled" | "err
  *  session-authed endpoint (never the model), then the card collapses to its
  *  outcome — so a button can't be clicked twice and a stale card reads clearly. */
 function ConfirmCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: string) => void }) {
-  const { title, before, after, impact, details, body } = o.preview!;
+  const { title, before, after, impact, details, body, items } = o.preview!;
   // Start "checking": on mount we ask the server whether this pending is still
   // open, so a RELOADED card shows "confirmed"/"expired" instead of live buttons
   // for a change that already happened (React state doesn't survive a reload).
@@ -221,6 +221,18 @@ function ConfirmCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: 
       </div>
       <div className="mt-2 text-sm text-muted-foreground">{title}</div>
       <Diff before={before} after={after} />
+      {/* The full SET being approved (e.g. every skill a repo would install) — so a
+          bulk install is never confirmed as an opaque "add repo". */}
+      {items && items.length > 0 && (
+        <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+          {items.map((it) => (
+            <li key={it} className="flex items-center gap-2">
+              <span className="h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden />
+              {it}
+            </li>
+          ))}
+        </ul>
+      )}
       {/* What the user is actually approving — description + the full text (e.g. a
           SKILL.md), collapsed — so a permanent instruction is never confirmed blind. */}
       {details && <div className="mt-2 text-sm text-muted-foreground">{details}</div>}

@@ -8,6 +8,7 @@ import { parseSkillMarkdown } from "@/lib/skills/parse";
 import { ingestSkill } from "@/lib/skills/service";
 import { upsertServer, upsertStdioServer, setEnabled } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
+import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghTree, ghRaw, resolveCommit, diffTrees, type TreeEntry, type TreeDiff } from "./fetch";
 import { extractServers, parseManifestMcp, type ServerDef } from "./manifest";
@@ -83,7 +84,11 @@ async function resolvePlugin(marketplaceId: string, pluginName: string) {
  *  tagging every row `catalog:<installId>`. Idempotent per name: ingestSkill /
  *  upsertServer upsert by name, so re-running with the same tag updates in place
  *  (the basis of upgrade). Returns what the current tree produced. */
-async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget): Promise<ApplyResult> {
+async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget, only?: string[]): Promise<ApplyResult> {
+  // `only` (from `--skill`) narrows the install to specific skills by name. A
+  // skill-scoped install ignores connectors entirely — the intent is "just these
+  // skills", and connectors are a separate, gated concern.
+  const onlySet = only && only.length ? new Set(only) : null;
   const prefix = gh.subdir ? `${gh.subdir}/` : "";
   const fetchFn = await ghFetch();
   // Pin gh.ref (a branch/tag/HEAD) to a concrete commit, then pull the tree AND
@@ -185,7 +190,7 @@ async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget): P
   }
   // Precedence on a name clash: inline < referenced config < root .mcp.json.
   const servers = { ...inlineServers, ...pathServers, ...fileServers };
-  for (const [sname, def] of Object.entries(servers)) await routeServer(sname, def);
+  if (!onlySet) for (const [sname, def] of Object.entries(servers)) await routeServer(sname, def);
 
   // ── Skills (skills/<name>/SKILL.md + bundled files) ────────────────────────
   const skillMds = tree.filter((t) => t.type === "blob" && t.path.startsWith(`${prefix}skills/`) && t.path.endsWith("/SKILL.md"));
@@ -196,6 +201,7 @@ async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget): P
     let parsed;
     try { parsed = parseSkillMarkdown(body); } catch { continue; }
     if (!parsed.name) continue;
+    if (onlySet && !onlySet.has(parsed.name)) continue;
     const files: { path: string; content: string }[] = [];
     const sibs = tree.filter((t) => t.type === "blob" && t.path.startsWith(`${dir}/`) && t.path !== md.path).slice(0, MAX_SKILL_FILES);
     for (const f of sibs) {
@@ -216,6 +222,7 @@ async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget): P
     try { parsed = parseSkillMarkdown(body); } catch { parsed = null; }
     const base = c.path.split("/").pop()!.replace(/\.md$/, "");
     const finalParsed = parsed && parsed.name ? parsed : { name: base, description: undefined, body, frontmatter: {} };
+    if (onlySet && !onlySet.has(finalParsed.name)) continue;
     await ingestSkill(finalParsed, [], { ...target, source: tag });
     manifest.skills.push(finalParsed.name);
   }
@@ -256,6 +263,8 @@ export async function installPlugin(opts: {
   installedBy: string;
   /** Org-wide (admin) or personal (a member installing for themselves). */
   scope?: "system" | "user";
+  /** Narrow to specific skills by name (`--skill`); omit for all. */
+  only?: string[];
 }): Promise<InstallManifest> {
   const { gh } = await resolvePlugin(opts.marketplaceId, opts.pluginName);
   const scope = opts.scope ?? "system";
@@ -276,7 +285,7 @@ export async function installPlugin(opts: {
   // Re-install stays PINNED: re-pull the commit already installed, not whatever the
   // branch points at now. Moving the pin is an explicit upgrade (with a diff).
   const ref = existing?.commitSha || gh.ref;
-  const { manifest, files } = await applyPlugin({ ...gh, ref }, `catalog:${installId}`, target);
+  const { manifest, files } = await applyPlugin({ ...gh, ref }, `catalog:${installId}`, target, opts.only);
 
   if (existing) {
     await pruneRemoved(`catalog:${installId}`, manifest); // re-install: drop rows removed upstream
@@ -373,6 +382,37 @@ export async function upgradePlugin(installId: string, toSha: string): Promise<I
     .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? row.commitSha, manifest: manifest as unknown as Record<string, unknown> })
     .where(eq(pluginInstalls.id, installId));
   return manifest;
+}
+
+/** Install skills straight from a git repo with no marketplace.json — a plain
+ *  `skills/<name>/SKILL.md` collection, à la `npx skills add owner/repo`. The repo
+ *  is modelled as a single-plugin marketplace whose one plugin (source ".") is the
+ *  repo root, so installing it enumerates every skill — and the whole pin / upgrade
+ *  / uninstall / Extensions machinery is reused unchanged. `only` narrows to
+ *  specific skills (`--skill`). The synthetic marketplace row is reused per URL. */
+export async function installSkillRepo(opts: {
+  url: string;
+  installedBy: string;
+  scope?: "system" | "user";
+  only?: string[];
+}): Promise<InstallManifest> {
+  const repo = parseGitHubUrl(opts.url);
+  if (!repo) throw new ValidationError("Only GitHub repositories are supported. Paste a github.com repo URL.");
+  const clean = opts.url.trim();
+  const pluginName = repo.repo;
+  const existing = (await db.select({ id: pluginMarketplaces.id }).from(pluginMarketplaces).where(eq(pluginMarketplaces.url, clean)).limit(1))[0];
+  let marketplaceId = existing?.id;
+  if (!marketplaceId) {
+    marketplaceId = nanoid();
+    const catalog: CatalogItem[] = [{
+      name: pluginName, description: "", author: repo.owner, category: null,
+      homepage: null, kind: "plugin", source: ".", installable: true,
+    }];
+    await db.insert(pluginMarketplaces).values({
+      id: marketplaceId, url: clean, name: `${repo.owner}/${repo.repo}`, owner: repo.owner, catalog, refreshedAt: new Date(),
+    });
+  }
+  return installPlugin({ marketplaceId, pluginName, installedBy: opts.installedBy, scope: opts.scope, only: opts.only });
 }
 
 /** Remove everything an install routed (FK cascade drops skill files, plugin
