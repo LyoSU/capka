@@ -51,6 +51,15 @@ All notable changes to Capka are documented here. Format follows
   labels `settings.update`/`settings.undo` instead of showing the raw code.
 
 ### Added
+- **`agent_autonomy` setting (admin): "supervised" (default) or "autonomous".**
+  In supervised mode the agent stages a risky change (org setting, add/remove) and
+  the user approves it on a confirmation card, as before. In autonomous mode the
+  agent applies these directly from chat and keeps working — no card, no round-trip
+  — EXCEPT installing an MCP connector (runs third-party code in the sandbox),
+  which stays confirmed even in autonomous mode, and the autonomy switch itself,
+  which always requires confirmation so a prompt-injected agent can't silently turn
+  supervision off. Undo and the audit log apply in both modes. Set it from chat or
+  the settings UI.
 - **Conversational settings control plane — users and admins manage config from
   chat via a new `manage` agent tool.** A regular user can change their own
   preferences (interface language, timezone); an admin can additionally change

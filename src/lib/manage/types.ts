@@ -52,6 +52,11 @@ export interface Control {
    *  the whole interface language), so the web card refreshes the route after
    *  apply/undo instead of leaving stale content until a manual reload. */
   reloadOnApply?: boolean;
+  /** Always require the confirm card, even when the org runs in `autonomous` mode
+   *  (which otherwise applies risky changes directly). Reserved for the master
+   *  switch itself (`org.agent_autonomy`) so a prompt-injected agent can't silently
+   *  disable supervision. */
+  alwaysConfirm?: boolean;
 }
 
 export type ManageInput =
@@ -107,6 +112,10 @@ export interface Collection {
   /** The full settings page that manages this collection, so a chat card can offer
    *  a quiet "Open in settings →" link to the richer UI (the card is a summary). */
   settingsPath?: string;
+  /** Keep add confirm-gated even in `autonomous` mode — for collections whose add
+   *  runs third-party code (MCP connectors), the one checkpoint injection can't
+   *  bypass. Reversible/instruction-only collections (skills) omit it. */
+  alwaysConfirm?: boolean;
   addSchema?: z.ZodTypeAny;
   /** Resolved, authoritative "may THIS caller add here" — surfaced to the model
    *  (UI-style, like the settings page's capability endpoint) so it never has to

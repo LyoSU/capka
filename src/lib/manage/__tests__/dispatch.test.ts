@@ -116,6 +116,25 @@ describe("manage/dispatch", () => {
     // There is NO model-facing action to apply — set/add/remove only stage.
   });
 
+  it("autonomous mode applies a confirm-risk change directly, no card", async () => {
+    const auto = memControl({ id: "org.agent_autonomy", scope: "org", requiredRole: "admin", risk: "confirm" });
+    auto.control.read = async () => "autonomous";
+    const target = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
+    const reg = createRegistry([auto.control, target.control]);
+    const res = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
+    expect(target.cell.value).toBe("bridge"); // applied directly, not staged
+    expect(res.status === "ok" && res.render).toBe("setting");
+  });
+
+  it("autonomous mode STILL confirms an alwaysConfirm control (the autonomy master switch can't be flipped silently)", async () => {
+    const auto = memControl({ id: "org.agent_autonomy", scope: "org", requiredRole: "admin", risk: "confirm", alwaysConfirm: true });
+    auto.control.read = async () => "autonomous";
+    const reg = createRegistry([auto.control]);
+    const res = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.agent_autonomy", value: "supervised" });
+    expect(res.status).toBe("confirm_required");
+    expect(auto.cell.value).toBe("org.agent_autonomy:init"); // unchanged — still gated
+  });
+
   it("applyPending applies exactly the staged change (human-authed path)", async () => {
     const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([control]);

@@ -16,6 +16,7 @@ function orgSetting(o: {
   def: string;
   format?: (v: string) => string;
   impact?: (ctx: ManageContext, next: string) => Promise<string | undefined>;
+  alwaysConfirm?: boolean;
 }): Control {
   return {
     id: `org.${o.key}`,
@@ -31,6 +32,7 @@ function orgSetting(o: {
     },
     format: o.format,
     impact: o.impact,
+    alwaysConfirm: o.alwaysConfirm,
   };
 }
 
@@ -46,6 +48,22 @@ const boundedInt = (max: number) =>
 const TOKENS_CEILING = 10_000_000;
 
 export const orgControls: Control[] = [
+  orgSetting({
+    key: "agent_autonomy",
+    title: "Agent autonomy",
+    description:
+      'How the agent applies changes from chat: "supervised" (the user approves each risky change on a confirmation card) or "autonomous" (the agent applies them directly, conversationally). Autonomous still asks before installing a connector that runs third-party code.',
+    schema: z.enum(["supervised", "autonomous"]),
+    def: "supervised",
+    format: (v) => (v === "autonomous" ? "Autonomous" : "Supervised"),
+    // Flipping the master switch always gets a confirmation, even from autonomous,
+    // so a prompt-injected agent can't quietly disable its own supervision.
+    alwaysConfirm: true,
+    impact: async (_ctx, next) =>
+      next === "autonomous"
+        ? "The agent will change settings and install skills directly, without asking each time — only connectors that run third-party code still require confirmation. Undo and the audit log still apply."
+        : undefined,
+  }),
   orgSetting({
     key: "platform_name",
     title: "Platform name",

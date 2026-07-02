@@ -193,6 +193,16 @@ async function get(reg: Registry, ctx: ManageContext, target: string): Promise<M
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
+/** Org autonomy mode: `autonomous` applies risky changes directly (conversational,
+ *  no confirm card); `supervised` (default) shows the confirm card. Read through the
+ *  registry so it's stubbable in tests and absent → supervised (safe default). The
+ *  master switch and connector installs opt out of this via `alwaysConfirm`. */
+async function autonomous(reg: Registry, ctx: ManageContext): Promise<boolean> {
+  const c = reg.get("org.agent_autonomy");
+  if (!c) return false;
+  try { return (await c.read(ctx)) === "autonomous"; } catch { return false; }
+}
+
 async function set(
   reg: Registry,
   ctx: ManageContext,
@@ -214,7 +224,9 @@ async function set(
 
   // Risky changes are STAGED — never applied by the model. Only the user's click
   // (web session / Telegram callback) consumes the pending id and applies it.
-  if (c.risk === "confirm") {
+  // EXCEPT in autonomous mode, where the agent applies directly (no card) — but the
+  // master autonomy switch itself (alwaysConfirm) always stays gated.
+  if (c.risk === "confirm" && (c.alwaysConfirm || !(await autonomous(reg, ctx)))) {
     const before = await c.read(ctx);
     const rawImpact = c.impact ? await c.impact(ctx, value) : undefined;
     const impact = rawImpact ? loc(t, `impact.${keyOf(c.id)}`, rawImpact) : undefined;
@@ -376,6 +388,9 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
       return err("apply_failed", errMsg(e));
     }
   }
+  // Autonomous mode applies directly — except a connector install (alwaysConfirm),
+  // which runs third-party code and stays gated even then.
+  if (!coll!.alwaysConfirm && (await autonomous(reg, ctx))) return applyAdd(reg, ctx, coll!.id, args);
   // previewAdd may probe the network (reach the connector, count its tools) before
   // we show the confirm card, so await it — a doomed/blind add is surfaced up front.
   const preview = coll!.previewAdd ? await coll!.previewAdd(ctx, args) : { title: coll!.title, after: "" };
@@ -404,6 +419,8 @@ async function remove(reg: Registry, ctx: ManageContext, input: Extract<ManageIn
   const items = await coll!.list(ctx);
   const it = items.find((x) => x.id === input.itemId);
   if (!it) return err("not_found", "No such item.");
+  // Autonomous mode removes directly (reversible by re-adding); supervised stages a confirm.
+  if (await autonomous(reg, ctx)) return applyRemove(reg, ctx, coll!.id, input.itemId);
   const store = await pendingStore(ctx);
   const pendingId = await store.stage({
     userId: ctx.userId,

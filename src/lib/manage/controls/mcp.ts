@@ -83,6 +83,9 @@ export const mcpCollection: Collection = {
   requiredRole: "user",
   auditNoun: "connector",
   settingsPath: "/settings/skills?tab=connectors",
+  // A connector runs third-party code in the sandbox, so adding one is confirmed
+  // even in autonomous mode — the one checkpoint prompt-injection can't bypass.
+  alwaysConfirm: true,
   addSchema,
 
   canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),
