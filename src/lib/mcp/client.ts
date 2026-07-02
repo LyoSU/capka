@@ -65,7 +65,7 @@ export async function connectMcpServer(
   // surface the question card and poll for the answer. Off-turn (cache warm), the
   // client advertises no elicitation support, so a server won't try to elicit.
   const client = new Client(
-    { name: "capka", version: "0.1.0" },
+    { name: "capka", version: process.env.CAPKA_VERSION || "dev" },
     opts.elicitContext ? { capabilities: { elicitation: {} } } : undefined,
   );
   if (opts.elicitContext) {

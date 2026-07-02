@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Github } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
-import { version } from "../../../../package.json";
 
 const REPO_URL = "https://github.com/LyoSU/capka";
 import { Input } from "@/components/ui/input";
@@ -83,6 +82,16 @@ function AccountSection() {
 export default function GeneralSettingsPage() {
   const tLang = useTranslations("language");
   const t = useTranslations("settings.general");
+  // The build-time package.json version never moves (release versioning lives
+  // in git tags), so fetch the version actually stamped into this running
+  // image (CAPKA_VERSION) instead of hardcoding a stale number.
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/version")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setVersion(d?.version ?? null))
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="max-w-lg space-y-6">
@@ -158,7 +167,7 @@ export default function GeneralSettingsPage() {
           <Github className="size-4" />
           {t("sourceCode")}
         </a>
-        <p className="text-xs text-muted-foreground">{t("version", { version })}</p>
+        {version && <p className="text-xs text-muted-foreground">{t("version", { version })}</p>}
       </div>
     </div>
   );

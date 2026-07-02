@@ -12,6 +12,9 @@ All notable changes to Capka are documented here. Format follows
   — `platform` and `sandbox-controller` now set `pull_policy: always`, so
   `docker compose up -d` re-checks the registry every deploy instead of only
   pulling when the tag is missing locally.
+- **Settings → General "About" and the MCP client handshake now report the
+  actual running version** (`CAPKA_VERSION`) instead of a frozen `package.json`
+  number that never moved past `0.1.0`.
 
 ## [0.2.0] - 2026-07-02
 
