@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight } from "lucide-react";
+import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight, FilePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
 
@@ -37,7 +37,7 @@ type ManageOutput = {
     /** The full settings page that manages this collection (quiet "Open in settings" link). */
     settingsPath?: string;
     // resource
-    op?: "added" | "removed" | "enabled" | "disabled";
+    op?: "added" | "removed" | "enabled" | "disabled" | "editing";
     itemTitle?: string;
     action?: RequiredAction;
     // debug
@@ -47,16 +47,44 @@ type ManageOutput = {
   };
 };
 
-const CARD_RENDERS = new Set(["confirm", "setting", "choice", "action_required", "resource", "debug"]);
+const CARD_RENDERS = new Set(["confirm", "choice", "action_required"]);
 
-/** A `manage` result becomes a prominent card (not a quiet rail step) when it's
- *  something the user must SEE or ACT on. Plain reads — a single value (`value`),
- *  the whole registry (`list`), or one collection's items (`collection`, i.e. the
- *  agent reviewing connectors/skills) — stay in the activity rail; the agent
- *  relays anything worth surfacing in prose, so an internal review isn't a card. */
+/** A `manage` result becomes a prominent card only when the user must still ACT on
+ *  it — a confirmation, a chip picker, or an OAuth/open-url hand-off. Everything the
+ *  agent merely *did* (an applied setting, an enable/disable, a healthy diagnostic)
+ *  and every internal read (a value, the registry list, a collection's items) drops
+ *  to the quiet activity rail, where it reads as a one-line step (see
+ *  `manageStepLabel`). Two results carry an action even though their render isn't in
+ *  the always-card set, so they stay cards: a `setting` change that must refresh the
+ *  route (a locale switch), and a `resource`/`debug` with a sign-in button attached. */
 export function isManageCard(output: unknown): boolean {
-  const r = (output as ManageOutput | null)?.render;
-  return r ? CARD_RENDERS.has(r) : false;
+  const o = output as ManageOutput | null;
+  const r = o?.render;
+  if (!r) return false;
+  if (CARD_RENDERS.has(r)) return true;
+  if (r === "setting") return !!o!.data?.reload; // a locale switch needs the visible card + route refresh
+  if (r === "resource" || r === "debug") return !!o!.data?.action; // keep only when a sign-in button rides along
+  return false;
+}
+
+/** A demoted `manage` result rendered as a quiet one-line rail step: its already-
+ *  localized `summary` (an applied change, a diagnostic, a value). Returns null for
+ *  renders with no crisp one-liner (`list`/`collection`/`capabilities` — internal
+ *  reads that keep the generic "managed settings" step label instead). */
+export function manageStepLabel(output: unknown): string | null {
+  const o = output as ManageOutput | null;
+  switch (o?.render) {
+    case "setting":
+    case "debug":
+    case "value":
+      return o.summary ?? null;
+    case "resource":
+      // `editing` (skill checked out) summarises as a long model instruction — show
+      // just the item name; the rest are short localized lines ("Enabled X").
+      return o.data?.op === "editing" ? (o.data.itemTitle ?? null) : (o.summary ?? null);
+    default:
+      return null;
+  }
 }
 
 /** Consume a staged pending id via the session-authed endpoint — the ONLY path a
@@ -102,7 +130,7 @@ function ConnectLink({ action, onConnected }: { action: RequiredAction; onConnec
   );
 }
 
-const OP_ICON = { added: Plug, removed: Trash2, enabled: Power, disabled: Power } as const;
+const OP_ICON = { added: Plug, removed: Trash2, enabled: Power, disabled: Power, editing: FilePen } as const;
 
 /** Quiet client-side link from a chat card to the full settings page that manages
  *  the same thing — the card is a summary; the page is the richer UI (#12). */

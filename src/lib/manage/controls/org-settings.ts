@@ -52,16 +52,17 @@ export const orgControls: Control[] = [
     key: "agent_autonomy",
     title: "Agent autonomy",
     description:
-      'How the agent applies changes from chat: "supervised" (the user approves each risky change on a confirmation card) or "autonomous" (the agent applies them directly, conversationally). Autonomous still asks before installing a connector that runs third-party code.',
+      'How the agent applies changes from chat: "supervised" (the user approves each risky change on a confirmation card) or "autonomous" (the agent applies personal changes directly, conversationally). Even autonomous still asks before changing a platform-wide setting (one that affects every user) or installing a connector that runs third-party code.',
     schema: z.enum(["supervised", "autonomous"]),
     def: "supervised",
     format: (v) => (v === "autonomous" ? "Autonomous" : "Supervised"),
     // Flipping the master switch always gets a confirmation, even from autonomous,
-    // so a prompt-injected agent can't quietly disable its own supervision.
+    // so a prompt-injected agent can't quietly disable its own supervision. (Being
+    // org-scoped now also guarantees this, but the flag documents the intent.)
     alwaysConfirm: true,
     impact: async (_ctx, next) =>
       next === "autonomous"
-        ? "The agent will change settings and install skills directly, without asking each time — only connectors that run third-party code still require confirmation. Undo and the audit log still apply."
+        ? "The agent will apply personal preferences and install skills directly, without asking each time. Platform-wide settings and connectors that run third-party code still require your confirmation. Undo and the audit log still apply."
         : undefined,
   }),
   orgSetting({

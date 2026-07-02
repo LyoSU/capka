@@ -16,7 +16,7 @@ export type StepCategory = "file" | "exec" | "search" | "browse" | "mcp" | "skil
 /** Symbolic icon name; the web maps it to a concrete lucide component. */
 export type StepIconKey =
   | "file-plus" | "file-pen" | "file-text" | "folder" | "search"
-  | "terminal" | "code" | "globe" | "wrench" | "sparkles" | "plug";
+  | "terminal" | "code" | "globe" | "wrench" | "sparkles" | "plug" | "sliders";
 
 /** A connected app behind an MCP tool — shown by brand, not a wrench. */
 export interface StepBrand {
@@ -127,6 +127,19 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
   }
 
   const name = toolName.toLowerCase();
+
+  if (name === "manage") {
+    // The running / generic label; a finished result usually replaces this with its
+    // own localized one-liner (see `manageStepLabel`). Diagnostics get a plug so a
+    // connector check reads as connector-shaped, not a generic settings tweak.
+    const isDebug = args.action === "debug";
+    return {
+      iconKey: isDebug ? "plug" : "sliders",
+      label: isDebug ? t("checkedConnector") : t("managedSettings"),
+      activeLabel: isDebug ? t("checkingConnector") : t("managingSettings"),
+      category: isDebug ? "mcp" : "other",
+    };
+  }
 
   if (name === "skill") {
     const skill = typeof args.name === "string" ? args.name : "";

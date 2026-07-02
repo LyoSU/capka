@@ -116,14 +116,25 @@ describe("manage/dispatch", () => {
     // There is NO model-facing action to apply — set/add/remove only stage.
   });
 
-  it("autonomous mode applies a confirm-risk change directly, no card", async () => {
+  it("autonomous mode applies a PERSONAL confirm-risk change directly, no card", async () => {
+    const auto = memControl({ id: "org.agent_autonomy", scope: "org", requiredRole: "admin", risk: "confirm" });
+    auto.control.read = async () => "autonomous";
+    // A hypothetical personal (user-scope) risky pref — autonomy covers these.
+    const target = memControl({ id: "user.pref", scope: "user", requiredRole: "user", risk: "confirm" });
+    const reg = createRegistry([auto.control, target.control]);
+    const res = await dispatch(reg, ctx(), { action: "set", target: "user.pref", value: "x" });
+    expect(target.cell.value).toBe("x"); // applied directly, not staged
+    expect(res.status === "ok" && res.render).toBe("setting");
+  });
+
+  it("autonomous mode STILL confirms a platform-wide (org) change — its blast radius is wider than one user", async () => {
     const auto = memControl({ id: "org.agent_autonomy", scope: "org", requiredRole: "admin", risk: "confirm" });
     auto.control.read = async () => "autonomous";
     const target = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([auto.control, target.control]);
     const res = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
-    expect(target.cell.value).toBe("bridge"); // applied directly, not staged
-    expect(res.status === "ok" && res.render).toBe("setting");
+    expect(target.cell.value).toBe("org.net:init"); // unchanged — staged, not applied
+    expect(res.status).toBe("confirm_required");
   });
 
   it("autonomous mode STILL confirms an alwaysConfirm control (the autonomy master switch can't be flipped silently)", async () => {

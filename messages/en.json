@@ -123,7 +123,11 @@
     "usedSkillGeneric": "Used a skill",
     "usingSkillGeneric": "Loading a skill…",
     "usedTool": "Used a tool",
-    "working": "Working…"
+    "working": "Working…",
+    "managedSettings": "Updated settings",
+    "managingSettings": "Updating settings…",
+    "checkedConnector": "Checked a connector",
+    "checkingConnector": "Checking a connector…"
   },
   "chat": {
     "untitled": "New Chat",

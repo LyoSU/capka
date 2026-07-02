@@ -49,13 +49,17 @@ All notable changes to Capka are documented here. Format follows
   `members_can_install_plugins` server-side (admins always may).
 
 ### Changed
-- **The agent reviewing connectors/skills no longer drops a redundant list card
-  in the chat.** A `manage` read of one collection's items (e.g. the agent
-  listing MCP connectors before acting) rendered a full item card to the user,
-  which read as noise next to the agent's own reply. Collection reads now stay a
-  quiet activity-rail step, like other reads (`value`/`list`); the agent surfaces
-  anything worth seeing in its prose. Cards remain only for things the user must
-  see or act on (confirmations, settings changes, sign-in prompts, diagnostics).
+- **`manage` results in chat are cards only when the user must still act; the
+  rest drop to the quiet activity rail.** Applied settings, enable/disable, healthy
+  connector diagnostics, and internal reads (a value, the registry list, a
+  collection's items) all rendered as prominent cards, so a short exchange piled up
+  a stack of "Setting updated" / "Diagnostics: ok" boxes that just echoed what the
+  tool already recorded. Now a card appears only for something still awaiting the
+  user: a confirmation, a chip picker, an OAuth/open-url hand-off, a locale switch
+  (which must refresh the page), or a diagnostic/added-connector that carries a
+  sign-in button. Everything else shows as a one-line rail step (its localized
+  summary — "Sandbox network → Isolated", "firecrawl: working"), so the timeline
+  reads cleanly instead of as a wall of result cards.
 - **All `manage` user-facing text is English in code + localized via i18n
   (default English).** Control titles, values, states and messages were
   Ukrainian string literals; they are now English in the source (the single
@@ -80,14 +84,10 @@ All notable changes to Capka are documented here. Format follows
   instead of re-authoring the whole file. Governance/confirm are unchanged — the
   same authorization and (supervised) confirmation apply at the add.
 - **`agent_autonomy` setting (admin): "supervised" (default) or "autonomous".**
-  In supervised mode the agent stages a risky change (org setting, add/remove) and
-  the user approves it on a confirmation card, as before. In autonomous mode the
-  agent applies these directly from chat and keeps working — no card, no round-trip
-  — EXCEPT installing an MCP connector (runs third-party code in the sandbox),
-  which stays confirmed even in autonomous mode, and the autonomy switch itself,
-  which always requires confirmation so a prompt-injected agent can't silently turn
-  supervision off. Undo and the audit log apply in both modes. Set it from chat or
-  the settings UI.
+  In supervised mode the agent stages a risky change and the user approves it on a
+  confirmation card, as before. In autonomous mode the agent applies *personal*
+  changes directly from chat and keeps working — no card, no round-trip. Undo and
+  the audit log apply in both modes. Set it from chat or the settings UI.
 - **Conversational settings control plane — users and admins manage config from
   chat via a new `manage` agent tool.** A regular user can change their own
   preferences (interface language, timezone); an admin can additionally change
@@ -173,6 +173,18 @@ All notable changes to Capka are documented here. Format follows
   `${VAR:-…}` defaults in `docker-compose.yml` (`SANDBOX_MEMORY_MB=1024`,
   `MAX_SESSIONS_PER_USER=2`, `GC_GRACE_MS=604800000`, …) with `stop_grace_period:
   35s` restored, all overridable from the Coolify environment.
+
+### Security
+- **Platform-wide settings always require confirmation, even in autonomous mode.**
+  With `agent_autonomy=autonomous`, the agent applied *any* risky change directly,
+  including org-scoped settings that affect every user (e.g. `sandbox_network`,
+  `block_private_provider_urls`) — so a misread request or a prompt injection could
+  silently disable network isolation or the SSRF guard platform-wide, with only a
+  post-hoc Undo. Autonomy now covers personal changes only: a control with
+  `scope: "org"` is always staged to a confirmation card regardless of autonomy
+  mode (the dispatcher gates on scope, so every current and future org control
+  inherits this). Personal preferences and skill installs still apply directly in
+  autonomous mode. No change in supervised mode.
 
 ### Removed
 - **Fly.io and Railway deploy manifests (the `deploy/` directory) removed.** They

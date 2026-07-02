@@ -19,7 +19,7 @@ import { cleanReasoning } from "@/lib/chat/reasoning";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
-import { ManageCard, isManageCard } from "./manage-cards";
+import { ManageCard, isManageCard, manageStepLabel } from "./manage-cards";
 
 // --- Helpers ---
 
@@ -318,7 +318,12 @@ function StepRow({ part }: { part: ToolPart }) {
     part.state === "output-error" ? "error" : part.state.startsWith("output-") ? "done" : "running";
   const isRunning = state === "running";
   const isError = state === "error";
-  const expandable = !isRunning && (isError ? !!part.errorText : !!formatValue(part.output));
+  // A demoted `manage` result (an applied change / diagnostic that isn't a card)
+  // carries a ready, localized one-liner — show it as the label and drop the raw
+  // JSON expander, so the timeline reads cleanly instead of "Manage" + a blob.
+  const manageLabel = !isRunning && !isError && rawName === "manage" ? manageStepLabel(part.output) : null;
+  const doneLabel = manageLabel ?? d.label;
+  const expandable = !isRunning && (isError ? !!part.errorText : rawName === "manage" ? false : !!formatValue(part.output));
 
   const row = (
     <div
@@ -328,7 +333,7 @@ function StepRow({ part }: { part: ToolPart }) {
     >
       <StepBadge d={d} state={state} />
       <span className="text-sm">
-        {isRunning ? d.activeLabel : d.label}
+        {isRunning ? d.activeLabel : doneLabel}
         {isError ? ` · ${t("failed")}` : ""}
       </span>
       {d.detail && (

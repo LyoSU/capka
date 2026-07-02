@@ -197,8 +197,9 @@ async function get(reg: Registry, ctx: ManageContext, target: string): Promise<M
 
 /** Org autonomy mode: `autonomous` applies risky changes directly (conversational,
  *  no confirm card); `supervised` (default) shows the confirm card. Read through the
- *  registry so it's stubbable in tests and absent → supervised (safe default). The
- *  master switch and connector installs opt out of this via `alwaysConfirm`. */
+ *  registry so it's stubbable in tests and absent → supervised (safe default).
+ *  Autonomy only ever covers *personal* changes: platform-wide (`org`) settings, the
+ *  master switch, and connector installs always stay confirm-gated (see `set`/`add`). */
 async function autonomous(reg: Registry, ctx: ManageContext): Promise<boolean> {
   const c = reg.get("org.agent_autonomy");
   if (!c) return false;
@@ -226,9 +227,11 @@ async function set(
 
   // Risky changes are STAGED — never applied by the model. Only the user's click
   // (web session / Telegram callback) consumes the pending id and applies it.
-  // EXCEPT in autonomous mode, where the agent applies directly (no card) — but the
-  // master autonomy switch itself (alwaysConfirm) always stays gated.
-  if (c.risk === "confirm" && (c.alwaysConfirm || !(await autonomous(reg, ctx)))) {
+  // Autonomous mode lets the agent apply directly (no card) — but ONLY personal
+  // changes: a platform-wide (`org`) setting affects every user, so its blast radius
+  // is wider than an undo can safely cover, and it always stays gated regardless of
+  // autonomy (as does the master autonomy switch itself, via `alwaysConfirm`).
+  if (c.risk === "confirm" && (c.alwaysConfirm || c.scope === "org" || !(await autonomous(reg, ctx)))) {
     const before = await c.read(ctx);
     const rawImpact = c.impact ? await c.impact(ctx, value) : undefined;
     const impact = rawImpact ? loc(t, `impact.${keyOf(c.id)}`, rawImpact) : undefined;
