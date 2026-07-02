@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { ProviderStatusBanner } from "@/components/layout/provider-status-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { OrgChangeBanner } from "@/components/layout/org-change-banner";
 import { TimezoneSync } from "@/components/layout/timezone-sync";
 import { isSetupComplete } from "@/lib/settings";
 import { getAuth } from "@/lib/auth";
@@ -32,6 +33,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <SidebarInset>
         <ProviderStatusBanner />
         <UpdateBanner />
+        <OrgChangeBanner />
         {/* Crossfade the main pane on navigation so moving between chats /
             settings feels like an app (desktop only — see RouteTransition). The
             sidebar + banner sit outside it, staying anchored as content swaps. */}

@@ -1313,5 +1313,9 @@
       "probeNeedsAuth": "Reachable, but it needs a sign-in or token (set on the settings page).",
       "probeOauth": "You'll sign in through your browser after adding it."
     }
+  },
+  "orgChangeBanner": {
+    "message": "{actor} changed “{title}” to “{value}”.",
+    "dismiss": "Dismiss"
   }
 }

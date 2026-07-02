@@ -23,7 +23,7 @@ import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
-import { getSandboxNetworkDefault, getMaxContextTokens } from "@/lib/settings";
+import { getSandboxNetworkDefault, getMaxContextTokens, getSetting, setSetting } from "@/lib/settings";
 import { makeManageTool } from "@/lib/manage/tool";
 import { getModelContextLength } from "@/lib/models/catalog";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
@@ -361,6 +361,19 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       }
     } catch { /* no workspace yet */ }
 
+    // One-time first-run concierge: on the admin's very first chat turn after
+    // setup, arm a prompt nudge to welcome them and offer to configure optional
+    // things via `manage`. The flag (set at setup completion) is consumed here so
+    // it fires exactly once. The getSetting only runs on a chat's first turn by an
+    // admin, so it costs nothing on the steady-state path.
+    let concierge = false;
+    if (user?.role === "admin" && (payload.uiMessages?.length ?? 0) <= 1) {
+      if ((await getSetting("concierge_pending")) === userId) {
+        concierge = true;
+        await setSetting("concierge_pending", ""); // consume — never nudge twice
+      }
+    }
+
     const prompt = buildSystemPrompt({
       project,
       memoryDocs,
@@ -372,6 +385,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       user: user ? { name: user.name, timezone: user.timezone } : null,
       conversationStartedAt: chat?.createdAt ?? null,
       locale: user?.locale ?? payload.origin?.locale ?? null,
+      concierge,
     });
 
     // Context-window budget inputs: the model's real window (catalog) and any

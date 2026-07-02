@@ -129,6 +129,9 @@ export async function POST(req: Request) {
     }
     await db.update(users).set({ role: "admin" }).where(eq(users.id, session.user.id));
     await setSetting("setup_complete", "true");
+    // Arm the one-time first-run concierge: the runner consumes this on the admin's
+    // first chat turn to welcome them and offer to configure the optional bits.
+    await setSetting("concierge_pending", session.user.id);
     return Response.json({ ok: true });
   }
 

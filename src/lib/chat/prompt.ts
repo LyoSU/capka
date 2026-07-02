@@ -95,6 +95,10 @@ export function buildSystemPrompt(opts: {
   user?: { name?: string | null; timezone?: string | null } | null;
   conversationStartedAt?: Date | null;
   locale?: string | null;
+  /** The operator's very first message right after finishing setup — adds a
+   *  one-time concierge nudge so the agent welcomes them and offers to configure
+   *  the optional bits (language, Telegram, a first connector) via `manage`. */
+  concierge?: boolean;
 }): BuiltPrompt {
   // ── Stable prefix (cacheable) ───────────────────────────────────────────
   let stable = `${SYSTEM_PROMPT}\n\n${SANDBOX_PROMPT}`;
@@ -143,6 +147,14 @@ export function buildSystemPrompt(opts: {
   if (promptLines.length > 0) {
     volatile += `${volatile ? "\n\n" : ""}## User just attached these files:\n${promptLines.join("\n")}`;
     if (hasToolOnly) volatile += `\nOpen non-native files with tools as needed.`;
+  }
+
+  // One-time, first-message-after-setup concierge. In the volatile tier (never
+  // cached) since it fires exactly once. English — the model relays in the user's
+  // language, like the rest of the prompt.
+  if (opts.concierge) {
+    volatile += `${volatile ? "\n\n" : ""}## First run
+This is the operator's FIRST message right after finishing setup. Warmly welcome them in one or two sentences, then offer to help set up the optional things you can do via the \`manage\` tool: their interface language, Telegram delivery, and adding a first connector or skill. Keep it brief — don't dump a list or a wall of options. If they already asked a real question, answer it first and add the offer at the end.`;
   }
 
   return { stable, session, volatile };

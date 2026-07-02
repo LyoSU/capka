@@ -275,6 +275,15 @@ async function applySet(reg: Registry, ctx: ManageContext, controlId: string, va
   const before = await c.read(ctx);
   await c.apply(ctx, parsed.data);
   await record(ctx, "settings.update", c.id, { before, after: parsed.data });
+  // Let other admins know a platform-wide setting changed (a dismissible banner on
+  // their next visit). Production path only — pure dispatch tests inject ctx.audit
+  // and must not touch the DB, matching the same signal `record` uses. Best-effort.
+  if (c.scope === "org" && !ctx.audit) {
+    try {
+      const { noteOrgChange } = await import("./org-notice");
+      await noteOrgChange(ctx.userId, c.id, parsed.data);
+    } catch { /* a failed notice must never fail the applied change */ }
+  }
   return settingResult(t, c, before, parsed.data, await stageUndo(ctx, c.id, before));
 }
 
