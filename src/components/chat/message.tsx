@@ -19,6 +19,7 @@ import { cleanReasoning } from "@/lib/chat/reasoning";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
+import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 
 // --- Helpers ---
@@ -119,6 +120,8 @@ type ToolPart = {
   output?: unknown;
   errorText?: string;
   approval?: { id: string; approved?: boolean; reason?: string };
+  askForm?: import("@/lib/ask/types").AskForm;
+  askValue?: import("@/lib/ask/types").AskAnswer;
 };
 
 function isToolPart(part: { type: string }): part is ToolPart {
@@ -131,6 +134,12 @@ function isToolPart(part: { type: string }): part is ToolPart {
 function isApprovalPart(part: ToolPart): boolean {
   return getToolName(part) === "manage"
     && (part.state === "approval-requested" || part.state === "approval-responded" || !!part.approval);
+}
+
+/** An `ask` tool call the runner suspended for a human answer — it (and its
+ *  answered state) always renders as the prominent question card. */
+function isAskPart(part: ToolPart): boolean {
+  return getToolName(part) === "ask" && !!part.askForm;
 }
 
 function getToolName(part: ToolPart): string {
@@ -1066,13 +1075,20 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
     | { kind: "text"; text: string }
     | { kind: "activity"; items: ActivityItem[] }
     | { kind: "manage"; output: unknown }
-    | { kind: "approval"; part: ToolPart };
+    | { kind: "approval"; part: ToolPart }
+    | { kind: "ask"; part: ToolPart };
   const groups: Group[] = [];
   for (const part of parts) {
     // A `manage` call suspended for native approval (and its resolved states) is
     // the user's one required action — it always renders as the prominent card.
     if (isToolPart(part) && isApprovalPart(part as ToolPart)) {
       groups.push({ kind: "approval", part: part as ToolPart });
+      continue;
+    }
+    // An `ask` call suspended for a human answer — the question card, likewise the
+    // user's one required action.
+    if (isToolPart(part) && isAskPart(part as ToolPart)) {
+      groups.push({ kind: "ask", part: part as ToolPart });
       continue;
     }
     // A completed `manage` result that's a confirmation or an applied change
@@ -1129,6 +1145,9 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             }
             if (g.kind === "approval") {
               return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} onSend={onSend} />;
+            }
+            if (g.kind === "ask") {
+              return <AskCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} form={g.part.askForm!} value={g.part.askValue} state={g.part.state} />;
             }
             if (g.kind === "manage") {
               return <ManageCard key={gi} output={g.output} onSend={onSend} />;

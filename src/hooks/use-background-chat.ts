@@ -13,7 +13,7 @@ import { classifyStreamEvent } from "@/lib/chat/stream-reconcile";
 type Part =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
-  | { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; approval?: { id: string; approved?: boolean; reason?: string } };
+  | { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; approval?: { id: string; approved?: boolean; reason?: string }; askForm?: import("@/lib/ask/types").AskForm; askValue?: import("@/lib/ask/types").AskAnswer };
 
 type Message = {
   id: string;
@@ -371,6 +371,30 @@ export function useBackgroundChat({
               break;
             }
 
+            case "task:ask": {
+              // The runner suspended a no-execute `ask` call — flip the live tool
+              // part to input-available and attach the form so the question card
+              // renders and the composer blocks. task:finish follows (finalized as
+              // awaiting_answer); loadHistory then re-derives the same state from the
+              // persisted `answer` marker. (An `elicit:` toolCallId has no persisted
+              // part yet — handled in the MCP elicitation phase.)
+              setTaskInfo((prev) => ({ ...prev, currentTool: null }));
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === data.messageId);
+                if (idx === -1) return prev;
+                const msgs = [...prev];
+                const msg = msgs[idx];
+                const parts = msg.parts.map((p) =>
+                  p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
+                    ? { ...p, state: "input-available", askForm: data.form }
+                    : p,
+                );
+                msgs[idx] = { ...msg, parts };
+                return msgs;
+              });
+              break;
+            }
+
             case "task:finish": {
               setStatus("idle");
               setTaskId(null);
@@ -682,12 +706,15 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId, chatId]);
 
-  // A `manage` tool call is suspended awaiting the user's decision — the composer
-  // blocks (like Claude Code) so the approval card is the only next action. Once
-  // decided, the part leaves the approval-requested state, so this clears itself.
-  const awaitingApproval = messages.some(
-    (m) => m.role === "assistant" && m.parts.some((p) => p.type === "dynamic-tool" && p.state === "approval-requested"),
+  // A tool call is suspended awaiting the user — a `manage` approval OR an `ask`
+  // question. The composer blocks (like Claude Code) so the card is the only next
+  // action. Once decided/answered the part leaves the awaiting state, so this
+  // clears itself.
+  const awaitingInput = messages.some(
+    (m) => m.role === "assistant" && m.parts.some((p) =>
+      p.type === "dynamic-tool" && (p.state === "approval-requested" || (p.toolName === "ask" && p.askForm && p.state === "input-available")),
+    ),
   );
 
-  return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", awaitingApproval, taskInfo };
+  return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", awaitingInput, taskInfo };
 }

@@ -309,7 +309,7 @@
     "input": {
       "placeholder": "Assign a task or ask anything",
       "placeholderFiles": "Add a message about the files…",
-      "awaitingApproval": "Approve or reject the change above to continue",
+      "awaitingInput": "Respond to the request above to continue",
       "attach": "Attach files",
       "stop": "Stop generation",
       "send": "Send message",
@@ -319,6 +319,15 @@
       "dropHere": "Drop files to attach",
       "uploadFailed": "Upload failed: {files}",
       "retryUpload": "Retry upload of {name}"
+    },
+    "ask": {
+      "title": "A quick question",
+      "submit": "Send",
+      "skip": "Skip",
+      "answered": "Answered",
+      "skipped": "Skipped",
+      "yes": "Yes",
+      "no": "No"
     },
     "workspace": {
       "title": "Files",
