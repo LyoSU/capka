@@ -1,6 +1,8 @@
-import { pool } from "@/lib/db";
+import { eq, sql } from "drizzle-orm";
+import { db, pool } from "@/lib/db";
+import { automations } from "@/lib/db/schema";
 import { nextOccurrenceAfter, type AutomationTrigger } from "./schedule";
-import { fireAutomation, type AutomationRow } from "./runs";
+import { fireAutomation, MAX_CONSECUTIVE_FAILURES, type AutomationRow } from "./runs";
 import { log } from "@/lib/log";
 
 /**
@@ -54,8 +56,29 @@ export async function schedulerTick(now: Date = new Date()): Promise<void> {
   } finally {
     client.release();
   }
-  // Fire AFTER commit so a slow/failed materialization can't hold row locks.
+  // Fire AFTER commit so a slow/failed materialization can't hold row locks. The
+  // tick already advanced next_run_at past this occurrence; a fire that THROWS
+  // (DB blip, enqueue error — not the intentional overlap skip, which returns
+  // {fired:false}) would otherwise drop the occurrence silently, and for a
+  // one-off leave it disabled with no run at all. So on a throw restore the
+  // original due time to retry next tick, and count the failure so a persistently
+  // broken automation still auto-disables after MAX_CONSECUTIVE_FAILURES instead
+  // of retry-looping forever. `a.nextRunAt` is the pre-advance due time (mapped
+  // from the SELECT snapshot, untouched by the UPDATE above).
   for (const a of claimed) {
-    await fireAutomation(a).catch((e) => log.error("automation fire failed", { automationId: a.id, err: String(e) }));
+    try {
+      await fireAutomation(a);
+    } catch (e) {
+      log.error("automation fire failed", { automationId: a.id, err: String(e) });
+      const [row] = await db.update(automations)
+        .set({ nextRunAt: a.nextRunAt, enabled: true, consecutiveFailures: sql`${automations.consecutiveFailures} + 1`, updatedAt: new Date() })
+        .where(eq(automations.id, a.id))
+        .returning()
+        .catch(() => [] as (typeof automations.$inferSelect)[]);
+      if (row && row.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        await db.update(automations).set({ enabled: false, updatedAt: new Date() })
+          .where(eq(automations.id, a.id)).catch(() => {});
+      }
+    }
   }
 }

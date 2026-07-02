@@ -21,9 +21,30 @@ describe("nextOccurrenceAfter", () => {
   });
 
   it("once: returns the moment while it's in the future, null after it passed", () => {
-    const once: AutomationTrigger = { kind: "once", at: "2026-08-01T12:00:00Z" };
+    const once: AutomationTrigger = { kind: "once", at: "2026-08-01T12:00:00Z", timezone: "Europe/Kyiv" };
     expect(nextOccurrenceAfter(once, new Date("2026-07-01T00:00:00Z"))?.toISOString()).toBe("2026-08-01T12:00:00.000Z");
     expect(nextOccurrenceAfter(once, new Date("2026-08-01T12:00:01Z"))).toBeNull();
+  });
+
+  it("once: a bare wall-clock time is read in the trigger's timezone, not UTC", () => {
+    // "22:15" in Kyiv summer (UTC+3) is 19:15 UTC — the whole point of the fix:
+    // the server runs in UTC but the user meant their own 22:15.
+    const once: AutomationTrigger = { kind: "once", at: "2026-07-02T22:15:00", timezone: "Europe/Kyiv" };
+    expect(nextOccurrenceAfter(once, new Date("2026-07-02T00:00:00Z"))?.toISOString()).toBe("2026-07-02T19:15:00.000Z");
+  });
+
+  it("once: an explicit offset/Z on `at` wins over the timezone", () => {
+    const once: AutomationTrigger = { kind: "once", at: "2026-07-02T22:15:00Z", timezone: "Europe/Kyiv" };
+    expect(nextOccurrenceAfter(once, new Date("2026-07-02T00:00:00Z"))?.toISOString()).toBe("2026-07-02T22:15:00.000Z");
+  });
+
+  it("once: a legacy row without a timezone falls back to UTC (old behavior)", () => {
+    const once = { kind: "once", at: "2026-07-02T22:15:00" } as AutomationTrigger;
+    expect(nextOccurrenceAfter(once, new Date("2026-07-02T00:00:00Z"))?.toISOString()).toBe("2026-07-02T22:15:00.000Z");
+  });
+
+  it("once: throws on an unparseable datetime", () => {
+    expect(() => nextOccurrenceAfter({ kind: "once", at: "not a date", timezone: "Europe/Kyiv" }, new Date())).toThrow();
   });
 
   it("throws on an invalid cron expression", () => {
@@ -42,6 +63,6 @@ describe("nextOccurrences", () => {
   });
 
   it("once yields at most one occurrence", () => {
-    expect(nextOccurrences({ kind: "once", at: "2026-08-01T12:00:00Z" }, 3, new Date("2026-07-01T00:00:00Z"))).toHaveLength(1);
+    expect(nextOccurrences({ kind: "once", at: "2026-08-01T12:00:00Z", timezone: "Europe/Kyiv" }, 3, new Date("2026-07-01T00:00:00Z"))).toHaveLength(1);
   });
 });

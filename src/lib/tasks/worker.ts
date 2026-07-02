@@ -132,6 +132,9 @@ export async function startWorker(): Promise<void> {
   // Fire due automations (scheduled agent runs). Same pattern as reconcile:
   // cheap DB poll, safe across replicas via SKIP LOCKED inside the tick.
   const { schedulerTick } = await import("@/lib/automations/scheduler");
+  // Fire anything already due right now (a due one-off shouldn't wait up to 30s
+  // for the first interval after a deploy/restart), then poll on the interval.
+  void schedulerTick().catch(() => {});
   const schedulerTimer = setInterval(() => void schedulerTick().catch(() => {}), 30_000);
 
   // Graceful shutdown: a deploy/restart sends SIGTERM. WITHOUT this, every

@@ -6,7 +6,26 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-02
+
 ### Fixed
+- **One-off automations (`once_at`) now fire at the user's wall-clock time, not
+  the worker's UTC clock** — a "22:15" one-off scheduled 22:15 UTC before, so it
+  ran hours off. One-off triggers now carry a timezone.
+- **An approved `manage` action (e.g. creating an automation) could apply twice
+  when the turn hit a provider retry** — the tool now executes at most once per
+  call, so retries no longer duplicate the change.
+- **The scheduler no longer silently drops an occurrence when firing fails** — a
+  failed fire restores the due time to retry and counts toward the 3-failure
+  auto-pause instead of leaving a one-off disabled with no run.
+- **Settings → Automations shows the scheduler's real next-run time and flags an
+  overdue run** (background worker not running) instead of a recomputed date that
+  hid a stuck worker.
+- **`/api/automations/:id` (enable/disable) rejects a non-boolean body** instead
+  of coercing e.g. the string `"false"` to `true`.
+- **A created automation now runs on the model of the chat that created it**
+  (was always the account default), and due automations fire immediately on
+  worker start instead of waiting up to 30s.
 - **A Coolify redeploy on an unchanged image tag (`:latest` or a pinned
   `CAPKA_VERSION`) no longer keeps running the previously cached image bits**
   — `platform` and `sandbox-controller` now set `pull_policy: always`, so

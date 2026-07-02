@@ -6,9 +6,16 @@ describe("parseTriggerArgs", () => {
     expect(parseTriggerArgs({ cron: "0 9 * * 1", timezone: "Europe/Kyiv" })).toEqual(
       { kind: "schedule", cron: "0 9 * * 1", timezone: "Europe/Kyiv" });
   });
-  it("builds a once trigger from once_at", () => {
-    expect(parseTriggerArgs({ once_at: "2026-08-01T12:00:00Z" })).toEqual(
-      { kind: "once", at: "2026-08-01T12:00:00Z" });
+  it("builds a once trigger from once_at + timezone", () => {
+    expect(parseTriggerArgs({ once_at: "2026-08-01T12:00:00", timezone: "Europe/Kyiv" })).toEqual(
+      { kind: "once", at: "2026-08-01T12:00:00", timezone: "Europe/Kyiv" });
+  });
+  it("rejects a once_at without a valid timezone (a bare wall-clock time is ambiguous)", () => {
+    expect(() => parseTriggerArgs({ once_at: "2026-08-01T12:00:00" })).toThrow(/timezone/i);
+    expect(() => parseTriggerArgs({ once_at: "2026-08-01T12:00:00", timezone: "Not/AZone" })).toThrow(/timezone/i);
+  });
+  it("rejects a once_at already in the past", () => {
+    expect(() => parseTriggerArgs({ once_at: "2000-01-01T00:00:00", timezone: "Europe/Kyiv" })).toThrow(/past/i);
   });
   it("rejects both/neither", () => {
     expect(() => parseTriggerArgs({})).toThrow(/cron or once_at/);

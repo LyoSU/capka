@@ -23,9 +23,15 @@ export function parseTriggerArgs(args: Record<string, unknown>): AutomationTrigg
     return trigger;
   }
   if (onceAt) {
-    if (Number.isNaN(Date.parse(onceAt))) throw new Error("once_at must be an ISO datetime.");
-    if (!nextOccurrenceAfter({ kind: "once", at: onceAt }, new Date())) throw new Error("once_at is already in the past.");
-    return { kind: "once", at: onceAt };
+    // A bare "2026-07-02T22:15:00" is a WALL-CLOCK time — it only means anything
+    // once we know whose clock. Require the timezone (same as cron) so "22:15"
+    // fires at the user's 22:15, not the UTC server's. isValidTimezone + a build
+    // of the trigger (which throws on an unparseable datetime) validate both.
+    const timezone = typeof args.timezone === "string" ? args.timezone : "";
+    if (!isValidTimezone(timezone)) throw new Error("A valid IANA timezone is required with once_at (e.g. Europe/Kyiv). Use the user's timezone setting.");
+    const trigger: AutomationTrigger = { kind: "once", at: onceAt, timezone };
+    if (!nextOccurrenceAfter(trigger, new Date())) throw new Error("once_at is already in the past.");
+    return trigger;
   }
   throw new Error("A schedule is required: cron or once_at.");
 }
@@ -44,7 +50,9 @@ export function assertMinInterval(trigger: AutomationTrigger, minMinutes: number
 export function humanizeSchedule(trigger: AutomationTrigger, locale: string | undefined, after = new Date()) {
   const fmt = new Intl.DateTimeFormat(locale === "uk" ? "uk-UA" : "en-US", {
     weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-    timeZone: trigger.kind === "schedule" ? trigger.timezone : undefined,
+    // Both kinds carry a timezone now — format the instant in it so the preview
+    // shows the wall time the user actually asked for (not the server's UTC).
+    timeZone: trigger.timezone,
   });
   const nextDates = nextOccurrences(trigger, 3, after).map((d) => fmt.format(d));
   const inMonth = trigger.kind === "once" ? 1
@@ -65,10 +73,11 @@ export const automationCollection: Collection = {
   description:
     "Scheduled agent runs: the platform runs a saved instruction on a schedule (or once at a set time) with no tab open. Each run opens a new chat; results also go to Telegram when linked. Offer this when the user describes a recurring intent.",
   usage:
-    "add args: {title, prompt, cron, timezone} for a recurring schedule, or {title, prompt, once_at} for a one-off. " +
+    "add args: {title, prompt, cron, timezone} for a recurring schedule, or {title, prompt, once_at, timezone} for a one-off. " +
     "title and prompt are ALWAYS required — title is a short label the user sees in the automations list; prompt is the FULL instruction " +
     "the agent will run each time, written as if starting a fresh conversation. " +
-    "cron is a 5-field expression evaluated in `timezone` (IANA, e.g. Europe/Kyiv — use the user's timezone); once_at is an ISO datetime.",
+    "timezone is ALWAYS required (IANA, e.g. Europe/Kyiv — use the user's timezone setting): cron is a 5-field expression evaluated in it, and " +
+    "once_at is a wall-clock ISO datetime like \"2026-07-02T22:15:00\" (NO trailing Z / offset) read in that timezone, so \"22:15\" means the user's 22:15.",
   requiredRole: "user",
   auditNoun: "automation",
   settingsPath: "/settings/automations",
@@ -85,7 +94,7 @@ export const automationCollection: Collection = {
     timezone: z.string().optional(),
     once_at: z.string().optional(),
   }).refine((v) => Boolean(v.cron) !== Boolean(v.once_at), {
-    message: 'Provide EITHER "cron" (with "timezone") for a recurring schedule OR "once_at" (an ISO datetime) for a one-off, not both.',
+    message: 'Provide EITHER "cron" for a recurring schedule OR "once_at" (a wall-clock ISO datetime) for a one-off, not both — and always a "timezone" (IANA) with whichever you pick.',
   }),
   canAdd: async () => ((await getSetting("automations_enabled")) ?? "true") === "true",
   validateAdd: async (ctx, args) => {
@@ -122,6 +131,9 @@ export const automationCollection: Collection = {
       projectId: ctx.projectId,
       title: String(args.title),
       prompt: String(args.prompt),
+      // Inherit the creating chat's model so runs use it, not the account default
+      // (null → default resolution in the runner). See the `model` column comment.
+      model: ctx.model ?? null,
       trigger,
       nextRunAt: nextOccurrenceAfter(trigger, new Date()),
     });

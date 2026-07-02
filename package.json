@@ -46,6 +46,7 @@
     "grammy": "^1.44.0",
     "gray-matter": "^4.0.3",
     "lucide-react": "^0.577.0",
+    "luxon": "^3.7.2",
     "mime-types": "^3.0.2",
     "nanoid": "^5.1.7",
     "next": "^16.2.7",
@@ -64,6 +65,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/adm-zip": "^0.5.8",
+    "@types/luxon": "^3.7.2",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^20",
     "@types/pg": "^8.18.0",

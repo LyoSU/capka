@@ -14,7 +14,7 @@ export type AutomationRow = typeof automations.$inferSelect;
 /** After this many failed runs in a row the automation disables itself and
  *  tells the user — a silent failure loop burning budget is the #1 complaint
  *  about every competitor's scheduled tasks. */
-const MAX_CONSECUTIVE_FAILURES = 3;
+export const MAX_CONSECUTIVE_FAILURES = 3;
 
 /**
  * Materialize one firing: a NEW ordinary chat holding one user message (the

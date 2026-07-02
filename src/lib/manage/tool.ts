@@ -17,6 +17,8 @@ export interface ManageIdentity {
   sessionKey?: string;
   /** The user's locale — all user-facing strings resolve to it (default English). */
   locale?: string;
+  /** The model ref this turn runs on — inherited by a created automation. */
+  model?: string | null;
 }
 
 const inputSchema = z.object({
@@ -109,7 +111,18 @@ export function makeManageTool(identity: ManageIdentity) {
     projectId: identity.projectId,
     sessionKey: identity.sessionKey,
     locale: identity.locale,
+    model: identity.model,
   });
+  // Exactly-once execution per tool call within this task. The runner re-streams
+  // the SAME model messages on a capability/stall retry (see makeStream); for an
+  // APPROVED-then-executing tool call that means the AI SDK runs `execute` AGAIN
+  // with the SAME toolCallId — which, for a mutation like `add`, silently applied
+  // it twice (the "created twice" bug). Memoizing the in-flight/settled result by
+  // toolCallId collapses that: a re-run returns the first outcome instead of
+  // re-applying. A toolCallId is unique per model invocation, so this never merges
+  // two genuinely different calls. A rejection is NOT cached — a transient failure
+  // must stay retryable.
+  const inflight = new Map<string, Promise<ManageResult>>();
   return {
     manage: tool({
       description: DESCRIPTION,
@@ -126,17 +139,26 @@ export function makeManageTool(identity: ManageIdentity) {
         const input = toInput(args);
         return input ? requiresApproval(registry, ctx(), input) : false;
       },
-      execute: async (args): Promise<ManageResult> => {
-        const input = toInput(args);
-        if (!input) {
-          return {
-            status: "error",
-            render: "error",
-            code: "bad_request",
-            summary: `action="${args.action}" needs ${REQUIRED_FIELDS[args.action] ?? "more fields"} — re-call with them set.`,
-          };
-        }
-        return dispatch(registry, ctx(), input);
+      execute: async (args, { toolCallId }): Promise<ManageResult> => {
+        const existing = inflight.get(toolCallId);
+        if (existing) return existing;
+        const run = (async (): Promise<ManageResult> => {
+          const input = toInput(args);
+          if (!input) {
+            return {
+              status: "error",
+              render: "error",
+              code: "bad_request",
+              summary: `action="${args.action}" needs ${REQUIRED_FIELDS[args.action] ?? "more fields"} — re-call with them set.`,
+            };
+          }
+          return dispatch(registry, ctx(), input);
+        })();
+        inflight.set(toolCallId, run);
+        // Drop a rejected run so a legitimate retry can re-attempt (dispatch itself
+        // returns error RESULTS rather than throwing, so this is the rare throw).
+        run.catch(() => inflight.delete(toolCallId));
+        return run;
       },
     }),
   };

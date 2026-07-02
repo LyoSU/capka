@@ -19,7 +19,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { nextOccurrenceAfter, type AutomationTrigger } from "@/lib/automations/schedule";
+import type { AutomationTrigger } from "@/lib/automations/schedule";
 
 interface Automation {
   id: string;
@@ -91,16 +91,24 @@ export default function AutomationsList() {
     }
   };
 
+  // The scheduler ticks every 30s; a next_run_at more than this far in the past on
+  // an ENABLED automation means the worker isn't firing (crashed / not running) —
+  // surface it instead of recomputing a fake future date that hides the outage.
+  const OVERDUE_GRACE_MS = 2 * 60_000;
+  const isOverdue = (a: Automation) =>
+    a.enabled && !!a.nextRunAt && Date.now() - Date.parse(a.nextRunAt) > OVERDUE_GRACE_MS;
+
   const nextRunText = (a: Automation) => {
-    if (!a.enabled) return null;
-    const next = nextOccurrenceAfter(a.trigger, new Date());
-    if (!next) return null;
+    // Show the ACTUAL next_run_at the scheduler stored — not a client-side cron
+    // recompute, which would mask a stuck worker (and, for a one-off, silently
+    // re-derive the wall time in the browser's zone instead of the trigger's).
+    if (!a.enabled || !a.nextRunAt || isOverdue(a)) return null;
     const fmt = new Intl.DateTimeFormat(locale, {
       dateStyle: "medium",
       timeStyle: "short",
-      timeZone: a.trigger.kind === "schedule" ? a.trigger.timezone : undefined,
+      timeZone: a.trigger.timezone,
     });
-    return t("nextRun", { when: fmt.format(next) });
+    return t("nextRun", { when: fmt.format(new Date(a.nextRunAt)) });
   };
 
   const lastRunText = (a: Automation) => {
@@ -164,11 +172,18 @@ export default function AutomationsList() {
                     <AlertTriangle className="h-3 w-3" /> {t("status.autoPaused")}
                   </Badge>
                 )}
+                {status === "active" && isOverdue(a) && (
+                  <Badge variant="outline" className="gap-1 border-warning-border font-normal text-warning-text">
+                    <AlertTriangle className="h-3 w-3" /> {t("status.overdue")}
+                  </Badge>
+                )}
               </div>
               <p className="truncate text-sm text-muted-foreground">{a.prompt}</p>
-              {(nextRunText(a) || lastRunText(a)) && (
+              {isOverdue(a) ? (
+                <p className="text-xs text-warning-text">{t("overdueHint")}</p>
+              ) : (nextRunText(a) || lastRunText(a)) ? (
                 <p className="text-xs text-muted-foreground">{nextRunText(a) ?? lastRunText(a)}</p>
-              )}
+              ) : null}
               {a.lastChatId && (
                 <Link href={`/chat/${a.lastChatId}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
                   <ExternalLink className="h-3 w-3" /> {t("openLastRun")}

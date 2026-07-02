@@ -49,7 +49,7 @@ run("schedulerTick", () => {
     const id = nanoid();
     await db.insert(automations).values({
       id, userId: U, title: "One-off", prompt: "go",
-      trigger: { kind: "once", at: new Date(Date.now() - 60_000).toISOString() },
+      trigger: { kind: "once", at: new Date(Date.now() - 60_000).toISOString(), timezone: "Europe/Kyiv" },
       nextRunAt: new Date(Date.now() - 60_000),
     });
     await schedulerTick();
@@ -57,6 +57,29 @@ run("schedulerTick", () => {
     expect(row.lastTaskId).toBeTruthy();
     expect(row.enabled).toBe(false);
     expect(row.nextRunAt).toBeNull();
+  });
+
+  it("restores the due time and counts a failure when firing throws", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const { schedulerTick } = await import("../scheduler");
+    const id = nanoid();
+    const due = new Date(Date.now() - 60_000);
+    await db.insert(automations).values({
+      id, userId: U, title: "Broken", prompt: "go",
+      // A non-existent projectId makes fireAutomation's chat insert violate the FK
+      // and throw — the occurrence must NOT be lost: the due time is restored so
+      // the next tick retries, and the failure counter advances toward auto-disable.
+      projectId: "no-such-project",
+      trigger: { kind: "once", at: due.toISOString(), timezone: "Europe/Kyiv" },
+      nextRunAt: due,
+    });
+    await schedulerTick();
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    expect(row.lastTaskId).toBeNull(); // never fired
+    expect(row.enabled).toBe(true); // re-enabled for retry (not silently dropped)
+    expect(row.nextRunAt!.getTime()).toBe(due.getTime()); // due time restored
+    expect(row.consecutiveFailures).toBe(1);
   });
 
   it("not-due and disabled rows are untouched", async () => {

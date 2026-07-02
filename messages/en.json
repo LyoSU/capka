@@ -899,9 +899,11 @@
       "status": {
         "active": "Active",
         "paused": "Paused",
-        "autoPaused": "Paused automatically after failures"
+        "autoPaused": "Paused automatically after failures",
+        "overdue": "Not running"
       },
       "nextRun": "Next: {when}",
+      "overdueHint": "This run is overdue — the background worker may not be running. Contact your admin if it doesn't recover.",
       "lastRun": "Last ran {when}",
       "openLastRun": "Open last run",
       "toggleAria": "Toggle {name}",

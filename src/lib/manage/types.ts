@@ -24,6 +24,10 @@ export interface ManageContext {
   /** The user's locale — all user-facing strings are resolved to it server-side
    *  (default English). Undefined → English. */
   locale?: string;
+  /** The model ref the CURRENT turn is running on (the picker's `${configId}:${modelId}`
+   *  form, as stored on the chat). Captured so a created automation inherits it and
+   *  runs on the same model. Undefined → the automation resolves the default model. */
+  model?: string | null;
   /** Store for staged confirmations. Injected in tests; production falls back to
    *  the DB-backed store (lazy-imported), like `audit`. */
   pending?: PendingStore;

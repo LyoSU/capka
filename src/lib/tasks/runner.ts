@@ -350,6 +350,8 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       projectId: payload.projectId ?? null,
       sessionKey,
       locale: user?.locale ?? payload.origin?.locale ?? undefined,
+      // A created automation inherits the model this turn runs on (the chat's ref).
+      model: payload.requestModel ?? null,
     });
     // The `ask` tool has NO execute: when the model calls it, the AI SDK tool-loop
     // stops the run, which the runner turns into a durable "awaiting_answer"
