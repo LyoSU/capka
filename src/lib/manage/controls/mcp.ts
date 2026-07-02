@@ -86,6 +86,11 @@ export const mcpCollection: Collection = {
   // A connector runs third-party code in the sandbox, so adding one is confirmed
   // even in autonomous mode — the one checkpoint prompt-injection can't bypass.
   alwaysConfirm: true,
+  // ENABLING is the same threat: a marketplace stdio server ships disabled as a
+  // consent gate (see marketplace/install), so re-enabling it activates
+  // third-party code and must go through the human, not the model.
+  confirmEnable: true,
+  enableImpact: "Runs third-party code in the sandbox once enabled.",
   addSchema,
 
   canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),

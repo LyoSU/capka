@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createRegistry } from "../registry";
 import { dispatch, requiresApproval, preview } from "../dispatch";
 import { memPendingStore } from "./mem-pending";
-import type { Collection, CollectionItem, ManageContext } from "../types";
+import type { Collection, CollectionItem, Control, ManageContext } from "../types";
 
 const store = memPendingStore();
 function ctx(over: Partial<ManageContext> = {}): ManageContext {
@@ -167,12 +167,53 @@ describe("manage/dispatch collections", () => {
     expect(items).toHaveLength(2);
   });
 
-  it("enable/disable apply directly", async () => {
-    const { collection, items } = memCollection();
+  it("disable applies directly — turning an item OFF is safety-positive, never gated", async () => {
+    const { collection, items } = memCollection({ confirmEnable: true });
     const reg = createRegistry([], [collection]);
+    expect(await requiresApproval(reg, ctx(), { action: "disable", target: "mcp", itemId: "s1" })).toBe(false);
     const res = await dispatch(reg, ctx(), { action: "disable", target: "mcp", itemId: "s1" });
     expect(res.status).toBe("ok");
     expect(items[0].enabled).toBe(false);
+  });
+
+  it("requiresApproval gates enable ONLY when the collection opts in via confirmEnable", async () => {
+    const gated = createRegistry([], [memCollection({ confirmEnable: true }).collection]);
+    const plain = createRegistry([], [memCollection().collection]); // no confirmEnable
+    expect(await requiresApproval(gated, ctx(), { action: "enable", target: "mcp", itemId: "s1" })).toBe(true);
+    expect(await requiresApproval(plain, ctx(), { action: "enable", target: "mcp", itemId: "s1" })).toBe(false);
+  });
+
+  it("the enable gate SURVIVES autonomous mode (activating third-party code is the one checkpoint injection can't bypass)", async () => {
+    // Register an autonomy control that reports the org is autonomous — which lets
+    // a bare `remove`/`disable` through, but must NOT let a confirmEnable enable through.
+    const autonomy: Control = {
+      id: "org.agent_autonomy", title: "", description: "", scope: "org", requiredRole: "admin",
+      risk: "safe", schema: z.string(), read: async () => "autonomous", apply: async () => {},
+    };
+    const reg = createRegistry([autonomy], [memCollection({ confirmEnable: true }).collection]);
+    expect(await requiresApproval(reg, ctx(), { action: "enable", target: "mcp", itemId: "s1" })).toBe(true);
+    // Sanity: disable is still direct even here.
+    expect(await requiresApproval(reg, ctx(), { action: "disable", target: "mcp", itemId: "s1" })).toBe(false);
+  });
+
+  it("preview() for a gated enable shows a Disabled→Enabled diff with the impact warning", async () => {
+    const { collection, items } = memCollection({ confirmEnable: true, enableImpact: "Runs third-party code once enabled." });
+    items[0].enabled = false; // a disabled item the agent wants to turn on
+    const reg = createRegistry([], [collection]);
+    const pv = await preview(reg, ctx(), { action: "enable", target: "mcp", itemId: "s1" });
+    expect(pv?.title).toContain("existing");
+    expect(pv?.before).toBe("Disabled");
+    expect(pv?.after).toBe("Enabled");
+    expect(pv?.impact).toBe("Runs third-party code once enabled.");
+  });
+
+  it("enable (post-approval) applies exactly once via dispatch", async () => {
+    const { collection, items } = memCollection({ confirmEnable: true });
+    items[0].enabled = false;
+    const reg = createRegistry([], [collection]);
+    const applied = await dispatch(reg, ctx(), { action: "enable", target: "mcp", itemId: "s1" });
+    expect(applied.status).toBe("ok");
+    expect(items[0].enabled).toBe(true);
   });
 
   it("debug returns a debug render with state + hint", async () => {

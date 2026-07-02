@@ -255,6 +255,17 @@ export async function requiresApproval(reg: Registry, ctx: ManageContext, input:
     if (!coll || !canAccess(ctx, coll)) return false;
     return !(await autonomous(reg, ctx));
   }
+  if (input.action === "enable") {
+    // Enabling is an ACTIVATION (marketplace MCP ships disabled, an automation
+    // spends unattended, a skill injects an instruction) — gated whenever the
+    // collection opts in, and like `add`'s alwaysConfirm it survives autonomous
+    // mode so a prompt-injected agent can never flip on third-party code alone.
+    const coll = reg.collection(input.target);
+    if (!coll || !canAccess(ctx, coll)) return false;
+    return !!coll.confirmEnable;
+  }
+  // `disable` (and everything else) needs no approval — turning an item OFF is
+  // safety-positive; the escalation risk lives entirely on the enable side.
   return false;
 }
 
@@ -292,6 +303,20 @@ export async function preview(
     const it = (await coll.list(ctx)).find((x) => x.id === input.itemId);
     if (!it) return null;
     return { controlId: `${coll.id}:remove`, title: loc(t, "op.removeTitle", `Remove from ${collLabel(t, coll)}`, { coll: collLabel(t, coll) }), before: it.title, after: "—" };
+  }
+  if (input.action === "enable") {
+    const coll = reg.collection(input.target);
+    if (!coll || !canAccess(ctx, coll)) return null;
+    const it = (await coll.list(ctx)).find((x) => x.id === input.itemId);
+    if (!it) return null;
+    const impact = coll.enableImpact ? loc(t, `impact.enable.${keyOf(coll.id)}`, coll.enableImpact) : undefined;
+    return {
+      controlId: `${coll.id}:enable`,
+      title: loc(t, "op.enableTitle", `Enable "${it.title}"`, { name: it.title }),
+      before: loc(t, "op.stateDisabled", "Disabled"),
+      after: loc(t, "op.stateEnabled", "Enabled"),
+      impact,
+    };
   }
   return null;
 }

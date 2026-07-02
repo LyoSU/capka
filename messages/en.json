@@ -326,6 +326,7 @@
       "skip": "Skip",
       "answered": "Answered",
       "skipped": "Skipped",
+      "expired": "That question is no longer active — your answer wasn't saved.",
       "yes": "Yes",
       "no": "No"
     },

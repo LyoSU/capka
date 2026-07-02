@@ -79,6 +79,41 @@ describe("ingestWorkspaceSkills — a .zip archive", () => {
     expect(names).toEqual(["zipped"]);
     expect(listFiles).not.toHaveBeenCalled(); // zip path never lists the fs
   });
+
+  it("rejects an over-cap .zip download without buffering it whole (streamed, aborted at the cap)", async () => {
+    // A controller streaming a huge file, chunked and WITHOUT Content-Length — the
+    // real download shape. readZipCapped must abort once the running total crosses
+    // the cap instead of materializing the whole thing then rejecting.
+    const CAP = 5 * 1024 * 1024;
+    const chunk = new Uint8Array(1024 * 1024); // 1 MB chunks
+    let emitted = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (emitted > CAP + 2 * chunk.byteLength) return c.close(); // safety stop
+        emitted += chunk.byteLength;
+        c.enqueue(chunk);
+      },
+      cancel() { cancelled = true; },
+    });
+    downloadFile.mockResolvedValue({ body, headers: { get: () => null } } as unknown as Response);
+
+    await expect(ingestWorkspaceSkills({ sessionKey: "s1", userId: "u1", path: "up/huge.zip", target }))
+      .rejects.toBeInstanceOf(WorkspacePathError);
+    expect(cancelled).toBe(true);         // the reader aborted the stream mid-flight
+    void emitted;                          // (exact count is stream-buffering detail)
+  });
+
+  it("rejects an over-cap .zip declared via Content-Length up front (no body read at all)", async () => {
+    const getReader = vi.fn();
+    downloadFile.mockResolvedValue({
+      headers: { get: (h: string) => (h === "content-length" ? String(6 * 1024 * 1024) : null) },
+      body: { getReader },
+    } as unknown as Response);
+    await expect(ingestWorkspaceSkills({ sessionKey: "s1", userId: "u1", path: "up/huge.zip", target }))
+      .rejects.toBeInstanceOf(WorkspacePathError);
+    expect(getReader).not.toHaveBeenCalled(); // rejected before touching the body
+  });
 });
 
 describe("guards", () => {

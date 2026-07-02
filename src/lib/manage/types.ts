@@ -121,6 +121,17 @@ export interface Collection {
    *  runs third-party code (MCP connectors), the one checkpoint injection can't
    *  bypass. Reversible/instruction-only collections (skills) omit it. */
   alwaysConfirm?: boolean;
+  /** Require the human's approval before `enable` runs — always, even in
+   *  autonomous mode. Enabling a disabled item is an ACTIVATION (a marketplace MCP
+   *  server ships disabled as a consent gate, an automation spends budget
+   *  unattended, a skill injects a permanent instruction), so it carries the same
+   *  blast radius as `add` and must not be bypassable by a prompt-injected agent.
+   *  `disable` stays direct — it turns things OFF (safety-positive) and gating it
+   *  would only annoy users without closing any escalation path. */
+  confirmEnable?: boolean;
+  /** Optional one-line warning shown on the enable approval card (e.g. "runs
+   *  third-party code"). Localized via the i18n key `impact.enable.<collectionId>`. */
+  enableImpact?: string;
   addSchema?: z.ZodTypeAny;
   /** Resolved, authoritative "may THIS caller add here" — surfaced to the model
    *  (UI-style, like the settings page's capability endpoint) so it never has to

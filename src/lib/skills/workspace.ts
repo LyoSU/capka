@@ -2,13 +2,40 @@ import { listFiles, downloadFile } from "@/lib/sandbox/client";
 import { parseSkillMarkdown } from "./parse";
 import { sanitizeBundlePath } from "./paths";
 import { ingestSkill, type IngestTarget } from "./service";
-import { readSkillZip } from "./ingest-zip";
+import { readSkillZip, MAX_SKILL_ZIP_BYTES } from "./ingest-zip";
 
 const MAX_SKILL_FILES = 50;
 const SKILL_MD = /(^|\/)SKILL\.md$/;
 
 /** A workspace path that can't be read as a skill (unsafe, missing, empty). */
 export class WorkspacePathError extends Error {}
+
+/** Buffer a controller download with a HARD byte cap, streaming so a giant
+ *  workspace file can never be materialized whole in the platform process. The
+ *  controller streams chunked (no Content-Length), so we cap on the running total
+ *  and abort the moment it's exceeded; if a Content-Length IS present we reject
+ *  up front. Mirrors the upload routes' `file.size` gate for the workspace path. */
+async function readZipCapped(res: Response): Promise<Buffer> {
+  const declared = Number(res.headers?.get?.("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_SKILL_ZIP_BYTES) {
+    throw new WorkspacePathError("That .zip is too large to install.");
+  }
+  const reader = res.body?.getReader?.();
+  if (!reader) return Buffer.from(await res.arrayBuffer()); // no stream — readSkillZip still caps it
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_SKILL_ZIP_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw new WorkspacePathError("That .zip is too large to install.");
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
 
 export interface WorkspaceSkill {
   parsed: ReturnType<typeof parseSkillMarkdown>;
@@ -73,10 +100,10 @@ async function readWorkspacePath(
   const p = safePath(path);
   const onlySet = only?.length ? new Set(only) : undefined;
 
-  // Archive: pull the bytes and unzip server-side.
+  // Archive: pull the bytes (capped, streamed) and unzip server-side.
   if (/\.zip$/i.test(p)) {
     const res = await downloadFile(sessionKey, p, userId);
-    const { parsed, files } = readSkillZip(Buffer.from(await res.arrayBuffer()));
+    const { parsed, files } = readSkillZip(await readZipCapped(res));
     return onlySet && !onlySet.has(parsed.name) ? [] : [{ parsed, files }];
   }
 

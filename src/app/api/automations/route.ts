@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireActive } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { automations, tasks } from "@/lib/db/schema";
 
 export const GET = apiHandler(async () => {
-  const { userId } = await requireSession();
+  // Automations spend the shared key unattended, so a pending/rejected account may
+  // not even list them — requireActive, matching the MCP/skill mutation routes.
+  const { userId } = await requireActive();
   const rows = await db.select().from(automations).where(eq(automations.userId, userId));
   // Resolve the last run's chat for a "open last run" link.
   const out = [];

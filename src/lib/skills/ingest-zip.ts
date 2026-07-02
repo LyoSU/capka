@@ -53,6 +53,13 @@ export function readSkillZip(buffer: Buffer): {
   parsed: ReturnType<typeof parseSkillMarkdown>;
   files: { path: string; content: string }[];
 } {
+  // Hard compressed-size cap at the true entry point. The upload routes check
+  // `file.size` before buffering, but the workspace-install path buffers a
+  // controller download that has no such gate — so enforce it here too, the one
+  // place every caller (upload AND workspace) funnels through, before AdmZip
+  // parses anything.
+  if (buffer.length > MAX_SKILL_ZIP_BYTES) throw new SkillZipError("That zip is too large.");
+
   let zip: AdmZip;
   try {
     zip = new AdmZip(buffer);

@@ -1,4 +1,4 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { messages, chats, tasks, pendingElicitations } from "@/lib/db/schema";
@@ -36,7 +36,17 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
   call.answer = { form: call.answer.form, value };
   // Append the tool-result so the resume sees a complete call→result pair.
   parts.push({ type: "tool-result", id: call.id, name: call.name, output: value });
-  await db.update(messages).set({ metadata: { ...meta, parts } }).where(eq(messages.id, d.messageId));
+  // Single-use, atomic transition: the guard matches only while SOME ask part is
+  // still unanswered, so two racing answers (double-submit, or web + Telegram) can't
+  // both enqueue a resume — the first writes the value, the second matches 0 rows
+  // and bails. Mirrors answerElicitationForUser's isNull(answer) guard.
+  const applied = await db.update(messages).set({ metadata: { ...meta, parts } })
+    .where(and(
+      eq(messages.id, d.messageId),
+      sql`${messages.metadata} @? ${'$.parts[*] ? (exists(@.answer.form) && !exists(@.answer.value))'}::jsonpath`,
+    ))
+    .returning({ id: messages.id });
+  if (applied.length === 0) return false;
 
   const orig = meta.taskId
     ? ((await db.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)

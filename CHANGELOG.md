@@ -272,6 +272,22 @@ All notable changes to Capka are documented here. Format follows
   `${VAR:-…}` defaults in `docker-compose.yml` (`SANDBOX_MEMORY_MB=1024`,
   `MAX_SESSIONS_PER_USER=2`, `GC_GRACE_MS=604800000`, …) with `stop_grace_period:
   35s` restored, all overridable from the Coolify environment.
+- **An automation whose run stops to ask you a question no longer piles up
+  parallel runs.** A scheduled run that suspended for an approval or an `ask`
+  finalized its task as `completed` (the reply was merely blocked on your input),
+  so the overlap guard — which only skipped `queued`/`running` predecessors — let
+  the next occurrence fire, and each fired again, stacking unanswered questions and
+  duplicate chats while burning budget. The guard now also skips a new occurrence
+  while the previous run's reply is still `awaiting_answer`/`awaiting_approval`, and
+  a suspended run no longer resets the failure streak (it neither succeeded nor
+  failed). The block clears itself the moment you answer.
+- **The skill-install approval card now shows the real skills a workspace path
+  would install.** The approval preview for `skill add {path}` ran without the
+  run's sandbox session, so reading the pointed-at file/folder/zip always failed
+  and the card fell back to "couldn't read that path — you can still install",
+  turning an informed approval into a blind one. The web card now passes its
+  `messageId` (ownership-checked server-side) and the Telegram path passes the
+  run's session key, so the card lists the actual skill names before you approve.
 
 ### Security
 - **Platform-wide settings always require confirmation, even in autonomous mode.**
@@ -284,6 +300,47 @@ All notable changes to Capka are documented here. Format follows
   mode (the dispatcher gates on scope, so every current and future org control
   inherits this). Personal preferences and skill installs still apply directly in
   autonomous mode. No change in supervised mode.
+- **Enabling a connector, skill, or automation from chat now requires your
+  approval, like adding one.** `manage`'s confirm gate only covered `set`/`add`/
+  `remove`; `enable`/`disable` ran straight through. Since a marketplace MCP server
+  ships **disabled** as a consent gate, a prompt-injected agent could `enable` it
+  and run third-party code with no human click (likewise re-enable a paused
+  automation to spend budget unattended, or switch on a dormant instruction skill).
+  Enabling a connector/skill/automation now suspends for an approval card — and,
+  like an install, stays gated even in autonomous mode. `disable` remains direct
+  (turning something off is safety-positive). Settings-page toggles are unaffected
+  (they authenticate the human directly, not via the agent).
+- **The automations API now rejects pending/rejected accounts.** `GET /api/automations`
+  and `PATCH`/`DELETE /api/automations/[id]` used `requireSession()`, so an
+  authenticated-but-not-yet-approved user could list, pause, resume, or delete
+  automations — features that spend the shared key unattended — by calling the API
+  directly (the UI redirect is not a security boundary). All three now use
+  `requireActive()`, matching the MCP/skill mutation routes.
+- **A skill `.zip` installed from the workspace is now size-capped before it's
+  buffered.** The upload routes enforced `MAX_SKILL_ZIP_BYTES` (5 MB) via
+  `file.size`, but the workspace-install path downloaded the controller file and
+  called `arrayBuffer()` with no cap, letting a large workspace zip materialize
+  wholesale in the platform process. The download is now streamed with a hard
+  running-total cap (aborted the moment it's exceeded, and rejected up front on a
+  declared `Content-Length`), and `readSkillZip` — the one entry point every
+  caller funnels through — rejects an over-cap buffer before AdmZip parses it.
+- **A double-tapped approval / answer, or a simultaneous web + Telegram response,
+  can no longer fire the turn twice.** `approveManageForUser` and
+  `answerAskForUser` read the suspended message's metadata, mutated it, and wrote
+  unconditionally before enqueuing the resume, so two racing responses could each
+  enqueue a continuation or clobber each other's decision. Both now transition the
+  pending item with a single-use conditional update (a jsonpath guard that matches
+  only while it's still undecided) and enqueue the resume only when that update
+  actually won — matching the `isNull(answer)` guard MCP elicitation already used.
+- **A late Telegram reply to a timed-out connector question is no longer
+  swallowed or falsely confirmed.** An MCP elicitation deletes its DB row after its
+  ~3-minute timeout, but the Telegram field-collection lived in an in-memory map
+  with no expiry: a reply arriving after the timeout was captured, reported
+  "answered", and the user's typed text was consumed instead of starting a fresh
+  turn. The collection now carries the same deadline, expires lazily on any
+  interaction (freeing a late free-text reply to become a normal message), and
+  reports "no longer active" instead of "answered" when the underlying question is
+  already gone.
 
 ### Removed
 - **Fly.io and Railway deploy manifests (the `deploy/` directory) removed.** They

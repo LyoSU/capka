@@ -43,6 +43,9 @@ export function makeElicitHandler(ctx: { userId: string; chatId: string; message
           const { startAskCollection } = await import("@/lib/telegram/ask-collect");
           await startAskCollection(bot, ctx.origin.telegramChatId, {
             userId: ctx.userId, messageId: ctx.messageId, form, kind: "elicitation", locale: ctx.origin.locale,
+            // Expire the Telegram collection on the SAME deadline this handler polls
+            // to, so a reply after the tool call gave up isn't captured into a dead row.
+            ttlMs: ctx.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           });
         }
       }

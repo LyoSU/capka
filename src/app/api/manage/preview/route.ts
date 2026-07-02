@@ -10,6 +10,10 @@ const bodySchema = z.object({
     itemId: z.string().optional(),
     args: z.record(z.string(), z.unknown()).optional(),
   }),
+  // The suspended message this approval is for — lets the server recover the run's
+  // sandbox session key (ownership-checked) so a workspace-path preview reads the
+  // actual files instead of degrading to "can't read it now".
+  messageId: z.string().optional(),
 });
 
 /**
@@ -22,6 +26,6 @@ const bodySchema = z.object({
  */
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
-  const { input } = bodySchema.parse(await req.json());
-  return Response.json({ preview: await previewManageForUser(userId, input) });
+  const { input, messageId } = bodySchema.parse(await req.json());
+  return Response.json({ preview: await previewManageForUser(userId, input, { messageId }) });
 });

@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { automations, chats, messages, telegramLinks, users, tasks } from "@/lib/db/schema";
 import { enqueueTask } from "@/lib/tasks/queue";
@@ -24,10 +24,27 @@ const MAX_CONSECUTIVE_FAILURES = 3;
  */
 export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean }> {
   if (a.lastTaskId) {
-    const [prev] = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, a.lastTaskId));
+    const [prev] = await db.select({ status: tasks.status, chatId: tasks.chatId }).from(tasks).where(eq(tasks.id, a.lastTaskId));
     if (prev && (prev.status === "queued" || prev.status === "running")) {
       log.info("automation skipped: previous run still live", { automationId: a.id, lastTaskId: a.lastTaskId });
       return { fired: false };
+    }
+    // A finished task can still be BLOCKED: its reply suspended for the user's
+    // approval/answer (task row "completed", message metadata awaiting_*). Firing
+    // again would pile up parallel questions the user never asked for, so skip
+    // until the last run is unblocked — the resume flips the message status away
+    // from awaiting_* the moment the user responds, so this clears itself.
+    if (prev && prev.status === "completed") {
+      const [blocked] = await db.select({ id: messages.id }).from(messages)
+        .where(and(
+          eq(messages.chatId, prev.chatId),
+          sql`${messages.metadata}->>'status' IN ('awaiting_answer', 'awaiting_approval')`,
+        ))
+        .limit(1);
+      if (blocked) {
+        log.info("automation skipped: previous run awaiting user input", { automationId: a.id, lastTaskId: a.lastTaskId });
+        return { fired: false };
+      }
     }
   }
 
@@ -91,6 +108,10 @@ export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean
  * Telegram (the failed turns themselves are already visible in their chats).
  */
 export async function recordAutomationOutcome(automationId: string, status: string): Promise<void> {
+  // A suspended run (awaiting approval/answer) is neither success nor failure: it
+  // didn't finish its work, so the streak must NOT reset — but it also isn't a
+  // failure to count toward auto-disable. Leave the streak untouched.
+  if (status === "suspended") return;
   if (status === "completed") {
     await db.update(automations)
       .set({ consecutiveFailures: 0, updatedAt: new Date() })

@@ -1489,9 +1489,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
 
     await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
     if (payload.automationId) {
-      // Outcome accounting must never fail the turn itself.
+      // Outcome accounting must never fail the turn itself. A turn that SUSPENDED
+      // for input (approval/ask) is neither a success nor a failure — report it as
+      // "suspended" so the streak isn't reset (it didn't succeed) and isn't counted
+      // as a failure; the overlap guard, keyed on the run's message state, blocks
+      // the next occurrence until the user answers.
+      const automationOutcome = awaitingApproval || awaitingAnswer ? "suspended" : finalStatus;
       const { recordAutomationOutcome } = await import("@/lib/automations/runs");
-      await recordAutomationOutcome(payload.automationId, finalStatus).catch((e) =>
+      await recordAutomationOutcome(payload.automationId, automationOutcome).catch((e) =>
         tlog.warn("automation outcome accounting failed", { err: String(e) }),
       );
     }
@@ -1516,7 +1521,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const callPart = parts.find((p) => p.type === "tool-call" && p.id === awaitingApproval!.toolCallId);
       const input = callPart?.type === "tool-call" ? callPart.input : undefined;
       const { previewManageForUser } = await import("@/lib/manage/authed");
-      const pv = await previewManageForUser(userId, input).catch(() => null);
+      // Pass the run's sandbox session so a workspace-path preview reads the real files.
+      const pv = await previewManageForUser(userId, input, { sessionKey }).catch(() => null);
       if (pv) telegramApproval = { messageId: msgId, title: pv.title, before: pv.before, after: pv.after, impact: pv.impact, body: pv.body, items: pv.items };
     }
     // A suspended `ask` on an origin channel starts a sequential field-by-field

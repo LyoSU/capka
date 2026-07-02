@@ -339,14 +339,17 @@ export function ApprovalCard({
     (async () => {
       try {
         const res = await fetch("/api/manage/preview", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input }),
+          method: "POST", headers: { "Content-Type": "application/json" },
+          // messageId lets the server recover the run's sandbox session so a
+          // workspace-path preview (skill add {path}) lists the real skills.
+          body: JSON.stringify({ input, messageId }),
         });
         const { preview } = (await res.json()) as { preview: Preview | null };
         if (alive && preview) setPreview(preview);
       } catch { /* fall back to the header alone */ }
     })();
     return () => { alive = false; };
-  }, [awaiting, input]);
+  }, [awaiting, input, messageId]);
 
   const decide = async (approved: boolean) => {
     if (submitting) return;

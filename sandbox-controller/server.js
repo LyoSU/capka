@@ -1,5 +1,4 @@
 import { createServer } from "node:http";
-import { createWriteStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { hostname } from "node:os";

@@ -62,6 +62,10 @@ export const skillCollection: Collection = {
   requiredRole: "user",
   auditNoun: "skill",
   settingsPath: "/settings/skills",
+  // Enabling a skill injects its (permanent, agent-visible) instruction back into
+  // context, so re-activating a disabled one goes through the human — a
+  // prompt-injected agent can't quietly switch on an instruction that steers it.
+  confirmEnable: true,
   addSchema,
 
   canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),

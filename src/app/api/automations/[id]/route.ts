@@ -1,11 +1,12 @@
 import { and, eq } from "drizzle-orm";
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireActive } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { automations } from "@/lib/db/schema";
 import { nextOccurrenceAfter, type AutomationTrigger } from "@/lib/automations/schedule";
 
 export const PATCH = apiHandler(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
-  const { userId } = await requireSession();
+  // Enable/disable resumes or pauses unattended budget spend — active accounts only.
+  const { userId } = await requireActive();
   const { id } = await params;
   const { enabled } = await req.json();
   const [row] = await db.select().from(automations).where(and(eq(automations.id, id), eq(automations.userId, userId)));
@@ -19,7 +20,7 @@ export const PATCH = apiHandler(async (req: Request, { params }: { params: Promi
 });
 
 export const DELETE = apiHandler(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
-  const { userId } = await requireSession();
+  const { userId } = await requireActive();
   const { id } = await params;
   const res = await db.delete(automations).where(and(eq(automations.id, id), eq(automations.userId, userId))).returning({ id: automations.id });
   if (!res.length) return Response.json({ error: "Not found" }, { status: 404 });

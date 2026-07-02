@@ -5,7 +5,7 @@ import AdmZip from "adm-zip";
 const ingestSkill = vi.fn().mockResolvedValue("skill_123");
 vi.mock("../service", () => ({ ingestSkill: (...args: unknown[]) => ingestSkill(...args) }));
 
-import { ingestSkillZip, SkillZipError } from "../ingest-zip";
+import { ingestSkillZip, readSkillZip, SkillZipError, MAX_SKILL_ZIP_BYTES } from "../ingest-zip";
 
 const SKILL_MD = "---\nname: my-skill\ndescription: Does a thing.\n---\n# Body\n";
 const target = { scope: "system" as const, userId: null, projectId: null };
@@ -42,5 +42,14 @@ describe("ingestSkillZip", () => {
 
   it("rejects an unreadable (non-zip) buffer", async () => {
     await expect(ingestSkillZip(Buffer.from("not a zip"), target)).rejects.toThrow(SkillZipError);
+  });
+
+  it("rejects a buffer larger than the compressed cap BEFORE parsing (the shared entry-point gate)", () => {
+    // A buffer just over the cap — readSkillZip must refuse it up front, so the
+    // workspace-install path (which buffers a controller download) can't force the
+    // platform to AdmZip-parse an oversized archive.
+    const tooBig = Buffer.alloc(MAX_SKILL_ZIP_BYTES + 1);
+    expect(() => readSkillZip(tooBig)).toThrow(SkillZipError);
+    expect(ingestSkill).not.toHaveBeenCalled();
   });
 });

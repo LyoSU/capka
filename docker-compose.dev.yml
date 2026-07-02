@@ -4,8 +4,9 @@
 # Layers dev-only conveniences over the base + build-from-source overlay:
 # zero-config default secrets, host-published ports bound to 127.0.0.1 (loopback
 # only — never the public iface), and hot-reloading `next dev` (target: dev
-# overrides the build overlay's prod `runner` target). The base already binds the
-# platform to 127.0.0.1:3000, so no platform port override is needed here.
+# overrides the build overlay's prod `runner` target). Every published port here —
+# postgres, sandbox-controller, AND platform — pins 127.0.0.1; the base defaults
+# platform to 0.0.0.0 (zero-config prod), so the dev platform port is overridden below.
 services:
   postgres:
     environment:
@@ -37,6 +38,11 @@ services:
       context: .
       target: dev # full deps, no prod build — gives `next dev` hot-reload
     command: npm run dev
+    # Bind the dev server to loopback like the other dev ports — the base compose
+    # defaults PLATFORM_BIND to 0.0.0.0 (zero-config prod), which would otherwise
+    # expose the hot-reload dev server to the LAN. Overridden here, not in the base.
+    ports:
+      - "127.0.0.1:3000:3000"
     volumes:
       - .:/app
       - /app/node_modules

@@ -21,9 +21,27 @@ type Collection = {
   locale?: string;
   cursor: number;
   collected: Record<string, string | string[]>;
+  /** Absolute expiry (ms). An MCP elicitation blocks a live tool call for ~3 min
+   *  then deletes its DB row (see mcp/elicitation); the Telegram collection must
+   *  expire on the SAME deadline, or a late reply is swallowed by a dead question
+   *  (and reported "answered") while the tool call already timed out. A durable
+   *  `ask` has no expiry — its DB snapshot waits indefinitely. */
+  expiresAt?: number;
 };
 
 const collections = new Map<number, Collection>();
+
+/** The active, NON-expired collection for a chat, if any. An expired one is
+ *  dropped here so every interaction path (button/skip/text) treats it as gone. */
+function live(chatId: number): Collection | undefined {
+  const c = collections.get(chatId);
+  if (!c) return undefined;
+  if (c.expiresAt !== undefined && Date.now() >= c.expiresAt) {
+    collections.delete(chatId);
+    return undefined;
+  }
+  return c;
+}
 
 /** Options a field offers as buttons (choice, or a synthetic yes/no for boolean);
  *  null for a free-text/number field that must be typed. */
@@ -47,27 +65,38 @@ async function promptField(bot: Bot, chatId: number, c: Collection): Promise<voi
   await bot.api.sendMessage(chatId, field.label, { reply_markup: kb }).catch(() => {});
 }
 
-/** Begin collecting answers for a suspended question. */
+/** Begin collecting answers for a suspended question. `ttlMs` bounds how long the
+ *  in-memory collection stays live — pass the elicitation's own timeout so a late
+ *  reply after the tool call gave up isn't captured; omit it for a durable `ask`. */
 export async function startAskCollection(
   bot: Bot,
   chatId: number,
-  init: { userId: string; messageId: string; form: AskForm; kind: "ask" | "elicitation"; locale?: string },
+  init: { userId: string; messageId: string; form: AskForm; kind: "ask" | "elicitation"; locale?: string; ttlMs?: number },
 ): Promise<void> {
   if (!init.form.fields.length) return;
-  const c: Collection = { ...init, cursor: 0, collected: {} };
+  // Sweep any expired entries so an abandoned question can't linger in the map.
+  for (const [id, c] of collections) if (c.expiresAt !== undefined && Date.now() >= c.expiresAt) collections.delete(id);
+  const c: Collection = {
+    userId: init.userId, messageId: init.messageId, form: init.form, kind: init.kind, locale: init.locale,
+    cursor: 0, collected: {}, expiresAt: init.ttlMs !== undefined ? Date.now() + init.ttlMs : undefined,
+  };
   collections.set(chatId, c);
   await promptField(bot, chatId, c);
 }
 
-/** Submit the collected values (or a skip) and clear the collection. */
+/** Submit the collected values (or a skip) and clear the collection. Confirms only
+ *  when the answer actually landed: the answer* helpers return false when the
+ *  suspended question is already resolved or gone (an elicitation that timed out
+ *  and deleted its row, a double-submit), so we say "expired" rather than falsely
+ *  reporting success. */
 async function finish(bot: Bot, chatId: number, c: Collection, action: AskAnswer["action"]): Promise<void> {
   collections.delete(chatId);
   const t = getTranslator(c.locale, "chat.ask");
   const d = { messageId: c.messageId, action, values: action === "submit" ? c.collected : {} };
   const { answerAskForUser, answerElicitationForUser } = await import("@/lib/ask/authed");
-  if (c.kind === "elicitation") await answerElicitationForUser(c.userId, d);
-  else await answerAskForUser(c.userId, d);
-  await bot.api.sendMessage(chatId, action === "skip" ? t("skipped") : t("answered")).catch(() => {});
+  const ok = c.kind === "elicitation" ? await answerElicitationForUser(c.userId, d) : await answerAskForUser(c.userId, d);
+  const msg = !ok ? t("expired") : action === "skip" ? t("skipped") : t("answered");
+  await bot.api.sendMessage(chatId, msg).catch(() => {});
 }
 
 /** Advance to the next field, or submit when the last one is done. */
@@ -82,7 +111,7 @@ async function advance(bot: Bot, chatId: number, c: Collection): Promise<void> {
  *  member of a group chat can't resume someone else's turn with chosen input.
  *  Returns false if no collection is active / the tapper isn't the owner. */
 export async function onAskChoice(bot: Bot, chatId: number, tapperUserId: string, fieldIdx: number, optIdx: number): Promise<boolean> {
-  const c = collections.get(chatId);
+  const c = live(chatId);
   if (!c || c.userId !== tapperUserId || c.cursor !== fieldIdx) return false;
   const t = getTranslator(c.locale, "chat.ask");
   const opts = fieldOptions(c.form.fields[fieldIdx], t);
@@ -96,7 +125,7 @@ export async function onAskChoice(bot: Bot, chatId: number, tapperUserId: string
 /** The Skip button was tapped. Only the turn's owner may skip. Returns false if no
  *  collection is active / the tapper isn't the owner. */
 export async function onAskSkip(bot: Bot, chatId: number, tapperUserId: string): Promise<boolean> {
-  const c = collections.get(chatId);
+  const c = live(chatId);
   if (!c || c.userId !== tapperUserId) return false;
   await finish(bot, chatId, c, "skip");
   return true;
@@ -107,7 +136,9 @@ export async function onAskSkip(bot: Bot, chatId: number, tapperUserId: string):
  *  returns true so the caller does NOT treat the message as a new chat turn.
  *  Otherwise returns false. `senderUserId` is the Capka user who sent the message. */
 export async function onAskText(bot: Bot, chatId: number, senderUserId: string, text: string): Promise<boolean> {
-  const c = collections.get(chatId);
+  // `live` drops an expired collection, so a late free-text reply returns false and
+  // the caller treats it as a fresh Telegram turn instead of swallowing it here.
+  const c = live(chatId);
   if (!c || c.userId !== senderUserId) return false;
   const field = c.form.fields[c.cursor];
   if (field.kind !== "text" && field.kind !== "number") return false; // a choice field ignores stray text

@@ -69,6 +69,10 @@ export const automationCollection: Collection = {
   settingsPath: "/settings/automations",
   // Spends money unattended — approval survives autonomous mode, like MCP installs.
   alwaysConfirm: true,
+  // Re-enabling a paused automation resumes unattended, budget-spending runs, so
+  // the human confirms it (a prompt-injected agent must not silently un-pause).
+  confirmEnable: true,
+  enableImpact: "Resumes scheduled runs that spend tokens unattended.",
   addSchema: z.object({
     title: z.string().min(1).max(80),
     prompt: z.string().min(1, "The instruction to run is required."),
