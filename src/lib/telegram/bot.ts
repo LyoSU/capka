@@ -432,25 +432,31 @@ async function buildBot(): Promise<Bot | null> {
   // skipped. The collection state (keyed by Telegram chat) records it and, once the
   // last field is done, submits the answer AS the turn's owner and resumes it.
   bot.callbackQuery(/^ta:(\d+):(\d+)$/, async (ctx) => {
-    if (!(await findLink(ctx.from!.id))) { await ctx.answerCallbackQuery(); return; }
+    const link = await findLink(ctx.from!.id);
+    if (!link) { await ctx.answerCallbackQuery(); return; }
     const { onAskChoice } = await import("./ask-collect");
-    await onAskChoice(bot, ctx.chat!.id, Number(ctx.match![1]), Number(ctx.match![2]));
+    // Pass the tapper's userId — only the turn's OWNER may answer.
+    await onAskChoice(bot, ctx.chat!.id, link.userId, Number(ctx.match![1]), Number(ctx.match![2]));
     await ctx.answerCallbackQuery();
     await ctx.editMessageReplyMarkup().catch(() => {}); // drop buttons so it can't be re-tapped
   });
   bot.callbackQuery("taskip", async (ctx) => {
-    if (!(await findLink(ctx.from!.id))) { await ctx.answerCallbackQuery(); return; }
+    const link = await findLink(ctx.from!.id);
+    if (!link) { await ctx.answerCallbackQuery(); return; }
     const { onAskSkip } = await import("./ask-collect");
-    await onAskSkip(bot, ctx.chat!.id);
+    await onAskSkip(bot, ctx.chat!.id, link.userId);
     await ctx.answerCallbackQuery();
     await ctx.editMessageReplyMarkup().catch(() => {});
   });
 
-  // Plain text → answer a pending `ask` question if one is collecting on this chat,
-  // otherwise straight into the engine as a new turn.
+  // Plain text → answer a pending `ask` question if one is collecting on this chat
+  // AND the sender owns it, otherwise straight into the engine as a new turn.
   bot.on("message:text", async (ctx) => {
-    const { onAskText } = await import("./ask-collect");
-    if (await onAskText(bot, ctx.chat.id, ctx.message.text)) return;
+    const link = await findLink(ctx.from!.id);
+    if (link) {
+      const { onAskText } = await import("./ask-collect");
+      if (await onAskText(bot, ctx.chat.id, link.userId, ctx.message.text)) return;
+    }
     await ingest(ctx, ctx.message.text, []);
   });
 

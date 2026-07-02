@@ -30,6 +30,17 @@ export function AskCard({
   const [submitting, setSubmitting] = useState(false);
   const awaiting = state === "input-available" && !value;
 
+  // Turn a stored answer value into its human label (choice → option label,
+  // boolean → yes/no, multi → joined) for the settled view.
+  const display = (field: AskField, v: string | string[] | undefined): string => {
+    if (v == null || v === "") return "—";
+    const one = (val: string) =>
+      field.kind === "boolean" ? (val === "true" ? t("yes") : t("no"))
+      : field.kind === "choice" ? (field.options?.find((o) => o.value === val)?.label ?? val)
+      : val;
+    return Array.isArray(v) ? v.map(one).join(", ") : one(v);
+  };
+
   const set = (id: string, v: string | string[]) => setValues((prev) => ({ ...prev, [id]: v }));
   const toggle = (id: string, v: string) => {
     const cur = Array.isArray(values[id]) ? (values[id] as string[]) : [];
@@ -78,7 +89,24 @@ export function AskCard({
           </div>
         </>
       ) : (
-        <div className="mt-2 text-sm text-muted-foreground">{value?.action === "skip" ? t("skipped") : t("answered")}</div>
+        // Settled: the questions stay on the record (they persist forever), and each
+        // answer renders as its own message-like bubble on the right — so it's clear
+        // what was asked AND what the user replied.
+        <div className="mt-3 space-y-3">
+          {form.fields.map((f) => (
+            <div key={f.id}>
+              <div className="text-sm text-muted-foreground">{f.label}</div>
+              {value?.action === "submit" ? (
+                <div className="mt-1.5 flex justify-end">
+                  <div className="inline-block max-w-[85%] whitespace-pre-wrap break-words rounded-2xl border border-border bg-card px-4 py-2 text-sm text-card-foreground shadow-sm">
+                    {display(f, value.values[f.id])}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {value?.action === "skip" && <div className="text-sm text-muted-foreground">{t("skipped")}</div>}
+        </div>
       )}
     </div>
   );

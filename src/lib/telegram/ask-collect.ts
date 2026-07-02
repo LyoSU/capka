@@ -77,10 +77,13 @@ async function advance(bot: Bot, chatId: number, c: Collection): Promise<void> {
   else await promptField(bot, chatId, c);
 }
 
-/** A choice/boolean button was tapped. Returns false if no collection is active. */
-export async function onAskChoice(bot: Bot, chatId: number, fieldIdx: number, optIdx: number): Promise<boolean> {
+/** A choice/boolean button was tapped. `tapperUserId` is the Capka user who tapped
+ *  (from their Telegram link) — only the turn's OWNER may answer, so a different
+ *  member of a group chat can't resume someone else's turn with chosen input.
+ *  Returns false if no collection is active / the tapper isn't the owner. */
+export async function onAskChoice(bot: Bot, chatId: number, tapperUserId: string, fieldIdx: number, optIdx: number): Promise<boolean> {
   const c = collections.get(chatId);
-  if (!c || c.cursor !== fieldIdx) return false;
+  if (!c || c.userId !== tapperUserId || c.cursor !== fieldIdx) return false;
   const t = getTranslator(c.locale, "chat.ask");
   const opts = fieldOptions(c.form.fields[fieldIdx], t);
   const value = opts?.[optIdx]?.value;
@@ -90,20 +93,22 @@ export async function onAskChoice(bot: Bot, chatId: number, fieldIdx: number, op
   return true;
 }
 
-/** The Skip button was tapped. Returns false if no collection is active. */
-export async function onAskSkip(bot: Bot, chatId: number): Promise<boolean> {
+/** The Skip button was tapped. Only the turn's owner may skip. Returns false if no
+ *  collection is active / the tapper isn't the owner. */
+export async function onAskSkip(bot: Bot, chatId: number, tapperUserId: string): Promise<boolean> {
   const c = collections.get(chatId);
-  if (!c) return false;
+  if (!c || c.userId !== tapperUserId) return false;
   await finish(bot, chatId, c, "skip");
   return true;
 }
 
-/** A plain text message arrived. If a collection is active AND the current field is
- *  typed (text/number), capture it and advance — returns true so the caller does
- *  NOT treat the message as a new chat turn. Otherwise returns false. */
-export async function onAskText(bot: Bot, chatId: number, text: string): Promise<boolean> {
+/** A plain text message arrived. If a collection is active, the sender is the turn's
+ *  OWNER, AND the current field is typed (text/number), capture it and advance —
+ *  returns true so the caller does NOT treat the message as a new chat turn.
+ *  Otherwise returns false. `senderUserId` is the Capka user who sent the message. */
+export async function onAskText(bot: Bot, chatId: number, senderUserId: string, text: string): Promise<boolean> {
   const c = collections.get(chatId);
-  if (!c) return false;
+  if (!c || c.userId !== senderUserId) return false;
   const field = c.form.fields[c.cursor];
   if (field.kind !== "text" && field.kind !== "number") return false; // a choice field ignores stray text
   c.collected[field.id] = text;
