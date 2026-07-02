@@ -1500,12 +1500,26 @@
       "pathInstalled": "{n, plural, one{# скіл} few{# скіли} many{# скілів} other{# скіла}} з {path}",
       "editReady": "«{name}» вивантажено у {path}/SKILL.md — відредагуйте файли там, потім збережіть через skill add {path}."
     },
+    "automation": {
+      "addTitle": "Додати автоматизацію",
+      "previewOnce": "Одноразовий запуск: {date}.",
+      "previewRecurring": "Наступні запуски: {dates} — приблизно {count} на місяць, кожен витрачає токени як звичайний хід.",
+      "nextSubtitle": "наступний: {date}",
+      "nextRun": "Наступний запуск: {date}",
+      "lastRun": "Останній запуск: {date}",
+      "neverRan": "Ще не запускалась",
+      "avgCost": "Середня вартість запуску: ≈${cost} (за {runs} запусків)",
+      "failures": "Послідовних невдач: {n}",
+      "autoPausedHint": "Призупинено після повторних невдач. Перевірте чат останнього запуску, потім увімкніть знову."
+    },
     "state": {
       "local": "локальний",
       "ok": "працює",
       "unauthorized": "не авторизовано",
       "unreachable": "недоступний",
-      "needs_login": "потрібен вхід"
+      "needs_login": "потрібен вхід",
+      "disabled": "вимкнено",
+      "failing": "виникають помилки"
     },
     "action": {
       "connect": "Підключити",

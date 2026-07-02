@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { getSetting } from "@/lib/settings";
 import { isValidTimezone } from "@/lib/timezone";
 import { nextOccurrenceAfter, nextOccurrences, type AutomationTrigger } from "@/lib/automations/schedule";
+import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
 
 /** Model-facing args are FLAT (weak models fumble nested unions): recurring =
@@ -89,13 +90,16 @@ export const automationCollection: Collection = {
   },
   previewAdd: async (ctx, args) => {
     const trigger = parseTriggerArgs(args);
+    const t = manageT(ctx.locale);
     const { nextDates, perMonth } = humanizeSchedule(trigger, ctx.locale);
     return {
-      title: "Automations",
+      title: loc(t, "automation.addTitle", "Add automation"),
       after: String(args.title),
       details: trigger.kind === "once"
-        ? `Runs once: ${nextDates[0]}.`
-        : `Next runs: ${nextDates.join(" · ")} — about ${perMonth} runs per month, each spending tokens like a normal turn.`,
+        ? loc(t, "automation.previewOnce", `Runs once: ${nextDates[0]}.`, { date: nextDates[0] })
+        : loc(t, "automation.previewRecurring",
+            `Next runs: ${nextDates.join(" · ")} — about ${perMonth} runs per month, each spending tokens like a normal turn.`,
+            { dates: nextDates.join(" · "), count: perMonth }),
       body: String(args.prompt),
     };
   },
@@ -113,13 +117,14 @@ export const automationCollection: Collection = {
     return { itemTitle: String(args.title) };
   },
   list: async (ctx) => {
+    const t = manageT(ctx.locale);
     const rows = await db.select().from(automations).where(eq(automations.userId, ctx.userId));
     return rows.map((a) => {
       const { nextDates } = humanizeSchedule(a.trigger as AutomationTrigger, ctx.locale);
       return {
         id: a.id,
         title: a.title,
-        subtitle: a.enabled ? (nextDates[0] ? `next: ${nextDates[0]}` : undefined) : undefined,
+        subtitle: a.enabled && nextDates[0] ? loc(t, "automation.nextSubtitle", `next: ${nextDates[0]}`, { date: nextDates[0] }) : undefined,
         enabled: a.enabled,
         owned: true,
       };
@@ -143,8 +148,9 @@ export const automationCollection: Collection = {
   },
   debug: async (ctx, itemId) => {
     const row = await mustOwn(ctx, itemId);
+    const t = manageT(ctx.locale);
     const { nextDates } = humanizeSchedule(row.trigger as AutomationTrigger, ctx.locale);
-    const state = !row.enabled ? "disabled" : row.consecutiveFailures > 0 ? "failing" : "ok";
+    const stateKey = !row.enabled ? "disabled" : row.consecutiveFailures > 0 ? "failing" : "ok";
     // Real average cost per run (spec §4.6 — the honest counterpart of the
     // creation-time frequency forecast). pending=false only: holds are estimates.
     const { rows: [cost] } = await (await import("@/lib/db")).pool.query<{ avg: string | null; runs: string }>(
@@ -155,15 +161,20 @@ export const automationCollection: Collection = {
     );
     return {
       itemTitle: row.title,
-      state,
+      state: loc(t, `state.${stateKey}`, stateKey),
       detail: [
-        nextDates[0] && row.enabled ? `Next run: ${nextDates[0]}` : undefined,
-        row.lastRunAt ? `Last run: ${row.lastRunAt.toISOString()}` : "Never ran yet",
-        cost?.avg ? `Average cost per run: ≈$${Number(cost.avg).toFixed(4)} over ${cost.runs} runs` : undefined,
-        row.consecutiveFailures ? `Consecutive failures: ${row.consecutiveFailures}` : undefined,
+        nextDates[0] && row.enabled ? loc(t, "automation.nextRun", `Next run: ${nextDates[0]}`, { date: nextDates[0] }) : undefined,
+        row.lastRunAt
+          ? loc(t, "automation.lastRun", `Last run: ${row.lastRunAt.toISOString()}`, { date: row.lastRunAt.toISOString() })
+          : loc(t, "automation.neverRan", "Never ran yet"),
+        cost?.avg
+          ? loc(t, "automation.avgCost", `Average cost per run: ≈$${Number(cost.avg).toFixed(4)} over ${cost.runs} runs`,
+              { cost: Number(cost.avg).toFixed(4), runs: cost.runs })
+          : undefined,
+        row.consecutiveFailures ? loc(t, "automation.failures", `Consecutive failures: ${row.consecutiveFailures}`, { n: row.consecutiveFailures }) : undefined,
       ].filter(Boolean).join(" · "),
-      hint: state === "disabled" && row.consecutiveFailures >= 3
-        ? "Auto-paused after repeated failures. Check the last run's chat, then enable it again."
+      hint: stateKey === "disabled" && row.consecutiveFailures >= 3
+        ? loc(t, "automation.autoPausedHint", "Auto-paused after repeated failures. Check the last run's chat, then enable it again.")
         : undefined,
     };
   },
