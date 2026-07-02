@@ -71,6 +71,27 @@ All notable changes to Capka are documented here. Format follows
   any user; org-wide skills are admin-only, enforced server-side. Same collection
   abstraction as connectors — new manageable resources are a registration, not a
   dispatcher change.
+- **`manage` UX round: first-run concierge, chip pickers, popup OAuth, connector
+  probe, instant locale, cross-links, and an admin-change banner.** After setup,
+  the admin's first chat turn greets them and offers to configure the optional
+  bits (language, Telegram, a first connector) — a one-time nudge, not a wizard
+  (setup stays a form since the agent can't run before a provider key exists).
+  Reading an enum/boolean setting now shows its values as pickable chips; adding
+  a remote connector probes it first ("responds — N tools" / "couldn't reach
+  it") so nobody confirms blind; OAuth sign-in opens in a popup that closes and
+  re-checks itself (falls back to full-page redirect if blocked); changing the
+  interface language takes effect immediately (no manual reload); connector/skill
+  cards link to the full settings page and vice-versa; and when one admin changes
+  a platform-wide setting, other admins see a calm, dismissible banner on their
+  next visit.
+- **The chat confirm preview is now identical on every channel.** The staged-change
+  confirmation is only a real security boundary if the user sees what they're
+  approving — but the Telegram preview dropped the impact warning and a skill's
+  full body, the plain-text fallback dropped the before→after diff, and the web
+  Cancel was cosmetic (it hid the buttons but left the staged change live on the
+  server, so a reload re-offered it). All three are fixed: impact + body travel to
+  Telegram, the plain-text fallback carries the full preview, and web Cancel drops
+  the pending server-side. Web and Telegram apply through one canonical server path.
 - **`PLATFORM_BIND` env var to bind the platform port to a single interface.**
   Defaults to `0.0.0.0` (all interfaces — works out of the box). Set
   `PLATFORM_BIND=127.0.0.1` to publish loopback-only when a reverse proxy fronts
