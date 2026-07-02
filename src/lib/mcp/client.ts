@@ -1,10 +1,16 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { assertSafeUrl, createGuardedFetch } from "@/lib/net/ssrf";
+import { makeElicitHandler } from "./elicitation";
 import { SandboxStdioTransport } from "./stdio-transport";
 import type { McpServerConfig } from "./types";
+
+/** Run context a connector needs to elicit input from the user mid-tool-call.
+ *  Present only during a live turn (loadMcpTools threads it through). */
+export type ElicitContext = { userId: string; chatId: string; messageId: string };
 
 export interface ConnectedMcp {
   client: Client;
@@ -48,12 +54,22 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
  *  the run; on any failure the half-open transport is closed before rethrowing. */
 export async function connectMcpServer(
   cfg: McpServerConfig,
-  opts: { timeoutMs?: number; blockPrivate?: boolean; authProvider?: OAuthClientProvider; sessionKey?: string } = {},
+  opts: { timeoutMs?: number; blockPrivate?: boolean; authProvider?: OAuthClientProvider; sessionKey?: string; elicitContext?: ElicitContext } = {},
 ): Promise<ConnectedMcp> {
   const timeoutMs = opts.timeoutMs ?? (cfg.transport === "stdio" ? STDIO_CONNECT_TIMEOUT_MS : CONNECT_TIMEOUT_MS);
   const blockPrivate = opts.blockPrivate ?? false;
 
-  const client = new Client({ name: "capka", version: "0.1.0" });
+  // Declare the elicitation capability + register a handler only during a live
+  // turn (elicitContext present) — the handler needs the run's chat/message to
+  // surface the question card and poll for the answer. Off-turn (cache warm), the
+  // client advertises no elicitation support, so a server won't try to elicit.
+  const client = new Client(
+    { name: "capka", version: "0.1.0" },
+    opts.elicitContext ? { capabilities: { elicitation: {} } } : undefined,
+  );
+  if (opts.elicitContext) {
+    client.setRequestHandler(ElicitRequestSchema, makeElicitHandler(opts.elicitContext));
+  }
   let transport: Transport;
 
   if (cfg.transport === "stdio") {

@@ -274,7 +274,7 @@ async function injectNativeFiles(
 /** Re-resolve everything needed to run the task from its persisted payload.
  *  `sessionKey` is the project (shared folder) or the chat itself — see
  *  workspaceSessionKey. Memory is scoped to the project plus user-global facts. */
-async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string) {
+async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string, messageId: string) {
   // A project chat sees its project memory doc + the user-global doc. A
   // standalone chat sees only the user-global doc, so projects don't leak.
   const [{ model, provider, modelId, modelInput, isShared, configId }, project, memoryDocs, user, chat] = await Promise.all([
@@ -321,6 +321,8 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     sessionKey,
     ensureSession,
     isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
+    // Lets a connector elicit input from the user mid-tool-call (block-and-poll).
+    elicitContext: { userId, chatId, messageId },
   });
   // The sandbox + MCP clients are now LIVE (stdio MCP servers may hold child
   // processes). Define their disposer immediately so any throw in the rest of
@@ -561,7 +563,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
 
     const { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: close, prompt, contextLength, adminCap } =
-      await prepareRun(userId, sessionKey, payload, chatId);
+      await prepareRun(userId, sessionKey, payload, chatId, msgId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
     // Publish the run identity to the outer scope so the catch path can reconcile

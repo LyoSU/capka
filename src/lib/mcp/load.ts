@@ -53,6 +53,9 @@ export async function loadMcpTools(opts: {
   ensureSession?: () => Promise<unknown>;
   /** Governance gate — a denied connector is never connected (G1). */
   isServerAllowed?: (name: string) => boolean;
+  /** Present during a live turn: lets a connector elicit input from the user
+   *  mid-tool-call (block-and-poll). Omitted for background cache warms. */
+  elicitContext?: import("./client").ElicitContext;
 }): Promise<{
   tools: Record<string, Tool>;
   close: () => Promise<void>;
@@ -91,7 +94,7 @@ export async function loadMcpTools(opts: {
         const cfg = opts.sessionKey && needsPluginRoot(c)
           ? await resolvePluginRoot(opts.sessionKey, c)
           : c;
-        const conn = await connectMcpServer(cfg, { blockPrivate, authProvider, sessionKey: opts.sessionKey });
+        const conn = await connectMcpServer(cfg, { blockPrivate, authProvider, sessionKey: opts.sessionKey, elicitContext: opts.elicitContext });
         connected.push(conn);
         setCachedTools(k, conn.tools); // refresh the schema cache for next turn
         clearConnectError(opts.userId, c.id);
