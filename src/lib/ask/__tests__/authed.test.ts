@@ -12,14 +12,18 @@ vi.mock("@/lib/db", () => ({
         where: () => ({ limit: () => [rows.task] }),
       }),
     }),
-    update: () => ({ set: (v: unknown) => ({ where: () => { rows.updated = v; } }) }),
+    // Covers both answerAskForUser (`.set().where()`, awaited) and
+    // answerElicitationForUser (`.set().where().returning()`).
+    update: () => ({
+      set: (v: unknown) => { rows.updated = v; return { where: () => ({ returning: () => rows.elicitReturn ?? [] }) }; },
+    }),
   },
 }));
 
-import { answerAskForUser } from "../authed";
+import { answerAskForUser, answerElicitationForUser } from "../authed";
 
 describe("answerAskForUser", () => {
-  beforeEach(() => { enqueueTask.mockClear(); rows.updated = undefined; });
+  beforeEach(() => { enqueueTask.mockClear(); rows.updated = undefined; rows.elicitReturn = undefined; });
 
   it("writes the answer + tool-result and enqueues a resume for an ask suspend", async () => {
     rows.msg = {
@@ -48,6 +52,23 @@ describe("answerAskForUser", () => {
   it("returns false when there is no pending ask call", async () => {
     rows.msg = { chatId: "chat1", ownerId: "u1", projectId: null, metadata: { parts: [{ type: "text", text: "hi" }] } };
     const ok = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: {} });
+    expect(ok).toBe(false);
+  });
+});
+
+describe("answerElicitationForUser", () => {
+  beforeEach(() => { rows.updated = undefined; rows.elicitReturn = undefined; });
+
+  it("writes the answer onto the pending_elicitation row", async () => {
+    rows.elicitReturn = [{ id: "e1" }];
+    const ok = await answerElicitationForUser("u1", { messageId: "m1", action: "submit", values: { name: "x" } });
+    expect(ok).toBe(true);
+    expect((rows.updated as { answer?: unknown }).answer).toEqual({ action: "submit", values: { name: "x" } });
+  });
+
+  it("returns false when no matching pending row (already answered / not owner)", async () => {
+    rows.elicitReturn = [];
+    const ok = await answerElicitationForUser("u1", { messageId: "m1", action: "submit", values: {} });
     expect(ok).toBe(false);
   });
 });

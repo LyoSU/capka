@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { messages, chats, tasks } from "@/lib/db/schema";
+import { messages, chats, tasks, pendingElicitations } from "@/lib/db/schema";
 import { enqueueTask } from "@/lib/tasks/queue";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -51,8 +51,22 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
   return true;
 }
 
-/** Placeholder — the real block-and-poll row writer arrives in the MCP
- *  elicitation phase (Task B3). Kept here so the shared answer route compiles. */
-export async function answerElicitationForUser(_userId: string, _d: AskDecision): Promise<boolean> {
-  return false;
+/**
+ * Write the user's answer onto the `pending_elicitation` row an MCP tool's blocked
+ * `execute` is polling (see mcp/elicitation). Unlike `ask`, there's no message part
+ * or resume task — setting the row unblocks the handler, which returns the answer to
+ * the MCP server and completes the tool call. Matched by messageId + owner + still
+ * unanswered; returns false when no such row (already answered, or not the caller's).
+ */
+export async function answerElicitationForUser(userId: string, d: AskDecision): Promise<boolean> {
+  const value: AskAnswer = { action: d.action, values: d.values };
+  const rows = await db.update(pendingElicitations)
+    .set({ answer: value })
+    .where(and(
+      eq(pendingElicitations.messageId, d.messageId),
+      eq(pendingElicitations.userId, userId),
+      isNull(pendingElicitations.answer),
+    ))
+    .returning({ id: pendingElicitations.id });
+  return rows.length > 0;
 }
