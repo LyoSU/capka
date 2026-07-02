@@ -28,6 +28,12 @@ export type TaskEvent =
   // result shape alone can't be trusted — successful tools like read_file return
   // an `error: null` field, which the client must NOT read as a failure.
   | { type: "task:tool-result"; taskId: string; chatId: string; messageId: string; toolCallId: string; result: unknown; isError?: boolean; seq?: number }
+  // The SDK suspended a tool call for native human-in-the-loop approval — flip
+  // the live tool part to "approval-requested" so the card shows Approve/Reject
+  // and the composer blocks. The reconnect/reload path re-derives the same state
+  // from the persisted `approval` marker (see presenter), so this is the live-only
+  // fast path; `approvalId` ties the decision back to the SDK's request.
+  | { type: "task:tool-approval"; taskId: string; chatId: string; messageId: string; toolCallId: string; approvalId: string; seq?: number }
   // A retry inside the runner threw away the partial reply (`parts.length = 0`)
   // for a capability/empty-response retry. The client must DISCARD the streamed
   // parts for this message and resync its applied-seq, so retry deltas land on a

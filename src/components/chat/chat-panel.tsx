@@ -118,7 +118,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const prevComposerH = useRef(160);
 
   const router = useRouter();
-  const { messages, isLoading, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, taskInfo } = useBackgroundChat({
+  const { messages, isLoading, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingApproval, taskInfo } = useBackgroundChat({
     chatId,
     projectId,
   });
@@ -571,6 +571,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       onSubmit={handleSubmit}
       onStop={stop}
       isLoading={isLoading}
+      awaitingApproval={awaitingApproval}
       chatId={chatId}
       files={attachments.files}
       onAddFiles={attachments.add}

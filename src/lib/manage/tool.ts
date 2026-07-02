@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { buildRegistry } from "./controls";
-import { dispatch } from "./dispatch";
+import { dispatch, requiresApproval } from "./dispatch";
 import type { ManageContext, ManageInput, ManageResult } from "./types";
 
 /** The registry is stateless (controls delegate to the service layer), so it's
@@ -34,6 +34,15 @@ const inputSchema = z.object({
     .optional()
     .describe('Fields for `add` to a collection, e.g. for mcp: {name, url, authKind:"oauth"} or {name, command, args}.'),
 });
+
+/** Map the flat tool args to a discriminated ManageInput (or null if a required
+ *  field for the action is missing). Exported so the approval-preview endpoint can
+ *  turn a suspended tool call's persisted input back into a dispatchable action. */
+export function toManageInput(a: {
+  action: string; target?: string; value?: string; itemId?: string; args?: Record<string, unknown>;
+}): ManageInput | null {
+  return toInput(a as z.infer<typeof inputSchema>);
+}
 
 function toInput(a: z.infer<typeof inputSchema>): ManageInput | null {
   switch (a.action) {
@@ -69,34 +78,45 @@ Permission is decided by the SERVER from each action's result — not by you rea
 Settings/controls:
 - action="list" (or "capabilities") discovers what THIS user may manage. Never invent an id.
 - action="get" reads a control; action="set" changes it (value is always a string).
-- Risky org-wide changes are confirmed by the USER, not you: "set" returns status="confirm_required" with a before→after preview. This ALREADY means the user is authorized (the server checked their role) and a confirmation card/button is shown to them. You CANNOT apply it — there is no token to re-send; only the user's click applies it. Do NOT say you lack permission, do NOT re-ask in prose, do NOT try to "set" again. Reply at most one short line, then STOP and wait — the applied change arrives on its own. Undo is a button too, not something you trigger.
+- Risky/platform-wide changes are approved by the USER, not you — this is handled automatically. When you call such a "set", the tool call PAUSES: the user sees an Approve/Reject card and the app blocks until they decide. You don't stage or re-send anything. If they approve, the tool then runs and returns the applied result — continue naturally from there (e.g. confirm it's done). If they reject, you'll get a denial result — acknowledge it and move on. NEVER tell the user to "press Confirm / click the button" (the card speaks for itself), never say you lack permission, and never re-call "set" to retry a pending approval. Undo is a button on the applied card, not something you trigger.
 
 Collections (target="mcp" for connectors, target="skill" for agent skills):
 - action="get" with a collection target lists its items; add/remove/enable/disable/debug/connect operate on them (itemId identifies one).
-- add args for mcp: {name, url, authKind:"oauth"} (remote) or {name, command, args} (local/stdio). add args for skill: {content} (a single full SKILL.md — frontmatter name+description then the instruction body), OR {repo} to install EVERY skill from a GitHub skills repo at once (e.g. {repo:"owner/repo"} or a github.com URL), OR {path} to install from the WORKSPACE — a SKILL.md, a skill folder, a repo-shaped folder, or a .zip the user dropped in (the server reads the files itself, so PREFER {path} over pasting file contents into {content}). add {only:["name",...]} narrows a repo/path/zip to specific skills. To CHANGE an existing skill, call action="edit" (target="skill", itemId): it checks the skill out into the workspace and returns the path — edit the files there with your normal file tools (a small partial edit, NOT re-authoring the whole SKILL.md), then save with add {path}. The confirm card lists all the skills that will be installed. add/remove are confirmed by the user (confirm_required), exactly like risky settings — you stage, the user applies.
+- add args for mcp: {name, url, authKind:"oauth"} (remote) or {name, command, args} (local/stdio). add args for skill: {content} (a single full SKILL.md — frontmatter name+description then the instruction body), OR {repo} to install EVERY skill from a GitHub skills repo at once (e.g. {repo:"owner/repo"} or a github.com URL), OR {path} to install from the WORKSPACE — a SKILL.md, a skill folder, a repo-shaped folder, or a .zip the user dropped in (the server reads the files itself, so PREFER {path} over pasting file contents into {content}). add {only:["name",...]} narrows a repo/path/zip to specific skills. To CHANGE an existing skill, call action="edit" (target="skill", itemId): it checks the skill out into the workspace and returns the path — edit the files there with your normal file tools (a small partial edit, NOT re-authoring the whole SKILL.md), then save with add {path}. add/remove PAUSE for the user's approval exactly like a risky setting: the approval card lists everything that will be installed; after they approve, the add/remove runs and returns its result (continue from there), and if they reject you get a denial — you never apply it yourself.
 - Some connectors need the user to sign in via a browser (OAuth). action="add" or action="connect" then returns status="action_required" with a URL — DON'T try to open it yourself; tell the user to use the button/link, then re-check with action="debug".
 - action="debug" reports a connector's live state (ok / needs login / unreachable) and a hint. NEVER ask the user to paste API keys or tokens into chat — a connector needing a secret token is configured on the settings page, not here.
 
 Permission and info are different things. Permission is server-side — just attempt the action; never infer what YOU can do from a setting's value (a toggle like "members can install connectors" restricts other end-users, not you-as-caller). If you're only missing INPUT to act — most often a connector's url (remote) or command (local) — ask the user for exactly that in one plain question, and never dress a missing url up as a permissions/admin problem.`;
 
 export function makeManageTool(identity: ManageIdentity) {
+  const ctx = (): ManageContext => ({
+    userId: identity.userId,
+    isAdmin: identity.isAdmin,
+    projectId: identity.projectId,
+    sessionKey: identity.sessionKey,
+    locale: identity.locale,
+  });
   return {
     manage: tool({
       description: DESCRIPTION,
       inputSchema,
+      // Native human-in-the-loop: a risky change SUSPENDS the tool call (the SDK
+      // emits a tool-approval-request; the user approves/rejects on a card) instead
+      // of `execute` staging a pending row. `requiresApproval` is the single source
+      // of the confirm policy (org-wide/risky/install → gated unless autonomous).
+      // Read-only actions (list/get/capabilities/enable/disable/debug/connect/edit)
+      // and personal changes in autonomous mode need none, so they run straight
+      // through — same reach as before.
+      needsApproval: async (args): Promise<boolean> => {
+        const input = toInput(args);
+        return input ? requiresApproval(registry, ctx(), input) : false;
+      },
       execute: async (args): Promise<ManageResult> => {
         const input = toInput(args);
         if (!input) {
           return { status: "error", render: "error", code: "bad_request", summary: "Missing required fields for this action." };
         }
-        const ctx: ManageContext = {
-          userId: identity.userId,
-          isAdmin: identity.isAdmin,
-          projectId: identity.projectId,
-          sessionKey: identity.sessionKey,
-          locale: identity.locale,
-        };
-        return dispatch(registry, ctx, input);
+        return dispatch(registry, ctx(), input);
       },
     }),
   };

@@ -13,7 +13,7 @@ import { classifyStreamEvent } from "@/lib/chat/stream-reconcile";
 type Part =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
-  | { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown };
+  | { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; approval?: { id: string; approved?: boolean; reason?: string } };
 
 type Message = {
   id: string;
@@ -140,7 +140,7 @@ export function useBackgroundChat({
     // truncating. task:start/reset/finish are handled explicitly, not gated.
     const GATED = new Set([
       "task:text-delta", "task:reasoning-delta",
-      "task:tool-input-start", "task:tool-call", "task:tool-result",
+      "task:tool-input-start", "task:tool-call", "task:tool-result", "task:tool-approval",
     ]);
 
     const connect = () => {
@@ -341,6 +341,28 @@ export function useBackgroundChat({
                 const parts = msg.parts.map((p) =>
                   p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
                     ? { ...p, state: isError ? "output-error" : "output-available", output: data.result }
+                    : p,
+                );
+                msgs[idx] = { ...msg, parts };
+                return msgs;
+              });
+              break;
+            }
+
+            case "task:tool-approval": {
+              // Native HITL: the SDK suspended this tool call — flip it to
+              // approval-requested so the card shows Approve/Reject and the composer
+              // blocks. task:finish follows (the turn finalized as awaiting_approval);
+              // loadHistory then re-derives the same state from the persisted marker.
+              setTaskInfo((prev) => ({ ...prev, currentTool: null }));
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === data.messageId);
+                if (idx === -1) return prev;
+                const msgs = [...prev];
+                const msg = msgs[idx];
+                const parts = msg.parts.map((p) =>
+                  p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
+                    ? { ...p, state: "approval-requested", approval: { id: data.approvalId } }
                     : p,
                 );
                 msgs[idx] = { ...msg, parts };
@@ -660,5 +682,12 @@ export function useBackgroundChat({
     setTaskId(null);
   }, [taskId, chatId]);
 
-  return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", taskInfo };
+  // A `manage` tool call is suspended awaiting the user's decision — the composer
+  // blocks (like Claude Code) so the approval card is the only next action. Once
+  // decided, the part leaves the approval-requested state, so this clears itself.
+  const awaitingApproval = messages.some(
+    (m) => m.role === "assistant" && m.parts.some((p) => p.type === "dynamic-tool" && p.state === "approval-requested"),
+  );
+
+  return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", awaitingApproval, taskInfo };
 }

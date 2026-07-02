@@ -19,7 +19,14 @@ export const chatRequestSchema = z.object({
 export const storedPartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("reasoning"), text: z.string() }),
-  z.object({ type: z.literal("tool-call"), id: z.string(), name: z.string(), input: z.unknown() }),
+  // `approval` marks a tool call the AI SDK suspended for native human-in-the-loop
+  // approval: present with `approved` undefined = awaiting the user; with `approved`
+  // set = the user's decision (a matching tool-result appears once an approved call
+  // resumes and executes). Absent on ordinary tool calls. See runner + presenter.
+  z.object({
+    type: z.literal("tool-call"), id: z.string(), name: z.string(), input: z.unknown(),
+    approval: z.object({ id: z.string(), approved: z.boolean().optional(), reason: z.string().optional() }).optional(),
+  }),
   z.object({ type: z.literal("tool-result"), id: z.string(), name: z.string(), output: z.unknown() }),
   z.object({ type: z.literal("tool-error"), id: z.string(), name: z.string(), error: z.string() }),
 ]);

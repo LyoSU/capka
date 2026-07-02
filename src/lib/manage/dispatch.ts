@@ -4,13 +4,12 @@ import type { PendingStore } from "./pending";
 import type { Collection, Control, ManageContext, ManageInput, ManageResult } from "./types";
 import type { AuditAction } from "@/lib/governance/types";
 
-/** The exact mutation a staged confirmation will run when the human approves it.
- *  Stored server-side (never handed to the model), so a confirmed change can't be
- *  swapped for a different one. An `undo` is just an `apply` of the prior value. */
-export type PendingPayload =
-  | { op: "set"; controlId: string; value: string }
-  | { op: "add"; collectionId: string; args: Record<string, unknown> }
-  | { op: "remove"; collectionId: string; itemId: string };
+/** The mutation an Undo will run when the user clicks it: re-`apply` the prior
+ *  value. Staged server-side (never handed to the model), so the model can't
+ *  trigger it. Forward changes are no longer staged — they're gated by the AI
+ *  SDK's native tool approval (`needsApproval`) and applied directly by `execute`
+ *  once approved; only the reverse (undo) still rides the pending store. */
+export type PendingPayload = { op: "set"; controlId: string; value: string };
 
 /** Localized display of a control's raw value (uk via i18n, else the control's
  *  own English format/raw). */
@@ -74,13 +73,6 @@ async function record(
     log.warn("manage audit write failed", { action, targetKey, err: String(e) });
   }
 }
-
-/** Instruction handed back to the model on a confirm request. English (the model
- *  relays to the user in their own language); the visible card is localized. The
- *  model has NO way to apply the change — the confirmation is applied only by the
- *  human via the card button / Telegram tap. */
-const CONFIRM_NOTE =
-  "The change is staged and shown to the user as a card with a Confirm button (or Confirm/Cancel buttons in Telegram). The user is ALREADY authorized (the server checked). You CANNOT apply it yourself and there is no token to re-send — only the user's click applies it. Do not claim missing permission, do not re-ask in prose. Reply with at most one short line, then STOP and wait; the applied change arrives on its own.";
 
 export async function dispatch(reg: Registry, ctx: ManageContext, input: ManageInput): Promise<ManageResult> {
   switch (input.action) {
@@ -223,38 +215,85 @@ async function set(
   if (!parsed.success) {
     return err("invalid_value", parsed.error.issues[0]?.message ?? "Invalid value.");
   }
-  const value = parsed.data;
+  // By the time `execute` calls dispatch, the AI SDK's native tool approval has
+  // already gated a risky change (see `requiresApproval` + the tool's
+  // `needsApproval`): either it needed no approval (a personal/safe change, or
+  // autonomous mode) or the user already approved it. So we apply directly here —
+  // through the SAME server apply path an undo takes, so the two can't diverge
+  // (records the audit line and stages the undo identically). `t` unused now.
+  void t;
+  return applySet(reg, ctx, c.id, parsed.data);
+}
 
-  // Risky changes are STAGED — never applied by the model. Only the user's click
-  // (web session / Telegram callback) consumes the pending id and applies it.
-  // Autonomous mode lets the agent apply directly (no card) — but ONLY personal
-  // changes: a platform-wide (`org`) setting affects every user, so its blast radius
-  // is wider than an undo can safely cover, and it always stays gated regardless of
-  // autonomy (as does the master autonomy switch itself, via `alwaysConfirm`).
-  if (c.risk === "confirm" && (c.alwaysConfirm || c.scope === "org" || !(await autonomous(reg, ctx)))) {
-    const before = await c.read(ctx);
-    const rawImpact = c.impact ? await c.impact(ctx, value) : undefined;
-    const impact = rawImpact ? loc(t, `impact.${keyOf(c.id)}`, rawImpact) : undefined;
-    const store = await pendingStore(ctx);
-    const pendingId = await store.stage({
-      userId: ctx.userId,
-      projectId: ctx.projectId,
-      kind: "apply",
-      payload: { op: "set", controlId: c.id, value } satisfies PendingPayload,
-    });
-    return {
-      status: "confirm_required",
-      render: "confirm",
-      summary: CONFIRM_NOTE,
-      pendingId,
-      preview: { controlId: c.id, title: title(t, c), before: fmt(t, c, before), after: fmt(t, c, value), impact },
-    };
+/**
+ * Does this action require the user's approval before it runs? Consulted by the
+ * `manage` tool's native `needsApproval` — the AI SDK then suspends the tool call
+ * (emitting a `tool-approval-request`) until the user approves, instead of the
+ * old staged-pending dead-end. This is the ONE place the confirm policy lives:
+ *  - a `confirm`-risk control: gated unless the org is autonomous AND the change
+ *    is personal (a platform-wide `org` setting, and the autonomy switch itself,
+ *    always stay gated — their blast radius is wider than one user's undo);
+ *  - a collection `add`: gated unless autonomous, and ALWAYS when the collection
+ *    marks `alwaysConfirm` (installing third-party code);
+ *  - a collection `remove`: gated unless autonomous (reversible by re-adding).
+ * Anything the caller can't access, or a safe/read action, needs no approval —
+ * the action itself will return not_found/apply the trivial change.
+ */
+export async function requiresApproval(reg: Registry, ctx: ManageContext, input: ManageInput): Promise<boolean> {
+  if (input.action === "set") {
+    const c = reg.get(input.target);
+    if (!c || !canAccess(ctx, c)) return false;
+    return c.risk === "confirm" && (!!c.alwaysConfirm || c.scope === "org" || !(await autonomous(reg, ctx)));
   }
+  if (input.action === "add") {
+    const coll = reg.collection(input.target);
+    if (!coll || !canAccess(ctx, coll)) return false;
+    return !!coll.alwaysConfirm || !(await autonomous(reg, ctx));
+  }
+  if (input.action === "remove") {
+    const coll = reg.collection(input.target);
+    if (!coll || !canAccess(ctx, coll)) return false;
+    return !(await autonomous(reg, ctx));
+  }
+  return false;
+}
 
-  // Safe controls (a user's own low-risk preference) apply immediately — through
-  // the SAME server apply path a confirmed change takes, so the two can't diverge
-  // (records the audit line and stages the undo identically).
-  return applySet(reg, ctx, c.id, value);
+/** The before→after preview for an approval card — the same rich data the old
+ *  confirm card showed, now fetched by the web card (and the Telegram buttons)
+ *  from the tool call's input once the SDK suspends it for approval. `null` when
+ *  the input isn't a gated change or the caller can't access the target. */
+export async function preview(
+  reg: Registry,
+  ctx: ManageContext,
+  input: ManageInput,
+): Promise<{ controlId: string; title: string; before: string; after: string; impact?: string; details?: string; body?: string; items?: string[] } | null> {
+  const t = manageT(ctx.locale);
+  if (input.action === "set") {
+    const c = reg.get(input.target);
+    if (!c || !canAccess(ctx, c)) return null;
+    const parsed = c.schema.safeParse(input.value);
+    if (!parsed.success) return null;
+    const before = await c.read(ctx);
+    const rawImpact = c.impact ? await c.impact(ctx, parsed.data) : undefined;
+    const impact = rawImpact ? loc(t, `impact.${keyOf(c.id)}`, rawImpact) : undefined;
+    return { controlId: c.id, title: title(t, c), before: fmt(t, c, before), after: fmt(t, c, parsed.data), impact };
+  }
+  if (input.action === "add") {
+    const coll = reg.collection(input.target);
+    if (!coll || !canAccess(ctx, coll)) return null;
+    // previewAdd may PROBE (reach the connector, count its tools; enumerate a
+    // repo's skills) — so the user approves an informed change, not a blind one.
+    const p = coll.previewAdd ? await coll.previewAdd(ctx, input.args) : { title: coll.title, after: "" };
+    return { controlId: `${coll.id}:add`, title: p.title, before: "", after: p.after, impact: p.impact, details: p.details, body: p.body, items: p.items };
+  }
+  if (input.action === "remove") {
+    const coll = reg.collection(input.target);
+    if (!coll || !canAccess(ctx, coll)) return null;
+    const it = (await coll.list(ctx)).find((x) => x.id === input.itemId);
+    if (!it) return null;
+    return { controlId: `${coll.id}:remove`, title: loc(t, "op.removeTitle", `Remove from ${collLabel(t, coll)}`, { coll: collLabel(t, coll) }), before: it.title, after: "—" };
+  }
+  return null;
 }
 
 // ── Server-side apply (the ONLY path a confirm-gated change or an undo runs) ───
@@ -270,14 +309,7 @@ export async function applyPending(reg: Registry, ctx: ManageContext, pendingId:
   // has no project context, but a project-scoped change captured its projectId.
   const ectx: ManageContext = { ...ctx, projectId: rec.projectId };
   const p = rec.payload as PendingPayload;
-  switch (p.op) {
-    case "set":
-      return applySet(reg, ectx, p.controlId, p.value);
-    case "add":
-      return applyAdd(reg, ectx, p.collectionId, p.args);
-    case "remove":
-      return applyRemove(reg, ectx, p.collectionId, p.itemId);
-  }
+  return applySet(reg, ectx, p.controlId, p.value);
 }
 
 async function applySet(reg: Registry, ctx: ManageContext, controlId: string, value: string): Promise<ManageResult> {
@@ -383,63 +415,21 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
 
   const parsed = coll!.addSchema.safeParse(input.args);
   if (!parsed.success) return err("invalid_value", parsed.error.issues[0]?.message ?? "Invalid data.");
-  const args = parsed.data as Record<string, unknown>;
-  // Pre-flight so a doomed add is refused UP FRONT rather than shown as a card the
-  // user confirms only to hit apply_failed (authorization / invalid content).
-  if (coll!.validateAdd) {
-    try {
-      await coll!.validateAdd(ctx, args);
-    } catch (e) {
-      return err("apply_failed", errMsg(e));
-    }
-  }
-  // Autonomous mode applies directly — except a connector install (alwaysConfirm),
-  // which runs third-party code and stays gated even then.
-  if (!coll!.alwaysConfirm && (await autonomous(reg, ctx))) return applyAdd(reg, ctx, coll!.id, args);
-  // previewAdd may probe the network (reach the connector, count its tools) before
-  // we show the confirm card, so await it — a doomed/blind add is surfaced up front.
-  const preview = coll!.previewAdd ? await coll!.previewAdd(ctx, args) : { title: coll!.title, after: "" };
-  const store = await pendingStore(ctx);
-  const pendingId = await store.stage({
-    userId: ctx.userId,
-    projectId: ctx.projectId,
-    kind: "apply",
-    payload: { op: "add", collectionId: coll!.id, args } satisfies PendingPayload,
-  });
-  return {
-    status: "confirm_required",
-    render: "confirm",
-    summary: CONFIRM_NOTE,
-    pendingId,
-    preview: { controlId: `${coll!.id}:add`, title: preview.title, before: "", after: preview.after, impact: preview.impact, details: preview.details, body: preview.body, items: preview.items },
-  };
+  // Native tool approval already gated this (see `requiresApproval`): the SDK
+  // suspended the call and the user approved, or autonomy let it through. Apply
+  // directly — `applyAdd` re-runs `validateAdd` at apply time, so a change that
+  // went stale between approval and apply still fails safely.
+  return applyAdd(reg, ctx, coll!.id, parsed.data as Record<string, unknown>);
 }
 
 async function remove(reg: Registry, ctx: ManageContext, input: Extract<ManageInput, { action: "remove" }>): Promise<ManageResult> {
-  const t = manageT(ctx.locale);
   const { coll, error } = resolveCollection(reg, ctx, input.target);
   if (error) return error;
   if (!coll!.remove) return err("unsupported", "This resource doesn't support removal.");
-
-  const items = await coll!.list(ctx);
-  const it = items.find((x) => x.id === input.itemId);
+  const it = (await coll!.list(ctx)).find((x) => x.id === input.itemId);
   if (!it) return err("not_found", "No such item.");
-  // Autonomous mode removes directly (reversible by re-adding); supervised stages a confirm.
-  if (await autonomous(reg, ctx)) return applyRemove(reg, ctx, coll!.id, input.itemId);
-  const store = await pendingStore(ctx);
-  const pendingId = await store.stage({
-    userId: ctx.userId,
-    projectId: ctx.projectId,
-    kind: "apply",
-    payload: { op: "remove", collectionId: coll!.id, itemId: input.itemId } satisfies PendingPayload,
-  });
-  return {
-    status: "confirm_required",
-    render: "confirm",
-    summary: CONFIRM_NOTE,
-    pendingId,
-    preview: { controlId: `${coll!.id}:remove`, title: loc(t, "op.removeTitle", `Remove from ${collLabel(t, coll!)}`, { coll: collLabel(t, coll!) }), before: it.title, after: "—" },
-  };
+  // Native tool approval already gated this (see `requiresApproval`) — apply.
+  return applyRemove(reg, ctx, coll!.id, input.itemId);
 }
 
 async function toggle(reg: Registry, ctx: ManageContext, target: string, itemId: string, enabled: boolean): Promise<ManageResult> {

@@ -309,6 +309,7 @@
     "input": {
       "placeholder": "Assign a task or ask anything",
       "placeholderFiles": "Add a message about the files…",
+      "awaitingApproval": "Approve or reject the change above to continue",
       "attach": "Attach files",
       "stop": "Stop generation",
       "send": "Send message",
@@ -452,7 +453,9 @@
       "statusOff": "off",
       "statusSignin": "sign-in",
       "applying": "Applying…",
+      "checking": "Checking…",
       "confirmed": "Confirmed",
+      "declined": "Declined.",
       "reverted": "Reverted",
       "expired": "This confirmation expired — just ask again.",
       "applyError": "Couldn't apply that — please try again.",

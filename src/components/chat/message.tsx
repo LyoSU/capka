@@ -19,7 +19,7 @@ import { cleanReasoning } from "@/lib/chat/reasoning";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
-import { ManageCard, isManageCard, manageStepLabel } from "./manage-cards";
+import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 
 // --- Helpers ---
 
@@ -118,10 +118,19 @@ type ToolPart = {
   input?: unknown;
   output?: unknown;
   errorText?: string;
+  approval?: { id: string; approved?: boolean; reason?: string };
 };
 
 function isToolPart(part: { type: string }): part is ToolPart {
   return part.type === "dynamic-tool" || (part.type.startsWith("tool-") && part.type !== "tool");
+}
+
+/** A `manage` tool call the SDK suspended for native approval — it (and its
+ *  resolved states) always renders as the prominent approval card, never the quiet
+ *  activity rail: the card is the user's one required action. */
+function isApprovalPart(part: ToolPart): boolean {
+  return getToolName(part) === "manage"
+    && (part.state === "approval-requested" || part.state === "approval-responded" || !!part.approval);
 }
 
 function getToolName(part: ToolPart): string {
@@ -1056,9 +1065,16 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   type Group =
     | { kind: "text"; text: string }
     | { kind: "activity"; items: ActivityItem[] }
-    | { kind: "manage"; output: unknown };
+    | { kind: "manage"; output: unknown }
+    | { kind: "approval"; part: ToolPart };
   const groups: Group[] = [];
   for (const part of parts) {
+    // A `manage` call suspended for native approval (and its resolved states) is
+    // the user's one required action — it always renders as the prominent card.
+    if (isToolPart(part) && isApprovalPart(part as ToolPart)) {
+      groups.push({ kind: "approval", part: part as ToolPart });
+      continue;
+    }
     // A completed `manage` result that's a confirmation or an applied change
     // escapes the quiet activity rail and renders as its own prominent card.
     if (isToolPart(part) && getToolName(part as ToolPart) === "manage" && isManageCard((part as ToolPart).output)) {
@@ -1110,6 +1126,9 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
                   <TextContent text={g.text} isStreaming={isStreaming && gi === lastTextIdx} chatId={chatId} />
                 </div>
               );
+            }
+            if (g.kind === "approval") {
+              return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} onSend={onSend} />;
             }
             if (g.kind === "manage") {
               return <ManageCard key={gi} output={g.output} onSend={onSend} />;

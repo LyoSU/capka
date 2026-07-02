@@ -44,13 +44,13 @@ export interface TaskResult {
    *  the answer, pointing at /model — the user otherwise can't tell the model
    *  never heard them. */
   blindModalities?: Modality[];
-  /** A change the turn STAGED for the user to confirm. On Telegram the final
-   *  message carries native Confirm/Cancel buttons bound to `pendingId` — the tap
-   *  (not the model) applies it, so this channel gets a real confirm boundary.
-   *  `impact` (a risk warning) and `body` (the full text being approved, e.g. a
-   *  SKILL.md) travel too, so the Telegram user sees exactly what the web card
-   *  shows — nobody approves a change blind on any channel. */
-  confirm?: { pendingId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] };
+  /** A `manage` tool call the SDK SUSPENDED for the user's approval (native HITL).
+   *  On Telegram the final message carries Approve/Reject buttons keyed to the
+   *  assistant `messageId` — the tap (not the model) records the decision and
+   *  resumes the turn, so this channel gets the same real approval boundary as web.
+   *  The preview (`title`/before→after, the ⚠️ `impact`, and `body`/`items` — the
+   *  full text/set being approved) travels too, so nobody approves a change blind. */
+  approval?: { messageId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] };
 }
 
 /** The transient activity shown while the answer streams in. The live reasoning
@@ -422,19 +422,21 @@ class TelegramSink implements DeliverySink {
       : null;
     if (notice) markdown = markdown ? `${notice}\n\n${markdown}` : notice;
 
-    // A staged confirmation: append a compact before→after preview and native
-    // Confirm/Cancel buttons. The tap (bound to this Telegram user) applies it —
-    // the model can't, so Telegram gets the same real confirm boundary as web.
-    if (result.confirm) {
-      const c = result.confirm;
+    // A suspended-for-approval turn: append a compact before→after preview and
+    // native Approve/Reject buttons. The tap (bound to this Telegram user) records
+    // the decision and resumes the turn — the model can't, so Telegram gets the
+    // same real approval boundary as web. Keyed to the assistant messageId (the
+    // message has one pending call at a time), which fits the 64-byte callback.
+    if (result.approval) {
+      const c = result.approval;
       const { markdown: previewMd, plain: previewPlain } = composeConfirmPreview(c, this.t);
       markdown = markdown ? `${markdown}\n\n${previewMd}` : previewMd;
       // The plain-text fallback carries the SAME preview (diff + impact + body), so
       // a Markdown rejection never drops what the user needs to approve safely.
       const plain = body ? `${body}\n\n${previewPlain}` : previewPlain;
       const keyboard = new InlineKeyboard()
-        .text(this.t("confirmApply"), `mc:${c.pendingId}`)
-        .text(this.t("confirmCancel"), `mx:${c.pendingId}`);
+        .text(this.t("confirmApply"), `ma:${c.messageId}`)
+        .text(this.t("confirmCancel"), `mr:${c.messageId}`);
       await this.sendRich(markdown, plain, false, keyboard);
       return;
     }

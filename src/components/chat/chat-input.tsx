@@ -44,6 +44,9 @@ interface ChatInputProps {
   onSubmit: () => void;
   onStop: () => void;
   isLoading: boolean;
+  /** A `manage` change is awaiting the user's approval on a card above — block the
+   *  composer (like Claude Code) so the card is the only next action. */
+  awaitingApproval?: boolean;
   chatId: string;
   files: AttachedFile[];
   onAddFiles: (files: FileList | File[]) => void;
@@ -61,6 +64,7 @@ export function ChatInput({
   onSubmit,
   onStop,
   isLoading,
+  awaitingApproval = false,
   chatId,
   files,
   onAddFiles,
@@ -119,7 +123,8 @@ export function ChatInput({
   const uploading = files.some((f) => f.status === "uploading");
   const hasReady = files.some((f) => f.status === "ready");
   const hasContent = Boolean(value.trim()) || hasReady;
-  const canSend = hasContent && !uploading;
+  // A pending approval hard-blocks sending — the user must decide on the card first.
+  const canSend = hasContent && !uploading && !awaitingApproval;
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // On mobile, Enter is the on-screen keyboard's newline — sending happens via
@@ -229,9 +234,10 @@ export function ChatInput({
               }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
+              disabled={awaitingApproval}
               aria-label={files.length > 0 ? t("placeholderFiles") : t("placeholder")}
               rows={1}
-              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none md:text-[15px]"
+              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none disabled:opacity-60 md:text-[15px]"
             />
             {/* Overlay placeholder instead of the native one: a textarea's own
                 placeholder wraps to a second line on a narrow screen and can't be
@@ -241,7 +247,7 @@ export function ChatInput({
                 aria-hidden
                 className="pointer-events-none absolute inset-x-0 top-0 truncate pr-2 text-base leading-relaxed text-muted-foreground md:text-[15px]"
               >
-                {files.length > 0 ? t("placeholderFiles") : t("placeholder")}
+                {awaitingApproval ? t("awaitingApproval") : files.length > 0 ? t("placeholderFiles") : t("placeholder")}
               </span>
             )}
           </div>

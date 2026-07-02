@@ -11,6 +11,23 @@ All notable changes to Capka are documented here. Format follows
 > `docker-compose.yml` is now the single canonical pull-only stack every target
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
+### Changed
+- **Confirming a `manage` change in chat is now native tool approval — the agent
+  continues the same turn after you decide, instead of dead-ending.** Before, a
+  risky change (a platform-wide setting, a connector/skill install) returned a
+  `confirm_required` tool result and the turn ENDED; the agent, unable to know
+  when you clicked, told you to "press Confirm" and never acknowledged the
+  outcome — so the card could read "Confirmed" while the message above still said
+  "press Confirm". Now the tool call SUSPENDS (AI SDK 6 human-in-the-loop
+  `needsApproval`): you see one Approve/Reject card, the composer blocks until you
+  decide (like Claude Code), and on Approve the tool runs and the SAME turn
+  resumes so the agent confirms it's done ("Connected Context7 — 2 tools"); on
+  Reject the agent is told and moves on. Applies to web and Telegram (inline
+  Approve/Reject buttons that resume the turn). The gate is unchanged — personal
+  prefs stay direct, platform-wide/`org` settings and third-party-code installs
+  always ask, and `agent_autonomy: autonomous` still waives only personal changes.
+  Undo is unchanged (a button on the applied card). No operator action required.
+
 ### Fixed
 - **Installing skills from a GitHub repo now explains a rate limit instead of
   saying "access denied".** With no `github_token` configured, Capka calls the

@@ -409,37 +409,24 @@ async function buildBot(): Promise<Bot | null> {
     await reply(ctx, "modelSet", { values: { model: choice.label } });
   });
 
-  // A staged `manage` confirmation was tapped. Applying is done HERE (server-side,
-  // keyed to the tapping Telegram user), never by the model — so a prompt-injected
-  // agent can stage but never self-confirm. callback_data is `mc:<pendingId>`;
-  // the pending id is a nanoid, well under the 64-byte callback limit.
-  bot.callbackQuery(/^mc:(.+)$/, async (ctx) => {
-    const t = tFor(ctx);
-    const link = await findLink(ctx.from!.id);
-    if (!link) { await ctx.answerCallbackQuery(); return; }
-    // Same canonical human-authed apply path as the web endpoint (manage/authed),
-    // keyed to the verified Telegram link's user — never the model.
-    const { applyPendingForUser } = await import("@/lib/manage/authed");
-    const result = await applyPendingForUser(link.userId, ctx.match![1]);
-    const msg =
-      result.status === "ok" ? t("confirmApplied")
-      : result.status === "error" && result.code === "confirm_expired" ? t("confirmExpired")
-      : t("confirmFailed");
-    await ctx.answerCallbackQuery({ text: msg });
-    await ctx.editMessageReplyMarkup().catch(() => {}); // drop the buttons so it can't be re-tapped
-    await ctx.reply(msg).catch(() => {}); // durable trail of the outcome
-  });
-
-  // Cancel a staged confirmation — drop it and clear the buttons.
-  bot.callbackQuery(/^mx:(.+)$/, async (ctx) => {
-    const link = await findLink(ctx.from!.id);
-    await ctx.answerCallbackQuery({ text: tFor(ctx)("confirmCancelled") });
-    await ctx.editMessageReplyMarkup().catch(() => {});
-    if (link) {
-      const { dbPendingStore } = await import("@/lib/manage/pending");
-      await dbPendingStore.cancel(ctx.match![1], link.userId).catch(() => {});
-    }
-  });
+  // A `manage` approval was tapped (native HITL). The decision is recorded HERE
+  // (server-side, keyed to the tapping Telegram user) and RESUMES the suspended
+  // turn — never the model, so a prompt-injected agent can stage but never
+  // self-approve. callback_data is `ma:<messageId>` (approve) / `mr:<messageId>`
+  // (reject); the message has one pending call at a time, and a nanoid messageId is
+  // well under the 64-byte callback limit.
+  for (const [pattern, approved] of [[/^ma:(.+)$/, true], [/^mr:(.+)$/, false]] as const) {
+    bot.callbackQuery(pattern, async (ctx) => {
+      const t = tFor(ctx);
+      const link = await findLink(ctx.from!.id);
+      if (!link) { await ctx.answerCallbackQuery(); return; }
+      const { approveManageForUser } = await import("@/lib/manage/authed");
+      const ok = await approveManageForUser(link.userId, { messageId: ctx.match![1], approved });
+      const msg = !ok ? t("confirmExpired") : approved ? t("confirmApplied") : t("confirmCancelled");
+      await ctx.answerCallbackQuery({ text: msg });
+      await ctx.editMessageReplyMarkup().catch(() => {}); // drop the buttons so it can't be re-tapped
+    });
+  }
 
   // Plain text → straight into the engine.
   bot.on("message:text", (ctx) => ingest(ctx, ctx.message.text, []));

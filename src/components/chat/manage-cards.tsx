@@ -307,6 +307,140 @@ function ConfirmCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: 
   );
 }
 
+type Preview = { title: string; before: string; after: string; impact?: string; details?: string; body?: string; items?: string[] };
+
+/**
+ * Native human-in-the-loop approval for a suspended `manage` tool call. Unlike the
+ * old ConfirmCard (which drove a staged pending id), this card is a renderer of the
+ * tool part's own approval state — Approve/Reject POST a decision that RESUMES the
+ * agent turn (it re-runs the tool and finishes, or acknowledges the denial), and
+ * the resolved state arrives back as a normal part update. While awaiting, it
+ * fetches the before→after preview from the call's input (the same rich data the
+ * confirm card showed, incl. a connector's live tool-count probe). The composer is
+ * blocked meanwhile (see useBackgroundChat.awaitingApproval), so this is the one
+ * next action — no "press confirm" prose, no stale card.
+ */
+export function ApprovalCard({
+  messageId, toolCallId, input, state, approval, output, onSend,
+}: {
+  messageId: string; toolCallId: string; input: unknown; state: string;
+  approval?: { id: string; approved?: boolean; reason?: string }; output?: unknown; onSend?: (text: string) => void;
+}) {
+  const t = useTranslations("chat.manage");
+  const awaiting = state === "approval-requested";
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Fetch the preview only while awaiting — a resolved card shows the applied
+  // result's own summary instead, so we never re-probe a connector after the fact.
+  useEffect(() => {
+    if (!awaiting) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/manage/preview", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input }),
+        });
+        const { preview } = (await res.json()) as { preview: Preview | null };
+        if (alive && preview) setPreview(preview);
+      } catch { /* fall back to the header alone */ }
+    })();
+    return () => { alive = false; };
+  }, [awaiting, input]);
+
+  const decide = async (approved: boolean) => {
+    if (submitting) return;
+    setSubmitting(true);
+    haptic(approved ? "success" : "tap");
+    try {
+      await fetch("/api/manage/approve", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, toolCallId, approved }),
+      });
+      // The resume turn now runs; its realtime updates (and the finish reload) flip
+      // this part to its resolved state, which re-renders the card. No local phase.
+    } catch {
+      setSubmitting(false); // let the user retry the click
+    }
+  };
+
+  const oo = output as ManageOutput | null;
+  const followUp = oo?.data?.action ?? oo?.action ?? null;
+
+  return (
+    <CardShell>
+      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+        {t("confirmTitle")}
+      </div>
+
+      {awaiting && (
+        <>
+          {preview ? (
+            <>
+              <div className="mt-2 text-sm text-muted-foreground">{preview.title}</div>
+              <Diff before={preview.before} after={preview.after} />
+              {preview.items && preview.items.length > 0 && (
+                <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                  {preview.items.map((it) => (
+                    <li key={it} className="flex items-center gap-2">
+                      <span className="h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden />
+                      {it}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {preview.details && <div className="mt-2 text-sm text-muted-foreground">{preview.details}</div>}
+              {preview.body && (
+                <details className="mt-2 text-sm">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{t("viewInstructions")}</summary>
+                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2.5 text-xs text-muted-foreground">{preview.body}</pre>
+                </details>
+              )}
+              {preview.impact && (
+                <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{preview.impact}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("checking")}
+            </div>
+          )}
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" onClick={() => decide(true)} disabled={submitting}>{t("apply")}</Button>
+            <Button size="sm" variant="ghost" onClick={() => decide(false)} disabled={submitting}>{t("cancel")}</Button>
+          </div>
+        </>
+      )}
+
+      {/* Resolved states — the agent's follow-up text carries the details, so the
+          card settles into a quiet confirmation. Approved-but-still-running shows a
+          spinner; a denied call reads "declined"; an applied one shows its summary. */}
+      {!awaiting && approval?.approved === true && state !== "output-available" && state !== "output-error" && (
+        <div className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("applying")}
+        </div>
+      )}
+      {!awaiting && approval?.approved === false && <Outcome kind="cancelled" text={t("declined")} />}
+      {!awaiting && state === "output-available" && (
+        <>
+          {oo?.summary && <div className="mt-2 text-sm text-muted-foreground">{oo.summary}</div>}
+          <Outcome kind="done" text={t("confirmed")} />
+          {followUp && (
+            <div className="mt-3">
+              <ConnectLink action={followUp} onConnected={onSend ? () => onSend(t("signedIn")) : undefined} />
+            </div>
+          )}
+        </>
+      )}
+      {!awaiting && state === "output-error" && <Outcome kind="error" text={oo?.summary || t("applyError")} />}
+    </CardShell>
+  );
+}
+
 /** An applied setting (before → after) with an Undo that also travels the
  *  human-authed endpoint (the model can't trigger an undo either). */
 function SettingCard({ o, t }: { o: ManageOutput; t: T }) {

@@ -254,17 +254,17 @@ describe("TelegramSink streaming", () => {
     expect(api.sendRichMessage.mock.calls[0][2]).toBeUndefined(); // final pings
   });
 
-  it("attaches Confirm/Cancel buttons (bound to the pendingId) when the turn staged a confirmation", async () => {
+  it("attaches Approve/Reject buttons (keyed to the messageId) when the turn suspended for approval", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 77, locale: "en" });
     await sink.finish({
-      status: "completed", text: "Ready — tap Confirm.", toolCount: 1, elapsedMs: 1000,
-      confirm: { pendingId: "pend123", title: "Sandbox network", before: "Isolated", after: "Network access" },
+      status: "completed", text: "", toolCount: 1, elapsedMs: 1000,
+      approval: { messageId: "msg123", title: "Sandbox network", before: "Isolated", after: "Network access" },
     });
     const opts = api.sendRichMessage.mock.calls[0][2];
     const rows = opts.reply_markup.inline_keyboard;
-    expect(rows[0][0].callback_data).toBe("mc:pend123"); // confirm applies this exact pending
-    expect(rows[0][1].callback_data).toBe("mx:pend123"); // cancel drops it
-    // The before→after preview rides along so the Telegram user sees what they confirm.
+    expect(rows[0][0].callback_data).toBe("ma:msg123"); // approve → resume this turn
+    expect(rows[0][1].callback_data).toBe("mr:msg123"); // reject → resume with a denial
+    // The before→after preview rides along so the Telegram user sees what they approve.
     expect(api.sendRichMessage.mock.calls[0][1].markdown).toContain("Isolated → Network access");
   });
 

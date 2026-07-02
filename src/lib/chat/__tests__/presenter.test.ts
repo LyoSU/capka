@@ -63,6 +63,38 @@ describe("toUIMessages", () => {
     expect((msg.parts[0] as { errorText?: string }).errorText).toBeTruthy();
   });
 
+  it("maps an approval-pending tool-call to approval-requested (never an orphan) even on a finished turn", () => {
+    const meta: MessageMeta = {
+      status: "awaiting_approval",
+      parts: [{ type: "tool-call", id: "t1", name: "manage", input: { action: "set" }, approval: { id: "ap1" } }],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    // Awaiting the user's decision — must show the approval card, NOT seal as an
+    // orphan error, so convertToModelMessages can later rebuild the tool-approval.
+    expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "approval-requested", approval: { id: "ap1" } });
+  });
+
+  it("maps a decided-but-unexecuted approval to approval-responded (denied, or mid-resume)", () => {
+    const meta: MessageMeta = {
+      status: "completed",
+      parts: [{ type: "tool-call", id: "t1", name: "manage", input: { action: "set" }, approval: { id: "ap1", approved: false, reason: "no" } }],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "approval-responded", approval: { id: "ap1", approved: false, reason: "no" } });
+  });
+
+  it("maps an approved-AND-executed approval to output-available (its result landed)", () => {
+    const meta: MessageMeta = {
+      status: "completed",
+      parts: [
+        { type: "tool-call", id: "t1", name: "manage", input: { action: "add" }, approval: { id: "ap1", approved: true } },
+        { type: "tool-result", id: "t1", name: "manage", output: { status: "ok" } },
+      ],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "output-available", output: { status: "ok" }, approval: { id: "ap1", approved: true } });
+  });
+
   it("surfaces tool-error as output-error with errorText", () => {
     const meta: MessageMeta = {
       parts: [

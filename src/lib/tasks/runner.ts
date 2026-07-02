@@ -45,7 +45,7 @@ import { StallWatchdog } from "./stall-watchdog";
 import { errorText } from "@/lib/errors/message";
 import { downloadFile, createSession } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
-import type { StoredPart } from "@/lib/chat/contracts";
+import type { StoredPart, MessageMeta } from "@/lib/chat/contracts";
 import { log } from "@/lib/log";
 
 const errMsg = (e: unknown) => errorText(e);
@@ -110,6 +110,13 @@ export interface TaskPayload {
   attachedFiles?: FileRef[];
   /** Where to push the result besides the web UI (e.g. Telegram). */
   origin?: TaskOrigin;
+  /** A continuation of a turn the user just approved/rejected on a `manage`
+   *  approval card. When set, this task does NOT start a fresh reply: it CONTINUES
+   *  the named assistant message (whose suspended tool call now carries the user's
+   *  decision), so the AI SDK re-runs the tool (or sees the denial) and the model
+   *  finishes the same turn — the tool-result + follow-up text append to this
+   *  message. See `/api/manage/approve`. */
+  resumeMessageId?: string;
 }
 
 export interface ClaimedTask {
@@ -437,7 +444,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     deadlineHit = true;
     ac.abort();
   }, MAX_TASK_MS);
-  const msgId = nanoid();
+  // A native-approval continuation reuses the SUSPENDED assistant message (append
+  // the execute-result + follow-up text to it); a normal turn mints a fresh reply.
+  const resumeMessageId = payload.resumeMessageId ?? null;
+  const msgId = resumeMessageId ?? nanoid();
   // Whether the assistant message row has been inserted yet. The insert happens
   // AFTER prepareRun (which resolves the model/provider). If prepareRun throws —
   // e.g. the chat's provider was disconnected or its model removed — there's no
@@ -447,10 +457,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // sees what went wrong.
   let messageInserted = false;
   const parts: StoredPart[] = [];
-  // If a turn ends staging a `manage` confirmation, the finished Telegram message
-  // carries native Confirm/Cancel buttons (the web renders its own card). Last
-  // confirm_required in the turn wins — that's the one still awaiting the user.
-  let pendingConfirm: { pendingId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] } | undefined;
+  // Set when the AI SDK suspends a `manage` tool call for native approval: the
+  // turn finalizes as "awaiting_approval" (non-terminal — no aux, no output-file
+  // delivery), the suspended tool-call part is marked with its approvalId, and the
+  // finished message carries Approve/Reject affordances (a card on web, inline
+  // buttons on Telegram). The user's decision enqueues a resume continuation.
+  let awaitingApproval: { approvalId: string; toolCallId: string } | undefined;
   // Per-message monotonic event counter. Stamped on every realtime event that
   // mutates/finalizes this reply (text/reasoning deltas, tool steps, reset,
   // finish). The persisted snapshot records the seq it covers (metadata.streamSeq),
@@ -577,14 +589,29 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // user message just sent, or the user turn being regenerated). Pointing the
     // chat at this leaf makes the new branch the active one immediately.
     let replyParentId = (payload.uiMessages ?? []).at(-1)?.id ?? null;
-    // Batch a burst of queued follow-ups (web or Telegram) into one reply: answer
-    // from the chat's CURRENT leaf — every message that piled up while we were
-    // busy — and absorb the queued tasks those follow-ups created, carrying their
-    // attachments along. Guarded to a USER leaf: a regenerate/edit leaves the
-    // active leaf on an assistant reply, and that reply must hang off the
-    // payload's user message instead, so we skip the override there.
     let extraAttachedFiles: FileRef[] = [];
-    {
+    if (resumeMessageId) {
+      // Approval continuation: the assistant message already exists (it's the chat
+      // leaf) with its suspended tool call now carrying the user's decision. Load
+      // its parts so this run APPENDS the execute-result + follow-up text to it,
+      // and build the model context from the path ENDING at it — convertToModelMessages
+      // turns that approval-responded tool part into a tool-approval-response, so
+      // the SDK re-runs the tool (approved) or the model sees the denial. No new
+      // row, no activeLeaf move.
+      const [row] = await db.select({ metadata: messages.metadata, parentId: messages.parentId })
+        .from(messages).where(eq(messages.id, resumeMessageId)).limit(1);
+      const meta = (row?.metadata ?? {}) as MessageMeta;
+      for (const p of meta.parts ?? []) parts.push(p);
+      seq = meta.streamSeq ?? 0;
+      replyParentId = resumeMessageId;
+      messageInserted = true;
+    } else {
+      // Batch a burst of queued follow-ups (web or Telegram) into one reply: answer
+      // from the chat's CURRENT leaf — every message that piled up while we were
+      // busy — and absorb the queued tasks those follow-ups created, carrying their
+      // attachments along. Guarded to a USER leaf: a regenerate/edit leaves the
+      // active leaf on an assistant reply, and that reply must hang off the
+      // payload's user message instead, so we skip the override there.
       const [row] = await db.select({ leaf: chats.activeLeafId }).from(chats).where(eq(chats.id, chatId)).limit(1);
       const leaf = row?.leaf ?? null;
       const leafRole = leaf
@@ -600,19 +627,22 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // holds and erode the user's budget until the 30-day window rolls.
         for (const t of absorbed) await releaseHold(t.id);
       }
+      await db.insert(messages).values({
+        id: msgId,
+        chatId,
+        parentId: replyParentId,
+        role: "assistant",
+        content: "",
+        platform: payload.origin?.platform ?? "web",
+        metadata: { taskId, status: "running", parts: [], streamSeq: 0 },
+      });
+      messageInserted = true;
+      await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
     }
-    await db.insert(messages).values({
-      id: msgId,
-      chatId,
-      parentId: replyParentId,
-      role: "assistant",
-      content: "",
-      platform: payload.origin?.platform ?? "web",
-      metadata: { taskId, status: "running", parts: [], streamSeq: 0 },
-    });
-    messageInserted = true;
-    await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
-    await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId, seq: 0 });
+    // A resume continues an existing message — seed task:start from the loaded seq
+    // so the client keeps reconciling against the snapshot it already has, rather
+    // than rewinding to 0 and dropping the appended deltas.
+    await publishTaskEvent(userId, { type: "task:start", taskId, chatId, messageId: msgId, seq: resumeMessageId ? seq : 0 });
 
     // Show a "Thinking…" block immediately — before the model emits its first
     // token — so the channel reacts at once; reasoning text then streams into it.
@@ -965,6 +995,32 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             watchdog.enterTool();
             break;
           }
+          case "tool-approval-request": {
+            // Native human-in-the-loop: the SDK is asking the user to approve this
+            // tool call before it runs (see the `manage` tool's needsApproval). The
+            // stream will now END without an execute/result — mark the call
+            // suspended and record the approvalId so the finalize path finalizes the
+            // turn as "awaiting_approval" (not orphaned) and the user's card/button
+            // can resume it. `tool-call` already pushed the part just above.
+            watchdog.exitTool();
+            const tc = event.toolCall;
+            // `tool-call` above already pushed the part, but the approval event also
+            // carries the full call — so find-or-create, then mark it suspended.
+            let call = parts.find((p) => p.type === "tool-call" && p.id === tc.toolCallId);
+            if (!call) {
+              call = { type: "tool-call", id: tc.toolCallId, name: tc.toolName, input: stripNul(tc.input) };
+              parts.push(call);
+            }
+            if (call.type === "tool-call") call.approval = { id: event.approvalId };
+            awaitingApproval = { approvalId: event.approvalId, toolCallId: tc.toolCallId };
+            await flushBuffers();
+            await publishTaskEvent(userId, {
+              type: "task:tool-approval", taskId, chatId, messageId: msgId,
+              toolCallId: tc.toolCallId, approvalId: event.approvalId, seq: ++seq,
+            });
+            await saveSnapshot(true);
+            break;
+          }
           case "tool-result": {
             watchdog.exitTool(); // tool returned — back to waiting on the model
             await flushBuffers();
@@ -974,16 +1030,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // the realtime publish below can choke. See stripNul.
             const output = stripNul(event.output);
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output });
-            // Surface a staged confirmation to the (Telegram) delivery sink so the
-            // final message can carry Confirm/Cancel buttons tied to the pending id.
-            if (event.toolName === "manage") {
-              const o = output as { status?: string; pendingId?: string; preview?: { title?: string; before?: string; after?: string; impact?: string; body?: string; items?: string[] } } | null;
-              if (o?.status === "confirm_required" && o.pendingId) {
-                // Carry impact + body too, so the Telegram confirm buttons show the
-                // same risk warning / full text the web card does (approve, not blind).
-                pendingConfirm = { pendingId: o.pendingId, title: o.preview?.title ?? "", before: o.preview?.before ?? "", after: o.preview?.after ?? "", impact: o.preview?.impact, body: o.preview?.body, items: o.preview?.items };
-              }
-            }
             // The full output is in `parts` (saved to the DB at finish-step). Over
             // realtime we ship it only if it fits NOTIFY's budget; an oversized
             // body (e.g. a loaded skill) is dropped here so the small state-flip
@@ -1321,7 +1367,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     await db.update(messages).set({
       content: getFullText(),
       metadata: {
-        taskId, status: finalStatus, parts: parts.length > 0 ? parts : undefined,
+        // A suspended-for-approval turn is NOT done — mark it so the presenter maps
+        // the pending tool call to approval-requested (not an orphan error) and the
+        // client blocks the composer until the user decides.
+        taskId, status: awaitingApproval ? "awaiting_approval" : finalStatus, parts: parts.length > 0 ? parts : undefined,
         ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
         // Capability gap: the model couldn't natively take one of the attached
         // media types — flag it so the UI can nudge a model switch.
@@ -1395,6 +1444,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       ...(costMeta != null ? { costUsd: costMeta } : {}),
       ...(streamError ? { error: streamError } : {}),
     });
+    // Build the Telegram approval payload (buttons + preview) only on an origin
+    // channel — the web card fetches its own preview, so this query is skipped there.
+    let telegramApproval: { messageId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] } | undefined;
+    if (awaitingApproval && payload.origin) {
+      const callPart = parts.find((p) => p.type === "tool-call" && p.id === awaitingApproval!.toolCallId);
+      const input = callPart?.type === "tool-call" ? callPart.input : undefined;
+      const { previewManageForUser } = await import("@/lib/manage/authed");
+      const pv = await previewManageForUser(userId, input).catch(() => null);
+      if (pv) telegramApproval = { messageId: msgId, title: pv.title, before: pv.before, after: pv.after, impact: pv.impact, body: pv.body, items: pv.items };
+    }
     await sink.finish({
       // The whole answer, persisted as one rich message (no bubble fragmentation).
       status: finalStatus, text: getFullText(), reasoning: getReasoning(),
@@ -1402,11 +1461,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       isAdmin: failure ? await resolveIsAdmin() : false,
       toolCount, elapsedMs: Date.now() - startedAt, reasoningMs,
       ...(blindModalities.length ? { blindModalities } : {}),
-      ...(pendingConfirm ? { confirm: pendingConfirm } : {}),
+      // Telegram gets Approve/Reject buttons + the same before→after preview the web
+      // card fetches — computed here (only on an origin channel) from the suspended
+      // call's input, so the tap resumes the turn instead of applying out-of-band.
+      ...(telegramApproval ? { approval: telegramApproval } : {}),
     });
     // Deliver any files the agent created/edited this run to the origin channel
     // (Telegram). Best-effort and only on success — never fail the task over it.
-    if (finalStatus === "completed" && payload.origin) {
+    if (finalStatus === "completed" && !awaitingApproval && payload.origin) {
       try {
         const outFiles = await collectReferencedFiles(sessionKey, userId, getFullText());
         if (outFiles.length) await sink.sendFiles(outFiles);
@@ -1429,7 +1491,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .map((p) => p.text)
         .join("\n");
     })();
-    if (finalStatus === "completed" && lastUserText.trim()) {
+    if (finalStatus === "completed" && !awaitingApproval && lastUserText.trim()) {
       // trackAux: keep the worker's shutdown drain waiting on this fire-and-forget
       // call so a deploy doesn't kill it mid-flight (lost spend / dropped facts).
       void trackAux(maintainMemoryDoc({
@@ -1452,7 +1514,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // The slice-of-first-message placeholder set by /api/chat stays visible until
     // this lands, so the sidebar always shows *something* in the meantime.
     const isFirstTurn = !modelMessages.some((m) => m.role === "assistant");
-    if (finalStatus === "completed" && isFirstTurn && lastUserText.trim()) {
+    if (finalStatus === "completed" && !awaitingApproval && isFirstTurn && lastUserText.trim()) {
       void trackAux(generateChatTitle(model, lastUserText, getFullText(), recordAuxUsage)
         .then(async (title) => {
           if (!title) return;
@@ -1469,7 +1531,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the final user turn — see buildCompactionMessages). Fire-and-forget like
     // title/memory; gated on a clean completion. `used` counts the FULL input
     // (cached reads included), since the whole prefix occupies the window.
-    if (finalStatus === "completed" && budget && budget.shouldCompact) {
+    if (finalStatus === "completed" && !awaitingApproval && budget && budget.shouldCompact) {
       void trackAux(
         compactConversation(model, systemMessages, modelMessages, recordAuxUsage)
           .then(async (summary) => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { createRegistry } from "../registry";
-import { dispatch, applyPending } from "../dispatch";
+import { dispatch, requiresApproval, preview } from "../dispatch";
 import { memPendingStore } from "./mem-pending";
 import type { Collection, CollectionItem, ManageContext } from "../types";
 
@@ -102,31 +102,27 @@ describe("manage/dispatch collections", () => {
     }
   });
 
-  it("add is confirm-gated: first call previews, does not add", async () => {
-    const { collection, items } = memCollection();
+  it("requiresApproval gates an add unless autonomous (the SDK suspends the call, not dispatch)", async () => {
+    const { collection } = memCollection();
     const reg = createRegistry([], [collection]);
-    const res = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
-    expect(res.status).toBe("confirm_required");
-    expect(items).toHaveLength(1);
+    // No org.agent_autonomy control registered → not autonomous → gated.
+    expect(await requiresApproval(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } })).toBe(true);
   });
 
-  it("awaits an async previewAdd (probe-before-confirm) and carries its details into the card", async () => {
+  it("preview() carries an async previewAdd's probe details (Responds — N tools) for the approval card", async () => {
     const { collection } = memCollection({
-      // Simulates a network probe run before the confirm card is shown (#11).
+      // Simulates a network probe run before the approval card is shown (#11).
       previewAdd: async (_ctx, args) => ({ title: "Connectors", after: String(args.name), details: "Responds — 4 tools available." }),
     });
     const reg = createRegistry([], [collection]);
-    const res = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
-    if (res.status !== "confirm_required") throw new Error("expected confirm");
-    expect(res.preview.details).toBe("Responds — 4 tools available.");
+    const pv = await preview(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
+    expect(pv?.details).toBe("Responds — 4 tools available.");
   });
 
-  it("add applies via applyPending (human-authed) and surfaces a follow-up action", async () => {
+  it("add (post-approval) applies directly via dispatch and surfaces a follow-up action", async () => {
     const { collection, items } = memCollection();
     const reg = createRegistry([], [collection]);
-    const staged = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
-    if (staged.status !== "confirm_required") throw new Error("expected confirm");
-    const applied = await applyPending(reg, ctx(), staged.pendingId);
+    const applied = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
     expect(applied.status).toBe("ok");
     expect(items).toHaveLength(2);
     if (applied.status === "ok" && applied.render === "resource") {
@@ -158,9 +154,7 @@ describe("manage/dispatch collections", () => {
     const audit = vi.fn();
     const { collection } = memCollection({ auditNoun: "skill" });
     const reg = createRegistry([], [collection]);
-    const staged = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
-    if (staged.status !== "confirm_required") throw new Error("expected confirm");
-    await applyPending(reg, ctx({ audit }), staged.pendingId);
+    await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "skill.add" }));
   });
 
@@ -168,9 +162,7 @@ describe("manage/dispatch collections", () => {
     const audit = vi.fn().mockRejectedValue(new Error("audit backend down"));
     const { collection, items } = memCollection();
     const reg = createRegistry([], [collection]);
-    const staged = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
-    if (staged.status !== "confirm_required") throw new Error("expected confirm");
-    const applied = await applyPending(reg, ctx({ audit }), staged.pendingId);
+    const applied = await dispatch(reg, ctx({ audit }), { action: "add", target: "mcp", args: { name: "s", url: "https://y" } });
     expect(applied.status).toBe("ok"); // the add succeeded despite the audit failure
     expect(items).toHaveLength(2);
   });
@@ -215,13 +207,11 @@ describe("manage/dispatch collections", () => {
     if (res.status === "error") expect(res.code).toBe("not_found");
   });
 
-  it("remove is confirm-gated and then removes", async () => {
+  it("requiresApproval gates a remove unless autonomous, then dispatch removes directly", async () => {
     const { collection, items } = memCollection();
     const reg = createRegistry([], [collection]);
-    const staged = await dispatch(reg, ctx(), { action: "remove", target: "mcp", itemId: "s1" });
-    if (staged.status !== "confirm_required") throw new Error("expected confirm");
-    expect(items).toHaveLength(1);
-    const applied = await applyPending(reg, ctx(), staged.pendingId);
+    expect(await requiresApproval(reg, ctx(), { action: "remove", target: "mcp", itemId: "s1" })).toBe(true);
+    const applied = await dispatch(reg, ctx(), { action: "remove", target: "mcp", itemId: "s1" });
     expect(applied.status).toBe("ok");
     expect(items).toHaveLength(0);
   });
