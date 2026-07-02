@@ -157,6 +157,15 @@ function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
     }
   };
 
+  // Cancel must DROP the staged pending on the server, not just hide the buttons —
+  // otherwise a reload re-offers Confirm for a change the user already declined.
+  const cancel = async () => {
+    if (!o.pendingId || phase !== "idle") return;
+    setPhase("cancelled");
+    haptic("tap");
+    await fetch(`/api/manage/confirm?pendingId=${encodeURIComponent(o.pendingId)}`, { method: "DELETE" }).catch(() => {});
+  };
+
   return (
     <CardShell>
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -183,7 +192,7 @@ function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
       {phase === "idle" && (
         <div className="mt-3 flex gap-2">
           <Button size="sm" onClick={confirm}>{t("apply")}</Button>
-          <Button size="sm" variant="ghost" onClick={() => setPhase("cancelled")}>{t("cancel")}</Button>
+          <Button size="sm" variant="ghost" onClick={cancel}>{t("cancel")}</Button>
         </div>
       )}
       {phase === "applying" && (

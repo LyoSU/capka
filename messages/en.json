@@ -1294,7 +1294,8 @@
     "confirmApplied": "✓ Done.",
     "confirmCancelled": "Cancelled.",
     "confirmExpired": "This confirmation expired — just ask again.",
-    "confirmFailed": "Couldn't apply that — please try again."
+    "confirmFailed": "Couldn't apply that — please try again.",
+    "confirmDetails": "Details"
   },
   "updateBanner": {
     "message": "Capka {version} is available.",

@@ -435,7 +435,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // If a turn ends staging a `manage` confirmation, the finished Telegram message
   // carries native Confirm/Cancel buttons (the web renders its own card). Last
   // confirm_required in the turn wins — that's the one still awaiting the user.
-  let pendingConfirm: { pendingId: string; title: string; before: string; after: string } | undefined;
+  let pendingConfirm: { pendingId: string; title: string; before: string; after: string; impact?: string; body?: string } | undefined;
   // Per-message monotonic event counter. Stamped on every realtime event that
   // mutates/finalizes this reply (text/reasoning deltas, tool steps, reset,
   // finish). The persisted snapshot records the seq it covers (metadata.streamSeq),
@@ -962,9 +962,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // Surface a staged confirmation to the (Telegram) delivery sink so the
             // final message can carry Confirm/Cancel buttons tied to the pending id.
             if (event.toolName === "manage") {
-              const o = output as { status?: string; pendingId?: string; preview?: { title?: string; before?: string; after?: string } } | null;
+              const o = output as { status?: string; pendingId?: string; preview?: { title?: string; before?: string; after?: string; impact?: string; body?: string } } | null;
               if (o?.status === "confirm_required" && o.pendingId) {
-                pendingConfirm = { pendingId: o.pendingId, title: o.preview?.title ?? "", before: o.preview?.before ?? "", after: o.preview?.after ?? "" };
+                // Carry impact + body too, so the Telegram confirm buttons show the
+                // same risk warning / full text the web card does (approve, not blind).
+                pendingConfirm = { pendingId: o.pendingId, title: o.preview?.title ?? "", before: o.preview?.before ?? "", after: o.preview?.after ?? "", impact: o.preview?.impact, body: o.preview?.body };
               }
             }
             // The full output is in `parts` (saved to the DB at finish-step). Over

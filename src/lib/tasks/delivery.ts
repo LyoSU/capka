@@ -46,8 +46,11 @@ export interface TaskResult {
   blindModalities?: Modality[];
   /** A change the turn STAGED for the user to confirm. On Telegram the final
    *  message carries native Confirm/Cancel buttons bound to `pendingId` — the tap
-   *  (not the model) applies it, so this channel gets a real confirm boundary. */
-  confirm?: { pendingId: string; title: string; before: string; after: string };
+   *  (not the model) applies it, so this channel gets a real confirm boundary.
+   *  `impact` (a risk warning) and `body` (the full text being approved, e.g. a
+   *  SKILL.md) travel too, so the Telegram user sees exactly what the web card
+   *  shows — nobody approves a change blind on any channel. */
+  confirm?: { pendingId: string; title: string; before: string; after: string; impact?: string; body?: string };
 }
 
 /** The transient activity shown while the answer streams in. The live reasoning
@@ -174,6 +177,33 @@ export function composeFinal(
   }
   if (log) return body ? `> ${log}\n\n${body}` : `> ${log}`;
   return body;
+}
+
+/** The confirm preview shown before a staged change is approved — the same
+ *  consent contract on every channel. Everything the user must SEE to approve
+ *  safely (the before→after diff, the ⚠️ impact warning, a skill's full body) is
+ *  rendered into BOTH the rich markdown and the plain-text fallback, so a Markdown
+ *  rejection can never silently strip the impact line or the body the web card shows. */
+export function composeConfirmPreview(
+  c: { title: string; before: string; after: string; impact?: string; body?: string },
+  t: Translator,
+): { markdown: string; plain: string } {
+  const diff = c.before && c.before !== c.after ? `${c.before} → ${c.after}` : c.after;
+  // Title + ⚠️ impact are consecutive blockquote lines → one quote block in rich md.
+  const quote = [`> ${escapeHtml(c.title)}${diff ? `: ${escapeHtml(diff)}` : ""}`];
+  const plain = [`${c.title}${diff ? `: ${diff}` : ""}`];
+  if (c.impact) {
+    quote.push(`> ⚠️ ${escapeHtml(c.impact)}`);
+    plain.push(`⚠️ ${c.impact}`);
+  }
+  let markdown = quote.join("\n");
+  if (c.body) {
+    // The full text being approved (e.g. a SKILL.md), collapsed in rich md and
+    // inline in the fallback — nobody confirms an unseen permanent instruction.
+    markdown += `\n\n<details><summary>${escapeHtml(t("confirmDetails"))}</summary>\n\n${escapeHtml(c.body)}\n\n</details>`;
+    plain.push(c.body);
+  }
+  return { markdown, plain: plain.join("\n\n") };
 }
 
 /** A failure rendered entirely in-chat, so the user never has to open the web UI
@@ -391,13 +421,15 @@ class TelegramSink implements DeliverySink {
     // the model can't, so Telegram gets the same real confirm boundary as web.
     if (result.confirm) {
       const c = result.confirm;
-      const diff = c.before && c.before !== c.after ? `${c.before} → ${c.after}` : c.after;
-      const preview = `> ${escapeHtml(c.title)}${diff ? `: ${escapeHtml(diff)}` : ""}`;
-      markdown = markdown ? `${markdown}\n\n${preview}` : preview;
+      const { markdown: previewMd, plain: previewPlain } = composeConfirmPreview(c, this.t);
+      markdown = markdown ? `${markdown}\n\n${previewMd}` : previewMd;
+      // The plain-text fallback carries the SAME preview (diff + impact + body), so
+      // a Markdown rejection never drops what the user needs to approve safely.
+      const plain = body ? `${body}\n\n${previewPlain}` : previewPlain;
       const keyboard = new InlineKeyboard()
         .text(this.t("confirmApply"), `mc:${c.pendingId}`)
         .text(this.t("confirmCancel"), `mx:${c.pendingId}`);
-      await this.sendRich(markdown, `${body || c.title}`, false, keyboard);
+      await this.sendRich(markdown, plain, false, keyboard);
       return;
     }
 

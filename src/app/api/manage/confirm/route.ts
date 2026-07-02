@@ -49,3 +49,16 @@ export const GET = apiHandler(async (req: Request) => {
   if (!pendingId) return Response.json({ status: "gone" });
   return Response.json({ status: await dbPendingStore.peek(pendingId, userId) });
 });
+
+/**
+ * Drop a staged confirmation the user cancelled from the web card. Without this,
+ * a Cancel was purely cosmetic (local React state) — the pending row survived on
+ * the server and a reload re-offered its Confirm button, so a "cancelled" change
+ * could still be applied. Owner-scoped and best-effort (idempotent).
+ */
+export const DELETE = apiHandler(async (req: Request) => {
+  const { userId } = await requireActive();
+  const pendingId = new URL(req.url).searchParams.get("pendingId");
+  if (pendingId) await dbPendingStore.cancel(pendingId, userId);
+  return Response.json({ ok: true });
+});

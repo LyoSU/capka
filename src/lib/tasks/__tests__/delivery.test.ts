@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { composeDraft, composeError, composeFinal, draftIdFrom, makeDeliverySink } from "../delivery";
+import { composeConfirmPreview, composeDraft, composeError, composeFinal, draftIdFrom, makeDeliverySink } from "../delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 
 const uk = getTranslator("uk", "telegram");
@@ -36,6 +36,63 @@ describe("composeDraft", () => {
     });
     // Plain answer, no reasoning, no step.
     expect(composeDraft("the answer", "", undefined, uk)).toEqual({ markdown: "the answer" });
+  });
+});
+
+describe("composeConfirmPreview", () => {
+  // The confirm preview is part of the security-boundary contract: whatever the
+  // user must SEE before approving (the diff, the impact warning, a skill's full
+  // body) must survive into BOTH the rich markdown and the plain-text fallback —
+  // a channel that drops the impact line lets someone approve a change blind.
+  it("carries the before→after diff into both markdown and plain", () => {
+    const { markdown, plain } = composeConfirmPreview(
+      { title: "Sandbox network", before: "Isolated", after: "Network access" },
+      en,
+    );
+    expect(markdown).toContain("Isolated → Network access");
+    expect(plain).toContain("Isolated → Network access");
+  });
+
+  it("shows only the new value when there is no meaningful 'before'", () => {
+    const { markdown, plain } = composeConfirmPreview(
+      { title: "Add connector", before: "", after: "Grok" },
+      en,
+    );
+    expect(markdown).not.toContain("→");
+    expect(markdown).toContain("Grok");
+    expect(plain).toContain("Grok");
+  });
+
+  it("carries the impact warning into both markdown and plain (never approved blind)", () => {
+    const { markdown, plain } = composeConfirmPreview(
+      {
+        title: "Block private provider URLs",
+        before: "Enabled",
+        after: "Disabled",
+        impact: "Turning this off weakens SSRF protection.",
+      },
+      en,
+    );
+    expect(markdown).toContain("Turning this off weakens SSRF protection.");
+    expect(plain).toContain("Turning this off weakens SSRF protection.");
+  });
+
+  it("carries a skill body (the full text being approved) into both markdown and plain", () => {
+    const { markdown, plain } = composeConfirmPreview(
+      { title: "Add skill", before: "", after: "pirate-mode", body: "Always answer like a pirate." },
+      en,
+    );
+    expect(markdown).toContain("Always answer like a pirate.");
+    expect(plain).toContain("Always answer like a pirate.");
+  });
+
+  it("escapes HTML-significant characters in the markdown preview", () => {
+    const { markdown } = composeConfirmPreview(
+      { title: "Name <x>", before: "a", after: "b & c" },
+      en,
+    );
+    expect(markdown).toContain("&lt;x&gt;");
+    expect(markdown).toContain("b &amp; c");
   });
 });
 

@@ -1294,7 +1294,8 @@
     "confirmApplied": "✓ Готово.",
     "confirmCancelled": "Скасовано.",
     "confirmExpired": "Строк цього підтвердження минув — просто попросіть ще раз.",
-    "confirmFailed": "Не вдалося застосувати — спробуйте ще раз."
+    "confirmFailed": "Не вдалося застосувати — спробуйте ще раз.",
+    "confirmDetails": "Деталі"
   },
   "updateBanner": {
     "message": "Доступна Capka {version}.",

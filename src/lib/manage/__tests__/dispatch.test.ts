@@ -99,6 +99,19 @@ describe("manage/dispatch", () => {
     expect(await store.peek(staged.pendingId, "u1")).toBe("applied");
   });
 
+  it("a cancelled pending can no longer be applied (web Cancel drops it server-side)", async () => {
+    const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
+    const reg = createRegistry([control]);
+    const staged = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm_required");
+    await store.cancel(staged.pendingId, "u1"); // what the DELETE endpoint does
+    expect(await store.peek(staged.pendingId, "u1")).toBe("gone");
+    const applied = await applyPending(reg, ctx({ isAdmin: true }), staged.pendingId);
+    expect(applied.status).toBe("error");
+    if (applied.status === "error") expect(applied.code).toBe("confirm_expired");
+    expect(cell.value).toBe("org.net:init"); // never applied
+  });
+
   it("a pendingId is single-use — a second apply is refused", async () => {
     const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([control]);
