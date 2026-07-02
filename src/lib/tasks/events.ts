@@ -34,6 +34,13 @@ export type TaskEvent =
   // from the persisted `approval` marker (see presenter), so this is the live-only
   // fast path; `approvalId` ties the decision back to the SDK's request.
   | { type: "task:tool-approval"; taskId: string; chatId: string; messageId: string; toolCallId: string; approvalId: string; seq?: number }
+  // The runner suspended a no-execute `ask` tool call (or an MCP server elicited)
+  // — surface the question card and block the composer. `form` is the AskForm to
+  // render; `toolCallId` ties the answer back (an `elicit:<id>` prefix marks a
+  // block-and-poll MCP elicitation, whose answer routes to the row writer). The
+  // reload path re-derives an ask card from the persisted `answer` marker (see
+  // presenter); this is the live-only fast path.
+  | { type: "task:ask"; taskId: string; chatId: string; messageId: string; toolCallId: string; form: import("@/lib/ask/types").AskForm; seq?: number }
   // A retry inside the runner threw away the partial reply (`parts.length = 0`)
   // for a capability/empty-response retry. The client must DISCARD the streamed
   // parts for this message and resync its applied-seq, so retry deltas land on a

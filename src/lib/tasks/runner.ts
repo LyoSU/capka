@@ -25,6 +25,8 @@ import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
 import { getSandboxNetworkDefault, getMaxContextTokens, getSetting, setSetting } from "@/lib/settings";
 import { makeManageTool } from "@/lib/manage/tool";
+import { makeAskTool } from "@/lib/ask/tool";
+import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { getModelContextLength } from "@/lib/models/catalog";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
@@ -344,11 +346,16 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       sessionKey,
       locale: user?.locale ?? payload.origin?.locale ?? undefined,
     });
+    // The `ask` tool has NO execute: when the model calls it, the AI SDK tool-loop
+    // stops the run, which the runner turns into a durable "awaiting_answer"
+    // suspend resolved by the user's answer (see the tool-call handler below).
+    const ask = makeAskTool();
     const tools = {
       ...sandbox.tools,
       ...mcp.tools,
       skill: skillTool,
       ...manage,
+      ...ask,
       ...makeMemoryTools({ userId, projectId: payload.projectId ?? null }),
       ...providerNativeTools(provider),
     };
@@ -463,6 +470,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // finished message carries Approve/Reject affordances (a card on web, inline
   // buttons on Telegram). The user's decision enqueues a resume continuation.
   let awaitingApproval: { approvalId: string; toolCallId: string } | undefined;
+  // Set when the model calls the no-execute `ask` tool: the SDK ends the run
+  // without a result, so the finalize path finalizes the turn as "awaiting_answer"
+  // (non-terminal, like awaiting_approval — no aux, no output-file delivery) and
+  // the question card / Telegram prompt can resume it with the user's answer.
+  let awaitingAnswer: { toolCallId: string; form: AskForm } | undefined;
   // Per-message monotonic event counter. Stamped on every realtime event that
   // mutates/finalizes this reply (text/reasoning deltas, tool steps, reset,
   // finish). The persisted snapshot records the seq it covers (metadata.streamSeq),
@@ -989,6 +1001,24 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // snapshot that already includes this step, or it reconciles in a loop
             // until the step ends. Tool events are rare, so a forced write is cheap.
             await saveSnapshot(true);
+            if (event.toolName === "ask") {
+              // No-execute tool → the SDK ends the run without a result. Mark the
+              // call awaiting a human answer (mirrors tool-approval-request) so the
+              // finalize path finalizes as "awaiting_answer" and the card / Telegram
+              // prompt can resume it. Parse defensively — a malformed form still
+              // suspends; the card just shows the raw fields.
+              const parsed = askFormSchema.safeParse(input);
+              const form = (parsed.success ? parsed.data : { fields: [] }) as AskForm;
+              const callPart = parts.find((p) => p.type === "tool-call" && p.id === event.toolCallId);
+              if (callPart?.type === "tool-call") callPart.answer = { form };
+              awaitingAnswer = { toolCallId: event.toolCallId, form };
+              await publishTaskEvent(userId, {
+                type: "task:ask", taskId, chatId, messageId: msgId,
+                toolCallId: event.toolCallId, form, seq: ++seq,
+              });
+              await saveSnapshot(true);
+              break;
+            }
             // The model is now waiting on OUR tool — pause the stall watchdog so a
             // legitimately slow command (a long sandbox run) isn't mistaken for a
             // hung provider. It resumes on the matching tool-result/tool-error.
@@ -1367,10 +1397,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     await db.update(messages).set({
       content: getFullText(),
       metadata: {
-        // A suspended-for-approval turn is NOT done — mark it so the presenter maps
-        // the pending tool call to approval-requested (not an orphan error) and the
-        // client blocks the composer until the user decides.
-        taskId, status: awaitingApproval ? "awaiting_approval" : finalStatus, parts: parts.length > 0 ? parts : undefined,
+        // A suspended turn is NOT done — mark it so the presenter maps the pending
+        // tool call to its card state (approval-requested / ask input-available),
+        // not an orphan error, and the client blocks the composer until the user
+        // decides/answers.
+        taskId, status: awaitingApproval ? "awaiting_approval" : awaitingAnswer ? "awaiting_answer" : finalStatus, parts: parts.length > 0 ? parts : undefined,
         ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
         // Capability gap: the model couldn't natively take one of the attached
         // media types — flag it so the UI can nudge a model switch.
@@ -1468,7 +1499,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     });
     // Deliver any files the agent created/edited this run to the origin channel
     // (Telegram). Best-effort and only on success — never fail the task over it.
-    if (finalStatus === "completed" && !awaitingApproval && payload.origin) {
+    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && payload.origin) {
       try {
         const outFiles = await collectReferencedFiles(sessionKey, userId, getFullText());
         if (outFiles.length) await sink.sendFiles(outFiles);
@@ -1491,7 +1522,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .map((p) => p.text)
         .join("\n");
     })();
-    if (finalStatus === "completed" && !awaitingApproval && lastUserText.trim()) {
+    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && lastUserText.trim()) {
       // trackAux: keep the worker's shutdown drain waiting on this fire-and-forget
       // call so a deploy doesn't kill it mid-flight (lost spend / dropped facts).
       void trackAux(maintainMemoryDoc({
@@ -1514,7 +1545,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // The slice-of-first-message placeholder set by /api/chat stays visible until
     // this lands, so the sidebar always shows *something* in the meantime.
     const isFirstTurn = !modelMessages.some((m) => m.role === "assistant");
-    if (finalStatus === "completed" && !awaitingApproval && isFirstTurn && lastUserText.trim()) {
+    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && isFirstTurn && lastUserText.trim()) {
       void trackAux(generateChatTitle(model, lastUserText, getFullText(), recordAuxUsage)
         .then(async (title) => {
           if (!title) return;
@@ -1531,7 +1562,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the final user turn — see buildCompactionMessages). Fire-and-forget like
     // title/memory; gated on a clean completion. `used` counts the FULL input
     // (cached reads included), since the whole prefix occupies the window.
-    if (finalStatus === "completed" && !awaitingApproval && budget && budget.shouldCompact) {
+    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && budget && budget.shouldCompact) {
       void trackAux(
         compactConversation(model, systemMessages, modelMessages, recordAuxUsage)
           .then(async (summary) => {
