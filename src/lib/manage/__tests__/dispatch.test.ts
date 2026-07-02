@@ -44,6 +44,31 @@ describe("manage/dispatch", () => {
     expect(ids(asAdmin)).toEqual(["user.locale", "org.net"]);
   });
 
+  it("get on an enum control returns a choice card (options derived from the schema) with the current value marked", async () => {
+    const { control } = memControl({
+      id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm",
+      schema: z.enum(["none", "bridge"]),
+      format: (v) => (v === "bridge" ? "Network access" : "Isolated"),
+    });
+    control.read = async () => "none";
+    const reg = createRegistry([control]);
+    const res = await dispatch(reg, ctx({ isAdmin: true }), { action: "get", target: "org.net" });
+    if (res.status !== "ok" || res.render !== "choice") throw new Error("expected choice render");
+    const data = res.data as { value: string; options: { value: string; label: string }[] };
+    expect(data.value).toBe("none");
+    expect(data.options).toEqual([
+      { value: "none", label: "Isolated" },
+      { value: "bridge", label: "Network access" },
+    ]);
+  });
+
+  it("get on a free-form control stays a plain value (no chips)", async () => {
+    const { control } = memControl({ id: "org.name", scope: "org", requiredRole: "admin", risk: "confirm" }); // z.string()
+    const reg = createRegistry([control]);
+    const res = await dispatch(reg, ctx({ isAdmin: true }), { action: "get", target: "org.name" });
+    expect(res.status === "ok" && res.render).toBe("value");
+  });
+
   it("hides an admin control from a non-admin (get → not_found, no leak)", async () => {
     const reg = createRegistry([memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" }).control]);
     const res = await dispatch(reg, ctx(), { action: "get", target: "org.net" });

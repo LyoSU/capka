@@ -145,11 +145,32 @@ async function list(reg: Registry, ctx: ManageContext): Promise<ManageResult> {
   return { status: "ok", render: "list", summary: `${items.length} settings, ${collections.length} collections`, data: { settings: items, collections } };
 }
 
+/** The fixed set of values a control accepts, if any — a `z.enum`'s options come
+ *  free off the schema; a refined string (e.g. locale) declares them explicitly. */
+function controlOptions(c: Control): string[] | undefined {
+  if (c.options?.length) return c.options;
+  const s = c.schema as { options?: unknown };
+  return Array.isArray(s.options) ? (s.options as string[]) : undefined;
+}
+
 async function get(reg: Registry, ctx: ManageContext, target: string): Promise<ManageResult> {
   const t = manageT(ctx.locale);
   const c = reg.get(target);
   if (c && canAccess(ctx, c)) {
     const v = await c.read(ctx);
+    // A bounded control (enum / declared options) renders as a chip picker so the
+    // user can switch with one tap; picking a chip asks the agent to `set` it, so
+    // the confirm barrier still gates risky changes. Free-form controls stay a
+    // plain value (shown in the activity rail, not a card).
+    const opts = controlOptions(c);
+    if (opts) {
+      return {
+        status: "ok",
+        render: "choice",
+        summary: `${title(t, c)}: ${fmt(t, c, v)}`,
+        data: { id: c.id, title: title(t, c), value: v, options: opts.map((o) => ({ value: o, label: fmt(t, c, o) })) },
+      };
+    }
     return {
       status: "ok",
       render: "value",

@@ -25,6 +25,9 @@ type ManageOutput = {
     controlId?: string;
     before?: string;
     after?: string;
+    // choice (enum chip picker)
+    value?: string;
+    options?: { value: string; label: string }[];
     undoPendingId?: string;
     /** Refresh the route after apply/undo (e.g. a locale change takes effect now). */
     reload?: boolean;
@@ -44,7 +47,7 @@ type ManageOutput = {
   };
 };
 
-const CARD_RENDERS = new Set(["confirm", "setting", "action_required", "resource", "debug", "collection"]);
+const CARD_RENDERS = new Set(["confirm", "setting", "choice", "action_required", "resource", "debug", "collection"]);
 
 /** A `manage` result becomes a prominent card (not a quiet rail step) when it's
  *  something the user must SEE or ACT on. Plain reads (`value`, `list`) stay in
@@ -290,6 +293,43 @@ function SettingCard({ o, t }: { o: ManageOutput; t: T }) {
   );
 }
 
+/** A control whose value is one of a fixed set, shown as pickable chips (current
+ *  one marked). Picking a chip doesn't apply anything directly — it asks the agent
+ *  to `set` that value, so a safe control applies and a risky one still surfaces a
+ *  confirm card (the barrier holds; a chip is just a shortcut to typing it). */
+function ChoiceCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: string) => void }) {
+  const { title = "", value, options = [] } = o.data!;
+  return (
+    <CardShell>
+      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+        {title}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.map((op) => {
+          const active = op.value === value;
+          return (
+            <button
+              key={op.value}
+              type="button"
+              disabled={active || !onSend}
+              aria-pressed={active}
+              onClick={() => { haptic("tap"); onSend?.(t("setInstruction", { title, value: op.label })); }}
+              className={
+                active
+                  ? "rounded-full border border-primary bg-primary/10 px-3 py-1 text-sm font-medium text-primary"
+                  : "rounded-full border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
+              }
+            >
+              {op.label}
+            </button>
+          );
+        })}
+      </div>
+    </CardShell>
+  );
+}
+
 /** A colored dot + localized word for a connector's state — no raw "oauth"/on/off
  *  jargon (PRODUCT.md forbids it for the non-technical audience). */
 function StatusBadge({ enabled, status, t }: { enabled?: boolean; status?: string; t: T }) {
@@ -311,6 +351,8 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
   if (o?.render === "confirm" && o.preview) return <ConfirmCard o={o} t={t} />;
 
   if (o?.render === "setting" && o.data) return <SettingCard o={o} t={t} />;
+
+  if (o?.render === "choice" && o.data?.options) return <ChoiceCard o={o} t={t} onSend={onSend} />;
 
   // OAuth / browser hand-off — the agent returned a URL only the user can open.
   if (o?.render === "action_required" && o.action) {

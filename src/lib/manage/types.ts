@@ -37,6 +37,11 @@ export interface Control {
   requiredRole: Role;
   risk: Risk;
   schema: z.ZodType<string>;
+  /** A fixed set of allowed values, rendered as pickable chips (a `choice` card).
+   *  For `z.enum` controls this is derived from the schema automatically; declare
+   *  it only when the valid set can't be read off the schema (e.g. a refined
+   *  string like `user.locale`). */
+  options?: string[];
   read(ctx: ManageContext): Promise<string>;
   /** Human-readable rendering of a raw value (e.g. "true" → "Увімкнено"). */
   format?(value: string): string;
@@ -145,6 +150,15 @@ export interface SettingChange {
 export type ManageResult =
   | { status: "ok"; render: "setting"; summary: string; data: SettingChange }
   | { status: "ok"; render: "list" | "value" | "capabilities"; summary: string; data?: unknown }
+  | {
+      status: "ok";
+      render: "choice";
+      summary: string;
+      /** A control whose value is one of a fixed set — the card shows the options
+       *  as chips (current one marked). Picking one asks the agent to `set` it, so
+       *  the confirm barrier still applies (safe → applied, risky → staged). */
+      data: { id: string; title: string; value: string; options: { value: string; label: string }[] };
+    }
   | {
       status: "ok";
       render: "collection";

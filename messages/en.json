@@ -455,7 +455,8 @@
       "recheck": "Re-check",
       "viewInstructions": "View full instructions",
       "emptyConnectors": "No connectors yet. Just ask — e.g. \"connect Linear\".",
-      "openInSettings": "Open in settings"
+      "openInSettings": "Open in settings",
+      "setInstruction": "Set \"{title}\" to \"{value}\"."
     }
   },
   "projects": {

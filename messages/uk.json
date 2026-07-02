@@ -455,7 +455,8 @@
       "recheck": "Перевірити ще раз",
       "viewInstructions": "Показати повні інструкції",
       "emptyConnectors": "Поки що немає конекторів. Просто попросіть — наприклад, «підключи Linear».",
-      "openInSettings": "Відкрити в налаштуваннях"
+      "openInSettings": "Відкрити в налаштуваннях",
+      "setInstruction": "Змінити «{title}» на «{value}»."
     }
   },
   "projects": {
