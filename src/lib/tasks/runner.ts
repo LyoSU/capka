@@ -119,6 +119,9 @@ export interface TaskPayload {
    *  finishes the same turn — the tool-result + follow-up text append to this
    *  message. See `/api/manage/approve`. */
   resumeMessageId?: string;
+  /** Set when this turn was fired by an automation — the finalize path reports
+   *  the outcome back so consecutive failures can auto-disable it. */
+  automationId?: string;
 }
 
 export interface ClaimedTask {
@@ -1463,6 +1466,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     }
 
     await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
+    if (payload.automationId) {
+      // Outcome accounting must never fail the turn itself.
+      const { recordAutomationOutcome } = await import("@/lib/automations/runs");
+      await recordAutomationOutcome(payload.automationId, finalStatus).catch((e) =>
+        tlog.warn("automation outcome accounting failed", { err: String(e) }),
+      );
+    }
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status: finalStatus, ...(failure ? { error: failure.userMessage } : {}) });
     // One structured line per finished run — the happy path used to leave no
     // trace in the logs (everything went to the DB), so "what happened with
