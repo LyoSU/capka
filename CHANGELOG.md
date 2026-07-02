@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-02
+
 > **⚠ Breaking — Coolify `docker_compose_location` must be `/docker-compose.yml`.**
 > `docker-compose.coolify.yml`/`.prod.yml` were removed; update the Coolify
 > setting (Configuration → Build) and redeploy.
