@@ -428,8 +428,31 @@ async function buildBot(): Promise<Bot | null> {
     });
   }
 
-  // Plain text → straight into the engine.
-  bot.on("message:text", (ctx) => ingest(ctx, ctx.message.text, []));
+  // An `ask` question field was answered by tapping a choice/boolean button, or
+  // skipped. The collection state (keyed by Telegram chat) records it and, once the
+  // last field is done, submits the answer AS the turn's owner and resumes it.
+  bot.callbackQuery(/^ta:(\d+):(\d+)$/, async (ctx) => {
+    if (!(await findLink(ctx.from!.id))) { await ctx.answerCallbackQuery(); return; }
+    const { onAskChoice } = await import("./ask-collect");
+    await onAskChoice(bot, ctx.chat!.id, Number(ctx.match![1]), Number(ctx.match![2]));
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageReplyMarkup().catch(() => {}); // drop buttons so it can't be re-tapped
+  });
+  bot.callbackQuery("taskip", async (ctx) => {
+    if (!(await findLink(ctx.from!.id))) { await ctx.answerCallbackQuery(); return; }
+    const { onAskSkip } = await import("./ask-collect");
+    await onAskSkip(bot, ctx.chat!.id);
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageReplyMarkup().catch(() => {});
+  });
+
+  // Plain text → answer a pending `ask` question if one is collecting on this chat,
+  // otherwise straight into the engine as a new turn.
+  bot.on("message:text", async (ctx) => {
+    const { onAskText } = await import("./ask-collect");
+    if (await onAskText(bot, ctx.chat.id, ctx.message.text)) return;
+    await ingest(ctx, ctx.message.text, []);
+  });
 
   // Any message carrying a file the assistant can use: photo, document, video,
   // audio, voice, animation, video note. The caption is the prompt. Telegram

@@ -1485,6 +1485,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const pv = await previewManageForUser(userId, input).catch(() => null);
       if (pv) telegramApproval = { messageId: msgId, title: pv.title, before: pv.before, after: pv.after, impact: pv.impact, body: pv.body, items: pv.items };
     }
+    // A suspended `ask` on an origin channel starts a sequential field-by-field
+    // collection there (the web card fills the same role in the browser).
+    const telegramAsk = awaitingAnswer && payload.origin
+      ? { messageId: msgId, form: awaitingAnswer.form, userId }
+      : undefined;
     await sink.finish({
       // The whole answer, persisted as one rich message (no bubble fragmentation).
       status: finalStatus, text: getFullText(), reasoning: getReasoning(),
@@ -1496,6 +1501,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // card fetches — computed here (only on an origin channel) from the suspended
       // call's input, so the tap resumes the turn instead of applying out-of-band.
       ...(telegramApproval ? { approval: telegramApproval } : {}),
+      ...(telegramAsk ? { ask: telegramAsk } : {}),
     });
     // Deliver any files the agent created/edited this run to the origin channel
     // (Telegram). Best-effort and only on success — never fail the task over it.

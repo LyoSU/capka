@@ -15,6 +15,7 @@ import { log } from "@/lib/log";
 import { getTranslator, type Translator } from "@/lib/i18n/translator";
 import { formatShortDuration } from "@/lib/chat/duration";
 import type { Modality } from "@/lib/providers/registry";
+import type { AskForm } from "@/lib/ask/types";
 
 // `locale` carries the originating Telegram client's language so the bot's
 // outbound text (status header, collapsed log, error fallbacks) matches what the
@@ -51,6 +52,10 @@ export interface TaskResult {
    *  The preview (`title`/before→after, the ⚠️ `impact`, and `body`/`items` — the
    *  full text/set being approved) travels too, so nobody approves a change blind. */
   approval?: { messageId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] };
+  /** An `ask` tool call the runner SUSPENDED for a human answer. On Telegram this
+   *  starts a sequential field-by-field collection (see ask-collect); `userId` owns
+   *  the answer submission, `messageId` is the suspended assistant message. */
+  ask?: { messageId: string; form: AskForm; userId: string };
 }
 
 /** The transient activity shown while the answer streams in. The live reasoning
@@ -253,7 +258,7 @@ class TelegramSink implements DeliverySink {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private bot: any = null;
 
-  constructor(private readonly chatId: number, locale?: string) {
+  constructor(private readonly chatId: number, private readonly locale?: string) {
     this.draftId = draftIdFrom(`tg:${chatId}:${Date.now()}`);
     this.t = getTranslator(locale, "telegram");
     this.tErr = getTranslator(locale, "errors.llm");
@@ -421,6 +426,22 @@ class TelegramSink implements DeliverySink {
         })
       : null;
     if (notice) markdown = markdown ? `${notice}\n\n${markdown}` : notice;
+
+    // A suspended-for-answer turn (`ask`): send any preamble text, then start the
+    // sequential field-by-field collection on this chat (see ask-collect). The
+    // composer-block equivalent on Telegram is that a plain reply is routed to the
+    // pending question until it's answered.
+    if (result.ask) {
+      if (body && markdown) await this.sendRich(markdown, body, false);
+      const bot = await this.getBot();
+      if (bot) {
+        const { startAskCollection } = await import("@/lib/telegram/ask-collect");
+        await startAskCollection(bot, this.chatId, {
+          userId: result.ask.userId, messageId: result.ask.messageId, form: result.ask.form, kind: "ask", locale: this.locale,
+        });
+      }
+      return;
+    }
 
     // A suspended-for-approval turn: append a compact before→after preview and
     // native Approve/Reject buttons. The tap (bound to this Telegram user) records
