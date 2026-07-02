@@ -384,11 +384,17 @@ export function useBackgroundChat({
                 if (idx === -1) return prev;
                 const msgs = [...prev];
                 const msg = msgs[idx];
-                const parts = msg.parts.map((p) =>
-                  p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
-                    ? { ...p, state: "input-available", askForm: data.form }
-                    : p,
-                );
+                const found = msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId);
+                const parts = found
+                  ? msg.parts.map((p) =>
+                      p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
+                        ? { ...p, state: "input-available", askForm: data.form }
+                        : p,
+                    )
+                  // An MCP elicitation (`elicit:` id) has no persisted tool-call part —
+                  // append a transient ask part so the same card renders mid-turn. It's
+                  // not persisted (elicitation is non-durable), so a reload drops it.
+                  : [...msg.parts, { type: "dynamic-tool" as const, toolCallId: data.toolCallId, toolName: "ask", state: "input-available", askForm: data.form }];
                 msgs[idx] = { ...msg, parts };
                 return msgs;
               });

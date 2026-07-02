@@ -9,8 +9,9 @@ import { SandboxStdioTransport } from "./stdio-transport";
 import type { McpServerConfig } from "./types";
 
 /** Run context a connector needs to elicit input from the user mid-tool-call.
- *  Present only during a live turn (loadMcpTools threads it through). */
-export type ElicitContext = { userId: string; chatId: string; messageId: string };
+ *  Present only during a live turn (loadMcpTools threads it through). `origin` lets
+ *  the handler also start the sequential collection on a non-web channel (Telegram). */
+export type ElicitContext = { userId: string; chatId: string; messageId: string; origin?: import("@/lib/tasks/delivery").TaskOrigin };
 
 export interface ConnectedMcp {
   client: Client;

@@ -1147,7 +1147,10 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
               return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} onSend={onSend} />;
             }
             if (g.kind === "ask") {
-              return <AskCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} form={g.part.askForm!} value={g.part.askValue} state={g.part.state} />;
+              // An `elicit:` toolCallId marks a block-and-poll MCP elicitation — the
+              // answer routes to the row writer, not a suspended tool call.
+              const kind = g.part.toolCallId?.startsWith("elicit:") ? "elicitation" : "ask";
+              return <AskCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} form={g.part.askForm!} value={g.part.askValue} state={g.part.state} kind={kind} />;
             }
             if (g.kind === "manage") {
               return <ManageCard key={gi} output={g.output} onSend={onSend} />;

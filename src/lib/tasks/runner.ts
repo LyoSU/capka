@@ -322,7 +322,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     ensureSession,
     isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
     // Lets a connector elicit input from the user mid-tool-call (block-and-poll).
-    elicitContext: { userId, chatId, messageId },
+    elicitContext: { userId, chatId, messageId, origin: payload.origin },
   });
   // The sandbox + MCP clients are now LIVE (stdio MCP servers may hold child
   // processes). Define their disposer immediately so any throw in the rest of

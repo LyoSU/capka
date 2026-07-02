@@ -19,7 +19,7 @@ const POLL_MS = 500;
  * during a tool call, so this quiet block isn't mistaken for a hung provider. On
  * timeout we return `cancel` and the MCP server's tool call fails gracefully.
  */
-export function makeElicitHandler(ctx: { userId: string; chatId: string; messageId: string; timeoutMs?: number }) {
+export function makeElicitHandler(ctx: { userId: string; chatId: string; messageId: string; timeoutMs?: number; origin?: import("@/lib/tasks/delivery").TaskOrigin }) {
   return async (request: { params: { message?: string; requestedSchema?: unknown } }) => {
     const form = elicitSchemaToForm(request.params.requestedSchema, request.params.message);
     const id = nanoid();
@@ -34,6 +34,18 @@ export function makeElicitHandler(ctx: { userId: string; chatId: string; message
         type: "task:ask", taskId: "", chatId: ctx.chatId, messageId: ctx.messageId,
         toolCallId: `elicit:${id}`, form,
       });
+      // On a non-web channel (Telegram) also start the sequential collection there;
+      // its answer writes this same row (kind:"elicitation"), which the poll picks up.
+      if (ctx.origin?.platform === "telegram") {
+        const { getBot } = await import("@/lib/telegram/bot");
+        const bot = await getBot();
+        if (bot) {
+          const { startAskCollection } = await import("@/lib/telegram/ask-collect");
+          await startAskCollection(bot, ctx.origin.telegramChatId, {
+            userId: ctx.userId, messageId: ctx.messageId, form, kind: "elicitation", locale: ctx.origin.locale,
+          });
+        }
+      }
       const deadline = Date.now() + (ctx.timeoutMs ?? DEFAULT_TIMEOUT_MS);
       while (Date.now() < deadline) {
         const [row] = await db.select({ answer: pendingElicitations.answer })

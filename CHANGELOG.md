@@ -12,6 +12,14 @@ All notable changes to Capka are documented here. Format follows
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
 ### Added
+- **Connectors can now ask you for input mid-task (MCP elicitation).** An MCP
+  connector that requests structured input during a tool call (`elicitation/create`)
+  surfaces the same question card; your answer is handed back so the connector's
+  call completes. Bounded by a ~3-minute timeout — if unanswered it auto-cancels
+  and the tool call fails gracefully. Unlike the `ask` tool this does NOT survive a
+  worker restart: an in-flight connector request lives on a live connection that a
+  fresh worker can't reconstruct, so it's block-and-poll by design. Works on web
+  (card) and Telegram (field-by-field). No operator configuration.
 - **The agent can now ask you a structured question mid-task (`ask` tool).**
   Instead of guessing or answering blind when it's genuinely blocked on your
   input, the model can pause a turn to collect a choice or a short text answer
