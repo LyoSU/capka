@@ -66,6 +66,18 @@ describe("manage/dispatch", () => {
     expect(audit).toHaveBeenCalledOnce();
   });
 
+  it("surfaces reloadOnApply on the setting result so the UI can refresh (e.g. after a locale change)", async () => {
+    const plain = memControl({ id: "user.x", scope: "user", requiredRole: "user", risk: "safe" });
+    const reloads = memControl({ id: "user.locale", scope: "user", requiredRole: "user", risk: "safe", reloadOnApply: true });
+    const reg = createRegistry([plain.control, reloads.control]);
+    const a = await dispatch(reg, ctx(), { action: "set", target: "user.x", value: "1" });
+    const b = await dispatch(reg, ctx(), { action: "set", target: "user.locale", value: "uk" });
+    if (a.status !== "ok" || a.render !== "setting") throw new Error("expected setting");
+    if (b.status !== "ok" || b.render !== "setting") throw new Error("expected setting");
+    expect(a.data.reload).toBeUndefined(); // ordinary settings don't force a refresh
+    expect(b.data.reload).toBe(true);
+  });
+
   it("does NOT apply a confirm-risk change — it STAGES one and returns a pendingId; the model can't apply it", async () => {
     const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([control]);

@@ -43,6 +43,10 @@ export interface Control {
   apply(ctx: ManageContext, value: string): Promise<void>;
   /** Optional warning about knock-on effects, shown in the confirm preview. */
   impact?(ctx: ManageContext, next: string): Promise<string | undefined>;
+  /** Applying this control changes server-rendered UI (e.g. `user.locale` switches
+   *  the whole interface language), so the web card refreshes the route after
+   *  apply/undo instead of leaving stale content until a manual reload. */
+  reloadOnApply?: boolean;
 }
 
 export type ManageInput =
@@ -130,6 +134,9 @@ export interface SettingChange {
   /** Opaque id of a staged undo — the Undo button/callback consumes it via the
    *  same human-authed path (the model never applies an undo either). */
   undoPendingId?: string;
+  /** The control's `reloadOnApply` — tells the card to refresh the route once the
+   *  change is applied (or undone), so a locale switch takes effect immediately. */
+  reload?: boolean;
 }
 
 export type ManageResult =

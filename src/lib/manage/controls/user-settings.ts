@@ -15,6 +15,9 @@ const locale: Control = {
   scope: "user",
   requiredRole: "user",
   risk: "safe",
+  // Switching language re-renders the whole UI server-side (next-intl reads
+  // user.locale per request), so the card refreshes the route on apply.
+  reloadOnApply: true,
   schema: z.string().refine((v) => (locales as readonly string[]).includes(v), "Unsupported language."),
   format: (v) => LOCALE_NAMES[v] ?? v,
   read: async (ctx) =>

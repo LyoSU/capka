@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,9 +21,12 @@ type ManageOutput = {
   action?: RequiredAction;
   data?: {
     title?: string;
+    controlId?: string;
     before?: string;
     after?: string;
     undoPendingId?: string;
+    /** Refresh the route after apply/undo (e.g. a locale change takes effect now). */
+    reload?: boolean;
     // collection
     collectionId?: string;
     items?: { id: string; title: string; subtitle?: string; enabled?: boolean; status?: string; owned?: boolean }[];
@@ -211,8 +215,21 @@ function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
 /** An applied setting (before → after) with an Undo that also travels the
  *  human-authed endpoint (the model can't trigger an undo either). */
 function SettingCard({ o, t }: { o: ManageOutput; t: T }) {
-  const { title = "", before = "", after = "", undoPendingId } = o.data!;
+  const { title = "", controlId = "", before = "", after = "", undoPendingId, reload } = o.data!;
   const [phase, setPhase] = useState<"idle" | "applying" | "done" | "error">("idle");
+  const router = useRouter();
+
+  // A reloadOnApply change (locale) already applied server-side before this card
+  // rendered, but the page was sent in the OLD language — refresh once so the UI
+  // catches up. Guarded by a per-transition sessionStorage marker so it can't loop
+  // (the refresh remounts this card) and doesn't re-fire for a historical card.
+  useEffect(() => {
+    if (!reload) return;
+    const key = `capka:reloaded:${controlId}:${after}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, "1");
+    router.refresh();
+  }, [reload, controlId, after, router]);
 
   const undo = async () => {
     if (!undoPendingId || phase !== "idle") return;
@@ -220,7 +237,10 @@ function SettingCard({ o, t }: { o: ManageOutput; t: T }) {
     haptic("tap");
     try {
       const r = await consumePending(undoPendingId);
-      setPhase(r.status === "ok" ? "done" : "error");
+      if (r.status === "ok") {
+        setPhase("done");
+        if (reload) router.refresh(); // revert the language too, immediately
+      } else setPhase("error");
     } catch {
       setPhase("error");
     }

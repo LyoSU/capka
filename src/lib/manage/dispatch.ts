@@ -317,7 +317,7 @@ function settingResult(t: ManageT, c: Control, before: string, after: string, un
     status: "ok",
     render: "setting",
     summary: `"${title(t, c)}" → ${fmt(t, c, after)}`,
-    data: { controlId: c.id, title: title(t, c), before: fmt(t, c, before), after: fmt(t, c, after), undoPendingId },
+    data: { controlId: c.id, title: title(t, c), before: fmt(t, c, before), after: fmt(t, c, after), undoPendingId, reload: c.reloadOnApply || undefined },
   };
 }
 
