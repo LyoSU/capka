@@ -49,6 +49,13 @@ All notable changes to Capka are documented here. Format follows
   `members_can_install_plugins` server-side (admins always may).
 
 ### Changed
+- **The agent reviewing connectors/skills no longer drops a redundant list card
+  in the chat.** A `manage` read of one collection's items (e.g. the agent
+  listing MCP connectors before acting) rendered a full item card to the user,
+  which read as noise next to the agent's own reply. Collection reads now stay a
+  quiet activity-rail step, like other reads (`value`/`list`); the agent surfaces
+  anything worth seeing in its prose. Cards remain only for things the user must
+  see or act on (confirmations, settings changes, sign-in prompts, diagnostics).
 - **All `manage` user-facing text is English in code + localized via i18n
   (default English).** Control titles, values, states and messages were
   Ukrainian string literals; they are now English in the source (the single

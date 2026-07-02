@@ -47,11 +47,13 @@ type ManageOutput = {
   };
 };
 
-const CARD_RENDERS = new Set(["confirm", "setting", "choice", "action_required", "resource", "debug", "collection"]);
+const CARD_RENDERS = new Set(["confirm", "setting", "choice", "action_required", "resource", "debug"]);
 
 /** A `manage` result becomes a prominent card (not a quiet rail step) when it's
- *  something the user must SEE or ACT on. Plain reads (`value`, `list`) stay in
- *  the activity rail. */
+ *  something the user must SEE or ACT on. Plain reads — a single value (`value`),
+ *  the whole registry (`list`), or one collection's items (`collection`, i.e. the
+ *  agent reviewing connectors/skills) — stay in the activity rail; the agent
+ *  relays anything worth surfacing in prose, so an internal review isn't a card. */
 export function isManageCard(output: unknown): boolean {
   const r = (output as ManageOutput | null)?.render;
   return r ? CARD_RENDERS.has(r) : false;
@@ -377,18 +379,6 @@ function ChoiceCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: s
 
 /** A colored dot + localized word for a connector's state — no raw "oauth"/on/off
  *  jargon (PRODUCT.md forbids it for the non-technical audience). */
-function StatusBadge({ enabled, status, t }: { enabled?: boolean; status?: string; t: T }) {
-  const kind = enabled === false ? "off" : status === "oauth" ? "signin" : "on";
-  const dot = kind === "on" ? "bg-emerald-500" : kind === "signin" ? "bg-amber-500" : "bg-muted-foreground/40";
-  const label = kind === "off" ? t("statusOff") : kind === "signin" ? t("statusSignin") : t("statusOn");
-  return (
-    <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs ${enabled === false ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
-      {label}
-    </span>
-  );
-}
-
 export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text: string) => void }) {
   const t = useTranslations("chat.manage");
   const o = output as ManageOutput;
@@ -467,34 +457,6 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
             </Button>
           </div>
         )}
-      </CardShell>
-    );
-  }
-
-  if (o?.render === "collection" && o.data?.items) {
-    const items = o.data.items;
-    return (
-      <CardShell>
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <Plug className="h-4 w-4 text-muted-foreground" />
-          {o.data.title ?? t("connectorsTitle")}
-        </div>
-        {items.length === 0 ? (
-          <div className="mt-2 text-sm text-muted-foreground">{t("emptyConnectors")}</div>
-        ) : (
-          <ul className="mt-2 space-y-1.5">
-            {items.map((it) => (
-              <li key={it.id} className="flex items-center justify-between gap-3 text-sm">
-                <span className="min-w-0">
-                  <span className="font-medium text-foreground">{it.title}</span>
-                  {it.subtitle && <span className="ml-2 truncate text-xs text-muted-foreground">{it.subtitle}</span>}
-                </span>
-                <StatusBadge enabled={it.enabled} status={it.status} t={t} />
-              </li>
-            ))}
-          </ul>
-        )}
-        {o.data.settingsPath && <SettingsLink href={o.data.settingsPath} t={t} />}
       </CardShell>
     );
   }
