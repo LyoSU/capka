@@ -23,5 +23,12 @@ export function memPendingStore(): PendingStore {
       const r = rows.get(id);
       if (r && r.userId === userId) rows.delete(id);
     },
+    async peek(id, userId) {
+      const r = rows.get(id);
+      if (!r || r.userId !== userId) return "gone";
+      if (r.consumed) return "applied";
+      if (r.expiresAt <= Date.now()) return "expired";
+      return "open";
+    },
   };
 }

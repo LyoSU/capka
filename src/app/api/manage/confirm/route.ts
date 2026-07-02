@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { buildRegistry } from "@/lib/manage/controls";
 import { applyPending } from "@/lib/manage/dispatch";
+import { dbPendingStore } from "@/lib/manage/pending";
 import type { ManageContext } from "@/lib/manage/types";
 
 // Built once — the registry is stateless (controls delegate to the service layer).
@@ -35,4 +36,16 @@ export const POST = apiHandler(async (req: Request) => {
   // 200 even for an error result: the card renders the friendly message inline
   // (e.g. "confirmation expired"); this isn't an HTTP-level failure.
   return Response.json(result);
+});
+
+/**
+ * Read-only status of a staged confirmation for the signed-in user — lets a
+ * RELOADED confirm card reflect reality (already applied / expired) instead of
+ * offering live buttons for a change that already happened.
+ */
+export const GET = apiHandler(async (req: Request) => {
+  const { userId } = await requireActive();
+  const pendingId = new URL(req.url).searchParams.get("pendingId");
+  if (!pendingId) return Response.json({ status: "gone" });
+  return Response.json({ status: await dbPendingStore.peek(pendingId, userId) });
 });

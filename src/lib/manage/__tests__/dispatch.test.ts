@@ -89,6 +89,16 @@ describe("manage/dispatch", () => {
     expect(cell.value).toBe("bridge");
   });
 
+  it("a confirmed pending reads back as 'applied' (so a reloaded card shows done, not live buttons)", async () => {
+    const { control } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
+    const reg = createRegistry([control]);
+    const staged = await dispatch(reg, ctx({ isAdmin: true }), { action: "set", target: "org.net", value: "bridge" });
+    if (staged.status !== "confirm_required") throw new Error("expected confirm_required");
+    expect(await store.peek(staged.pendingId, "u1")).toBe("open");
+    await applyPending(reg, ctx({ isAdmin: true }), staged.pendingId);
+    expect(await store.peek(staged.pendingId, "u1")).toBe("applied");
+  });
+
   it("a pendingId is single-use — a second apply is refused", async () => {
     const { control, cell } = memControl({ id: "org.net", scope: "org", requiredRole: "admin", risk: "confirm" });
     const reg = createRegistry([control]);

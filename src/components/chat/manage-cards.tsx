@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -118,8 +118,29 @@ function Outcome({ kind, text }: { kind: "done" | "expired" | "cancelled" | "err
  *  outcome — so a button can't be clicked twice and a stale card reads clearly. */
 function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
   const { title, before, after, impact, details, body } = o.preview!;
-  const [phase, setPhase] = useState<"idle" | "applying" | "done" | "expired" | "cancelled" | "error">("idle");
+  // Start "checking": on mount we ask the server whether this pending is still
+  // open, so a RELOADED card shows "confirmed"/"expired" instead of live buttons
+  // for a change that already happened (React state doesn't survive a reload).
+  const [phase, setPhase] = useState<"checking" | "idle" | "applying" | "done" | "expired" | "cancelled" | "error">(
+    o.pendingId ? "checking" : "idle",
+  );
   const [errText, setErrText] = useState("");
+
+  useEffect(() => {
+    if (!o.pendingId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/manage/confirm?pendingId=${encodeURIComponent(o.pendingId!)}`);
+        const { status } = (await res.json()) as { status: "open" | "applied" | "expired" | "gone" };
+        if (!alive) return;
+        setPhase(status === "open" ? "idle" : status === "applied" ? "done" : "expired");
+      } catch {
+        if (alive) setPhase("idle"); // fall back to buttons; a click will resolve it
+      }
+    })();
+    return () => { alive = false; };
+  }, [o.pendingId]);
 
   const confirm = async () => {
     if (!o.pendingId || phase !== "idle") return;

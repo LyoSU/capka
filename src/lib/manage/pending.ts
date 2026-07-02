@@ -26,7 +26,13 @@ export interface PendingStore {
   consume(id: string, userId: string): Promise<PendingRecord | null>;
   /** Drop a staged action the user cancelled (best-effort). */
   cancel(id: string, userId: string): Promise<void>;
+  /** Read-only status for THIS user's card, so a reloaded confirm card reflects
+   *  reality instead of showing live buttons for an already-applied change.
+   *  `gone` = never existed, cancelled, or cleaned up past its TTL. */
+  peek(id: string, userId: string): Promise<PendingStatus>;
 }
+
+export type PendingStatus = "open" | "applied" | "expired" | "gone";
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 
@@ -69,5 +75,17 @@ export const dbPendingStore: PendingStore = {
 
   async cancel(id, userId) {
     await db.delete(managePending).where(and(eq(managePending.id, id), eq(managePending.userId, userId)));
+  },
+
+  async peek(id, userId) {
+    const [row] = await db
+      .select({ consumedAt: managePending.consumedAt, expiresAt: managePending.expiresAt })
+      .from(managePending)
+      .where(and(eq(managePending.id, id), eq(managePending.userId, userId)))
+      .limit(1);
+    if (!row) return "gone";
+    if (row.consumedAt) return "applied";
+    if (row.expiresAt <= new Date()) return "expired";
+    return "open";
   },
 };
