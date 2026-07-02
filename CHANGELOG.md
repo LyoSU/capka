@@ -6,6 +6,13 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A Coolify redeploy on an unchanged image tag (`:latest` or a pinned
+  `CAPKA_VERSION`) no longer keeps running the previously cached image bits**
+  — `platform` and `sandbox-controller` now set `pull_policy: always`, so
+  `docker compose up -d` re-checks the registry every deploy instead of only
+  pulling when the tag is missing locally.
+
 ## [0.2.0] - 2026-07-02
 
 > **⚠ Breaking — Coolify `docker_compose_location` must be `/docker-compose.yml`.**

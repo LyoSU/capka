@@ -63,6 +63,11 @@ services:
 
   sandbox-controller:
     image: ghcr.io/lyosu/capka-controller:${CAPKA_VERSION:-latest}
+    # `up -d`'s default pull policy only fetches an image that's missing
+    # locally — a redeploy that reuses the same tag (e.g. Coolify's git-based
+    # "Redeploy", which never runs `docker compose pull`) would silently keep
+    # running the stale cached bits. Always check the registry instead.
+    pull_policy: always
     expose:
       - "3001"
     # Reaches the daemon via the restricted socket-proxy (DOCKER_HOST), never the
@@ -121,6 +126,7 @@ services:
 
   platform:
     image: ghcr.io/lyosu/capka-platform:${CAPKA_VERSION:-latest}
+    pull_policy: always
     # Published on all interfaces by default so it works out of the box with zero
     # config. Behind a reverse proxy (or on a host where Docker publishes past the
     # firewall), set PLATFORM_BIND=127.0.0.1 to bind loopback-only and let the
