@@ -117,6 +117,11 @@ export interface Collection {
   /** The full settings page that manages this collection, so a chat card can offer
    *  a quiet "Open in settings →" link to the richer UI (the card is a summary). */
   settingsPath?: string;
+  /** Model-facing usage notes: the exact `add` args and any special workflows
+   *  (English, like the tool description this used to live in). Returned by `get`
+   *  on the collection and echoed on an invalid `add`, so the static tool
+   *  description stays small and cache-friendly (progressive disclosure). */
+  usage?: string;
   /** Keep add confirm-gated even in `autonomous` mode — for collections whose add
    *  runs third-party code (MCP connectors), the one checkpoint injection can't
    *  bypass. Reversible/instruction-only collections (skills) omit it. */
@@ -201,7 +206,7 @@ export type ManageResult =
       status: "ok";
       render: "collection";
       summary: string;
-      data: { collectionId: string; title: string; items: CollectionItem[]; canAdd: boolean; settingsPath?: string };
+      data: { collectionId: string; title: string; items: CollectionItem[]; canAdd: boolean; settingsPath?: string; usage?: string };
     }
   | {
       status: "ok";

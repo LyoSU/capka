@@ -47,6 +47,13 @@ All notable changes to Capka are documented here. Format follows
   push/PR.
 
 ### Changed
+- **The `manage` tool description shed its per-collection reference (~40%
+  smaller), cutting its per-turn token cost.** Connector/skill/automation add
+  shapes and workflows now come back as a `usage` field from `get` on the
+  collection (and are echoed on an invalid `add`), instead of riding along in
+  every request. Malformed `manage` calls now name the missing fields, and an
+  `add` whose args can't validate is rejected immediately instead of first
+  asking you to approve it.
 - **Claude models now cache the conversation history, not just the system
   prompt** — long Claude chats bill at roughly cache-read pricing instead of
   full price. Claude behind a LiteLLM proxy still needs

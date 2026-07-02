@@ -63,7 +63,12 @@ export const automationCollection: Collection = {
   id: "automations",
   title: "Automations",
   description:
-    "Scheduled agent runs: the platform runs a saved instruction on a schedule (or once at a set time) with no tab open. Each run opens a new chat; results also go to Telegram when linked. Use the user's timezone for cron. Offer this when the user describes a recurring intent.",
+    "Scheduled agent runs: the platform runs a saved instruction on a schedule (or once at a set time) with no tab open. Each run opens a new chat; results also go to Telegram when linked. Offer this when the user describes a recurring intent.",
+  usage:
+    "add args: {title, prompt, cron, timezone} for a recurring schedule, or {title, prompt, once_at} for a one-off. " +
+    "title and prompt are ALWAYS required — title is a short label the user sees in the automations list; prompt is the FULL instruction " +
+    "the agent will run each time, written as if starting a fresh conversation. " +
+    "cron is a 5-field expression evaluated in `timezone` (IANA, e.g. Europe/Kyiv — use the user's timezone); once_at is an ISO datetime.",
   requiredRole: "user",
   auditNoun: "automation",
   settingsPath: "/settings/automations",
@@ -79,6 +84,8 @@ export const automationCollection: Collection = {
     cron: z.string().optional(),
     timezone: z.string().optional(),
     once_at: z.string().optional(),
+  }).refine((v) => Boolean(v.cron) !== Boolean(v.once_at), {
+    message: 'Provide EITHER "cron" (with "timezone") for a recurring schedule OR "once_at" (an ISO datetime) for a one-off, not both.',
   }),
   canAdd: async () => ((await getSetting("automations_enabled")) ?? "true") === "true",
   validateAdd: async (ctx, args) => {

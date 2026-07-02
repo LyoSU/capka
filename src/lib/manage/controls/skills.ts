@@ -59,6 +59,14 @@ export const skillCollection: Collection = {
   id: "skill",
   title: "Skills",
   description: "Agent skills — list, add (SKILL.md), enable/disable, remove.",
+  usage:
+    "add args: {content} — one full SKILL.md (frontmatter name+description, then the instruction body); " +
+    'OR {repo} — install EVERY skill from a GitHub skills repo ("owner/repo" or a github.com URL); ' +
+    "OR {path} — install from the WORKSPACE: a SKILL.md, a skill folder, a repo-shaped folder, or a .zip the user dropped in " +
+    "(the server reads the files itself, so PREFER {path} over pasting file contents into {content}). " +
+    'add {only:["name",...]} narrows a repo/path/zip to specific skills. ' +
+    'To CHANGE an existing skill, call action="edit" (target="skill", itemId): it checks the skill out into the workspace and returns the path — ' +
+    "edit the files there with your normal file tools (a small partial edit, NOT re-authoring the whole SKILL.md), then save with add {path}.",
   requiredRole: "user",
   auditNoun: "skill",
   settingsPath: "/settings/skills",

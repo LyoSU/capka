@@ -139,6 +139,33 @@ describe("manage/dispatch collections", () => {
     if (res.status === "error") expect(res.code).toBe("invalid_value");
   });
 
+  it("get surfaces the collection's usage (add args live there, not in the tool description)", async () => {
+    const { collection } = memCollection({ usage: "add args: {name, url}." });
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx(), { action: "get", target: "mcp" });
+    if (res.status === "ok" && res.render === "collection") {
+      expect(res.data.usage).toBe("add args: {name, url}.");
+    } else {
+      throw new Error("expected collection render");
+    }
+  });
+
+  it("an add that fails the addSchema echoes the collection's usage so the model can repair it", async () => {
+    const { collection } = memCollection({ usage: "add args: {name, url}." });
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok" } });
+    expect(res.status).toBe("error");
+    if (res.status === "error") expect(res.summary).toContain("add args: {name, url}.");
+  });
+
+  it("requiresApproval skips the approval card for an add the schema would reject anyway", async () => {
+    const { collection } = memCollection();
+    const reg = createRegistry([], [collection]);
+    // Doomed args (url missing) — execute will return the actionable error without
+    // interrupting the user; valid args stay gated as before.
+    expect(await requiresApproval(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok" } })).toBe(false);
+  });
+
   it("validateAdd refuses UP FRONT — a doomed add never reaches a confirm card", async () => {
     const { collection, items } = memCollection({
       validateAdd: async () => { throw new Error("only an admin can add this"); },

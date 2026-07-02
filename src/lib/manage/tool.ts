@@ -32,7 +32,7 @@ const inputSchema = z.object({
   args: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe('Fields for `add` to a collection, e.g. for mcp: {name, url, authKind:"oauth"} or {name, command, args}.'),
+    .describe("Fields for `add` to a collection — the exact shape is documented in that collection's `usage` (returned by get; e.g. mcp: {name, url})."),
 });
 
 /** Map the flat tool args to a discriminated ManageInput (or null if a required
@@ -43,6 +43,20 @@ export function toManageInput(a: {
 }): ManageInput | null {
   return toInput(a as z.infer<typeof inputSchema>);
 }
+
+/** Which fields each action requires — echoed back on a malformed call so the
+ *  model repairs it in one step instead of re-guessing against a generic error. */
+const REQUIRED_FIELDS: Record<string, string> = {
+  get: "`target`",
+  set: "`target` and `value`",
+  add: "`target` and `args`",
+  remove: "`target` and `itemId`",
+  enable: "`target` and `itemId`",
+  disable: "`target` and `itemId`",
+  debug: "`target` and `itemId`",
+  connect: "`target` and `itemId`",
+  edit: "`target` and `itemId`",
+};
 
 function toInput(a: z.infer<typeof inputSchema>): ManageInput | null {
   switch (a.action) {
@@ -81,10 +95,10 @@ Settings/controls:
 - Risky/platform-wide changes are approved by the USER, not you — this is handled automatically. When you call such a "set", the tool call PAUSES: the user sees an Approve/Reject card and the app blocks until they decide. You don't stage or re-send anything. If they approve, the tool then runs and returns the applied result — continue naturally from there (e.g. confirm it's done). If they reject, you'll get a denial result — acknowledge it and move on. NEVER tell the user to "press Confirm / click the button" (the card speaks for itself), never say you lack permission, and never re-call "set" to retry a pending approval. Undo is a button on the applied card, not something you trigger.
 
 Collections (target="mcp" for connectors, target="skill" for agent skills, target="automations" for scheduled agent runs):
-- action="get" with a collection target lists its items; add/remove/enable/disable/debug/connect operate on them (itemId identifies one). Each collection in a list/get result carries a resolved \`canAdd\` boolean — that, and ONLY that, tells you whether you may add there; trust it over any inference (e.g. a toggle like "members can install connectors" governs OTHER end-users, never you-as-caller). Adding a personal connector (name+url) or a personal skill needs no admin at all.
-- add args for mcp: {name, url, authKind:"oauth"} (remote) or {name, command, args} (local/stdio). add args for skill: {content} (a single full SKILL.md — frontmatter name+description then the instruction body), OR {repo} to install EVERY skill from a GitHub skills repo at once (e.g. {repo:"owner/repo"} or a github.com URL), OR {path} to install from the WORKSPACE — a SKILL.md, a skill folder, a repo-shaped folder, or a .zip the user dropped in (the server reads the files itself, so PREFER {path} over pasting file contents into {content}). add {only:["name",...]} narrows a repo/path/zip to specific skills. To CHANGE an existing skill, call action="edit" (target="skill", itemId): it checks the skill out into the workspace and returns the path — edit the files there with your normal file tools (a small partial edit, NOT re-authoring the whole SKILL.md), then save with add {path}. add args for automations: {title, prompt, cron, timezone} for a recurring schedule, or {title, prompt, once_at} for a one-off — title and prompt are ALWAYS required (title is a short label the user sees in the automations list, prompt is the FULL instruction the agent will run each time, written as if starting a fresh conversation). Never omit title. add/remove AND enable PAUSE for the user's approval exactly like a risky setting: the approval card lists what will be installed or turned on (enabling a connector/skill/automation activates third-party code or unattended spend, so it needs the same click); after they approve, the action runs and returns its result (continue from there), and if they reject you get a denial — you never apply it yourself. disable/debug/connect run directly.
-- Some connectors need the user to sign in via a browser (OAuth). action="add" or action="connect" then returns status="action_required" with a URL — DON'T try to open it yourself; tell the user to use the button/link, then re-check with action="debug".
-- action="debug" reports a connector's live state (ok / needs login / unreachable) and a hint. NEVER ask the user to paste API keys or tokens into chat — a connector needing a secret token is configured on the settings page, not here.
+- action="get" with a collection target lists its items AND returns that collection's \`usage\` — the exact add args and workflows. Get the collection BEFORE your first add/edit to it (an add with wrong args also returns the usage). add/remove/enable/disable/debug/connect operate on items (itemId identifies one).
+- Each collection in a list/get result carries a resolved \`canAdd\` boolean — that, and ONLY that, tells you whether you may add there; trust it over any inference (e.g. a toggle like "members can install connectors" governs OTHER end-users, never you-as-caller).
+- add/remove AND enable PAUSE for the user's approval exactly like a risky setting (enabling a connector/skill/automation activates third-party code or unattended spend, so it needs the same click); after they approve, the action runs and returns its result, and if they reject you get a denial — you never apply it yourself. disable/debug/connect run directly.
+- status="action_required" carries a URL only the USER can open (e.g. an OAuth sign-in) — DON'T open it yourself; tell the user to use the button/link, then re-check with action="debug".
 
 Permission and info are different things. Permission is server-side — just attempt the action; never infer what YOU can do from a setting's value (a toggle like "members can install connectors" restricts other end-users, not you-as-caller). If you're only missing INPUT to act — most often a connector's url (remote) or command (local) — ask the user for exactly that in one plain question, and never dress a missing url up as a permissions/admin problem.`;
 
@@ -115,7 +129,12 @@ export function makeManageTool(identity: ManageIdentity) {
       execute: async (args): Promise<ManageResult> => {
         const input = toInput(args);
         if (!input) {
-          return { status: "error", render: "error", code: "bad_request", summary: "Missing required fields for this action." };
+          return {
+            status: "error",
+            render: "error",
+            code: "bad_request",
+            summary: `action="${args.action}" needs ${REQUIRED_FIELDS[args.action] ?? "more fields"} — re-call with them set.`,
+          };
         }
         return dispatch(registry, ctx(), input);
       },

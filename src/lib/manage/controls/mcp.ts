@@ -80,6 +80,11 @@ export const mcpCollection: Collection = {
   id: "mcp",
   title: "Connectors (MCP)",
   description: "External MCP connectors — add, enable/disable, debug, authorize.",
+  usage:
+    'add args: {name, url} for a remote connector (set authKind:"oauth" if it needs a sign-in), or {name, command, args} for a local stdio one. ' +
+    'Some connectors need the user to sign in via a browser: add/connect then returns status="action_required" with a URL — don\'t open it yourself; ' +
+    'tell the user to use the button/link, then re-check with debug. debug reports a connector\'s live state (ok / needs sign-in / unreachable) and a hint. ' +
+    "NEVER ask the user to paste API keys or tokens into chat — a connector needing a secret token is configured on the settings page, not here.",
   requiredRole: "user",
   auditNoun: "connector",
   settingsPath: "/settings/skills?tab=connectors",

@@ -179,7 +179,7 @@ async function get(reg: Registry, ctx: ManageContext, target: string): Promise<M
       status: "ok",
       render: "collection",
       summary: `${collLabel(t, coll)}: ${items.length}${canAdd ? " (you can add here)" : ""}`,
-      data: { collectionId: coll.id, title: collLabel(t, coll), items, canAdd, settingsPath: coll.settingsPath },
+      data: { collectionId: coll.id, title: collLabel(t, coll), items, canAdd, settingsPath: coll.settingsPath, usage: coll.usage },
     };
   }
   return err("not_found", `No setting "${target}".`);
@@ -248,6 +248,10 @@ export async function requiresApproval(reg: Registry, ctx: ManageContext, input:
   if (input.action === "add") {
     const coll = reg.collection(input.target);
     if (!coll || !canAccess(ctx, coll)) return false;
+    // Args the schema rejects are doomed anyway: skip the approval card and let
+    // execute return the actionable invalid_value (with the collection's usage)
+    // instead of making the user approve a change that can never apply.
+    if (coll.addSchema && !coll.addSchema.safeParse(input.args).success) return false;
     return !!coll.alwaysConfirm || !(await autonomous(reg, ctx));
   }
   if (input.action === "remove") {
@@ -439,7 +443,12 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
   if (!coll!.add || !coll!.addSchema) return err("unsupported", "This resource doesn't support adding.");
 
   const parsed = coll!.addSchema.safeParse(input.args);
-  if (!parsed.success) return err("invalid_value", parsed.error.issues[0]?.message ?? "Invalid data.");
+  if (!parsed.success) {
+    // Echo the collection's usage so the model repairs the args in ONE step
+    // instead of guessing (the shapes no longer live in the tool description).
+    const msg = parsed.error.issues[0]?.message ?? "Invalid data.";
+    return err("invalid_value", coll!.usage ? `${msg}\n\nUsage — ${coll!.usage}` : msg);
+  }
   // Native tool approval already gated this (see `requiresApproval`): the SDK
   // suspended the call and the user approved, or autonomy let it through. Apply
   // directly — `applyAdd` re-runs `validateAdd` at apply time, so a change that
