@@ -1414,7 +1414,11 @@
       "addRepoTitle": "Встановити скіли з {repo}",
       "repoEmpty": "У цьому репозиторії не знайдено відповідних скілів.",
       "repoUnreachable": "Не вдалося прочитати репозиторій зараз — можна встановити, скіли підтягнуться після підтвердження.",
-      "repoInstalled": "{n, plural, one{# скіл} few{# скіли} many{# скілів} other{# скіла}} з {repo}"
+      "repoInstalled": "{n, plural, one{# скіл} few{# скіли} many{# скілів} other{# скіла}} з {repo}",
+      "addPathTitle": "Встановити скіли з {path}",
+      "pathEmpty": "За цим шляхом не знайдено SKILL.md.",
+      "pathUnreachable": "Не вдалося прочитати цей шлях зараз — можна встановити, вміст зчитається після підтвердження.",
+      "pathInstalled": "{n, plural, one{# скіл} few{# скіли} many{# скілів} other{# скіла}} з {path}"
     },
     "state": {
       "local": "локальний",

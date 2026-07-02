@@ -43,15 +43,16 @@ function readEntry(e: AdmZip.IZipEntry, cap: number): Buffer {
 }
 
 /**
- * Parse an uploaded skill .zip (SKILL.md + optional bundle files, allowed nested
- * one level as <skill>/SKILL.md) and ingest it for `target`. Shared by the user
- * and admin upload routes so both validate identically. Throws SkillZipError
- * (bad zip) or SkillParseError (bad SKILL.md) for the route to map to a 400.
+ * Parse a skill .zip (SKILL.md + optional bundle files, allowed nested one level
+ * as <skill>/SKILL.md) into a ready-to-ingest skill WITHOUT touching the DB.
+ * Applies every decompression-bomb guard. Shared by the upload routes and by
+ * workspace-path ingestion so a preview and an install validate identically.
+ * Throws SkillZipError (bad zip) or SkillParseError (bad SKILL.md).
  */
-export async function ingestSkillZip(
-  buffer: Buffer,
-  target: IngestTarget,
-): Promise<{ id: string; name: string; files: number }> {
+export function readSkillZip(buffer: Buffer): {
+  parsed: ReturnType<typeof parseSkillMarkdown>;
+  files: { path: string; content: string }[];
+} {
   let zip: AdmZip;
   try {
     zip = new AdmZip(buffer);
@@ -96,7 +97,18 @@ export async function ingestSkillZip(
     if (readBytes > MAX_UNCOMPRESSED_BYTES) throw new SkillZipError("The zip's contents are too large.");
     files.push({ path: safe, content: data.toString("base64") });
   }
+  return { parsed, files };
+}
 
+/**
+ * Parse an uploaded skill .zip and ingest it for `target`. Shared by the user and
+ * admin upload routes so both validate identically.
+ */
+export async function ingestSkillZip(
+  buffer: Buffer,
+  target: IngestTarget,
+): Promise<{ id: string; name: string; files: number }> {
+  const { parsed, files } = readSkillZip(buffer);
   const id = await ingestSkill(parsed, files, target);
   return { id, name: parsed.name, files: files.length };
 }

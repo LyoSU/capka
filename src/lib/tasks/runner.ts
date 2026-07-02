@@ -334,6 +334,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       userId,
       isAdmin: user?.role === "admin",
       projectId: payload.projectId ?? null,
+      sessionKey,
       locale: user?.locale ?? payload.origin?.locale ?? undefined,
     });
     const tools = {

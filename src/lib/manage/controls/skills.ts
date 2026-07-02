@@ -11,6 +11,7 @@ import { canInstallExtensions, assertCanInstall } from "@/lib/settings";
 import { discoverRepoSkills } from "@/lib/marketplace/service";
 import { installSkillRepo } from "@/lib/marketplace/install";
 import { parseGitHubUrl } from "@/lib/marketplace/source";
+import { discoverWorkspaceSkills, ingestWorkspaceSkills } from "@/lib/skills/workspace";
 import type { SkillScope } from "@/lib/skills/types";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
@@ -25,6 +26,11 @@ const addSchema = z.union([
   }),
   z.object({
     repo: z.string().min(1, "A GitHub repo is required — a github.com URL or owner/repo (e.g. publora/skills)."),
+    only: z.array(z.string()).optional(),
+    scope: z.enum(["user", "org"]).optional(),
+  }),
+  z.object({
+    path: z.string().min(1, "A workspace path is required — a SKILL.md, a skill folder, a repo-shaped folder, or a .zip."),
     only: z.array(z.string()).optional(),
     scope: z.enum(["user", "org"]).optional(),
   }),
@@ -64,6 +70,7 @@ export const skillCollection: Collection = {
     // must at least look like a GitHub reference. The repo's real content is read
     // in previewAdd (which lists the skills it would install).
     if ("content" in a) parseSkillMarkdown(a.content);
+    else if ("path" in a) { if (!ctx.sessionKey) throw new Error("No active workspace — open a chat with the sandbox to install a skill from a file."); }
     else if (!parseGitHubUrl(a.repo)) throw new Error("That doesn't look like a GitHub repo — use a github.com URL or owner/repo (e.g. publora/skills).");
   },
 
@@ -83,6 +90,30 @@ export const skillCollection: Collection = {
     const a = args as AddArgs;
     const { scope } = skillScope(a);
     const impact = scope === "system" ? loc(t, "skill.sharedImpact", "Shared skill — available to all users.") : undefined;
+
+    // Workspace path: enumerate the skills the pointed-at file/folder/zip holds,
+    // read server-side (0 model tokens), so the user approves the actual set.
+    if ("path" in a) {
+      try {
+        const only = a.only?.length ? new Set(a.only) : null;
+        const all = await discoverWorkspaceSkills(ctx.sessionKey!, ctx.userId, a.path, a.only);
+        const names = only ? all.filter((n) => only.has(n)) : all;
+        return {
+          title: loc(t, "skill.addPathTitle", `Install skills from ${a.path}`, { path: a.path }),
+          after: a.path,
+          items: names,
+          details: names.length ? undefined : loc(t, "skill.pathEmpty", "No SKILL.md found at that path."),
+          impact,
+        };
+      } catch {
+        return {
+          title: loc(t, "skill.addPathTitle", `Install skills from ${a.path}`, { path: a.path }),
+          after: a.path,
+          details: loc(t, "skill.pathUnreachable", "Couldn't read that path just now — you can still install; it'll be read on confirm."),
+          impact,
+        };
+      }
+    }
 
     // Repo install: enumerate the skills it would install so the user approves the
     // whole SET before confirming (like `npx skills add owner/repo --list`).
@@ -126,6 +157,18 @@ export const skillCollection: Collection = {
     const a = args as AddArgs;
     await assertCanAddSkill(ctx, a); // defense-in-depth: dispatch pre-flights this too
     const { scope } = skillScope(a);
+
+    if ("path" in a) {
+      const names = await ingestWorkspaceSkills({
+        sessionKey: ctx.sessionKey!,
+        userId: ctx.userId,
+        path: a.path,
+        target: { scope, userId: scope === "user" ? ctx.userId : null, projectId: null },
+        only: a.only,
+      });
+      const n = names.length;
+      return { itemTitle: loc(t, "skill.pathInstalled", `${n} skill${n === 1 ? "" : "s"} from ${a.path}`, { n, path: a.path }) };
+    }
 
     if ("repo" in a) {
       const manifest = await installSkillRepo({

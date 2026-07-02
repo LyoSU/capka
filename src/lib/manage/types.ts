@@ -17,6 +17,10 @@ export interface ManageContext {
   userId: string;
   isAdmin: boolean;
   projectId: string | null;
+  /** The active sandbox session key (`projectId ?? chatId`) — lets collections
+   *  read workspace files server-side (e.g. ingest a skill from a dropped file or
+   *  archive) without round-tripping bytes through the model. Undefined off-turn. */
+  sessionKey?: string;
   /** The user's locale — all user-facing strings are resolved to it server-side
    *  (default English). Undefined → English. */
   locale?: string;
