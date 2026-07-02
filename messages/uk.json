@@ -1418,7 +1418,8 @@
       "addPathTitle": "Встановити скіли з {path}",
       "pathEmpty": "За цим шляхом не знайдено SKILL.md.",
       "pathUnreachable": "Не вдалося прочитати цей шлях зараз — можна встановити, вміст зчитається після підтвердження.",
-      "pathInstalled": "{n, plural, one{# скіл} few{# скіли} many{# скілів} other{# скіла}} з {path}"
+      "pathInstalled": "{n, plural, one{# скіл} few{# скіли} many{# скілів} other{# скіла}} з {path}",
+      "editReady": "«{name}» вивантажено у {path}/SKILL.md — відредагуйте файли там, потім збережіть через skill add {path}."
     },
     "state": {
       "local": "локальний",

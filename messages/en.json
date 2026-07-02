@@ -1327,7 +1327,8 @@
       "addPathTitle": "Install skills from {path}",
       "pathEmpty": "No SKILL.md found at that path.",
       "pathUnreachable": "Couldn't read that path just now — you can still install; it'll be read on confirm.",
-      "pathInstalled": "{n, plural, one {# skill} other {# skills}} from {path}"
+      "pathInstalled": "{n, plural, one {# skill} other {# skills}} from {path}",
+      "editReady": "\"{name}\" is checked out to {path}/SKILL.md — edit the files there, then save with skill add {path}."
     }
   },
   "orgChangeBanner": {

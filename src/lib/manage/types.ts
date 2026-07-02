@@ -76,7 +76,8 @@ export type ManageInput =
   | { action: "enable"; target: string; itemId: string }
   | { action: "disable"; target: string; itemId: string }
   | { action: "debug"; target: string; itemId: string }
-  | { action: "connect"; target: string; itemId: string };
+  | { action: "connect"; target: string; itemId: string }
+  | { action: "edit"; target: string; itemId: string };
 
 /** One row of a collection (an MCP connector, later a skill/plugin). */
 export interface CollectionItem {
@@ -150,6 +151,11 @@ export interface Collection {
   setEnabled?(ctx: ManageContext, itemId: string, enabled: boolean): Promise<{ itemTitle: string }>;
   debug?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string; state: string; detail?: string; hint?: string; action?: RequiredAction }>;
   connect?(ctx: ManageContext, itemId: string): Promise<RequiredAction | null>;
+  /** Check an item OUT into the workspace for cheap in-place editing: materialize
+   *  its files so the agent edits them with its normal file tools (a partial edit,
+   *  not re-authoring the whole thing), then saves back via `add {path}`. Returns
+   *  the workspace path and a one-line instruction telling the model what to do. */
+  edit?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string; path: string; instruction: string }>;
 }
 
 /** A change the UI renders as a SettingChangeCard (before→after diff + Undo).
@@ -190,7 +196,7 @@ export type ManageResult =
       status: "ok";
       render: "resource";
       summary: string;
-      data: { op: "added" | "removed" | "enabled" | "disabled"; collectionId: string; title: string; itemTitle: string; action?: RequiredAction; settingsPath?: string };
+      data: { op: "added" | "removed" | "enabled" | "disabled" | "editing"; collectionId: string; title: string; itemTitle: string; action?: RequiredAction; settingsPath?: string; path?: string };
     }
   | {
       status: "ok";

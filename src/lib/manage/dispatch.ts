@@ -104,6 +104,8 @@ export async function dispatch(reg: Registry, ctx: ManageContext, input: ManageI
       return debug(reg, ctx, input.target, input.itemId);
     case "connect":
       return connect(reg, ctx, input.target, input.itemId);
+    case "edit":
+      return edit(reg, ctx, input.target, input.itemId);
   }
 }
 
@@ -468,6 +470,25 @@ async function debug(reg: Registry, ctx: ManageContext, target: string, itemId: 
       render: "debug",
       summary: `${r.itemTitle}: ${r.state}`,
       data: { title: coll!.title, itemTitle: r.itemTitle, state: r.state, detail: r.detail, hint: r.hint, action: r.action },
+    };
+  } catch (e) {
+    return err("apply_failed", errMsg(e));
+  }
+}
+
+async function edit(reg: Registry, ctx: ManageContext, target: string, itemId: string): Promise<ManageResult> {
+  const { coll, error } = resolveCollection(reg, ctx, target);
+  if (error) return error;
+  if (!coll!.edit) return err("unsupported", "This resource can't be edited.");
+  try {
+    const { itemTitle, path, instruction } = await coll!.edit(ctx, itemId);
+    // A prepare step, not a change — it only writes into the caller's own workspace,
+    // so it applies directly (the confirm gate fires later, on the save-back `add`).
+    return {
+      status: "ok",
+      render: "resource",
+      summary: instruction,
+      data: { op: "editing", collectionId: coll!.id, title: coll!.title, itemTitle, path },
     };
   } catch (e) {
     return err("apply_failed", errMsg(e));

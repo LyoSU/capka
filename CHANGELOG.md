@@ -61,6 +61,17 @@ All notable changes to Capka are documented here. Format follows
   labels `settings.update`/`settings.undo` instead of showing the raw code.
 
 ### Added
+- **The agent can install and edit skills from the workspace without burning
+  tokens re-typing them.** Previously a skill could only be added by pasting a
+  whole SKILL.md into the tool call, or from a GitHub repo; a skill a user dropped
+  into the sandbox as files or a `.zip` had to be read and echoed back in full.
+  Now `manage skill add {path}` points at a workspace path — a SKILL.md, a skill
+  folder, a repo-shaped `skills/<name>/` tree, or a `.zip` — and the platform reads
+  the bytes server-side (zips unzipped in-process, bomb-guarded). `manage skill
+  edit {name}` checks a skill out to `.capka/skills/<name>/` so the agent edits it
+  with ordinary file tools and saves back via `add {path}` (an in-place upsert),
+  instead of re-authoring the whole file. Governance/confirm are unchanged — the
+  same authorization and (supervised) confirmation apply at the add.
 - **`agent_autonomy` setting (admin): "supervised" (default) or "autonomous".**
   In supervised mode the agent stages a risky change (org setting, add/remove) and
   the user approves it on a confirmation card, as before. In autonomous mode the

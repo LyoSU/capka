@@ -21,7 +21,7 @@ export interface ManageIdentity {
 
 const inputSchema = z.object({
   action: z
-    .enum(["capabilities", "list", "get", "set", "add", "remove", "enable", "disable", "debug", "connect"])
+    .enum(["capabilities", "list", "get", "set", "add", "remove", "enable", "disable", "debug", "connect", "edit"])
     .describe("What to do. Start with `list` or `capabilities` to discover what can be managed."),
   target: z
     .string()
@@ -57,6 +57,8 @@ function toInput(a: z.infer<typeof inputSchema>): ManageInput | null {
       return a.target && a.itemId ? { action: "debug", target: a.target, itemId: a.itemId } : null;
     case "connect":
       return a.target && a.itemId ? { action: "connect", target: a.target, itemId: a.itemId } : null;
+    case "edit":
+      return a.target && a.itemId ? { action: "edit", target: a.target, itemId: a.itemId } : null;
   }
 }
 
@@ -71,7 +73,7 @@ Settings/controls:
 
 Collections (target="mcp" for connectors, target="skill" for agent skills):
 - action="get" with a collection target lists its items; add/remove/enable/disable/debug/connect operate on them (itemId identifies one).
-- add args for mcp: {name, url, authKind:"oauth"} (remote) or {name, command, args} (local/stdio). add args for skill: {content} (a single full SKILL.md — frontmatter name+description then the instruction body), OR {repo} to install EVERY skill from a GitHub skills repo at once (e.g. {repo:"owner/repo"} or a github.com URL), OR {path} to install from the WORKSPACE — a SKILL.md, a skill folder, a repo-shaped folder, or a .zip the user dropped in (the server reads the files itself, so PREFER {path} over pasting file contents into {content}). add {only:["name",...]} narrows a repo/path/zip to specific skills. The confirm card lists all the skills that will be installed. add/remove are confirmed by the user (confirm_required), exactly like risky settings — you stage, the user applies.
+- add args for mcp: {name, url, authKind:"oauth"} (remote) or {name, command, args} (local/stdio). add args for skill: {content} (a single full SKILL.md — frontmatter name+description then the instruction body), OR {repo} to install EVERY skill from a GitHub skills repo at once (e.g. {repo:"owner/repo"} or a github.com URL), OR {path} to install from the WORKSPACE — a SKILL.md, a skill folder, a repo-shaped folder, or a .zip the user dropped in (the server reads the files itself, so PREFER {path} over pasting file contents into {content}). add {only:["name",...]} narrows a repo/path/zip to specific skills. To CHANGE an existing skill, call action="edit" (target="skill", itemId): it checks the skill out into the workspace and returns the path — edit the files there with your normal file tools (a small partial edit, NOT re-authoring the whole SKILL.md), then save with add {path}. The confirm card lists all the skills that will be installed. add/remove are confirmed by the user (confirm_required), exactly like risky settings — you stage, the user applies.
 - Some connectors need the user to sign in via a browser (OAuth). action="add" or action="connect" then returns status="action_required" with a URL — DON'T try to open it yourself; tell the user to use the button/link, then re-check with action="debug".
 - action="debug" reports a connector's live state (ok / needs login / unreachable) and a hint. NEVER ask the user to paste API keys or tokens into chat — a connector needing a secret token is configured on the settings page, not here.
 

@@ -1,11 +1,14 @@
 import { z } from "zod";
+import matter from "gray-matter";
 import {
   listManagedSkills,
   ingestSkill,
   setSkillEnabled,
   deleteSkill,
   getSkillMeta,
+  getSkillForRun,
 } from "@/lib/skills/service";
+import { uploadFile } from "@/lib/sandbox/client";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
 import { canInstallExtensions, assertCanInstall } from "@/lib/settings";
 import { discoverRepoSkills } from "@/lib/marketplace/service";
@@ -196,6 +199,32 @@ export const skillCollection: Collection = {
     const s = await mustManageSkill(ctx, itemId);
     await setSkillEnabled(itemId, enabled);
     return { itemTitle: s.name };
+  },
+
+  // Check a skill OUT into the workspace so the agent edits it with its normal
+  // file tools (a cheap partial edit) instead of re-authoring the whole SKILL.md
+  // through a tool argument. The save-back is `add {path}`, which upserts by name.
+  async edit(ctx, itemId) {
+    const t = manageT(ctx.locale);
+    if (!ctx.sessionKey) throw new Error("No active workspace to edit the skill in.");
+    const s = await mustManageSkill(ctx, itemId); // authorizes (own / admin) + resolves name
+    const run = await getSkillForRun(ctx.userId, ctx.projectId, s.name);
+    if (!run) throw new Error("No such skill.");
+    const dir = `.capka/skills/${s.name}`;
+    // Reconstruct SKILL.md from the stored name+description+body (the load-bearing
+    // frontmatter). Re-ingest on save re-parses whatever the agent writes.
+    const md = matter.stringify(run.info.body, { name: run.info.name, description: run.info.description ?? undefined });
+    await uploadFile(ctx.sessionKey, dir, new File([md], "SKILL.md"), ctx.userId);
+    for (const f of run.files) {
+      const slash = f.path.lastIndexOf("/");
+      const sub = slash >= 0 ? `${dir}/${f.path.slice(0, slash)}` : dir;
+      await uploadFile(ctx.sessionKey, sub, new File([Buffer.from(f.content, "base64")], slash >= 0 ? f.path.slice(slash + 1) : f.path), ctx.userId);
+    }
+    return {
+      itemTitle: s.name,
+      path: dir,
+      instruction: loc(t, "skill.editReady", `"${s.name}" is checked out to ${dir}/SKILL.md — edit the files there, then save with skill add {path:"${dir}"}.`, { name: s.name, path: dir }),
+    };
   },
 };
 
