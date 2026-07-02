@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { HelpCircle, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { haptic } from "@/lib/haptics";
@@ -69,40 +69,40 @@ export function AskCard({
   };
 
   return (
-    <div className="animate-blur-rise my-3 rounded-xl border border-border bg-card p-4 shadow-sm">
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <HelpCircle className="h-4 w-4 text-muted-foreground" />
-        {form.title ?? t("title")}
-      </div>
+    // Frameless — no bordered card. The assistant's own prose above already frames
+    // the question; the fields/answers read as part of the conversation, not a boxed
+    // widget (calmer, per PRODUCT.md). A model-set title shows as a quiet heading.
+    <div className="animate-blur-rise my-3 space-y-3">
+      {form.title && <div className="text-sm font-medium text-foreground">{form.title}</div>}
 
       {awaiting ? (
         <>
-          <div className="mt-3 space-y-3">
+          <div className="space-y-3">
             {form.fields.map((f) => (
               <Field key={f.id} field={f} value={values[f.id]} onSet={set} onToggle={toggle} />
             ))}
           </div>
-          <div className="mt-3 flex gap-2">
+          <div className="flex gap-2">
             <Button size="sm" onClick={() => send("submit")} disabled={submitting || !complete}>{t("submit")}</Button>
             <Button size="sm" variant="ghost" onClick={() => send("skip")} disabled={submitting}>{t("skip")}</Button>
             {submitting && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
           </div>
         </>
       ) : (
-        // Settled: the questions stay on the record (they persist forever), and each
-        // answer renders as its own message-like bubble on the right — so it's clear
-        // what was asked AND what the user replied.
-        <div className="mt-3 space-y-3">
+        // Settled: each question reads as a quiet label and its answer as a
+        // right-aligned bubble — like the user's own reply woven into the chat. The
+        // questions stay on the record (persisted forever).
+        <div className="space-y-3">
           {form.fields.map((f) => (
-            <div key={f.id}>
+            <div key={f.id} className="space-y-1.5">
               <div className="text-sm text-muted-foreground">{f.label}</div>
-              {value?.action === "submit" ? (
-                <div className="mt-1.5 flex justify-end">
+              {value?.action === "submit" && (
+                <div className="flex justify-end">
                   <div className="inline-block max-w-[85%] whitespace-pre-wrap break-words rounded-2xl border border-border bg-card px-4 py-2 text-sm text-card-foreground shadow-sm">
                     {display(f, value.values[f.id])}
                   </div>
                 </div>
-              ) : null}
+              )}
             </div>
           ))}
           {value?.action === "skip" && <div className="text-sm text-muted-foreground">{t("skipped")}</div>}
