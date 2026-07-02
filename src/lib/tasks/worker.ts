@@ -129,6 +129,11 @@ export async function startWorker(): Promise<void> {
   void refreshCatalogIfStale();
   const catalogTimer = setInterval(() => void refreshCatalogIfStale(), CATALOG_REFRESH_MS);
 
+  // Fire due automations (scheduled agent runs). Same pattern as reconcile:
+  // cheap DB poll, safe across replicas via SKIP LOCKED inside the tick.
+  const { schedulerTick } = await import("@/lib/automations/scheduler");
+  const schedulerTimer = setInterval(() => void schedulerTick().catch(() => {}), 30_000);
+
   // Graceful shutdown: a deploy/restart sends SIGTERM. WITHOUT this, every
   // in-flight task was killed mid-run and surfaced to the user as an interruption
   // (the single biggest source of "worker lost" failures during the beta, one
@@ -146,6 +151,7 @@ export async function startWorker(): Promise<void> {
     clearInterval(pollTimer);
     clearInterval(reconcileTimer);
     clearInterval(catalogTimer);
+    clearInterval(schedulerTimer);
     log.info("worker draining on signal — no new tasks; waiting for in-flight", { signal, workerId: s.workerId, inFlight: s.inFlight });
     // Also wait on fire-and-forget aux work (title/memory/compaction) so a deploy
     // doesn't kill an in-flight LLM call mid-write and lose the spend/checkpoint.
