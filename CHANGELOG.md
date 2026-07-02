@@ -12,6 +12,19 @@ All notable changes to Capka are documented here. Format follows
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
 ### Added
+- **Automations: scheduled agent runs.** Users create them in chat («щопонеділка
+  о 9 готуй зведення») — the agent translates the schedule, an approval card
+  shows the next run dates and an estimated runs-per-month, and the platform
+  then fires each run as a new ordinary chat (delivered to Telegram when
+  linked) with no tab open. Runs are normal queued tasks under the user's
+  budget. Three consecutive failures auto-pause the automation with a
+  plain-language notice. New admin org settings: `automations_enabled`
+  (default `true`), `automations_per_user` (default `10`),
+  `automations_min_interval_minutes` (default `60`). New
+  `/settings/automations` page lists, pauses, and deletes them; creation is
+  chat-only. Adds the `automations` table (auto-migration at boot) and a
+  30-second scheduler tick inside the existing in-process worker — no new
+  services.
 - **Connectors can now ask you for input mid-task (MCP elicitation).** An MCP
   connector that requests structured input during a tool call (`elicitation/create`)
   surfaces the same question card; your answer is handed back so the connector's
