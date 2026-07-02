@@ -101,15 +101,36 @@ export const mcpCollection: Collection = {
     }));
   },
 
-  previewAdd(ctx, args) {
+  async previewAdd(ctx, args) {
     const t = manageT(ctx.locale);
     const a = args as AddArgs;
     const { scope } = planMcpAdd(a);
-    return {
+    const preview: { title: string; after: string; impact?: string; details?: string } = {
       title: loc(t, "mcp.addTitle", "Add connector"),
       after: `${a.name}${a.url ? ` (${a.url})` : ` (${loc(t, "mcp.local", "local")})`}`,
       impact: scope === "system" ? loc(t, "mcp.sharedImpact", "Shared connector — available to all users.") : undefined,
     };
+    // Probe-before-confirm: for a remote, non-OAuth connector, actually reach it
+    // BEFORE the user confirms, so the card can say "responds, N tools" or warn
+    // it's unreachable — instead of confirming blind. OAuth connectors expect an
+    // unauthenticated probe to fail, so we just note the sign-in step. The probe
+    // is advisory: any failure here must never block the add.
+    if (a.url && a.authKind !== "oauth") {
+      try {
+        const health = await probeConfig({ name: a.name, url: a.url }, await getBlockPrivateProviderUrls(), { userId: ctx.userId });
+        preview.details =
+          health.status === "ok"
+            ? loc(t, "mcp.probeOk", `Responds — ${health.toolCount ?? 0} tools available.`, { n: health.toolCount ?? 0 })
+            : health.status === "unreachable"
+              ? loc(t, "mcp.probeUnreachable", "Couldn't reach it just now — you can still add it and fix later.")
+              : loc(t, "mcp.probeNeedsAuth", "Reachable, but it needs a sign-in or token (set on the settings page).");
+      } catch {
+        /* advisory only — never block the add on a probe error */
+      }
+    } else if (a.authKind === "oauth") {
+      preview.details = loc(t, "mcp.probeOauth", "You'll sign in through your browser after adding it.");
+    }
+    return preview;
   },
 
   async add(ctx, args) {

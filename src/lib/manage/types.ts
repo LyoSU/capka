@@ -124,7 +124,14 @@ export interface Collection {
    *  a short human description (e.g. what a skill does); `body` is the full text
    *  the user is approving (e.g. the SKILL.md) shown collapsibly — so nobody
    *  confirms an unseen permanent instruction. */
-  previewAdd?(ctx: ManageContext, args: Record<string, unknown>): { title: string; after: string; impact?: string; details?: string; body?: string };
+  previewAdd?(
+    ctx: ManageContext,
+    args: Record<string, unknown>,
+  ):
+    | { title: string; after: string; impact?: string; details?: string; body?: string }
+    // May be async so it can PROBE before the confirm card is shown (e.g. try to
+    // reach a remote connector and report its tool count / that it's unreachable).
+    | Promise<{ title: string; after: string; impact?: string; details?: string; body?: string }>;
   remove?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string }>;
   setEnabled?(ctx: ManageContext, itemId: string, enabled: boolean): Promise<{ itemTitle: string }>;
   debug?(ctx: ManageContext, itemId: string): Promise<{ itemTitle: string; state: string; detail?: string; hint?: string; action?: RequiredAction }>;

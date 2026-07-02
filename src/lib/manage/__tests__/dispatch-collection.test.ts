@@ -110,6 +110,17 @@ describe("manage/dispatch collections", () => {
     expect(items).toHaveLength(1);
   });
 
+  it("awaits an async previewAdd (probe-before-confirm) and carries its details into the card", async () => {
+    const { collection } = memCollection({
+      // Simulates a network probe run before the confirm card is shown (#11).
+      previewAdd: async (_ctx, args) => ({ title: "Connectors", after: String(args.name), details: "Responds — 4 tools available." }),
+    });
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
+    if (res.status !== "confirm_required") throw new Error("expected confirm");
+    expect(res.preview.details).toBe("Responds — 4 tools available.");
+  });
+
   it("add applies via applyPending (human-authed) and surfaces a follow-up action", async () => {
     const { collection, items } = memCollection();
     const reg = createRegistry([], [collection]);

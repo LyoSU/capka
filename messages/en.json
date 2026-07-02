@@ -456,7 +456,8 @@
       "viewInstructions": "View full instructions",
       "emptyConnectors": "No connectors yet. Just ask — e.g. \"connect Linear\".",
       "openInSettings": "Open in settings",
-      "setInstruction": "Set \"{title}\" to \"{value}\"."
+      "setInstruction": "Set \"{title}\" to \"{value}\".",
+      "signedIn": "I've signed in — please check the connector now."
     }
   },
   "projects": {
@@ -1305,5 +1306,12 @@
     "action": "Update",
     "dismiss": "Dismiss"
   },
-  "manage": {}
+  "manage": {
+    "mcp": {
+      "probeOk": "Responds — {n} tools available.",
+      "probeUnreachable": "Couldn't reach it just now — you can still add it and fix later.",
+      "probeNeedsAuth": "Reachable, but it needs a sign-in or token (set on the settings page).",
+      "probeOauth": "You'll sign in through your browser after adding it."
+    }
+  }
 }

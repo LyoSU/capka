@@ -68,12 +68,30 @@ async function consumePending(pendingId: string): Promise<ManageOutput> {
   return (await res.json()) as ManageOutput;
 }
 
-/** OAuth / open-url handoff — the agent can't click, so the user does. Rendered
- *  as a link-button (a real navigation, not an onSend). */
-function ConnectLink({ action }: { action: RequiredAction }) {
+/** OAuth / open-url handoff — the agent can't click, so the user does. For an
+ *  OAuth sign-in we open a POPUP and wait for the callback page to postMessage
+ *  back (see the oauth callback route) — then close it and re-check, so the user
+ *  never leaves the chat. If the popup is blocked we fall back to a full-page
+ *  navigation (the callback redirects instead). `open_url` stays a plain link. */
+function ConnectLink({ action, onConnected }: { action: RequiredAction; onConnected?: () => void }) {
+  const onClick = (e: React.MouseEvent) => {
+    if (action.kind !== "oauth") return; // open_url: let the anchor navigate normally
+    e.preventDefault();
+    const popup = window.open(action.url, "capka-oauth", "popup,width=520,height=680");
+    if (!popup) { window.location.href = action.url; return; } // blocked → full navigation
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.origin !== window.location.origin) return;
+      if ((ev.data as { type?: string } | null)?.type !== "capka:oauth") return;
+      window.removeEventListener("message", onMsg);
+      try { popup.close(); } catch { /* already closed */ }
+      onConnected?.();
+    };
+    window.addEventListener("message", onMsg);
+  };
   return (
     <a
       href={action.url}
+      onClick={onClick}
       className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
     >
       <Plug className="h-3.5 w-3.5" />
@@ -363,7 +381,7 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
           {o.action.description ?? t("openHint")}
         </div>
         <div className="mt-3">
-          <ConnectLink action={o.action} />
+          <ConnectLink action={o.action} onConnected={onSend ? () => onSend(t("signedIn")) : undefined} />
         </div>
       </CardShell>
     );
@@ -381,7 +399,10 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
         </div>
         {o.data.action && (
           <div className="mt-3">
-            <ConnectLink action={o.data.action} />
+            <ConnectLink
+              action={o.data.action}
+              onConnected={onSend ? () => onSend(t("recheckMsg", { name: o.data!.itemTitle ?? "" })) : undefined}
+            />
           </div>
         )}
         {o.data.settingsPath && <SettingsLink href={o.data.settingsPath} t={t} />}
@@ -404,7 +425,10 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
         {o.data.hint && <div className="mt-1 text-sm text-muted-foreground">{o.data.hint}</div>}
         {o.data.action && (
           <div className="mt-3">
-            <ConnectLink action={o.data.action} />
+            <ConnectLink
+              action={o.data.action}
+              onConnected={onSend && itemTitle ? () => onSend(t("recheckMsg", { name: itemTitle })) : undefined}
+            />
           </div>
         )}
         {/* Close the OAuth loop: one tap re-runs the live probe via the agent. */}

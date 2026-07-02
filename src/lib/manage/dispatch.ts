@@ -367,7 +367,9 @@ async function add(reg: Registry, ctx: ManageContext, input: Extract<ManageInput
       return err("apply_failed", errMsg(e));
     }
   }
-  const preview = coll!.previewAdd?.(ctx, args) ?? { title: coll!.title, after: "" };
+  // previewAdd may probe the network (reach the connector, count its tools) before
+  // we show the confirm card, so await it — a doomed/blind add is surfaced up front.
+  const preview = coll!.previewAdd ? await coll!.previewAdd(ctx, args) : { title: coll!.title, after: "" };
   const store = await pendingStore(ctx);
   const pendingId = await store.stage({
     userId: ctx.userId,
