@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Modality } from "@/lib/providers/registry";
+import { askFormSchema, askAnswerSchema } from "@/lib/ask/types";
 
 // Inbound POST /api/chat body
 export const chatRequestSchema = z.object({
@@ -26,6 +27,11 @@ export const storedPartSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("tool-call"), id: z.string(), name: z.string(), input: z.unknown(),
     approval: z.object({ id: z.string(), approved: z.boolean().optional(), reason: z.string().optional() }).optional(),
+    // `answer` marks an `ask` tool call the runner suspended (no-execute) for a
+    // human answer: present with `value` undefined = awaiting the user; with
+    // `value` set = answered (a matching tool-result appears once the resume
+    // runs). Absent on ordinary tool calls. See runner + presenter.
+    answer: z.object({ form: askFormSchema, value: askAnswerSchema.optional() }).optional(),
   }),
   z.object({ type: z.literal("tool-result"), id: z.string(), name: z.string(), output: z.unknown() }),
   z.object({ type: z.literal("tool-error"), id: z.string(), name: z.string(), error: z.string() }),
