@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, ShieldCheck, Wallet, KeyRound, Lock, Download } from "lucide-react";
+import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, ShieldCheck, Wallet, KeyRound, Lock, Download, CalendarClock } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
@@ -22,6 +22,7 @@ const navSections: NavSection[] = [
       { key: "connections", href: "/settings/connections", icon: Link2 },
       { key: "memory", href: "/settings/memory", icon: Brain },
       { key: "skills", href: "/settings/skills", icon: Sparkles },
+      { key: "automations", href: "/settings/automations", icon: CalendarClock },
     ],
   },
   {

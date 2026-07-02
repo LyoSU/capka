@@ -525,6 +525,7 @@
       "usage": "Usage",
       "users": "Users",
       "skills": "Customize",
+      "automations": "Automations",
       "connectors": "Connectors",
       "marketplace": "Marketplace",
       "permissions": "Permissions",
@@ -886,6 +887,31 @@
         "browse": "Browse"
       },
       "chatHint": "You can also add and manage these just by asking the assistant in chat."
+    },
+    "automations": {
+      "title": "Automations",
+      "subtitle": "Scheduled agent runs that fire on their own, without a chat open.",
+      "chatHint": "Ask the assistant in chat to set one up, e.g. “Every Monday at 9am, prepare the weekly summary.”",
+      "loadError": "Couldn't load automations.",
+      "emptyTitle": "No automations yet",
+      "emptyHint": "An automation runs a saved instruction on a schedule or at a set time. Ask the assistant in chat to create one.",
+      "status": {
+        "active": "Active",
+        "paused": "Paused",
+        "autoPaused": "Paused automatically after failures"
+      },
+      "nextRun": "Next: {when}",
+      "lastRun": "Last ran {when}",
+      "openLastRun": "Open last run",
+      "toggleAria": "Toggle {name}",
+      "toggleFailed": "Couldn't update the automation.",
+      "deleteAria": "Delete {name}",
+      "deleteTitle": "Delete “{name}”?",
+      "deleteWarn": "This stops future runs and removes the automation. This can't be undone.",
+      "deleted": "Deleted “{name}”.",
+      "deleteFailed": "Couldn't delete the automation.",
+      "cancel": "Cancel",
+      "delete": "Delete"
     },
     "connectors": {
       "title": "Connectors",
