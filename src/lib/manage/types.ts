@@ -12,8 +12,7 @@ export type Risk = "safe" | "confirm";
 
 /** Everything a control handler needs about the caller. Injected by the runner
  *  from the run's identity — NEVER derived from the model's arguments, so the
- *  agent cannot claim a role it doesn't have. `audit`/`now` are injectable for
- *  tests. */
+ *  agent cannot claim a role it doesn't have. `audit` is injectable for tests. */
 export interface ManageContext {
   userId: string;
   isAdmin: boolean;
@@ -25,7 +24,6 @@ export interface ManageContext {
    *  the DB-backed store (lazy-imported), like `audit`. */
   pending?: PendingStore;
   audit?: (e: { action: string; targetType?: string; targetKey?: string; detail?: Record<string, unknown> }) => Promise<void> | void;
-  now?: () => number;
 }
 
 /** A single manageable thing. Its value is always a string — settings are stored

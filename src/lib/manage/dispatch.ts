@@ -180,19 +180,21 @@ async function set(
   const t = manageT(ctx.locale);
   const c = reg.get(input.target);
   // A non-admin can't even learn an admin control exists — same answer as a typo.
+  // canAccess is the role gate (admin controls need isAdmin), so there's no
+  // separate "forbidden" branch: a non-admin hitting an admin control already
+  // gets not_found above.
   if (!c || !canAccess(ctx, c)) return err("not_found", `No setting "${input.target}".`);
-  if (c.requiredRole === "admin" && !ctx.isAdmin) return err("forbidden", "This action is admin-only.");
 
   const parsed = c.schema.safeParse(input.value);
   if (!parsed.success) {
     return err("invalid_value", parsed.error.issues[0]?.message ?? "Invalid value.");
   }
   const value = parsed.data;
-  const before = await c.read(ctx);
 
   // Risky changes are STAGED — never applied by the model. Only the user's click
   // (web session / Telegram callback) consumes the pending id and applies it.
   if (c.risk === "confirm") {
+    const before = await c.read(ctx);
     const rawImpact = c.impact ? await c.impact(ctx, value) : undefined;
     const impact = rawImpact ? loc(t, `impact.${keyOf(c.id)}`, rawImpact) : undefined;
     const store = await pendingStore(ctx);
@@ -211,11 +213,10 @@ async function set(
     };
   }
 
-  // Safe controls (a user's own low-risk preference) apply immediately; the undo
-  // still goes through the human-authed path, so we stage it.
-  await c.apply(ctx, value);
-  await record(ctx, "settings.update", c.id, { before, after: value });
-  return settingResult(t, c, before, value, await stageUndo(ctx, c.id, before));
+  // Safe controls (a user's own low-risk preference) apply immediately — through
+  // the SAME server apply path a confirmed change takes, so the two can't diverge
+  // (records the audit line and stages the undo identically).
+  return applySet(reg, ctx, c.id, value);
 }
 
 // ── Server-side apply (the ONLY path a confirm-gated change or an undo runs) ───
@@ -244,8 +245,9 @@ export async function applyPending(reg: Registry, ctx: ManageContext, pendingId:
 async function applySet(reg: Registry, ctx: ManageContext, controlId: string, value: string): Promise<ManageResult> {
   const t = manageT(ctx.locale);
   const c = reg.get(controlId);
+  // canAccess re-reads ctx.isAdmin, so a user demoted between staging and applying
+  // fails here (an admin control becomes invisible) — no separate role branch.
   if (!c || !canAccess(ctx, c)) return err("not_found", "Setting unavailable.");
-  if (c.requiredRole === "admin" && !ctx.isAdmin) return err("forbidden", "This action is admin-only.");
   // Re-validate: state and the value's validity may have changed since staging.
   const parsed = c.schema.safeParse(value);
   if (!parsed.success) return err("invalid_value", parsed.error.issues[0]?.message ?? "Invalid value.");

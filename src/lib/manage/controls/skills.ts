@@ -7,7 +7,7 @@ import {
   getSkillMeta,
 } from "@/lib/skills/service";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
-import { canInstallExtensions } from "@/lib/settings";
+import { canInstallExtensions, assertCanInstall } from "@/lib/settings";
 import type { SkillScope } from "@/lib/skills/types";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
@@ -30,9 +30,7 @@ export function skillScope(args: { scope?: string }): { scope: SkillScope; needs
 async function assertCanAddSkill(ctx: ManageContext, a: AddArgs): Promise<void> {
   const { needsAdmin } = skillScope(a);
   if (needsAdmin && !ctx.isAdmin) throw new Error("Shared (org) skills can only be added by an administrator.");
-  if (!(await canInstallExtensions(ctx.isAdmin))) {
-    throw new Error("The administrator has disabled self-service skill installation for members.");
-  }
+  await assertCanInstall(ctx.isAdmin, "skill");
 }
 
 export const skillCollection: Collection = {

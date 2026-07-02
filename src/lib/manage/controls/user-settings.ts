@@ -3,19 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { locales } from "@/i18n/config";
+import { isValidTimezone } from "@/lib/timezone";
 import type { Control } from "../types";
-
-/** Validate an IANA timezone the same way the /settings/timezone route does —
- *  Intl throws on anything it doesn't recognise. */
-function isValidTimezone(tz: string): boolean {
-  if (tz.length === 0 || tz.length > 64) return false;
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 const LOCALE_NAMES: Record<string, string> = { en: "English", uk: "Ukrainian" };
 

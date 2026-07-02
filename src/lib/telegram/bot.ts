@@ -417,14 +417,10 @@ async function buildBot(): Promise<Bot | null> {
     const t = tFor(ctx);
     const link = await findLink(ctx.from!.id);
     if (!link) { await ctx.answerCallbackQuery(); return; }
-    const [u] = await db.select({ role: users.role, locale: users.locale }).from(users).where(eq(users.id, link.userId)).limit(1);
-    const [{ applyPending }, { buildRegistry }] = await Promise.all([
-      import("@/lib/manage/dispatch"),
-      import("@/lib/manage/controls"),
-    ]);
-    const result = await applyPending(buildRegistry(), {
-      userId: link.userId, isAdmin: u?.role === "admin", projectId: null, locale: u?.locale ?? undefined,
-    }, ctx.match![1]);
+    // Same canonical human-authed apply path as the web endpoint (manage/authed),
+    // keyed to the verified Telegram link's user — never the model.
+    const { applyPendingForUser } = await import("@/lib/manage/authed");
+    const result = await applyPendingForUser(link.userId, ctx.match![1]);
     const msg =
       result.status === "ok" ? t("confirmApplied")
       : result.status === "error" && result.code === "confirm_expired" ? t("confirmExpired")

@@ -236,6 +236,16 @@ export async function canInstallExtensions(isAdmin: boolean): Promise<boolean> {
   return isAdmin || (await membersCanInstallPlugins());
 }
 
+/** Throw the ONE canonical "self-service install disabled" message when the
+ *  caller may not install `noun`s (connectors/skills). Both `manage` collections
+ *  guard their add through here so the wording — the exact line a weak model once
+ *  misread as "you have no permission" — lives in a single place. */
+export async function assertCanInstall(isAdmin: boolean, noun: string): Promise<void> {
+  if (!(await canInstallExtensions(isAdmin))) {
+    throw new Error(`The administrator has disabled self-service ${noun} installation for members.`);
+  }
+}
+
 /**
  * Telegram "Login with Telegram" (OIDC) configuration, sourced at runtime from
  * the DB so nothing is baked into the image. The secret is encrypted at rest

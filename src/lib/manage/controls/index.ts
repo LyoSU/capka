@@ -8,6 +8,10 @@ import { skillCollection } from "./skills";
  *  `list`/`capabilities` output — and thus the tools prefix behaviour — is
  *  deterministic. Adding a future capability (MCP, skill, folder access) means
  *  appending its controls here; nothing in the dispatcher or runner changes. */
+let cached: Registry | undefined;
 export function buildRegistry(): Registry {
-  return createRegistry([...userControls, ...orgControls], [mcpCollection, skillCollection]);
+  // The registry is stateless (controls delegate to the service layer), so one
+  // instance is shared process-wide — callers (the tool, the web confirm
+  // endpoint, the Telegram callback) no longer each rebuild it per request/tap.
+  return (cached ??= createRegistry([...userControls, ...orgControls], [mcpCollection, skillCollection]));
 }

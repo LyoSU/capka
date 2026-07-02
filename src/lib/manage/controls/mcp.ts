@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { decrypt } from "@/lib/crypto";
-import { getMasterKey, getBlockPrivateProviderUrls, canInstallExtensions } from "@/lib/settings";
+import { getMasterKey, getBlockPrivateProviderUrls, canInstallExtensions, assertCanInstall } from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
 import {
   listServers,
@@ -52,9 +52,7 @@ async function assertCanAddMcp(ctx: ManageContext, a: AddArgs): Promise<void> {
   if (needsAdmin && !ctx.isAdmin) {
     throw new Error("Local and shared (org) connectors can only be added by an administrator.");
   }
-  if (!(await canInstallExtensions(ctx.isAdmin))) {
-    throw new Error("The administrator has disabled self-service connector installation for members.");
-  }
+  await assertCanInstall(ctx.isAdmin, "connector");
 }
 
 /** Build the absolute OAuth sign-in URL the user's browser must open. Absolute
