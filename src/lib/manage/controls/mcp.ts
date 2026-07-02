@@ -11,6 +11,7 @@ import {
   getAccessibleServer,
 } from "@/lib/mcp/service";
 import { probeConfig, type ProbeStatus } from "@/lib/mcp/health";
+import { hasUserTokens } from "@/lib/mcp/oauth/store";
 import type { McpAuthKind, McpScope, McpSecrets } from "@/lib/mcp/types";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext, RequiredAction } from "../types";
@@ -91,14 +92,17 @@ export const mcpCollection: Collection = {
   async list(ctx) {
     const t = manageT(ctx.locale);
     const servers = await listServers(ctx.userId, ctx.projectId);
-    return servers.map((s) => ({
+    return Promise.all(servers.map(async (s) => ({
       id: s.id,
       title: s.name,
       subtitle: s.transport === "stdio" ? loc(t, "mcp.stdio", "local (stdio)") : s.url ?? undefined,
       enabled: s.enabled,
-      status: s.authKind === "oauth" ? "oauth" : undefined,
+      // "sign-in needed" only when an OAuth connector actually lacks a token — once
+      // the user has signed in it reads as a normal connector. (Was unconditional
+      // for any OAuth connector, so a signed-in connector still showed "sign in".)
+      status: s.authKind === "oauth" && !(await hasUserTokens(ctx.userId, s.id)) ? "oauth" : undefined,
       owned: s.mine,
-    }));
+    })));
   },
 
   async previewAdd(ctx, args) {

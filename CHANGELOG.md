@@ -12,6 +12,22 @@ All notable changes to Capka are documented here. Format follows
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
 ### Fixed
+- **An OAuth MCP connector now works right after you sign in, instead of being
+  silently ignored for up to 10 minutes.** Adding an OAuth connector and then
+  signing in left the agent unable to use it: any turn between adding and
+  signing in eagerly tried to connect the connector, got the expected 401, and
+  recorded a 10-minute connect-error backoff. A successful OAuth callback did
+  not clear that backoff, so the next turn's `loadMcpTools` skipped the
+  connector — the model had none of its tools and answered from memory, even
+  though the connector's own diagnostics reported it healthy. Three changes:
+  `loadMcpTools` no longer eager-connects (or records an error for) an OAuth
+  connector with no stored token — an unauthenticated 401 is "not signed in
+  yet", not a failure; the OAuth callback clears the connect backoff on success
+  (covering the token-revoked-then-reauthorized case); and the connectors list
+  shows "sign-in needed" only when a token is actually missing, not for every
+  OAuth connector. Confirming an OAuth connector in chat now also surfaces its
+  "Connect" sign-in button inline in the confirmation card, and a cancelled
+  confirmation reads as "cancelled" (not "expired") after a reload.
 - **The agent no longer refuses config changes it's actually allowed to make.**
   A weak model would read a control's `requiredRole: "admin"` label (or the
   `members_can_install_plugins` setting) and pre-emptively refuse — telling an

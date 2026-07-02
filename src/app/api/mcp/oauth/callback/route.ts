@@ -6,7 +6,7 @@ import { consumeState } from "@/lib/mcp/oauth/store";
 import { createGuardedFetch, PROVIDER_FETCH_TIMEOUT_MS } from "@/lib/net/ssrf";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { getPublicUrl } from "@/lib/url";
-import { recordConnectError } from "@/lib/mcp/connect-errors";
+import { recordConnectError, clearConnectError } from "@/lib/mcp/connect-errors";
 import { errorText } from "@/lib/errors/message";
 
 /** A tiny interstitial that ENDS the OAuth round-trip whether it happened in a
@@ -57,6 +57,11 @@ export async function GET(req: Request) {
     const fetchFn = createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), timeoutMs: PROVIDER_FETCH_TIMEOUT_MS });
     const result = await auth(provider, { serverUrl: server.url, authorizationCode: code, fetchFn });
     if (result !== "AUTHORIZED") return settings("?error=oauth");
+    // A just-authorized connector must not stay suppressed by the connect backoff
+    // that its pre-sign-in 401s set — clear it so the NEXT turn's loadMcpTools
+    // re-dials and actually exposes the connector's tools (otherwise the model has
+    // no mcp__<server>__* tools for up to the 10-min TTL and answers from memory).
+    clearConnectError(userId, server.id);
     const tab = server.source?.startsWith("catalog:") ? "plugins" : "connectors";
     return settings(`?connected=${encodeURIComponent(server.name)}`, tab, server.name);
   } catch (e) {

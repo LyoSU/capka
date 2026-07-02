@@ -5,6 +5,7 @@ import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
 import { recordConnectError, clearConnectError, recentlyFailed } from "./connect-errors";
 import { getCachedTools, setCachedTools } from "./tool-cache";
+import { hasUserTokens } from "./oauth/store";
 import { McpOAuthProvider } from "./oauth/provider";
 import { needsPluginRoot, resolvePluginRoot } from "./plugin-runtime";
 import type { McpServerConfig } from "./types";
@@ -125,6 +126,12 @@ export async function loadMcpTools(opts: {
       .slice(i, i + MAX_CONCURRENT)
       .filter((c) => !(c.id && recentlyFailed(opts.userId, c.id, CONNECT_BACKOFF_MS)));
     await Promise.allSettled(batch.map(async (c) => {
+      // An OAuth connector with no stored token can only 401 — that's "not signed
+      // in yet", not a failure. Skip it (no connect, no recorded error, so no
+      // backoff to later hide it) until the user signs in; its tools then appear
+      // next turn. clearConnectError on the callback covers the revoked-then-
+      // reauthorized case, where a token exists but the server rejected it.
+      if (c.authKind === "oauth" && c.id && !(await hasUserTokens(opts.userId, c.id))) return;
       const conn = await connect(c);
       for (const mt of [...conn.tools].sort((a, b) => a.name.localeCompare(b.name))) {
         tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(conn.client, c.name, mt, spillCtx);

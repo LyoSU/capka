@@ -158,7 +158,7 @@ function Outcome({ kind, text }: { kind: "done" | "expired" | "cancelled" | "err
 /** Staged change awaiting the USER's confirmation. Confirm/Cancel act via the
  *  session-authed endpoint (never the model), then the card collapses to its
  *  outcome — so a button can't be clicked twice and a stale card reads clearly. */
-function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
+function ConfirmCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: string) => void }) {
   const { title, before, after, impact, details, body } = o.preview!;
   // Start "checking": on mount we ask the server whether this pending is still
   // open, so a RELOADED card shows "confirmed"/"expired" instead of live buttons
@@ -167,6 +167,9 @@ function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
     o.pendingId ? "checking" : "idle",
   );
   const [errText, setErrText] = useState("");
+  // A follow-up the apply result carries (e.g. an OAuth sign-in for a just-added
+  // connector) — surfaced right in this card so the user doesn't have to ask again.
+  const [followUp, setFollowUp] = useState<RequiredAction | null>(null);
 
   useEffect(() => {
     if (!o.pendingId) return;
@@ -176,7 +179,9 @@ function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
         const res = await fetch(`/api/manage/confirm?pendingId=${encodeURIComponent(o.pendingId!)}`);
         const { status } = (await res.json()) as { status: "open" | "applied" | "expired" | "gone" };
         if (!alive) return;
-        setPhase(status === "open" ? "idle" : status === "applied" ? "done" : "expired");
+        // "gone" = the user cancelled it (or it was cleaned up) — show "cancelled",
+        // not "expired", so a declined change reads correctly after a reload.
+        setPhase(status === "open" ? "idle" : status === "applied" ? "done" : status === "gone" ? "cancelled" : "expired");
       } catch {
         if (alive) setPhase("idle"); // fall back to buttons; a click will resolve it
       }
@@ -190,7 +195,7 @@ function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
     haptic("success");
     try {
       const r = await consumePending(o.pendingId);
-      if (r.status === "ok") setPhase("done");
+      if (r.status === "ok") { setFollowUp(r.data?.action ?? r.action ?? null); setPhase("done"); }
       else if (r.code === "confirm_expired") setPhase("expired");
       else { setErrText(r.summary || t("applyError")); setPhase("error"); }
     } catch {
@@ -242,7 +247,17 @@ function ConfirmCard({ o, t }: { o: ManageOutput; t: T }) {
           <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("applying")}
         </div>
       )}
-      {phase === "done" && <Outcome kind="done" text={t("confirmed")} />}
+      {phase === "done" && (
+        <>
+          <Outcome kind="done" text={t("confirmed")} />
+          {/* e.g. "Connect" after adding an OAuth connector — sign in without leaving chat. */}
+          {followUp && (
+            <div className="mt-3">
+              <ConnectLink action={followUp} onConnected={onSend ? () => onSend(t("signedIn")) : undefined} />
+            </div>
+          )}
+        </>
+      )}
       {phase === "expired" && <Outcome kind="expired" text={t("expired")} />}
       {phase === "cancelled" && <Outcome kind="cancelled" text={t("cancelled")} />}
       {phase === "error" && <Outcome kind="error" text={errText} />}
@@ -366,7 +381,7 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
   const t = useTranslations("chat.manage");
   const o = output as ManageOutput;
 
-  if (o?.render === "confirm" && o.preview) return <ConfirmCard o={o} t={t} />;
+  if (o?.render === "confirm" && o.preview) return <ConfirmCard o={o} t={t} onSend={onSend} />;
 
   if (o?.render === "setting" && o.data) return <SettingCard o={o} t={t} />;
 

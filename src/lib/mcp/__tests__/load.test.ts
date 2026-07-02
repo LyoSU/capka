@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const listEnabledServerConfigs = vi.fn();
 const connectMcpServer = vi.fn();
 const recordConnectError = vi.fn();
+const hasUserTokens = vi.fn((..._a: unknown[]) => Promise.resolve(true));
 
 vi.mock("../service", () => ({ listEnabledServerConfigs: (...a: unknown[]) => listEnabledServerConfigs(...a) }));
 vi.mock("../client", () => ({
@@ -30,6 +31,7 @@ vi.mock("../connect-errors", () => ({
   recentlyFailed: vi.fn(() => false),
 }));
 vi.mock("../oauth/provider", () => ({ McpOAuthProvider: class {} }));
+vi.mock("../oauth/store", () => ({ hasUserTokens: (...a: unknown[]) => hasUserTokens(...a) }));
 vi.mock("../plugin-runtime", () => ({ needsPluginRoot: () => false, resolvePluginRoot: vi.fn() }));
 vi.mock("@/lib/settings", () => ({ getBlockPrivateProviderUrls: async () => false }));
 
@@ -52,6 +54,30 @@ beforeEach(() => {
 describe("loadMcpTools — http stays eager", () => {
   it("connects http connectors at load time and exposes their tools", async () => {
     listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    connectMcpServer.mockResolvedValue({ tools: [{ name: "q" }], client: { callTool: vi.fn() } });
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    expect(connectMcpServer).toHaveBeenCalledTimes(1);
+    expect(Object.keys(res.tools)).toContain("mcp__api__q");
+  });
+});
+
+describe("loadMcpTools — oauth needs a token", () => {
+  it("does NOT eager-connect (or record an error for) an oauth http connector with no stored token", async () => {
+    // An unauthenticated OAuth connect is a guaranteed 401 — that's an expected
+    // not-signed-in-yet state, not a failure. Attempting it every turn wasted a
+    // connect and set a connect-error backoff that then hid the connector for 10
+    // min AFTER the user finally signed in (the bug behind "connector didn't work").
+    listEnabledServerConfigs.mockResolvedValue([{ ...cfg("api", "http"), authKind: "oauth" }]);
+    hasUserTokens.mockResolvedValue(false);
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    expect(connectMcpServer).not.toHaveBeenCalled();
+    expect(recordConnectError).not.toHaveBeenCalled();
+    expect(res.tools).toEqual({});
+  });
+
+  it("eager-connects an oauth http connector once its token exists", async () => {
+    listEnabledServerConfigs.mockResolvedValue([{ ...cfg("api", "http"), authKind: "oauth" }]);
+    hasUserTokens.mockResolvedValue(true);
     connectMcpServer.mockResolvedValue({ tools: [{ name: "q" }], client: { callTool: vi.fn() } });
     const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
     expect(connectMcpServer).toHaveBeenCalledTimes(1);
