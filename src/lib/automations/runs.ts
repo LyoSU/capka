@@ -44,35 +44,45 @@ export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean
     source: "web", // fully interactive in the web UI — the user can follow up
   });
 
-  const msgId = nanoid();
-  await db.insert(messages).values({
-    id: msgId,
-    chatId,
-    parentId: null,
-    role: "user",
-    content: a.prompt,
-    platform: "automation",
-  });
-  await db.update(chats).set({ activeLeafId: msgId, updatedAt: new Date() }).where(eq(chats.id, chatId));
-  await publishTaskEvent(a.userId, { type: "new_message", chatId });
+  // Everything past this point can fail independently (no shared transaction —
+  // enqueueTask issues its own raw-SQL round-trip). A failure here would otherwise
+  // strand a chat with an unanswered user message and silently drop the occurrence
+  // (the scheduler already advanced next_run_at before calling us), so clean up
+  // the orphan chat on any failure — messages cascade-delete with it.
+  try {
+    const msgId = nanoid();
+    await db.insert(messages).values({
+      id: msgId,
+      chatId,
+      parentId: null,
+      role: "user",
+      content: a.prompt,
+      platform: "automation",
+    });
+    await db.update(chats).set({ activeLeafId: msgId, updatedAt: new Date() }).where(eq(chats.id, chatId));
+    await publishTaskEvent(a.userId, { type: "new_message", chatId });
 
-  // Deliver to Telegram when linked — the run's full result lands in the
-  // messenger via the existing TelegramSink, no new delivery code.
-  const [link] = await db.select().from(telegramLinks).where(eq(telegramLinks.userId, a.userId));
-  const path = await loadActivePath(chatId, msgId);
-  const payload: TaskPayload = {
-    requestModel: a.model ?? undefined,
-    projectId: a.projectId ?? undefined,
-    uiMessages: toUIMessages(path.map((p) => p.node)),
-    automationId: a.id,
-    ...(link ? { origin: { platform: "telegram" as const, telegramChatId: link.telegramUserId, locale } } : {}),
-  };
-  const taskId = nanoid();
-  await enqueueTask({ id: taskId, chatId, userId: a.userId, payload });
-  await db.update(automations)
-    .set({ lastTaskId: taskId, lastRunAt: new Date(), updatedAt: new Date() })
-    .where(eq(automations.id, a.id));
-  return { fired: true };
+    // Deliver to Telegram when linked — the run's full result lands in the
+    // messenger via the existing TelegramSink, no new delivery code.
+    const [link] = await db.select().from(telegramLinks).where(eq(telegramLinks.userId, a.userId));
+    const path = await loadActivePath(chatId, msgId);
+    const payload: TaskPayload = {
+      requestModel: a.model ?? undefined,
+      projectId: a.projectId ?? undefined,
+      uiMessages: toUIMessages(path.map((p) => p.node)),
+      automationId: a.id,
+      ...(link ? { origin: { platform: "telegram" as const, telegramChatId: link.telegramUserId, locale } } : {}),
+    };
+    const taskId = nanoid();
+    await enqueueTask({ id: taskId, chatId, userId: a.userId, payload });
+    await db.update(automations)
+      .set({ lastTaskId: taskId, lastRunAt: new Date(), updatedAt: new Date() })
+      .where(eq(automations.id, a.id));
+    return { fired: true };
+  } catch (e) {
+    await db.delete(chats).where(eq(chats.id, chatId)).catch(() => {});
+    throw e;
+  }
 }
 
 /**
