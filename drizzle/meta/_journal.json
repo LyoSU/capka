@@ -267,6 +267,13 @@
       "when": 1782942328066,
       "tag": "0037_special_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1783001091929,
+      "tag": "0038_simple_psynapse",
+      "breakpoints": true
     }
   ]
 }

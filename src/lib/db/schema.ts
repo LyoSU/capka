@@ -535,3 +535,21 @@ export const managePending = pgTable("manage_pending", {
 }, (table) => [
   index("idx_manage_pending_expires").on(table.expiresAt),
 ]);
+
+// A pending MCP elicitation. Elicitation arrives mid-`callTool` over a live MCP
+// connection, so — unlike the durable `ask` suspend — it can't snapshot/resume:
+// the handler BLOCKS and polls this row until the user answers (`answer` set) or
+// it times out (row deleted). `form` is the AskForm the card renders; `answer` is
+// the AskAnswer the user submits. Matched by `messageId` (the assistant turn the
+// blocked tool belongs to) + `userId` (only the owner may answer). Short-lived.
+export const pendingElicitations = pgTable("pending_elicitation", {
+  id: text("id").primaryKey(),
+  chatId: text("chat_id").notNull(),
+  messageId: text("message_id").notNull(),
+  userId: text("user_id").notNull(),
+  form: jsonb("form").$type<Record<string, unknown>>().notNull(),
+  answer: jsonb("answer").$type<Record<string, unknown>>(), // AskAnswer once answered; null while pending
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_pending_elicitation_message").on(table.messageId),
+]);
