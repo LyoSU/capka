@@ -977,7 +977,17 @@
       "noMatches": "Nothing matches “{query}”.",
       "update": "Update",
       "updated": "Updated · {skills} skills, {connectors} connectors.",
-      "updateFailed": "Couldn't update that plugin."
+      "updateFailed": "Couldn't update that plugin.",
+      "tokenTitle": "GitHub access token",
+      "tokenHint": "Optional. Lets Capka reach marketplaces without hitting GitHub's anonymous rate limit — the usual cause of a failed install — and open private repositories. Stored encrypted; never shown again.",
+      "tokenConfigured": "Saved",
+      "tokenPlaceholder": "Paste a token to set or replace",
+      "tokenSave": "Save",
+      "tokenSaved": "Token saved.",
+      "tokenSaveFailed": "Couldn't save the token.",
+      "tokenClear": "Clear",
+      "tokenCleared": "Token removed.",
+      "tokenClearFailed": "Couldn't remove the token."
     },
     "permissions": {
       "title": "Permissions",

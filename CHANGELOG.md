@@ -11,6 +11,17 @@ All notable changes to Capka are documented here. Format follows
 > `docker-compose.yml` is now the single canonical pull-only stack every target
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
+### Added
+- **The GitHub token for marketplace installs is now set from the UI (Settings →
+  Marketplace), not only by hand-writing a `github_token` settings row.** Without
+  a token, Capka calls GitHub anonymously (60 requests/hour per IP) and installs
+  start failing once that budget is spent; a token raises the limit to 5000/hour
+  and reaches private repos. The new admin-only field is write-only — the value
+  is encrypted at rest and never echoed back (the UI shows only whether one is
+  stored), matching the Telegram OIDC secret. It is deliberately NOT settable
+  through the conversational `manage` tool, because a token pasted into chat would
+  persist in plaintext in the message transcript.
+
 ### Changed
 - **Confirming a `manage` change in chat is now native tool approval — the agent
   continues the same turn after you decide, instead of dead-ending.** Before, a

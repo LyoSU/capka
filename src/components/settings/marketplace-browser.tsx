@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PluginIcon } from "@/components/plugin-icon";
 import MembersInstallToggle from "@/components/settings/members-install-toggle";
+import GithubTokenField from "@/components/settings/github-token-field";
 
 interface Marketplace {
   id: string;
@@ -177,6 +178,7 @@ export function MarketplaceBrowser() {
   return (
     <div className="space-y-5">
       <MembersInstallToggle />
+      <GithubTokenField />
 
       {/* Add a marketplace */}
       <div className="flex gap-2">
