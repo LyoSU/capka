@@ -39,6 +39,7 @@ export const skillCollection: Collection = {
   description: "Agent skills — list, add (SKILL.md), enable/disable, remove.",
   requiredRole: "user",
   auditNoun: "skill",
+  settingsPath: "/settings/skills",
   addSchema,
 
   canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),

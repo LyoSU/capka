@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw } from "lucide-react";
+import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
 
@@ -30,6 +31,8 @@ type ManageOutput = {
     // collection
     collectionId?: string;
     items?: { id: string; title: string; subtitle?: string; enabled?: boolean; status?: string; owned?: boolean }[];
+    /** The full settings page that manages this collection (quiet "Open in settings" link). */
+    settingsPath?: string;
     // resource
     op?: "added" | "removed" | "enabled" | "disabled";
     itemTitle?: string;
@@ -77,6 +80,20 @@ function ConnectLink({ action }: { action: RequiredAction }) {
 }
 
 const OP_ICON = { added: Plug, removed: Trash2, enabled: Power, disabled: Power } as const;
+
+/** Quiet client-side link from a chat card to the full settings page that manages
+ *  the same thing — the card is a summary; the page is the richer UI (#12). */
+function SettingsLink({ href, t }: { href: string; t: T }) {
+  return (
+    <Link
+      href={href}
+      className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {t("openInSettings")}
+      <ArrowUpRight className="h-3 w-3" />
+    </Link>
+  );
+}
 
 /** before → after, with the old value dimmed/struck and the new value emphasised.
  *  When there's no meaningful "before" (e.g. an empty default) only the new value
@@ -325,6 +342,7 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
             <ConnectLink action={o.data.action} />
           </div>
         )}
+        {o.data.settingsPath && <SettingsLink href={o.data.settingsPath} t={t} />}
       </CardShell>
     );
   }
@@ -383,6 +401,7 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
             ))}
           </ul>
         )}
+        {o.data.settingsPath && <SettingsLink href={o.data.settingsPath} t={t} />}
       </CardShell>
     );
   }

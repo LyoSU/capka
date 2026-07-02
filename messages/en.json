@@ -454,7 +454,8 @@
       "cancelled": "Cancelled.",
       "recheck": "Re-check",
       "viewInstructions": "View full instructions",
-      "emptyConnectors": "No connectors yet. Just ask — e.g. \"connect Linear\"."
+      "emptyConnectors": "No connectors yet. Just ask — e.g. \"connect Linear\".",
+      "openInSettings": "Open in settings"
     }
   },
   "projects": {
@@ -862,7 +863,8 @@
       "pluginsView": {
         "installed": "Installed",
         "browse": "Browse"
-      }
+      },
+      "chatHint": "You can also add and manage these just by asking the assistant in chat."
     },
     "connectors": {
       "title": "Connectors",

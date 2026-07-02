@@ -81,6 +81,7 @@ export const mcpCollection: Collection = {
   description: "External MCP connectors — add, enable/disable, debug, authorize.",
   requiredRole: "user",
   auditNoun: "connector",
+  settingsPath: "/settings/skills?tab=connectors",
   addSchema,
 
   canAdd: (ctx) => canInstallExtensions(ctx.isAdmin),

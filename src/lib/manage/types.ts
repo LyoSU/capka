@@ -99,6 +99,9 @@ export interface Collection {
    *  `${auditNoun}.{add,remove,enable,disable}` so a skill change never masquerades
    *  as a connector change. */
   auditNoun: "connector" | "skill";
+  /** The full settings page that manages this collection, so a chat card can offer
+   *  a quiet "Open in settings →" link to the richer UI (the card is a summary). */
+  settingsPath?: string;
   addSchema?: z.ZodTypeAny;
   /** Resolved, authoritative "may THIS caller add here" — surfaced to the model
    *  (UI-style, like the settings page's capability endpoint) so it never has to
@@ -146,13 +149,13 @@ export type ManageResult =
       status: "ok";
       render: "collection";
       summary: string;
-      data: { collectionId: string; title: string; items: CollectionItem[]; canAdd: boolean };
+      data: { collectionId: string; title: string; items: CollectionItem[]; canAdd: boolean; settingsPath?: string };
     }
   | {
       status: "ok";
       render: "resource";
       summary: string;
-      data: { op: "added" | "removed" | "enabled" | "disabled"; collectionId: string; title: string; itemTitle: string; action?: RequiredAction };
+      data: { op: "added" | "removed" | "enabled" | "disabled"; collectionId: string; title: string; itemTitle: string; action?: RequiredAction; settingsPath?: string };
     }
   | {
       status: "ok";

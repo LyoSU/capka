@@ -164,7 +164,7 @@ async function get(reg: Registry, ctx: ManageContext, target: string): Promise<M
       status: "ok",
       render: "collection",
       summary: `${collLabel(t, coll)}: ${items.length}${canAdd ? " (you can add here)" : ""}`,
-      data: { collectionId: coll.id, title: collLabel(t, coll), items, canAdd },
+      data: { collectionId: coll.id, title: collLabel(t, coll), items, canAdd, settingsPath: coll.settingsPath },
     };
   }
   return err("not_found", `No setting "${target}".`);
@@ -270,7 +270,7 @@ async function applyAdd(reg: Registry, ctx: ManageContext, collectionId: string,
       status: "ok",
       render: "resource",
       summary: loc(t, "op.added", `Added ${itemTitle}.`, { name: itemTitle }),
-      data: { op: "added", collectionId: coll!.id, title: coll!.title, itemTitle, action },
+      data: { op: "added", collectionId: coll!.id, title: coll!.title, itemTitle, action, settingsPath: coll!.settingsPath },
     };
   } catch (e) {
     return err("apply_failed", errMsg(e));
@@ -289,7 +289,7 @@ async function applyRemove(reg: Registry, ctx: ManageContext, collectionId: stri
       status: "ok",
       render: "resource",
       summary: loc(t, "op.removed", `Removed ${itemTitle}.`, { name: itemTitle }),
-      data: { op: "removed", collectionId: coll!.id, title: coll!.title, itemTitle },
+      data: { op: "removed", collectionId: coll!.id, title: coll!.title, itemTitle, settingsPath: coll!.settingsPath },
     };
   } catch (e) {
     return err("apply_failed", errMsg(e));
@@ -401,7 +401,7 @@ async function toggle(reg: Registry, ctx: ManageContext, target: string, itemId:
       status: "ok",
       render: "resource",
       summary: loc(t, opKey, `${itemTitle} ${enabled ? "enabled" : "disabled"}.`, { name: itemTitle }),
-      data: { op: enabled ? "enabled" : "disabled", collectionId: coll!.id, title: coll!.title, itemTitle },
+      data: { op: enabled ? "enabled" : "disabled", collectionId: coll!.id, title: coll!.title, itemTitle, settingsPath: coll!.settingsPath },
     };
   } catch (e) {
     return err("apply_failed", errMsg(e));

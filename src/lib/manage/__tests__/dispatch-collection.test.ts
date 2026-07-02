@@ -57,6 +57,17 @@ describe("manage/dispatch collections", () => {
     }
   });
 
+  it("surfaces settingsPath so the card can link to the full settings page (#12)", async () => {
+    const { collection } = memCollection({ settingsPath: "/settings/skills?tab=connectors" });
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx(), { action: "get", target: "mcp" });
+    if (res.status === "ok" && res.render === "collection") {
+      expect(res.data.settingsPath).toBe("/settings/skills?tab=connectors");
+    } else {
+      throw new Error("expected collection render");
+    }
+  });
+
   it("get resolves and surfaces the collection's canAdd (authoritative, not inferred by the model)", async () => {
     const { collection } = memCollection({ canAdd: async () => true });
     const reg = createRegistry([], [collection]);

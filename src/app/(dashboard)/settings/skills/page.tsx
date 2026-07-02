@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Library, Plug, Package } from "lucide-react";
+import { Library, Plug, Package, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import SkillLibrary from "@/components/settings/skill-library";
@@ -48,6 +48,10 @@ export default function CustomizePage() {
       <div>
         <h2 className="text-base font-medium">{t("title")}</h2>
         <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/80">
+          <MessageSquare className="h-3 w-3" />
+          {t("chatHint")}
+        </p>
       </div>
 
       {/* Segmented control */}
