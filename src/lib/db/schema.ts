@@ -313,6 +313,41 @@ export const projects = pgTable("projects", {
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_projects_user_id").on(table.userId)]);
 
+// ── Automations (scheduled agent runs) ───────────────────────
+
+/** A recurring (or one-off) agent run the platform fires without an open tab.
+ *  Each firing materializes a NEW ordinary chat with one user message (the
+ *  prompt) and enqueues a normal task — see src/lib/automations/runs.ts. The
+ *  scheduler is a tick in the in-process worker; rows are claimed with
+ *  FOR UPDATE SKIP LOCKED so multiple platform replicas can't double-fire. */
+export const automations = pgTable("automations", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // Inherited from the chat where the automation was created: run chats get the
+  // same projectId, so they share the project's sandbox (workspace continuity).
+  projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  // The user message each run starts with — the whole instruction.
+  prompt: text("prompt").notNull(),
+  // Model of the creating chat; null → default resolution in the runner.
+  model: text("model"),
+  // {kind:"schedule", cron, timezone} | {kind:"once", at} — see AutomationTrigger.
+  trigger: jsonb("trigger").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  nextRunAt: timestamp("next_run_at"),
+  lastRunAt: timestamp("last_run_at"),
+  // The task the last firing enqueued: overlap guard (skip firing while it's
+  // still queued/running) + "open last run" links in settings/debug.
+  lastTaskId: text("last_task_id"),
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_automations_user_id").on(table.userId),
+  // The scheduler's whole query: due, enabled rows.
+  index("idx_automations_due").on(table.nextRunAt).where(sql`enabled = true`),
+]);
+
 // Agent memory as ONE self-maintaining markdown document per scope — "CLAUDE.md
 // in Postgres". `projectId IS NULL` is the user-global doc (≈ ~/CLAUDE.md); a row
 // with a projectId is that project's doc (≈ project/CLAUDE.md). The doc is edited
