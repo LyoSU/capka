@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthShell, AUTH_FIELD } from "@/components/auth/auth-shell";
 import { TelegramSignIn, AuthDivider } from "@/components/auth/telegram-sign-in";
+import { authErrorKey } from "@/lib/auth/client-error";
 import { toast } from "sonner";
 
 export default function LoginPage() {
@@ -19,11 +20,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [telegramEnabled, setTelegramEnabled] = useState<boolean | null>(null);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/registration-status")
       .then((r) => r.json())
-      .then((d) => setTelegramEnabled(!!d.telegram?.enabled))
+      .then((d) => {
+        setTelegramEnabled(!!d.telegram?.enabled);
+        setRegistrationEnabled(d.enabled !== false);
+      })
       .catch(() => setTelegramEnabled(false));
     // Surface a failed Telegram round-trip (the error callback redirects here).
     const p = new URLSearchParams(window.location.search);
@@ -43,7 +48,8 @@ export default function LoginPage() {
     });
 
     if (error) {
-      toast.error(error.message ?? t("login.invalidCredentials"));
+      const key = authErrorKey(error);
+      toast.error(key ? t(`errors.${key}`) : t("login.invalidCredentials"));
       setLoading(false);
       return;
     }
@@ -56,12 +62,14 @@ export default function LoginPage() {
       title={t("login.title")}
       description={t("login.description")}
       footer={
-        <>
-          {t("login.noAccount")}{" "}
-          <Link href="/register" className="font-medium text-foreground hover:underline">
-            {t("login.createOne")}
-          </Link>
-        </>
+        registrationEnabled ? (
+          <>
+            {t("login.noAccount")}{" "}
+            <Link href="/register" className="font-medium text-foreground hover:underline">
+              {t("login.createOne")}
+            </Link>
+          </>
+        ) : undefined
       }
     >
       {telegramEnabled && (

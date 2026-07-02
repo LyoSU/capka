@@ -89,6 +89,7 @@ export function ChatContextMenu({
   // first time the chat is shared, so we adopt whatever the server settles on
   // rather than guessing the URL client-side.
   async function changeVisibility(next: Visibility) {
+    const previous = visibility;
     setSavingVisibility(true);
     setVisibility(next);
     try {
@@ -103,6 +104,7 @@ export function ChatContextMenu({
       if (data.shareToken) setShareToken(data.shareToken);
       onUpdate();
     } catch {
+      setVisibility(previous);
       toast.error(t("share.updateFailed"));
     } finally {
       setSavingVisibility(false);

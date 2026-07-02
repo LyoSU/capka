@@ -1,5 +1,6 @@
 {
   "common": {
+    "skipToContent": "Skip to content",
     "save": "Save",
     "saving": "Saving…",
     "cancel": "Cancel",
@@ -619,7 +620,9 @@
         "codeExpires": "Code expires in 5 minutes",
         "doneRefresh": "Done / Refresh status",
         "generateCode": "Generate Link Code",
-        "configureFirst": "Configure the bot token above before linking your account.",
+        "configureFirstAdmin": "Add the bot token in",
+        "configureFirstAdminLink": "Integrations settings",
+        "configureFirstUser": "Not set up yet. Ask your administrator to connect Telegram.",
         "oidcLink": "Connect with Telegram",
         "oidcFailed": "Couldn't connect to Telegram. Please try again."
       },
@@ -1258,6 +1261,14 @@
       "signIn": "Sign in with Telegram",
       "failed": "Telegram sign-in didn't go through. Please try again.",
       "registerHint": "Sign in with your Telegram account to get started."
+    },
+    "errors": {
+      "invalidCredentials": "Invalid email or password.",
+      "userExists": "An account with this email already exists.",
+      "passwordTooShort": "Password is too short.",
+      "passwordTooLong": "Password is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "emailNotVerified": "Confirm your email before signing in."
     },
     "pending": {
       "title": "Almost there",

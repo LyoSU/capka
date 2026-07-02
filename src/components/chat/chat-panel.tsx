@@ -128,11 +128,13 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const attachments = useComposerAttachments({ chatId, ensureChat });
 
   // Fork the conversation from a message into a fresh chat, then jump to it.
-  const handleFork = async (messageId: string) => {
+  // useCallback keeps this identity stable across composer keystrokes so it
+  // doesn't defeat memo(ChatMessage) and re-render the whole transcript.
+  const handleFork = useCallback(async (messageId: string) => {
     const newId = await forkChat(messageId);
     if (newId) router.push(`/chat/${newId}`);
     else toast.error(t("forkFailed"));
-  };
+  }, [forkChat, router, t]);
 
   // "Continue here": fork a read-only Telegram chat from its latest message into
   // a fresh, fully-interactive web chat so the user can take the thread over.

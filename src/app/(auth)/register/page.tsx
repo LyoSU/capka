@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthShell, AUTH_FIELD } from "@/components/auth/auth-shell";
 import { TelegramSignIn, AuthDivider } from "@/components/auth/telegram-sign-in";
+import { authErrorKey } from "@/lib/auth/client-error";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -46,7 +47,8 @@ export default function RegisterPage() {
     });
 
     if (error) {
-      toast.error(error.message ?? t("register.failed"));
+      const key = authErrorKey(error);
+      toast.error(key ? t(`errors.${key}`) : t("register.failed"));
       setLoading(false);
       return;
     }

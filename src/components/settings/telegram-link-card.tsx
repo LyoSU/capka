@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Loader2, Link2, Copy, Check, Send } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -11,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth-client";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 /**
  * Personal Telegram account linking — visible to every role. The bot *token* is
@@ -21,6 +23,7 @@ import { authClient } from "@/lib/auth-client";
  */
 export function TelegramLinkCard() {
   const t = useTranslations("settings.integrations");
+  const isAdmin = useIsAdmin();
 
   const [linked, setLinked] = useState(false);
   const [linkUsername, setLinkUsername] = useState<string | null>(null);
@@ -213,7 +216,18 @@ export function TelegramLinkCard() {
             </Button>
           )}
           {!botUsername && (
-            <p className="text-xs text-muted-foreground">{t("link.configureFirst")}</p>
+            <p className="text-xs text-muted-foreground">
+              {isAdmin ? (
+                <>
+                  {t("link.configureFirstAdmin")}{" "}
+                  <Link href="/settings/integrations" className="font-medium text-foreground hover:underline">
+                    {t("link.configureFirstAdminLink")}
+                  </Link>
+                </>
+              ) : (
+                t("link.configureFirstUser")
+              )}
+            </p>
           )}
         </div>
       )}

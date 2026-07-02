@@ -21,6 +21,7 @@ import { ClawMark } from "@/components/brand/claw-mark";
 import { iconForSlug } from "@/components/chat/provider-icons";
 import { PROVIDER_OPTIONS, PROVIDER_META, type ProviderName } from "@/lib/providers/registry";
 import { SETUP_STEPS, type SetupStep } from "@/lib/setup-steps";
+import { authErrorKey } from "@/lib/auth/client-error";
 
 const STEPS = SETUP_STEPS;
 
@@ -54,6 +55,7 @@ export function SetupWizard({
 }) {
   const router = useRouter();
   const t = useTranslations("setup");
+  const tAuth = useTranslations("auth");
   // The server resolves where to resume (see lib/setup). Once a session exists
   // the account is already created, so we never re-show — or let the user back
   // into — the account step; doing so would dead-end on a duplicate sign-up.
@@ -135,10 +137,11 @@ export function SetupWizard({
           // the same credentials so they resume and claim admin, instead of dead-
           // ending on "user already exists". Wrong password just re-surfaces the
           // original error.
-          const exists = /exists|already/i.test(error.message ?? "");
+          const key = authErrorKey(error);
+          const exists = key === "userExists";
           const recovered = exists && !(await authClient.signIn.email({ email, password })).error;
           if (!recovered) {
-            toast.error(error.message || t("account.error"));
+            toast.error(key ? tAuth(`errors.${key}`) : t("account.error"));
             return;
           }
         }
@@ -156,8 +159,8 @@ export function SetupWizard({
       }
 
       setStep(1);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("account.error"));
+    } catch {
+      toast.error(t("account.error"));
     } finally {
       setLoading(false);
     }
@@ -232,8 +235,8 @@ export function SetupWizard({
 
       sessionStorage.removeItem("capka_setup_token");
       router.push("/chat");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("provider.verifyError"));
+    } catch {
+      toast.error(t("provider.verifyError"));
     } finally {
       setLoading(false);
     }

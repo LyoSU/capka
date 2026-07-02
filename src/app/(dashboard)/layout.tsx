@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { RouteTransition } from "@/components/layout/route-transition";
 import { AppSidebar } from "@/components/layout/app-sidebar";
@@ -27,10 +28,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/pending");
   }
 
+  const t = await getTranslations("common");
+
   return (
     <SidebarProvider>
+      {/* Keyboard users would otherwise have to tab through the entire chat
+          list before reaching the page content on every navigation. */}
+      <a
+        href="#main-content"
+        className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:left-4 focus-visible:top-4 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-primary focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {t("skipToContent")}
+      </a>
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset id="main-content" tabIndex={-1} className="focus-visible:outline-none">
         <ProviderStatusBanner />
         <UpdateBanner />
         <OrgChangeBanner />

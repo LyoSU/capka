@@ -1,5 +1,6 @@
 {
   "common": {
+    "skipToContent": "Перейти до вмісту",
     "save": "Зберегти",
     "saving": "Зберігаю…",
     "cancel": "Скасувати",
@@ -619,7 +620,9 @@
         "codeExpires": "Код діє 5 хвилин",
         "doneRefresh": "Готово / Оновити",
         "generateCode": "Згенерувати код підключення",
-        "configureFirst": "Спершу налаштуйте токен бота вище.",
+        "configureFirstAdmin": "Додайте токен бота в розділі",
+        "configureFirstAdminLink": "«Інтеграції»",
+        "configureFirstUser": "Ще не налаштовано. Зверніться до адміністратора.",
         "oidcLink": "Підключити Telegram",
         "oidcFailed": "Не вдалося підключити Telegram. Спробуйте ще раз."
       },
@@ -1258,6 +1261,14 @@
       "signIn": "Увійти через Telegram",
       "failed": "Не вдалося увійти через Telegram. Спробуйте ще раз.",
       "registerHint": "Увійдіть через свій акаунт Telegram, щоб почати."
+    },
+    "errors": {
+      "invalidCredentials": "Неправильна пошта або пароль.",
+      "userExists": "Акаунт із цією поштою вже існує.",
+      "passwordTooShort": "Пароль надто короткий.",
+      "passwordTooLong": "Пароль надто довгий.",
+      "invalidEmail": "Вкажіть коректну електронну пошту.",
+      "emailNotVerified": "Підтвердьте пошту перед входом."
     },
     "pending": {
       "title": "Майже готово",

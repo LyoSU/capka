@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import { authErrorKey } from "@/lib/auth/client-error";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -38,7 +39,8 @@ export function TelegramSignIn({ enabled, callbackURL = "/chat" }: { enabled: bo
     });
     // On success better-auth redirects away; reaching here means it failed.
     if (error) {
-      toast.error(error.message ?? t("telegram.failed"));
+      const key = authErrorKey(error);
+      toast.error(key ? t(`errors.${key}`) : t("telegram.failed"));
       setLoading(false);
     }
   };
