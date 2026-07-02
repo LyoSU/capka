@@ -38,6 +38,10 @@ export interface ModelInfo {
   // runner uses (`acceptsNativeFile`), so an audio icon never promises what the
   // connection won't actually deliver.
   configProvider?: string;
+  // Whether the owning connection is an admin's SHARED key (spends the org budget)
+  // rather than the user's own. Drives the "shared" chip per selected model in a
+  // mixed own+shared picker; absent on single-credential paths.
+  configShared?: boolean;
 }
 
 const perMillion = (v: string | null | undefined) => (v ? parseFloat(v) * 1_000_000 : 0);

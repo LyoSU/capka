@@ -1157,7 +1157,10 @@ export function ModelPicker({
               {currentModel && currentModel.context > 0 && (
                 <span className="text-xs text-muted-foreground tabular-nums hidden md:inline" title={t("context")}>{formatContext(currentModel.context)}</span>
               )}
-              {state.isShared && (
+              {/* Shared-key chip: shown when the whole offering is the shared key,
+                  or (in a mixed own+shared picker) when the SELECTED model runs on
+                  a shared connection. */}
+              {(state.isShared || currentModel?.configShared) && (
                 <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title={t("sharedTooltip")}>{t("shared")}</span>
               )}
             </span>

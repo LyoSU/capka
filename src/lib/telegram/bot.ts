@@ -227,11 +227,7 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
     userId: link.userId, taskId: tgTaskId, onSharedKey: tgShared, modelId: tgModelId, provider: tgProvider,
   });
   if (!reservation.allowed) {
-    if (reservation.reason === "unpriced") {
-      await ctx.reply("This model isn't priced, so it can't run on the shared key — please ask an admin to sync models or pick another model.").catch(() => {});
-    } else {
-      await reply(ctx, "budgetReached");
-    }
+    await reply(ctx, "budgetReached");
     return;
   }
 

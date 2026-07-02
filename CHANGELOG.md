@@ -70,8 +70,27 @@ All notable changes to Capka are documented here. Format follows
   Undo is unchanged (a button on the applied card). No operator action required.
 
 ### Fixed
-- **Installing skills from a GitHub repo now explains a rate limit instead of
-  saying "access denied".** With no `github_token` configured, Capka calls the
+- **Adding your own provider key no longer hides the org's shared connections.**
+  In `shared_plus_own`, `resolveEnabledConfigs` returned the user's own configs
+  OR (only when they had none) the admin's shared configs — never both. So the
+  moment a user added a personal key, every shared/public connection vanished
+  from the model picker. Now the picker shows the UNION: the user's own
+  connections first (a new chat still defaults to their own key, never silently
+  to the admin's), followed by the admin's shared ones. Each model is tagged with
+  its owning connection, so a shared-key pick is still budget-gated and now
+  carries a "shared" chip; the admin's min-context / max-price caps are enforced
+  on shared-connection models only (own keys stay unfiltered). No effect in
+  `own_only` or `shared_only`.
+- **A free (or newly released) model no longer fails with "isn't priced in the
+  catalog" on the shared key.** The shared-key budget gate priced turns from the
+  synced catalog only; a model the picker offered from OpenRouter's live list but
+  the periodic sync hadn't captured yet had no catalog price, so `reserveBudget`
+  returned `unpriced` and refused the turn — even for a genuinely free model. Now
+  an unpriced model is (1) looked up against OpenRouter's live price book as a
+  best-effort fallback, and (2) if still unknown, ALLOWED through with a zero hold
+  (reconciled to its real, usually zero, cost at finalize) while a background
+  catalog sync is kicked to price it next time — instead of being blocked. A
+  model is never hidden or refused for missing a price. With no `github_token` configured, Capka calls the
   GitHub API anonymously (60 requests/hour per IP); once that budget was spent,
   `resolveCommit`/`ghTree`/`ghRaw` threw a bare `HTTP 403`, which the agent
   relayed to users as "доступ заборонено" — reading as a permissions problem

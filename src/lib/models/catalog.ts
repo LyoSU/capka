@@ -217,6 +217,8 @@ export async function syncModelCatalog(): Promise<{ openrouter: number; litellm:
     console.error("[catalog] Models.dev enrichment failed (non-fatal):", err);
   }
   priceCache.clear();
+  livePriceCache.clear();
+  livePriceBook = null; // fresh catalog supersedes the live-fetched fallback book
   contextCache.clear(); // was never cleared on sync — context windows could go stale
   console.log(`[catalog] synced ${or} OpenRouter + ${ll} LiteLLM models, enriched ${md} from Models.dev`);
   return { openrouter: or, litellm: ll, modelsdev: md };
@@ -368,6 +370,41 @@ export async function getModelPrice(modelId: string): Promise<ModelPrice | null>
     : null;
   cacheSet(priceCache, modelId, price, price === null);
   return price;
+}
+
+// Best-effort LIVE price when the synced catalog is missing a model — e.g. a
+// brand-new or free OpenRouter model the periodic sync hasn't picked up yet.
+// Hits OpenRouter's public price book directly (works unauthenticated) and caches
+// the parsed book for a few minutes so a flurry of turns shares one fetch. Returns
+// null when the model isn't there either (or the fetch fails); the caller then
+// lets the turn run unpriced rather than blocking it.
+const LIVE_PRICE_TTL_MS = 5 * 60_000;
+let livePriceBook: { at: number; byId: Map<string, ModelPrice> } | null = null;
+const livePriceCache = new Map<string, CacheEntry<ModelPrice | null>>();
+
+export async function getLiveModelPrice(modelId: string): Promise<ModelPrice | null> {
+  const cached = cacheGet(livePriceCache, modelId);
+  if (cached.hit) return cached.v;
+  try {
+    if (!livePriceBook || Date.now() - livePriceBook.at > LIVE_PRICE_TTL_MS) {
+      const byId = new Map<string, ModelPrice>();
+      for (const m of parseOpenRouterModels(await fetchJson(OPENROUTER_MODELS_URL))) {
+        if (m.inputPrice == null) continue; // no usable price — skip
+        byId.set(m.id, { input: m.inputPrice, output: m.outputPrice ?? 0, cacheRead: m.cacheReadPrice ?? 0 });
+      }
+      livePriceBook = { at: Date.now(), byId };
+    }
+    const stripped = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
+    const price =
+      livePriceBook.byId.get(modelId) ??
+      (stripped !== modelId
+        ? [...livePriceBook.byId].find(([id]) => id === stripped || id.endsWith(`/${stripped}`))?.[1] ?? null
+        : null);
+    cacheSet(livePriceCache, modelId, price, price === null);
+    return price;
+  } catch {
+    return null;
+  }
 }
 
 const contextCache = new Map<string, CacheEntry<number | null>>();

@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
 import { getMasterKey, sharedKeyEnabled, getModelMaxPrice, getBlockPrivateProviderUrls } from "@/lib/settings";
@@ -10,12 +10,13 @@ import { ValidationError } from "@/lib/errors";
 type ProviderConfigRow = typeof providerConfigs.$inferSelect;
 
 /**
- * Every provider config the user can draw on, newest first. Several may be
- * enabled at once, so the picker can show models from all of them and the chat
- * can route to whichever a model belongs to. Own configs win outright; only a
- * user with none falls back to an admin's shared configs (and thus their budget
- * + sandbox), and only when the instance mode permits a shared key — never in
- * own_only, so a stray account can't silently spend the admin's credits.
+ * Every provider config the user can draw on. The picker shows models from all of
+ * them and the chat routes to whichever a model belongs to. The user's OWN configs
+ * come first (so a new chat defaults to their own key, never silently to the
+ * admin's), followed by the admin's SHARED configs when the instance permits a
+ * shared key — so adding a personal key ADDS to, rather than replaces, the org's
+ * shared connections. Never in own_only, and a config is only shared if an admin
+ * explicitly marked it so.
  */
 export async function resolveEnabledConfigs(
   userId: string,
@@ -25,19 +26,21 @@ export async function resolveEnabledConfigs(
     .from(providerConfigs)
     .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
     .orderBy(providerConfigs.createdAt);
-  if (own.length) return own.map((c) => ({ ...c, isShared: false }));
+  const ownConfigs = own.map((c) => ({ ...c, isShared: false }));
 
-  if (!(await sharedKeyEnabled())) return [];
+  if (!(await sharedKeyEnabled())) return ownConfigs;
 
   const rows = await db
     .select({ config: providerConfigs })
     .from(providerConfigs)
     .innerJoin(users, eq(providerConfigs.userId, users.id))
     // Only admin keys explicitly marked shared enter the pool — a private admin
-    // key (shared=false) is theirs alone.
-    .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true), eq(providerConfigs.shared, true)))
+    // key (shared=false) is theirs alone. Exclude the caller's OWN rows: if the
+    // caller IS an admin, their shared configs are already in `ownConfigs` above
+    // (as own, not shared) — re-adding them here would duplicate the connection.
+    .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true), eq(providerConfigs.shared, true), ne(providerConfigs.userId, userId)))
     .orderBy(providerConfigs.createdAt);
-  return rows.map((r) => ({ ...r.config, isShared: true }));
+  return [...ownConfigs, ...rows.map((r) => ({ ...r.config, isShared: true }))];
 }
 
 /**

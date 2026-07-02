@@ -14,7 +14,7 @@ run("shared-key budget", () => {
   beforeAll(async () => {
     await pool.query(`INSERT INTO "user" (id, name, email) VALUES ($1,'B','b@test.local') ON CONFLICT (id) DO NOTHING`, [U]);
     // A priced model so reserveBudget can estimate a non-zero turn cost (an
-    // unpriced model fails closed before the cap is ever evaluated).
+    // unpriced model is allowed through with a zero hold, so the cap wouldn't bite).
     await pool.query(
       `INSERT INTO models (id, source, display_name, input_price, output_price)
        VALUES ($1,'test','Priced', 0.000001, 0.000002)

@@ -79,11 +79,6 @@ export const POST = apiHandler(async (req: Request) => {
     userId, taskId, onSharedKey: isShared, modelId: resolvedModelId, provider: resolvedProvider,
   });
   if (!reservation.allowed) {
-    if (reservation.reason === "unpriced") {
-      throw new ForbiddenError(
-        "This model isn't priced in the catalog, so it can't run on the shared key. Ask an admin to sync models, or pick another model.",
-      );
-    }
     throw new BudgetExceededError(reservation.window ?? "d30");
   }
 

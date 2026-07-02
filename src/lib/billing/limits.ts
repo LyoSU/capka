@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { tiers, users, usage } from "@/lib/db/schema";
 import { computeCost } from "@/lib/pricing";
-import { getModelPrice } from "@/lib/models/catalog";
+import { getModelPrice, getLiveModelPrice, syncModelCatalog } from "@/lib/models/catalog";
 import { log } from "@/lib/log";
 
 /**
@@ -177,12 +177,15 @@ const ESTIMATE_OUTPUT_TOKENS = 4_000;
  * turn can be neither bounded nor billed.
  */
 async function estimateTurnCost(modelId: string): Promise<number | null> {
-  const price = await getModelPrice(modelId);
+  // Catalog first (synced price book); if it's missing the model — a brand-new or
+  // free model the sync hasn't caught yet — try OpenRouter's live price book before
+  // giving up, so the estimate is still accurate instead of unknown.
+  const price = (await getModelPrice(modelId)) ?? (await getLiveModelPrice(modelId));
   if (!price) return null;
   return computeCost(price, { inputTokens: ESTIMATE_INPUT_TOKENS, outputTokens: ESTIMATE_OUTPUT_TOKENS });
 }
 
-export type ReserveReason = "budget" | "unpriced";
+export type ReserveReason = "budget";
 
 /**
  * Atomically reserve budget for a turn BEFORE it runs: under a per-user lock,
@@ -205,8 +208,14 @@ export async function reserveBudget(input: {
   // Own-key turns pay their own provider — never gated, never held.
   if (!input.onSharedKey) return { allowed: true, window: null, reason: null };
 
-  const estimate = input.modelId ? await estimateTurnCost(input.modelId) : null;
-  if (estimate === null) return { allowed: false, window: null, reason: "unpriced" };
+  // An unpriced model (not in the catalog, not resolvable live, or a local gateway
+  // with no price book) is NOT blocked — refusing a free or brand-new model would
+  // be worse than not billing it. It reserves a zero hold and reconciles to its
+  // real (often zero) cost at finalize; a background sync is kicked so the catalog
+  // can price it on the next turn.
+  const priced = input.modelId ? await estimateTurnCost(input.modelId) : null;
+  if (priced === null && input.modelId) void syncModelCatalog().catch(() => {});
+  const estimate = priced ?? 0;
 
   const tier = await getTierForUser(input.userId);
 

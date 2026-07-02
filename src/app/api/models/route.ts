@@ -47,13 +47,16 @@ async function respond(provider: string, apiKey: string | undefined, baseUrl: st
 
 /**
  * Active mode: union of every enabled config's catalog, each model tagged with
- * its owning config so the picker can route + label it. Per-config failures
- * don't sink the whole list — we surface what loaded and only report an error
- * (or the first-run "syncing" state) when nothing came back at all.
+ * its owning config so the picker can route + label it. The set can mix the
+ * user's OWN connections with the admin's SHARED ones — governance (min-context /
+ * max-price caps) is enforced only on the shared configs' models, since the owner
+ * of a key may pick anything. Per-config failures don't sink the whole list — we
+ * surface what loaded and only report an error (or "syncing") when nothing came
+ * back at all.
  */
 async function respondAggregated(
   configs: Awaited<ReturnType<typeof resolveEnabledConfigs>>,
-  showSharedBadge: boolean,
+  mode: Awaited<ReturnType<typeof getProviderKeyMode>>,
 ): Promise<Response> {
   const labels = labelEnabledConfigs(configs);
 
@@ -62,9 +65,12 @@ async function respondAggregated(
       if (!isProviderName(c.provider)) return { models: [] as ModelInfo[] };
       const apiKey = await decryptKey(c.apiKey);
       try {
-        const models = await listProviderModels({ provider: c.provider, apiKey, baseUrl: c.baseUrl ?? undefined });
+        let models = await listProviderModels({ provider: c.provider, apiKey, baseUrl: c.baseUrl ?? undefined });
+        // A shared (admin) key spends the org budget, so the admin's min-context /
+        // max-price caps gate what users may pick from it; own keys are untouched.
+        if (c.isShared) models = await applySharedGovernance(models);
         const configIcon = c.iconSlug || PROVIDER_META[c.provider].iconSlug;
-        const tagged = models.map((m) => ({ ...m, configId: c.id, configLabel: labels.get(c.id), configIcon, configProvider: c.provider }));
+        const tagged = models.map((m) => ({ ...m, configId: c.id, configLabel: labels.get(c.id), configIcon, configProvider: c.provider, configShared: c.isShared }));
         return { models: tagged, provider: c.provider };
       } catch (e) {
         return { models: [] as ModelInfo[], error: e instanceof Error ? e.message : "Could not load models" };
@@ -72,12 +78,7 @@ async function respondAggregated(
     }),
   );
 
-  // Shared offering → enforce the admin's min-context / max-price caps on what
-  // users may pick (independent of the badge, which is hidden in shared_only).
-  // The owner's own list is untouched.
-  const shared = configs.length > 0 && !!configs[0].isShared;
-  const merged = results.flatMap((r) => r.models);
-  const models = shared ? await applySharedGovernance(merged) : merged;
+  const models = results.flatMap((r) => r.models);
 
   // First-run safety net: an empty OpenRouter config means its catalog hasn't
   // synced — kick a background sync so the picker fills in shortly.
@@ -89,10 +90,17 @@ async function respondAggregated(
 
   const error = models.length === 0 ? results.find((r) => r.error)?.error : undefined;
 
+  // Top-level badge: the whole offering runs on the shared key only when EVERY
+  // served config is shared (a pure shared-key user with no own key). In a mixed
+  // own+shared union the user's own key is primary, so the per-model `configShared`
+  // tag drives the chip instead. Suppressed in shared_only, where there's no own
+  // key to contrast against and the badge is just noise.
+  const isShared = configs.length > 0 && configs.every((c) => c.isShared) && mode !== "shared_only";
+
   return Response.json({
     models,
     provider: null,
-    isShared: showSharedBadge,
+    isShared,
     syncing,
     ...(error ? { error } : {}),
   });
@@ -118,12 +126,10 @@ export const GET = apiHandler(async (req: Request) => {
 
   const configs = await resolveEnabledConfigs(userId);
   if (configs.length === 0) return empty();
-  // In shared_only there's no "own key" to switch to, so the "shared" badge is
-  // just noise — suppress it. Configs are all-own or all-shared, so the first
-  // one represents the set.
+  // The set may mix the user's own configs with the admin's shared ones; the
+  // badge logic (whole offering shared vs. per-model) lives in respondAggregated.
   const mode = await getProviderKeyMode();
-  const showShared = !!configs[0].isShared && mode !== "shared_only";
-  return respondAggregated(configs, showShared);
+  return respondAggregated(configs, mode);
 });
 
 /**
