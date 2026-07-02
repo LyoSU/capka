@@ -5,6 +5,23 @@ import type { CatalogItem, CommitInfo, PluginSource } from "./types";
  *  content hash, so two trees can be diffed precisely by comparing it per path. */
 export interface TreeEntry { path: string; type: "blob" | "tree"; sha: string }
 
+/** Turn a failed GitHub response into an actionable, human message rather than a
+ *  bare "HTTP 403" — which the conversational agent relays verbatim, and a
+ *  non-technical user reads as "access denied". The common case is an exhausted
+ *  anonymous rate limit (60 req/hour per IP, no token configured): that must read
+ *  as "try again later", not "forbidden". */
+function ghError(res: Response, context: string): Error {
+  if ((res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0") {
+    const reset = Number(res.headers.get("x-ratelimit-reset"));
+    const mins = Number.isFinite(reset) ? Math.max(1, Math.ceil((reset * 1000 - Date.now()) / 60_000)) : null;
+    const when = mins ? `try again in about ${mins} minute${mins === 1 ? "" : "s"}` : "try again later";
+    return new Error(`GitHub is rate-limiting anonymous requests (60 per hour); ${when}, or ask an admin to configure a GitHub token to remove the limit.`);
+  }
+  if (res.status === 404) return new Error(`${context} was not found on GitHub — check the repository exists and is public (private repos need a GitHub token).`);
+  if (res.status === 401) return new Error("GitHub rejected the configured token — check it is valid and has repo read access.");
+  return new Error(`${context}: GitHub returned HTTP ${res.status}.`);
+}
+
 /**
  * Resolve a ref (branch / tag / "HEAD" / a SHA) to a concrete commit — the pin.
  * Fetching the tree + files AT this SHA gives a consistent snapshot (no TOCTOU if
@@ -18,7 +35,7 @@ export async function resolveCommit(
   fetchFn: typeof fetch,
 ): Promise<CommitInfo> {
   const res = await fetchFn(`https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`);
-  if (!res.ok) throw new Error(`GitHub commit ${owner}/${repo}@${ref}: HTTP ${res.status}`);
+  if (!res.ok) throw ghError(res, `Commit ${owner}/${repo}@${ref}`);
   const json = (await res.json()) as {
     sha?: string;
     commit?: { message?: string; author?: { date?: string }; committer?: { date?: string } };
@@ -39,7 +56,7 @@ export async function ghTree(
   fetchFn: typeof fetch,
 ): Promise<TreeEntry[]> {
   const res = await fetchFn(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
-  if (!res.ok) throw new Error(`GitHub tree ${owner}/${repo}@${ref}: HTTP ${res.status}`);
+  if (!res.ok) throw ghError(res, `File list for ${owner}/${repo}@${ref}`);
   const json = (await res.json()) as { tree?: { path: string; type: string; sha?: string }[] };
   return (json.tree ?? []).map((t) => ({ path: t.path, type: t.type === "tree" ? "tree" : "blob", sha: t.sha ?? "" }));
 }
@@ -94,7 +111,7 @@ export async function ghRaw(
 ): Promise<string | null> {
   const res = await fetchFn(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path.split("/").map(encodeURIComponent).join("/")}`);
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`GitHub raw ${path}: HTTP ${res.status}`);
+  if (!res.ok) throw ghError(res, `File ${path}`);
 
   const declared = Number(res.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {

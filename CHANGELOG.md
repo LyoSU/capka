@@ -12,6 +12,16 @@ All notable changes to Capka are documented here. Format follows
 > deploys. Update the Coolify setting (Configuration → Build) and redeploy.
 
 ### Fixed
+- **Installing skills from a GitHub repo now explains a rate limit instead of
+  saying "access denied".** With no `github_token` configured, Capka calls the
+  GitHub API anonymously (60 requests/hour per IP); once that budget was spent,
+  `resolveCommit`/`ghTree`/`ghRaw` threw a bare `HTTP 403`, which the agent
+  relayed to users as "доступ заборонено" — reading as a permissions problem
+  rather than a temporary limit. GitHub failures now surface as actionable
+  sentences: an exhausted anonymous rate limit says how long until it resets and
+  that an admin can configure a GitHub token; a 404 says the repo is missing or
+  private; a 401 says the token was rejected. Configure `github_token` (settings
+  row) to raise the limit to 5000/hour.
 - **An OAuth MCP connector now works right after you sign in, instead of being
   silently ignored for up to 10 minutes.** Adding an OAuth connector and then
   signing in left the agent unable to use it: any turn between adding and

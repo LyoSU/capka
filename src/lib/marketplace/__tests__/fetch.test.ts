@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { parseMarketplace, resolveCommit, ghTree, diffTrees, type TreeEntry } from "../fetch";
 
-const jsonResponse = (body: unknown, ok = true, status = 200) =>
-  ({ ok, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response;
+const jsonResponse = (body: unknown, ok = true, status = 200, headers: Record<string, string> = {}) =>
+  ({ ok, status, json: async () => body, text: async () => JSON.stringify(body), headers: new Headers(headers) }) as Response;
 
 describe("resolveCommit", () => {
   it("pins a ref to its concrete commit (sha + first-line message + date)", async () => {
@@ -14,9 +14,23 @@ describe("resolveCommit", () => {
     expect(fetchFn).toHaveBeenCalledWith("https://api.github.com/repos/o/r/commits/main");
   });
 
-  it("throws on a non-ok response", async () => {
+  it("surfaces an exhausted anonymous rate limit as an actionable, non-alarming message (not a bare HTTP 403)", async () => {
+    const reset = Math.floor(Date.now() / 1000) + 25 * 60; // ~25 min out
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ message: "API rate limit exceeded" }, false, 403, {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(reset),
+      }),
+    );
+    const err = await resolveCommit("o", "r", "main", fetchFn as unknown as typeof fetch).catch((e) => e as Error);
+    expect(err.message).toMatch(/rate.?limit/i);
+    expect(err.message).toMatch(/\b2[0-9] minutes?\b/); // includes the reset countdown
+    expect(err.message).not.toMatch(/HTTP 403/); // the raw status must not leak
+  });
+
+  it("explains a 404 as a missing/private repo, not a bare HTTP code", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({}, false, 404));
-    await expect(resolveCommit("o", "r", "nope", fetchFn as unknown as typeof fetch)).rejects.toThrow(/HTTP 404/);
+    await expect(resolveCommit("o", "r", "nope", fetchFn as unknown as typeof fetch)).rejects.toThrow(/not found|public/i);
   });
 });
 
