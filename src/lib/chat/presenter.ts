@@ -34,6 +34,22 @@ export function toUIMessages(rows: {
         } else if (p.type === "tool-call") {
           const tr = resultMap.get(p.id) as { output?: unknown } | undefined;
           const err = errorMap.get(p.id);
+          // A call the runner suspended (no-execute `ask`) for a human answer.
+          // awaiting (no value, no result) → input-available; answered → output-
+          // available once its tool-result lands. `answer.form`/`answer.value` ride
+          // along so the AskCard owns the whole lifecycle — NOT the orphan→error
+          // fallback below. (Safe past sealOrphanToolCalls: an answered call is
+          // output-available; an unanswered one only reaches the model feed on a
+          // fork/abandon, where sealing to an error is the correct behavior.)
+          if (p.answer) {
+            parts.push({
+              type: "dynamic-tool", toolCallId: p.id, toolName: p.name, input: p.input,
+              state: tr ? "output-available" : "input-available",
+              output: tr?.output,
+              askForm: p.answer.form, askValue: p.answer.value,
+            });
+            continue;
+          }
           // A call the SDK suspended for native human-in-the-loop approval. Mapped
           // to the AI SDK 6 approval states so convertToModelMessages rebuilds the
           // exact tool-approval-request/response the resume needs (and the card

@@ -95,6 +95,27 @@ describe("toUIMessages", () => {
     expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "output-available", output: { status: "ok" }, approval: { id: "ap1", approved: true } });
   });
 
+  it("maps an ask tool-call awaiting an answer to input-available with askForm (not an orphan)", () => {
+    const meta: MessageMeta = {
+      status: "awaiting_answer",
+      parts: [{ type: "tool-call", id: "c1", name: "ask", input: {}, answer: { form: { fields: [{ id: "q", label: "Q?", kind: "text" }] } } }],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "input-available", askForm: { fields: [{ id: "q" }] } });
+  });
+
+  it("maps an answered ask tool-call to output-available", () => {
+    const meta: MessageMeta = {
+      status: "completed",
+      parts: [
+        { type: "tool-call", id: "c1", name: "ask", input: {}, answer: { form: { fields: [{ id: "q", label: "Q?", kind: "text" }] }, value: { action: "submit", values: { q: "hi" } } } },
+        { type: "tool-result", id: "c1", name: "ask", output: { action: "submit", values: { q: "hi" } } },
+      ],
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.parts[0]).toMatchObject({ type: "dynamic-tool", state: "output-available", askValue: { action: "submit" } });
+  });
+
   it("surfaces tool-error as output-error with errorText", () => {
     const meta: MessageMeta = {
       parts: [
