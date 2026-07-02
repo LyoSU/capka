@@ -1031,6 +1031,12 @@
           "enable": "Enabled skill",
           "disable": "Disabled skill"
         },
+        "automation": {
+          "add": "Added automation",
+          "remove": "Removed automation",
+          "enable": "Enabled automation",
+          "disable": "Disabled automation"
+        },
         "policy": {
           "set": "Changed permission",
           "clear": "Reset permission"

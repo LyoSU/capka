@@ -16,7 +16,8 @@ interface AuditEntry { id: string; action: string; targetKey: string | null; cre
 const KNOWN_ACTIONS = new Set([
   "plugin.install", "plugin.uninstall", "connector.add", "connector.remove",
   "connector.enable", "connector.disable", "skill.add", "skill.remove",
-  "skill.enable", "skill.disable", "policy.set", "policy.clear",
+  "skill.enable", "skill.disable", "automation.add", "automation.remove",
+  "automation.enable", "automation.disable", "policy.set", "policy.clear",
   "settings.update", "settings.undo",
 ]);
 

@@ -150,4 +150,27 @@ export const orgControls: Control[] = [
     def: "0",
     format: (v) => (v === "0" ? "no limit" : `$${v}`),
   }),
+  orgSetting({
+    key: "automations_enabled",
+    title: "Automations",
+    description: "Whether users may create scheduled automations (recurring agent runs).",
+    schema: bool,
+    def: "true",
+    format: boolFmt,
+  }),
+  orgSetting({
+    key: "automations_per_user",
+    title: "Automations per user",
+    description: "How many active automations one user may have.",
+    schema: boundedInt(100),
+    def: "10",
+  }),
+  orgSetting({
+    key: "automations_min_interval_minutes",
+    title: "Minimum automation interval",
+    description: "The shortest allowed gap between two runs of one automation, in minutes. Protects the budget from accidental 'every minute' schedules.",
+    schema: boundedInt(7 * 24 * 60),
+    def: "60",
+    format: (v) => `${v} min`,
+  }),
 ];

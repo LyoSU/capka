@@ -113,7 +113,7 @@ export interface Collection {
   /** Audit-log noun for this collection's mutations — the trail records
    *  `${auditNoun}.{add,remove,enable,disable}` so a skill change never masquerades
    *  as a connector change. */
-  auditNoun: "connector" | "skill";
+  auditNoun: "connector" | "skill" | "automation";
   /** The full settings page that manages this collection, so a chat card can offer
    *  a quiet "Open in settings →" link to the richer UI (the card is a summary). */
   settingsPath?: string;

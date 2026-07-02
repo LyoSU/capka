@@ -1,0 +1,170 @@
+import { z } from "zod";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { automations } from "@/lib/db/schema";
+import { nanoid } from "nanoid";
+import { getSetting } from "@/lib/settings";
+import { isValidTimezone } from "@/lib/timezone";
+import { nextOccurrenceAfter, nextOccurrences, type AutomationTrigger } from "@/lib/automations/schedule";
+import type { Collection, ManageContext } from "../types";
+
+/** Model-facing args are FLAT (weak models fumble nested unions): recurring =
+ *  cron+timezone, one-off = once_at. Exactly one form must be present. */
+export function parseTriggerArgs(args: Record<string, unknown>): AutomationTrigger {
+  const cron = typeof args.cron === "string" ? args.cron : undefined;
+  const onceAt = typeof args.once_at === "string" ? args.once_at : undefined;
+  if (cron && onceAt) throw new Error("Give either a recurring schedule (cron) or a one-off moment (once_at), not both.");
+  if (cron) {
+    const timezone = typeof args.timezone === "string" ? args.timezone : "";
+    if (!isValidTimezone(timezone)) throw new Error("A valid IANA timezone is required with cron (e.g. Europe/Kyiv). Use the user's timezone setting.");
+    const trigger: AutomationTrigger = { kind: "schedule", cron, timezone };
+    nextOccurrenceAfter(trigger, new Date()); // throws on an invalid expression
+    return trigger;
+  }
+  if (onceAt) {
+    if (Number.isNaN(Date.parse(onceAt))) throw new Error("once_at must be an ISO datetime.");
+    if (!nextOccurrenceAfter({ kind: "once", at: onceAt }, new Date())) throw new Error("once_at is already in the past.");
+    return { kind: "once", at: onceAt };
+  }
+  throw new Error("A schedule is required: cron or once_at.");
+}
+
+export function assertMinInterval(trigger: AutomationTrigger, minMinutes: number): void {
+  if (trigger.kind !== "schedule") return;
+  const [a, b] = nextOccurrences(trigger, 2);
+  if (a && b && b.getTime() - a.getTime() < minMinutes * 60_000) {
+    throw new Error(`This schedule runs more often than the platform minimum of ${minMinutes} minutes between runs.`);
+  }
+}
+
+/** Next dates + a runs-per-month estimate for the approval preview — the user
+ *  confirms concrete DATES (not cron syntax), and sees the frequency they're
+ *  about to pay for. */
+export function humanizeSchedule(trigger: AutomationTrigger, locale: string | undefined, after = new Date()) {
+  const fmt = new Intl.DateTimeFormat(locale === "uk" ? "uk-UA" : "en-US", {
+    weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+    timeZone: trigger.kind === "schedule" ? trigger.timezone : undefined,
+  });
+  const nextDates = nextOccurrences(trigger, 3, after).map((d) => fmt.format(d));
+  const inMonth = trigger.kind === "once" ? 1
+    : nextOccurrences(trigger, 200, after).filter((d) => d.getTime() - after.getTime() < 30 * 86_400_000).length;
+  return { nextDates, perMonth: inMonth };
+}
+
+async function mustOwn(ctx: ManageContext, itemId: string) {
+  const [row] = await db.select().from(automations)
+    .where(and(eq(automations.id, itemId), eq(automations.userId, ctx.userId)));
+  if (!row) throw new Error("No such automation.");
+  return row;
+}
+
+export const automationCollection: Collection = {
+  id: "automations",
+  title: "Automations",
+  description:
+    "Scheduled agent runs: the platform runs a saved instruction on a schedule (or once at a set time) with no tab open. Each run opens a new chat; results also go to Telegram when linked. Use the user's timezone for cron. Offer this when the user describes a recurring intent.",
+  requiredRole: "user",
+  auditNoun: "automation",
+  settingsPath: "/settings/automations",
+  // Spends money unattended — approval survives autonomous mode, like MCP installs.
+  alwaysConfirm: true,
+  addSchema: z.object({
+    title: z.string().min(1).max(80),
+    prompt: z.string().min(1, "The instruction to run is required."),
+    cron: z.string().optional(),
+    timezone: z.string().optional(),
+    once_at: z.string().optional(),
+  }),
+  canAdd: async () => ((await getSetting("automations_enabled")) ?? "true") === "true",
+  validateAdd: async (ctx, args) => {
+    if (((await getSetting("automations_enabled")) ?? "true") !== "true") {
+      throw new Error("Automations are disabled on this platform.");
+    }
+    const trigger = parseTriggerArgs(args);
+    assertMinInterval(trigger, Number((await getSetting("automations_min_interval_minutes")) ?? "60"));
+    const cap = Number((await getSetting("automations_per_user")) ?? "10");
+    const mine = await db.select({ id: automations.id }).from(automations)
+      .where(and(eq(automations.userId, ctx.userId), eq(automations.enabled, true)));
+    if (mine.length >= cap) throw new Error(`Active automations limit reached (${cap}). Disable or remove one first.`);
+  },
+  previewAdd: async (ctx, args) => {
+    const trigger = parseTriggerArgs(args);
+    const { nextDates, perMonth } = humanizeSchedule(trigger, ctx.locale);
+    return {
+      title: "Automations",
+      after: String(args.title),
+      details: trigger.kind === "once"
+        ? `Runs once: ${nextDates[0]}.`
+        : `Next runs: ${nextDates.join(" · ")} — about ${perMonth} runs per month, each spending tokens like a normal turn.`,
+      body: String(args.prompt),
+    };
+  },
+  add: async (ctx, args) => {
+    const trigger = parseTriggerArgs(args);
+    await db.insert(automations).values({
+      id: nanoid(),
+      userId: ctx.userId,
+      projectId: ctx.projectId,
+      title: String(args.title),
+      prompt: String(args.prompt),
+      trigger,
+      nextRunAt: nextOccurrenceAfter(trigger, new Date()),
+    });
+    return { itemTitle: String(args.title) };
+  },
+  list: async (ctx) => {
+    const rows = await db.select().from(automations).where(eq(automations.userId, ctx.userId));
+    return rows.map((a) => {
+      const { nextDates } = humanizeSchedule(a.trigger as AutomationTrigger, ctx.locale);
+      return {
+        id: a.id,
+        title: a.title,
+        subtitle: a.enabled ? (nextDates[0] ? `next: ${nextDates[0]}` : undefined) : undefined,
+        enabled: a.enabled,
+        owned: true,
+      };
+    });
+  },
+  remove: async (ctx, itemId) => {
+    const row = await mustOwn(ctx, itemId);
+    await db.delete(automations).where(eq(automations.id, itemId));
+    return { itemTitle: row.title };
+  },
+  setEnabled: async (ctx, itemId, enabled) => {
+    const row = await mustOwn(ctx, itemId);
+    await db.update(automations).set({
+      enabled,
+      // Re-enabling recomputes the horizon from now (no backfill) and clears the
+      // failure streak — the user explicitly said "try again".
+      ...(enabled ? { nextRunAt: nextOccurrenceAfter(row.trigger as AutomationTrigger, new Date()), consecutiveFailures: 0 } : {}),
+      updatedAt: new Date(),
+    }).where(eq(automations.id, itemId));
+    return { itemTitle: row.title };
+  },
+  debug: async (ctx, itemId) => {
+    const row = await mustOwn(ctx, itemId);
+    const { nextDates } = humanizeSchedule(row.trigger as AutomationTrigger, ctx.locale);
+    const state = !row.enabled ? "disabled" : row.consecutiveFailures > 0 ? "failing" : "ok";
+    // Real average cost per run (spec §4.6 — the honest counterpart of the
+    // creation-time frequency forecast). pending=false only: holds are estimates.
+    const { rows: [cost] } = await (await import("@/lib/db")).pool.query<{ avg: string | null; runs: string }>(
+      `SELECT avg(u.cost_usd)::text AS avg, count(*)::text AS runs
+         FROM usage u JOIN tasks t ON t.id = u.task_id
+        WHERE t.payload->>'automationId' = $1 AND u.pending = false`,
+      [itemId],
+    );
+    return {
+      itemTitle: row.title,
+      state,
+      detail: [
+        nextDates[0] && row.enabled ? `Next run: ${nextDates[0]}` : undefined,
+        row.lastRunAt ? `Last run: ${row.lastRunAt.toISOString()}` : "Never ran yet",
+        cost?.avg ? `Average cost per run: ≈$${Number(cost.avg).toFixed(4)} over ${cost.runs} runs` : undefined,
+        row.consecutiveFailures ? `Consecutive failures: ${row.consecutiveFailures}` : undefined,
+      ].filter(Boolean).join(" · "),
+      hint: state === "disabled" && row.consecutiveFailures >= 3
+        ? "Auto-paused after repeated failures. Check the last run's chat, then enable it again."
+        : undefined,
+    };
+  },
+};

@@ -1031,6 +1031,12 @@
           "enable": "Увімкнено навичку",
           "disable": "Вимкнено навичку"
         },
+        "automation": {
+          "add": "Додано автоматизацію",
+          "remove": "Видалено автоматизацію",
+          "enable": "Увімкнено автоматизацію",
+          "disable": "Вимкнено автоматизацію"
+        },
         "policy": {
           "set": "Змінено дозвіл",
           "clear": "Скинуто дозвіл"
@@ -1389,6 +1395,15 @@
       },
       "org_model_max_price": {
         "title": "Макс. ціна моделі"
+      },
+      "org_automations_enabled": {
+        "title": "Автоматизації"
+      },
+      "org_automations_per_user": {
+        "title": "Автоматизацій на користувача"
+      },
+      "org_automations_min_interval_minutes": {
+        "title": "Мінімальний інтервал автоматизацій"
       }
     },
     "value": {
@@ -1422,7 +1437,8 @@
     },
     "collection": {
       "mcp": "Конектори (MCP)",
-      "skill": "Скіли"
+      "skill": "Скіли",
+      "automations": "Автоматизації"
     },
     "op": {
       "added": "Додано {name}.",
