@@ -1099,7 +1099,13 @@
       "sandboxNetHint": "Let sandboxed code and local (stdio) connectors reach the public internet. Tools that self-install on first use (e.g. npx) need this. Private/internal ranges and cloud metadata stay blocked.",
       "netEnabled": "Internet access on for the sandbox.",
       "netDisabled": "Internet access off for the sandbox.",
-      "sandboxNetBlocked": "Blocked at the deployment level — set SANDBOX_ALLOW_NETWORK=true and restart the sandbox controller to enable this."
+      "sandboxNetBlocked": "Blocked at the deployment level — set SANDBOX_ALLOW_NETWORK=true and restart the sandbox controller to enable this.",
+      "agent": "Agent",
+      "agentDesc": "How much the assistant may change on its own from chat.",
+      "autonomousMode": "Autonomous mode",
+      "autonomousModeHint": "When on, the agent applies settings changes and installs skills directly, without a confirmation each time — it still asks before installing a connector that runs third-party code. When off, it asks you to confirm each risky change.",
+      "autonomousEnabled": "Autonomous mode on — the agent acts without asking.",
+      "autonomousDisabled": "Autonomous mode off — the agent confirms risky changes."
     },
     "updates": {
       "title": "Updates",

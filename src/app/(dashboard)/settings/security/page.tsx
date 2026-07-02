@@ -17,6 +17,7 @@ export default function SecuritySettingsPage() {
   const sandbox = useSetting("sandbox_enabled", "false");
   const sandboxNet = useSetting("sandbox_network", "none");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
+  const autonomy = useSetting("agent_autonomy", "supervised");
 
   // Deployment-level egress kill-switch, read from the controller. When false,
   // the in-app toggle has no effect (the controller downgrades bridge→none), so
@@ -31,7 +32,20 @@ export default function SecuritySettingsPage() {
   }, []);
   const netBlocked = allowNetwork === false;
 
-  const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading;
+  const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading || autonomy.loading;
+
+  // Agent autonomy stores "supervised"/"autonomous", not a bool — map the switch.
+  const toggleAutonomy = (checked: boolean) => {
+    const prev = autonomy.value;
+    const next = checked ? "autonomous" : "supervised";
+    autonomy.update(next);
+    autonomy.persist(next)
+      .then((ok) => {
+        if (ok) toast.success(checked ? t("autonomousEnabled") : t("autonomousDisabled"));
+        else { autonomy.setValue(prev); toast.error(t("updateFailed")); }
+      })
+      .catch(() => { autonomy.setValue(prev); toast.error(t("updateFailed")); });
+  };
 
   // The network setting stores "bridge"/"none", not "true"/"false".
   const toggleNet = (checked: boolean) => {
@@ -119,6 +133,21 @@ export default function SecuritySettingsPage() {
           )}
         </div>
         <Switch checked={sandboxNet.value === "bridge"} onCheckedChange={toggleNet} disabled={netBlocked} />
+      </div>
+
+      <Separator />
+
+      {/* Agent — how much the assistant may change without asking */}
+      <div>
+        <h3 className="text-sm font-medium">{t("agent")}</h3>
+        <p className="text-sm text-muted-foreground">{t("agentDesc")}</p>
+      </div>
+      <div className="flex items-center justify-between rounded-lg border p-4">
+        <div className="pr-4">
+          <p className="text-sm font-medium">{t("autonomousMode")}</p>
+          <p className="text-xs text-muted-foreground">{t("autonomousModeHint")}</p>
+        </div>
+        <Switch checked={autonomy.value === "autonomous"} onCheckedChange={toggleAutonomy} />
       </div>
 
       <Separator />
