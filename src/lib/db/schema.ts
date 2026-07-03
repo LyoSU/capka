@@ -348,6 +348,27 @@ export const automations = pgTable("automations", {
   index("idx_automations_due").on(table.nextRunAt).where(sql`enabled = true`),
 ]);
 
+/** A folder attached to a sandbox session (key = projectId ?? chatId — chats in a
+ *  project share it). kind "host" = a server directory bind-mounted at /folders/
+ *  <name> (admin-only, validated by the controller's mount-safety); kind "pc" = a
+ *  folder on the user's own computer synced by the browser bridge into
+ *  /workspace/<name>. `state` holds the pc-sync base manifest (3-way merge). */
+export const attachedFolders = pgTable("attached_folders", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sessionKey: text("session_key").notNull(),
+  kind: text("kind").notNull(), // "host" | "pc"
+  name: text("name").notNull(),
+  hostPath: text("host_path"),
+  readOnly: boolean("read_only").notNull().default(true),
+  state: jsonb("state"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  uniqueIndex("uq_attached_folders_session_name").on(table.sessionKey, table.name),
+  index("idx_attached_folders_session").on(table.sessionKey),
+]);
+
 // Agent memory as ONE self-maintaining markdown document per scope — "CLAUDE.md
 // in Postgres". `projectId IS NULL` is the user-global doc (≈ ~/CLAUDE.md); a row
 // with a projectId is that project's doc (≈ project/CLAUDE.md). The doc is edited
