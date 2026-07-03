@@ -245,6 +245,13 @@ class TelegramSink implements DeliverySink {
   private pending: { answer: string; reasoning: string; status: StreamStatus } | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inflight = false;
+  /** The draft HTTP call currently on the wire. finish() awaits it: a draft
+   *  Telegram processes AFTER the final message re-creates the "streaming"
+   *  bubble client-side, and it lingers ~30s as if the turn never ended. */
+  private sending: Promise<unknown> | null = null;
+  /** Whether any draft actually reached Telegram (gates the finish() bridge —
+   *  with no draft on screen there is nothing to adopt). */
+  private streamed = false;
   private lastSentAt = 0;
   private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
   private lastDraft: DraftBody | null = null;
@@ -298,7 +305,10 @@ class TelegramSink implements DeliverySink {
       if (!answer.trim() && !reasoning.trim() && !status) return; // nothing to show yet
       // Ephemeral animated preview; the real message is sent on finish().
       const draft = composeDraft(answer, reasoning, status, this.t);
-      await bot.api.sendRichMessageDraft(this.chatId, this.draftId, draft);
+      const send = bot.api.sendRichMessageDraft(this.chatId, this.draftId, draft);
+      this.sending = send;
+      this.streamed = true;
+      await send;
       this.lastSentAt = Date.now();
       this.lastDraft = draft;
       this.scheduleKeepalive();
@@ -335,7 +345,9 @@ class TelegramSink implements DeliverySink {
       // finish() may have latched while we awaited the bot/network — re-check
       // before sending so we never re-push a draft for an already-ended turn.
       if (bot && !this.closed) {
-        await bot.api.sendRichMessageDraft(this.chatId, this.draftId, this.lastDraft);
+        const send = bot.api.sendRichMessageDraft(this.chatId, this.draftId, this.lastDraft);
+        this.sending = send;
+        await send;
         this.lastSentAt = Date.now();
       }
     } catch (e) {
@@ -354,6 +366,20 @@ class TelegramSink implements DeliverySink {
     const other = silent || keyboard
       ? { ...(silent ? { disable_notification: true } : {}), ...(keyboard ? { reply_markup: keyboard } : {}) }
       : undefined;
+    // Clients "adopt" the streamed draft into the arriving real message by
+    // matching text prefixes (there is no draft_id on sendRichMessage), and
+    // composeFinal PREPENDS a reasoning/tool-log header the draft never had —
+    // zero common prefix, so the draft can survive as an orphaned "still
+    // streaming" bubble for ~30s next to the answer. Bridge it: update the
+    // draft to the exact final markdown first, making adoption a full match.
+    if (this.streamed) {
+      this.streamed = false;
+      try {
+        await bot.api.sendRichMessageDraft(this.chatId, this.draftId, { markdown });
+      } catch (e) {
+        log.warn("telegram draft bridge failed", { chatId: this.chatId, err: String(e) });
+      }
+    }
     try {
       await bot.api.sendRichMessage(this.chatId, { markdown }, other);
     } catch (e) {
@@ -388,6 +414,9 @@ class TelegramSink implements DeliverySink {
     }
     this.pending = null;
     this.lastDraft = null;
+    // Wait out a draft update already on the wire — processed after the final,
+    // it would resurrect the (already-answered) streaming bubble for ~30s.
+    if (this.sending) await this.sending.catch(() => {});
     if (result.status === "cancelled") return; // nothing useful to persist
 
     // A failure is delivered in-chat, never deferred to the web UI: a calm

@@ -209,6 +209,51 @@ describe("TelegramSink streaming", () => {
     expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
   });
 
+  it("bridges the final into the draft (same id, exact final text) before persisting it", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 30, locale: "uk" });
+    sink.push("відповідь", "", undefined);
+    await vi.advanceTimersByTimeAsync(900); // the draft actually reached Telegram
+
+    await sink.finish({ status: "completed", text: "відповідь", toolCount: 1, elapsedMs: 3000 });
+
+    // Clients adopt a streamed draft into the arriving real message by matching
+    // text prefixes — and composeFinal PREPENDS the tool-log/reasoning header,
+    // zeroing the prefix. The bridge re-sends the draft with the exact final
+    // markdown first, so adoption is a clean full match instead of a ~30s
+    // orphaned "still streaming" bubble.
+    expect(api.sendRichMessageDraft).toHaveBeenCalledTimes(2);
+    const [, streamedId] = api.sendRichMessageDraft.mock.calls[0];
+    const [, bridgeId, bridgeBody] = api.sendRichMessageDraft.mock.calls[1];
+    const finalMarkdown = api.sendRichMessage.mock.calls[0][1].markdown;
+    expect(bridgeId).toBe(streamedId);
+    expect(bridgeBody.markdown).toBe(finalMarkdown);
+    expect(finalMarkdown).toBe("> ✅ 1 інструмент · 3с\n\nвідповідь");
+    // The bridge must land strictly before the final message.
+    expect(api.sendRichMessageDraft.mock.invocationCallOrder[1]).toBeLessThan(
+      api.sendRichMessage.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("waits out an in-flight draft update so the final can never be overtaken by it", async () => {
+    let release!: (v: true) => void;
+    api.sendRichMessageDraft.mockImplementationOnce(
+      () => new Promise<true>((r) => { release = r; }),
+    );
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 31, locale: "uk" });
+    sink.push("partial", "", undefined);
+    await vi.advanceTimersByTimeAsync(900); // dispatches the draft; it hangs on the wire
+
+    const finishing = sink.finish({ status: "completed", text: "done", toolCount: 0, elapsedMs: 100 });
+    for (let i = 0; i < 5; i++) await Promise.resolve(); // let finish() reach its await
+    // A draft processed by Telegram AFTER the final re-creates the streaming
+    // bubble client-side for ~30s — the final must wait for the straggler.
+    expect(api.sendRichMessage).not.toHaveBeenCalled();
+
+    release(true);
+    await finishing;
+    expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("kills the draft keepalive permanently once finished (no orphaned re-sends)", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 21, locale: "uk" });
     sink.push("partial", "", { kind: "thinking" });

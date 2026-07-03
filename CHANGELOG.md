@@ -7,6 +7,9 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Fixed
+- **Telegram: the streamed draft no longer lingers as a "still thinking" bubble
+  for ~30s next to the delivered answer** — the final message is now bridged
+  into the draft so Telegram clients adopt it cleanly.
 - **Pasting two screenshots no longer collapses them into one attachment** —
   clipboard bitmaps all arrive named `image.png`, so the second overwrote the
   first in the sandbox and the dedup-by-name persistence treated them as one.
