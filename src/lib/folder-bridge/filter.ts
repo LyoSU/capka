@@ -8,18 +8,42 @@
  * audience is non-technical, and a fixed sane list covers the real cases.
  */
 
-/** Directory/segment names that are never worth syncing — matched on ANY path
- *  segment, so `a/node_modules/b` is skipped wherever it appears. */
+/** Directory/segment names that are never worth syncing — matched (case-sensitively)
+ *  on ANY path segment, so `a/node_modules/b` is skipped wherever it appears. Case
+ *  sensitivity is deliberate: build tools emit lowercase `dist`/`build`/`target`, so
+ *  a user's own "Build" or "Target" folder is untouched. Only distinctive names are
+ *  listed — bare generic words (env, bin, obj, vendor, coverage) are omitted so they
+ *  never eat a legitimate folder. */
 const IGNORE_SEGMENTS = new Set([
-  "node_modules", ".git", ".hg", ".svn", ".venv", "venv", "env", "__pycache__",
-  ".mypy_cache", ".pytest_cache", ".next", ".nuxt", ".cache", "dist", "build",
-  "target", ".gradle", ".idea", ".vscode", ".DS_Store", ".Trash",
+  // Package/dependency trees
+  "node_modules", "bower_components", "jspm_packages",
+  // Version control
+  ".git", ".hg", ".svn", ".bzr", "_darcs",
+  // Python envs & caches
+  ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".tox", ".eggs",
+  ".ipynb_checkpoints", ".dart_tool", ".pub-cache",
+  // JS/build framework caches & outputs
+  ".next", ".nuxt", ".svelte-kit", ".angular", ".expo", ".output", ".vercel",
+  ".netlify", ".turbo", ".parcel-cache", ".nyc_output", ".cache", "dist", "build",
+  "target", ".gradle", ".settings", ".idea", ".vscode",
+  // Infra
+  ".terraform", ".serverless",
+  // macOS
+  ".DS_Store", ".AppleDouble", ".Spotlight-V100", ".Trashes", ".fseventsd",
+  ".TemporaryItems", ".Trash", "__MACOSX",
+  // Windows
+  "$RECYCLE.BIN", "System Volume Information",
 ]);
 
-/** File extensions for model weights / big binaries that should never sync. */
+/** File extensions for model weights / disk images that should never sync. Only
+ *  UNAMBIGUOUS blob formats — ambiguous data containers (.h5/HDF5, .npy, .parquet)
+ *  are left to the size cap so a data analyst's real dataset is never dropped. */
 const IGNORE_EXT = [
+  // Model weights
   ".safetensors", ".gguf", ".ggml", ".bin", ".pt", ".pth", ".onnx", ".ckpt",
-  ".h5", ".pb", ".tflite", ".iso", ".dmg", ".vmdk", ".qcow2",
+  ".pb", ".tflite", ".mlmodel", ".caffemodel",
+  // Disk / VM images
+  ".iso", ".dmg", ".img", ".vmdk", ".qcow2", ".vdi", ".vhd", ".vhdx", ".ova",
 ];
 
 /** Per-file size cap (a model/video/archive over this is skipped and reported). */
@@ -33,9 +57,21 @@ export const FOLDER_MAX_TOTAL_MB = 100;
 export function ignoredPath(path: string): boolean {
   const segs = path.split("/").filter(Boolean);
   const base = segs[segs.length - 1] ?? "";
-  if (base === "Thumbs.db" || base.startsWith("~$") || base.startsWith(".~lock.")) return true;
-  if (segs.some((s) => IGNORE_SEGMENTS.has(s))) return true;
   const lower = base.toLowerCase();
+
+  // OS / editor junk files by name or pattern.
+  if (
+    base.startsWith("._") ||        // macOS AppleDouble resource forks
+    base.startsWith("~$") ||         // Office owner/lock files
+    base.startsWith(".~lock.") ||    // LibreOffice locks
+    base.endsWith("~") ||            // editor backups (foo.txt~)
+    lower === "thumbs.db" || lower === "ehthumbs.db" ||
+    lower === "desktop.ini" || lower === ".localized" ||
+    lower.endsWith(".swp") || lower.endsWith(".swo") ||  // vim swap
+    lower.endsWith(".tmp") || lower.endsWith(".temp")
+  ) return true;
+
+  if (segs.some((s) => IGNORE_SEGMENTS.has(s))) return true;
   return IGNORE_EXT.some((ext) => lower.endsWith(ext));
 }
 
