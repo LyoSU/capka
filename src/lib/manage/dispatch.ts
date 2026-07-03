@@ -473,7 +473,10 @@ async function toggle(reg: Registry, ctx: ManageContext, target: string, itemId:
   if (!coll!.setEnabled) return err("unsupported", "This resource doesn't support enable/disable.");
   try {
     const { itemTitle } = await coll!.setEnabled(ctx, itemId, enabled);
-    await record(ctx, `${coll!.auditNoun}.${enabled ? "enable" : "disable"}`, coll!.id, { item: itemTitle });
+    // Only reachable for collections that DO support enable/disable (guarded by the
+    // setEnabled check above) — so nouns without those audit actions (e.g. "folder")
+    // never actually reach here; the cast just tells the type-checker that.
+    await record(ctx, `${coll!.auditNoun}.${enabled ? "enable" : "disable"}` as AuditAction, coll!.id, { item: itemTitle });
     const opKey = enabled ? "op.enabled" : "op.disabled";
     return {
       status: "ok",

@@ -29,6 +29,7 @@ export type AuditAction =
   | "connector.add" | "connector.remove" | "connector.enable" | "connector.disable"
   | "skill.add" | "skill.remove" | "skill.enable" | "skill.disable"
   | "automation.add" | "automation.remove" | "automation.enable" | "automation.disable"
+  | "folder.add" | "folder.remove"
   | "policy.set" | "policy.clear"
   // Chat-driven configuration changes via the `manage` control plane.
   | "settings.update" | "settings.undo"

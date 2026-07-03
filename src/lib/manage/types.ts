@@ -96,10 +96,13 @@ export interface CollectionItem {
 }
 
 /** A hand-back to the human for something the agent can't do itself (an OAuth
- *  redirect, a folder picker). Rendered as a button in web, a link in Telegram. */
+ *  redirect, a folder picker). Rendered as a button in web, a link in Telegram.
+ *  `url` is present for oauth/open_url; `pick_folder` has none — the web card
+ *  invokes the browser folder picker directly (Telegram shows a "do it in the
+ *  browser" note). */
 export interface RequiredAction {
-  kind: "oauth" | "open_url";
-  url: string;
+  kind: "oauth" | "open_url" | "pick_folder";
+  url?: string;
   label: string;
   description?: string;
 }
@@ -117,7 +120,7 @@ export interface Collection {
   /** Audit-log noun for this collection's mutations — the trail records
    *  `${auditNoun}.{add,remove,enable,disable}` so a skill change never masquerades
    *  as a connector change. */
-  auditNoun: "connector" | "skill" | "automation";
+  auditNoun: "connector" | "skill" | "automation" | "folder";
   /** The full settings page that manages this collection, so a chat card can offer
    *  a quiet "Open in settings →" link to the richer UI (the card is a summary). */
   settingsPath?: string;

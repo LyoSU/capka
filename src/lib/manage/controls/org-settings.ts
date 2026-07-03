@@ -151,6 +151,15 @@ export const orgControls: Control[] = [
     format: (v) => (v === "0" ? "no limit" : `$${v}`),
   }),
   orgSetting({
+    key: "folder_access",
+    title: "Folder access",
+    description:
+      'Whether folders outside the workspace can be attached to sandboxes: "off" (nothing can be attached), "admins" (only administrators), or "everyone" (any user may connect a folder from their own computer; server folders always require an administrator).',
+    schema: z.enum(["off", "admins", "everyone"]),
+    def: "off",
+    format: (v) => ({ off: "Off", admins: "Admins only", everyone: "Everyone" })[v] ?? v,
+  }),
+  orgSetting({
     key: "automations_enabled",
     title: "Automations",
     description: "Whether users may create scheduled automations (recurring agent runs).",
