@@ -575,12 +575,13 @@ function CopyButton({ text }: { text: string }) {
 /** "‹ i/N ›" version switcher — shown only when a message has alternative
  *  siblings (from an edit or a regenerate). Flips the visible branch. */
 function BranchSwitcher({
-  index, count, messageId, onSwitch,
+  index, count, messageId, onSwitch, disabled,
 }: {
   index: number;
   count: number;
   messageId: string;
   onSwitch: (messageId: string, direction: "prev" | "next") => void;
+  disabled?: boolean;
 }) {
   const t = useTranslations("chat.message");
   if (count <= 1) return null;
@@ -589,7 +590,7 @@ function BranchSwitcher({
       <button
         type="button"
         onClick={() => onSwitch(messageId, "prev")}
-        disabled={index <= 0}
+        disabled={disabled || index <= 0}
         title={t("prevVersion")}
         aria-label={t("prevVersion")}
         className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
@@ -600,7 +601,7 @@ function BranchSwitcher({
       <button
         type="button"
         onClick={() => onSwitch(messageId, "next")}
-        disabled={index >= count - 1}
+        disabled={disabled || index >= count - 1}
         title={t("nextVersion")}
         aria-label={t("nextVersion")}
         className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
@@ -613,15 +614,16 @@ function BranchSwitcher({
 
 /** Fork from this message into a new chat — explore an alternative path without
  *  disturbing the current conversation. */
-function ForkButton({ messageId, onFork }: { messageId: string; onFork: (messageId: string) => void }) {
+function ForkButton({ messageId, onFork, disabled }: { messageId: string; onFork: (messageId: string) => void; disabled?: boolean }) {
   const t = useTranslations("chat.message");
   return (
     <button
       type="button"
       onClick={() => onFork(messageId)}
+      disabled={disabled}
       title={t("fork")}
       aria-label={t("fork")}
-      className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+      className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
     >
       <GitBranch className="h-3.5 w-3.5" />
     </button>
@@ -660,7 +662,7 @@ function MessageAttachments({ chatId, files }: { chatId: string; files: { name: 
 }
 
 function UserBubble({
-  text, messageId, timestamp, isTelegram, siblingIndex, siblingCount, chatId, attachedFiles, onEdit, onSwitchBranch, onFork,
+  text, messageId, timestamp, isTelegram, siblingIndex, siblingCount, chatId, attachedFiles, onEdit, onSwitchBranch, onFork, actionsDisabled,
 }: {
   text: string;
   messageId: string;
@@ -673,6 +675,7 @@ function UserBubble({
   onEdit?: (messageId: string, newText: string) => void;
   onSwitchBranch?: (messageId: string, direction: "prev" | "next") => void;
   onFork?: (messageId: string) => void;
+  actionsDisabled?: boolean;
 }) {
   const tCommon = useTranslations("common");
   const tMsg = useTranslations("chat.message");
@@ -754,7 +757,7 @@ function UserBubble({
           )}
           <div className="mt-1 flex items-center gap-1">
             {onSwitchBranch && (
-              <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} />
+              <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={messageId} onSwitch={onSwitchBranch} disabled={actionsDisabled} />
             )}
             {/* Inline icons are the desktop (hover) affordance; touch uses the
                 long-press menu instead, so these stay hover-only. */}
@@ -764,19 +767,22 @@ function UserBubble({
               </span>
             )}
             {onEdit && text && (
-              <button
-                type="button"
-                onClick={() => { setDraft(text); setEditing(true); }}
-                title={tMsg("edit")}
-                aria-label={tMsg("edit")}
-                className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground opacity-0 transition hover:bg-accent/50 hover:text-foreground group-hover/msg:opacity-100"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+              <span className="opacity-0 transition group-hover/msg:opacity-100">
+                <button
+                  type="button"
+                  onClick={() => { setDraft(text); setEditing(true); }}
+                  disabled={actionsDisabled}
+                  title={tMsg("edit")}
+                  aria-label={tMsg("edit")}
+                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </span>
             )}
             {onFork && (
               <span className="opacity-0 transition group-hover/msg:opacity-100">
-                <ForkButton messageId={messageId} onFork={onFork} />
+                <ForkButton messageId={messageId} onFork={onFork} disabled={actionsDisabled} />
               </span>
             )}
             <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
@@ -789,12 +795,12 @@ function UserBubble({
             </DropdownMenuItem>
           )}
           {onEdit && text && (
-            <DropdownMenuItem onClick={() => { setDraft(text); setEditing(true); }}>
+            <DropdownMenuItem disabled={actionsDisabled} onClick={() => { setDraft(text); setEditing(true); }}>
               <Pencil /> {tMsg("edit")}
             </DropdownMenuItem>
           )}
           {onFork && (
-            <DropdownMenuItem onClick={() => onFork(messageId)}>
+            <DropdownMenuItem disabled={actionsDisabled} onClick={() => onFork(messageId)}>
               <GitBranch /> {tMsg("fork")}
             </DropdownMenuItem>
           )}
@@ -996,6 +1002,9 @@ interface ChatMessageProps {
   onSwitchBranch?: (messageId: string, direction: "prev" | "next") => void;
   /** Fork the conversation from this message into a new chat. */
   onFork?: (messageId: string) => void;
+  /** A turn is streaming: edit/fork/branch/regenerate render disabled instead
+   *  of unmounting — icons that vanish and reappear read as the UI glitching. */
+  actionsDisabled?: boolean;
   /** The chat's active model + setter — lets the capability notice offer a
    *  one-tap switch to a model that can actually see/hear the attachment. */
   model?: string;
@@ -1028,7 +1037,7 @@ function CompactionDivider({ summary }: { summary: string }) {
   );
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, model, onModelChange, onSend }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, model, onModelChange, onSend }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -1063,6 +1072,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
         onEdit={onEdit}
         onSwitchBranch={onSwitchBranch}
         onFork={onFork}
+        actionsDisabled={actionsDisabled}
       />
     );
   }
@@ -1192,21 +1202,22 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
           return (
             <div className="mt-1 flex items-center gap-1">
               {onSwitchBranch && (
-                <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={message.id} onSwitch={onSwitchBranch} />
+                <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={message.id} onSwitch={onSwitchBranch} disabled={actionsDisabled} />
               )}
               {copyText && <CopyButton text={copyText} />}
               {onRegenerate && (
                 <button
                   type="button"
                   onClick={onRegenerate}
+                  disabled={actionsDisabled}
                   title={t("regenerate")}
                   aria-label={t("regenerate")}
-                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                 </button>
               )}
-              {onFork && <ForkButton messageId={message.id} onFork={onFork} />}
+              {onFork && <ForkButton messageId={message.id} onFork={onFork} disabled={actionsDisabled} />}
               <MessageDetails
                 details={{ durationMs: metadata?.durationMs, model: metadata?.model, usage: metadata?.usage, costUsd: metadata?.costUsd, costSource: metadata?.costSource, upstreamProvider: metadata?.upstreamProvider, hasGeneration: metadata?.hasGeneration, messageId: message.id }}
                 createdAt={createdAt}

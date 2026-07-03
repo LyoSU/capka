@@ -141,6 +141,12 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     else toast.error(t("forkFailed"));
   }, [forkChat, router, t]);
 
+  // Stable identities for the same reason as handleFork — these are passed to
+  // every ChatMessage even while a turn runs (the buttons render disabled, not
+  // hidden — see actionsDisabled), so a changing identity would bust the memo.
+  const handleEdit = useCallback((id: string, text: string) => editMessage(id, text, model), [editMessage, model]);
+  const handleRegenerate = useCallback(() => regenerate(model), [regenerate, model]);
+
   // "Continue here": fork a read-only Telegram chat from its latest message into
   // a fresh, fully-interactive web chat so the user can take the thread over.
   const handleContinueHere = async () => {
@@ -150,7 +156,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   };
 
   // The latest assistant reply is the only one that can be regenerated; editing
-  // is offered on any user message while nothing is streaming.
+  // is offered on any user message. While a turn is streaming the actions render
+  // disabled instead of unmounting — vanishing icons read as the UI glitching.
   const lastAssistantIndex = (() => {
     for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "assistant") return i;
     return -1;
@@ -717,7 +724,6 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                 const isLast = i === messages.length - 1;
                 const isStreamingMsg = isLoading && isLast && message.role === "assistant";
                 const isLatestUser = message.id === lastUserId;
-                const canRegenerate = !isLoading && i === lastAssistantIndex;
                 return (
                   <div
                     key={message.id}
@@ -730,10 +736,11 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                       chatId={chatId}
                       isAdmin={isAdmin}
                       isStreaming={isStreamingMsg}
-                      onRegenerate={canRegenerate && !readOnly ? () => regenerate(model) : undefined}
-                      onEdit={!isLoading && !readOnly ? (id, text) => editMessage(id, text, model) : undefined}
-                      onSwitchBranch={!isLoading ? switchBranch : undefined}
-                      onFork={!isLoading ? handleFork : undefined}
+                      onRegenerate={i === lastAssistantIndex && !readOnly ? handleRegenerate : undefined}
+                      onEdit={!readOnly ? handleEdit : undefined}
+                      onSwitchBranch={switchBranch}
+                      onFork={handleFork}
+                      actionsDisabled={isLoading}
                       model={model}
                       onModelChange={readOnly ? undefined : setModel}
                       onSend={readOnly ? undefined : handleManageSend}

@@ -11,6 +11,11 @@ All notable changes to Capka are documented here. Format follows
   (HTTP 200)" for OpenAI-compatible gateways that always stream (e.g. omniroute):
   the connection test now probes over the streaming transport that real turns
   use, and times out after 30s instead of hanging.
+- Long streaming replies no longer freeze the chat on phones (dead taps,
+  stuttering scroll): incoming deltas are now coalesced client-side into ~4
+  renders/s, halving main-thread load at the tail of a long answer.
+- Message actions (edit/fork/regenerate/version arrows) stay visible but
+  disabled while a reply is streaming, instead of vanishing and reappearing.
 
 ### Added
 - Attach folders to a chat's sandbox, gated by two new org settings (both off by

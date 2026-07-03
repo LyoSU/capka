@@ -7,6 +7,7 @@ import { type FileRef } from "@/lib/constants";
 import type { TaskEvent } from "@/lib/tasks/events";
 import { mergePendingMessages, pendingStillUnknown } from "@/lib/chat/optimistic";
 import { classifyStreamEvent } from "@/lib/chat/stream-reconcile";
+import { createDeltaCoalescer } from "@/lib/chat/delta-coalesce";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -143,6 +144,278 @@ export function useBackgroundChat({
       "task:tool-input-start", "task:tool-call", "task:tool-result", "task:tool-approval",
     ]);
 
+    // The full per-event state application, shared by the immediate path and
+    // the coalescer's deferred flush.
+    const applyEvent = (data: TaskEvent) => {
+      switch (data.type) {
+        case "task:start": {
+          setStatus("running");
+          // Track the taskId from the live event too — a turn that begins
+          // while we're watching (a queued send draining, a Telegram-sourced
+          // turn, another tab) would otherwise leave the stop button unable
+          // to cancel anything (taskId was only set by our own POST before).
+          setTaskId(data.taskId);
+          setTaskInfo({ startedAt: Date.now(), currentTool: null, retrying: null });
+          // Baseline the seq cursor for this reply (task:start is seq 0), so
+          // the first delta (seq 1) is the next contiguous one. NEVER lower a
+          // cursor we've already advanced: a redelivered/late task:start
+          // (reconnect racing a snapshot load) must not reset us to 0, or
+          // already-applied deltas would re-classify as `apply` and duplicate.
+          {
+            const prevSeq = appliedSeqRef.current.get(data.messageId);
+            const baseline = data.seq ?? 0;
+            appliedSeqRef.current.set(
+              data.messageId,
+              prevSeq === undefined ? baseline : Math.max(prevSeq, baseline),
+            );
+          }
+          // Idempotent: if history already loaded this assistant row
+          // (reconnect / cross-channel), don't append a duplicate.
+          setMessages((prev) =>
+            prev.some((m) => m.id === data.messageId)
+              ? prev
+              : [...prev, { id: data.messageId, role: "assistant", parts: [] }],
+          );
+          break;
+        }
+
+        case "task:reset": {
+          // A runner retry threw away the partial reply — clear the streamed
+          // parts so retry deltas don't append onto the abandoned attempt, and
+          // move the cursor to the reset's seq.
+          appliedSeqRef.current.set(data.messageId, data.seq);
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === data.messageId);
+            if (idx === -1) return prev;
+            const msgs = [...prev];
+            msgs[idx] = { ...msgs[idx], parts: [] };
+            return msgs;
+          });
+          break;
+        }
+
+        case "task:text-delta": {
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === data.messageId);
+            if (idx === -1) return prev;
+            const msgs = [...prev];
+            const msg = msgs[idx];
+            const parts = [...msg.parts];
+            const lastPart = parts[parts.length - 1];
+            if (lastPart?.type === "text") {
+              parts[parts.length - 1] = { type: "text", text: lastPart.text + data.delta };
+            } else {
+              parts.push({ type: "text", text: data.delta });
+            }
+            msgs[idx] = { ...msg, parts };
+            return msgs;
+          });
+          break;
+        }
+
+        case "task:reasoning-delta": {
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === data.messageId);
+            if (idx === -1) return prev;
+            const msgs = [...prev];
+            const msg = msgs[idx];
+            const parts = [...msg.parts];
+            const lastPart = parts[parts.length - 1];
+            if (lastPart?.type === "reasoning") {
+              parts[parts.length - 1] = { type: "reasoning", text: lastPart.text + data.delta };
+            } else {
+              parts.push({ type: "reasoning", text: data.delta });
+            }
+            msgs[idx] = { ...msg, parts };
+            return msgs;
+          });
+          break;
+        }
+
+        case "task:tool-input-start": {
+          // The model began a tool call; args haven't arrived yet. Show the
+          // step immediately as a spinner with a generic label — `tool-call`
+          // refines it once the parsed args land.
+          setTaskInfo((prev) => ({ ...prev, currentTool: data.toolName }));
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === data.messageId);
+            if (idx === -1) return prev;
+            const msg = prev[idx];
+            // A reconnect may replay it — don't add the same step twice.
+            if (msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId)) return prev;
+            const msgs = [...prev];
+            msgs[idx] = {
+              ...msg,
+              parts: [...msg.parts, {
+                type: "dynamic-tool",
+                toolCallId: data.toolCallId,
+                toolName: data.toolName,
+                // AI SDK 6 state for a call whose args are still streaming in.
+                state: "input-streaming",
+              }],
+            };
+            return msgs;
+          });
+          break;
+        }
+
+        case "task:tool-call": {
+          setTaskInfo((prev) => ({ ...prev, currentTool: data.toolName }));
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === data.messageId);
+            if (idx === -1) return prev;
+            const msgs = [...prev];
+            const msg = msgs[idx];
+            const existing = msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId);
+            msgs[idx] = {
+              ...msg,
+              // Refine the step opened by tool-input-start: fill the parsed
+              // args and mark the input complete (output still pending). If no
+              // input-start was seen (older worker / missed event), add it.
+              parts: existing
+                ? msg.parts.map((p) =>
+                    p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
+                      ? { ...p, state: "input-available", input: data.args }
+                      : p,
+                  )
+                : [...msg.parts, {
+                    type: "dynamic-tool",
+                    toolCallId: data.toolCallId,
+                    toolName: data.toolName,
+                    state: "input-available",
+                    input: data.args,
+                  }],
+            };
+            return msgs;
+          });
+          break;
+        }
+
+        case "task:tool-result": {
+          setTaskInfo((prev) => ({ ...prev, currentTool: null }));
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === data.messageId);
+            if (idx === -1) return prev;
+            const msgs = [...prev];
+            const msg = msgs[idx];
+            // Trust the server's explicit failure flag — a successful tool can
+            // legitimately carry an `error: null` field, which must not read
+            // as a failure (otherwise it flashes red mid-stream).
+            const isError = data.isError === true;
+            const parts = msg.parts.map((p) =>
+              p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
+                ? { ...p, state: isError ? "output-error" : "output-available", output: data.result }
+                : p,
+            );
+            msgs[idx] = { ...msg, parts };
+            return msgs;
+          });
+          break;
+        }
+
+        case "task:tool-approval": {
+          // Native HITL: the SDK suspended this tool call — flip it to
+          // approval-requested so the card shows Approve/Reject and the composer
+          // blocks. task:finish follows (the turn finalized as awaiting_approval);
+          // loadHistory then re-derives the same state from the persisted marker.
+          setTaskInfo((prev) => ({ ...prev, currentTool: null }));
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === data.messageId);
+            if (idx === -1) return prev;
+            const msgs = [...prev];
+            const msg = msgs[idx];
+            const parts = msg.parts.map((p) =>
+              p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
+                ? { ...p, state: "approval-requested", approval: { id: data.approvalId } }
+                : p,
+            );
+            msgs[idx] = { ...msg, parts };
+            return msgs;
+          });
+          break;
+        }
+
+        case "task:ask": {
+          // The runner suspended a no-execute `ask` call — flip the live tool
+          // part to input-available and attach the form so the question card
+          // renders and the composer blocks. task:finish follows (finalized as
+          // awaiting_answer); loadHistory then re-derives the same state from the
+          // persisted `answer` marker. (An `elicit:` toolCallId has no persisted
+          // part yet — handled in the MCP elicitation phase.)
+          setTaskInfo((prev) => ({ ...prev, currentTool: null }));
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === data.messageId);
+            if (idx === -1) return prev;
+            const msgs = [...prev];
+            const msg = msgs[idx];
+            const found = msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId);
+            const parts = found
+              ? msg.parts.map((p) =>
+                  p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
+                    ? { ...p, state: "input-available", askForm: data.form }
+                    : p,
+                )
+              // An MCP elicitation (`elicit:` id) has no persisted tool-call part —
+              // append a transient ask part so the same card renders mid-turn. It's
+              // not persisted (elicitation is non-durable), so a reload drops it.
+              : [...msg.parts, { type: "dynamic-tool" as const, toolCallId: data.toolCallId, toolName: "ask", state: "input-available", askForm: data.form }];
+            msgs[idx] = { ...msg, parts };
+            return msgs;
+          });
+          break;
+        }
+
+        case "task:finish": {
+          setStatus("idle");
+          setTaskId(null);
+          setTaskInfo({ startedAt: 0, currentTool: null, retrying: null });
+          // Stop tracking this reply's seq — the turn is done; loadHistory
+          // below reloads the final, authoritative content.
+          if (data.messageId) appliedSeqRef.current.delete(data.messageId);
+          // Don't surface a failure via the bottom banner here: the server
+          // has already persisted it on the message row (taskStatus:"failed"
+          // + error), so the reload below brings it back as the message's own
+          // durable ErrorNotice. Setting `error` would only flash the banner
+          // for the one render before loadHistory() clears it again — an
+          // unreadable red blink above the composer. The banner is reserved
+          // for load errors (loadHistory's own catch).
+          loadHistory();
+          break;
+        }
+
+        case "task:notice": {
+          // The provider stalled and the runner is re-streaming. Surface a
+          // calm "model is slow, retrying" instead of a silent pause; the next
+          // content delta clears it (see the GATED apply path above).
+          if (data.notice.kind === "retrying") {
+            setTaskInfo((prev) => ({ ...prev, retrying: { attempt: data.notice.attempt, max: data.notice.max } }));
+          }
+          break;
+        }
+
+        case "new_message": {
+          // External message (e.g. Telegram) — reload
+          loadHistory();
+          break;
+        }
+
+        case "chat:compacted": {
+          // A compaction checkpoint landed — reload so the transcript shows
+          // the divider and the context meter re-derives from the new leaf.
+          loadHistory();
+          break;
+        }
+      }
+    };
+
+    // Text/reasoning deltas arrive ~10/s and each applied one re-renders the
+    // whole streaming message at O(its full length) — on long replies that
+    // saturates a phone's main thread (dead taps, stuttering scroll). Coalesce
+    // them into one burst ≤4/s; React batches the burst into a single render.
+    // All other events are rare but order-sensitive relative to the deltas, so
+    // they flush the buffer first and apply immediately.
+    const coalescer = createDeltaCoalescer(applyEvent);
+
     const connect = () => {
       es = new EventSource("/api/events");
 
@@ -178,270 +451,19 @@ export function useBackgroundChat({
             if (action === "ignore") return;
             if (action === "reconcile") { reconcileSoon(); return; }
             // action === "apply": advance the cursor, then run the handler below.
+            // (The cursor advances at receive time even for buffered deltas —
+            // classification is about arrival order, not paint time.)
             if (typeof seq === "number") appliedSeqRef.current.set(mid, seq);
             // Content is flowing again — clear any "retrying" notice from a stall.
             setTaskInfo((prev) => (prev.retrying ? { ...prev, retrying: null } : prev));
           }
 
-          switch (data.type) {
-            case "task:start": {
-              setStatus("running");
-              // Track the taskId from the live event too — a turn that begins
-              // while we're watching (a queued send draining, a Telegram-sourced
-              // turn, another tab) would otherwise leave the stop button unable
-              // to cancel anything (taskId was only set by our own POST before).
-              setTaskId(data.taskId);
-              setTaskInfo({ startedAt: Date.now(), currentTool: null, retrying: null });
-              // Baseline the seq cursor for this reply (task:start is seq 0), so
-              // the first delta (seq 1) is the next contiguous one. NEVER lower a
-              // cursor we've already advanced: a redelivered/late task:start
-              // (reconnect racing a snapshot load) must not reset us to 0, or
-              // already-applied deltas would re-classify as `apply` and duplicate.
-              {
-                const prevSeq = appliedSeqRef.current.get(data.messageId);
-                const baseline = data.seq ?? 0;
-                appliedSeqRef.current.set(
-                  data.messageId,
-                  prevSeq === undefined ? baseline : Math.max(prevSeq, baseline),
-                );
-              }
-              // Idempotent: if history already loaded this assistant row
-              // (reconnect / cross-channel), don't append a duplicate.
-              setMessages((prev) =>
-                prev.some((m) => m.id === data.messageId)
-                  ? prev
-                  : [...prev, { id: data.messageId, role: "assistant", parts: [] }],
-              );
-              break;
-            }
-
-            case "task:reset": {
-              // A runner retry threw away the partial reply — clear the streamed
-              // parts so retry deltas don't append onto the abandoned attempt, and
-              // move the cursor to the reset's seq.
-              appliedSeqRef.current.set(data.messageId, data.seq);
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === data.messageId);
-                if (idx === -1) return prev;
-                const msgs = [...prev];
-                msgs[idx] = { ...msgs[idx], parts: [] };
-                return msgs;
-              });
-              break;
-            }
-
-            case "task:text-delta": {
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === data.messageId);
-                if (idx === -1) return prev;
-                const msgs = [...prev];
-                const msg = msgs[idx];
-                const parts = [...msg.parts];
-                const lastPart = parts[parts.length - 1];
-                if (lastPart?.type === "text") {
-                  parts[parts.length - 1] = { type: "text", text: lastPart.text + data.delta };
-                } else {
-                  parts.push({ type: "text", text: data.delta });
-                }
-                msgs[idx] = { ...msg, parts };
-                return msgs;
-              });
-              break;
-            }
-
-            case "task:reasoning-delta": {
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === data.messageId);
-                if (idx === -1) return prev;
-                const msgs = [...prev];
-                const msg = msgs[idx];
-                const parts = [...msg.parts];
-                const lastPart = parts[parts.length - 1];
-                if (lastPart?.type === "reasoning") {
-                  parts[parts.length - 1] = { type: "reasoning", text: lastPart.text + data.delta };
-                } else {
-                  parts.push({ type: "reasoning", text: data.delta });
-                }
-                msgs[idx] = { ...msg, parts };
-                return msgs;
-              });
-              break;
-            }
-
-            case "task:tool-input-start": {
-              // The model began a tool call; args haven't arrived yet. Show the
-              // step immediately as a spinner with a generic label — `tool-call`
-              // refines it once the parsed args land.
-              setTaskInfo((prev) => ({ ...prev, currentTool: data.toolName }));
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === data.messageId);
-                if (idx === -1) return prev;
-                const msg = prev[idx];
-                // A reconnect may replay it — don't add the same step twice.
-                if (msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId)) return prev;
-                const msgs = [...prev];
-                msgs[idx] = {
-                  ...msg,
-                  parts: [...msg.parts, {
-                    type: "dynamic-tool",
-                    toolCallId: data.toolCallId,
-                    toolName: data.toolName,
-                    // AI SDK 6 state for a call whose args are still streaming in.
-                    state: "input-streaming",
-                  }],
-                };
-                return msgs;
-              });
-              break;
-            }
-
-            case "task:tool-call": {
-              setTaskInfo((prev) => ({ ...prev, currentTool: data.toolName }));
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === data.messageId);
-                if (idx === -1) return prev;
-                const msgs = [...prev];
-                const msg = msgs[idx];
-                const existing = msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId);
-                msgs[idx] = {
-                  ...msg,
-                  // Refine the step opened by tool-input-start: fill the parsed
-                  // args and mark the input complete (output still pending). If no
-                  // input-start was seen (older worker / missed event), add it.
-                  parts: existing
-                    ? msg.parts.map((p) =>
-                        p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
-                          ? { ...p, state: "input-available", input: data.args }
-                          : p,
-                      )
-                    : [...msg.parts, {
-                        type: "dynamic-tool",
-                        toolCallId: data.toolCallId,
-                        toolName: data.toolName,
-                        state: "input-available",
-                        input: data.args,
-                      }],
-                };
-                return msgs;
-              });
-              break;
-            }
-
-            case "task:tool-result": {
-              setTaskInfo((prev) => ({ ...prev, currentTool: null }));
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === data.messageId);
-                if (idx === -1) return prev;
-                const msgs = [...prev];
-                const msg = msgs[idx];
-                // Trust the server's explicit failure flag — a successful tool can
-                // legitimately carry an `error: null` field, which must not read
-                // as a failure (otherwise it flashes red mid-stream).
-                const isError = data.isError === true;
-                const parts = msg.parts.map((p) =>
-                  p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
-                    ? { ...p, state: isError ? "output-error" : "output-available", output: data.result }
-                    : p,
-                );
-                msgs[idx] = { ...msg, parts };
-                return msgs;
-              });
-              break;
-            }
-
-            case "task:tool-approval": {
-              // Native HITL: the SDK suspended this tool call — flip it to
-              // approval-requested so the card shows Approve/Reject and the composer
-              // blocks. task:finish follows (the turn finalized as awaiting_approval);
-              // loadHistory then re-derives the same state from the persisted marker.
-              setTaskInfo((prev) => ({ ...prev, currentTool: null }));
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === data.messageId);
-                if (idx === -1) return prev;
-                const msgs = [...prev];
-                const msg = msgs[idx];
-                const parts = msg.parts.map((p) =>
-                  p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
-                    ? { ...p, state: "approval-requested", approval: { id: data.approvalId } }
-                    : p,
-                );
-                msgs[idx] = { ...msg, parts };
-                return msgs;
-              });
-              break;
-            }
-
-            case "task:ask": {
-              // The runner suspended a no-execute `ask` call — flip the live tool
-              // part to input-available and attach the form so the question card
-              // renders and the composer blocks. task:finish follows (finalized as
-              // awaiting_answer); loadHistory then re-derives the same state from the
-              // persisted `answer` marker. (An `elicit:` toolCallId has no persisted
-              // part yet — handled in the MCP elicitation phase.)
-              setTaskInfo((prev) => ({ ...prev, currentTool: null }));
-              setMessages((prev) => {
-                const idx = prev.findIndex((m) => m.id === data.messageId);
-                if (idx === -1) return prev;
-                const msgs = [...prev];
-                const msg = msgs[idx];
-                const found = msg.parts.some((p) => p.type === "dynamic-tool" && p.toolCallId === data.toolCallId);
-                const parts = found
-                  ? msg.parts.map((p) =>
-                      p.type === "dynamic-tool" && p.toolCallId === data.toolCallId
-                        ? { ...p, state: "input-available", askForm: data.form }
-                        : p,
-                    )
-                  // An MCP elicitation (`elicit:` id) has no persisted tool-call part —
-                  // append a transient ask part so the same card renders mid-turn. It's
-                  // not persisted (elicitation is non-durable), so a reload drops it.
-                  : [...msg.parts, { type: "dynamic-tool" as const, toolCallId: data.toolCallId, toolName: "ask", state: "input-available", askForm: data.form }];
-                msgs[idx] = { ...msg, parts };
-                return msgs;
-              });
-              break;
-            }
-
-            case "task:finish": {
-              setStatus("idle");
-              setTaskId(null);
-              setTaskInfo({ startedAt: 0, currentTool: null, retrying: null });
-              // Stop tracking this reply's seq — the turn is done; loadHistory
-              // below reloads the final, authoritative content.
-              if (data.messageId) appliedSeqRef.current.delete(data.messageId);
-              // Don't surface a failure via the bottom banner here: the server
-              // has already persisted it on the message row (taskStatus:"failed"
-              // + error), so the reload below brings it back as the message's own
-              // durable ErrorNotice. Setting `error` would only flash the banner
-              // for the one render before loadHistory() clears it again — an
-              // unreadable red blink above the composer. The banner is reserved
-              // for load errors (loadHistory's own catch).
-              loadHistory();
-              break;
-            }
-
-            case "task:notice": {
-              // The provider stalled and the runner is re-streaming. Surface a
-              // calm "model is slow, retrying" instead of a silent pause; the next
-              // content delta clears it (see the GATED apply path above).
-              if (data.notice.kind === "retrying") {
-                setTaskInfo((prev) => ({ ...prev, retrying: { attempt: data.notice.attempt, max: data.notice.max } }));
-              }
-              break;
-            }
-
-            case "new_message": {
-              // External message (e.g. Telegram) — reload
-              loadHistory();
-              break;
-            }
-
-            case "chat:compacted": {
-              // A compaction checkpoint landed — reload so the transcript shows
-              // the divider and the context meter re-derives from the new leaf.
-              loadHistory();
-              break;
-            }
+          if (data.type === "task:text-delta" || data.type === "task:reasoning-delta") {
+            coalescer.enqueue(data);
+            return;
           }
+          coalescer.flush();
+          applyEvent(data);
         } catch { /* ignore parse errors */ }
       };
 
@@ -460,6 +482,7 @@ export function useBackgroundChat({
       clearTimeout(reconnectTimer);
       clearTimeout(truncReloadTimer);
       clearTimeout(reconcileTimer);
+      coalescer.dispose();
       es?.close();
     };
   }, [chatId, loadHistory]);
