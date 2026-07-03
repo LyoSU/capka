@@ -489,6 +489,14 @@
       "reconnect": "Перепідключити",
       "disconnect": "Відключити теку",
       "syncing": "Синхронізація…",
+      "progress": {
+        "scanning": "Сканування…",
+        "hashing": "Перевірка {done}/{total}…",
+        "uploading": "Завантаження {done}/{total}",
+        "downloading": "Отримання {done}/{total}"
+      },
+      "skipped": "пропущено: {n} (завеликі або службові)",
+      "tooLarge": "Ця тека завелика для синхронізації ({count} файлів, {mb} MB). Ліміт: {maxFiles} файлів / {maxMb} MB.",
       "syncedAgo": "Синхронізовано {ago}",
       "justNow": "щойно",
       "minAgo": "{n} хв тому",

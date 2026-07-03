@@ -489,6 +489,14 @@
       "reconnect": "Reconnect",
       "disconnect": "Disconnect folder",
       "syncing": "Syncing…",
+      "progress": {
+        "scanning": "Scanning…",
+        "hashing": "Checking {done}/{total}…",
+        "uploading": "Uploading {done}/{total}",
+        "downloading": "Downloading {done}/{total}"
+      },
+      "skipped": "{n} skipped (too large or system files)",
+      "tooLarge": "This folder is too large to sync ({count} files, {mb} MB). Limit: {maxFiles} files / {maxMb} MB.",
       "syncedAgo": "Synced {ago}",
       "justNow": "just now",
       "minAgo": "{n} min ago",

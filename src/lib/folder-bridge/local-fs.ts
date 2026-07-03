@@ -6,6 +6,8 @@
  * depend on the FS-Access lib.dom typings being present.
  */
 
+import { ignoredPath, oversized } from "./filter";
+
 export type LocalStat = { mtime: number; size: number };
 export type LocalManifest = Record<string, LocalStat>;
 export type HashedManifest = Record<string, { mtime: number; size: number; hash: string }>;
@@ -52,18 +54,27 @@ export interface DirHandle {
   requestPermission?(d: { mode: "read" | "readwrite" }): Promise<PermissionState>;
 }
 
-/** Recursively list a directory handle into a mtime+size manifest (no hashing). */
-export async function walkLocal(dir: DirHandle, prefix = ""): Promise<LocalManifest> {
-  const out: LocalManifest = {};
+/** Recursively list a directory handle into a mtime+size manifest (no hashing).
+ *  Skips ignored trees (never even descends node_modules/.git/etc — the big perf
+ *  win) and files over the size cap; `skipped` counts oversized files, so the UI
+ *  can tell the user why a large file didn't make it into the sandbox. */
+export async function walkLocal(dir: DirHandle, prefix = ""): Promise<{ files: LocalManifest; skipped: number }> {
+  const files: LocalManifest = {};
+  let skipped = 0;
   for await (const [name, handle] of dir.entries()) {
     const path = prefix ? `${prefix}/${name}` : name;
-    if (handle.kind === "directory") Object.assign(out, await walkLocal(handle, path));
-    else {
+    if (ignoredPath(path)) continue; // never descend/collect ignored dirs & junk files
+    if (handle.kind === "directory") {
+      const sub = await walkLocal(handle, path);
+      Object.assign(files, sub.files);
+      skipped += sub.skipped;
+    } else {
       const f = await handle.getFile();
-      out[path] = { mtime: f.lastModified, size: f.size };
+      if (oversized(f.size)) { skipped++; continue; }
+      files[path] = { mtime: f.lastModified, size: f.size };
     }
   }
-  return out;
+  return { files, skipped };
 }
 
 /** Recursively list a directory handle's SUBDIRECTORIES (paths, no files) — the dir
@@ -74,6 +85,7 @@ export async function walkLocalDirs(dir: DirHandle, prefix = ""): Promise<string
   for await (const [name, handle] of dir.entries()) {
     if (handle.kind !== "directory") continue;
     const path = prefix ? `${prefix}/${name}` : name;
+    if (ignoredPath(path)) continue; // don't list or descend ignored trees
     out.push(path);
     out.push(...await walkLocalDirs(handle, path));
   }

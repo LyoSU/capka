@@ -7,6 +7,8 @@
  * dependency to install (and nothing new for a self-hoster's container to miss).
  */
 
+import { ignoredPath, oversized } from "./filter";
+
 /** Open the OS directory picker via a hidden `<input webkitdirectory>` and resolve
  *  the chosen files (each carries `webkitRelativePath`). Resolves [] on cancel. */
 function pickDirectory(): Promise<File[]> {
@@ -36,11 +38,20 @@ function pickDirectory(): Promise<File[]> {
 const CHUNK = 100;
 
 export async function importFolderFallback(chatId: string): Promise<{ name: string; count: number } | null> {
-  const files = await pickDirectory();
-  if (files.length === 0) return null;
+  const picked = await pickDirectory();
+  if (picked.length === 0) return null;
 
-  const first = files[0].webkitRelativePath || files[0].name;
+  const first = picked[0].webkitRelativePath || picked[0].name;
   const name = first.split("/")[0] || "folder";
+
+  // Drop the same junk the live sync skips (node_modules/models/oversized) so a
+  // one-shot import doesn't haul a dependency tree into the sandbox either.
+  const files = picked.filter((f) => {
+    const rel = f.webkitRelativePath || f.name;
+    const inner = rel.startsWith(`${name}/`) ? rel.slice(name.length + 1) : rel;
+    return !ignoredPath(inner) && !oversized(f.size);
+  });
+  if (files.length === 0) return { name, count: 0 };
 
   // Batch through the folder-sync endpoint (rate-limited per request), so a big
   // folder doesn't trip the interactive per-file upload limiter. Each file's form

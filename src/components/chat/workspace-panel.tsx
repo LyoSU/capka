@@ -243,7 +243,9 @@ export function WorkspacePanel({
         {isSyncedFolder(entry) && (
           <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary" title={t("syncedFolder")}>
             {syncingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-            {t("synced")}
+            {syncingNow && folderSync?.progress && folderSync.progress.total > 0
+              ? `${folderSync.progress.done}/${folderSync.progress.total}`
+              : t("synced")}
           </span>
         )}
       </div>

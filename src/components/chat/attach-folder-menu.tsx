@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { FileUp, FolderPlus, FolderUp, Folder, RefreshCw, Download, Loader2, X } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
+import { FOLDER_MAX_FILES, FOLDER_MAX_TOTAL_MB } from "@/lib/folder-bridge/filter";
 
 type FolderSync = ReturnType<typeof useFolderSync>;
 
@@ -21,7 +22,10 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
   const connect = async () => {
     setBusy(true); setErr("");
     const r = await folders.connect();
-    if (!r.ok && r.error) setErr(r.error);
+    if (!r.ok) {
+      if (r.tooLarge) setErr(t("tooLarge", { count: r.tooLarge.count, mb: r.tooLarge.mb, maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
+      else if (r.error) setErr(r.error);
+    }
     setBusy(false);
     if (r.ok) setOpen(false);
   };
@@ -78,8 +82,18 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
 
             {folders.folders.length > 0 && (
               <div className="px-2 pt-1 text-xs text-muted-foreground">
-                {folders.phase === "syncing" ? t("syncing") : folders.lastSyncedAt ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, t) }) : ""}
+                {folders.phase === "syncing" ? (
+                  <>
+                    <span>{folders.progress ? t(`progress.${folders.progress.phase}`, { done: folders.progress.done, total: folders.progress.total }) : t("syncing")}</span>
+                    {folders.progress && folders.progress.total > 0 && (
+                      <span className="mt-1 block h-0.5 w-full overflow-hidden rounded-full bg-muted">
+                        <span className="block h-full bg-primary transition-all" style={{ width: `${Math.round((folders.progress.done / folders.progress.total) * 100)}%` }} />
+                      </span>
+                    )}
+                  </>
+                ) : folders.lastSyncedAt ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, t) }) : ""}
                 {folders.conflicts > 0 && <span className="text-amber-600 dark:text-amber-500"> · {t("conflicts", { n: folders.conflicts })}</span>}
+                {folders.phase !== "syncing" && folders.skipped > 0 && <span className="block text-muted-foreground/70">{t("skipped", { n: folders.skipped })}</span>}
               </div>
             )}
           </>

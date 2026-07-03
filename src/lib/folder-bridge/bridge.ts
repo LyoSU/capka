@@ -15,8 +15,24 @@ import {
   readLocalFile, writeLocalFile, deleteLocalFile, deleteLocalDir, ensureLocalDir,
   type DirHandle, type HashedManifest,
 } from "./local-fs";
+import { ignoredPath, oversized, FOLDER_MAX_FILES, FOLDER_MAX_TOTAL_MB } from "./filter";
 
 export type PcFolder = { id: string; name: string };
+
+/** Progress during a sync — a phase plus a done/total counter the UI renders as a
+ *  thin bar ("Uploading 34/210"). total is 0 while scanning (count unknown yet). */
+export type SyncProgress = { phase: "scanning" | "hashing" | "uploading" | "downloading"; done: number; total: number };
+
+/** Thrown by pickAndCreate when a folder exceeds the attach ceiling (too many files
+ *  or too many bytes AFTER filtering). Carries the numbers so the UI can localize
+ *  the message; identified by `name` to avoid importing the class across the dynamic
+ *  import boundary. */
+export class FolderTooLargeError extends Error {
+  constructor(public count: number, public mb: number) {
+    super("folder too large");
+    this.name = "FolderTooLargeError";
+  }
+}
 
 declare global {
   interface Window {
@@ -78,8 +94,9 @@ async function serverTree(chatId: string, name: string): Promise<{ files: Manife
     // Entries may come back relative to the queried dir or to the workspace root;
     // normalize to a path relative to the folder.
     const rel = e.path.startsWith(`${name}/`) ? e.path.slice(name.length + 1) : e.path;
+    if (ignoredPath(rel)) continue; // same skip-list as the local side (symmetry)
     if (e.isDirectory) dirs.push(rel);
-    else files[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size };
+    else if (!oversized(e.size)) files[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size };
   }
   return { files, dirs };
 }
@@ -88,7 +105,7 @@ async function serverTree(chatId: string, name: string): Promise<{ files: Manife
 // chunk, rate-limited per request) — NOT the interactive per-file upload route,
 // which caps at ~10/min and would 429 on any real folder.
 const UPLOAD_CHUNK = 100;
-async function uploadBatch(chatId: string, name: string, paths: string[], read: (rel: string) => Promise<Blob>): Promise<void> {
+async function uploadBatch(chatId: string, name: string, paths: string[], read: (rel: string) => Promise<Blob>, onProgress?: (p: SyncProgress) => void): Promise<void> {
   for (let i = 0; i < paths.length; i += UPLOAD_CHUNK) {
     const chunk = paths.slice(i, i + UPLOAD_CHUNK);
     const form = new FormData();
@@ -97,6 +114,7 @@ async function uploadBatch(chatId: string, name: string, paths: string[], read: 
     for (const rel of chunk) form.append("files", new File([await read(rel)], rel));
     const res = await fetch("/api/folders/upload", { method: "POST", body: form });
     if (!res.ok) throw new Error("upload failed");
+    onProgress?.({ phase: "uploading", done: Math.min(i + chunk.length, paths.length), total: paths.length });
   }
 }
 
@@ -112,14 +130,19 @@ async function deleteFromWorkspace(chatId: string, name: string, rel: string): P
 
 // ── Local hashing (with the prefilter) ───────────────────────────────────────
 
-async function localHashed(handle: DirHandle, folderId: string): Promise<HashedManifest> {
-  const stats = await walkLocal(handle);
+async function localHashed(handle: DirHandle, folderId: string, onProgress?: (p: SyncProgress) => void): Promise<{ hashed: HashedManifest; skipped: number }> {
+  const { files: stats, skipped } = await walkLocal(handle);
   const prev = lastLocal.get(folderId) ?? {};
   const fresh: Record<string, string> = {};
-  for (const path of hashCandidates(stats, prev)) fresh[path] = await sha256Hex(await readLocalFile(handle, path));
+  const cand = hashCandidates(stats, prev);
+  let i = 0;
+  for (const path of cand) {
+    onProgress?.({ phase: "hashing", done: i++, total: cand.length });
+    fresh[path] = await sha256Hex(await readLocalFile(handle, path));
+  }
   const merged = mergeHashed(stats, prev, fresh);
   lastLocal.set(folderId, merged);
-  return merged;
+  return { hashed: merged, skipped };
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -136,6 +159,17 @@ export async function pickAndCreate(chatId: string, opts?: { name?: string; ensu
   } catch {
     return null; // user cancelled the picker
   }
+  // Refuse an oversized folder up front (after filtering out node_modules/models/etc)
+  // rather than grinding through a hopeless first sync — the ceiling protects the
+  // sandbox quota and the user's patience. Checked here, at the user gesture, so the
+  // failure is immediate and explains itself.
+  const scan = await walkLocal(handle);
+  const count = Object.keys(scan.files).length;
+  const bytes = Object.values(scan.files).reduce((sum, f) => sum + f.size, 0);
+  if (count > FOLDER_MAX_FILES || bytes > FOLDER_MAX_TOTAL_MB * 1024 * 1024) {
+    throw new FolderTooLargeError(count, Math.round(bytes / (1024 * 1024)));
+  }
+
   await opts?.ensureChat?.();
   // Mirror the server's name sanitization so we can detect an existing row.
   const name = (opts?.name || handle.name).replace(/[^a-z0-9-_]/gi, "").toLowerCase().slice(0, 40) || "folder";
@@ -202,13 +236,14 @@ export async function forget(folderId: string): Promise<void> {
 /** Full bidirectional reconcile between the local folder and /workspace/<name>.
  *  push (before a message) and pull (after the turn) are the same sync at
  *  different times — a sync is idempotent, so running it both ends is safe. */
-export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: number; conflicts: number }> {
+export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: SyncProgress) => void): Promise<{ synced: number; conflicts: number; skipped: number }> {
   const handle = await loadHandle(folder.id);
   if (!handle) throw new Error("Folder not connected.");
 
   const base = bases.get(folder.id) ?? null;
   const dbase = baseDirs.get(folder.id) ?? null;
-  const local = await localHashed(handle, folder.id);
+  onProgress?.({ phase: "scanning", done: 0, total: 0 });
+  const { hashed: local, skipped } = await localHashed(handle, folder.id, onProgress);
   const localDirs = await walkLocalDirs(handle);
   const { files: remote, dirs: remoteDirs } = await serverTree(chatId, folder.name);
   const plan = planSync(local, remote, base);
@@ -217,8 +252,13 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
   const remoteWins = plan.conflicts.filter((c) => c.winner === "remote").map((c) => c.path);
 
-  await uploadBatch(chatId, folder.name, [...plan.upload, ...localWins], (rel) => readLocalFile(handle, rel));
-  for (const path of [...plan.download, ...remoteWins]) await writeLocalFile(handle, path, await downloadFromWorkspace(chatId, folder.name, path));
+  await uploadBatch(chatId, folder.name, [...plan.upload, ...localWins], (rel) => readLocalFile(handle, rel), onProgress);
+  const downloads = [...plan.download, ...remoteWins];
+  let di = 0;
+  for (const path of downloads) {
+    onProgress?.({ phase: "downloading", done: di++, total: downloads.length });
+    await writeLocalFile(handle, path, await downloadFromWorkspace(chatId, folder.name, path));
+  }
   for (const path of plan.deleteRemote) await deleteFromWorkspace(chatId, folder.name, path);
   for (const path of plan.deleteLocal) await deleteLocalFile(handle, path);
   // Directory sync (3-way, so a folder deleted on the PC is removed on the server
@@ -231,7 +271,7 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
   // Reconciled: local now matches the server for every touched path. Re-walk to
   // capture that as the new base (the common ancestor for the next sync).
   lastLocal.delete(folder.id); // force a fresh re-hash of what we just wrote
-  const merged = await localHashed(handle, folder.id);
+  const { hashed: merged } = await localHashed(handle, folder.id);
   bases.set(folder.id, merged);
   baseDirs.set(folder.id, await walkLocalDirs(handle));
   // Persist best-effort for durability; a failure just means the next reload
@@ -245,6 +285,7 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
   return {
     synced: plan.upload.length + plan.download.length + plan.deleteRemote.length + plan.deleteLocal.length,
     conflicts: plan.conflicts.length,
+    skipped,
   };
 }
 

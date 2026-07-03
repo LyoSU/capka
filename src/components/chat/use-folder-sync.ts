@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PcFolder } from "@/lib/folder-bridge/bridge";
+import type { PcFolder, SyncProgress } from "@/lib/folder-bridge/bridge";
 import type { Manifest } from "@/lib/folder-bridge/plan";
 
 export type FolderSyncPhase = "idle" | "syncing" | "error";
+export type ConnectResult = { ok: boolean; error?: string; tooLarge?: { count: number; mb: number } };
 
 /**
  * Turn-scoped sync for a chat's PC folders. The composer calls pushAll() before a
@@ -20,6 +21,8 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   const [folders, setFolders] = useState<PcFolder[]>([]);
   const [needReconnect, setNeedReconnect] = useState<string[]>([]);
   const [phase, setPhase] = useState<FolderSyncPhase>("idle");
+  const [progress, setProgress] = useState<SyncProgress | null>(null);
+  const [skipped, setSkipped] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [conflicts, setConflicts] = useState(0);
   const [supported, setSupported] = useState(true);
@@ -70,10 +73,12 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
     setPhase("syncing");
     try {
       const { sync, syncedManifest } = await import("@/lib/folder-bridge/bridge");
-      let total = 0;
+      let totalConflicts = 0;
+      let totalSkipped = 0;
       for (const f of live) {
-        const r = await sync(chatId, f);
-        total += r.conflicts;
+        const r = await sync(chatId, f, setProgress);
+        totalConflicts += r.conflicts;
+        totalSkipped += r.skipped;
       }
       // Snapshot the post-sync manifests so the file browser can badge statuses.
       setSynced((prev) => {
@@ -81,25 +86,33 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
         for (const f of live) { const m = syncedManifest(f.id); if (m) next[f.name] = m; }
         return next;
       });
-      setConflicts(total);
+      setConflicts(totalConflicts);
+      setSkipped(totalSkipped);
       setLastSyncedAt(Date.now());
       setPhase("idle");
     } catch (e) {
       console.error("[folders] sync failed:", e);
       setPhase("error");
+    } finally {
+      setProgress(null);
     }
   }, [chatId, needReconnect]);
 
   // Connect a live folder (Chromium): pick → create row → first sync. ensureChat
   // runs inside the bridge, after the picker opens (keeps the user gesture) but
   // before the row is created.
-  const connect = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+  const connect = useCallback(async (): Promise<ConnectResult> => {
     try {
       const { pickAndCreate } = await import("@/lib/folder-bridge/bridge");
       const folder = await pickAndCreate(chatId, { ensureChat });
       if (folder) { setLastSyncedAt(Date.now()); await refresh(); }
       return { ok: true };
     } catch (e) {
+      // The ceiling error carries counts so the UI can localize (see FolderTooLargeError).
+      if (e instanceof Error && e.name === "FolderTooLargeError") {
+        const m = e as Error & { count?: number; mb?: number };
+        return { ok: false, tooLarge: { count: m.count ?? 0, mb: m.mb ?? 0 } };
+      }
       return { ok: false, error: e instanceof Error ? e.message : "Could not attach the folder." };
     }
   }, [chatId, ensureChat, refresh]);
@@ -127,7 +140,7 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   }, [refresh]);
 
   return {
-    chatId, folders, needReconnect, phase, lastSyncedAt, conflicts, supported, canAttach, synced,
+    chatId, folders, needReconnect, phase, progress, skipped, lastSyncedAt, conflicts, supported, canAttach, synced,
     pushAll: syncAll, pullAll: syncAll, connect, importFallback, reconnect: reconnectOne, remove, refresh,
   };
 }
