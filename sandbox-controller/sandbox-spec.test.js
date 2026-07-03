@@ -65,6 +65,23 @@ describe("buildSandboxConfig — locked security posture", () => {
       "/data/storage/user1/_global/sandbox:/shared",
     ]);
   });
+
+  it("mounts become read-only rprivate bind Mounts under /folders", () => {
+    const cfg = buildSandboxConfig({ ...base, mounts: [
+      { hostPath: "/srv/share", name: "share", ro: true },
+      { hostPath: "/mnt/nas/x", name: "nas", ro: false },
+    ]});
+    expect(cfg.HostConfig.Mounts).toEqual([
+      { Type: "bind", Source: "/srv/share", Target: "/folders/share", ReadOnly: true,
+        BindOptions: { Propagation: "rprivate" } },
+      { Type: "bind", Source: "/mnt/nas/x", Target: "/folders/nas", ReadOnly: false,
+        BindOptions: { Propagation: "rprivate" } },
+    ]);
+  });
+
+  it("no mounts -> no Mounts key (config identical to today)", () => {
+    expect(buildSandboxConfig(base).HostConfig.Mounts).toBeUndefined();
+  });
 });
 
 describe("buildSandboxConfig — isolation hardening", () => {

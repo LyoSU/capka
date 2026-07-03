@@ -8,6 +8,7 @@ import { sanitize } from "./path-safety.js";
 import { resolveOwnerDecision, safeEqual } from "./owner.js";
 import { parseMultipart } from "./multipart.js";
 import { resolveNetworkMode } from "./sandbox-spec.js";
+import { validateMountPath } from "./mount-safety.js";
 import { makeComputeBackend } from "./backends/backend-factory.js";
 import { makeWorkspaceStore } from "./stores/workspace-factory.js";
 import { detectHostDataRoot } from "./stores/local-fs-store.js";
@@ -65,6 +66,10 @@ const EXEC_TIMEOUT = parseInt(process.env.SANDBOX_EXEC_TIMEOUT_MS || "30000");
 const IDLE_TTL = parseInt(process.env.SANDBOX_IDLE_TTL_MS || "900000"); // 15 min — stop idle CONTAINER (files stay)
 const WORKSPACE_TTL_MS = parseInt(process.env.WORKSPACE_TTL_MS || "2592000000"); // 30d — delete a workspace (row + disk) unused this long
 const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
+// Optional hard perimeter for host folder mounts: when set (`:`-separated roots),
+// only paths under one of these may be mounted. Unset ⇒ any path passing the
+// denylist is allowed, with the in-chat admin confirm as the final gate.
+const MOUNT_ALLOW_ROOTS = (process.env.SANDBOX_MOUNT_ALLOW || "").split(":").filter(Boolean);
 const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
 const MAX_WORKSPACE_MB = intEnv("MAX_WORKSPACE_MB", 500);
 // Hard per-file size cap (RLIMIT_FSIZE), kernel-enforced. Defaults to the whole
@@ -130,6 +135,7 @@ if (!(MCP_UID > 0 && MCP_UID !== SANDBOX_UID)) {
 const mcpBridge = createMcpBridge(docker, { user: `${MCP_UID}:${MCP_GID}` });
 let workspace;
 let backend;
+let hostDataRoot; // real host path of DATA_ROOT, resolved at boot; used by mount validation
 let ready = false;
 let liveCount = 0;
 
@@ -221,7 +227,7 @@ const server = createServer(async (req, res) => {
   try {
     // POST /sessions — create (or reuse) sandbox
     if (method === "POST" && path === "/sessions") {
-      const { sessionId, userId, networkMode } = await parseBody(req);
+      const { sessionId, userId, networkMode, mounts: rawMounts } = await parseBody(req);
       if (!sessionId || !userId) return jsonRes(res, 400, { error: "Missing sessionId or userId" });
       const sid = sanitize(sessionId);
       const uid = sanitize(userId);
@@ -229,12 +235,32 @@ const server = createServer(async (req, res) => {
       // GC skips it. A session by that id would collide with it and never be reaped.
       if (sid === "_global") return jsonRes(res, 400, { error: "Reserved sessionId" });
 
+      // Validate + normalize the requested host folder mounts. Each name is
+      // sanitized like a session id; each path runs through mount-safety with this
+      // deployment's DATA_ROOT and optional allowlist. Invalid → 400 before any
+      // container work.
+      const reqMounts = [];
+      if (Array.isArray(rawMounts)) {
+        for (const m of rawMounts) {
+          const name = sanitize(m?.name || "");
+          if (!name) return jsonRes(res, 400, { error: "Invalid mount name", code: "invalid_mount" });
+          const v = validateMountPath(m?.hostPath, { dataRoot: DATA_ROOT, hostDataRoot, allowRoots: MOUNT_ALLOW_ROOTS });
+          if (!v.ok) return jsonRes(res, 400, { error: "Invalid mount path", code: "invalid_mount", reason: v.code });
+          reqMounts.push({ hostPath: v.path, name, ro: m?.ro !== false });
+        }
+      }
+      // Order-independent identity of a mount set, for drift detection.
+      const mountKey = (m) => JSON.stringify([...m].sort((a, b) => a.name.localeCompare(b.name)));
+      const reqKey = mountKey(reqMounts);
+
       const pre = await store.get(sid);
       if (pre && pre.userId !== uid) return jsonRes(res, 403, { error: "Session belongs to another user" });
 
-      // Hot path — a live container is already up → reuse without taking the lock.
-      // (Mid-op invalidation on the next exec handles a container that vanished.)
-      if (pre && pre.handle) {
+      // Hot path — a live container is already up with the SAME mounts → reuse
+      // without taking the lock. (Mid-op invalidation on the next exec handles a
+      // container that vanished.) Different mounts fall through to the lock path,
+      // which tears the container down and recreates it with the new set.
+      if (pre && pre.handle && mountKey(pre.mounts || []) === reqKey) {
         await workspace.ensure(uid, sid);
         store.touch(sid);
         return jsonRes(res, 200, { sessionId: sid, status: "reused" });
@@ -247,9 +273,18 @@ const server = createServer(async (req, res) => {
       const out = await store.withSessionLock(sid, async () => {
         const existing = await store.get(sid);
         if (existing && existing.handle) {
-          await workspace.ensure(uid, sid);
-          store.touch(sid);
-          return { code: 200, body: { sessionId: sid, status: "reused" } };
+          if (mountKey(existing.mounts || []) === reqKey) {
+            await workspace.ensure(uid, sid);
+            store.touch(sid);
+            return { code: 200, body: { sessionId: sid, status: "reused" } };
+          }
+          // Mount set changed since the container came up → destroy and recreate
+          // with the new mounts. Workspace files live on the host and survive;
+          // running processes die (the confirm card warns about this).
+          await backend.destroy(existing.handle).catch(() => {});
+          await store.setStopped(sid);
+          liveCount = Math.max(0, liveCount - 1);
+          log("session.mounts.changed", { sessionId: sid, userId: uid });
         }
 
         // The per-user cap limits CONCURRENT LIVE containers (RAM), not stored
@@ -275,14 +310,24 @@ const server = createServer(async (req, res) => {
           networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
           tmpMb: TMP_MB, mcpTmpMb: MCP_TMP_MB,
           fsizeBytes: MAX_FILE_MB * 1024 * 1024,
+          mounts: reqMounts,
         });
         const now = Date.now();
-        await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, lastActivity: now, createdAt: existing?.createdAt ?? now });
+        await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, mounts: reqMounts, lastActivity: now, createdAt: existing?.createdAt ?? now });
         liveCount++;
         log(existing ? "session.resume" : "session.create", { sessionId: sid, userId: uid, handle, image: SANDBOX_IMAGE });
         return { code: 201, body: { sessionId: sid, status: existing ? "resumed" : "created" } };
       });
       return jsonRes(res, out.code, out.body);
+    }
+
+    // POST /mounts/validate — dry-run a host folder path against mount-safety so
+    // the platform can reject a bad path in the manage/settings UI before creating
+    // a row. Single source of truth: the controller owns DATA_ROOT + allowlist.
+    if (method === "POST" && path === "/mounts/validate") {
+      const { hostPath } = await parseBody(req);
+      const v = validateMountPath(hostPath, { dataRoot: DATA_ROOT, hostDataRoot, allowRoots: MOUNT_ALLOW_ROOTS });
+      return jsonRes(res, 200, v.ok ? { ok: true } : { ok: false, code: v.code });
     }
 
     // POST /sessions/:id/exec
@@ -577,7 +622,7 @@ async function overQuotaScan() {
 // --- Boot ---
 async function boot() {
   await store.init();
-  const hostDataRoot = await detectHostDataRoot(docker, {
+  hostDataRoot = await detectHostDataRoot(docker, {
     dataRoot: DATA_ROOT, hostname: hostname(), override: process.env.HOST_DATA_ROOT,
     // Remote daemon ⇒ binds need the real host path; refuse to boot on a wrong guess.
     failClosed: !!process.env.DOCKER_HOST,

@@ -24,6 +24,10 @@ export class PostgresSessionStore {
     // been reclaimed (stopped) but the files live on. Drop the legacy NOT NULL on
     // existing deployments. Idempotent — no-op once already nullable.
     await this.pool.query("ALTER TABLE sandbox_sessions ALTER COLUMN handle DROP NOT NULL");
+    // Host folder bind-mounts attached to this session, as a JSON array of
+    // {hostPath, name, ro}. Drives drift detection: a create request whose mount
+    // set differs from the stored one recreates the container. Idempotent.
+    await this.pool.query("ALTER TABLE sandbox_sessions ADD COLUMN IF NOT EXISTS mounts text");
   }
 
   #map(row) {
@@ -33,6 +37,7 @@ export class PostgresSessionStore {
       userId: row.user_id,
       handle: row.handle,
       networkMode: row.network_mode,
+      mounts: row.mounts ? JSON.parse(row.mounts) : [],
       lastActivity: Number(row.last_activity),
       createdAt: Number(row.created_at),
     };
@@ -40,12 +45,14 @@ export class PostgresSessionStore {
 
   async upsert(rec) {
     await this.pool.query(
-      `INSERT INTO sandbox_sessions (session_id, user_id, handle, network_mode, last_activity, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6)
+      `INSERT INTO sandbox_sessions (session_id, user_id, handle, network_mode, mounts, last_activity, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (session_id) DO UPDATE SET
          user_id = EXCLUDED.user_id, handle = EXCLUDED.handle,
-         network_mode = EXCLUDED.network_mode, last_activity = EXCLUDED.last_activity`,
-      [rec.sessionId, rec.userId, rec.handle, rec.networkMode, rec.lastActivity, rec.createdAt],
+         network_mode = EXCLUDED.network_mode, mounts = EXCLUDED.mounts,
+         last_activity = EXCLUDED.last_activity`,
+      [rec.sessionId, rec.userId, rec.handle, rec.networkMode,
+       JSON.stringify(rec.mounts || []), rec.lastActivity, rec.createdAt],
     );
   }
 

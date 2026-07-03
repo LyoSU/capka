@@ -33,6 +33,7 @@ d("controller HTTP API (lifecycle)", () => {
   const auth = { Authorization: `Bearer ${SECRET}`, "Content-Type": "application/json" };
   const token = (uid, sid) => createHmac("sha256", SECRET).update(`${uid}|${sid}`).digest("hex");
   const post = (sid, uid) => fetch(`${base}/sessions`, { method: "POST", headers: auth, body: JSON.stringify({ sessionId: sid, userId: uid }) });
+  const postMounts = (sid, uid, mounts) => fetch(`${base}/sessions`, { method: "POST", headers: auth, body: JSON.stringify({ sessionId: sid, userId: uid, mounts }) });
 
   beforeAll(async () => {
     process.env.CONTROLLER_NO_BOOT = "1";
@@ -151,6 +152,36 @@ d("controller HTTP API (lifecycle)", () => {
     expect(r.status).toBe(413);
     expect((await r.json()).code).toBe("WORKSPACE_FULL");
     expect(execCalls).toBe(before); // gated before the backend ran anything
+  });
+
+  it("rejects a session create with a denied mount path (400 invalid_mount)", async () => {
+    const r = await postMounts("smnt", "umnt", [{ hostPath: "/etc", name: "etc", ro: true }]);
+    expect(r.status).toBe(400);
+    expect((await r.json()).code).toBe("invalid_mount");
+    expect(await store.get("smnt")).toBeNull(); // nothing created
+  });
+
+  it("dry-run /mounts/validate mirrors mount-safety", async () => {
+    const ok = await fetch(`${base}/mounts/validate`, { method: "POST", headers: auth, body: JSON.stringify({ hostPath: "/srv/share" }) });
+    expect(await ok.json()).toEqual({ ok: true });
+    const bad = await fetch(`${base}/mounts/validate`, { method: "POST", headers: auth, body: JSON.stringify({ hostPath: "/etc" }) });
+    expect(await bad.json()).toEqual({ ok: false, code: "denied" });
+  });
+
+  it("recreates the container when the mount set changes (drift), reuses when identical", async () => {
+    const m = [{ hostPath: "/srv/share", name: "share", ro: true }];
+    expect((await postMounts("sdrift", "udrift", m)).status).toBe(201);
+    const h1 = (await store.get("sdrift")).handle;
+    // Same mounts → hot reuse, same handle.
+    const same = await postMounts("sdrift", "udrift", m);
+    expect((await same.json()).status).toBe("reused");
+    expect((await store.get("sdrift")).handle).toBe(h1);
+    // Different mounts → destroy + recreate, new handle, status "resumed".
+    const drift = await postMounts("sdrift", "udrift", [{ hostPath: "/srv/share", name: "share", ro: false }]);
+    expect((await drift.json()).status).toBe("resumed");
+    const h2 = (await store.get("sdrift")).handle;
+    expect(h2).not.toBe(h1);
+    expect(containers.has(h1)).toBe(false); // old container torn down
   });
 
   it("lists files by HMAC token without a live container, honoring depth", async () => {

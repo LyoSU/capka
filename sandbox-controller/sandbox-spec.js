@@ -1,6 +1,7 @@
 // The sandbox container's security posture lives here as a pure builder, so the
 // guarantees (never privileged, no-new-privileges, all caps dropped, non-root,
-// no host binds beyond the session workspace) are unit-tested and cannot silently
+// no host binds beyond the session workspace — except operator-confirmed
+// /folders mounts validated by mount-safety) are unit-tested and cannot silently
 // regress. server.js composes the runtime values and calls these.
 
 /**
@@ -43,6 +44,11 @@ export function buildSandboxConfig({
   // under the memory budget. Tunable via SANDBOX_TMP_MB / SANDBOX_MCP_TMP_MB.
   tmpMb = 64,
   mcpTmpMb = 256,
+  // Operator-confirmed host folders, bind-mounted at /folders/<name>. Each entry
+  // is {hostPath, name, ro}; hostPath has already passed mount-safety validation
+  // in server.js. Deliberately OUTSIDE /workspace so the quota/prune/delete_path
+  // machinery never touches the operator's files. Empty by default (zero-config).
+  mounts = [],
 }) {
   return {
     Image: image,
@@ -118,6 +124,13 @@ export function buildSandboxConfig({
       CapAdd: ["CHOWN", "SETUID", "SETGID", ...(networkMode === "bridge" ? ["NET_ADMIN", "NET_RAW"] : [])],
       NetworkMode: networkMode,
       Binds: [`${wsHostPath}:/workspace`, `${sharedHostPath}:/shared`],
+      // Host folders use Mounts (not Binds): Mounts fails on a missing source
+      // instead of silently creating a root-owned dir, and carries explicit
+      // ReadOnly + Propagation. rprivate stops mount events propagating either way.
+      ...(mounts.length ? { Mounts: mounts.map((m) => ({
+        Type: "bind", Source: m.hostPath, Target: `/folders/${m.name}`,
+        ReadOnly: m.ro !== false, BindOptions: { Propagation: "rprivate" },
+      })) } : {}),
       Init: true,
     },
     // Intentionally NO `User` pin. The container must start as the image default

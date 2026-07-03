@@ -50,6 +50,7 @@ export class DockerBackend {
       tmpMb: spec.tmpMb,
       mcpTmpMb: spec.mcpTmpMb,
       fsizeBytes: spec.fsizeBytes,
+      mounts: spec.mounts,
     });
 
     let container;
