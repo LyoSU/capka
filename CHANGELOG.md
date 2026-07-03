@@ -6,6 +6,12 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Adding a provider no longer fails with "The provider rejected the request
+  (HTTP 200)" for OpenAI-compatible gateways that always stream (e.g. omniroute):
+  the connection test now probes over the streaming transport that real turns
+  use, and times out after 30s instead of hanging.
+
 ### Added
 - Attach a server folder to a chat's sandbox at `/folders/<name>` via the `manage`
   tool (or a chat request). Gated by the new org setting `folder_access` (default
