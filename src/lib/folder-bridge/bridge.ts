@@ -205,6 +205,16 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
   const local = await localHashed(handle, folder.id);
   const { files: remote, dirs: remoteDirs } = await serverTree(chatId, folder.name);
   const plan = planSync(local, remote, base);
+  console.debug("[folders] plan", folder.name, {
+    localFiles: Object.keys(local).length,
+    remoteFiles: Object.keys(remote).length,
+    remoteDirs: remoteDirs.length,
+    hasBase: !!base,
+    download: plan.download.length,
+    upload: plan.upload.length,
+    deleteLocal: plan.deleteLocal.length,
+    deleteRemote: plan.deleteRemote.length,
+  });
 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
   const remoteWins = plan.conflicts.filter((c) => c.winner === "remote").map((c) => c.path);

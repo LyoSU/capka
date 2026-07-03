@@ -64,13 +64,19 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   // Shared by push (pre-message) and pull (post-turn) — a sync is bidirectional
   // and idempotent, so the timing is all that differs.
   const syncAll = useCallback(async () => {
-    const live = foldersRef.current.filter((f) => !needReconnect.includes(f.id));
+    const all = foldersRef.current;
+    const live = all.filter((f) => !needReconnect.includes(f.id));
+    console.debug("[folders] syncAll:", { total: all.length, live: live.length, needReconnect });
     if (live.length === 0) return;
     setPhase("syncing");
     try {
       const { sync, syncedManifest } = await import("@/lib/folder-bridge/bridge");
       let total = 0;
-      for (const f of live) total += (await sync(chatId, f)).conflicts;
+      for (const f of live) {
+        const r = await sync(chatId, f);
+        console.debug("[folders] synced", f.name, r);
+        total += r.conflicts;
+      }
       // Snapshot the post-sync manifests so the file browser can badge statuses.
       setSynced((prev) => {
         const next = { ...prev };
@@ -80,7 +86,8 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
       setConflicts(total);
       setLastSyncedAt(Date.now());
       setPhase("idle");
-    } catch {
+    } catch (e) {
+      console.error("[folders] sync failed:", e);
       setPhase("error");
     }
   }, [chatId, needReconnect]);
