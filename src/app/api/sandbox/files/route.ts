@@ -9,6 +9,12 @@ export const GET = apiHandler(async (req: Request) => {
   const { searchParams } = new URL(req.url);
   const chatId = searchParams.get("chatId");
   const path = searchParams.get("path") || ".";
+  // Depth of the listing (default 1 = a single level, the file browser's view).
+  // The folder-sync bridge asks for a deep tree so nested files under a synced
+  // folder are seen (and pulled) — without this the route dropped `depth` and only
+  // top-level entries came back, so a subfolder appeared but its files never did.
+  const depthRaw = parseInt(searchParams.get("depth") || "1", 10);
+  const depth = Number.isFinite(depthRaw) ? depthRaw : 1;
 
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
 
@@ -16,7 +22,7 @@ export const GET = apiHandler(async (req: Request) => {
   // no running container required.
   const chat = await requireOwned(chats, chatId, userId, "Chat");
   const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
-  const data = await listFiles(key, path, userId);
+  const data = await listFiles(key, path, userId, depth);
   return Response.json(data);
 });
 

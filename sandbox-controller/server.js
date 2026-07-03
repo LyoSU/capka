@@ -420,9 +420,11 @@ const server = createServer(async (req, res) => {
       if (r.missing) return jsonRes(res, 400, { error: "Missing userId" });
       if (r.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
       store.touch(r.sessionId);
-      // depth>1 lets the platform fetch a shallow tree (workspace snapshot) without
-      // a container; the file browser omits it and gets a single level. Clamp 1..5.
-      const depth = Math.min(5, Math.max(1, parseInt(url.searchParams.get("depth") || "1", 10) || 1));
+      // depth>1 lets the platform fetch a tree (workspace snapshot, folder-sync)
+      // without a container; the file browser omits it and gets a single level.
+      // Clamp 1..20 — folder sync needs the full nested tree, and the 1000-entry
+      // limit in list() still bounds the response size.
+      const depth = Math.min(20, Math.max(1, parseInt(url.searchParams.get("depth") || "1", 10) || 1));
       const entries = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".", depth);
       return jsonRes(res, 200, { entries });
     }
