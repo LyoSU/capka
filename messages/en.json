@@ -52,7 +52,8 @@
   "providerStatus": {
     "outOfCredits": "The AI account is out of credit. Top it up to restore the assistant for everyone.",
     "invalidKey": "The AI provider isn't connected. Check the provider settings to restore the assistant.",
-    "fix": "Open settings"
+    "fix": "Open settings",
+    "dismiss": "Dismiss"
   },
   "theme": {
     "system": "System theme",
@@ -377,7 +378,7 @@
       "more": "+{count} more"
     },
     "notice": {
-      "blindModalities": "The current model can't process this attachment ({modalities}). Switch to a model that supports it:",
+      "blindModalities": "This model can't view {modalities} directly — pick one that can:",
       "modality": {
         "audio": "audio",
         "video": "video",

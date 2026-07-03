@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { AlertTriangle } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { TopBanner } from "./top-banner";
+
+// Remembers the state the admin dismissed (e.g. "out_of_credits"), keyed by the
+// state itself so a different problem still surfaces. Cleared once the account is
+// healthy again, so the same problem recurring re-shows the banner.
+const DISMISS_KEY = "capka:dismissed-provider-status";
 
 /**
  * Admin-only deployment health strip. Polls /api/admin/status (which reflects
@@ -16,6 +21,7 @@ export function ProviderStatusBanner() {
   const isAdmin = useIsAdmin();
   const t = useTranslations("providerStatus");
   const [status, setStatus] = useState("ok");
+  const [dismissed, setDismissed] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -24,7 +30,10 @@ export function ProviderStatusBanner() {
       fetch("/api/admin/status")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (!cancelled && d?.status) setStatus(d.status);
+          if (cancelled || !d?.status) return;
+          setStatus(d.status);
+          if (d.status === "ok") localStorage.removeItem(DISMISS_KEY);
+          setDismissed(localStorage.getItem(DISMISS_KEY));
         })
         .catch(() => {});
     check();
@@ -35,19 +44,22 @@ export function ProviderStatusBanner() {
     };
   }, [isAdmin]);
 
-  if (!isAdmin || status === "ok") return null;
+  if (!isAdmin || status === "ok" || dismissed === status) return null;
+
+  const dismiss = () => {
+    localStorage.setItem(DISMISS_KEY, status);
+    setDismissed(status);
+  };
 
   const message = status === "out_of_credits" ? t("outOfCredits") : t("invalidKey");
   return (
-    <div className="flex items-center justify-center gap-2 border-b border-warning-border bg-warning-surface px-4 py-2 text-sm text-foreground">
-      <AlertTriangle className="h-4 w-4 shrink-0 text-warning-text" />
-      <span>{message}</span>
-      <Link
-        href="/settings/connections"
-        className="shrink-0 font-medium text-warning-text underline underline-offset-2 hover:opacity-80"
-      >
-        {t("fix")}
-      </Link>
-    </div>
+    <TopBanner
+      icon={<AlertTriangle className="h-4 w-4 shrink-0 text-warning-text" />}
+      action={{ href: "/settings/connections", label: t("fix") }}
+      onDismiss={dismiss}
+      dismissLabel={t("dismiss")}
+    >
+      {message}
+    </TopBanner>
   );
 }

@@ -1,7 +1,7 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
-  ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb, Info, AlertTriangle,
+  ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb, Info,
 } from "lucide-react";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { Button } from "@/components/ui/button";
@@ -514,10 +514,12 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: stri
   );
 }
 
-/** Calm heads-up shown when the model couldn't natively take an attached media
- *  type (e.g. an audio note sent to a text-only model). Amber, not red — it's a
- *  limitation, not a failure. The embedded model picker IS the one-tap fix:
- *  switch to a capable model, then regenerate. */
+/** Quiet heads-up shown when the model couldn't natively read an attached media
+ *  type (e.g. an image sent to a text-only model). Deliberately understated —
+ *  muted text, an info glyph, no coloured panel — because it's a limitation, not
+ *  a failure: the file still reached the sandbox, the model just can't *see* it
+ *  directly. The embedded model picker is the one-tap fix: switch to a capable
+ *  model, then regenerate. */
 function CapabilityNotice({
   modalities, model, onModelChange,
 }: {
@@ -528,18 +530,16 @@ function CapabilityNotice({
   const t = useTranslations("chat.notice");
   const list = modalities.map((m) => t(`modality.${m}`)).join(", ");
   return (
-    <div className="mt-2 rounded-lg border border-warning-border bg-warning-surface px-3.5 py-2.5">
-      <div className="flex items-start gap-2 text-sm">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-text" />
-        <div className="flex-1 text-foreground">
-          <span>{t("blindModalities", { modalities: list })}</span>
-          {onModelChange && model !== undefined && (
-            <div className="mt-1.5 inline-flex rounded-full border border-warning-border bg-card/60 px-1">
-              <ModelPicker variant="pill" value={model} onChange={onModelChange} />
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        <Info className="h-3.5 w-3.5 shrink-0 opacity-70" />
+        {t("blindModalities", { modalities: list })}
+      </span>
+      {onModelChange && model !== undefined && (
+        <span className="inline-flex rounded-full border border-border bg-card/60 px-1">
+          <ModelPicker variant="pill" value={model} onChange={onModelChange} />
+        </span>
+      )}
     </div>
   );
 }

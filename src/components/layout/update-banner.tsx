@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { ArrowUpCircle, X } from "lucide-react";
+import { ArrowUpCircle } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { TopBanner } from "./top-banner";
 
 // Remembers the version the admin dismissed. Keyed by version (not a boolean) so
 // the banner stays hidden for this release but returns when a newer one ships.
@@ -46,23 +46,13 @@ export function UpdateBanner() {
   };
 
   return (
-    <div className="relative flex items-center justify-center gap-2 border-b border-warning-border bg-warning-surface px-10 py-2 text-sm text-foreground">
-      <ArrowUpCircle className="h-4 w-4 shrink-0 text-warning-text" />
-      <span>{t("message", { version: latest })}</span>
-      <Link
-        href="/settings/updates"
-        className="shrink-0 font-medium text-warning-text underline underline-offset-2 hover:opacity-80"
-      >
-        {t("action")}
-      </Link>
-      <button
-        type="button"
-        onClick={dismiss}
-        aria-label={t("dismiss")}
-        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-warning-text transition-opacity hover:opacity-70"
-      >
-        <X className="h-4 w-4" />
-      </button>
-    </div>
+    <TopBanner
+      icon={<ArrowUpCircle className="h-4 w-4 shrink-0 text-muted-foreground" />}
+      action={{ href: "/settings/updates", label: t("action") }}
+      onDismiss={dismiss}
+      dismissLabel={t("dismiss")}
+    >
+      {t("message", { version: latest })}
+    </TopBanner>
   );
 }

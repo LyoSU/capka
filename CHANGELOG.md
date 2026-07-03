@@ -6,6 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- Admin top banners (update available, provider out-of-credits/invalid-key, org
+  change) share one calm muted style instead of a full-width amber alarm, and all
+  three are now dismissible. The out-of-credits/invalid-key banner re-appears if
+  the problem recurs after being resolved.
+- The "model can't read this attachment" chat notice is now a quiet inline hint,
+  reworded to clarify the model can't view the file directly (not that it failed).
+
 ## [0.2.3] - 2026-07-03
 
 ### Changed
