@@ -717,8 +717,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                       chatId={chatId}
                       isAdmin={isAdmin}
                       isStreaming={isStreamingMsg}
-                      onRegenerate={canRegenerate && !readOnly ? regenerate : undefined}
-                      onEdit={!isLoading && !readOnly ? editMessage : undefined}
+                      onRegenerate={canRegenerate && !readOnly ? () => regenerate(model) : undefined}
+                      onEdit={!isLoading && !readOnly ? (id, text) => editMessage(id, text, model) : undefined}
                       onSwitchBranch={!isLoading ? switchBranch : undefined}
                       onFork={!isLoading ? handleFork : undefined}
                       model={model}

@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Regenerating or editing a message after switching the model now runs the newly
+  selected model instead of the chat's previously persisted one.
+
 ### Changed
 - Admin top banners (update available, provider out-of-credits/invalid-key, org
   change) share one calm muted style instead of a full-width amber alarm, and all

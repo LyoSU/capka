@@ -589,11 +589,13 @@ export function useBackgroundChat({
 
   // ── Re-run the tail (regenerate / edit) ────────────────────
   // Both share a shape: truncate the DB from a point, set the optimistic
-  // history, then POST to /api/chat. Omitting `model` lets the server reuse the
-  // chat's persisted model. An empty userMessage means "don't insert a new user
-  // row" (regenerate); a non-empty one re-inserts the edited message (edit).
+  // history, then POST to /api/chat. `model` carries the currently-selected model
+  // so re-running after a model switch uses the new one; omitting it lets the
+  // server reuse the chat's persisted model. An empty userMessage means "don't
+  // insert a new user row" (regenerate); a non-empty one re-inserts the edited
+  // message (edit).
   const rerun = useCallback(
-    async (history: Message[], userMessage: string, userMessageId?: string, attachedFiles?: FileRef[]) => {
+    async (history: Message[], userMessage: string, userMessageId?: string, attachedFiles?: FileRef[], model?: string) => {
       // Non-destructive: the server inserts a sibling branch keyed off the
       // history we send, so the previous version stays reachable via ‹ i/N ›.
       setMessages(history);
@@ -607,6 +609,7 @@ export function useBackgroundChat({
             projectId,
             userMessage,
             userMessageId,
+            model,
             // Edit only changes the text — the original attachments ride along so
             // the server re-persists them and the runner re-feeds them to the model.
             attachedFiles: attachedFiles?.length ? attachedFiles : undefined,
@@ -633,7 +636,7 @@ export function useBackgroundChat({
   );
 
   // Regenerate: drop the latest assistant reply and re-run the same prompt.
-  const regenerate = useCallback(async () => {
+  const regenerate = useCallback(async (model?: string) => {
     const msgs = msgRef.current;
     let lastAssistantIdx = -1;
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -642,11 +645,11 @@ export function useBackgroundChat({
     if (lastAssistantIdx === -1) return;
     const history = msgs.slice(0, lastAssistantIdx);
     if (!history.some((m) => m.role === "user")) return;
-    await rerun(history, "");
+    await rerun(history, "", undefined, undefined, model);
   }, [rerun]);
 
   // Edit: replace a user message's text and re-run from there.
-  const editMessage = useCallback(async (messageId: string, newText: string) => {
+  const editMessage = useCallback(async (messageId: string, newText: string, model?: string) => {
     const text = newText.trim();
     if (!text) return;
     const msgs = msgRef.current;
@@ -663,7 +666,7 @@ export function useBackgroundChat({
       parts: [{ type: "text", text }],
       metadata: attachedFiles?.length ? { attachedFiles } : undefined,
     };
-    await rerun([...history, edited], text, edited.id, attachedFiles);
+    await rerun([...history, edited], text, edited.id, attachedFiles, model);
   }, [rerun]);
 
   // ── Switch branch (‹ i/N › version arrows) ─────────────────
