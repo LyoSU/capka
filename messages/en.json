@@ -1197,7 +1197,7 @@
       "sandboxNetBlocked": "Blocked at the deployment level — set SANDBOX_ALLOW_NETWORK=true and restart the sandbox controller to enable this.",
       "updated": "Setting updated.",
       "hostFolders": "Server folders",
-      "hostFoldersHint": "Let admins attach a folder from the server (the machine running Capka) into a chat's sandbox at /folders/<name>, read-only by default. Off by default.",
+      "hostFoldersHint": "Let admins attach a folder from the server (the machine running Capka) into a chat's sandbox at /folders/[name], read-only by default. Off by default.",
       "hostFoldersEnabled": "Server folders on — admins can attach host folders.",
       "hostFoldersDisabled": "Server folders off.",
       "pcFolders": "Personal folders",
