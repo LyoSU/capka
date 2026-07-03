@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- **Telegram: the turn summary (reasoning `<details>` / tool log) moved below
+  the answer** — the streamed reply now finishes by typing out the footer
+  instead of visibly repainting the whole message to insert a header.
+
 ## [0.2.2] - 2026-07-03
 
 ### Fixed

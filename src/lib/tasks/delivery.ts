@@ -155,14 +155,19 @@ export function composeDraft(answer: string, reasoning: string, status: StreamSt
   return { html: `<tg-thinking>${inner}</tg-thinking>` };
 }
 
-/** Final view, mirroring the web: the model's thinking is folded into a
- *  collapsed `<details>` block above the answer, summarized by the tool-count log
- *  ("✅ N tools · Ts") when tools ran, or a plain "Reasoning" label otherwise.
- *  Bot API 10.1 rich Markdown renders the `<details>` body as Markdown, so the
- *  reasoning stays formatted and the answer below is sent verbatim — we only
- *  HTML-escape the angle brackets that would otherwise be read as tags. With no
- *  reasoning we keep the lighter one-line blockquote log (or nothing). `doneLog`
- *  is an ICU plural string, so the tool-count grammar is correct in every locale. */
+/** Final view: the answer verbatim, then the turn summary as a FOOTER — the
+ *  model's thinking folded into a collapsed `<details>` ("💭 Reasoned for Xs"),
+ *  or the lighter one-line tool log ("✅ N tools · Ts") when it only ran tools.
+ *  Footer, not header, deliberately (diverging from the web, which collapses
+ *  reasoning above the answer): Telegram clients adopt the streamed draft into
+ *  the final message by matching text PREFIXES, so the final must be the draft
+ *  plus appended text — a header above the answer zeroes the prefix and the
+ *  whole bubble repaints from scratch instead of "typing out" the summary. A
+ *  header can't stream live either: tool count and durations only settle at
+ *  the end of the turn. Bot API 10.1 rich Markdown renders the `<details>`
+ *  body as Markdown; we only HTML-escape angle brackets that would be read as
+ *  tags. `doneLog` is an ICU plural string, so the tool-count grammar is
+ *  correct in every locale. */
 export function composeFinal(
   body: string,
   reasoning: string,
@@ -178,9 +183,9 @@ export function composeFinal(
     // whole turn (which would over-count the answer streaming time).
     const summary = escapeHtml(t("reasonedFor", { duration: formatShortDuration(reasoningMs ?? elapsedMs) }));
     const block = `<details><summary>${summary}</summary>\n\n${escapeHtml(think)}\n\n</details>`;
-    return body ? `${block}\n\n${body}` : block;
+    return body ? `${body}\n\n${block}` : block;
   }
-  if (log) return body ? `> ${log}\n\n${body}` : `> ${log}`;
+  if (log) return body ? `${body}\n\n> ${log}` : `> ${log}`;
   return body;
 }
 
@@ -367,11 +372,13 @@ class TelegramSink implements DeliverySink {
       ? { ...(silent ? { disable_notification: true } : {}), ...(keyboard ? { reply_markup: keyboard } : {}) }
       : undefined;
     // Clients "adopt" the streamed draft into the arriving real message by
-    // matching text prefixes (there is no draft_id on sendRichMessage), and
-    // composeFinal PREPENDS a reasoning/tool-log header the draft never had —
-    // zero common prefix, so the draft can survive as an orphaned "still
-    // streaming" bubble for ~30s next to the answer. Bridge it: update the
-    // draft to the exact final markdown first, making adoption a full match.
+    // matching text prefixes (there is no draft_id on sendRichMessage); a
+    // final that doesn't extend the draft — capability notice prepended, an
+    // error, a turn where the draft trailed the last flush — can leave the
+    // draft as an orphaned "still streaming" bubble for ~30s next to the
+    // answer. Bridge it: update the draft to the exact final markdown first,
+    // making adoption a full match (and the summary footer visibly types out
+    // as part of the stream instead of popping in with the final).
     if (this.streamed) {
       this.streamed = false;
       try {
@@ -436,8 +443,8 @@ class TelegramSink implements DeliverySink {
     const reasoning = result.reasoning ?? "";
     let markdown: string | null;
     if (body) {
-      // The whole answer, one message — capped with the tool log + collapsed
-      // reasoning (the <tg-thinking> the draft showed, folded into <details>).
+      // The whole answer, one message — closed with the summary footer (tool
+      // log / the draft's <tg-thinking> reasoning folded into <details>).
       markdown = composeFinal(body, reasoning, result.toolCount, result.elapsedMs, this.t, result.reasoningMs);
     } else if (result.toolCount > 0 || reasoning.trim()) {
       // Tools ran / it thought but wrote no closing text — still cap the reply

@@ -97,38 +97,47 @@ describe("composeConfirmPreview", () => {
 });
 
 describe("composeFinal", () => {
-  it("adds a collapsed tool log with correct plural grammar (uk)", () => {
-    expect(composeFinal("Готово.", "", 1, 3000, uk)).toBe("> ✅ 1 інструмент · 3с\n\nГотово.");
-    expect(composeFinal("Готово.", "", 2, 12_300, uk)).toBe("> ✅ 2 інструменти · 12с\n\nГотово.");
-    expect(composeFinal("Готово.", "", 5, 9000, uk)).toBe("> ✅ 5 інструментів · 9с\n\nГотово.");
+  // The turn summary is a FOOTER, not a header: the streamed draft (the bare
+  // answer) must remain a strict text PREFIX of the final message, so clients
+  // adopt the draft with an append-only "typing out" animation instead of
+  // repainting the whole bubble from scratch.
+  it("appends a collapsed tool log with correct plural grammar (uk)", () => {
+    expect(composeFinal("Готово.", "", 1, 3000, uk)).toBe("Готово.\n\n> ✅ 1 інструмент · 3с");
+    expect(composeFinal("Готово.", "", 2, 12_300, uk)).toBe("Готово.\n\n> ✅ 2 інструменти · 12с");
+    expect(composeFinal("Готово.", "", 5, 9000, uk)).toBe("Готово.\n\n> ✅ 5 інструментів · 9с");
   });
   it("localizes the log for English", () => {
-    expect(composeFinal("Done.", "", 1, 3000, en)).toBe("> ✅ 1 tool · 3s\n\nDone.");
-    expect(composeFinal("Done.", "", 2, 12_000, en)).toBe("> ✅ 2 tools · 12s\n\nDone.");
+    expect(composeFinal("Done.", "", 1, 3000, en)).toBe("Done.\n\n> ✅ 1 tool · 3s");
+    expect(composeFinal("Done.", "", 2, 12_000, en)).toBe("Done.\n\n> ✅ 2 tools · 12s");
   });
   it("returns the bare answer when no tools ran and there's no reasoning", () => {
     expect(composeFinal("Just chatting.", "", 0, 4000, en)).toBe("Just chatting.");
   });
   it("folds reasoning into a collapsed <details> with a Grok-style 'reasoned for' summary", () => {
     expect(composeFinal("Готово.", "Зважую варіанти", 2, 6000, uk)).toBe(
-      "<details><summary>💭 Розмірковування протягом 6s</summary>\n\nЗважую варіанти\n\n</details>\n\nГотово.",
+      "Готово.\n\n<details><summary>💭 Розмірковування протягом 6s</summary>\n\nЗважую варіанти\n\n</details>",
     );
   });
   it("uses the reasoning summary even when no tools ran", () => {
     expect(composeFinal("Hi.", "thought it through", 0, 1000, en)).toBe(
-      "<details><summary>💭 Reasoned for 1s</summary>\n\nthought it through\n\n</details>\n\nHi.",
+      "Hi.\n\n<details><summary>💭 Reasoned for 1s</summary>\n\nthought it through\n\n</details>",
     );
   });
   it("prefers the reasoning-phase duration over the whole-turn elapsed", () => {
     // 30s turn, but only 5s spent reasoning before the answer began.
     expect(composeFinal("Done.", "thinking", 2, 30_000, en, 5000)).toBe(
-      "<details><summary>💭 Reasoned for 5s</summary>\n\nthinking\n\n</details>\n\nDone.",
+      "Done.\n\n<details><summary>💭 Reasoned for 5s</summary>\n\nthinking\n\n</details>",
     );
   });
   it("escapes angle brackets in the reasoning so they aren't read as tags", () => {
     expect(composeFinal("ok", "a < b && </details> c", 0, 0, en)).toBe(
-      "<details><summary>💭 Reasoned for 0s</summary>\n\na &lt; b &amp;&amp; &lt;/details&gt; c\n\n</details>\n\nok",
+      "ok\n\n<details><summary>💭 Reasoned for 0s</summary>\n\na &lt; b &amp;&amp; &lt;/details&gt; c\n\n</details>",
     );
+  });
+  it("keeps the streamed draft a strict prefix of the final (append-only convergence)", () => {
+    const body = "Стрімлена відповідь.";
+    expect(composeFinal(body, "думав", 3, 9000, uk, 2000).startsWith(body)).toBe(true);
+    expect(composeFinal(body, "", 3, 9000, uk).startsWith(body)).toBe(true);
   });
 });
 
@@ -204,7 +213,7 @@ describe("TelegramSink streaming", () => {
 
     expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
     expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe(
-      "> ✅ 1 інструмент · 3с\n\nfinal answer",
+      "final answer\n\n> ✅ 1 інструмент · 3с",
     );
     expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
   });
@@ -217,17 +226,16 @@ describe("TelegramSink streaming", () => {
     await sink.finish({ status: "completed", text: "відповідь", toolCount: 1, elapsedMs: 3000 });
 
     // Clients adopt a streamed draft into the arriving real message by matching
-    // text prefixes — and composeFinal PREPENDS the tool-log/reasoning header,
-    // zeroing the prefix. The bridge re-sends the draft with the exact final
-    // markdown first, so adoption is a clean full match instead of a ~30s
-    // orphaned "still streaming" bubble.
+    // text prefixes. The bridge re-sends the draft with the exact final
+    // markdown first, so adoption is a clean full match (and covers finals
+    // that DON'T extend the draft, e.g. the capability notice or an error).
     expect(api.sendRichMessageDraft).toHaveBeenCalledTimes(2);
     const [, streamedId] = api.sendRichMessageDraft.mock.calls[0];
     const [, bridgeId, bridgeBody] = api.sendRichMessageDraft.mock.calls[1];
     const finalMarkdown = api.sendRichMessage.mock.calls[0][1].markdown;
     expect(bridgeId).toBe(streamedId);
     expect(bridgeBody.markdown).toBe(finalMarkdown);
-    expect(finalMarkdown).toBe("> ✅ 1 інструмент · 3с\n\nвідповідь");
+    expect(finalMarkdown).toBe("відповідь\n\n> ✅ 1 інструмент · 3с");
     // The bridge must land strictly before the final message.
     expect(api.sendRichMessageDraft.mock.invocationCallOrder[1]).toBeLessThan(
       api.sendRichMessage.mock.invocationCallOrder[0],
@@ -322,7 +330,7 @@ describe("TelegramSink streaming", () => {
     });
     expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
     expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe(
-      "<details><summary>💭 Розмірковування протягом 6s</summary>\n\nЗважую варіанти\n\n</details>\n\nГотово.",
+      "Готово.\n\n<details><summary>💭 Розмірковування протягом 6s</summary>\n\nЗважую варіанти\n\n</details>",
     );
   });
 
