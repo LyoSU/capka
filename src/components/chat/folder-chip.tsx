@@ -2,21 +2,21 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Folder, FolderPlus, Loader2, RefreshCw, X, AlertTriangle } from "lucide-react";
+import { Folder, FolderPlus, Loader2, RefreshCw, X, AlertTriangle, FolderUp, Download } from "lucide-react";
 import type { useFolderSync } from "./use-folder-sync";
 
 type Sync = ReturnType<typeof useFolderSync>;
 
 /** Quiet strip above the composer: connected PC folders, their sync freshness,
  *  and a one-click re-grant when a handle's permission lapsed after a reload.
- *  Deliberately calm — a chip row, not a panel. Hidden entirely when the browser
- *  can't do live sync (the fallback import lives in the attach menu instead). */
-export function FolderChip({ sync }: { sync: Sync }) {
+ *  Deliberately calm — a chip row, not a panel. On non-Chromium browsers (no live
+ *  sync) it degrades to a one-shot import + a "download as zip" link. */
+export function FolderChip({ sync, chatId }: { sync: Sync; chatId: string }) {
   const t = useTranslations("chat.folders");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  if (!sync.supported) return null;
+  if (!sync.supported) return <FallbackImport chatId={chatId} />;
 
   const connect = async () => {
     setBusy(true); setErr("");
@@ -70,6 +70,51 @@ export function FolderChip({ sync }: { sync: Sync }) {
           {err || t("syncFailed")}
         </span>
       )}
+    </div>
+  );
+}
+
+/** Non-Chromium: no live sync, so offer a one-shot import + a zip download of the
+ *  result. Calm copy explains that live sync needs Chrome/Edge. */
+function FallbackImport({ chatId }: { chatId: string }) {
+  const t = useTranslations("chat.folders");
+  const [busy, setBusy] = useState(false);
+  const [imported, setImported] = useState<{ name: string; count: number } | null>(null);
+  const [err, setErr] = useState("");
+
+  const onImport = async () => {
+    setBusy(true); setErr("");
+    try {
+      const { importFolderFallback } = await import("@/lib/folder-bridge/fallback");
+      const r = await importFolderFallback(chatId);
+      if (r) setImported(r);
+    } catch {
+      setErr(t("syncFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+      <button type="button" onClick={onImport} disabled={busy} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors hover:text-foreground disabled:opacity-60">
+        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <FolderUp className="h-3 w-3" />}
+        {t("importFolder")}
+      </button>
+      {imported && (
+        <>
+          <span>{t("imported", { n: imported.count, name: imported.name })}</span>
+          <a
+            href={`/api/sandbox/files/download-all?chatId=${encodeURIComponent(chatId)}&paths=${encodeURIComponent(imported.name)}`}
+            className="inline-flex items-center gap-1 text-foreground hover:underline"
+          >
+            <Download className="h-3 w-3" />
+            {t("downloadZip")}
+          </a>
+        </>
+      )}
+      <span className="text-muted-foreground/70">· {t("unsupportedBrowser")}</span>
+      {err && <span className="inline-flex items-center gap-1 text-destructive"><AlertTriangle className="h-3 w-3" />{err}</span>}
     </div>
   );
 }

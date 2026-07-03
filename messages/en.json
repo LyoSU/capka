@@ -489,7 +489,10 @@
       "hourAgo": "{n} h ago",
       "conflicts": "{n} kept newer",
       "syncFailed": "Couldn't sync — will retry",
-      "unsupportedBrowser": "Live folder sync needs Chrome or Edge."
+      "unsupportedBrowser": "Live folder sync needs Chrome or Edge.",
+      "importFolder": "Import a folder",
+      "imported": "Imported {n} files from \"{name}\"",
+      "downloadZip": "Download as zip"
     }
   },
   "projects": {

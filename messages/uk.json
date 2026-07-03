@@ -489,7 +489,10 @@
       "hourAgo": "{n} год тому",
       "conflicts": "залишено новіших: {n}",
       "syncFailed": "Не вдалося синхронізувати — повторю",
-      "unsupportedBrowser": "Жива синхронізація тек потребує Chrome або Edge."
+      "unsupportedBrowser": "Жива синхронізація тек потребує Chrome або Edge.",
+      "importFolder": "Імпортувати теку",
+      "imported": "Імпортовано файлів: {n} з «{name}»",
+      "downloadZip": "Завантажити як zip"
     }
   },
   "projects": {

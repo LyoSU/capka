@@ -847,7 +847,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
               )}
               {!readOnly && (
                 <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6">
-                  <FolderChip sync={folderSync} />
+                  <FolderChip sync={folderSync} chatId={chatId} />
                 </div>
               )}
               {queuedEl}
