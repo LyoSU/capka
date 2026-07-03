@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { attachedFolders, chats } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
-import { folderAccessLevel } from "@/lib/manage/controls/folders";
+import { pcFolderLevel } from "@/lib/manage/controls/folders";
 
 /** The sandbox session key for a chat the caller owns (`projectId ?? chatId`),
  *  resolved server-side — never trusted from the client. Throws (→ 404) via
@@ -31,11 +31,11 @@ export const GET = apiHandler(async (req: Request) => {
 // folders are attached only through the `manage` tool, never this route.
 export const POST = apiHandler(async (req: Request) => {
   const { userId, role } = await requireActive();
-  const level = await folderAccessLevel();
+  const level = await pcFolderLevel();
   // pc folders: "everyone" lets any user connect their own; "admins" needs admin;
-  // "off" attaches nothing. (Host folders are admin-only and go through manage.)
+  // "off" attaches nothing. (Server folders are admin-only and go through manage.)
   if (level === "off" || (level === "admins" && role !== "admin")) {
-    return Response.json({ error: "Folder access is disabled." }, { status: 403 });
+    return Response.json({ error: "Personal folder access is disabled." }, { status: 403 });
   }
   const body = (await req.json().catch(() => ({}))) as { chatId?: unknown; name?: unknown };
   const chatId = typeof body.chatId === "string" ? body.chatId : null;

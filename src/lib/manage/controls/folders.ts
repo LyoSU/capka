@@ -8,12 +8,18 @@ import { validateMount, createSession, type SandboxMount } from "@/lib/sandbox/c
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
 
-export type FolderAccessLevel = "off" | "admins" | "everyone";
+export type PcFolderLevel = "off" | "admins" | "everyone";
 
-/** The org gate for attaching folders outside the workspace. Default OFF — nothing
- *  mounts until an admin turns it on (zero-config principle). */
-export async function folderAccessLevel(): Promise<FolderAccessLevel> {
-  const v = await getSetting("folder_access");
+/** Server (host) folder bind-mounts: a single admin on/off gate. Default OFF —
+ *  nothing mounts until an admin turns it on (zero-config principle). */
+export async function hostFolderEnabled(): Promise<boolean> {
+  return (await getSetting("host_folder_access")) === "true";
+}
+
+/** Personal (PC) folder sync: who may connect a folder from their own computer.
+ *  Default OFF. Separate from the server-folder gate — the two are independent. */
+export async function pcFolderLevel(): Promise<PcFolderLevel> {
+  const v = await getSetting("pc_folder_access");
   return v === "admins" || v === "everyone" ? v : "off";
 }
 
@@ -97,12 +103,15 @@ export const folderCollection: Collection = {
   addSchema,
 
   async canAdd(ctx) {
-    const level = await folderAccessLevel();
-    return level !== "off" && (ctx.isAdmin || level === "everyone");
+    const [host, pc] = await Promise.all([hostFolderEnabled(), pcFolderLevel()]);
+    const canHost = host && ctx.isAdmin;
+    const canPc = pc !== "off" && (ctx.isAdmin || pc === "everyone");
+    return canHost || canPc;
   },
 
   async list(ctx) {
-    if ((await folderAccessLevel()) === "off") throw new Error("Folder access is turned off. An administrator can enable it in settings.");
+    const [host, pc] = await Promise.all([hostFolderEnabled(), pcFolderLevel()]);
+    if (!host && pc === "off") throw new Error("Folder access is turned off. An administrator can enable it in settings.");
     if (!ctx.sessionKey) throw new Error("No active workspace — open a chat to see attached folders.");
     const rows = await db.select().from(attachedFolders).where(eq(attachedFolders.sessionKey, ctx.sessionKey));
     return rows.map((f) => ({
@@ -116,15 +125,16 @@ export const folderCollection: Collection = {
   async validateAdd(ctx, args) {
     const a = args as AddArgs;
     const kind = a.kind ?? "host";
-    const level = await folderAccessLevel();
-    if (level === "off") throw new Error("Folder access is turned off. An administrator can enable it in settings.");
     if (kind === "host") {
+      if (!(await hostFolderEnabled())) throw new Error("Server folder access is turned off. An administrator can enable it in settings.");
       if (!ctx.isAdmin) throw new Error("Server folders can only be attached by an administrator.");
       if (!a.path) throw new Error("A server folder path is required (an absolute path on the server, e.g. /srv/reports).");
       const v = await validateMount(a.path);
       if (!v.ok) throw new Error(mountError(v.code));
-    } else if (!ctx.isAdmin && level !== "everyone") {
-      throw new Error("Attaching folders is limited to administrators.");
+    } else {
+      const level = await pcFolderLevel();
+      if (level === "off") throw new Error("Personal folder access is turned off. An administrator can enable it in settings.");
+      if (level === "admins" && !ctx.isAdmin) throw new Error("Connecting a personal folder is limited to administrators.");
     }
     if (!ctx.sessionKey) throw new Error("No active workspace — open a chat to attach a folder.");
     const name = deriveName(a);
@@ -151,27 +161,27 @@ export const folderCollection: Collection = {
   async add(ctx, args) {
     const t = manageT(ctx.locale);
     const a = args as AddArgs;
-    const kind = a.kind ?? "host";
     const name = deriveName(a);
-    // pc folders sync into /workspace/<name> and are always read-write; host
-    // folders default to read-only and only an admin reaches this branch.
-    const readOnly = kind === "host" ? a.readOnly !== "false" : false;
+    // pc: don't create a row here — a pc folder with no picked handle is useless.
+    // Hand the folder picker back to the browser (a button on the web card;
+    // Telegram shows a "do it in the browser" note); the client POSTs
+    // /api/folders once the user actually picks a directory.
+    if ((a.kind ?? "host") === "pc") {
+      return { itemTitle: name, action: { kind: "pick_folder", label: loc(t, "folder.pick", "Choose a folder") } };
+    }
+    // host: admin-only (enforced in validateAdd), read-only by default. Insert the
+    // row, then recreate the sandbox so the mount goes live now.
     await db.insert(attachedFolders).values({
       id: randomUUID(),
       userId: ctx.userId,
       sessionKey: ctx.sessionKey!,
-      kind,
+      kind: "host",
       name,
-      hostPath: kind === "host" ? a.path! : null,
-      readOnly,
+      hostPath: a.path!,
+      readOnly: a.readOnly !== "false",
     });
-    if (kind === "host") {
-      reattach(ctx);
-      return { itemTitle: name };
-    }
-    // pc: hand the folder picker back to the browser (rendered as a button on the
-    // web card; Telegram shows a "do it in the browser" note).
-    return { itemTitle: name, action: { kind: "pick_folder", label: loc(t, "folder.pick", "Choose a folder") } };
+    reattach(ctx);
+    return { itemTitle: name };
   },
 
   async remove(ctx, itemId) {

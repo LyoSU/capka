@@ -1,29 +1,61 @@
-import { directoryOpen } from "browser-fs-access";
-
 /**
  * Non-Chromium fallback: a ONE-SHOT folder import (no live binding). Firefox and
  * Safari have refused `showDirectoryPicker`, so instead of syncing we bulk-upload
  * a picked directory into /workspace/<name>/… once; the user gets the result back
- * via the existing "download as zip" route. browser-fs-access degrades to a
- * `<input webkitdirectory>` under the hood.
+ * via the existing "download as zip" route. Uses a plain `<input webkitdirectory>`
+ * — exactly what a File-System-Access polyfill does under the hood — so there's no
+ * dependency to install (and nothing new for a self-hoster's container to miss).
  */
+
+/** Open the OS directory picker via a hidden `<input webkitdirectory>` and resolve
+ *  the chosen files (each carries `webkitRelativePath`). Resolves [] on cancel. */
+function pickDirectory(): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.webkitdirectory = true;
+    input.multiple = true;
+    input.style.display = "none";
+    let settled = false;
+    const done = (files: File[]) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(files);
+    };
+    input.addEventListener("change", () => done(input.files ? Array.from(input.files) : []), { once: true });
+    // A cancelled picker fires no event; when the window regains focus with nothing
+    // chosen, treat it as cancelled. The `change` event, if any, wins the race
+    // (it flips `settled` first), so a real selection is never dropped.
+    window.addEventListener("focus", () => setTimeout(() => done([]), 500), { once: true });
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+const CHUNK = 100;
+
 export async function importFolderFallback(chatId: string): Promise<{ name: string; count: number } | null> {
-  const files = (await directoryOpen({ recursive: true }).catch(() => null)) as (File & { webkitRelativePath?: string })[] | null;
-  if (!files || files.length === 0) return null;
+  const files = await pickDirectory();
+  if (files.length === 0) return null;
 
   const first = files[0].webkitRelativePath || files[0].name;
   const name = first.split("/")[0] || "folder";
 
-  for (const f of files) {
-    const rel = f.webkitRelativePath || f.name; // "<name>/sub/file.txt"
-    const slash = rel.lastIndexOf("/");
-    const dir = slash >= 0 ? rel.slice(0, slash) : name;
-    const filename = slash >= 0 ? rel.slice(slash + 1) : rel;
+  // Batch through the folder-sync endpoint (rate-limited per request), so a big
+  // folder doesn't trip the interactive per-file upload limiter. Each file's form
+  // name is its path relative to the folder root.
+  for (let i = 0; i < files.length; i += CHUNK) {
     const form = new FormData();
     form.append("chatId", chatId);
-    form.append("path", dir);
-    form.append("file", new File([f], filename));
-    await fetch("/api/sandbox/files/upload", { method: "POST", body: form });
+    form.append("name", name);
+    for (const f of files.slice(i, i + CHUNK)) {
+      const rel = f.webkitRelativePath || f.name; // "<name>/sub/file.txt"
+      const inner = rel.startsWith(`${name}/`) ? rel.slice(name.length + 1) : rel;
+      form.append("files", new File([f], inner));
+    }
+    const res = await fetch("/api/folders/upload", { method: "POST", body: form });
+    if (!res.ok) throw new Error("import failed");
   }
   return { name, count: files.length };
 }

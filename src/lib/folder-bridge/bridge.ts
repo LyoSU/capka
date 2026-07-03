@@ -79,16 +79,20 @@ async function serverManifest(chatId: string, name: string): Promise<Manifest> {
   return m;
 }
 
-async function uploadToWorkspace(chatId: string, name: string, rel: string, blob: Blob): Promise<void> {
-  const slash = rel.lastIndexOf("/");
-  const dir = slash >= 0 ? `${name}/${rel.slice(0, slash)}` : name;
-  const filename = slash >= 0 ? rel.slice(slash + 1) : rel;
-  const form = new FormData();
-  form.append("chatId", chatId);
-  form.append("path", dir);
-  form.append("file", new File([blob], filename));
-  const res = await fetch("/api/sandbox/files/upload", { method: "POST", body: form });
-  if (!res.ok) throw new Error("upload failed");
+// Upload many files in batches to the folder-sync endpoint (one request per
+// chunk, rate-limited per request) — NOT the interactive per-file upload route,
+// which caps at ~10/min and would 429 on any real folder.
+const UPLOAD_CHUNK = 100;
+async function uploadBatch(chatId: string, name: string, paths: string[], read: (rel: string) => Promise<Blob>): Promise<void> {
+  for (let i = 0; i < paths.length; i += UPLOAD_CHUNK) {
+    const chunk = paths.slice(i, i + UPLOAD_CHUNK);
+    const form = new FormData();
+    form.append("chatId", chatId);
+    form.append("name", name);
+    for (const rel of chunk) form.append("files", new File([await read(rel)], rel));
+    const res = await fetch("/api/folders/upload", { method: "POST", body: form });
+    if (!res.ok) throw new Error("upload failed");
+  }
 }
 
 async function downloadFromWorkspace(chatId: string, name: string, rel: string): Promise<Blob> {
@@ -116,18 +120,36 @@ async function localHashed(handle: DirHandle, folderId: string): Promise<HashedM
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /** Open the directory picker, create the folder row, persist the handle, and run a
- *  first sync. Returns the created folder, or null if the user dismissed the picker. */
-export async function pickAndCreate(chatId: string, name?: string): Promise<PcFolder | null> {
+ *  first sync. Returns the created folder, or null if the user dismissed the picker.
+ *  `ensureChat` (a fresh chat has no DB row yet) runs AFTER the picker so the
+ *  showDirectoryPicker call stays inside the user gesture, but BEFORE the POST so
+ *  the row the folder references exists. */
+export async function pickAndCreate(chatId: string, opts?: { name?: string; ensureChat?: () => Promise<void> }): Promise<PcFolder | null> {
   let handle: DirHandle;
   try {
     handle = await window.showDirectoryPicker!({ mode: "readwrite" });
   } catch {
     return null; // user cancelled the picker
   }
+  await opts?.ensureChat?.();
+  // Mirror the server's name sanitization so we can detect an existing row.
+  const name = (opts?.name || handle.name).replace(/[^a-z0-9-_]/gi, "").toLowerCase().slice(0, 40) || "folder";
+
+  // Folders attach to the SANDBOX (shared by a project's chats), so the same
+  // folder may already be attached from a sibling chat. Re-picking it should
+  // re-link the handle locally + sync, not fail — so adopt an existing row.
+  const listed = await fetch(`/api/folders?chatId=${encodeURIComponent(chatId)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const match = (listed?.folders as PcFolder[] | undefined)?.find?.((f) => (f as { kind?: string }).kind !== "host" && f.name === name);
+  if (match) {
+    await saveHandle(match.id, handle);
+    await sync(chatId, match);
+    return match;
+  }
+
   const res = await fetch("/api/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chatId, name: name || handle.name }),
+    body: JSON.stringify({ chatId, name }),
   });
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || "Could not attach the folder.");
   const { folder } = (await res.json()) as { folder: PcFolder };
@@ -179,7 +201,7 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
   const remoteWins = plan.conflicts.filter((c) => c.winner === "remote").map((c) => c.path);
 
-  for (const path of [...plan.upload, ...localWins]) await uploadToWorkspace(chatId, folder.name, path, await readLocalFile(handle, path));
+  await uploadBatch(chatId, folder.name, [...plan.upload, ...localWins], (rel) => readLocalFile(handle, rel));
   for (const path of [...plan.download, ...remoteWins]) await writeLocalFile(handle, path, await downloadFromWorkspace(chatId, folder.name, path));
   for (const path of plan.deleteRemote) await deleteFromWorkspace(chatId, folder.name, path);
   for (const path of plan.deleteLocal) await deleteLocalFile(handle, path);

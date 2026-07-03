@@ -3,16 +3,16 @@ import { ForbiddenError, NotFoundError } from "@/lib/errors";
 
 // Stub the auth gate + the folder-access level + ownership; keep apiHandler and the
 // real error classes so thrown AppErrors map to their status codes.
-const { requireActive, folderAccessLevel, requireOwned } = vi.hoisted(() => ({
+const { requireActive, pcFolderLevel, requireOwned } = vi.hoisted(() => ({
   requireActive: vi.fn(),
-  folderAccessLevel: vi.fn(),
+  pcFolderLevel: vi.fn(),
   requireOwned: vi.fn(),
 }));
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
   return { ...actual, requireActive };
 });
-vi.mock("@/lib/manage/controls/folders", () => ({ folderAccessLevel }));
+vi.mock("@/lib/manage/controls/folders", () => ({ pcFolderLevel }));
 vi.mock("@/lib/db/ownership", () => ({ requireOwned }));
 
 const h = vi.hoisted(() => {
@@ -43,19 +43,19 @@ const jsonReq = (url: string, method: string, body?: unknown) =>
 beforeEach(() => {
   h.setRows([]);
   requireActive.mockReset().mockResolvedValue({ userId: "u1", role: "user", status: "active" });
-  folderAccessLevel.mockReset().mockResolvedValue("everyone");
+  pcFolderLevel.mockReset().mockResolvedValue("everyone");
   requireOwned.mockReset().mockResolvedValue({ id: "c1", projectId: null });
 });
 
 describe("POST /api/folders — pc folder create", () => {
   it("403 when folder access is off", async () => {
-    folderAccessLevel.mockResolvedValue("off");
+    pcFolderLevel.mockResolvedValue("off");
     const r = await POST(jsonReq("http://x/api/folders", "POST", { chatId: "c1", name: "docs" }));
     expect(r.status).toBe(403);
   });
 
   it("403 for a non-admin when access is admins-only", async () => {
-    folderAccessLevel.mockResolvedValue("admins");
+    pcFolderLevel.mockResolvedValue("admins");
     const r = await POST(jsonReq("http://x/api/folders", "POST", { chatId: "c1", name: "docs" }));
     expect(r.status).toBe(403);
   });

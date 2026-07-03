@@ -81,11 +81,11 @@ The agent can work with folders that live **outside** its workspace: a directory
 on the server bind-mounted into the sandbox at `/folders/<name>`. This exposes the
 operator's own filesystem to sandboxed code, so it is gated deliberately:
 
-- **Off by default.** The org setting `folder_access` defaults to `off` — nothing
-  can be attached until an admin sets it to `admins` or `everyone`. Server folders
-  are **admin-only regardless** of that level (`everyone` only lets regular users
-  connect folders from *their own computer*, which sync into `/workspace`, not host
-  folders).
+- **Off by default.** Two independent org settings, both off by default:
+  `host_folder_access` (`true`/`false`) governs SERVER folder bind-mounts and is
+  **admin-only**; `pc_folder_access` (`off`/`admins`/`everyone`) governs folders a
+  user connects from *their own computer* (synced into `/workspace`, not a host
+  mount). Nothing can be attached until an admin turns the relevant one on.
 - **Admin-confirmed, every time.** Attaching a server folder always shows a
   confirmation card (it is not bypassable even in autonomous mode), and is recorded
   in the audit log (`folder.add` / `folder.remove`).

@@ -29,7 +29,6 @@ import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X, Square }
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput } from "@/components/chat/chat-input";
-import { FolderChip } from "@/components/chat/folder-chip";
 import { useFolderSync } from "@/components/chat/use-folder-sync";
 import { deriveContextFill } from "@/lib/chat/context/fill";
 import { useComposerAttachments } from "@/components/chat/use-composer-attachments";
@@ -131,7 +130,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // PC folders (File System Access): pushed before a message, pulled after the
   // turn. A no-op when the chat has no connected folders, so it costs nothing on
   // the common path.
-  const folderSync = useFolderSync(chatId);
+  const folderSync = useFolderSync({ chatId, ensureChat });
 
   // Fork the conversation from a message into a fresh chat, then jump to it.
   // useCallback keeps this identity stable across composer keystrokes so it
@@ -589,6 +588,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       onRetryFile={attachments.retry}
       contextUsage={contextUsage}
       isNewChat={showGreeting}
+      folders={folderSync}
     />
   );
 
@@ -843,11 +843,6 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                       <RefreshCw className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                </div>
-              )}
-              {!readOnly && (
-                <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6">
-                  <FolderChip sync={folderSync} chatId={chatId} />
                 </div>
               )}
               {queuedEl}

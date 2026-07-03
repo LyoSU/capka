@@ -151,10 +151,19 @@ export const orgControls: Control[] = [
     format: (v) => (v === "0" ? "no limit" : `$${v}`),
   }),
   orgSetting({
-    key: "folder_access",
-    title: "Folder access",
+    key: "host_folder_access",
+    title: "Server folder access",
     description:
-      'Whether folders outside the workspace can be attached to sandboxes: "off" (nothing can be attached), "admins" (only administrators), or "everyone" (any user may connect a folder from their own computer; server folders always require an administrator).',
+      "Whether administrators may bind-mount a folder from the SERVER (a directory on the machine running Capka) into a chat's sandbox at /folders/<name>. Admin-only and read-only by default. Off by default.",
+    schema: bool,
+    def: "false",
+    format: boolFmt,
+  }),
+  orgSetting({
+    key: "pc_folder_access",
+    title: "Personal folder access",
+    description:
+      'Whether users may connect a folder from their OWN computer (synced into the chat workspace via the browser): "off" (no one), "admins" (only administrators), or "everyone" (any user).',
     schema: z.enum(["off", "admins", "everyone"]),
     def: "off",
     format: (v) => ({ off: "Off", admins: "Admins only", everyone: "Everyone" })[v] ?? v,

@@ -18,6 +18,8 @@ export default function SecuritySettingsPage() {
   const sandboxNet = useSetting("sandbox_network", "none");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
   const autonomy = useSetting("agent_autonomy", "supervised");
+  const hostFolders = useSetting("host_folder_access", "false");
+  const pcFolders = useSetting("pc_folder_access", "off");
 
   // Deployment-level egress kill-switch, read from the controller. When false,
   // the in-app toggle has no effect (the controller downgrades bridge→none), so
@@ -32,7 +34,17 @@ export default function SecuritySettingsPage() {
   }, []);
   const netBlocked = allowNetwork === false;
 
-  const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading || autonomy.loading;
+  const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading || autonomy.loading || hostFolders.loading || pcFolders.loading;
+
+  // Tri-state personal-folder access (off / admins / everyone) — optimistic w/ rollback.
+  const setPcFolders = (next: string) => {
+    const prev = pcFolders.value;
+    if (next === prev) return;
+    pcFolders.update(next);
+    pcFolders.persist(next)
+      .then((ok) => { if (ok) toast.success(t("updated")); else { pcFolders.setValue(prev); toast.error(t("updateFailed")); } })
+      .catch(() => { pcFolders.setValue(prev); toast.error(t("updateFailed")); });
+  };
 
   // Agent autonomy stores "supervised"/"autonomous", not a bool — map the switch.
   const toggleAutonomy = (checked: boolean) => {
@@ -133,6 +145,38 @@ export default function SecuritySettingsPage() {
           )}
         </div>
         <Switch checked={sandboxNet.value === "bridge"} onCheckedChange={toggleNet} disabled={netBlocked} />
+      </div>
+
+      {/* Server folders — admin bind-mounts from the host into the sandbox */}
+      <div className="flex items-center justify-between rounded-lg border p-4">
+        <div className="pr-4">
+          <p className="text-sm font-medium">{t("hostFolders")}</p>
+          <p className="text-xs text-muted-foreground">{t("hostFoldersHint")}</p>
+        </div>
+        <Switch
+          checked={hostFolders.value === "true"}
+          onCheckedChange={(checked) => toggle(hostFolders, "host_folder_access", checked, t("hostFoldersEnabled"), t("hostFoldersDisabled"))}
+        />
+      </div>
+
+      {/* Personal folders — users sync a folder from their own computer */}
+      <div className="rounded-lg border p-4">
+        <p className="text-sm font-medium">{t("pcFolders")}</p>
+        <p className="text-xs text-muted-foreground">{t("pcFoldersHint")}</p>
+        <div className="mt-3 inline-flex rounded-lg border p-0.5">
+          {(["off", "admins", "everyone"] as const).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => setPcFolders(opt)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                pcFolders.value === opt ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t(`folder_${opt}`)}
+            </button>
+          ))}
+        </div>
       </div>
 
       <Separator />

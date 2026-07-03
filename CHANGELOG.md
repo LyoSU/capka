@@ -13,11 +13,14 @@ All notable changes to Capka are documented here. Format follows
   use, and times out after 30s instead of hanging.
 
 ### Added
-- Attach a server folder to a chat's sandbox at `/folders/<name>` via the `manage`
-  tool (or a chat request). Gated by the new org setting `folder_access` (default
-  `off`; `admins`/`everyone`) — server folders are admin-only and confirm-gated,
-  read-only by default. Set `SANDBOX_MOUNT_ALLOW` (`:`-separated roots) to restrict
-  mountable paths; recommended for multi-admin hosts. See SECURITY.md.
+- Attach folders to a chat's sandbox, gated by two new org settings (both off by
+  default, in Settings → Security). `host_folder_access` (admin-only): bind-mount a
+  SERVER folder at `/folders/<name>`, read-only + confirm-gated; set
+  `SANDBOX_MOUNT_ALLOW` (`:`-separated roots) to restrict mountable paths
+  (recommended for multi-admin hosts). `pc_folder_access` (`off`/`admins`/`everyone`):
+  users connect a folder from their OWN computer (📎 menu), synced to the workspace
+  around each turn; live sync needs Chrome/Edge, other browsers get a one-shot
+  import + zip download. See SECURITY.md.
 
 ## [0.2.4] - 2026-07-03
 

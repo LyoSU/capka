@@ -4,10 +4,12 @@ import { useRef, useCallback, useMemo, useEffect, type KeyboardEvent } from "rea
 import { useTranslations } from "next-intl";
 import { ArrowUp, Loader2, Paperclip, RotateCw, Square, X } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
+import { AttachFolderMenu } from "@/components/chat/attach-folder-menu";
 import { useIsMobile, MOBILE_BREAKPOINT } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { BinaryFileThumb, FileTile, SandboxFileTile, type PreviewFile } from "./file-preview";
 import type { FileRef } from "@/lib/constants";
+import type { useFolderSync } from "@/components/chat/use-folder-sync";
 
 /**
  * Pasted plain text at or above this length becomes a .txt attachment instead of
@@ -72,6 +74,9 @@ interface ChatInputProps {
   contextUsage?: { used: number; window: number } | null;
   /** Fresh, empty chat — focus the composer on mount so it's ready to type. */
   isNewChat: boolean;
+  /** PC-folder sync state + actions. When the user may attach a folder, the
+   *  paperclip becomes a small menu (Upload files / Connect a folder). */
+  folders?: ReturnType<typeof useFolderSync>;
 }
 
 export function ChatInput({
@@ -88,6 +93,7 @@ export function ChatInput({
   onRetryFile,
   contextUsage,
   isNewChat,
+  folders,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
   const isMobile = useIsMobile();
@@ -281,16 +287,30 @@ export function ChatInput({
                   e.target.value = "";
                 }}
               />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90"
-                onClick={() => fileInputRef.current?.click()}
-                title={t("attach")}
-                aria-label={t("attach")}
-              >
-                <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
-              </Button>
+              {folders?.canAttach ? (
+                // Folder access is on for this user → the paperclip opens a small
+                // menu (upload files vs connect a folder from their computer).
+                <AttachFolderMenu folders={folders} onUpload={() => fileInputRef.current?.click()}>
+                  <span
+                    className="inline-flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90"
+                    title={t("attach")}
+                    aria-label={t("attach")}
+                  >
+                    <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                  </span>
+                </AttachFolderMenu>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90"
+                  onClick={() => fileInputRef.current?.click()}
+                  title={t("attach")}
+                  aria-label={t("attach")}
+                >
+                  <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                </Button>
+              )}
             </div>
 
             {/* Right cluster: context-window ring, then Send/Stop. Grouping them
