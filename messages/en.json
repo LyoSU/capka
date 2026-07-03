@@ -474,7 +474,22 @@
       "emptyConnectors": "No connectors yet. Just ask — e.g. \"connect Linear\".",
       "openInSettings": "Open in settings",
       "setInstruction": "Set \"{title}\" to \"{value}\".",
-      "signedIn": "I've signed in — please check the connector now."
+      "signedIn": "I've signed in — please check the connector now.",
+      "pickFolderHint": "Choose a folder on your computer to connect.",
+      "folderPicked": "I connected the folder \"{name}\"."
+    },
+    "folders": {
+      "connect": "Connect a folder",
+      "reconnect": "Reconnect",
+      "disconnect": "Disconnect folder",
+      "syncing": "Syncing…",
+      "syncedAgo": "Synced {ago}",
+      "justNow": "just now",
+      "minAgo": "{n} min ago",
+      "hourAgo": "{n} h ago",
+      "conflicts": "{n} kept newer",
+      "syncFailed": "Couldn't sync — will retry",
+      "unsupportedBrowser": "Live folder sync needs Chrome or Edge."
     }
   },
   "projects": {

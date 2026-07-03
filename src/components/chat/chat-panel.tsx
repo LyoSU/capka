@@ -29,6 +29,8 @@ import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X, Square }
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput } from "@/components/chat/chat-input";
+import { FolderChip } from "@/components/chat/folder-chip";
+import { useFolderSync } from "@/components/chat/use-folder-sync";
 import { deriveContextFill } from "@/lib/chat/context/fill";
 import { useComposerAttachments } from "@/components/chat/use-composer-attachments";
 import { useChatDraft } from "@/components/chat/use-chat-draft";
@@ -126,6 +128,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // retry never re-uploads) and persist their refs per chat — they survive a
   // reload just like the text draft.
   const attachments = useComposerAttachments({ chatId, ensureChat });
+  // PC folders (File System Access): pushed before a message, pulled after the
+  // turn. A no-op when the chat has no connected folders, so it costs nothing on
+  // the common path.
+  const folderSync = useFolderSync(chatId);
 
   // Fork the conversation from a message into a fresh chat, then jump to it.
   // useCallback keeps this identity stable across composer keystrokes so it
@@ -337,9 +343,13 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // A gentle "done" buzz on the falling edge of loading (touch devices only).
   const wasLoading = useRef(false);
   useEffect(() => {
-    if (wasLoading.current && !isLoading) haptic("success");
+    if (wasLoading.current && !isLoading) {
+      haptic("success");
+      // Turn finished — pull any files the agent changed back to the local folder.
+      void folderSync.pullAll();
+    }
     wasLoading.current = isLoading;
-  }, [isLoading]);
+  }, [isLoading, folderSync]);
 
   // Composer text is a per-chat draft persisted to localStorage, so a
   // typed-but-unsent message survives a reload, a closed tab, or a failed send.
@@ -361,6 +371,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
 
   const send = async (text: string, refs: FileRef[], id?: string): Promise<boolean> => {
     try {
+      // Push local folder changes up before the turn sees the workspace. Never
+      // block the send on it — a sync hiccup shows in the chip, not a failed turn.
+      await folderSync.pushAll().catch(() => {});
       await sendMessage(text, model, refs.length > 0 ? refs : undefined, id);
       return true;
     } catch (e) {
@@ -830,6 +843,11 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                       <RefreshCw className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+                </div>
+              )}
+              {!readOnly && (
+                <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6">
+                  <FolderChip sync={folderSync} />
                 </div>
               )}
               {queuedEl}

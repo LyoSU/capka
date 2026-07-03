@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight, FilePen } from "lucide-react";
+import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight, FilePen, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
 
-type RequiredAction = { kind: string; url: string; label: string; description?: string };
+type RequiredAction = { kind: string; url?: string; label: string; description?: string };
 
 /** The subset of a `manage` tool result the chat renders as a card. Kept loose
  *  (all optional) because it arrives as opaque tool output. */
@@ -105,7 +105,7 @@ async function consumePending(pendingId: string): Promise<ManageOutput> {
  *  navigation (the callback redirects instead). `open_url` stays a plain link. */
 function ConnectLink({ action, onConnected }: { action: RequiredAction; onConnected?: () => void }) {
   const onClick = (e: React.MouseEvent) => {
-    if (action.kind !== "oauth") return; // open_url: let the anchor navigate normally
+    if (action.kind !== "oauth" || !action.url) return; // open_url: let the anchor navigate normally
     e.preventDefault();
     const popup = window.open(action.url, "capka-oauth", "popup,width=520,height=680");
     if (!popup) { window.location.href = action.url; return; } // blocked → full navigation
@@ -127,6 +127,37 @@ function ConnectLink({ action, onConnected }: { action: RequiredAction; onConnec
       <Plug className="h-3.5 w-3.5" />
       {action.label}
     </a>
+  );
+}
+
+/** The agent asked the user to pick a folder from their own computer — only the
+ *  browser can open that picker. Opens it, creates the folder row, and runs a
+ *  first sync (all in the bridge). Needs the chatId to key the sandbox side. */
+function PickFolderButton({ chatId, action, onPicked }: { chatId?: string; action: RequiredAction; onPicked?: (name: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!chatId) return null;
+  const onClick = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const { pickAndCreate } = await import("@/lib/folder-bridge/bridge");
+      const folder = await pickAndCreate(chatId);
+      if (folder) onPicked?.(folder.name);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not attach the folder.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div>
+      <Button size="sm" onClick={onClick} disabled={busy} className="gap-1.5">
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
+        {action.label}
+      </Button>
+      {err && <div className="mt-1.5 text-xs text-destructive">{err}</div>}
+    </div>
   );
 }
 
@@ -188,7 +219,7 @@ function Outcome({ kind, text }: { kind: "done" | "expired" | "cancelled" | "err
 /** Staged change awaiting the USER's confirmation. Confirm/Cancel act via the
  *  session-authed endpoint (never the model), then the card collapses to its
  *  outcome — so a button can't be clicked twice and a stale card reads clearly. */
-function ConfirmCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: string) => void }) {
+function ConfirmCard({ o, t, onSend, chatId }: { o: ManageOutput; t: T; onSend?: (text: string) => void; chatId?: string }) {
   const { title, before, after, impact, details, body, items } = o.preview!;
   // Start "checking": on mount we ask the server whether this pending is still
   // open, so a RELOADED card shows "confirmed"/"expired" instead of live buttons
@@ -292,10 +323,13 @@ function ConfirmCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: 
       {phase === "done" && (
         <>
           <Outcome kind="done" text={t("confirmed")} />
-          {/* e.g. "Connect" after adding an OAuth connector — sign in without leaving chat. */}
+          {/* e.g. "Connect" after adding an OAuth connector, or "Choose a folder"
+              after attaching a PC folder — resolved without leaving chat. */}
           {followUp && (
             <div className="mt-3">
-              <ConnectLink action={followUp} onConnected={onSend ? () => onSend(t("signedIn")) : undefined} />
+              {followUp.kind === "pick_folder"
+                ? <PickFolderButton chatId={chatId} action={followUp} onPicked={onSend ? (name) => onSend(t("folderPicked", { name })) : undefined} />
+                : <ConnectLink action={followUp} onConnected={onSend ? () => onSend(t("signedIn")) : undefined} />}
             </div>
           )}
         </>
@@ -544,26 +578,30 @@ function ChoiceCard({ o, t, onSend }: { o: ManageOutput; t: T; onSend?: (text: s
 
 /** A colored dot + localized word for a connector's state — no raw "oauth"/on/off
  *  jargon (PRODUCT.md forbids it for the non-technical audience). */
-export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text: string) => void }) {
+export function ManageCard({ output, onSend, chatId }: { output: unknown; onSend?: (text: string) => void; chatId?: string }) {
   const t = useTranslations("chat.manage");
   const o = output as ManageOutput;
 
-  if (o?.render === "confirm" && o.preview) return <ConfirmCard o={o} t={t} onSend={onSend} />;
+  if (o?.render === "confirm" && o.preview) return <ConfirmCard o={o} t={t} onSend={onSend} chatId={chatId} />;
 
   if (o?.render === "setting" && o.data) return <SettingCard o={o} t={t} />;
 
   if (o?.render === "choice" && o.data?.options) return <ChoiceCard o={o} t={t} onSend={onSend} />;
 
-  // OAuth / browser hand-off — the agent returned a URL only the user can open.
+  // OAuth / browser hand-off — the agent returned an action only the user can do
+  // (open an OAuth URL, or pick a folder from their own computer).
   if (o?.render === "action_required" && o.action) {
+    const isPick = o.action.kind === "pick_folder";
     return (
       <CardShell>
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <ExternalLink className="h-4 w-4 text-muted-foreground" />
-          {o.action.description ?? t("openHint")}
+          {isPick ? <FolderPlus className="h-4 w-4 text-muted-foreground" /> : <ExternalLink className="h-4 w-4 text-muted-foreground" />}
+          {o.action.description ?? (isPick ? t("pickFolderHint") : t("openHint"))}
         </div>
         <div className="mt-3">
-          <ConnectLink action={o.action} onConnected={onSend ? () => onSend(t("signedIn")) : undefined} />
+          {isPick
+            ? <PickFolderButton chatId={chatId} action={o.action} onPicked={onSend ? (name) => onSend(t("folderPicked", { name })) : undefined} />
+            : <ConnectLink action={o.action} onConnected={onSend ? () => onSend(t("signedIn")) : undefined} />}
         </div>
       </CardShell>
     );
@@ -581,10 +619,12 @@ export function ManageCard({ output, onSend }: { output: unknown; onSend?: (text
         </div>
         {o.data.action && (
           <div className="mt-3">
-            <ConnectLink
-              action={o.data.action}
-              onConnected={onSend ? () => onSend(t("recheckMsg", { name: o.data!.itemTitle ?? "" })) : undefined}
-            />
+            {o.data.action.kind === "pick_folder"
+              ? <PickFolderButton chatId={chatId} action={o.data.action} onPicked={onSend ? (name) => onSend(t("folderPicked", { name })) : undefined} />
+              : <ConnectLink
+                  action={o.data.action}
+                  onConnected={onSend ? () => onSend(t("recheckMsg", { name: o.data!.itemTitle ?? "" })) : undefined}
+                />}
           </div>
         )}
         {o.data.settingsPath && <SettingsLink href={o.data.settingsPath} t={t} />}

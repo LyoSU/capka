@@ -1153,7 +1153,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
               return <AskCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} form={g.part.askForm!} value={g.part.askValue} state={g.part.state} kind={kind} />;
             }
             if (g.kind === "manage") {
-              return <ManageCard key={gi} output={g.output} onSend={onSend} />;
+              return <ManageCard key={gi} output={g.output} onSend={onSend} chatId={chatId} />;
             }
             // No wrapper blur-rise here — the spoiler header animates itself in,
             // and on expand each rail row surfaces with .animate-step-in.
