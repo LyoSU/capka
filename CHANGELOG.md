@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-03
+
 ### Fixed
 - **Telegram: the streamed draft no longer lingers as a "still thinking" bubble
   for ~30s next to the delivered answer** — the final message is now bridged
