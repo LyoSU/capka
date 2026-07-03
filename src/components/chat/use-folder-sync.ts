@@ -66,7 +66,6 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   const syncAll = useCallback(async () => {
     const all = foldersRef.current;
     const live = all.filter((f) => !needReconnect.includes(f.id));
-    console.debug("[folders] syncAll:", { total: all.length, live: live.length, needReconnect });
     if (live.length === 0) return;
     setPhase("syncing");
     try {
@@ -74,7 +73,6 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
       let total = 0;
       for (const f of live) {
         const r = await sync(chatId, f);
-        console.debug("[folders] synced", f.name, r);
         total += r.conflicts;
       }
       // Snapshot the post-sync manifests so the file browser can badge statuses.

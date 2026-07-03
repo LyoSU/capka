@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planSync, type Manifest } from "../plan";
+import { planSync, planDirs, type Manifest } from "../plan";
 
 // Helper: an entry with a hash (content identity) + mtime for LWW.
 const e = (hash: string, mtime = 1, size = hash.length) => ({ hash, mtime, size });
@@ -73,5 +73,37 @@ describe("planSync — first sync (no base)", () => {
   it("different content on both sides with no base is a conflict", () => {
     const plan = planSync({ "a.txt": e("L", 2) }, { "a.txt": e("R", 1) }, null);
     expect(plan.conflicts).toEqual([{ path: "a.txt", winner: "local" }]);
+  });
+});
+
+describe("planDirs — directory 3-way (presence-based, no content)", () => {
+  it("mirrors a new server dir to the PC (no base)", () => {
+    expect(planDirs([], ["sub"], null)).toMatchObject({ createLocal: ["sub"], deleteRemote: [], deleteLocal: [] });
+  });
+
+  it("mirrors a new server dir to the PC (dir absent from base)", () => {
+    expect(planDirs([], ["sub"], [])).toMatchObject({ createLocal: ["sub"], deleteRemote: [], deleteLocal: [] });
+  });
+
+  it("deletes on the server a dir removed on the PC since base", () => {
+    // was synced (in base), still on server, gone locally → user deleted it on the PC
+    expect(planDirs([], ["sub"], ["sub"])).toMatchObject({ deleteRemote: ["sub"], createLocal: [], deleteLocal: [] });
+  });
+
+  it("deletes on the PC a dir removed on the server since base", () => {
+    expect(planDirs(["sub"], [], ["sub"])).toMatchObject({ deleteLocal: ["sub"], createLocal: [], deleteRemote: [] });
+  });
+
+  it("does nothing when a dir exists on both sides", () => {
+    expect(planDirs(["sub"], ["sub"], ["sub"])).toMatchObject({ createLocal: [], deleteRemote: [], deleteLocal: [] });
+  });
+
+  it("does not resurrect a new empty local dir (no server mkdir path)", () => {
+    // new empty dir on the PC, no base, not on server → nothing to do (out of scope, no endpoint)
+    expect(planDirs(["sub"], [], null)).toMatchObject({ createLocal: [], deleteRemote: [], deleteLocal: [] });
+  });
+
+  it("sorts nested dirs parent-before-child for safe recursive apply", () => {
+    expect(planDirs([], ["a/b", "a"], ["a/b", "a"])).toMatchObject({ deleteRemote: ["a", "a/b"] });
   });
 });

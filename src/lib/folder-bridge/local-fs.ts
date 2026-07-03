@@ -66,6 +66,20 @@ export async function walkLocal(dir: DirHandle, prefix = ""): Promise<LocalManif
   return out;
 }
 
+/** Recursively list a directory handle's SUBDIRECTORIES (paths, no files) — the dir
+ *  counterpart to walkLocal. Feeds the directory 3-way merge so a folder the user
+ *  deletes on the PC is detected and removed on the server, not silently re-mirrored. */
+export async function walkLocalDirs(dir: DirHandle, prefix = ""): Promise<string[]> {
+  const out: string[] = [];
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind !== "directory") continue;
+    const path = prefix ? `${prefix}/${name}` : name;
+    out.push(path);
+    out.push(...await walkLocalDirs(handle, path));
+  }
+  return out;
+}
+
 export async function sha256Hex(blob: Blob): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -105,4 +119,12 @@ export async function deleteLocalFile(root: DirHandle, path: string): Promise<vo
   const parts = path.split("/");
   const dir = await resolveDir(root, parts.slice(0, -1), false).catch(() => null);
   if (dir) await dir.removeEntry(parts[parts.length - 1]).catch(() => {});
+}
+
+/** Remove a (possibly non-empty) directory locally — mirrors a server-side dir
+ *  delete onto the PC. Recursive so a subtree removed on the server clears fully. */
+export async function deleteLocalDir(root: DirHandle, path: string): Promise<void> {
+  const parts = path.split("/");
+  const dir = await resolveDir(root, parts.slice(0, -1), false).catch(() => null);
+  if (dir) await dir.removeEntry(parts[parts.length - 1], { recursive: true }).catch(() => {});
 }

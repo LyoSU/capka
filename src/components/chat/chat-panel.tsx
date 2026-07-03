@@ -345,7 +345,6 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     if (wasLoading.current && !isLoading) {
       haptic("success");
       // Turn finished — pull any files the agent changed back to the local folder.
-      console.debug("[folders] turn finished → pull");
       void folderSync.pullAll();
     }
     wasLoading.current = isLoading;

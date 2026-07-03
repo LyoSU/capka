@@ -9,10 +9,10 @@
  * design: a sync failure warns, it never blocks the turn (see chat-input).
  */
 
-import { planSync, type Manifest } from "./plan";
+import { planSync, planDirs, type Manifest } from "./plan";
 import {
-  walkLocal, hashCandidates, mergeHashed, sha256Hex,
-  readLocalFile, writeLocalFile, deleteLocalFile, ensureLocalDir,
+  walkLocal, walkLocalDirs, hashCandidates, mergeHashed, sha256Hex,
+  readLocalFile, writeLocalFile, deleteLocalFile, deleteLocalDir, ensureLocalDir,
   type DirHandle, type HashedManifest,
 } from "./local-fs";
 
@@ -60,6 +60,10 @@ const dropHandle = (id: string) => withStore<void>("readwrite", (s) => s.delete(
 // forward-compat). After a page reload base is empty → the first sync treats both
 // sides as first-seen (union + LWW on genuine content clashes — no data loss).
 const bases = new Map<string, Manifest>();
+// Base directory set per folder, parallel to `bases` — the last-synced list of
+// subdirectories. Lets a dir deleted on one side be told apart from a new dir on
+// the other (see planDirs). In-memory like `bases`; a reload starts empty.
+const baseDirs = new Map<string, string[]>();
 const lastLocal = new Map<string, HashedManifest>();
 
 // ── File API (workspace side, /workspace/<name>/…) ───────────────────────────
@@ -190,6 +194,7 @@ export function syncedManifest(folderId: string): Manifest | null {
 /** Forget a folder's handle locally (called when the row is deleted). */
 export async function forget(folderId: string): Promise<void> {
   bases.delete(folderId);
+  baseDirs.delete(folderId);
   lastLocal.delete(folderId);
   await dropHandle(folderId).catch(() => {});
 }
@@ -202,19 +207,12 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
   if (!handle) throw new Error("Folder not connected.");
 
   const base = bases.get(folder.id) ?? null;
+  const dbase = baseDirs.get(folder.id) ?? null;
   const local = await localHashed(handle, folder.id);
+  const localDirs = await walkLocalDirs(handle);
   const { files: remote, dirs: remoteDirs } = await serverTree(chatId, folder.name);
   const plan = planSync(local, remote, base);
-  console.debug("[folders] plan", folder.name, {
-    localFiles: Object.keys(local).length,
-    remoteFiles: Object.keys(remote).length,
-    remoteDirs: remoteDirs.length,
-    hasBase: !!base,
-    download: plan.download.length,
-    upload: plan.upload.length,
-    deleteLocal: plan.deleteLocal.length,
-    deleteRemote: plan.deleteRemote.length,
-  });
+  const dirPlan = planDirs(localDirs, remoteDirs, dbase);
 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
   const remoteWins = plan.conflicts.filter((c) => c.winner === "remote").map((c) => c.path);
@@ -223,15 +221,19 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
   for (const path of [...plan.download, ...remoteWins]) await writeLocalFile(handle, path, await downloadFromWorkspace(chatId, folder.name, path));
   for (const path of plan.deleteRemote) await deleteFromWorkspace(chatId, folder.name, path);
   for (const path of plan.deleteLocal) await deleteLocalFile(handle, path);
-  // File-based sync misses empty directories — mirror the server's folders so an
-  // empty subfolder the agent created still shows up on the user's computer.
-  for (const d of remoteDirs) await ensureLocalDir(handle, d).catch(() => {});
+  // Directory sync (3-way, so a folder deleted on the PC is removed on the server
+  // instead of being blindly re-mirrored back down). Delete husks first, then
+  // create genuinely-new server dirs — mirrors empty folders the agent made.
+  for (const d of dirPlan.deleteRemote) await deleteFromWorkspace(chatId, folder.name, d);
+  for (const d of dirPlan.deleteLocal) await deleteLocalDir(handle, d);
+  for (const d of dirPlan.createLocal) await ensureLocalDir(handle, d).catch(() => {});
 
   // Reconciled: local now matches the server for every touched path. Re-walk to
   // capture that as the new base (the common ancestor for the next sync).
   lastLocal.delete(folder.id); // force a fresh re-hash of what we just wrote
   const merged = await localHashed(handle, folder.id);
   bases.set(folder.id, merged);
+  baseDirs.set(folder.id, await walkLocalDirs(handle));
   // Persist best-effort for durability; a failure just means the next reload
   // starts from an empty base (safe — see the bases note above).
   fetch(`/api/folders/${folder.id}/state`, {

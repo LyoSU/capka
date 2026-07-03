@@ -64,3 +64,28 @@ export function planSync(local: Manifest, remote: Manifest, base: Manifest | nul
   plan.conflicts.sort((a, b) => a.path.localeCompare(b.path));
   return plan;
 }
+
+export type DirPlan = {
+  createLocal: string[]; // new server dir → mkdir on the PC (mirror empty folders)
+  deleteRemote: string[]; // dir removed on the PC since base → rmdir on the server
+  deleteLocal: string[]; // dir removed on the server since base → rmdir on the PC
+};
+
+/** Directory 3-way merge. Directories have no content, so this is presence-based:
+ *  a dir gone from one side is a *delete* only if it was in base (previously synced),
+ *  otherwise it is a *new* dir on the other side. This is what stops a folder deleted
+ *  on the PC from being resurrected by the blind server→PC mirror (see the bridge):
+ *  in-base + gone-locally = deleteRemote, not createLocal. A brand-new empty local dir
+ *  has no server-side mkdir path, so it is intentionally a no-op. Pure. */
+export function planDirs(local: string[], remote: string[], base: string[] | null): DirPlan {
+  const L = new Set(local), R = new Set(remote), B = new Set(base ?? []);
+  const plan: DirPlan = { createLocal: [], deleteRemote: [], deleteLocal: [] };
+  for (const d of new Set([...L, ...R, ...B])) {
+    const l = L.has(d), r = R.has(d), b = B.has(d);
+    if (r && !l) (b ? plan.deleteRemote : plan.createLocal).push(d); // gone on PC: delete if known, else mirror down
+    else if (l && !r && b) plan.deleteLocal.push(d); // gone on server since base → propagate to PC
+  }
+  // Ascending sort = parent before child: safe for recursive rmdir/mkdir either way.
+  for (const k of ["createLocal", "deleteRemote", "deleteLocal"] as const) plan[k].sort();
+  return plan;
+}
