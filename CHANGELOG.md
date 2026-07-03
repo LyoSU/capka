@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-03
+
 ### Fixed
 - Regenerating or editing a message after switching the model now runs the newly
   selected model instead of the chat's previously persisted one.
