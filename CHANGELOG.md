@@ -6,6 +6,12 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Pasting two screenshots no longer collapses them into one attachment** —
+  clipboard bitmaps all arrive named `image.png`, so the second overwrote the
+  first in the sandbox and the dedup-by-name persistence treated them as one.
+  Pasted images now get a unique name; real copied filenames are left untouched.
+
 ## [0.2.1] - 2026-07-02
 
 ### Fixed

@@ -23,6 +23,22 @@ function pastedTextFile(text: string): File {
 }
 
 /**
+ * Clipboard screenshots all arrive named "image.png" (or blank), so repeat pastes
+ * collide: the sandbox writes them to the same path (second overwrites first) and
+ * the dedup-by-name persistence treats them as one file. Give each pasted image a
+ * unique name so two screenshots stay two separate attachments. A copied *file*
+ * (from Finder/Explorer) carries a real name — leave those untouched.
+ */
+export function uniquelyNamedPaste(file: File): File {
+  // Only clipboard bitmaps ("image.png"/blank) need a name; real files keep theirs.
+  if (file.name && !/^image\.\w+$/i.test(file.name)) return file;
+  const ext = /\.\w+$/.exec(file.name)?.[0] ?? (file.type.startsWith("image/") ? `.${file.type.slice(6)}` : "");
+  // HH-MM-SS + a short random suffix, so two pastes in the same second stay distinct.
+  const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "-");
+  return new File([file], `pasted-image-${stamp}-${Math.random().toString(36).slice(2, 5)}${ext}`, { type: file.type });
+}
+
+/**
  * A composer attachment. Uploaded eagerly on attach, so it carries its own
  * lifecycle: `uploading` while in flight, `ready` once it's in the sandbox (with
  * its server `ref`), or `error` (retryable). `file` holds the local bytes for a
@@ -144,7 +160,7 @@ export function ChatInput({
     const pastedFiles = Array.from(e.clipboardData.files);
     if (pastedFiles.length > 0) {
       e.preventDefault();
-      onAddFiles(pastedFiles);
+      onAddFiles(pastedFiles.map(uniquelyNamedPaste));
       return;
     }
     // Big text paste → .txt attachment, so a wall of text doesn't flood the input.
