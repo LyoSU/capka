@@ -308,13 +308,15 @@ export function WorkspacePanel({
   // Always mounted so open/close can animate. On mobile it's a fixed overlay that
   // slides in from the right (transform); on desktop (md:static) it's a flex item
   // that grows from 0 → 20rem, pushing the chat smoothly instead of popping in.
-  // The inner column keeps a fixed w-80 so its contents don't reflow mid-animation
-  // while the outer width animates — overflow-hidden clips the overhang.
+  // The inner column keeps a fixed w-80 (shrink-0) so its contents don't reflow
+  // mid-animation, and justify-end pins it to the panel's right edge — so the
+  // chat slides aside to *reveal* it in place, instead of the column riding the
+  // left edge and getting chopped at the window edge while the width animates.
   return (
     <aside
       aria-hidden={!open}
       className={cn(
-        "z-40 h-full shrink-0 overflow-hidden border-l bg-card shadow-lg transition-[width,transform] duration-300 ease-out",
+        "z-40 flex h-full shrink-0 justify-end overflow-hidden border-l bg-card shadow-lg transition-[width,transform] duration-300 ease-out",
         // Mobile: full-screen sheet sliding from the right. Desktop: a flex item
         // that grows 0 → 20rem, pushing the chat instead of overlaying it.
         "fixed inset-y-0 right-0 w-full md:static md:z-auto md:w-80 md:shadow-none",
@@ -323,7 +325,7 @@ export function WorkspacePanel({
           : "pointer-events-none translate-x-full md:w-0 md:translate-x-0 md:border-l-0",
       )}
     >
-    <div className="flex h-full w-full flex-col md:w-80">
+    <div className="flex h-full w-full flex-col md:w-80 md:shrink-0">
       <div className="flex items-center gap-2 border-b border-border/50 bg-muted/20 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:pt-3">
         <h3 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold tracking-tight">
           <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />

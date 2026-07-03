@@ -12,6 +12,10 @@ All notable changes to Capka are documented here. Format follows
 - Destructive confirm buttons (delete skill, delete automation) now show readable
   light text — `text-destructive-foreground` was missing from the theme, so the
   label fell back to dark text on the red background.
+- With classic scrollbars (Windows/Linux), the app no longer reserves a dead
+  15px strip along the right window edge; the chat column stays centered via a
+  symmetric scrollbar gutter, and the workspace files panel opens flush with the
+  window edge without clipping its content mid-animation.
 
 ### Changed
 - Admin top banners (update available, provider out-of-credits/invalid-key, org
