@@ -9,6 +9,9 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 - Regenerating or editing a message after switching the model now runs the newly
   selected model instead of the chat's previously persisted one.
+- Destructive confirm buttons (delete skill, delete automation) now show readable
+  light text — `text-destructive-foreground` was missing from the theme, so the
+  label fell back to dark text on the red background.
 
 ### Changed
 - Admin top banners (update available, provider out-of-credits/invalid-key, org

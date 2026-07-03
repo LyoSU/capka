@@ -39,6 +39,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-surface: var(--destructive-surface);
   --color-destructive-border: var(--destructive-border);
   --color-destructive-text: var(--destructive-text);
@@ -317,11 +318,11 @@
   * {
     @apply border-border outline-ring/50;
   }
-  /* Always reserve the scrollbar gutter so content doesn't jump sideways when a
-     vertical scrollbar appears/disappears (classic scrollbars on Windows/Linux
-     change the viewport width otherwise). */
+  /* The document itself never scrolls — the app shell is h-dvh and every pane
+     owns its scrolling — so no root scrollbar gutter is reserved here (it would
+     only paint a dead strip along the window edge). The inner scroll containers
+     reserve their own gutters instead. */
   html {
-    scrollbar-gutter: stable;
     /* Native-app feel: no iOS font inflation on rotate, and no document-level
        rubber-band / pull-to-refresh — the app owns its own scrolling. */
     text-size-adjust: 100%;

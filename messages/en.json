@@ -50,8 +50,8 @@
     }
   },
   "providerStatus": {
-    "outOfCredits": "The AI account is out of credit. Top it up to restore the assistant for everyone.",
-    "invalidKey": "The AI provider isn't connected. Check the provider settings to restore the assistant.",
+    "outOfCredits": "The AI account is out of credit — top it up to restore the assistant for everyone",
+    "invalidKey": "The AI provider isn't connected — check the provider settings to restore the assistant",
     "fix": "Open settings",
     "dismiss": "Dismiss"
   },
@@ -220,9 +220,7 @@
       "cancelQueued": "Remove from queue",
       "contextFull": "Context: {pct}%",
       "contextTokens": "{used} / {total} tokens",
-      "modelGoneTitle": "Model unavailable",
-      "modelGoneBody": "This chat's model is no longer available — its provider was disconnected or the model was removed. Pick another model to continue here, or start a new chat.",
-      "modelGonePick": "Choose an available model from the picker at the top to continue here.",
+      "modelGoneBody": "This model isn't available anymore — pick another from the switcher above to keep chatting",
       "modelGoneNew": "New chat"
     },
     "menu": {
@@ -1381,7 +1379,7 @@
     "confirmDetails": "Details"
   },
   "updateBanner": {
-    "message": "Capka {version} is available.",
+    "message": "Capka {version} is available",
     "action": "Update",
     "dismiss": "Dismiss"
   },
@@ -1405,7 +1403,7 @@
     }
   },
   "orgChangeBanner": {
-    "message": "{actor} changed “{title}” to “{value}”.",
+    "message": "{actor} changed “{title}” to “{value}”",
     "dismiss": "Dismiss"
   }
 }

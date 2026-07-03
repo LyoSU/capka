@@ -543,25 +543,22 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     </div>
   ) : modelGone ? (
     <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
-      <div className="flex flex-col gap-3 rounded-2xl border border-warning-border bg-warning-surface px-4 py-4">
-        <p className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <AlertCircle className="h-4 w-4 shrink-0 text-warning-text" />
-          {t("panel.modelGoneTitle")}
+      {/* Calm, centered — matches the read-only block above. No inline picker: it
+          rendered awkwardly in this floating block, and the header picker already
+          fixes it (picking an available model flips modelStatus and the composer
+          returns). One line says what to do; the button offers the alternative. */}
+      <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {t("panel.modelGoneBody")}
         </p>
-        <p className="text-sm text-muted-foreground">{t("panel.modelGoneBody")}</p>
-        {/* No inline picker here — it rendered awkwardly inside the floating
-            bottom block. The model picker lives in the header above; picking an
-            available model there flips modelStatus back and the composer returns. */}
-        <p className="text-sm text-muted-foreground">{t("panel.modelGonePick")}</p>
-        <div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.push(projectId ? `/chat?projectId=${projectId}` : "/chat")}
-          >
-            {t("panel.modelGoneNew")}
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => router.push(projectId ? `/chat?projectId=${projectId}` : "/chat")}
+        >
+          {t("panel.modelGoneNew")}
+        </Button>
       </div>
     </div>
   ) : (
@@ -625,7 +622,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
               viewport — otherwise centering clips the logo off the top with no
               way to scroll back to it (mobile, keyboard open). */}
           <div
-            className="flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+            className="flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable_both-edges]"
             // Keyboard inset as bottom padding so the centered composer rises above
             // the keyboard instead of being covered (iOS).
             style={{ paddingBottom: "calc(2.5rem + var(--kb, 0px))" }}
@@ -689,11 +686,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       ) : (
         <div className="relative flex flex-1 flex-col overflow-hidden">
           {/* Scroll area fills the whole panel; the header and input float over
-              it as gradients, so messages slide behind a soft fade at both ends. */}
+              it as gradients, so messages slide behind a soft fade at both ends.
+              both-edges keeps the centered column aligned with those overlays
+              (which don't know about the gutter) whether or not a classic
+              scrollbar is showing. */}
           <div
             ref={scrollRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto overscroll-contain pt-16 [scrollbar-gutter:stable]"
+            className="flex-1 overflow-y-auto overscroll-contain pt-16 [scrollbar-gutter:stable_both-edges]"
             // Bottom room tracks the composer's live height (+a little air, +the
             // keyboard inset) so the last message always clears the overlaid
             // composer — even after attachments grow it.
