@@ -24,9 +24,8 @@ const IGNORE_EXT = [
 
 /** Per-file size cap (a model/video/archive over this is skipped and reported). */
 export const FOLDER_MAX_FILE_MB = 100;
-/** Ceiling that blocks attaching a folder outright (checked after filtering).
- *  Deliberately small for now — folder sync is new; loosen once it's proven. */
-export const FOLDER_MAX_FILES = 50;
+/** Ceiling that blocks attaching a folder outright (checked after filtering). */
+export const FOLDER_MAX_FILES = 5000;
 export const FOLDER_MAX_TOTAL_MB = 100;
 
 /** Is this path (file OR directory) one we never sync? Used to skip descending an

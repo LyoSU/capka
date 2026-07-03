@@ -496,7 +496,7 @@
         "downloading": "Downloading {done}/{total}"
       },
       "skipped": "{n} skipped (too large or system files)",
-      "tooLarge": "This folder is too large to sync ({count} files, {mb} MB). Limit: {maxFiles} files / {maxMb} MB.",
+      "tooLarge": "This folder is too large to sync ({count} files, {size}). Limit: {maxFiles} files / {maxMb} MB.",
       "syncedAgo": "Synced {ago}",
       "justNow": "just now",
       "minAgo": "{n} min ago",

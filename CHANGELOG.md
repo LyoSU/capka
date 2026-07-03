@@ -21,7 +21,7 @@ All notable changes to Capka are documented here. Format follows
   users connect a folder from their OWN computer (📎 menu), synced to the workspace
   around each turn; live sync needs Chrome/Edge, other browsers get a one-shot
   import + zip download. Sync skips dependency/build trees (node_modules, .git…),
-  model/binary blobs, and files over 100 MB, and refuses a folder over 50 files /
+  model/binary blobs, and files over 100 MB, and refuses a folder over 5000 files /
   100 MB; progress is shown per phase. See SECURITY.md.
 
 ## [0.2.4] - 2026-07-03

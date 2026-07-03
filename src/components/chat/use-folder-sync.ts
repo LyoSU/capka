@@ -5,7 +5,7 @@ import type { PcFolder, SyncProgress } from "@/lib/folder-bridge/bridge";
 import type { Manifest } from "@/lib/folder-bridge/plan";
 
 export type FolderSyncPhase = "idle" | "syncing" | "error";
-export type ConnectResult = { ok: boolean; error?: string; tooLarge?: { count: number; mb: number } };
+export type ConnectResult = { ok: boolean; error?: string; tooLarge?: { count: number; bytes: number } };
 
 /**
  * Turn-scoped sync for a chat's PC folders. The composer calls pushAll() before a
@@ -110,8 +110,8 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
     } catch (e) {
       // The ceiling error carries counts so the UI can localize (see FolderTooLargeError).
       if (e instanceof Error && e.name === "FolderTooLargeError") {
-        const m = e as Error & { count?: number; mb?: number };
-        return { ok: false, tooLarge: { count: m.count ?? 0, mb: m.mb ?? 0 } };
+        const m = e as Error & { count?: number; bytes?: number };
+        return { ok: false, tooLarge: { count: m.count ?? 0, bytes: m.bytes ?? 0 } };
       }
       return { ok: false, error: e instanceof Error ? e.message : "Could not attach the folder." };
     }

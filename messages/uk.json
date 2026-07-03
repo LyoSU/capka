@@ -496,7 +496,7 @@
         "downloading": "Отримання {done}/{total}"
       },
       "skipped": "пропущено: {n} (завеликі або службові)",
-      "tooLarge": "Ця тека завелика для синхронізації ({count} файлів, {mb} MB). Ліміт: {maxFiles} файлів / {maxMb} MB.",
+      "tooLarge": "Ця тека завелика для синхронізації ({count} файлів, {size}). Ліміт: {maxFiles} файлів / {maxMb} MB.",
       "syncedAgo": "Синхронізовано {ago}",
       "justNow": "щойно",
       "minAgo": "{n} хв тому",

@@ -23,7 +23,7 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
     setBusy(true); setErr("");
     const r = await folders.connect();
     if (!r.ok) {
-      if (r.tooLarge) setErr(t("tooLarge", { count: r.tooLarge.count, mb: r.tooLarge.mb, maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
+      if (r.tooLarge) setErr(t("tooLarge", { count: r.tooLarge.count, size: humanSize(r.tooLarge.bytes), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
       else if (r.error) setErr(r.error);
     }
     setBusy(false);
@@ -123,6 +123,15 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
       </PopoverContent>
     </Popover>
   );
+}
+
+/** Human-readable byte size — KB under a MB, one decimal above, so a small folder
+ *  never reads as a misleading "0 MB". */
+function humanSize(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
 }
 
 /** "just now" / "N min ago" / "N h ago", localized. */

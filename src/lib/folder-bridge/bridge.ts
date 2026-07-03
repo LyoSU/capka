@@ -28,7 +28,7 @@ export type SyncProgress = { phase: "scanning" | "hashing" | "uploading" | "down
  *  the message; identified by `name` to avoid importing the class across the dynamic
  *  import boundary. */
 export class FolderTooLargeError extends Error {
-  constructor(public count: number, public mb: number) {
+  constructor(public count: number, public bytes: number) {
     super("folder too large");
     this.name = "FolderTooLargeError";
   }
@@ -167,7 +167,7 @@ export async function pickAndCreate(chatId: string, opts?: { name?: string; ensu
   const count = Object.keys(scan.files).length;
   const bytes = Object.values(scan.files).reduce((sum, f) => sum + f.size, 0);
   if (count > FOLDER_MAX_FILES || bytes > FOLDER_MAX_TOTAL_MB * 1024 * 1024) {
-    throw new FolderTooLargeError(count, Math.round(bytes / (1024 * 1024)));
+    throw new FolderTooLargeError(count, bytes);
   }
 
   await opts?.ensureChat?.();
