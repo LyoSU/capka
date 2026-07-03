@@ -89,6 +89,9 @@ export function buildSystemPrompt(opts: {
    *  takes precedence over the provider's static caps when gating attachments. */
   modelInput?: Modality[] | null;
   user?: { name?: string | null; timezone?: string | null } | null;
+  /** Server host folders bind-mounted into this session at /folders/<name>.
+   *  Listed so the model knows they exist without probing the filesystem. */
+  attachedFolders?: { name: string; readOnly: boolean }[];
   conversationStartedAt?: Date | null;
   locale?: string | null;
   /** The operator's very first message right after finishing setup — adds a
@@ -130,6 +133,16 @@ export function buildSystemPrompt(opts: {
   // Workspace snapshot changes every run — must stay out of the cached prefix.
   if (opts.workspaceSnapshot) {
     volatile += `${volatile ? "\n\n" : ""}## Current workspace files:\n\`\`\`\n${opts.workspaceSnapshot}\n\`\`\``;
+  }
+
+  // Server folders bind-mounted outside /workspace. Volatile: the set can change
+  // between turns (attach/detach recreates the sandbox). They belong to the
+  // operator, not the workspace — hence the explicit warning.
+  if (opts.attachedFolders?.length) {
+    const lines = opts.attachedFolders
+      .map((f) => `  - /folders/${f.name} (${f.readOnly ? "read-only" : "read-write"})`)
+      .join("\n");
+    volatile += `${volatile ? "\n\n" : ""}## Attached server folders:\n${lines}\nThese files belong to the operator — treat them carefully.`;
   }
 
   // Single-pass: classify files and build prompt lines

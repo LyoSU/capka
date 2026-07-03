@@ -3,7 +3,7 @@ import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } fr
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { chats, messages, projects, users } from "@/lib/db/schema";
+import { chats, messages, projects, users, attachedFolders } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
 import { stripNul } from "./sanitize";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
@@ -300,6 +300,13 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   // Egress: a project may force "bridge"; otherwise fall back to the org default.
   // The controller still gates bridge on SANDBOX_ALLOW_NETWORK.
   const networkMode = project?.sandboxNetwork === "bridge" ? "bridge" : await getSandboxNetworkDefault();
+  // Host folders attached to this session (admin-confirmed server dirs): passed as
+  // bind-mounts so the controller mounts them at /folders/<name>, and listed in the
+  // prompt so the model knows they exist. PC folders (kind "pc") aren't mounts —
+  // they're synced into /workspace/<name> by the browser bridge, so they're skipped.
+  const hostFolders = await db.select().from(attachedFolders)
+    .where(and(eq(attachedFolders.sessionKey, sessionKey), eq(attachedFolders.kind, "host")));
+  const mounts = hostFolders.map((f) => ({ hostPath: f.hostPath!, name: f.name, ro: f.readOnly }));
   // Lazy, shared sandbox session: created (with the resolved networkMode) on the
   // FIRST consumer that actually needs the container — a sandbox tool call, a
   // stdio MCP connector, or an invoked skill. Memoized so all three share one
@@ -310,7 +317,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     // Memoize the success; on failure clear it so a later consumer can retry
     // (a transient controller blip shouldn't poison the whole turn's sandbox).
     if (!sessionEnsured) {
-      sessionEnsured = createSession(sessionKey, userId, networkMode).catch((e) => {
+      sessionEnsured = createSession(sessionKey, userId, networkMode, mounts).catch((e) => {
         sessionEnsured = null;
         throw e;
       });
@@ -405,6 +412,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       provider,
       modelInput,
       user: user ? { name: user.name, timezone: user.timezone } : null,
+      attachedFolders: hostFolders.map((f) => ({ name: f.name, readOnly: f.readOnly })),
       conversationStartedAt: chat?.createdAt ?? null,
       locale: user?.locale ?? payload.origin?.locale ?? null,
       concierge,

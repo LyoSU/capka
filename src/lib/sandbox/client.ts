@@ -92,12 +92,24 @@ export async function getSandboxAllowNetwork(): Promise<boolean | null> {
 
 // ── Session lifecycle ────────────────────────────────────────
 
-export async function createSession(sessionId: string, userId: string, networkMode?: string) {
+/** A host folder to bind-mount into the sandbox at /folders/<name>. Validated by
+ *  the controller's mount-safety before it ever reaches Docker. */
+export type SandboxMount = { hostPath: string; name: string; ro: boolean };
+
+export async function createSession(sessionId: string, userId: string, networkMode?: string, mounts?: SandboxMount[]) {
   return request("/sessions", "POST", {
     sessionId: sanitizeId(sessionId),
     userId: sanitizeId(userId),
     ...(networkMode ? { networkMode } : {}),
+    ...(mounts && mounts.length ? { mounts } : {}),
   });
+}
+
+/** Dry-run a host folder path against the controller's mount-safety (single
+ *  source of truth for DATA_ROOT + SANDBOX_MOUNT_ALLOW), so the manage/settings
+ *  UI can reject a bad path before creating a folder row. */
+export async function validateMount(hostPath: string) {
+  return request("/mounts/validate", "POST", { hostPath }) as Promise<{ ok: boolean; code?: string }>;
 }
 
 export async function execCommand(sessionId: string, command: string, timeout?: number) {
