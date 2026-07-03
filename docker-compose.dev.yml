@@ -40,8 +40,11 @@ services:
     command: npm run dev
     # Bind the dev server to loopback like the other dev ports — the base compose
     # defaults PLATFORM_BIND to 0.0.0.0 (zero-config prod), which would otherwise
-    # expose the hot-reload dev server to the LAN. Overridden here, not in the base.
-    ports:
+    # expose the hot-reload dev server to the LAN. `!override` REPLACES the base
+    # ports list — without it compose *merges* the two entries (0.0.0.0:3000 +
+    # 127.0.0.1:3000), the container binds 3000 twice and self-collides with
+    # "address already in use".
+    ports: !override
       - "127.0.0.1:3000:3000"
     volumes:
       - .:/app
