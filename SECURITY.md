@@ -75,6 +75,45 @@ Sandboxes have **no outbound network by default** (fail-closed). Set
 sandbox compromise. The in-container egress firewall additionally blocks the
 cloud metadata range and refuses to start if its rules can't be verified.
 
+## Host folder mounts
+
+The agent can work with folders that live **outside** its workspace: a directory
+on the server bind-mounted into the sandbox at `/folders/<name>`. This exposes the
+operator's own filesystem to sandboxed code, so it is gated deliberately:
+
+- **Off by default.** The org setting `folder_access` defaults to `off` — nothing
+  can be attached until an admin sets it to `admins` or `everyone`. Server folders
+  are **admin-only regardless** of that level (`everyone` only lets regular users
+  connect folders from *their own computer*, which sync into `/workspace`, not host
+  folders).
+- **Admin-confirmed, every time.** Attaching a server folder always shows a
+  confirmation card (it is not bypassable even in autonomous mode), and is recorded
+  in the audit log (`folder.add` / `folder.remove`).
+- **Read-only by default**, mounted with `HostConfig.Mounts` (not `Binds`, which
+  would silently create a missing source as a root-owned dir) and
+  `Propagation: rprivate`.
+- **Validated by a denylist.** The controller's `mount-safety` rejects system trees
+  (`/etc`, `/proc`, `/sys`, `/dev`, `/usr`, `/boot`, `/root`, …) and anything that
+  contains or sits under the data root (`DATA_ROOT` / `HOST_DATA_ROOT`) — mounting
+  a child would leak other users' workspaces, an ancestor the whole store. All
+  checks are directory-boundary checks (`/data` never matches `/data-archived`).
+- **Optional hard perimeter.** Set `SANDBOX_MOUNT_ALLOW` (`:`-separated roots) to
+  restrict mounts to subpaths of those roots — recommended for multi-admin
+  deployments. When unset, any path passing the denylist is allowed and the admin
+  confirm is the final gate.
+
+Honest limitation: the controller runs in a container and **cannot resolve
+host-level symlinks** — a host symlink under an allowed root could point elsewhere
+on the host. The denylist + `SANDBOX_MOUNT_ALLOW` + the admin confirm are the
+mitigations; there is no server-side realpath of arbitrary host paths.
+
+A read-write mount must be writable by uid 1000 on the host (the entrypoint does
+**not** chown `/folders/*`); otherwise the agent sees `EACCES`. suid binaries in a
+mount are neutralized by `no-new-privileges` + exec as uid 1000. **gVisor is
+recommended** for deployments using host mounts — its default
+`--file-access-mounts=shared` is correct for folders written by both host and
+sandbox.
+
 ## Marketplace, plugins & third-party code
 
 Installing a plugin pulls code from a third-party repo into the capability system.

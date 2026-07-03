@@ -95,6 +95,11 @@ services:
       # egress is still firewalled off private/metadata ranges). Set false to
       # hard-forbid egress regardless of the in-app toggle (untrusted tenants).
       - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-true}
+      # Optional perimeter for host folder mounts (folder access is off by default;
+      # server folders are admin-only + confirm-gated). When set (colon-separated
+      # roots), only subpaths of these may be mounted, on top of the system-path
+      # denylist. Unset → any non-system path, gated by the admin confirm.
+      - SANDBOX_MOUNT_ALLOW=${SANDBOX_MOUNT_ALLOW:-}
       # Per-sandbox RAM. The /tmp + /opt/mcp tmpfs are charged to this same
       # cgroup, so keep headroom.
       - SANDBOX_MEMORY_MB=${SANDBOX_MEMORY_MB:-1024}
