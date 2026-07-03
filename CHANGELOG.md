@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-03
+
 ### Changed
 - **Telegram: the turn summary (reasoning `<details>` / tool log) moved below
   the answer** — the streamed reply now finishes by typing out the footer
