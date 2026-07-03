@@ -300,12 +300,14 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   // Egress: a project may force "bridge"; otherwise fall back to the org default.
   // The controller still gates bridge on SANDBOX_ALLOW_NETWORK.
   const networkMode = project?.sandboxNetwork === "bridge" ? "bridge" : await getSandboxNetworkDefault();
-  // Host folders attached to this session (admin-confirmed server dirs): passed as
-  // bind-mounts so the controller mounts them at /folders/<name>, and listed in the
-  // prompt so the model knows they exist. PC folders (kind "pc") aren't mounts —
-  // they're synced into /workspace/<name> by the browser bridge, so they're skipped.
-  const hostFolders = await db.select().from(attachedFolders)
-    .where(and(eq(attachedFolders.sessionKey, sessionKey), eq(attachedFolders.kind, "host")));
+  // Folders attached to this session. HOST folders (admin-confirmed server dirs)
+  // become bind-mounts the controller mounts at /folders/<name>. PC folders aren't
+  // mounts — the browser bridge syncs them into /workspace/<name>. Both are listed
+  // in the prompt so the model knows where they are (esp. that files it puts under
+  // a PC folder's /workspace/<name> flow back to the user's computer).
+  const folderRows = await db.select().from(attachedFolders).where(eq(attachedFolders.sessionKey, sessionKey));
+  const hostFolders = folderRows.filter((f) => f.kind === "host");
+  const pcFolders = folderRows.filter((f) => f.kind === "pc");
   const mounts = hostFolders.map((f) => ({ hostPath: f.hostPath!, name: f.name, ro: f.readOnly }));
   // Lazy, shared sandbox session: created (with the resolved networkMode) on the
   // FIRST consumer that actually needs the container — a sandbox tool call, a
@@ -413,6 +415,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       modelInput,
       user: user ? { name: user.name, timezone: user.timezone } : null,
       attachedFolders: hostFolders.map((f) => ({ name: f.name, readOnly: f.readOnly })),
+      syncedFolders: pcFolders.map((f) => ({ name: f.name })),
       conversationStartedAt: chat?.createdAt ?? null,
       locale: user?.locale ?? payload.origin?.locale ?? null,
       concierge,

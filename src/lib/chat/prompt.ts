@@ -92,6 +92,9 @@ export function buildSystemPrompt(opts: {
   /** Server host folders bind-mounted into this session at /folders/<name>.
    *  Listed so the model knows they exist without probing the filesystem. */
   attachedFolders?: { name: string; readOnly: boolean }[];
+  /** PC folders synced to the user's own computer, living at /workspace/<name>.
+   *  Files the model writes there flow back to the user after the turn. */
+  syncedFolders?: { name: string }[];
   conversationStartedAt?: Date | null;
   locale?: string | null;
   /** The operator's very first message right after finishing setup — adds a
@@ -143,6 +146,14 @@ export function buildSystemPrompt(opts: {
       .map((f) => `  - /folders/${f.name} (${f.readOnly ? "read-only" : "read-write"})`)
       .join("\n");
     volatile += `${volatile ? "\n\n" : ""}## Attached server folders:\n${lines}\nThese files belong to the operator — treat them carefully.`;
+  }
+
+  // PC folders live at /workspace/<name> and sync back to the user's computer after
+  // the turn — so deliverables MUST go inside that folder, not elsewhere in the
+  // workspace, or the user never receives them.
+  if (opts.syncedFolders?.length) {
+    const lines = opts.syncedFolders.map((f) => `  - /workspace/${f.name}`).join("\n");
+    volatile += `${volatile ? "\n\n" : ""}## Folders synced to the user's computer:\n${lines}\nFiles you create or edit INSIDE these folders are copied back to the user's computer after you reply. To give the user a file, write it there (e.g. /workspace/${opts.syncedFolders[0].name}/result.xlsx) — files elsewhere in /workspace are NOT synced.`;
   }
 
   // Single-pass: classify files and build prompt lines
