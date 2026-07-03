@@ -78,6 +78,14 @@ async function resolveDir(root: DirHandle, parts: string[], create: boolean): Pr
   return dir;
 }
 
+/** Create a (possibly nested) directory locally if missing — so empty folders the
+ *  agent made on the server still appear on the user's computer (file-based sync
+ *  otherwise skips a directory with no files in it). */
+export async function ensureLocalDir(root: DirHandle, path: string): Promise<void> {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length) await resolveDir(root, parts, true);
+}
+
 export async function readLocalFile(root: DirHandle, path: string): Promise<File> {
   const parts = path.split("/");
   const dir = await resolveDir(root, parts.slice(0, -1), false);

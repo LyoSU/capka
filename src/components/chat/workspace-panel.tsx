@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 import {
-  ArrowDownUp, ChevronLeft, Download, Folder, LayoutGrid, List, Loader2, Upload, X,
+  ArrowDownUp, ChevronLeft, Cloud, Check, Download, Folder, LayoutGrid, List, Loader2, RefreshCw, Upload, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { extOf, fileCategory, fileKind, previewKind, type FileCategory } from "@
 import { cn } from "@/lib/utils";
 import { downloadAllPaths, canDownloadAll } from "./workspace-paths";
 import { FileThumb, FileTile, SandboxFileTile, usePreview, type PreviewFile } from "./file-preview";
+import type { useFolderSync } from "./use-folder-sync";
 
 type FileEntry = { name: string; path: string; isDirectory: boolean; size: number; modifiedAt: string | null };
 
@@ -67,6 +68,7 @@ export function WorkspacePanel({
   onClose,
   running,
   revision,
+  folderSync,
 }: {
   chatId: string;
   open: boolean;
@@ -76,6 +78,8 @@ export function WorkspacePanel({
   /** Bumps each time a tool call completes (the moment files may have changed),
    *  so the listing refreshes right after the agent writes, not on a timer. */
   revision: number;
+  /** PC-folder sync state — badges a connected folder and its files' sync status. */
+  folderSync?: ReturnType<typeof useFolderSync>;
 }) {
   const t = useTranslations("chat.workspace");
   const tc = useTranslations("common");
@@ -169,6 +173,30 @@ export function WorkspacePanel({
     .filter((e) => previewKind(e.name) !== null)
     .map((e) => ({ path: e.path, name: e.name, chatId }));
 
+  // ── PC-folder sync badges (Drive-style) ─────────────────────────────────────
+  // A top-level folder whose name matches a connected PC folder is "synced". Files
+  // inside it get a per-file badge from the last-synced manifest: a workspace file
+  // present there (matching size) is in sync with the user's computer.
+  const syncedNames = useMemo(() => new Set(folderSync?.folders.map((f) => f.name) ?? []), [folderSync?.folders]);
+  const topSeg = path === "." ? null : path.split("/")[0];
+  const activeBase = topSeg && syncedNames.has(topSeg) ? folderSync?.synced[topSeg] : undefined;
+  const syncingNow = folderSync?.phase === "syncing";
+  const isSyncedFolder = (entry: FileEntry) => path === "." && syncedNames.has(entry.name);
+  const fileStatus = (entry: FileEntry): "synced" | "pending" | "syncing" | null => {
+    if (!activeBase || !topSeg) return null;
+    if (syncingNow) return "syncing";
+    const rel = entry.path.startsWith(`${topSeg}/`) ? entry.path.slice(topSeg.length + 1) : entry.name;
+    const b = activeBase[rel];
+    return b && b.size === entry.size ? "synced" : "pending";
+  };
+  const FileStatus = ({ entry }: { entry: FileEntry }) => {
+    const s = fileStatus(entry);
+    if (!s) return null;
+    if (s === "syncing") return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" aria-label={t("statusSyncing")} />;
+    if (s === "synced") return <Check className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-500" aria-label={t("statusSynced")} />;
+    return <Cloud className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-label={t("statusPending")} />;
+  };
+
   const downloadUrl = (p: string) => `/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(p)}`;
   const downloadAll = () => {
     const params = new URLSearchParams({ chatId });
@@ -212,6 +240,12 @@ export function WorkspacePanel({
         <button type="button" onClick={() => setPath(entry.path)} className="min-w-0 flex-1 text-left">
           <p className="truncate text-sm font-medium">{entry.name}</p>
         </button>
+        {isSyncedFolder(entry) && (
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary" title={t("syncedFolder")}>
+            {syncingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+            {t("synced")}
+          </span>
+        )}
       </div>
     );
   };
@@ -229,7 +263,10 @@ export function WorkspacePanel({
         >
           <FileThumb file={file} className="h-9 w-9 shrink-0 rounded-lg" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm text-foreground/90">{entry.name}</span>
+            <span className="flex items-center gap-1.5">
+              <span className="min-w-0 truncate text-sm text-foreground/90">{entry.name}</span>
+              <FileStatus entry={entry} />
+            </span>
             <span className="block text-[10px] uppercase tabular-nums text-muted-foreground">
               {extOf(entry.name) ? `${extOf(entry.name)} · ` : ""}
               {formatSize(entry.size)}

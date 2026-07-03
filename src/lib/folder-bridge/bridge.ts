@@ -12,7 +12,7 @@
 import { planSync, type Manifest } from "./plan";
 import {
   walkLocal, hashCandidates, mergeHashed, sha256Hex,
-  readLocalFile, writeLocalFile, deleteLocalFile,
+  readLocalFile, writeLocalFile, deleteLocalFile, ensureLocalDir,
   type DirHandle, type HashedManifest,
 } from "./local-fs";
 
@@ -64,19 +64,20 @@ const lastLocal = new Map<string, HashedManifest>();
 
 // ── File API (workspace side, /workspace/<name>/…) ───────────────────────────
 
-async function serverManifest(chatId: string, name: string): Promise<Manifest> {
+async function serverTree(chatId: string, name: string): Promise<{ files: Manifest; dirs: string[] }> {
   const res = await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(name)}&depth=20`);
-  if (!res.ok) return {};
+  if (!res.ok) return { files: {}, dirs: [] };
   const { entries } = (await res.json()) as { entries?: { path: string; isDirectory: boolean; size: number; modifiedAt: string | null }[] };
-  const m: Manifest = {};
+  const files: Manifest = {};
+  const dirs: string[] = [];
   for (const e of entries ?? []) {
-    if (e.isDirectory) continue;
     // Entries may come back relative to the queried dir or to the workspace root;
     // normalize to a path relative to the folder.
     const rel = e.path.startsWith(`${name}/`) ? e.path.slice(name.length + 1) : e.path;
-    m[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size };
+    if (e.isDirectory) dirs.push(rel);
+    else files[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size };
   }
-  return m;
+  return { files, dirs };
 }
 
 // Upload many files in batches to the folder-sync endpoint (one request per
@@ -179,6 +180,13 @@ export async function requestReconnect(folderId: string): Promise<boolean> {
   return state === "granted";
 }
 
+/** The last-synced manifest for a folder (its files' paths → mtime/size/hash),
+ *  or null before the first sync. Drives the file browser's per-file sync badges:
+ *  a workspace file present here (and matching size) is in sync with the PC copy. */
+export function syncedManifest(folderId: string): Manifest | null {
+  return bases.get(folderId) ?? null;
+}
+
 /** Forget a folder's handle locally (called when the row is deleted). */
 export async function forget(folderId: string): Promise<void> {
   bases.delete(folderId);
@@ -195,7 +203,7 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
 
   const base = bases.get(folder.id) ?? null;
   const local = await localHashed(handle, folder.id);
-  const remote = await serverManifest(chatId, folder.name);
+  const { files: remote, dirs: remoteDirs } = await serverTree(chatId, folder.name);
   const plan = planSync(local, remote, base);
 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
@@ -205,6 +213,9 @@ export async function sync(chatId: string, folder: PcFolder): Promise<{ synced: 
   for (const path of [...plan.download, ...remoteWins]) await writeLocalFile(handle, path, await downloadFromWorkspace(chatId, folder.name, path));
   for (const path of plan.deleteRemote) await deleteFromWorkspace(chatId, folder.name, path);
   for (const path of plan.deleteLocal) await deleteLocalFile(handle, path);
+  // File-based sync misses empty directories — mirror the server's folders so an
+  // empty subfolder the agent created still shows up on the user's computer.
+  for (const d of remoteDirs) await ensureLocalDir(handle, d).catch(() => {});
 
   // Reconciled: local now matches the server for every touched path. Re-walk to
   // capture that as the new base (the common ancestor for the next sync).

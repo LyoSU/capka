@@ -858,6 +858,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
         onClose={() => setFilesOpen(false)}
         running={isLoading}
         revision={toolRevision}
+        folderSync={folderSync}
       />
     </div>
     </PreviewProvider>

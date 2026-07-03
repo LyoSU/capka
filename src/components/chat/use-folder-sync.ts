@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PcFolder } from "@/lib/folder-bridge/bridge";
+import type { Manifest } from "@/lib/folder-bridge/plan";
 
 export type FolderSyncPhase = "idle" | "syncing" | "error";
 
@@ -25,6 +26,9 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   // Whether THIS user may attach a folder at all (the org gate + role), from the
   // server. Undefined until known → the UI shows nothing rather than flashing.
   const [canAttach, setCanAttach] = useState(false);
+  // Last-synced manifest per folder NAME — the file browser reads it to badge each
+  // workspace file as synced-with-the-PC or pending.
+  const [synced, setSynced] = useState<Record<string, Manifest>>({});
   const foldersRef = useRef(folders);
   foldersRef.current = folders;
 
@@ -64,9 +68,15 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
     if (live.length === 0) return;
     setPhase("syncing");
     try {
-      const { sync } = await import("@/lib/folder-bridge/bridge");
+      const { sync, syncedManifest } = await import("@/lib/folder-bridge/bridge");
       let total = 0;
       for (const f of live) total += (await sync(chatId, f)).conflicts;
+      // Snapshot the post-sync manifests so the file browser can badge statuses.
+      setSynced((prev) => {
+        const next = { ...prev };
+        for (const f of live) { const m = syncedManifest(f.id); if (m) next[f.name] = m; }
+        return next;
+      });
       setConflicts(total);
       setLastSyncedAt(Date.now());
       setPhase("idle");
@@ -112,7 +122,7 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   }, [refresh]);
 
   return {
-    chatId, folders, needReconnect, phase, lastSyncedAt, conflicts, supported, canAttach,
+    chatId, folders, needReconnect, phase, lastSyncedAt, conflicts, supported, canAttach, synced,
     pushAll: syncAll, pullAll: syncAll, connect, importFallback, reconnect: reconnectOne, remove, refresh,
   };
 }

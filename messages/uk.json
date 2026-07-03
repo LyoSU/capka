@@ -350,7 +350,12 @@
       "groupFolders": "Теки",
       "groupImages": "Зображення",
       "groupDocuments": "Документи",
-      "groupOther": "Інше"
+      "groupOther": "Інше",
+      "synced": "Синхронізовано",
+      "syncedFolder": "Синхронізується з вашим комп'ютером",
+      "statusSynced": "Синхронізовано з вашим комп'ютером",
+      "statusPending": "Ще не на вашому комп'ютері",
+      "statusSyncing": "Синхронізація…"
     },
     "preview": {
       "prev": "Назад",

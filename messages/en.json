@@ -350,7 +350,12 @@
       "groupFolders": "Folders",
       "groupImages": "Images",
       "groupDocuments": "Documents",
-      "groupOther": "Other"
+      "groupOther": "Other",
+      "synced": "Synced",
+      "syncedFolder": "Synced with your computer",
+      "statusSynced": "Synced to your computer",
+      "statusPending": "Not yet on your computer",
+      "statusSyncing": "Syncing…"
     },
     "preview": {
       "prev": "Previous",
