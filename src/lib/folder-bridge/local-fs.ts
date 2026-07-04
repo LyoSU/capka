@@ -57,9 +57,13 @@ export interface DirHandle {
 /** Recursively list a directory handle into a mtime+size manifest (no hashing).
  *  Skips ignored trees (never even descends node_modules/.git/etc — the big perf
  *  win) and files over the size cap; `skipped` counts oversized files, so the UI
- *  can tell the user why a large file didn't make it into the sandbox. */
-export async function walkLocal(dir: DirHandle, prefix = ""): Promise<{ files: LocalManifest; skipped: number }> {
+ *  can tell the user why a large file didn't make it into the sandbox. `excluded`
+ *  lists those oversized paths so the planner can leave them alone instead of
+ *  reading their absence as a deletion (a file that grows past the cap must not
+ *  trigger a delete of the copy on the other side). */
+export async function walkLocal(dir: DirHandle, prefix = ""): Promise<{ files: LocalManifest; skipped: number; excluded: string[] }> {
   const files: LocalManifest = {};
+  const excluded: string[] = [];
   let skipped = 0;
   for await (const [name, handle] of dir.entries()) {
     const path = prefix ? `${prefix}/${name}` : name;
@@ -67,14 +71,15 @@ export async function walkLocal(dir: DirHandle, prefix = ""): Promise<{ files: L
     if (handle.kind === "directory") {
       const sub = await walkLocal(handle, path);
       Object.assign(files, sub.files);
+      excluded.push(...sub.excluded);
       skipped += sub.skipped;
     } else {
       const f = await handle.getFile();
-      if (oversized(f.size)) { skipped++; continue; }
+      if (oversized(f.size)) { skipped++; excluded.push(path); continue; }
       files[path] = { mtime: f.lastModified, size: f.size };
     }
   }
-  return { files, skipped };
+  return { files, skipped, excluded };
 }
 
 /** Recursively list a directory handle's SUBDIRECTORIES (paths, no files) — the dir

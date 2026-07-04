@@ -35,8 +35,12 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
     try {
       const r = await folders.importFallback();
       if (r) setImported(r);
-    } catch {
-      setErr(t("syncFailed"));
+    } catch (e) {
+      // Same ceiling as live sync — surface the same localized "too large" message.
+      if (e instanceof Error && e.name === "FolderTooLargeError") {
+        const m = e as Error & { count?: number; bytes?: number };
+        setErr(t("tooLarge", { count: m.count ?? 0, size: humanSize(m.bytes ?? 0), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
+      } else setErr(t("syncFailed"));
     }
     setBusy(false);
   };
@@ -103,7 +107,7 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
               {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <FolderUp className="h-4 w-4 shrink-0 text-muted-foreground" />}
               {t("importFolder")}
             </button>
-            {imported && (
+            {imported && (imported.count > 0 ? (
               <div className="px-2 pt-1 text-xs text-muted-foreground">
                 {t("imported", { n: imported.count, name: imported.name })}{" "}
                 <a
@@ -114,7 +118,11 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
                   {t("downloadZip")}
                 </a>
               </div>
-            )}
+            ) : (
+              // Nothing survived the filter (all skipped/oversized) — no folder was
+              // created, so don't offer a zip link to a path that doesn't exist.
+              <div className="px-2 pt-1 text-xs text-muted-foreground">{t("nothingImported")}</div>
+            ))}
             <div className="px-2 pt-1 text-xs text-muted-foreground/70">{t("unsupportedBrowser")}</div>
           </>
         )}

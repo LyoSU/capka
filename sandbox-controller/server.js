@@ -425,8 +425,13 @@ const server = createServer(async (req, res) => {
       // Clamp 1..20 — folder sync needs the full nested tree, and the 1000-entry
       // limit in list() still bounds the response size.
       const depth = Math.min(20, Math.max(1, parseInt(url.searchParams.get("depth") || "1", 10) || 1));
-      const entries = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".", depth);
-      return jsonRes(res, 200, { entries });
+      // Folder sync needs a COMPLETE tree: an incomplete listing looks like files
+      // were deleted on the server and would drive a destructive local delete. It
+      // asks for a high limit and checks `truncated` to abort if the tree is too
+      // big to enumerate whole. Default 1000 keeps the file browser's cheap listing.
+      const limit = Math.min(20000, Math.max(1, parseInt(url.searchParams.get("limit") || "1000", 10) || 1000));
+      const entries = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".", depth, limit);
+      return jsonRes(res, 200, { entries, truncated: entries.length >= limit });
     }
 
     // DELETE /sessions/:id/files?path=  — remove one file (composer attachment

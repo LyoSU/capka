@@ -30,7 +30,9 @@ All notable changes to Capka are documented here. Format follows
   around each turn; live sync needs Chrome/Edge, other browsers get a one-shot
   import + zip download. Sync skips dependency/build trees (node_modules, .git…),
   model/binary blobs, and files over 100 MB, and refuses a folder over 5000 files /
-  100 MB; progress is shown per phase. See SECURITY.md.
+  100 MB; progress is shown per phase. Deletions propagate both ways and survive a
+  page reload; a partial or failed workspace read aborts the sync instead of
+  deleting files. See SECURITY.md.
 
 ## [0.2.4] - 2026-07-03
 

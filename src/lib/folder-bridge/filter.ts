@@ -36,12 +36,14 @@ const IGNORE_SEGMENTS = new Set([
 ]);
 
 /** File extensions for model weights / disk images that should never sync. Only
- *  UNAMBIGUOUS blob formats — ambiguous data containers (.h5/HDF5, .npy, .parquet)
- *  are left to the size cap so a data analyst's real dataset is never dropped. */
+ *  UNAMBIGUOUS blob formats — ambiguous containers are left to the size cap so a
+ *  user's real file is never silently dropped: .h5/HDF5, .npy, .parquet (data),
+ *  and deliberately NOT .bin/.pb (firmware, protobuf schemas, small fixtures,
+ *  embedded assets — a big model .bin is caught by the size cap anyway). */
 const IGNORE_EXT = [
   // Model weights
-  ".safetensors", ".gguf", ".ggml", ".bin", ".pt", ".pth", ".onnx", ".ckpt",
-  ".pb", ".tflite", ".mlmodel", ".caffemodel",
+  ".safetensors", ".gguf", ".ggml", ".pt", ".pth", ".onnx", ".ckpt",
+  ".tflite", ".mlmodel", ".caffemodel",
   // Disk / VM images
   ".iso", ".dmg", ".img", ".vmdk", ".qcow2", ".vdi", ".vhd", ".vhdx", ".ova",
 ];
@@ -51,6 +53,23 @@ export const FOLDER_MAX_FILE_MB = 100;
 /** Ceiling that blocks attaching a folder outright (checked after filtering). */
 export const FOLDER_MAX_FILES = 5000;
 export const FOLDER_MAX_TOTAL_MB = 100;
+
+/** Thrown when a folder exceeds the attach ceiling (too many files or bytes AFTER
+ *  filtering). Carries the numbers so the UI can localize the message; identified by
+ *  `name` (string) so it survives the dynamic-import boundary and both the live-sync
+ *  and one-shot-import paths raise the exact same shape. */
+export class FolderTooLargeError extends Error {
+  constructor(public count: number, public bytes: number) {
+    super("folder too large");
+    this.name = "FolderTooLargeError";
+  }
+}
+
+/** Does this (already-filtered) count/byte total exceed the attach ceiling? Shared
+ *  by the live-sync picker and the one-shot fallback so both refuse the same folders. */
+export function exceedsCeiling(count: number, bytes: number): boolean {
+  return count > FOLDER_MAX_FILES || bytes > FOLDER_MAX_TOTAL_MB * 1024 * 1024;
+}
 
 /** Is this path (file OR directory) one we never sync? Used to skip descending an
  *  ignored directory during the walk, and to drop ignored files on both sides. */

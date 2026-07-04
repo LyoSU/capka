@@ -76,6 +76,40 @@ describe("planSync — first sync (no base)", () => {
   });
 });
 
+describe("planSync — excluded paths are never a delete signal", () => {
+  // A path we deliberately skipped (oversized on one side) must not be read as a
+  // deletion just because it's missing from that side's manifest. Leave it alone
+  // entirely: no delete, no download that would clobber the user's big file.
+  it("does not deleteRemote a file that went oversized locally (dropped from local)", () => {
+    const base: Manifest = { "big.bin": e("A") };
+    const remote: Manifest = { "big.bin": e("A") };
+    // local dropped it (now > cap) → without the guard this is deleteRemote
+    const plan = planSync({}, remote, base, new Set(["big.bin"]));
+    expect(plan).toMatchObject({ deleteRemote: [], deleteLocal: [], upload: [], download: [] });
+  });
+
+  it("does not deleteLocal a file that went oversized on the server (dropped from remote)", () => {
+    const base: Manifest = { "big.bin": e("A") };
+    const local: Manifest = { "big.bin": e("A") };
+    const plan = planSync(local, {}, base, new Set(["big.bin"]));
+    expect(plan).toMatchObject({ deleteRemote: [], deleteLocal: [], upload: [], download: [] });
+  });
+
+  it("does not download/overwrite when a local file is excluded but present remotely", () => {
+    const local: Manifest = {}; // excluded (oversized) → dropped from the walk
+    const remote: Manifest = { "big.bin": e("A") };
+    const plan = planSync(local, remote, null, new Set(["big.bin"]));
+    expect(plan.download).toEqual([]);
+  });
+
+  it("leaves non-excluded files planned as usual", () => {
+    const base: Manifest = { "a.txt": e("A"), "big.bin": e("B") };
+    const remote: Manifest = { "a.txt": e("A"), "big.bin": e("B") };
+    const plan = planSync({}, remote, base, new Set(["big.bin"]));
+    expect(plan.deleteRemote).toEqual(["a.txt"]); // a.txt genuinely gone; big.bin protected
+  });
+});
+
 describe("planDirs — directory 3-way (presence-based, no content)", () => {
   it("mirrors a new server dir to the PC (no base)", () => {
     expect(planDirs([], ["sub"], null)).toMatchObject({ createLocal: ["sub"], deleteRemote: [], deleteLocal: [] });

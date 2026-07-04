@@ -29,11 +29,18 @@ function changed(entry: Entry, base: Entry | undefined): boolean {
   return !base || !sameContent(entry, base);
 }
 
-export function planSync(local: Manifest, remote: Manifest, base: Manifest | null): SyncPlan {
+/** `excluded` are paths we deliberately did NOT track on one/both sides (oversized
+ *  now, though they may sit in base or the other manifest). Their absence from a
+ *  manifest is NOT a deletion — it's "we chose not to look" — so the planner leaves
+ *  them completely alone (no delete that drops a real copy, no download that would
+ *  clobber the user's larger local file). Without this, a file that grows past the
+ *  cap on one side gets deleted on the other. */
+export function planSync(local: Manifest, remote: Manifest, base: Manifest | null, excluded?: Set<string>): SyncPlan {
   const plan: SyncPlan = { upload: [], download: [], deleteRemote: [], deleteLocal: [], conflicts: [] };
   const paths = new Set([...Object.keys(local), ...Object.keys(remote), ...Object.keys(base ?? {})]);
 
   for (const path of paths) {
+    if (excluded?.has(path)) continue; // skipped on some side → never infer a delete
     const l = local[path];
     const r = remote[path];
     const b = base?.[path];

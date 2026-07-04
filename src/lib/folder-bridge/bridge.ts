@@ -15,7 +15,7 @@ import {
   readLocalFile, writeLocalFile, deleteLocalFile, deleteLocalDir, ensureLocalDir,
   type DirHandle, type HashedManifest,
 } from "./local-fs";
-import { ignoredPath, oversized, FOLDER_MAX_FILES, FOLDER_MAX_TOTAL_MB } from "./filter";
+import { ignoredPath, oversized, exceedsCeiling, FolderTooLargeError } from "./filter";
 
 export type PcFolder = { id: string; name: string };
 
@@ -23,16 +23,7 @@ export type PcFolder = { id: string; name: string };
  *  thin bar ("Uploading 34/210"). total is 0 while scanning (count unknown yet). */
 export type SyncProgress = { phase: "scanning" | "hashing" | "uploading" | "downloading"; done: number; total: number };
 
-/** Thrown by pickAndCreate when a folder exceeds the attach ceiling (too many files
- *  or too many bytes AFTER filtering). Carries the numbers so the UI can localize
- *  the message; identified by `name` to avoid importing the class across the dynamic
- *  import boundary. */
-export class FolderTooLargeError extends Error {
-  constructor(public count: number, public bytes: number) {
-    super("folder too large");
-    this.name = "FolderTooLargeError";
-  }
-}
+export { FolderTooLargeError }; // re-export so existing bridge importers still find it
 
 declare global {
   interface Window {
@@ -84,21 +75,37 @@ const lastLocal = new Map<string, HashedManifest>();
 
 // ── File API (workspace side, /workspace/<name>/…) ───────────────────────────
 
-async function serverTree(chatId: string, name: string): Promise<{ files: Manifest; dirs: string[] }> {
-  const res = await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(name)}&depth=20`);
-  if (!res.ok) return { files: {}, dirs: [] };
-  const { entries } = (await res.json()) as { entries?: { path: string; isDirectory: boolean; size: number; modifiedAt: string | null }[] };
+// Ask for a tree far larger than the attach ceiling (FOLDER_MAX_FILES) so a
+// legitimately-capped folder is always listed WHOLE; the server clamps this and
+// flags `truncated` if even this isn't enough, which aborts the sync (see below).
+const SYNC_LIST_LIMIT = 15000;
+
+async function serverTree(chatId: string, name: string): Promise<{ files: Manifest; dirs: string[]; excluded: string[] }> {
+  const res = await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(name)}&depth=20&limit=${SYNC_LIST_LIMIT}`);
+  // A non-OK response must NOT look like "the server is empty" — that would drive a
+  // destructive local delete of every synced file on a transient 403/500. Abort the
+  // sync instead (base is left untouched, so the next sync retries cleanly).
+  if (!res.ok) throw new Error(`Could not read the workspace (HTTP ${res.status}).`);
+  const { entries, truncated } = (await res.json()) as {
+    entries?: { path: string; isDirectory: boolean; size: number; modifiedAt: string | null }[];
+    truncated?: boolean;
+  };
+  // A truncated tree is an INCOMPLETE server view; treating the unseen files as
+  // deletions would wipe them locally. Refuse rather than sync a partial picture.
+  if (truncated) throw new Error("This folder's workspace copy is too large to sync safely.");
   const files: Manifest = {};
   const dirs: string[] = [];
+  const excluded: string[] = [];
   for (const e of entries ?? []) {
     // Entries may come back relative to the queried dir or to the workspace root;
     // normalize to a path relative to the folder.
     const rel = e.path.startsWith(`${name}/`) ? e.path.slice(name.length + 1) : e.path;
     if (ignoredPath(rel)) continue; // same skip-list as the local side (symmetry)
     if (e.isDirectory) dirs.push(rel);
-    else if (!oversized(e.size)) files[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size };
+    else if (oversized(e.size)) excluded.push(rel); // track: absence ≠ delete (see planSync)
+    else files[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size };
   }
-  return { files, dirs };
+  return { files, dirs, excluded };
 }
 
 // Upload many files in batches to the folder-sync endpoint (one request per
@@ -125,13 +132,17 @@ async function downloadFromWorkspace(chatId: string, name: string, rel: string):
 }
 
 async function deleteFromWorkspace(chatId: string, name: string, rel: string): Promise<void> {
-  await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(`${name}/${rel}`)}`, { method: "DELETE" });
+  const res = await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(`${name}/${rel}`)}`, { method: "DELETE" });
+  // A swallowed delete failure would let base advance as if the file were gone,
+  // so the next sync re-creates it (or reports a false "synced"). Abort instead;
+  // the controller delete is idempotent, so a missing path still returns OK.
+  if (!res.ok) throw new Error(`Could not delete ${rel} from the workspace (HTTP ${res.status}).`);
 }
 
 // ── Local hashing (with the prefilter) ───────────────────────────────────────
 
-async function localHashed(handle: DirHandle, folderId: string, onProgress?: (p: SyncProgress) => void): Promise<{ hashed: HashedManifest; skipped: number }> {
-  const { files: stats, skipped } = await walkLocal(handle);
+async function localHashed(handle: DirHandle, folderId: string, onProgress?: (p: SyncProgress) => void): Promise<{ hashed: HashedManifest; skipped: number; excluded: string[] }> {
+  const { files: stats, skipped, excluded } = await walkLocal(handle);
   const prev = lastLocal.get(folderId) ?? {};
   const fresh: Record<string, string> = {};
   const cand = hashCandidates(stats, prev);
@@ -142,7 +153,24 @@ async function localHashed(handle: DirHandle, folderId: string, onProgress?: (p:
   }
   const merged = mergeHashed(stats, prev, fresh);
   lastLocal.set(folderId, merged);
-  return { hashed: merged, skipped };
+  return { hashed: merged, skipped, excluded };
+}
+
+/** Rehydrate the 3-way base for a folder from its persisted row (written at the end
+ *  of the last sync). Populates the in-memory `bases`/`baseDirs` so a page reload
+ *  doesn't forget deletes. Only accepts the versioned `{v:1,files,dirs}` shape;
+ *  anything else (absent, legacy, malformed) leaves the base empty — the safe union
+ *  fallback. Best-effort: never throws. */
+async function hydrateBase(folderId: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/folders/${folderId}/state`);
+    if (!res.ok) return;
+    const { state } = (await res.json()) as { state?: { v?: number; files?: Manifest; dirs?: string[] } };
+    if (state?.v === 1 && state.files) {
+      bases.set(folderId, state.files);
+      baseDirs.set(folderId, state.dirs ?? []);
+    }
+  } catch { /* best-effort — empty base is safe */ }
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -166,9 +194,7 @@ export async function pickAndCreate(chatId: string, opts?: { name?: string; ensu
   const scan = await walkLocal(handle);
   const count = Object.keys(scan.files).length;
   const bytes = Object.values(scan.files).reduce((sum, f) => sum + f.size, 0);
-  if (count > FOLDER_MAX_FILES || bytes > FOLDER_MAX_TOTAL_MB * 1024 * 1024) {
-    throw new FolderTooLargeError(count, bytes);
-  }
+  if (exceedsCeiling(count, bytes)) throw new FolderTooLargeError(count, bytes);
 
   await opts?.ensureChat?.();
   // Mirror the server's name sanitization so we can detect an existing row.
@@ -240,13 +266,22 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
   const handle = await loadHandle(folder.id);
   if (!handle) throw new Error("Folder not connected.");
 
+  // After a reload the in-memory base is gone; rehydrate it from the row persisted
+  // at the end of the last sync so a delete on either side still propagates instead
+  // of being reverted (a missing base makes the next sync a union — safe, but it
+  // forgets deletes). Best-effort: a failed/absent load just leaves base null.
+  if (!bases.has(folder.id)) await hydrateBase(folder.id);
+
   const base = bases.get(folder.id) ?? null;
   const dbase = baseDirs.get(folder.id) ?? null;
   onProgress?.({ phase: "scanning", done: 0, total: 0 });
-  const { hashed: local, skipped } = await localHashed(handle, folder.id, onProgress);
+  const { hashed: local, skipped, excluded: localExcluded } = await localHashed(handle, folder.id, onProgress);
   const localDirs = await walkLocalDirs(handle);
-  const { files: remote, dirs: remoteDirs } = await serverTree(chatId, folder.name);
-  const plan = planSync(local, remote, base);
+  const { files: remote, dirs: remoteDirs, excluded: remoteExcluded } = await serverTree(chatId, folder.name);
+  // Paths skipped (oversized) on either side: their absence from a manifest is a
+  // "didn't look", not a delete. The planner leaves them untouched entirely.
+  const excluded = new Set([...localExcluded, ...remoteExcluded]);
+  const plan = planSync(local, remote, base, excluded);
   const dirPlan = planDirs(localDirs, remoteDirs, dbase);
 
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
@@ -272,14 +307,17 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
   // capture that as the new base (the common ancestor for the next sync).
   lastLocal.delete(folder.id); // force a fresh re-hash of what we just wrote
   const { hashed: merged } = await localHashed(handle, folder.id);
+  const mergedDirs = await walkLocalDirs(handle);
   bases.set(folder.id, merged);
-  baseDirs.set(folder.id, await walkLocalDirs(handle));
-  // Persist best-effort for durability; a failure just means the next reload
-  // starts from an empty base (safe — see the bases note above).
+  baseDirs.set(folder.id, mergedDirs);
+  // Persist BOTH the file and directory base so a reload can rehydrate a complete
+  // ancestor (dirs are needed to tell a deleted folder from a new one). Versioned
+  // so hydrateBase can reject anything it doesn't understand. Best-effort — a
+  // failure just means the next reload starts from an empty base (safe union).
   fetch(`/api/folders/${folder.id}/state`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ state: merged }),
+    body: JSON.stringify({ state: { v: 1, files: merged, dirs: mergedDirs } }),
   }).catch(() => {});
 
   return {

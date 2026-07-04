@@ -15,6 +15,10 @@ export const GET = apiHandler(async (req: Request) => {
   // top-level entries came back, so a subfolder appeared but its files never did.
   const depthRaw = parseInt(searchParams.get("depth") || "1", 10);
   const depth = Number.isFinite(depthRaw) ? depthRaw : 1;
+  // Folder sync passes a high limit so it gets a COMPLETE tree (a truncated one
+  // reads as server-side deletes and would drive a destructive local delete).
+  const limitRaw = parseInt(searchParams.get("limit") || "0", 10);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
 
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
 
@@ -22,7 +26,7 @@ export const GET = apiHandler(async (req: Request) => {
   // no running container required.
   const chat = await requireOwned(chats, chatId, userId, "Chat");
   const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
-  const data = await listFiles(key, path, userId, depth);
+  const data = await listFiles(key, path, userId, depth, limit);
   return Response.json(data);
 });
 

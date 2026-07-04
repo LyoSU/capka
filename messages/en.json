@@ -506,6 +506,7 @@
       "unsupportedBrowser": "Live folder sync needs Chrome or Edge.",
       "importFolder": "Import a folder",
       "imported": "Imported {n} files from \"{name}\"",
+      "nothingImported": "Nothing to import — every file was skipped (too large or not syncable).",
       "downloadZip": "Download as zip"
     }
   },

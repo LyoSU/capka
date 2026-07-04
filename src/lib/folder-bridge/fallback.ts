@@ -7,7 +7,7 @@
  * dependency to install (and nothing new for a self-hoster's container to miss).
  */
 
-import { ignoredPath, oversized } from "./filter";
+import { ignoredPath, oversized, exceedsCeiling, FolderTooLargeError } from "./filter";
 
 /** Open the OS directory picker via a hidden `<input webkitdirectory>` and resolve
  *  the chosen files (each carries `webkitRelativePath`). Resolves [] on cancel. */
@@ -52,6 +52,11 @@ export async function importFolderFallback(chatId: string): Promise<{ name: stri
     return !ignoredPath(inner) && !oversized(f.size);
   });
   if (files.length === 0) return { name, count: 0 };
+
+  // Same attach ceiling as live sync — refuse a huge import up front (before writing
+  // anything) rather than grinding through it and possibly failing part-way.
+  const bytes = files.reduce((sum, f) => sum + f.size, 0);
+  if (exceedsCeiling(files.length, bytes)) throw new FolderTooLargeError(files.length, bytes);
 
   // Batch through the folder-sync endpoint (rate-limited per request), so a big
   // folder doesn't trip the interactive per-file upload limiter. Each file's form

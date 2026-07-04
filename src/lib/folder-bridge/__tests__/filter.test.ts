@@ -50,6 +50,8 @@ describe("ignoredPath", () => {
     expect(ignoredPath("dataset.h5")).toBe(false);            // HDF5 is scientific data, not just Keras
     expect(ignoredPath("arr.npy")).toBe(false);
     expect(ignoredPath("cfg/.env")).toBe(false);              // small config, user's choice
+    expect(ignoredPath("firmware.bin")).toBe(false);          // .bin is ambiguous — size cap guards big models
+    expect(ignoredPath("schema.pb")).toBe(false);             // protobuf schema, not a frozen graph
   });
 
   it("does not eat legitimate folders with generic English names", () => {

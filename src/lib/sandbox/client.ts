@@ -160,10 +160,11 @@ type FileEntry = {
   modifiedAt: string | null;
 };
 
-export async function listFiles(sessionId: string, path = ".", userId?: string, depth?: number): Promise<{ entries: FileEntry[]; error?: string }> {
+export async function listFiles(sessionId: string, path = ".", userId?: string, depth?: number, limit?: number): Promise<{ entries: FileEntry[]; truncated?: boolean; error?: string }> {
   const id = sanitizeId(sessionId);
   const params = new URLSearchParams({ path });
   if (depth && depth > 1) params.set("depth", String(depth));
+  if (limit && limit > 1) params.set("limit", String(limit));
   if (userId) {
     params.set("userId", userId);
     params.set("token", workspaceToken(userId, sessionId));
