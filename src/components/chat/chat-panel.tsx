@@ -240,7 +240,12 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     // of dead scroll below the turn. (--kb is left in the padding on purpose:
     // that slack is what lets the list rise above the on-screen keyboard.)
     const footer = prevComposerH.current + 16;
-    const h = `${Math.max(0, el.clientHeight - footer - contentBelowUser - TOP_INSET)}px`;
+    // -2: an exact fit would rest the content precisely on the overflow
+    // boundary, where sub-pixel drift (fractional text heights vs the rounded
+    // clientHeight) flips the scrollbar on and off with every streamed delta
+    // in a fresh chat. Undershooting keeps "no scrollbar" a stable state; the
+    // pinned turn resting 2px shy of the header line is imperceptible.
+    const h = `${Math.max(0, el.clientHeight - footer - contentBelowUser - TOP_INSET - 2)}px`;
     // Only write when it actually changes — a no-op write would re-trigger the
     // ResizeObserver that calls this, risking a feedback loop.
     if (spacer.style.height !== h) spacer.style.height = h;

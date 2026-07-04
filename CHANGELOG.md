@@ -7,6 +7,8 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Fixed
+- The chat scrollbar no longer flickers in and out while a reply streams into
+  a fresh (not-yet-scrollable) chat.
 - Desktop: dragging the scrollbar while a reply is streaming no longer snaps
   the view back on every delta (scrolling felt locked until the mouse wheel
   was used once).
