@@ -6,6 +6,12 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-05
+
+### Added
+- Telegram bot now auto-creates an account on first contact, so a new user can just message the bot instead of signing in on the web first. Governed by the existing registration mode (`open` → active, `approval` → pending, `closed` → refused) and disabled until first-run setup completes; only from private chats. For a publicly-reachable bot, prefer `approval` mode — under `open` anyone who finds the bot gets an account that can spend the shared key.
+- Attach folders to a chat's sandbox, off by default via two new org settings in Settings → Security. `host_folder_access` (admin-only) bind-mounts a server folder at `/folders/<name>`; restrict mountable paths with `SANDBOX_MOUNT_ALLOW` (`:`-separated roots). `pc_folder_access` (`off`/`admins`/`everyone`) lets users sync a folder from their own computer (live sync needs Chrome/Edge; other browsers get a one-shot import + zip). See SECURITY.md.
+
 ### Fixed
 - Desktop: buttons (e.g. the sidebar toggle) no longer intermittently swallow
   clicks while a reply is streaming — streamed markdown updates were triggering
@@ -25,10 +31,6 @@ All notable changes to Capka are documented here. Format follows
   renders/s, halving main-thread load at the tail of a long answer.
 - Message actions (edit/fork/regenerate/version arrows) stay visible but
   disabled while a reply is streaming, instead of vanishing and reappearing.
-
-### Added
-- Telegram bot now auto-creates an account on first contact, so a new user can just message the bot instead of signing in on the web first. Governed by the existing registration mode (`open` → active, `approval` → pending, `closed` → refused) and disabled until first-run setup completes; only from private chats. For a publicly-reachable bot, prefer `approval` mode — under `open` anyone who finds the bot gets an account that can spend the shared key.
-- Attach folders to a chat's sandbox, off by default via two new org settings in Settings → Security. `host_folder_access` (admin-only) bind-mounts a server folder at `/folders/<name>`; restrict mountable paths with `SANDBOX_MOUNT_ALLOW` (`:`-separated roots). `pc_folder_access` (`off`/`admins`/`everyone`) lets users sync a folder from their own computer (live sync needs Chrome/Edge; other browsers get a one-shot import + zip). See SECURITY.md.
 
 ## [0.2.4] - 2026-07-03
 
