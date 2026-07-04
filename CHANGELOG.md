@@ -7,6 +7,10 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Fixed
+- Desktop: buttons (e.g. the sidebar toggle) no longer intermittently swallow
+  clicks while a reply is streaming — streamed markdown updates were triggering
+  a full-page view transition ~4×/s, whose overlay also made the whole page
+  appear to re-render. Route-navigation crossfades are unaffected.
 - The chat scrollbar no longer flickers in and out while a reply streams into
   a fresh (not-yet-scrollable) chat.
 - Desktop: dragging the scrollbar while a reply is streaming no longer snaps

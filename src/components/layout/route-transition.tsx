@@ -1,6 +1,7 @@
 "use client";
 
 import { ViewTransition } from "react";
+import { usePathname } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 /**
@@ -21,6 +22,19 @@ import { useIsMobile } from "@/hooks/use-mobile";
  */
 export function RouteTransition({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
+  const pathname = usePathname();
   if (isMobile) return <>{children}</>;
-  return <ViewTransition>{children}</ViewTransition>;
+  // update="none": a bare <ViewTransition> activates on ANY transition-marked
+  // update inside it — and Streamdown applies every streamed markdown block via
+  // its own useTransition, so a streaming reply ran a full-document
+  // startViewTransition ~4×/s. Each one snapshots the page and overlays
+  // ::view-transition, which eats clicks (dead sidebar button) and reads as the
+  // whole page re-rendering. Keying by pathname keeps the route crossfade: a
+  // navigation exits the old boundary and enters the new one instead of being
+  // an in-place update.
+  return (
+    <ViewTransition key={pathname} enter="auto" exit="auto" update="none">
+      {children}
+    </ViewTransition>
+  );
 }
