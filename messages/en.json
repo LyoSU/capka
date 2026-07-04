@@ -1376,7 +1376,7 @@
     }
   },
   "telegram": {
-    "start": "👋 **Welcome to Capka!**\n\nI'm your AI assistant right here in Telegram — I answer questions and work with text, photos and files.\n\nTo get started, open Capka and sign in with Telegram — your account will be linked automatically.\n\nAlready have a connection code? Send `/link CODE`.",
+    "start": "👋 **Welcome to Capka!**\n\nI'm your AI assistant right here in Telegram — I answer questions and work with text, photos and files.\n\nJust send me a message and I'll get going. /new starts a fresh chat.\n\nAlready have a Capka account? Open Capka and connect Telegram in Settings.",
     "startLinked": "👋 **Welcome back!** Your account is already connected.\n\nJust message me and I'll get going. You can send text, photos and files, and /new opens a fresh chat.",
     "openApp": "🦀 Open Capka",
     "openInBrowser": "💬 Open in browser",
@@ -1384,7 +1384,6 @@
     "linkUsage": "Send the code right after the command: `/link CODE`\n\nYou'll find your connection code in Capka's settings.",
     "invalidCode": "🤔 That code is invalid or has expired. Generate a new one in Capka and try again.",
     "linked": "✅ **Account linked!**\n\nJust message me and I'll get going. You can send text, photos and files.",
-    "linkFirst": "Connect your account first. Open Capka and sign in with Telegram — it takes a few seconds and links automatically.",
     "newChat": "🆕 **New chat**\n\nYour previous conversation is saved. Go ahead — we're starting fresh.",
     "notLinked": "To let me reply, connect your account first.\n\nOpen Capka and sign in with Telegram — it takes a few seconds and links automatically.",
     "tooFast": "⏳ Hold on a moment — you're sending messages too fast.",
@@ -1400,6 +1399,9 @@
     "technicalDetails": "Technical details",
     "doneLog": "✅ {count, plural, one {# tool} other {# tools}} · {secs}s",
     "pendingApproval": "⏳ **Account awaiting approval**\n\nAn administrator needs to approve your account. You'll be able to chat as soon as they do.",
+    "registrationClosed": "Registration is currently closed. Ask your administrator for access.",
+    "setupIncomplete": "Capka isn't set up yet. Ask your administrator to finish the initial setup, then message me again.",
+    "accountNotActive": "Your account isn't active. If you think this is a mistake, ask your administrator.",
     "capabilityNotice": "⚠️ The current model can't process this attachment ({modalities}). Use /model to pick one that supports it.",
     "modality": {
       "audio": "audio",

@@ -18,6 +18,7 @@ import { getPublicUrl } from "@/lib/url";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { uploadFile } from "@/lib/sandbox/client";
 import { modelChoices } from "@/lib/telegram/model-menu";
+import { provisionTelegramUser } from "@/lib/auth";
 import type { FileRef } from "@/lib/constants";
 import type { TaskPayload } from "@/lib/tasks/runner";
 
@@ -191,19 +192,11 @@ function flushAlbum(groupId: string): void {
  * durable task whose result the runner streams back to this chat.
  */
 async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void> {
-  const link = await findLink(ctx.from!.id);
-  if (!link) {
-    await reply(ctx, "notLinked", { button: openAppButton() });
-    return;
-  }
-  // Approval gate: a pending account must not spend the shared key from Telegram
-  // either — mirror the web /api/chat guard. (A Telegram login auto-links before
-  // approval, so without this a pending user could DM the bot to slip past it.)
-  const [u] = await db.select({ status: users.status }).from(users).where(eq(users.id, link.userId)).limit(1);
-  if (u?.status === "pending") {
-    await reply(ctx, "pendingApproval", { button: { label: "openApp", url: `${getPublicUrl()}/pending` } });
-    return;
-  }
+  // Resolve (auto-provisioning on first contact) and gate the account. ensureUser
+  // handles the not-a-user / closed / pre-setup / pending / rejected cases with
+  // the right reply and returns null; a non-null link is an ACTIVE user.
+  const link = await ensureUser(ctx);
+  if (!link) return;
   // Same per-user flood guard as the web enqueue path.
   if (!take(`chat:${link.userId}`).ok) {
     await reply(ctx, "tooFast");
@@ -328,15 +321,15 @@ async function buildBot(): Promise<Bot | null> {
       await linkAccount(ctx, code);
       return;
     }
-    // A bare /start greets — but tailor it: an already-linked user gets a "you're
-    // set, just message me" nudge to the web UI, a stranger gets the onboarding
-    // path to sign in.
-    const link = await findLink(ctx.from!.id);
-    if (link) {
-      await reply(ctx, "startLinked", { button: openChatButton() });
-    } else {
-      await reply(ctx, "start", { button: openAppButton() });
-    }
+    // A bare /start greets — and, for a stranger in a private chat, silently
+    // provisions their account first (respecting registration policy) so they can
+    // just start messaging. A returning user gets the "you're set" nudge; a
+    // brand-new one gets the welcome. If provisioning is refused (closed / pending
+    // / pre-setup), ensureUser already replied — nothing more to say.
+    const returning = await findLink(ctx.from!.id);
+    const link = await ensureUser(ctx);
+    if (!link) return;
+    await reply(ctx, returning ? "startLinked" : "start", { button: returning ? openChatButton() : openAppButton() });
   });
 
   bot.command("link", async (ctx) => {
@@ -349,11 +342,8 @@ async function buildBot(): Promise<Bot | null> {
   });
 
   bot.command("new", async (ctx) => {
-    const link = await findLink(ctx.from!.id);
-    if (!link) {
-      await reply(ctx, "linkFirst", { button: openAppButton() });
-      return;
-    }
+    const link = await ensureUser(ctx);
+    if (!link) return;
     const id = nanoid();
     await db
       .insert(chats)
@@ -366,11 +356,8 @@ async function buildBot(): Promise<Bot | null> {
   // list. The menu is a one-per-row inline keyboard; the tap is handled by the
   // `m:<index>` callback below, which re-derives the same list and stores the ref.
   bot.command("model", async (ctx) => {
-    const link = await findLink(ctx.from!.id);
-    if (!link) {
-      await reply(ctx, "linkFirst", { button: openAppButton() });
-      return;
-    }
+    const link = await ensureUser(ctx);
+    if (!link) return;
     const choices = await modelChoices(link.userId);
     if (!choices.length) {
       await reply(ctx, "modelEmpty");
@@ -793,4 +780,52 @@ async function findLink(telegramUserId: number) {
     .where(eq(telegramLinks.telegramUserId, telegramUserId))
     .limit(1);
   return link || null;
+}
+
+/**
+ * Resolve the platform user behind an incoming update, auto-provisioning a
+ * brand-new account on first contact when registration policy allows. Returns a
+ * usable link ONLY for an ACTIVE user; for every other case it sends the right
+ * reply and returns null, so callers collapse to `if (!link) return`.
+ *
+ * Cases handled here:
+ *  - already linked & active   → returns the link (the common path)
+ *  - not a private DM / a bot  → no provisioning; points to the web sign-in
+ *  - registration closed       → refusal
+ *  - setup not finished        → refusal, points admin to the app
+ *  - pending / rejected        → the lifecycle reply (never reaches the engine)
+ */
+async function ensureUser(ctx: Context): Promise<Awaited<ReturnType<typeof findLink>> | null> {
+  const tgId = ctx.from!.id;
+  let link = await findLink(tgId);
+  let status: string | undefined;
+  if (link) {
+    const [u] = await db.select({ status: users.status }).from(users).where(eq(users.id, link.userId)).limit(1);
+    status = u?.status;
+  } else {
+    // Only ever auto-create from a real person's private chat — never a group
+    // member or another bot. Elsewhere, fall back to the web sign-in path.
+    if (ctx.chat?.type !== "private" || ctx.from?.is_bot) {
+      await reply(ctx, "notLinked", { button: openAppButton() });
+      return null;
+    }
+    const name = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null;
+    const outcome = await provisionTelegramUser(tgId, { name, username: ctx.from?.username || null });
+    if ("refused" in outcome) {
+      if (outcome.refused === "closed") await reply(ctx, "registrationClosed");
+      else await reply(ctx, "setupIncomplete", { button: openAppButton() });
+      return null;
+    }
+    status = outcome.status;
+    link = await findLink(tgId);
+  }
+  if (status !== "active") {
+    if (status === "pending") {
+      await reply(ctx, "pendingApproval", { button: { label: "openApp", url: `${getPublicUrl()}/pending` } });
+    } else {
+      await reply(ctx, "accountNotActive");
+    }
+    return null;
+  }
+  return link;
 }

@@ -3,7 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { genericOAuth } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "./db";
 import * as schema from "./db/schema";
@@ -184,34 +184,126 @@ export async function getAuth() {
   return _auth as ReturnType<typeof betterAuth>;
 }
 
+/** A drizzle transaction handle — the same query surface as `db`, so helpers can
+ *  run either standalone or inside a caller's transaction. */
+type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * Bind a Telegram numeric id to a platform user in telegram_links — the table
  * the bot delivery layer reads. Mirrors the bot's /link handler: re-point an
  * existing link instead of violating the unique constraint, and keep it
- * one-Telegram-per-user by dropping the user's other links.
+ * one-Telegram-per-user by dropping the user's other links. Runs on `db` by
+ * default, or inside a caller's transaction when one is passed.
  */
-async function upsertTelegramLink(userId: string, telegramUserId: number, username: string | null) {
-  const [existing] = await db
+async function upsertTelegramLink(userId: string, telegramUserId: number, username: string | null, exec: Executor = db) {
+  const [existing] = await exec
     .select({ id: schema.telegramLinks.id })
     .from(schema.telegramLinks)
     .where(eq(schema.telegramLinks.telegramUserId, telegramUserId))
     .limit(1);
   if (existing) {
-    await db
+    await exec
       .update(schema.telegramLinks)
       .set({ userId, telegramUsername: username })
       .where(eq(schema.telegramLinks.id, existing.id));
   } else {
-    await db.insert(schema.telegramLinks).values({
+    await exec.insert(schema.telegramLinks).values({
       id: nanoid(),
       userId,
       telegramUserId,
       telegramUsername: username,
     });
   }
-  await db
+  await exec
     .delete(schema.telegramLinks)
     .where(and(eq(schema.telegramLinks.userId, userId), ne(schema.telegramLinks.telegramUserId, telegramUserId)));
+}
+
+// Namespace for the per-Telegram-id advisory lock that serializes provisioning
+// (arbitrary stable 32-bit key; the id is the lock's second arg).
+const TG_PROVISION_LOCK = 0x74677576; // 'tguv'
+
+/** The outcome of {@link provisionTelegramUser}: a resolved user (with its
+ *  lifecycle status, which the caller still gates on) or a policy refusal. */
+export type TelegramProvisionOutcome =
+  | { userId: string; status: AccountStatus }
+  | { refused: "closed" | "setup_incomplete" };
+
+/**
+ * Resolve — or, on first contact, CREATE — the platform user behind a Telegram
+ * identity, applying the same registration policy the web OIDC sign-in uses
+ * (`resolveRegistration`). Lets someone start using the bot without the web
+ * round-trip, while never bypassing an admin's open/approval/closed choice.
+ *
+ * The whole resolve-or-create runs under a per-id advisory transaction lock so
+ * two back-to-back Telegram updates from a brand-new user can't each create a
+ * row (the `account` table has no unique on provider+accountId; the lock plus
+ * the unique `user.email` / `telegram_links.telegram_user_id` backstops make a
+ * duplicate impossible). The row it writes is byte-identical to the OIDC path's,
+ * so a later "Sign in with Telegram" resolves to THIS user, not a duplicate.
+ */
+export async function provisionTelegramUser(
+  telegramUserId: number,
+  profile: { name: string | null; username: string | null },
+): Promise<TelegramProvisionOutcome> {
+  const accountId = String(telegramUserId);
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${TG_PROVISION_LOCK}, ${telegramUserId})`);
+
+    // Identity is keyed on the account row (what a later OIDC sign-in also keys
+    // on). If it exists the user is already known — reattach the (possibly
+    // orphaned) link and report the existing status for the caller to gate.
+    const [known] = await tx
+      .select({ userId: schema.accounts.userId, status: schema.users.status })
+      .from(schema.accounts)
+      .innerJoin(schema.users, eq(schema.users.id, schema.accounts.userId))
+      .where(and(eq(schema.accounts.providerId, TELEGRAM_PROVIDER_ID), eq(schema.accounts.accountId, accountId)))
+      .limit(1);
+    if (known) {
+      await upsertTelegramLink(known.userId, telegramUserId, profile.username, tx);
+      return { userId: known.userId, status: known.status as AccountStatus };
+    }
+
+    // A brand-new identity. Before first-run setup there's no admin and no
+    // working provider, so there's nothing to answer with — refuse rather than
+    // mint an orphan account (and never let a bot DM become the bootstrap admin).
+    if (!(await isSetupComplete())) return { refused: "setup_incomplete" };
+    const decision = resolveRegistration({ mode: await getRegistrationMode(), setupDone: true });
+    if (!decision.allow) return { refused: "closed" };
+
+    // Create the user. ON CONFLICT (email) DO NOTHING + re-select heals the rare
+    // orphan case (a user row exists for this synthetic email but its account row
+    // is missing) instead of throwing on the unique constraint.
+    const email = syntheticTelegramEmail(telegramUserId);
+    const newUserId = nanoid();
+    await tx
+      .insert(schema.users)
+      .values({
+        id: newUserId,
+        name: telegramDisplayName({ telegramUserId, name: profile.name, username: profile.username, picture: null }),
+        email,
+        emailVerified: false,
+        role: decision.role,
+        status: decision.status,
+      })
+      .onConflictDoNothing({ target: schema.users.email });
+    // Re-select by the unique email: this is the row we just inserted, or — when
+    // the conflict fired — the pre-existing orphan. Report ITS status (not the
+    // fresh decision), so healing an already-pending orphan stays pending.
+    const [u] = await tx
+      .select({ id: schema.users.id, status: schema.users.status })
+      .from(schema.users)
+      .where(eq(schema.users.email, email))
+      .limit(1);
+    const userId = u!.id;
+
+    // Tokenless account row — better-auth fills tokens on a later OIDC sign-in;
+    // it only needs the provider+accountId→user mapping to avoid a duplicate user.
+    await tx.insert(schema.accounts).values({ id: nanoid(), accountId, providerId: TELEGRAM_PROVIDER_ID, userId });
+    await upsertTelegramLink(userId, telegramUserId, profile.username, tx);
+
+    return { userId, status: u!.status as AccountStatus };
+  });
 }
 
 export type Role = "admin" | "user" | "viewer";
