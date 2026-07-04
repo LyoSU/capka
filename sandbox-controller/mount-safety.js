@@ -16,6 +16,17 @@ import { normalize } from "node:path";
 const DENY = ["/", "/etc", "/proc", "/sys", "/dev", "/run", "/var/run",
   "/var/lib/docker", "/boot", "/root", "/usr", "/bin", "/sbin", "/lib"];
 
+// Normalize a path and strip a trailing slash so containment checks compare
+// like with like. Without this, a root written with a trailing slash
+// (`/srv/share/`, a very common way to name a directory) normalizes to
+// `/srv/share/` while the candidate is stripped to `/srv/share/reports`, and
+// the boundary check below never matches — every mount under an allowlisted
+// root gets wrongly rejected.
+const clean = (p) => {
+  const n = normalize(p);
+  return n.length > 1 && n.endsWith("/") ? n.slice(0, -1) : n;
+};
+
 const isUnder = (p, root) =>
   root === "/" ? true : p === root || p.startsWith(root + "/");
 
@@ -23,20 +34,20 @@ export function validateMountPath(hostPath, { dataRoot, hostDataRoot, allowRoots
   if (typeof hostPath !== "string" || hostPath.includes("\0") || !hostPath.startsWith("/")) {
     return { ok: false, code: "not_absolute" };
   }
-  let p = normalize(hostPath);
-  if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  const p = clean(hostPath);
   if (p.includes("..")) return { ok: false, code: "denied" };
   // "/" denies only the exact filesystem root; every other entry denies the
   // path itself and anything under it. (isUnder treats "/" as "contains all",
   // which is what we want for the allowlist below but not here.)
-  if (p === "/" || DENY.some((d) => d !== "/" && isUnder(p, d))) {
+  if (p === "/" || DENY.some((d) => d !== "/" && isUnder(p, clean(d)))) {
     return { ok: false, code: "denied" };
   }
   for (const dr of [dataRoot, hostDataRoot].filter(Boolean)) {
     // contains, is, or is contained by the data root — all leak workspaces
-    if (isUnder(p, dr) || isUnder(dr, p)) return { ok: false, code: "denied" };
+    const c = clean(dr);
+    if (isUnder(p, c) || isUnder(c, p)) return { ok: false, code: "denied" };
   }
-  if (allowRoots.length && !allowRoots.some((r) => isUnder(p, normalize(r)))) {
+  if (allowRoots.length && !allowRoots.some((r) => isUnder(p, clean(r)))) {
     return { ok: false, code: "outside_allowlist" };
   }
   return { ok: true, path: p };

@@ -25,6 +25,7 @@ import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
 import { getSandboxNetworkDefault, getMaxContextTokens, getSetting, setSetting } from "@/lib/settings";
 import { makeManageTool } from "@/lib/manage/tool";
+import { hostFolderEnabled, sessionMounts } from "@/lib/manage/controls/folders";
 import { makeAskTool } from "@/lib/ask/tool";
 import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { getModelContextLength } from "@/lib/models/catalog";
@@ -305,10 +306,14 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
   // mounts — the browser bridge syncs them into /workspace/<name>. Both are listed
   // in the prompt so the model knows where they are (esp. that files it puts under
   // a PC folder's /workspace/<name> flow back to the user's computer).
-  const folderRows = await db.select().from(attachedFolders).where(eq(attachedFolders.sessionKey, sessionKey));
-  const hostFolders = folderRows.filter((f) => f.kind === "host");
+  const [folderRows, hostEnabled] = await Promise.all([
+    db.select().from(attachedFolders).where(eq(attachedFolders.sessionKey, sessionKey)),
+    hostFolderEnabled(),
+  ]);
+  // Host folders are only real when the admin gate is on — otherwise don't tell
+  // the model /folders/<name> exists (it won't be mounted; see ensureSession).
+  const hostFolders = hostEnabled ? folderRows.filter((f) => f.kind === "host") : [];
   const pcFolders = folderRows.filter((f) => f.kind === "pc");
-  const mounts = hostFolders.map((f) => ({ hostPath: f.hostPath!, name: f.name, ro: f.readOnly }));
   // Lazy, shared sandbox session: created (with the resolved networkMode) on the
   // FIRST consumer that actually needs the container — a sandbox tool call, a
   // stdio MCP connector, or an invoked skill. Memoized so all three share one
@@ -319,10 +324,17 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     // Memoize the success; on failure clear it so a later consumer can retry
     // (a transient controller blip shouldn't poison the whole turn's sandbox).
     if (!sessionEnsured) {
-      sessionEnsured = createSession(sessionKey, userId, networkMode, mounts).catch((e) => {
-        sessionEnsured = null;
-        throw e;
-      });
+      // Resolve mounts FRESH at create time (not a prepareRun snapshot): a folder
+      // attached mid-turn via `manage` recreates the container with the new mount,
+      // and a stale [] here would make the controller see drift and tear it back
+      // down. sessionMounts is gated on host_folder_access, so a disabled gate
+      // un-mounts on the next (re)create.
+      sessionEnsured = sessionMounts(sessionKey)
+        .then((mounts) => createSession(sessionKey, userId, networkMode, mounts))
+        .catch((e) => {
+          sessionEnsured = null;
+          throw e;
+        });
     }
     return sessionEnsured;
   };

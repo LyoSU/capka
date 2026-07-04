@@ -390,7 +390,8 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const send = async (text: string, refs: FileRef[], id?: string): Promise<boolean> => {
     try {
       // Push local folder changes up before the turn sees the workspace. Never
-      // block the send on it — a sync hiccup shows in the chip, not a failed turn.
+      // block the send on it — a sync hiccup surfaces in the attach menu, not a
+      // failed turn.
       await folderSync.pushAll().catch(() => {});
       await sendMessage(text, model, refs.length > 0 ? refs : undefined, id);
       return true;

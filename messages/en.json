@@ -499,8 +499,6 @@
       "tooLarge": "This folder is too large to sync ({count} files, {size}). Limit: {maxFiles} files / {maxMb} MB.",
       "syncedAgo": "Synced {ago}",
       "justNow": "just now",
-      "minAgo": "{n} min ago",
-      "hourAgo": "{n} h ago",
       "conflicts": "{n} kept newer",
       "syncFailed": "Couldn't sync — will retry",
       "unsupportedBrowser": "Live folder sync needs Chrome or Edge.",
@@ -1427,6 +1425,15 @@
     "dismiss": "Dismiss"
   },
   "manage": {
+    "folder": {
+      "addTitle": "Attach server folder",
+      "addPcTitle": "Connect a folder from your computer",
+      "restartImpact": "The sandbox will restart to attach the folder; any running command stops.",
+      "pick": "Choose a folder",
+      "fromComputer": "from your computer",
+      "readOnly": "read-only",
+      "readWrite": "read-write"
+    },
     "mcp": {
       "probeOk": "Responds — {n} tools available.",
       "probeUnreachable": "Couldn't reach it just now — you can still add it and fix later.",

@@ -98,3 +98,12 @@ export function ignoredPath(path: string): boolean {
 export function oversized(size: number): boolean {
   return size > FOLDER_MAX_FILE_MB * 1024 * 1024;
 }
+
+/** Canonical mount/workspace name for a folder: the safe id charset the sandbox
+ *  path and Docker mount name allow, lower-cased and length-capped. The SINGLE
+ *  source of truth — the API routes, the manage control, and the browser bridge
+ *  all call this so the name the client derives to adopt an existing row stays
+ *  byte-identical to what the server stored (a drift here 409s a re-pick). */
+export function sanitizeFolderName(name: string): string {
+  return name.replace(/[^a-z0-9-_]/gi, "").toLowerCase().slice(0, 40);
+}

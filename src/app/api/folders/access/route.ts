@@ -1,5 +1,5 @@
 import { apiHandler, requireActive } from "@/lib/auth";
-import { pcFolderLevel } from "@/lib/manage/controls/folders";
+import { pcFolderLevel, canAttachPc } from "@/lib/manage/controls/folders";
 
 // Whether THIS user may connect a folder from their own computer, so the composer
 // can show or hide the affordance without leaking the setting to the client.
@@ -8,6 +8,5 @@ import { pcFolderLevel } from "@/lib/manage/controls/folders";
 export const GET = apiHandler(async () => {
   const { role } = await requireActive();
   const level = await pcFolderLevel();
-  const canAttach = level === "everyone" || (level === "admins" && role === "admin");
-  return Response.json({ level, canAttach });
+  return Response.json({ level, canAttach: canAttachPc(level, role === "admin") });
 });

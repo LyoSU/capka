@@ -12,7 +12,11 @@ vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
   return { ...actual, requireActive };
 });
-vi.mock("@/lib/manage/controls/folders", () => ({ pcFolderLevel }));
+vi.mock("@/lib/manage/controls/folders", () => ({
+  pcFolderLevel,
+  // Pure predicate — use the real logic so the route's gate is exercised.
+  canAttachPc: (level: string, isAdmin: boolean) => level === "everyone" || (level === "admins" && isAdmin),
+}));
 vi.mock("@/lib/db/ownership", () => ({ requireOwned }));
 
 const h = vi.hoisted(() => {

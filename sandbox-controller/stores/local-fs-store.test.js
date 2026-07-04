@@ -33,15 +33,52 @@ describe("LocalFsStore.list depth", () => {
       await writeFile(join(wsHostPath, "sub", "deep", "leaf.txt"), "c");
 
       const flat = await store.list("u1", "s1");
-      expect(flat.map((e) => e.path).sort()).toEqual(["sub", "top.txt"]); // one level only
+      expect(flat.entries.map((e) => e.path).sort()).toEqual(["sub", "top.txt"]); // one level only
 
       const tree = await store.list("u1", "s1", ".", 3);
-      const paths = tree.map((e) => e.path).sort();
+      const paths = tree.entries.map((e) => e.path).sort();
       expect(paths).toContain("sub/mid.txt");
       expect(paths).toContain("sub/deep/leaf.txt"); // nested, full relative path
+      expect(tree.truncated).toBe(false); // whole tree fit within depth + limit
 
       const capped = await store.list("u1", "s1", ".", 3, 2);
-      expect(capped.length).toBe(2); // hard limit respected
+      expect(capped.entries.length).toBe(2); // hard limit respected
+      expect(capped.truncated).toBe(true); // …and flagged as incomplete
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("flags truncated when a subtree is deeper than the requested depth", async () => {
+    const dataRoot = join(TMP, `ws-depth-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      const { wsHostPath } = await store.ensure("u1", "s1");
+      await mkdir(join(wsHostPath, "a", "b", "c"), { recursive: true });
+      await writeFile(join(wsHostPath, "a", "b", "c", "deep.txt"), "x");
+      // depth 2 stops at a/b — but a/b has a child dir (c) it didn't descend, so the
+      // listing is INCOMPLETE and must say so (else sync reads deep.txt as deleted).
+      const shallow = await store.list("u1", "s1", ".", 2, 10000);
+      expect(shallow.truncated).toBe(true);
+      // Deep enough to see everything → not truncated.
+      const full = await store.list("u1", "s1", ".", 5, 10000);
+      expect(full.truncated).toBe(false);
+      expect(full.entries.map((e) => e.path)).toContain("a/b/c/deep.txt");
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("includes a content hash for files when withHash is set", async () => {
+    const dataRoot = join(TMP, `ws-hash-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      await store.ensure("u1", "s1");
+      await store.write("u1", "s1", "f.txt", Buffer.from("hello"));
+      const { entries } = await store.list("u1", "s1", ".", 1, 100, { withHash: true });
+      const f = entries.find((e) => e.path === "f.txt");
+      // sha256("hello")
+      expect(f.hash).toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
     } finally {
       await rm(dataRoot, { recursive: true, force: true });
     }

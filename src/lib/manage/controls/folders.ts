@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { posix } from "node:path";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { attachedFolders, projects } from "@/lib/db/schema";
 import { getSetting, getSandboxNetworkDefault } from "@/lib/settings";
 import { validateMount, createSession, type SandboxMount } from "@/lib/sandbox/client";
+import { sanitizeFolderName } from "@/lib/folder-bridge/filter";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
 
@@ -23,6 +25,14 @@ export async function pcFolderLevel(): Promise<PcFolderLevel> {
   return v === "admins" || v === "everyone" ? v : "off";
 }
 
+/** May a user of this role connect a PC folder at the given access level? The one
+ *  predicate the access route, the attach POST, the upload route, and this control
+ *  all share — so a future access level can't be enforced in one place and missed
+ *  in another. */
+export function canAttachPc(level: PcFolderLevel, isAdmin: boolean): boolean {
+  return level === "everyone" || (level === "admins" && isAdmin);
+}
+
 // add args cover BOTH kinds: {path} attaches a server folder (host, admin-only);
 // {kind:"pc"} connects a folder from the user's own computer (they pick it in the
 // browser). Kept loose (path optional) so the friendly validateAdd errors — not a
@@ -35,14 +45,11 @@ const addSchema = z.object({
 });
 type AddArgs = z.infer<typeof addSchema>;
 
-const sanitizeName = (s: string) => s.replace(/[^a-z0-9-_]/gi, "").toLowerCase().slice(0, 40);
-const basename = (p: string) => p.replace(/\/+$/, "").split("/").pop() || "";
-
 /** Mount name for a folder: explicit `name`, else the path's basename, else a
  *  generic fallback — sanitized to the safe id charset. */
 function deriveName(args: AddArgs): string {
-  const raw = args.name?.trim() || (args.path ? basename(args.path) : "") || "folder";
-  return sanitizeName(raw) || "folder";
+  const raw = args.name?.trim() || (args.path ? posix.basename(args.path) : "") || "folder";
+  return sanitizeFolderName(raw) || "folder";
 }
 
 /** Friendly, role-neutral message for a controller mount-safety rejection. */
@@ -52,8 +59,15 @@ function mountError(code?: string): string {
   return "That folder can't be shared — it's a system location on the server.";
 }
 
-/** All host folders for a session, as controller mount specs. */
-async function hostMounts(sessionKey: string): Promise<SandboxMount[]> {
+/** All host folders for a session as controller mount specs — GATED on the org
+ *  setting, so it is the single chokepoint for "what does this session mount".
+ *  Returns [] when host_folder_access is off, so turning the setting off actually
+ *  un-mounts already-attached server folders on the next session (re)create,
+ *  instead of leaving the operator's filesystem exposed until idle-TTL. Every
+ *  createSession caller (runner, this control, the download route) goes through
+ *  here so the gate can't be enforced in one place and missed in another. */
+export async function sessionMounts(sessionKey: string): Promise<SandboxMount[]> {
+  if (!(await hostFolderEnabled())) return [];
   const rows = await db.select().from(attachedFolders)
     .where(and(eq(attachedFolders.sessionKey, sessionKey), eq(attachedFolders.kind, "host")));
   return rows.map((f) => ({ hostPath: f.hostPath!, name: f.name, ro: f.readOnly }));
@@ -61,7 +75,7 @@ async function hostMounts(sessionKey: string): Promise<SandboxMount[]> {
 
 /** The network mode the session runs with, so a folder-driven recreate doesn't
  *  silently downgrade an egress-enabled sandbox to isolated (mirrors runner.ts). */
-async function resolveNetwork(projectId: string | null): Promise<"none" | "bridge"> {
+export async function resolveNetwork(projectId: string | null): Promise<"none" | "bridge"> {
   if (projectId) {
     const [p] = await db.select({ net: projects.sandboxNetwork }).from(projects).where(eq(projects.id, projectId)).limit(1);
     if (p?.net === "bridge") return "bridge";
@@ -77,7 +91,7 @@ function reattach(ctx: ManageContext): void {
   if (!sessionKey) return;
   void (async () => {
     try {
-      await createSession(sessionKey, userId, await resolveNetwork(projectId), await hostMounts(sessionKey));
+      await createSession(sessionKey, userId, await resolveNetwork(projectId), await sessionMounts(sessionKey));
     } catch { /* next turn's ensureSession will apply the new mounts */ }
   })();
 }
@@ -104,22 +118,24 @@ export const folderCollection: Collection = {
 
   async canAdd(ctx) {
     const [host, pc] = await Promise.all([hostFolderEnabled(), pcFolderLevel()]);
-    const canHost = host && ctx.isAdmin;
-    const canPc = pc !== "off" && (ctx.isAdmin || pc === "everyone");
-    return canHost || canPc;
+    return (host && ctx.isAdmin) || canAttachPc(pc, ctx.isAdmin);
   },
 
   async list(ctx) {
     const [host, pc] = await Promise.all([hostFolderEnabled(), pcFolderLevel()]);
     if (!host && pc === "off") throw new Error("Folder access is turned off. An administrator can enable it in settings.");
     if (!ctx.sessionKey) throw new Error("No active workspace — open a chat to see attached folders.");
+    const t = manageT(ctx.locale);
     const rows = await db.select().from(attachedFolders).where(eq(attachedFolders.sessionKey, ctx.sessionKey));
-    return rows.map((f) => ({
-      id: f.id,
-      title: f.name,
-      subtitle: f.kind === "host" ? `${f.hostPath}${f.readOnly ? " · read-only" : " · read-write"}` : "from your computer",
-      owned: f.userId === ctx.userId,
-    }));
+    return rows.map((f) => {
+      // Host-folder subtitles carry the operator's real server path — only an admin
+      // should ever see it (never a regular chat user, nor the model via them).
+      const mode = f.readOnly ? loc(t, "folder.readOnly", "read-only") : loc(t, "folder.readWrite", "read-write");
+      const subtitle = f.kind === "host"
+        ? (ctx.isAdmin ? `${f.hostPath} · ${mode}` : mode)
+        : loc(t, "folder.fromComputer", "from your computer");
+      return { id: f.id, title: f.name, subtitle, owned: f.userId === ctx.userId };
+    });
   },
 
   async validateAdd(ctx, args) {
@@ -133,8 +149,11 @@ export const folderCollection: Collection = {
       if (!v.ok) throw new Error(mountError(v.code));
     } else {
       const level = await pcFolderLevel();
-      if (level === "off") throw new Error("Personal folder access is turned off. An administrator can enable it in settings.");
-      if (level === "admins" && !ctx.isAdmin) throw new Error("Connecting a personal folder is limited to administrators.");
+      if (!canAttachPc(level, ctx.isAdmin)) {
+        throw new Error(level === "off"
+          ? "Personal folder access is turned off. An administrator can enable it in settings."
+          : "Connecting a personal folder is limited to administrators.");
+      }
     }
     if (!ctx.sessionKey) throw new Error("No active workspace — open a chat to attach a folder.");
     const name = deriveName(a);

@@ -56,6 +56,22 @@ describe("planSync — with a base (incremental)", () => {
     const plan = planSync({ "a.txt": e("A") }, { "a.txt": e("A") }, base);
     expect(plan).toMatchObject({ upload: [], download: [], deleteRemote: [], deleteLocal: [], conflicts: [] });
   });
+
+  it("propagates a same-LENGTH content edit when both sides carry a hash", () => {
+    // Same byte length, different content — only the hash distinguishes them.
+    // Without a server-side hash this silently reads as "already in sync" and
+    // the edit never propagates (a data-loss-shaped bug), so the remote manifest
+    // MUST carry a hash for this to work.
+    const base: Manifest = { "a.txt": { hash: "OLD", mtime: 1, size: 4 } };
+    const local: Manifest = { "a.txt": { hash: "NEW", mtime: 2, size: 4 } }; // edited locally
+    const remote: Manifest = { "a.txt": { hash: "OLD", mtime: 1, size: 4 } };
+    expect(planSync(local, remote, base)).toMatchObject({ upload: ["a.txt"], download: [], conflicts: [] });
+
+    // …and the reverse (agent edited it in the workspace).
+    const local2: Manifest = { "a.txt": { hash: "OLD", mtime: 1, size: 4 } };
+    const remote2: Manifest = { "a.txt": { hash: "NEW", mtime: 2, size: 4 } };
+    expect(planSync(local2, remote2, base)).toMatchObject({ download: ["a.txt"], upload: [] });
+  });
 });
 
 describe("planSync — first sync (no base)", () => {

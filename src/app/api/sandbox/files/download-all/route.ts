@@ -2,6 +2,7 @@ import { requireSession, apiHandler } from "@/lib/auth";
 import { createSession, execCommand, downloadFile } from "@/lib/sandbox/client";
 import { requireOwned } from "@/lib/db/ownership";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
+import { sessionMounts, resolveNetwork } from "@/lib/manage/controls/folders";
 import { chats } from "@/lib/db/schema";
 
 // Only allow safe characters in file paths (matches client-side WORKSPACE_PATH_RE)
@@ -21,9 +22,13 @@ export const GET = apiHandler(async (req: Request) => {
   }
 
   const chat = await requireOwned(chats, chatId, userId, "Chat");
-  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
-  // Archiving shells out to zip/tar, so a live container is required here.
-  await createSession(key, userId);
+  const projectId = (chat.projectId as string | null) ?? null;
+  const key = workspaceSessionKey({ id: chatId, projectId });
+  // Archiving shells out to zip/tar, so a live container is required here. Pass
+  // the session's real mounts + network so an existing container with host folders
+  // is REUSED — omitting them reads as mount drift and would destroy (and reset the
+  // network of) a container the agent may be mid-command in on every zip download.
+  await createSession(key, userId, await resolveNetwork(projectId), await sessionMounts(key));
 
   const shellPaths = paths.map((p) => `'${p.replace(/'/g, "'\\''")}'`).join(" ");
 

@@ -27,7 +27,7 @@ export function runWorkspaceStoreContract(makeStore) {
     it("list() returns written entries", async () => {
       await store.ensure("u1", "s1");
       await store.write("u1", "s1", "a.txt", Buffer.from("x"));
-      const entries = await store.list("u1", "s1", ".");
+      const { entries } = await store.list("u1", "s1", ".");
       expect(entries.map((e) => e.name)).toContain("a.txt");
     });
 
@@ -41,7 +41,7 @@ export function runWorkspaceStoreContract(makeStore) {
       await store.ensure("u1", "s1");
       await store.write("u1", "s1", "a.txt", Buffer.from("x"));
       await store.remove("u1", "s1");
-      await expect(store.list("u1", "s1", ".")).resolves.toEqual([]);
+      await expect(store.list("u1", "s1", ".")).resolves.toEqual({ entries: [], truncated: false });
     });
 
     it("delete() removes a single file, leaving the rest", async () => {
@@ -49,7 +49,7 @@ export function runWorkspaceStoreContract(makeStore) {
       await store.write("u1", "s1", "keep.txt", Buffer.from("k"));
       await store.write("u1", "s1", "drop.txt", Buffer.from("d"));
       await store.delete("u1", "s1", "drop.txt");
-      const names = (await store.list("u1", "s1", ".")).map((e) => e.name).sort();
+      const names = (await store.list("u1", "s1", ".")).entries.map((e) => e.name).sort();
       expect(names).toEqual(["keep.txt"]);
     });
 
@@ -64,7 +64,7 @@ export function runWorkspaceStoreContract(makeStore) {
       await store.write("u1", "s1", "dir/inner.txt", Buffer.from("x"));
       await store.write("u1", "s1", "dir/sub/deep.txt", Buffer.from("y"));
       await store.delete("u1", "s1", "dir");
-      const names = (await store.list("u1", "s1", ".")).map((e) => e.name).sort();
+      const names = (await store.list("u1", "s1", ".")).entries.map((e) => e.name).sort();
       expect(names).toEqual(["keep.txt"]); // the folder and everything under it is gone
     });
 
@@ -77,7 +77,7 @@ export function runWorkspaceStoreContract(makeStore) {
       await store.ensure("u1", "s1");
       await store.ensure("u1", "s2");
       await store.write("u1", "s1", "only-s1.txt", Buffer.from("x"));
-      const s2 = await store.list("u1", "s2", ".");
+      const { entries: s2 } = await store.list("u1", "s2", ".");
       expect(s2.map((e) => e.name)).not.toContain("only-s1.txt");
     });
   });

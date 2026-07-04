@@ -5,7 +5,8 @@ import { db } from "@/lib/db";
 import { attachedFolders, chats } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
-import { pcFolderLevel } from "@/lib/manage/controls/folders";
+import { pcFolderLevel, canAttachPc } from "@/lib/manage/controls/folders";
+import { sanitizeFolderName } from "@/lib/folder-bridge/filter";
 
 /** The sandbox session key for a chat the caller owns (`projectId ?? chatId`),
  *  resolved server-side — never trusted from the client. Throws (→ 404) via
@@ -14,8 +15,6 @@ async function ownedSessionKey(chatId: string, userId: string): Promise<string> 
   const chat = await requireOwned(chats, chatId, userId, "Chat");
   return workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
 }
-
-const sanitizeName = (s: string) => s.replace(/[^a-z0-9-_]/gi, "").toLowerCase().slice(0, 40);
 
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
@@ -31,16 +30,15 @@ export const GET = apiHandler(async (req: Request) => {
 // folders are attached only through the `manage` tool, never this route.
 export const POST = apiHandler(async (req: Request) => {
   const { userId, role } = await requireActive();
-  const level = await pcFolderLevel();
   // pc folders: "everyone" lets any user connect their own; "admins" needs admin;
   // "off" attaches nothing. (Server folders are admin-only and go through manage.)
-  if (level === "off" || (level === "admins" && role !== "admin")) {
+  if (!canAttachPc(await pcFolderLevel(), role === "admin")) {
     return Response.json({ error: "Personal folder access is disabled." }, { status: 403 });
   }
   const body = (await req.json().catch(() => ({}))) as { chatId?: unknown; name?: unknown };
   const chatId = typeof body.chatId === "string" ? body.chatId : null;
   if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
-  const name = sanitizeName(typeof body.name === "string" ? body.name : "");
+  const name = sanitizeFolderName(typeof body.name === "string" ? body.name : "");
   if (!name) return Response.json({ error: "Invalid folder name" }, { status: 400 });
 
   const key = await ownedSessionKey(chatId, userId);

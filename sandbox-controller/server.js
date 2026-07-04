@@ -430,8 +430,11 @@ const server = createServer(async (req, res) => {
       // asks for a high limit and checks `truncated` to abort if the tree is too
       // big to enumerate whole. Default 1000 keeps the file browser's cheap listing.
       const limit = Math.min(20000, Math.max(1, parseInt(url.searchParams.get("limit") || "1000", 10) || 1000));
-      const entries = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".", depth, limit);
-      return jsonRes(res, 200, { entries, truncated: entries.length >= limit });
+      // hash=1 (folder sync) makes each file entry carry a content SHA-256 so the
+      // bridge can detect a same-length edit; the file browser omits it (cheaper).
+      const withHash = url.searchParams.get("hash") === "1";
+      const { entries, truncated } = await workspace.list(r.userId, r.sessionId, url.searchParams.get("path") || ".", depth, limit, { withHash });
+      return jsonRes(res, 200, { entries, truncated });
     }
 
     // DELETE /sessions/:id/files?path=  — remove one file (composer attachment

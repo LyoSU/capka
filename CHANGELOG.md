@@ -27,18 +27,7 @@ All notable changes to Capka are documented here. Format follows
   disabled while a reply is streaming, instead of vanishing and reappearing.
 
 ### Added
-- Attach folders to a chat's sandbox, gated by two new org settings (both off by
-  default, in Settings → Security). `host_folder_access` (admin-only): bind-mount a
-  SERVER folder at `/folders/<name>`, read-only + confirm-gated; set
-  `SANDBOX_MOUNT_ALLOW` (`:`-separated roots) to restrict mountable paths
-  (recommended for multi-admin hosts). `pc_folder_access` (`off`/`admins`/`everyone`):
-  users connect a folder from their OWN computer (📎 menu), synced to the workspace
-  around each turn; live sync needs Chrome/Edge, other browsers get a one-shot
-  import + zip download. Sync skips dependency/build trees (node_modules, .git…),
-  model/binary blobs, and files over 100 MB, and refuses a folder over 5000 files /
-  100 MB; progress is shown per phase. Deletions propagate both ways and survive a
-  page reload; a partial or failed workspace read aborts the sync instead of
-  deleting files. See SECURITY.md.
+- Attach folders to a chat's sandbox, off by default via two new org settings in Settings → Security. `host_folder_access` (admin-only) bind-mounts a server folder at `/folders/<name>`; restrict mountable paths with `SANDBOX_MOUNT_ALLOW` (`:`-separated roots). `pc_folder_access` (`off`/`admins`/`everyone`) lets users sync a folder from their own computer (live sync needs Chrome/Edge; other browsers get a one-shot import + zip). See SECURITY.md.
 
 ## [0.2.4] - 2026-07-03
 

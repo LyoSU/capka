@@ -46,6 +46,14 @@ describe("validateMountPath", () => {
     expect(validateMountPath("/home/me", o).code).toBe("outside_allowlist");
   });
 
+  it("allowlist: a root written with a trailing slash still matches", () => {
+    const o = { ...opts, allowRoots: ["/srv/shared/"] };
+    expect(validateMountPath("/srv/shared/reports", o).ok).toBe(true);
+    expect(validateMountPath("/srv/shared", o).ok).toBe(true);
+    expect(validateMountPath("/srv/shared/", o).ok).toBe(true);
+    expect(validateMountPath("/srv/elsewhere", o).code).toBe("outside_allowlist");
+  });
+
   it("rejects NUL bytes", () => {
     expect(validateMountPath("/srv/\0share", opts).ok).toBe(false);
   });

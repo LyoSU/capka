@@ -15,15 +15,13 @@ import {
   readLocalFile, writeLocalFile, deleteLocalFile, deleteLocalDir, ensureLocalDir,
   type DirHandle, type HashedManifest,
 } from "./local-fs";
-import { ignoredPath, oversized, exceedsCeiling, FolderTooLargeError } from "./filter";
+import { ignoredPath, oversized, exceedsCeiling, sanitizeFolderName, FolderTooLargeError } from "./filter";
 
 export type PcFolder = { id: string; name: string };
 
 /** Progress during a sync — a phase plus a done/total counter the UI renders as a
  *  thin bar ("Uploading 34/210"). total is 0 while scanning (count unknown yet). */
 export type SyncProgress = { phase: "scanning" | "hashing" | "uploading" | "downloading"; done: number; total: number };
-
-export { FolderTooLargeError }; // re-export so existing bridge importers still find it
 
 declare global {
   interface Window {
@@ -62,15 +60,14 @@ const saveHandle = (id: string, handle: DirHandle) => withStore<void>("readwrite
 const loadHandle = (id: string) => withStore<DirHandle | undefined>("readonly", (s) => s.get(id));
 const dropHandle = (id: string) => withStore<void>("readwrite", (s) => s.delete(id));
 
-// In-memory base + last-local per folder for this tab. Base is the 3-way merge
-// ancestor; kept in memory (persisted best-effort to the server row for
-// forward-compat). After a page reload base is empty → the first sync treats both
-// sides as first-seen (union + LWW on genuine content clashes — no data loss).
+// The 3-way merge ancestor is NOT trusted from tab memory — it's loaded fresh
+// from the shared server row at the start of every sync (loadState) and written
+// back with an optimistic revision (CAS), so two tabs (or two project members)
+// syncing the same folder can't clobber each other's ancestor and resurrect a
+// deleted file. `bases` here is only a *badge cache* for the file browser (the
+// last manifest THIS tab synced); it never feeds the merge.
 const bases = new Map<string, Manifest>();
-// Base directory set per folder, parallel to `bases` — the last-synced list of
-// subdirectories. Lets a dir deleted on one side be told apart from a new dir on
-// the other (see planDirs). In-memory like `bases`; a reload starts empty.
-const baseDirs = new Map<string, string[]>();
+// Per-folder hash cache for the local prefilter (skip re-hashing unchanged files).
 const lastLocal = new Map<string, HashedManifest>();
 
 // ── File API (workspace side, /workspace/<name>/…) ───────────────────────────
@@ -81,17 +78,20 @@ const lastLocal = new Map<string, HashedManifest>();
 const SYNC_LIST_LIMIT = 15000;
 
 async function serverTree(chatId: string, name: string): Promise<{ files: Manifest; dirs: string[]; excluded: string[] }> {
-  const res = await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(name)}&depth=20&limit=${SYNC_LIST_LIMIT}`);
+  // hash=1 makes each file carry a content SHA-256 so plan.ts compares by content,
+  // not by size — a same-length edit on the server must still count as a change.
+  const res = await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(name)}&depth=20&limit=${SYNC_LIST_LIMIT}&hash=1`);
   // A non-OK response must NOT look like "the server is empty" — that would drive a
   // destructive local delete of every synced file on a transient 403/500. Abort the
   // sync instead (base is left untouched, so the next sync retries cleanly).
   if (!res.ok) throw new Error(`Could not read the workspace (HTTP ${res.status}).`);
   const { entries, truncated } = (await res.json()) as {
-    entries?: { path: string; isDirectory: boolean; size: number; modifiedAt: string | null }[];
+    entries?: { path: string; isDirectory: boolean; size: number; modifiedAt: string | null; hash?: string }[];
     truncated?: boolean;
   };
-  // A truncated tree is an INCOMPLETE server view; treating the unseen files as
-  // deletions would wipe them locally. Refuse rather than sync a partial picture.
+  // A truncated tree is an INCOMPLETE server view (entry cap OR a subtree past the
+  // depth limit); treating the unseen files as deletions would wipe them locally.
+  // Refuse rather than sync a partial picture.
   if (truncated) throw new Error("This folder's workspace copy is too large to sync safely.");
   const files: Manifest = {};
   const dirs: string[] = [];
@@ -103,16 +103,26 @@ async function serverTree(chatId: string, name: string): Promise<{ files: Manife
     if (ignoredPath(rel)) continue; // same skip-list as the local side (symmetry)
     if (e.isDirectory) dirs.push(rel);
     else if (oversized(e.size)) excluded.push(rel); // track: absence ≠ delete (see planSync)
-    else files[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size };
+    else files[rel] = { mtime: e.modifiedAt ? Date.parse(e.modifiedAt) : 0, size: e.size, hash: e.hash };
   }
   return { files, dirs, excluded };
+}
+
+/** Bounded-parallel map — runs `fn` over `items` with at most `limit` in flight.
+ *  Folder-sync file ops (download/write) are independent per path, so a pool turns
+ *  a serial round-trip-per-file wait into a handful of concurrent ones. */
+async function runPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (let i = next++; i < items.length; i = next++) await fn(items[i]);
+  }));
 }
 
 // Upload many files in batches to the folder-sync endpoint (one request per
 // chunk, rate-limited per request) — NOT the interactive per-file upload route,
 // which caps at ~10/min and would 429 on any real folder.
 const UPLOAD_CHUNK = 100;
-async function uploadBatch(chatId: string, name: string, paths: string[], read: (rel: string) => Promise<Blob>, onProgress?: (p: SyncProgress) => void): Promise<void> {
+export async function uploadBatch(chatId: string, name: string, paths: string[], read: (rel: string) => Promise<Blob>, onProgress?: (p: SyncProgress) => void): Promise<void> {
   for (let i = 0; i < paths.length; i += UPLOAD_CHUNK) {
     const chunk = paths.slice(i, i + UPLOAD_CHUNK);
     const form = new FormData();
@@ -156,21 +166,20 @@ async function localHashed(handle: DirHandle, folderId: string, onProgress?: (p:
   return { hashed: merged, skipped, excluded };
 }
 
-/** Rehydrate the 3-way base for a folder from its persisted row (written at the end
- *  of the last sync). Populates the in-memory `bases`/`baseDirs` so a page reload
- *  doesn't forget deletes. Only accepts the versioned `{v:1,files,dirs}` shape;
- *  anything else (absent, legacy, malformed) leaves the base empty — the safe union
- *  fallback. Best-effort: never throws. */
-async function hydrateBase(folderId: string): Promise<void> {
+/** Load the 3-way merge ancestor + its revision from the shared server row. Read
+ *  FRESH at the start of every sync (the row is the cross-tab source of truth), so
+ *  a stale tab never reverts an ancestor another tab already advanced. Only accepts
+ *  the versioned `{v:1,rev,files,dirs}` shape; anything else (absent, legacy,
+ *  malformed) yields an empty base (rev 0) — the safe union fallback. Never throws. */
+async function loadState(folderId: string): Promise<{ files: Manifest; dirs: string[]; rev: number }> {
   try {
     const res = await fetch(`/api/folders/${folderId}/state`);
-    if (!res.ok) return;
-    const { state } = (await res.json()) as { state?: { v?: number; files?: Manifest; dirs?: string[] } };
-    if (state?.v === 1 && state.files) {
-      bases.set(folderId, state.files);
-      baseDirs.set(folderId, state.dirs ?? []);
+    if (res.ok) {
+      const { state } = (await res.json()) as { state?: { v?: number; rev?: number; files?: Manifest; dirs?: string[] } };
+      if (state?.v === 1 && state.files) return { files: state.files, dirs: state.dirs ?? [], rev: state.rev ?? 0 };
     }
-  } catch { /* best-effort — empty base is safe */ }
+  } catch { /* best-effort — empty base is a safe union */ }
+  return { files: {}, dirs: [], rev: 0 };
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -197,8 +206,9 @@ export async function pickAndCreate(chatId: string, opts?: { name?: string; ensu
   if (exceedsCeiling(count, bytes)) throw new FolderTooLargeError(count, bytes);
 
   await opts?.ensureChat?.();
-  // Mirror the server's name sanitization so we can detect an existing row.
-  const name = (opts?.name || handle.name).replace(/[^a-z0-9-_]/gi, "").toLowerCase().slice(0, 40) || "folder";
+  // Same sanitization as the server (shared helper) so the name we compute to
+  // detect an existing row stays byte-identical to what the server stored.
+  const name = sanitizeFolderName(opts?.name || handle.name) || "folder";
 
   // Folders attach to the SANDBOX (shared by a project's chats), so the same
   // folder may already be attached from a sibling chat. Re-picking it should
@@ -254,7 +264,6 @@ export function syncedManifest(folderId: string): Manifest | null {
 /** Forget a folder's handle locally (called when the row is deleted). */
 export async function forget(folderId: string): Promise<void> {
   bases.delete(folderId);
-  baseDirs.delete(folderId);
   lastLocal.delete(folderId);
   await dropHandle(folderId).catch(() => {});
 }
@@ -266,14 +275,10 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
   const handle = await loadHandle(folder.id);
   if (!handle) throw new Error("Folder not connected.");
 
-  // After a reload the in-memory base is gone; rehydrate it from the row persisted
-  // at the end of the last sync so a delete on either side still propagates instead
-  // of being reverted (a missing base makes the next sync a union — safe, but it
-  // forgets deletes). Best-effort: a failed/absent load just leaves base null.
-  if (!bases.has(folder.id)) await hydrateBase(folder.id);
-
-  const base = bases.get(folder.id) ?? null;
-  const dbase = baseDirs.get(folder.id) ?? null;
+  // Load the merge ancestor FRESH from the shared row (source of truth across
+  // tabs/members) plus its revision for the optimistic write below. A missing/empty
+  // base makes this sync a safe union (no data loss, just forgets deletes once).
+  const { files: base, dirs: dbase, rev } = await loadState(folder.id);
   onProgress?.({ phase: "scanning", done: 0, total: 0 });
   const { hashed: local, skipped, excluded: localExcluded } = await localHashed(handle, folder.id, onProgress);
   const localDirs = await walkLocalDirs(handle);
@@ -290,12 +295,12 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
   await uploadBatch(chatId, folder.name, [...plan.upload, ...localWins], (rel) => readLocalFile(handle, rel), onProgress);
   const downloads = [...plan.download, ...remoteWins];
   let di = 0;
-  for (const path of downloads) {
-    onProgress?.({ phase: "downloading", done: di++, total: downloads.length });
+  await runPool(downloads, 6, async (path) => {
     await writeLocalFile(handle, path, await downloadFromWorkspace(chatId, folder.name, path));
-  }
-  for (const path of plan.deleteRemote) await deleteFromWorkspace(chatId, folder.name, path);
-  for (const path of plan.deleteLocal) await deleteLocalFile(handle, path);
+    onProgress?.({ phase: "downloading", done: ++di, total: downloads.length });
+  });
+  await runPool(plan.deleteRemote, 6, (path) => deleteFromWorkspace(chatId, folder.name, path));
+  await runPool(plan.deleteLocal, 6, (path) => deleteLocalFile(handle, path));
   // Directory sync (3-way, so a folder deleted on the PC is removed on the server
   // instead of being blindly re-mirrored back down). Delete husks first, then
   // create genuinely-new server dirs — mirrors empty folders the agent made.
@@ -304,21 +309,26 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
   for (const d of dirPlan.createLocal) await ensureLocalDir(handle, d).catch(() => {});
 
   // Reconciled: local now matches the server for every touched path. Re-walk to
-  // capture that as the new base (the common ancestor for the next sync).
-  lastLocal.delete(folder.id); // force a fresh re-hash of what we just wrote
+  // capture that as the new ancestor. The hash prefilter re-hashes only the files
+  // whose mtime/size changed (the downloads we just wrote); everything else keeps
+  // its cached hash — no full re-hash of the whole folder.
   const { hashed: merged } = await localHashed(handle, folder.id);
   const mergedDirs = await walkLocalDirs(handle);
-  bases.set(folder.id, merged);
-  baseDirs.set(folder.id, mergedDirs);
-  // Persist BOTH the file and directory base so a reload can rehydrate a complete
-  // ancestor (dirs are needed to tell a deleted folder from a new one). Versioned
-  // so hydrateBase can reject anything it doesn't understand. Best-effort — a
-  // failure just means the next reload starts from an empty base (safe union).
-  fetch(`/api/folders/${folder.id}/state`, {
+  bases.set(folder.id, merged); // badge cache only (not the merge base)
+  // Persist the new ancestor with an optimistic revision: if another tab/member
+  // advanced the row since we loaded it (rev mismatch → 409), we DON'T overwrite —
+  // their ancestor stands. No corruption either way: our file ops ran against the
+  // base we loaded fresh this sync, and the next sync reloads whatever the winner
+  // stored. The 409 needs no client action; a transient network failure is likewise
+  // best-effort (an empty base next time is a safe union).
+  const put = await fetch(`/api/folders/${folder.id}/state`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ state: { v: 1, files: merged, dirs: mergedDirs } }),
-  }).catch(() => {});
+    body: JSON.stringify({ expectedRev: rev, state: { v: 1, rev: rev + 1, files: merged, dirs: mergedDirs } }),
+  }).catch(() => null);
+  if (put && !put.ok && put.status !== 409) {
+    console.warn(`[folders] could not persist sync state (HTTP ${put.status})`);
+  }
 
   return {
     synced: plan.upload.length + plan.download.length + plan.deleteRemote.length + plan.deleteLocal.length,
@@ -326,6 +336,3 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
     skipped,
   };
 }
-
-export const push = sync;
-export const pull = sync;

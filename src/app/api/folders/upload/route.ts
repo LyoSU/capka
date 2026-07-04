@@ -4,7 +4,7 @@ import { requireOwned } from "@/lib/db/ownership";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { chats } from "@/lib/db/schema";
 import { take } from "@/lib/rate-limit";
-import { pcFolderLevel } from "@/lib/manage/controls/folders";
+import { pcFolderLevel, canAttachPc } from "@/lib/manage/controls/folders";
 import { ignoredPath, oversized } from "@/lib/folder-bridge/filter";
 
 // Bulk upload for PC-folder sync: MANY files in one request, written under
@@ -14,8 +14,7 @@ import { ignoredPath, oversized } from "@/lib/folder-bridge/filter";
 // Rate-limited per REQUEST (generously), not per file.
 export const POST = apiHandler(async (req: Request) => {
   const { userId, role } = await requireActive();
-  const level = await pcFolderLevel();
-  if (level === "off" || (level === "admins" && role !== "admin")) {
+  if (!canAttachPc(await pcFolderLevel(), role === "admin")) {
     return Response.json({ error: "Personal folder access is disabled." }, { status: 403 });
   }
   // 60-request burst, ~1/s refill — a batch is up to CHUNK files (see the bridge),
@@ -38,15 +37,20 @@ export const POST = apiHandler(async (req: Request) => {
   // confined to the caller's own workspace by requireOwned + the controller's
   // path-safety, and bounded by the workspace quota, so no folder-row check is
   // needed on top — and the one-shot fallback import has no row to check against.)
-  let count = 0;
-  for (const f of files) {
-    const rel = f.name; // path relative to the folder, e.g. "sub/a.txt"
-    if (ignoredPath(rel) || oversized(f.size)) continue; // mirror the client filter
-    const slash = rel.lastIndexOf("/");
-    const dir = slash >= 0 ? `${name}/${rel.slice(0, slash)}` : name;
-    const filename = slash >= 0 ? rel.slice(slash + 1) : rel;
-    await uploadFile(key, dir, new File([f], filename), userId);
-    count++;
-  }
-  return Response.json({ ok: true, count });
+  const accepted = files.filter((f) => !ignoredPath(f.name) && !oversized(f.size)); // mirror the client filter
+  // Upload with bounded concurrency: each file is an independent POST to the
+  // controller, so a large batch forwarded one-at-a-time was pure serial latency.
+  const POOL = 6;
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(POOL, accepted.length) }, async () => {
+    for (let i = next++; i < accepted.length; i = next++) {
+      const f = accepted[i];
+      const rel = f.name; // path relative to the folder, e.g. "sub/a.txt"
+      const slash = rel.lastIndexOf("/");
+      const dir = slash >= 0 ? `${name}/${rel.slice(0, slash)}` : name;
+      const filename = slash >= 0 ? rel.slice(slash + 1) : rel;
+      await uploadFile(key, dir, new File([f], filename), userId);
+    }
+  }));
+  return Response.json({ ok: true, count: accepted.length });
 });

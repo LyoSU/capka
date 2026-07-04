@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { FileUp, FolderPlus, FolderUp, Folder, RefreshCw, Download, Loader2, X } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
 import { FOLDER_MAX_FILES, FOLDER_MAX_TOTAL_MB } from "@/lib/folder-bridge/filter";
+import { formatSize } from "@/lib/constants";
 
 type FolderSync = ReturnType<typeof useFolderSync>;
 
@@ -14,6 +15,7 @@ type FolderSync = ReturnType<typeof useFolderSync>;
  *  above the composer) so the composer stays clean when nothing is attached. */
 export function AttachFolderMenu({ folders, onUpload, children }: { folders: FolderSync; onUpload: () => void; children: React.ReactNode }) {
   const t = useTranslations("chat.folders");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -23,8 +25,8 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
     setBusy(true); setErr("");
     const r = await folders.connect();
     if (!r.ok) {
-      if (r.tooLarge) setErr(t("tooLarge", { count: r.tooLarge.count, size: humanSize(r.tooLarge.bytes), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
-      else if (r.error) setErr(r.error);
+      if (r.tooLarge) setErr(t("tooLarge", { count: r.tooLarge.count, size: formatSize(r.tooLarge.bytes), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
+      else setErr(t("syncFailed"));
     }
     setBusy(false);
     if (r.ok) setOpen(false);
@@ -39,7 +41,7 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
       // Same ceiling as live sync — surface the same localized "too large" message.
       if (e instanceof Error && e.name === "FolderTooLargeError") {
         const m = e as Error & { count?: number; bytes?: number };
-        setErr(t("tooLarge", { count: m.count ?? 0, size: humanSize(m.bytes ?? 0), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
+        setErr(t("tooLarge", { count: m.count ?? 0, size: formatSize(m.bytes ?? 0), maxFiles: FOLDER_MAX_FILES, maxMb: FOLDER_MAX_TOTAL_MB }));
       } else setErr(t("syncFailed"));
     }
     setBusy(false);
@@ -95,7 +97,9 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
                       </span>
                     )}
                   </>
-                ) : folders.lastSyncedAt ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, t) }) : ""}
+                ) : folders.phase === "error" ? (
+                  <span className="text-destructive">{t("syncFailed")}</span>
+                ) : folders.lastSyncedAt ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, locale, t) }) : ""}
                 {folders.conflicts > 0 && <span className="text-amber-600 dark:text-amber-500"> · {t("conflicts", { n: folders.conflicts })}</span>}
                 {folders.phase !== "syncing" && folders.skipped > 0 && <span className="block text-muted-foreground/70">{t("skipped", { n: folders.skipped })}</span>}
               </div>
@@ -133,19 +137,12 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
   );
 }
 
-/** Human-readable byte size — KB under a MB, one decimal above, so a small folder
- *  never reads as a misleading "0 MB". */
-function humanSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${bytes} B`;
-}
-
-/** "just now" / "N min ago" / "N h ago", localized. */
-function rel(ts: number, t: ReturnType<typeof useTranslations>): string {
+/** "just now" then localized relative time — Intl.RelativeTimeFormat gives correct
+ *  units/plurals per locale (incl. Ukrainian) for free, so no hand-kept strings. */
+function rel(ts: number, locale: string, t: ReturnType<typeof useTranslations>): string {
   const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
   if (secs < 45) return t("justNow");
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const mins = Math.round(secs / 60);
-  return mins < 60 ? t("minAgo", { n: mins }) : t("hourAgo", { n: Math.round(mins / 60) });
+  return mins < 60 ? rtf.format(-mins, "minute") : rtf.format(-Math.round(mins / 60), "hour");
 }

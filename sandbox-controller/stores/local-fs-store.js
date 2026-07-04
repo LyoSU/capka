@@ -1,11 +1,26 @@
 import { createReadStream, constants as FS } from "node:fs";
 import { readdir, stat, lstat, mkdir, chown, rm, open } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { sanitize, safeRealPath, assertNoSymlinkEscape } from "../path-safety.js";
 
 const execFileP = promisify(execFile);
+
+/** SHA-256 (hex) of a file's contents, streamed so a large file isn't buffered
+ *  whole. Used only by the folder-sync listing (withHash), so the client can
+ *  compare content by hash instead of size — a same-length edit must still count
+ *  as a change or it silently never syncs. */
+async function hashFile(full) {
+  return new Promise((resolve, reject) => {
+    const h = createHash("sha256");
+    const s = createReadStream(full);
+    s.on("error", reject);
+    s.on("data", (chunk) => h.update(chunk));
+    s.on("end", () => resolve(h.digest("hex")));
+  });
+}
 
 /** WorkspaceStore backed by the local filesystem (Stage 1 default). All file
  *  endpoints in the controller core go through this port, so swapping in an
@@ -16,6 +31,28 @@ export class LocalFsStore {
     this.hostDataRoot = hostDataRoot || dataRoot; // see detectHostDataRoot()
     this.uid = uid;
     this.gid = gid;
+  }
+
+  // Content-hash cache for the folder-sync listing, keyed by absolute path + mtime
+  // + size. Folder sync lists (and hashes) the whole tree twice per turn; without
+  // this, every unchanged file is re-read and SHA-256'd each time — material I/O on
+  // a large folder. A changed file gets a new key (mtime/size differ), so the cache
+  // self-invalidates; stale keys age out by FIFO once the cap is hit.
+  #hashCache = new Map();
+  #HASH_CACHE_MAX = 50000;
+
+  async #hashFileCached(full, mtimeMs, size) {
+    const key = `${full}:${mtimeMs}:${size}`;
+    const cached = this.#hashCache.get(key);
+    if (cached !== undefined) return cached;
+    const hash = await hashFile(full).catch(() => undefined);
+    if (hash !== undefined) {
+      if (this.#hashCache.size >= this.#HASH_CACHE_MAX) {
+        this.#hashCache.delete(this.#hashCache.keys().next().value); // evict oldest
+      }
+      this.#hashCache.set(key, hash);
+    }
+    return hash;
   }
 
   #wsPath(userId, sessionId) {
@@ -47,27 +84,46 @@ export class LocalFsStore {
    *  browser's behavior, unchanged. depth > 1 walks subdirectories (parent before
    *  children, full relative `path` on each) so a container-free workspace snapshot
    *  can mirror the old `find -maxdepth N`. `limit` hard-caps the entry count so a
-   *  huge tree can't blow up the response. */
-  async list(userId, sessionId, relPath = ".", depth = 1, limit = 1000) {
+   *  huge tree can't blow up the response.
+   *
+   *  Returns `{ entries, truncated }`. `truncated` is true when the listing is
+   *  INCOMPLETE — either the entry limit was hit, OR a multi-level walk bottomed
+   *  out on a directory that still had children (the depth cap, which also guards
+   *  against symlink-cycle recursion). Folder sync MUST refuse a truncated tree:
+   *  treating the unseen files as absent would drive a destructive local delete.
+   *  With `withHash`, each file entry also carries a content SHA-256 (`hash`). */
+  async list(userId, sessionId, relPath = ".", depth = 1, limit = 1000, { withHash = false } = {}) {
     const base = this.#wsPath(userId, sessionId);
+    const deep = depth > 1; // multi-level walk → a dir left un-descended means incomplete
     const entries = [];
+    let truncated = false;
     const walk = async (rel, d) => {
-      if (entries.length >= limit) return;
+      if (entries.length >= limit) { truncated = true; return; }
       const dirPath = await safeRealPath(base, rel);
       const names = await readdir(dirPath).catch(() => []);
       for (const name of names) {
-        if (entries.length >= limit) break;
+        if (entries.length >= limit) { truncated = true; break; }
         try {
-          const s = await stat(join(dirPath, name));
+          const full = join(dirPath, name);
+          const s = await stat(full);
           const childRel = rel === "." ? name : `${rel}/${name}`;
           const isDirectory = s.isDirectory();
-          entries.push({ name, path: childRel, isDirectory, size: s.size, modifiedAt: s.mtime.toISOString() });
-          if (isDirectory && d > 1) await walk(childRel, d - 1);
+          const entry = { name, path: childRel, isDirectory, size: s.size, modifiedAt: s.mtime.toISOString() };
+          if (!isDirectory && withHash) entry.hash = await this.#hashFileCached(full, s.mtimeMs, s.size);
+          entries.push(entry);
+          if (isDirectory) {
+            if (d > 1) await walk(childRel, d - 1);
+            else if (deep) {
+              // Hit the depth floor with more below → the tree is incomplete.
+              const kids = await readdir(full).catch(() => []);
+              if (kids.length) truncated = true;
+            }
+          }
         } catch { /* skip inaccessible */ }
       }
     };
     await walk(relPath, Math.max(1, depth));
-    return entries;
+    return { entries, truncated };
   }
 
   async read(userId, sessionId, relPath) {

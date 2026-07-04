@@ -34,6 +34,16 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   const [synced, setSynced] = useState<Record<string, Manifest>>({});
   const foldersRef = useRef(folders);
   foldersRef.current = folders;
+  // Serialize syncs: pullAll (post-turn, fire-and-forget) and pushAll (pre-send)
+  // both run over the same folder handles + the shared server base row, so two
+  // overlapping runs could interleave file ops and clobber the ancestor. Chaining
+  // makes the next sync wait for the in-flight one instead of racing it.
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  // Latest values for the chained closure without re-chaining on every render.
+  const canAttachRef = useRef(canAttach);
+  canAttachRef.current = canAttach;
+  const needReconnectRef = useRef(needReconnect);
+  needReconnectRef.current = needReconnect;
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/folders?chatId=${encodeURIComponent(chatId)}`).catch(() => null);
@@ -66,37 +76,44 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   // Full sync over every connected folder (skipping those needing a re-grant).
   // Shared by push (pre-message) and pull (post-turn) — a sync is bidirectional
   // and idempotent, so the timing is all that differs.
-  const syncAll = useCallback(async () => {
-    const all = foldersRef.current;
-    const live = all.filter((f) => !needReconnect.includes(f.id));
-    if (live.length === 0) return;
-    setPhase("syncing");
-    try {
-      const { sync, syncedManifest } = await import("@/lib/folder-bridge/bridge");
-      let totalConflicts = 0;
-      let totalSkipped = 0;
-      for (const f of live) {
-        const r = await sync(chatId, f, setProgress);
-        totalConflicts += r.conflicts;
-        totalSkipped += r.skipped;
+  const syncAll = useCallback(() => {
+    // Chain after any in-flight sync (ignore its rejection — this run is independent).
+    const run = chain.current.catch(() => {}).then(async () => {
+      // Respect the org gate: if access was turned off, stop syncing entirely
+      // (fail-closed) rather than keep streaming workspace files to/from the PC.
+      if (!canAttachRef.current) return;
+      const live = foldersRef.current.filter((f) => !needReconnectRef.current.includes(f.id));
+      if (live.length === 0) return;
+      setPhase("syncing");
+      try {
+        const { sync, syncedManifest } = await import("@/lib/folder-bridge/bridge");
+        let totalConflicts = 0;
+        let totalSkipped = 0;
+        for (const f of live) {
+          const r = await sync(chatId, f, setProgress);
+          totalConflicts += r.conflicts;
+          totalSkipped += r.skipped;
+        }
+        // Snapshot the post-sync manifests so the file browser can badge statuses.
+        setSynced((prev) => {
+          const next = { ...prev };
+          for (const f of live) { const m = syncedManifest(f.id); if (m) next[f.name] = m; }
+          return next;
+        });
+        setConflicts(totalConflicts);
+        setSkipped(totalSkipped);
+        setLastSyncedAt(Date.now());
+        setPhase("idle");
+      } catch (e) {
+        console.error("[folders] sync failed:", e);
+        setPhase("error");
+      } finally {
+        setProgress(null);
       }
-      // Snapshot the post-sync manifests so the file browser can badge statuses.
-      setSynced((prev) => {
-        const next = { ...prev };
-        for (const f of live) { const m = syncedManifest(f.id); if (m) next[f.name] = m; }
-        return next;
-      });
-      setConflicts(totalConflicts);
-      setSkipped(totalSkipped);
-      setLastSyncedAt(Date.now());
-      setPhase("idle");
-    } catch (e) {
-      console.error("[folders] sync failed:", e);
-      setPhase("error");
-    } finally {
-      setProgress(null);
-    }
-  }, [chatId, needReconnect]);
+    });
+    chain.current = run;
+    return run;
+  }, [chatId]);
 
   // Connect a live folder (Chromium): pick → create row → first sync. ensureChat
   // runs inside the bridge, after the picker opens (keeps the user gesture) but
