@@ -281,8 +281,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     if (!el || !content) return;
 
     const release = () => { pinnedRef.current = false; };
+    // Scrollbar drags emit no wheel event — only pointerdown/mousedown — so
+    // without this the re-seat below snaps the position back on every streamed
+    // delta and the page feels scroll-locked on desktop. Mouse only: touch taps
+    // arrive as synthetic mouse events too, and a tap isn't a scroll intent.
+    const releaseOnMouse = (e: PointerEvent) => { if (e.pointerType === "mouse") release(); };
     el.addEventListener("wheel", release, { passive: true });
     el.addEventListener("touchmove", release, { passive: true });
+    el.addEventListener("pointerdown", releaseOnMouse, { passive: true });
 
     const ro = new ResizeObserver(() => {
       resizeSpacer(); // grow the spacer first so re-seating has room to scroll into
@@ -300,6 +306,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       ro.disconnect();
       el.removeEventListener("wheel", release);
       el.removeEventListener("touchmove", release);
+      el.removeEventListener("pointerdown", releaseOnMouse);
     };
   }, []);
 

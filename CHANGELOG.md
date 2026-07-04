@@ -7,6 +7,9 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Fixed
+- Desktop: dragging the scrollbar while a reply is streaming no longer snaps
+  the view back on every delta (scrolling felt locked until the mouse wheel
+  was used once).
 - Adding a provider no longer fails with "The provider rejected the request
   (HTTP 200)" for OpenAI-compatible gateways that always stream (e.g. omniroute):
   the connection test now probes over the streaming transport that real turns
