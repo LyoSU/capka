@@ -48,7 +48,7 @@ export function RecentChats({ initial }: { initial?: ChatRow[] }) {
               <span className="truncate">{c.title || tn("newChat")}</span>
             </span>
             {c.updatedAt && (
-              <span className="shrink-0 text-xs text-muted-foreground">
+              <span className="shrink-0 text-xs text-muted-foreground" suppressHydrationWarning>
                 {new Date(c.updatedAt).toLocaleDateString(locale, { month: "short", day: "numeric" })}
               </span>
             )}
