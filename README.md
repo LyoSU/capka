@@ -1,7 +1,7 @@
 # Capka
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Images on GHCR](https://img.shields.io/badge/images-ghcr-green.svg)](DEPLOY.md)
+[![Images on GHCR](https://img.shields.io/badge/images-ghcr-green.svg)](docs/DEPLOY.md)
 [![Live demo](https://img.shields.io/badge/live%20demo-capka.yuri.ly-ff6f3c.svg)](https://capka.yuri.ly/)
 
 <p align="center"><img src="./docs/assets/logo.webp" alt="Capka" width="180"></p>
@@ -128,8 +128,8 @@ DOMAIN=capka.example.com ./scripts/up.sh
 `DOMAIN` enables automatic HTTPS through Caddy. Without it, Capka serves plain
 HTTP on `:3000`; put it behind your own TLS proxy and set `PUBLIC_URL`.
 
-See [`DEPLOY.md`](DEPLOY.md) for Coolify, compose files, host nginx, and common
-deployment gotchas.
+See [`docs/DEPLOY.md`](docs/DEPLOY.md) for Coolify, compose files, host nginx,
+and common deployment gotchas.
 
 ## Requirements
 
@@ -174,7 +174,7 @@ SANDBOX_RUNTIME=runsc
 
 ## Useful Links
 
-- [`DEPLOY.md`](DEPLOY.md): production deploys and Coolify
+- [`docs/DEPLOY.md`](docs/DEPLOY.md): production deploys and Coolify
 - [`SECURITY.md`](SECURITY.md): threat model and hardening
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): local development
 - [`docs/UPGRADE.md`](docs/UPGRADE.md): upgrade notes

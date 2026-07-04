@@ -10,7 +10,7 @@
 		Permissions-Policy "geolocation=(), microphone=(), camera=()"
 	}
 	reverse_proxy platform:3000
-	# Allow large uploads (matches the host-nginx client_max_body_size in DEPLOY.md).
+	# Allow large uploads (matches the host-nginx client_max_body_size in docs/DEPLOY.md).
 	request_body {
 		max_size 100MB
 	}

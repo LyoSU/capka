@@ -54,5 +54,5 @@ next-env.d.ts
 .superpowers/
 
 # Maintainer-private deploy runbook + internal planning docs (not for the public tree)
-DEPLOY.md
+/DEPLOY.md
 docs/superpowers/

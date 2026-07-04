@@ -33,4 +33,4 @@ npm test               # Vitest unit tests
 Restart the platform container after editing worker, runner, instrumentation, or
 Telegram bot code. HMR does not reload the in-process worker.
 
-For production deploys, use [`../DEPLOY.md`](../DEPLOY.md).
+For production deploys, use [`DEPLOY.md`](DEPLOY.md).
