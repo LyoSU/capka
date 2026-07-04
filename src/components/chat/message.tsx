@@ -744,6 +744,7 @@ function UserBubble({
           <DropdownMenuTrigger
             aria-hidden
             tabIndex={-1}
+            nativeButton={false}
             render={<span />}
             className="pointer-events-none absolute right-2 bottom-1 h-0 w-0"
           />
