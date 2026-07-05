@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-05
+
 ### Added
 - New Settings → Activity page: a readable, per-day audit trail of admin and configuration changes, showing who did each action, filterable by category (People/Extensions/Settings/Security) with load-more paging. Replaces the raw action-code list that was buried under Permissions.
 - Settings → Users now shows pending sign-ups with inline approve/reject (moved off Authentication), 30-day shared-key spend per person, join date, role filter, search, and account removal.
