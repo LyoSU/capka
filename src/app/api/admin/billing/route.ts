@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { tiers, users } from "@/lib/db/schema";
 import { getProviderKeyMode, setSetting, type ProviderKeyMode } from "@/lib/settings";
 import { getDefaultTier } from "@/lib/billing/limits";
+import { audit } from "@/lib/governance/audit";
 
 const MODES: ProviderKeyMode[] = ["shared_plus_own", "shared_only", "own_only"];
 
@@ -39,7 +40,7 @@ export const GET = apiHandler(async () => {
  *  - assignTier: hand-assign a user to a tier (scaffold for future auto/api)
  */
 export const PUT = apiHandler(async (req: Request) => {
-  await requireAdmin();
+  const { userId: adminId } = await requireAdmin();
   const body = await req.json();
   const action = body?.action;
 
@@ -50,6 +51,7 @@ export const PUT = apiHandler(async (req: Request) => {
     await setSetting("provider_key_mode", body.mode);
     // Keep the legacy boolean consistent so any old reader stays correct.
     await setSetting("share_admin_providers", body.mode === "own_only" ? "false" : "true");
+    await audit({ actorId: adminId, action: "billing.update", targetType: "billing", targetKey: "keyMode", detail: { field: "keyMode", mode: body.mode } });
     return Response.json({ ok: true, keyMode: body.mode });
   }
 
@@ -64,6 +66,7 @@ export const PUT = apiHandler(async (req: Request) => {
       })
       .where(eq(tiers.id, tier.id))
       .returning();
+    await audit({ actorId: adminId, action: "billing.update", targetType: "billing", targetKey: "limits", detail: { field: "limits", limit5h: updated?.limit5h, limitWeek: updated?.limitWeek, limitMonth: updated?.limitMonth } });
     return Response.json({ ok: true, defaultTier: updated });
   }
 
@@ -79,9 +82,10 @@ export const PUT = apiHandler(async (req: Request) => {
       .update(users)
       .set({ tierId, tierSource: "manual" })
       .where(eq(users.id, body.userId))
-      .returning({ id: users.id, tierId: users.tierId });
+      .returning({ id: users.id, tierId: users.tierId, name: users.name });
     if (!updated) return Response.json({ error: "User not found" }, { status: 404 });
-    return Response.json({ ok: true, user: updated });
+    await audit({ actorId: adminId, action: "billing.update", targetType: "billing", targetKey: updated.name ?? body.userId, detail: { field: "tier", tierId } });
+    return Response.json({ ok: true, user: { id: updated.id, tierId: updated.tierId } });
   }
 
   return Response.json({ error: "Unknown action" }, { status: 400 });

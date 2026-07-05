@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Copy, Check, Send, UserCheck, UserX } from "lucide-react";
+import Link from "next/link";
+import { Loader2, Copy, Check, Send, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,6 @@ interface Config {
   registrationMode: Mode;
   emailSignupEnabled: boolean;
 }
-interface PendingUser { id: string; name: string; email: string; status: string; createdAt: string | null }
 
 export default function AuthenticationPage() {
   const t = useTranslations("settings.authentication");
@@ -33,15 +33,6 @@ export default function AuthenticationPage() {
   const [emailSignup, setEmailSignup] = useState(true);
   const [redirectUri, setRedirectUri] = useState("");
   const [copied, setCopied] = useState(false);
-  const [pending, setPending] = useState<PendingUser[]>([]);
-
-  const loadPending = useCallback(async () => {
-    const res = await fetch("/api/admin/users");
-    if (res.ok) {
-      const rows: PendingUser[] = await res.json();
-      setPending(rows.filter((u) => u.status === "pending"));
-    }
-  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -55,11 +46,10 @@ export default function AuthenticationPage() {
         setMode(data.registrationMode);
         setEmailSignup(data.emailSignupEnabled);
       }
-      await loadPending();
     } finally {
       setLoading(false);
     }
-  }, [loadPending]);
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   const save = async () => {
@@ -89,22 +79,6 @@ export default function AuthenticationPage() {
     setCopied(true);
     toast.success(t("copied"));
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const approve = async (userId: string) => {
-    const res = await fetch("/api/admin/users", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, status: "active" }),
-    });
-    if (res.ok) { toast.success(t("approved")); setPending((p) => p.filter((u) => u.id !== userId)); }
-    else toast.error(t("actionFailed"));
-  };
-
-  const reject = async (userId: string) => {
-    const res = await fetch(`/api/admin/users?userId=${encodeURIComponent(userId)}`, { method: "DELETE" });
-    if (res.ok) { toast.success(t("rejected")); setPending((p) => p.filter((u) => u.id !== userId)); }
-    else toast.error(t("actionFailed"));
   };
 
   const modes: { key: Mode; }[] = [{ key: "open" }, { key: "approval" }, { key: "closed" }];
@@ -227,35 +201,16 @@ export default function AuthenticationPage() {
         </Button>
       </div>
 
-      {/* Pending approvals */}
+      {/* Approvals now live on the Users page (the single home for people
+          management); when in approval mode, point admins there. */}
       {mode === "approval" && (
-        <>
-          <Separator />
-          <div className="space-y-3">
-            <div>
-              <h3 className="text-sm font-medium">{t("pending.title")}</h3>
-              <p className="text-sm text-muted-foreground">{t("pending.desc")}</p>
-            </div>
-            {pending.length === 0 ? (
-              <p className="rounded-md border border-dashed py-6 text-center text-sm text-muted-foreground">{t("pending.empty")}</p>
-            ) : (
-              pending.map((u) => (
-                <div key={u.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{u.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">{u.email}</p>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <Button size="sm" onClick={() => approve(u.id)}><UserCheck className="mr-1 h-3.5 w-3.5" />{t("pending.approve")}</Button>
-                    <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => reject(u.id)}>
-                      <UserX className="mr-1 h-3.5 w-3.5" />{t("pending.reject")}
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </>
+        <Link
+          href="/settings/users"
+          className="flex items-center justify-between gap-3 rounded-md border px-4 py-3 text-sm transition-colors hover:bg-accent/40"
+        >
+          <span className="text-muted-foreground">{t("pending.moved")}</span>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </Link>
       )}
     </div>
   );

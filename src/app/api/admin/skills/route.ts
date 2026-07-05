@@ -38,7 +38,7 @@ export const POST = apiHandler(async (req: Request) => {
 
 /** Admin toggles a shared (system/project) skill. User-scope skills are owner-managed via /api/skills. */
 export const PATCH = apiHandler(async (req: Request) => {
-  await requireAdmin();
+  const { userId } = await requireAdmin();
   const { id, enabled } = await req.json();
   if (typeof id !== "string" || typeof enabled !== "boolean") {
     return Response.json({ error: "Bad request" }, { status: 400 });
@@ -46,17 +46,19 @@ export const PATCH = apiHandler(async (req: Request) => {
   const skill = await getSkillMeta(id);
   if (!skill || skill.scope === "user") return Response.json({ error: "Not found" }, { status: 404 });
   await setSkillEnabled(id, enabled);
+  await audit({ actorId: userId, action: enabled ? "skill.enable" : "skill.disable", targetType: "skill", targetKey: id });
   return Response.json({ ok: true });
 });
 
 /** Admin deletes a shared (system/project) skill. If it came from a plugin it may
  *  reappear on the next install/update — uninstall the plugin to remove it for good. */
 export const DELETE = apiHandler(async (req: Request) => {
-  await requireAdmin();
+  const { userId } = await requireAdmin();
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return Response.json({ error: "id required" }, { status: 400 });
   const skill = await getSkillMeta(id);
   if (!skill || skill.scope === "user") return Response.json({ error: "Not found" }, { status: 404 });
   await deleteSkill(id);
+  await audit({ actorId: userId, action: "skill.remove", targetType: "skill", targetKey: id });
   return Response.json({ ok: true });
 });

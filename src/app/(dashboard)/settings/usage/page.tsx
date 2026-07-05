@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { TrendingDown, TrendingUp } from "lucide-react";
+import { TrendingDown, TrendingUp, Search, X } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 interface Totals {
@@ -41,6 +42,7 @@ interface RecentRow {
   cost: number;
   inputTokens: string | number;
   outputTokens: string | number;
+  userId: string;
   userName: string | null;
   userEmail: string | null;
 }
@@ -67,6 +69,10 @@ export default function UsagePage() {
   const [scope, setScope] = useState<Scope>("shared");
   const [data, setData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [userQuery, setUserQuery] = useState("");
+  // Clicking a person in "By member" drills the recent-activity list down to
+  // just them — the answer to "who is spending, and on what?".
+  const [selectedUser, setSelectedUser] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     fetch(`/api/admin/usage?days=${days}&scope=${scope}`)
@@ -117,6 +123,7 @@ export default function UsagePage() {
           onValueChange={(v) => {
             if (v.length) {
               setLoading(true);
+              setSelectedUser(null);
               setDays(Number(v[0]));
             }
           }}
@@ -137,6 +144,7 @@ export default function UsagePage() {
         onValueChange={(v) => {
           if (v.length) {
             setLoading(true);
+            setSelectedUser(null);
             setScope(v[0] as Scope);
           }
         }}
@@ -182,12 +190,19 @@ export default function UsagePage() {
           {/* Daily cost trend */}
           <DailyChart series={data.series} days={data.days} dailyAvg={dailyAvg} money={money} locale={locale} t={t} />
 
-          {/* Efficiency strip — "how" the budget is spent, not just how much */}
-          <div className="grid grid-cols-3 gap-3">
-            <Stat label={t("totalTokens")} value={compact(totalTok)} sub={t("tokenSplit", { input: compact(promptTok), output: compact(outTok) })} />
-            <Stat label={t("cacheRate")} value={pct(cacheRate)} sub={t("cachedTokens", { tokens: compact(cachedTok) })} />
-            <Stat label={t("blendedRate")} value={money(blendedPerM)} sub={t("perMillionTokens")} />
-          </div>
+          {/* Technical detail — token counts and per-million rates. Collapsed by
+              default: engineer metrics, not what an admin acts on day to day. */}
+          <details className="group rounded-lg border">
+            <summary className="flex cursor-pointer list-none items-center justify-between px-3.5 py-2.5 text-sm font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+              {t("technicalDetails")}
+              <span className="text-xs text-muted-foreground/70 group-open:hidden">{t("tokensSummary", { tokens: compact(totalTok) })}</span>
+            </summary>
+            <div className="grid grid-cols-3 gap-3 border-t p-3">
+              <Stat label={t("totalTokens")} value={compact(totalTok)} sub={t("tokenSplit", { input: compact(promptTok), output: compact(outTok) })} />
+              <Stat label={t("cacheRate")} value={pct(cacheRate)} sub={t("cachedTokens", { tokens: compact(cachedTok) })} />
+              <Stat label={t("blendedRate")} value={money(blendedPerM)} sub={t("perMillionTokens")} />
+            </div>
+          </details>
 
           {/* By model */}
           <section className="space-y-2">
@@ -211,33 +226,69 @@ export default function UsagePage() {
             />
           </section>
 
-          {/* By user */}
+          {/* By member — click a row to drill the recent list down to that person */}
           <section className="space-y-2">
-            <h3 className="text-sm font-medium">{t("byUser")}</h3>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-medium">{t("byUser")}</h3>
+              {data.byUser.length > 8 && (
+                <div className="relative w-44">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder={t("searchUser")} className="h-8 pl-8 text-xs" />
+                </div>
+              )}
+            </div>
             <Breakdown
-              rows={data.byUser.map((u) => ({
-                key: u.userId,
-                label: <span className="truncate">{u.name || u.email || t("unknownUser")}</span>,
-                meta: u.calls > 0 ? t("userMeta", { cost: moneyPrecise(u.cost / u.calls) }) : undefined,
-                calls: u.calls,
-                cost: u.cost,
-              }))}
+              rows={data.byUser
+                .filter((u) => {
+                  const q = userQuery.trim().toLowerCase();
+                  return !q || (u.name || u.email || "").toLowerCase().includes(q);
+                })
+                .map((u) => ({
+                  key: u.userId,
+                  label: <span className="truncate">{u.name || u.email || t("unknownUser")}</span>,
+                  meta: u.calls > 0 ? t("userMeta", { cost: moneyPrecise(u.cost / u.calls) }) : undefined,
+                  calls: u.calls,
+                  cost: u.cost,
+                }))}
               total={totalCost}
               money={money}
               pct={pct}
               t={t}
+              selectedKey={selectedUser?.id}
+              onSelect={(key) => {
+                const u = data.byUser.find((x) => x.userId === key);
+                setSelectedUser((cur) => (cur?.id === key ? null : { id: key, name: u?.name || u?.email || t("unknownUser") }));
+              }}
             />
           </section>
 
-          {/* Recent activity */}
+          {/* Recent activity (optionally filtered to the selected member) */}
           {data.recent?.length ? (
             <section className="space-y-2">
-              <h3 className="text-sm font-medium">{t("recentActivity")}</h3>
-              <div className="overflow-hidden rounded-lg border">
-                {data.recent.map((r, i) => (
-                  <RecentItem key={r.id} row={r} money={moneyPrecise} compact={compact} locale={locale} t={t} border={i > 0} />
-                ))}
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium">{t("recentActivity")}</h3>
+                {selectedUser && (
+                  <button
+                    onClick={() => setSelectedUser(null)}
+                    className="flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {selectedUser.name}<X className="h-3 w-3" />
+                  </button>
+                )}
               </div>
+              {(() => {
+                const rows = selectedUser ? data.recent.filter((r) => r.userId === selectedUser.id) : data.recent;
+                if (rows.length === 0) {
+                  return <p className="rounded-lg border border-dashed py-6 text-center text-xs text-muted-foreground">{t("noRecentForUser")}</p>;
+                }
+                return (
+                  <div className="overflow-hidden rounded-lg border">
+                    {rows.map((r, i) => (
+                      <RecentItem key={r.id} row={r} money={moneyPrecise} compact={compact} locale={locale} t={t} border={i > 0} />
+                    ))}
+                  </div>
+                );
+              })()}
             </section>
           ) : null}
         </>
@@ -320,20 +371,38 @@ function Breakdown({
   money,
   pct,
   t,
+  onSelect,
+  selectedKey,
 }: {
   rows: { key: string; label: React.ReactNode; meta?: string; calls: number; cost: number }[];
   total: number;
   money: (n: number) => string;
   pct: (n: number) => string;
   t: T;
+  onSelect?: (key: string) => void;
+  selectedKey?: string;
 }) {
   const max = Math.max(...rows.map((r) => r.cost), 0);
+  if (rows.length === 0) {
+    return <p className="rounded-lg border border-dashed py-6 text-center text-xs text-muted-foreground">{t("noMatches")}</p>;
+  }
   return (
     <div className="overflow-hidden rounded-lg border">
       {rows.map((r, i) => {
         const share = total > 0 ? r.cost / total : 0;
+        const selected = selectedKey === r.key;
+        const Tag = onSelect ? "button" : "div";
         return (
-          <div key={r.key} className={cn("relative px-3.5 py-2.5", i > 0 && "border-t")}>
+          <Tag
+            key={r.key}
+            {...(onSelect ? { onClick: () => onSelect(r.key), type: "button" as const } : {})}
+            className={cn(
+              "relative block w-full px-3.5 py-2.5 text-left",
+              i > 0 && "border-t",
+              onSelect && "transition-colors hover:bg-accent/40",
+              selected && "bg-accent/60",
+            )}
+          >
             {/* Proportional fill behind the row, scaled to the largest spender. */}
             <div
               className="absolute inset-y-0 left-0 bg-primary/[0.07]"
@@ -351,7 +420,7 @@ function Breakdown({
                 <span className="w-20 text-right font-medium tabular-nums">{money(r.cost)}</span>
               </div>
             </div>
-          </div>
+          </Tag>
         );
       })}
     </div>

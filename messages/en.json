@@ -566,15 +566,19 @@
         "personal": "Personal",
         "admin": "Administration"
       },
-      "updates": "Updates"
+      "updates": "Updates",
+      "activity": "Activity"
     },
     "usersPage": {
       "title": "Users",
-      "subtitle": "Manage user roles and permissions. Only admins can access this page.",
+      "subtitle": "Approve, assign roles, and see what each person is spending.",
+      "searchPlaceholder": "Search people",
       "colUser": "User",
-      "colEmail": "Email",
       "colRole": "Role",
-      "empty": "No users found",
+      "colSpend": "30-day spend",
+      "colActions": "",
+      "empty": "No users yet",
+      "noMatches": "No one matches your search.",
       "adminRequired": "Admin access required",
       "loadFailed": "Failed to load users",
       "loadError": "Could not load users. Please refresh the page.",
@@ -585,7 +589,21 @@
         "user": "User",
         "viewer": "Viewer"
       },
-      "changeRole": "Change role"
+      "changeRole": "Change role",
+      "joined": "joined {date}",
+      "pendingTitle": "Awaiting approval",
+      "requestedOn": "requested {date}",
+      "approve": "Approve",
+      "reject": "Reject",
+      "approved": "Account approved",
+      "removed": "Account removed",
+      "actionFailed": "Something went wrong. Please try again.",
+      "remove": "Remove",
+      "removeTitle": "Remove {name}?",
+      "removeWarn": "This permanently deletes their account, chats, and files. This can't be undone.",
+      "cancel": "Cancel",
+      "spendHint": "Spend is this person's usage on the organization's shared key over the last 30 days. Own-key usage isn't counted.",
+      "filterAll": "All"
     },
     "general": {
       "account": "Account",
@@ -822,7 +840,12 @@
       "perMillionTokens": "per 1M tokens",
       "avgLine": "avg {cost}/day",
       "modelMeta": "{rate}/1M · {tokens} tok",
-      "userMeta": "avg {cost}/req"
+      "userMeta": "avg {cost}/req",
+      "technicalDetails": "Technical details",
+      "tokensSummary": "{tokens} tokens",
+      "searchUser": "Search member",
+      "noRecentForUser": "No recent activity for this member in the latest events.",
+      "noMatches": "No one matches your search."
     },
     "skills": {
       "title": "Customize",
@@ -1065,46 +1088,13 @@
       "hint": "Deny hides a skill or connector from the assistant for everyone. Allow is the default.",
       "skills": "Skills",
       "connectors": "Connectors",
-      "activity": "Activity",
       "effect": {
         "allow": "Allow",
         "ask": "Ask",
         "deny": "Deny"
       },
       "askSoon": "Ask (human-in-the-loop) is coming soon. For now it behaves as Allow.",
-      "saveFailed": "Couldn't save that change.",
-      "actions": {
-        "plugin": {
-          "install": "Installed plugin",
-          "uninstall": "Removed plugin"
-        },
-        "connector": {
-          "add": "Added connector",
-          "remove": "Removed connector",
-          "enable": "Enabled connector",
-          "disable": "Disabled connector"
-        },
-        "skill": {
-          "add": "Added skill",
-          "remove": "Removed skill",
-          "enable": "Enabled skill",
-          "disable": "Disabled skill"
-        },
-        "automation": {
-          "add": "Added automation",
-          "remove": "Removed automation",
-          "enable": "Enabled automation",
-          "disable": "Disabled automation"
-        },
-        "policy": {
-          "set": "Changed permission",
-          "clear": "Reset permission"
-        },
-        "settings": {
-          "update": "Updated setting",
-          "undo": "Reverted change"
-        }
-      }
+      "saveFailed": "Couldn't save that change."
     },
     "authentication": {
       "title": "Authentication",
@@ -1113,9 +1103,6 @@
       "saved": "Saved",
       "saveFailed": "Couldn't save. Please try again.",
       "copied": "Copied",
-      "approved": "Account approved",
-      "rejected": "Account removed",
-      "actionFailed": "Something went wrong. Please try again.",
       "telegram": {
         "title": "Login with Telegram",
         "desc": "Let people sign in with one tap using their Telegram account.",
@@ -1153,11 +1140,7 @@
         "deadEndWarning": "Email sign-up is off and Telegram login isn't configured — new users won't be able to register at all."
       },
       "pending": {
-        "title": "Waiting for approval",
-        "desc": "People who signed in and need your go-ahead.",
-        "empty": "No one is waiting right now.",
-        "approve": "Approve",
-        "reject": "Reject"
+        "moved": "Approve or remove people on the Users page →"
       }
     },
     "security": {
@@ -1232,6 +1215,96 @@
       "checkEnabled": "Update checks on",
       "checkDisabled": "Update checks off",
       "updateFailed": "Couldn't save the change"
+    },
+    "activity": {
+      "title": "Activity",
+      "subtitle": "A record of admin and configuration changes across the organization.",
+      "adminOnly": "Only admins can view activity.",
+      "empty": "Nothing has happened yet.",
+      "systemActor": "System",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "loadMore": "Load more",
+      "category": {
+        "all": "All",
+        "people": "People",
+        "extensions": "Extensions",
+        "settings": "Settings",
+        "security": "Security"
+      },
+      "role": {
+        "admin": "Admin",
+        "user": "User",
+        "viewer": "Viewer"
+      },
+      "status": {
+        "active": "Active",
+        "pending": "Pending"
+      },
+      "mode": {
+        "shared_plus_own": "Shared + own keys",
+        "shared_only": "Shared key only",
+        "own_only": "Own keys only"
+      },
+      "field": {
+        "keyMode": "Provider keys",
+        "limits": "Spend limits",
+        "tier": "Tier"
+      },
+      "actions": {
+        "plugin": {
+          "install": "Installed plugin",
+          "uninstall": "Removed plugin",
+          "update": "Updated plugin",
+          "enable": "Enabled plugin",
+          "disable": "Disabled plugin"
+        },
+        "connector": {
+          "add": "Added connector",
+          "remove": "Removed connector",
+          "enable": "Enabled connector",
+          "disable": "Disabled connector"
+        },
+        "skill": {
+          "add": "Added skill",
+          "remove": "Removed skill",
+          "enable": "Enabled skill",
+          "disable": "Disabled skill"
+        },
+        "automation": {
+          "add": "Added automation",
+          "remove": "Removed automation",
+          "enable": "Enabled automation",
+          "disable": "Disabled automation"
+        },
+        "folder": {
+          "add": "Added folder",
+          "remove": "Removed folder"
+        },
+        "policy": {
+          "set": "Changed permission for",
+          "clear": "Reset permission for"
+        },
+        "settings": {
+          "update": "Updated setting",
+          "undo": "Reverted change"
+        },
+        "user": {
+          "role_change": "Changed role of",
+          "status_change": "Changed status of",
+          "remove": "Removed user"
+        },
+        "auth_config": {
+          "update": "Updated sign-in settings"
+        },
+        "master_key": {
+          "view": "Viewed the master key",
+          "remove": "Removed the master key"
+        },
+        "billing": {
+          "update": "Updated billing"
+        }
+      }
     }
   },
   "setup": {

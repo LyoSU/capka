@@ -11,15 +11,6 @@ type Effect = "allow" | "deny" | "ask";
 type CapabilityType = "skill" | "connector";
 interface Policy { id: string; capabilityType: CapabilityType; capabilityKey: string; effect: Effect; scope: string }
 interface InvItem { capabilityType: CapabilityType; capabilityKey: string }
-interface AuditEntry { id: string; action: string; targetKey: string | null; createdAt: string | null }
-
-const KNOWN_ACTIONS = new Set([
-  "plugin.install", "plugin.uninstall", "connector.add", "connector.remove",
-  "connector.enable", "connector.disable", "skill.add", "skill.remove",
-  "skill.enable", "skill.disable", "automation.add", "automation.remove",
-  "automation.enable", "automation.disable", "policy.set", "policy.clear",
-  "settings.update", "settings.undo",
-]);
 
 /** Three-way segmented control: Allow / Ask / Deny. */
 function EffectControl({ value, onChange, t }: { value: Effect; onChange: (e: Effect) => void; t: ReturnType<typeof useTranslations> }) {
@@ -50,14 +41,12 @@ export default function PermissionsPage() {
   const isAdmin = useIsAdmin();
   const [inventory, setInventory] = useState<InvItem[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
-  const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const [p, a] = await Promise.all([fetch("/api/admin/policies"), fetch("/api/admin/audit?limit=50")]);
+      const p = await fetch("/api/admin/policies");
       if (p.ok) { const d = await p.json(); setPolicies(d.policies ?? []); setInventory(d.inventory ?? []); }
-      if (a.ok) setAudit((await a.json()).entries ?? []);
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { if (isAdmin) load(); else setLoading(false); }, [isAdmin, load]);
@@ -100,8 +89,6 @@ export default function PermissionsPage() {
       </div>
     );
 
-  const fmtTime = (s: string | null) => (s ? new Date(s).toLocaleString() : "");
-
   return (
     <div className="max-w-2xl space-y-6">
       <div>
@@ -124,24 +111,8 @@ export default function PermissionsPage() {
           <p className="text-xs text-muted-foreground">{t("hint")}</p>
           {section(t("skills"), Sparkles, skills)}
           {section(t("connectors"), Plug, connectors)}
+          <p className="text-xs text-muted-foreground/80">{t("askSoon")}</p>
         </>
-      )}
-
-      {!loading && audit.length > 0 && (
-        <div className="space-y-2 pt-2">
-          <h3 className="text-sm font-medium">{t("activity")}</h3>
-          <div className="rounded-md border divide-y">
-            {audit.map((e) => (
-              <div key={e.id} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
-                <span>
-                  {KNOWN_ACTIONS.has(e.action) ? t(`actions.${e.action}` as never) : e.action}
-                  {e.targetKey && <span className="text-muted-foreground"> · {e.targetKey}</span>}
-                </span>
-                <span className="shrink-0 text-muted-foreground">{fmtTime(e.createdAt)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
     </div>
   );

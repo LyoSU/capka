@@ -80,6 +80,7 @@ export const GET = apiHandler(async (req: Request) => {
         cost: sql<number>`coalesce(${usage.costUsd}, 0)::float8`,
         inputTokens: sql<number>`coalesce(${usage.inputTokens}, 0) + coalesce(${usage.cachedInputTokens}, 0)`,
         outputTokens: sql<number>`coalesce(${usage.outputTokens}, 0)`,
+        userId: usage.userId,
         userName: users.name,
         userEmail: users.email,
       })
@@ -87,7 +88,7 @@ export const GET = apiHandler(async (req: Request) => {
       .leftJoin(users, eq(users.id, usage.userId))
       .where(and(gte(usage.createdAt, since), base))
       .orderBy(desc(usage.createdAt))
-      .limit(15),
+      .limit(40),
   ]);
 
   return Response.json({ days, scope, totals, prev, series, byModel, byUser, recent });

@@ -6,7 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- New Settings → Activity page: a readable, per-day audit trail of admin and configuration changes, showing who did each action, filterable by category (People/Extensions/Settings/Security) with load-more paging. Replaces the raw action-code list that was buried under Permissions.
+- Settings → Users now shows pending sign-ups with inline approve/reject (moved off Authentication), 30-day shared-key spend per person, join date, role filter, search, and account removal.
+
+### Changed
+- Settings → Usage: token/cache/blended-rate metrics moved into a collapsible "Technical details" block; the by-member list is now searchable and clicking a person filters recent activity to them.
+
 ### Fixed
+- Audit trail now records skill enable/disable/remove, automation enable/disable/remove, and instance billing changes, and renders every action (including `auth_config.update`, `user.role_change`, master-key access) as a localized sentence naming the actor — several of these previously went unlogged or showed as raw keys.
 - Settings nav no longer flickers on every navigation — admin-only items briefly vanished and reappeared because the route crossfade remounts the pane, re-fetching admin/billing status each time; both are now cached across remounts.
 - README and `docs/DEVELOPMENT.md` no longer link to a `DEPLOY.md` that isn't in the repo (it was untracked as maintainer-private); a public `docs/DEPLOY.md` deployment guide now backs those links.
 

@@ -4,6 +4,7 @@ import { apiHandler, requireActive } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { automations } from "@/lib/db/schema";
 import { nextOccurrenceAfter, type AutomationTrigger } from "@/lib/automations/schedule";
+import { audit } from "@/lib/governance/audit";
 
 const patchBody = z.object({ enabled: z.boolean() });
 
@@ -23,13 +24,16 @@ export const PATCH = apiHandler(async (req: Request, { params }: { params: Promi
     ...(enabled ? { nextRunAt: nextOccurrenceAfter(row.trigger as AutomationTrigger, new Date()), consecutiveFailures: 0 } : {}),
     updatedAt: new Date(),
   }).where(eq(automations.id, id));
+  // Unattended shared-key spend is toggling on/off — record it in the trail.
+  await audit({ actorId: userId, action: enabled ? "automation.enable" : "automation.disable", targetType: "automation", targetKey: row.title });
   return Response.json({ ok: true });
 });
 
 export const DELETE = apiHandler(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { userId } = await requireActive();
   const { id } = await params;
-  const res = await db.delete(automations).where(and(eq(automations.id, id), eq(automations.userId, userId))).returning({ id: automations.id });
+  const res = await db.delete(automations).where(and(eq(automations.id, id), eq(automations.userId, userId))).returning({ id: automations.id, title: automations.title });
   if (!res.length) return Response.json({ error: "Not found" }, { status: 404 });
+  await audit({ actorId: userId, action: "automation.remove", targetType: "automation", targetKey: res[0].title });
   return Response.json({ ok: true });
 });
