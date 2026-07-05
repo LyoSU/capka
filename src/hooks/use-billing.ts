@@ -25,21 +25,31 @@ export interface BillingInfo {
   } | null;
 }
 
+// Cached across remounts (the dashboard's keyed <ViewTransition> remounts the
+// route subtree on every navigation). `undefined` = not yet loaded, distinct
+// from a valid `null` result; `inflight` dedups concurrent first-mount fetches.
+let cached: BillingInfo | null | undefined;
+let inflight: Promise<BillingInfo | null> | undefined;
+
 /**
  * Per-user billing context (key mode, own-key permission, budget status). Loads
  * once from /api/me/billing. `loading` lets callers avoid flicker before the
  * mode is known (e.g. the settings nav deciding whether to show Connections).
  */
 export function useBilling() {
-  const [data, setData] = useState<BillingInfo | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<BillingInfo | null>(cached ?? null);
+  const [loading, setLoading] = useState(cached === undefined);
 
   useEffect(() => {
-    fetch("/api/me/billing")
+    if (cached !== undefined) return;
+    inflight ??= fetch("/api/me/billing")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
+      .catch(() => null);
+    inflight.then((d) => {
+      cached = d;
+      setData(d);
+      setLoading(false);
+    });
   }, []);
 
   return { billing: data, loading };

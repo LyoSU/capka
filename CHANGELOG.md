@@ -7,6 +7,7 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Fixed
+- Settings nav no longer flickers on every navigation — admin-only items briefly vanished and reappeared because the route crossfade remounts the pane, re-fetching admin/billing status each time; both are now cached across remounts.
 - README and `docs/DEVELOPMENT.md` no longer link to a `DEPLOY.md` that isn't in the repo (it was untracked as maintainer-private); a public `docs/DEPLOY.md` deployment guide now backs those links.
 
 ## [0.3.0] - 2026-07-05
