@@ -150,6 +150,18 @@ ensure_prereqs() {
   fi
 }
 
+# Run the official Docker installer, but keep its very noisy apt/kernel/version
+# output out of the operator's face — a wall of `+ sh -c ...` lines looks alarming
+# to a non-technical user. Show one calm line; on failure, surface the log tail.
+install_docker_quietly() {
+  log=/tmp/capka-docker-install.log
+  info "$1 — this takes a minute ..."
+  if ! curl -fsSL https://get.docker.com | $SUDO sh >"$log" 2>&1; then
+    tail -20 "$log" >&2
+    err "Docker install failed — full log at $log"
+  fi
+}
+
 ensure_docker() {
   # Reject podman aliased as `docker`: it doesn't expose the container/exec socket
   # API the sandbox controller drives, and get.docker.com won't change that.
@@ -167,15 +179,13 @@ ensure_docker() {
     if [ "${running:-0}" -gt 0 ]; then
       err "Docker is running ${running} container(s) but the 'docker compose' plugin is missing. Add it without disrupting your daemon (https://docs.docker.com/compose/install/linux/) and re-run."
     fi
-    info "Adding the docker compose plugin (via get.docker.com) ..."
-    curl -fsSL https://get.docker.com | $SUDO sh
+    install_docker_quietly "Adding the docker compose plugin"
   else
     # get.docker.com's convenience script doesn't support Alpine.
     if have apk && ! have apt-get && ! have dnf && ! have yum; then
       err "on Alpine install Docker with: apk add docker docker-cli-compose && rc-update add docker && service docker start — then re-run."
     fi
-    info "Installing Docker (via get.docker.com) ..."
-    curl -fsSL https://get.docker.com | $SUDO sh
+    install_docker_quietly "Installing Docker"
   fi
 
   # A freshly installed daemon may be down on minimal images; nudge it.
