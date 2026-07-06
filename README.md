@@ -2,12 +2,14 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Images on GHCR](https://img.shields.io/badge/images-ghcr-green.svg)](docs/DEPLOY.md)
+[![Website](https://img.shields.io/badge/website-capka.vercel.app-22190f.svg)](https://capka.vercel.app/)
 [![Live demo](https://img.shields.io/badge/live%20demo-capka.yuri.ly-ff6f3c.svg)](https://capka.yuri.ly/)
 
 <p align="center"><img src="./docs/assets/logo.webp" alt="Capka" width="180"></p>
 <p align="center"><strong>Self-hosted AI workspace with a sandbox and file storage for every chat</strong></p>
 <p align="center">
-  <a href="https://capka.yuri.ly/">Demo</a> |
+  <a href="https://capka.vercel.app/">Website</a> |
+  <a href="https://capka.yuri.ly/">Live demo</a> |
   <a href="#run-locally">Run locally</a> |
   <a href="#deploy">Deploy</a> |
   <a href="SECURITY.md">Security</a>
@@ -41,7 +43,8 @@ You can close the tab while it works. The task keeps running.
 This is a solo project, built seriously. I am trying to make the AI tool I
 actually want to use.
 
-[Try the live demo](https://capka.yuri.ly/)
+There is a longer walkthrough on the [website](https://capka.vercel.app/), or you
+can [try the live demo](https://capka.yuri.ly/) and hand it a real task right now.
 
 ![Capka turning uploaded files into a PDF report and Excel workbook](./docs/assets/demo.webp)
 
@@ -68,6 +71,21 @@ work, not only a chat reply:
 - repetitive office tasks
 - small coding and debugging jobs
 - workflows through MCP tools and connectors
+
+## Is Capka for you?
+
+**Reach for Capka if:**
+
+- you want a finished file back — a report, a patch, a clean dataset — not just a chat reply
+- your files should not leave your own infrastructure
+- you would rather choose models and pay for tokens than pay a per-seat subscription
+- you have a small Linux server, or do not mind renting one
+
+**Look elsewhere if:**
+
+- you just want to chat with a model and never touch files — a plain chat app is simpler
+- nobody wants to run and maintain a server — hosted products exist for a reason
+- you need vendor support with an SLA — Capka is open source, and support lives in GitHub issues
 
 ## For teams
 
