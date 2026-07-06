@@ -259,40 +259,14 @@ else
   # first sandbox tool call may wait for that download to finish.
 fi
 
-# Bring Postgres up first and repair the role password to match .env. On a fresh
-# volume this is a no-op; on a REINSTALL the old volume keeps its original
-# password while .env got a freshly generated one, so the app can't authenticate
-# and crash-loops. Local socket connections inside the container are trusted, so
-# we can reset the password without knowing the old one. This makes .env the
-# source of truth and removes the need to wipe the volume to recover.
-echo "Starting database ..."
-docker compose $COMPOSE up -d postgres || { diagnose; exit 1; }
-i=0
-until docker compose $COMPOSE exec -T postgres pg_isready -U Capka >/dev/null 2>&1; do
-  i=$((i + 1))
-  [ "$i" -gt 60 ] && { echo "  postgres didn't accept connections in time — continuing, diagnostics will show why"; break; }
-  sleep 1
-done
-DESIRED_PW="$(env_value POSTGRES_PASSWORD)"
-if [ -n "$DESIRED_PW" ]; then
-  # Escape single quotes for the SQL string literal (standard_conforming_strings
-  # is on by default, so backslashes are literal — only quotes need doubling).
-  esc_pw="$(printf '%s' "$DESIRED_PW" | sed "s/'/''/g")"
-  docker compose $COMPOSE exec -T postgres \
-    psql -v ON_ERROR_STOP=1 -U Capka -d Capka \
-    -c "ALTER ROLE \"Capka\" WITH PASSWORD '$esc_pw'" >/dev/null 2>&1 \
-    && echo "  database password synced with $ENV_FILE" \
-    || echo "  (couldn't sync database password — continuing; diagnostics will show if it matters)"
-fi
-
-# Bring up the rest. --remove-orphans clears a leftover container from a previous
-# layout (e.g. a `caddy` left behind after switching away from DOMAIN); it does
-# not touch named volumes or ./data, so no persistent state is lost. (If you run
-# the optional backup overlay, include it here too, or its sidecar is removed.)
-# On failure (e.g. a host port is already taken — including the loopback rescue
-# publish in TLS mode), `set -e` would abort here before diagnostics run and dump
-# a raw compose error. Route it through diagnose() instead, which names the cause.
-echo "Starting the rest of the stack ..."
+# Bring the whole stack up. Compose ordering starts Postgres first, then the
+# db-init one-shot re-syncs the DB role password to POSTGRES_PASSWORD (heals a
+# reinstall/rotation over an existing volume — see docker-compose.yml), then the
+# app. --remove-orphans clears a container left by a previous layout (e.g. a
+# `caddy` after switching away from DOMAIN); it touches no named volume or ./data.
+# On failure (e.g. a host port already taken — including the TLS loopback rescue
+# publish), `set -e` would abort before diagnostics; route through diagnose().
+echo "Starting the stack ..."
 if [ "${CAPKA_BUILD:-}" = "1" ]; then
   docker compose $COMPOSE up -d --build --remove-orphans || { diagnose; exit 1; }
 else

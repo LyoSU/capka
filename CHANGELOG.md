@@ -18,7 +18,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 - First install no longer fails while the sandbox image is still downloading (platform starts independently of the controller).
-- Reinstalling over an existing database volume no longer crash-loops on an auth error: script-based installs (`up.sh`/`install.sh`) re-sync the database password to `.env` on start.
+- Reinstalling or rotating `POSTGRES_PASSWORD` over an existing database volume no longer crash-loops on an auth error: a `db-init` one-shot re-syncs the role password on every start, on all deploy paths (plain `docker compose up`, Coolify, and the scripts).
 - A failed certificate or platform boot no longer leaves the host unreachable — Caddy starts independently and keeps a `127.0.0.1` rescue publish.
 - `.env` files saved with Windows (CRLF) line endings are normalized on start.
 

@@ -27,6 +27,9 @@ services:
       - "5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Expose the unix socket to the db-init one-shot so it can reset the role
+      # password over a trusted local connection (see db-init below).
+      - postgres-run:/var/run/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U Capka"]
       interval: 5s
@@ -38,6 +41,37 @@ services:
     # env-overridable to tune for the box.
     mem_limit: ${POSTGRES_MEM_LIMIT:-2g}
     pids_limit: ${POSTGRES_PIDS_LIMIT:-512}
+
+  # One-shot: sync the Postgres role password to POSTGRES_PASSWORD on every start.
+  # The official image only applies POSTGRES_PASSWORD when it INITIALISES a fresh
+  # volume, so a volume that outlives a password change (reinstall / rotation)
+  # keeps the old password and the app crash-loops on auth. This resets it over
+  # the LOCAL trusted socket (shared via postgres-run) — no current password
+  # needed — on EVERY deploy path, including Coolify and plain `docker compose up`
+  # (not just the install scripts). No-op on a fresh volume and when
+  # POSTGRES_PASSWORD is unset (dev). Best-effort: it never fails the stack.
+  db-init:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - postgres-run:/var/run/postgresql
+    environment:
+      - DESIRED_PW=${POSTGRES_PASSWORD:-}
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        [ -n "$${DESIRED_PW:-}" ] || { echo "db-init: POSTGRES_PASSWORD unset — skipping"; exit 0; }
+        esc=$$(printf '%s' "$$DESIRED_PW" | sed "s/'/''/g")
+        if psql -h /var/run/postgresql -U Capka -d Capka -v ON_ERROR_STOP=1 \
+             -c "ALTER ROLE \"Capka\" WITH PASSWORD '$$esc'" >/dev/null 2>&1; then
+          echo "db-init: database password synced with POSTGRES_PASSWORD"
+        else
+          echo "db-init: WARNING - could not sync password (continuing)"
+        fi
+    restart: "no"
 
   # Narrows the Docker API the controller can reach: only container + exec
   # endpoints, plus image inspect/pull (IMAGES) so the controller can self-heal a
@@ -132,6 +166,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Wait for the password sync so the controller's DATABASE_URL auth can't
+      # race a drifted password on boot.
+      db-init:
+        condition: service_completed_successfully
       socket-proxy:
         condition: service_started
     restart: unless-stopped
@@ -173,6 +211,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Password sync runs before the app connects (heals reinstall/rotation drift).
+      db-init:
+        condition: service_completed_successfully
       # service_started, NOT service_healthy: login and the first-run setup wizard
       # never touch the sandbox, so the app must come up and be usable while the
       # controller is still warming (pulling the ~7.5 GB image on a fresh box).
@@ -193,3 +234,5 @@ networks:
 
 volumes:
   postgres-data:
+  # Postgres unix socket dir, shared with db-init for the trusted local password reset.
+  postgres-run:
