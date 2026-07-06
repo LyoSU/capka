@@ -207,15 +207,15 @@ echo
 # --- Diagnostics helpers ---------------------------------------------------
 # docker compose word-splits COMPOSE intentionally (filenames carry no spaces).
 
-# Names of services that are not up-and-running right now (exited/restarting/created).
+# Services that actually failed, in ONE compose call. A container that exited 0
+# is a successful one-shot (db-init), NOT a failure; a service not created yet
+# isn't listed, so it isn't reported. Everything else running-but-not (exited
+# non-zero, restarting, dead) is a real problem.
 unhealthy_services() {
-  for svc in $(docker compose $COMPOSE ps --services 2>/dev/null); do
-    state="$(docker compose $COMPOSE ps -a --format '{{.Service}} {{.State}}' 2>/dev/null | awk -v s="$svc" '$1==s{print $2; exit}')"
-    case "$state" in
-      running|"") ;;              # running, or not created yet (nothing to report)
-      *) echo "$svc" ;;
-    esac
-  done
+  docker compose $COMPOSE ps -a --format '{{.Service}} {{.State}} {{.ExitCode}}' 2>/dev/null | awk '
+    $2 == "running" { next }
+    $2 == "exited" && $3 == "0" { next }
+    { print $1 }'
 }
 
 # Print what went wrong in operator terms: status table, the culprit's last logs,
