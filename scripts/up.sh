@@ -3,12 +3,15 @@
 #
 # Generates the three required secrets into .env on first run (idempotent — it
 # never overwrites an existing value, and self-heals a missing one on upgrade),
-# then brings the stack up. No external account is needed beyond an LLM key,
-# which you add in the in-app setup wizard.
+# brings the stack up, waits until the app actually answers, then prints the
+# address to open. No external account is needed beyond an LLM key, which you add
+# in the in-app setup wizard.
 #
 #   ./scripts/up.sh                 # generate .env (if needed) and start
 #   PUBLIC_URL=https://app.example.com ./scripts/up.sh   # set the public origin
 #   ./scripts/up.sh --env-only      # only write .env, don't start (CI / inspect)
+#
+# Re-run it any time to reprint the address, apply .env changes, or upgrade.
 set -eu
 
 # Run from the repo root regardless of where the script is invoked from.
@@ -43,8 +46,34 @@ ensure_secret() {
   fi
 }
 
+# Read a single value out of .env (last wins), stripped of a trailing CR.
+env_value() { sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tr -d '\r' | tail -n1; }
+
+# Best-effort public IPv4 so a no-domain install can print a reachable address
+# instead of a useless "localhost" (the operator is usually on SSH, not the box).
+# install.sh passes CAPKA_PUBLIC_IP; standalone runs probe an external echo.
+public_ip() {
+  [ -n "${CAPKA_PUBLIC_IP:-}" ] && { printf '%s' "$CAPKA_PUBLIC_IP"; return 0; }
+  command -v curl >/dev/null 2>&1 || return 0
+  for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
+    ip="$(curl -fsS --max-time 5 "$url" 2>/dev/null | tr -d '[:space:]')"
+    if printf '%s' "$ip" | grep -Eq '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+      printf '%s' "$ip"; return 0
+    fi
+  done
+}
+
 touch "$ENV_FILE"
 chmod 600 "$ENV_FILE"
+
+# A .env edited on Windows (WinSCP/Notepad) carries CRLF line endings; the stray
+# \r rides along into every value (password, URL) and quietly corrupts auth and
+# links. Normalize to LF once, in place, before anything reads the file.
+if LC_ALL=C grep -q "$(printf '\r')" "$ENV_FILE" 2>/dev/null; then
+  tr -d '\r' <"$ENV_FILE" >"$ENV_FILE.lf" && mv "$ENV_FILE.lf" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  echo "  normalized $ENV_FILE line endings (CRLF -> LF)"
+fi
 
 echo "Ensuring secrets in $ENV_FILE ..."
 ensure_secret POSTGRES_PASSWORD
@@ -69,11 +98,30 @@ if [ "${PUBLIC_URL:-}" != "" ] && ! grep -q '^PUBLIC_URL=' "$ENV_FILE"; then
   echo "  set PUBLIC_URL=$PUBLIC_URL"
 fi
 
+# Optional ACME account email. Persist it so re-runs keep it; when set it turns on
+# the Caddy ZeroSSL fallback issuer (see the snippet rendered below).
+if [ "${ACME_EMAIL:-}" != "" ] && ! grep -q '^ACME_EMAIL=' "$ENV_FILE"; then
+  printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL" >>"$ENV_FILE"
+  echo "  set ACME_EMAIL=$ACME_EMAIL"
+fi
+
+# Persist the setup token, host port, and bind interface when passed in (the
+# installer picks a free port / loopback bind on a shared box). Persisting makes
+# the choice sticky: a later bare `up.sh` keeps the same port and reprints the
+# working #token setup link instead of silently reverting to defaults.
+for var in SETUP_TOKEN PLATFORM_PORT PLATFORM_BIND; do
+  eval "val=\${$var:-}"
+  if [ "$val" != "" ] && ! grep -q "^${var}=" "$ENV_FILE"; then
+    printf '%s=%s\n' "$var" "$val" >>"$ENV_FILE"
+    echo "  set $var=$val"
+  fi
+done
+
 # DOMAIN is the turnkey HTTPS path: persist it and derive PUBLIC_URL=https://DOMAIN
 # so auth callbacks and absolute links are correct.
 if [ "${DOMAIN:-}" != "" ]; then
   grep -q '^DOMAIN=' "$ENV_FILE" || printf 'DOMAIN=%s\n' "$DOMAIN" >>"$ENV_FILE"
-  existing_pub="$(sed -n 's/^PUBLIC_URL=//p' "$ENV_FILE" | head -n1)"
+  existing_pub="$(env_value PUBLIC_URL)"
   if [ -z "$existing_pub" ]; then
     printf 'PUBLIC_URL=https://%s\n' "$DOMAIN" >>"$ENV_FILE"
   elif [ "$existing_pub" != "https://$DOMAIN" ]; then
@@ -87,49 +135,209 @@ if [ "$START" -eq 0 ]; then
   exit 0
 fi
 
-# Re-read DOMAIN from .env so a value generated/persisted above is honored even
-# when it wasn't passed in the environment this run.
-DOMAIN_EFFECTIVE="${DOMAIN:-$(sed -n 's/^DOMAIN=//p' "$ENV_FILE" 2>/dev/null | head -n1)}"
+# --- Effective config (honor values just written to .env, not only this run's env) ---
+DOMAIN_EFFECTIVE="${DOMAIN:-$(env_value DOMAIN)}"
+PUBLIC_URL_EFFECTIVE="${PUBLIC_URL:-$(env_value PUBLIC_URL)}"
+ACME_EMAIL_EFFECTIVE="${ACME_EMAIL:-$(env_value ACME_EMAIL)}"
+PORT="$(env_value PLATFORM_PORT)"; PORT="${PLATFORM_PORT:-${PORT:-3000}}"
+BIND="$(env_value PLATFORM_BIND)"; BIND="${PLATFORM_BIND:-${BIND:-}}"
+SETUP_TOKEN_VALUE="$(env_value SETUP_TOKEN)"
+BIND_LOOPBACK=""
 
 # Compose file set: the TLS overlay is layered in only when a DOMAIN is configured.
-set -- -f docker-compose.yml
-if [ "${DOMAIN_EFFECTIVE:-}" != "" ]; then
-  set -- "$@" -f docker-compose.tls.yml
-  OPEN_URL="https://$DOMAIN_EFFECTIVE"
-  echo "Starting Capka with automatic HTTPS for $DOMAIN_EFFECTIVE ..."
-else
-  OPEN_URL="${PUBLIC_URL:-http://localhost:3000}"
-  echo "Starting Capka ..."
-  if [ -z "${PUBLIC_URL:-}" ] && ! grep -q '^PUBLIC_URL=' "$ENV_FILE"; then
-    echo "  NOTE: no DOMAIN/PUBLIC_URL — serving plain HTTP on :3000 (auth callbacks need a real origin)."
-    echo "        Re-run with DOMAIN=… for turnkey HTTPS, or front it with a TLS proxy and set PUBLIC_URL."
-    echo "        Exposing /setup over plain HTTP? Set SETUP_TOKEN in $ENV_FILE first (see .env.example)."
+COMPOSE="-f docker-compose.yml"
+if [ -n "$DOMAIN_EFFECTIVE" ]; then
+  COMPOSE="$COMPOSE -f docker-compose.tls.yml"
+
+  # Render the optional Caddy email snippet (see Caddyfile / docker-compose.tls.yml).
+  # The dir must exist for the read-only bind mount either way; the snippet is
+  # written only for a valid-looking email, and removed otherwise so toggling
+  # ACME_EMAIL off actually takes effect on the next run.
+  mkdir -p data/caddy/conf.d
+  if printf '%s' "$ACME_EMAIL_EFFECTIVE" | grep -Eq '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'; then
+    printf 'email %s\n' "$ACME_EMAIL_EFFECTIVE" >data/caddy/conf.d/email.caddy
+    echo "  ACME email set — ZeroSSL fallback enabled"
+  else
+    rm -f data/caddy/conf.d/email.caddy
   fi
 fi
 
+# The address we'll tell the operator to open. Compute it up front and print it
+# now, before the docker output scrolls past — so they know the target even while
+# images pull. PLATFORM_BIND matters: a loopback bind (shared box / behind a
+# proxy) is NOT reachable at the public IP, so don't advertise one.
+if [ -n "$DOMAIN_EFFECTIVE" ]; then
+  OPEN_URL="https://$DOMAIN_EFFECTIVE"
+elif [ -n "$PUBLIC_URL_EFFECTIVE" ]; then
+  OPEN_URL="$PUBLIC_URL_EFFECTIVE"
+else
+  case "$BIND" in
+    127.0.0.1|localhost|::1)
+      OPEN_URL="http://127.0.0.1:$PORT"; BIND_LOOPBACK=1 ;;
+    *)
+      IP="$(public_ip)"
+      if [ -n "$IP" ]; then OPEN_URL="http://$IP:$PORT"; else OPEN_URL="http://localhost:$PORT"; fi ;;
+  esac
+fi
+
+# The link to hand the operator: the #token setup deep-link when SETUP_TOKEN is
+# set (fragment stays out of server/proxy logs), else the bare origin. Computed
+# once here so every final branch below prints the same working link.
+LINK="${OPEN_URL%/}"
+[ -n "$SETUP_TOKEN_VALUE" ] && LINK="${OPEN_URL%/}/setup#token=$SETUP_TOKEN_VALUE"
+
+echo
+if [ -n "$DOMAIN_EFFECTIVE" ]; then
+  echo "Setting up Capka at $OPEN_URL (automatic HTTPS via Caddy) — this takes a few minutes."
+elif [ -n "$BIND_LOOPBACK" ]; then
+  echo "Setting up Capka on $OPEN_URL (bound to localhost) — this takes a few minutes."
+  echo "  NOTE: reachable only via your reverse proxy. Point it at http://127.0.0.1:$PORT,"
+  echo "        set PUBLIC_URL=https://your.domain in $ENV_FILE, then re-run scripts/up.sh."
+  echo "        From your laptop you can reach it over an SSH tunnel to 127.0.0.1:$PORT."
+else
+  echo "Setting up Capka at $OPEN_URL — this takes a few minutes."
+  if [ -z "$PUBLIC_URL_EFFECTIVE" ]; then
+    echo "  NOTE: plain HTTP, no domain. For turnkey HTTPS re-run with DOMAIN=your.domain,"
+    echo "        or front it with your own TLS proxy and set PUBLIC_URL."
+    echo "        Exposing /setup over plain HTTP? Set SETUP_TOKEN in $ENV_FILE first (see .env.example)."
+  fi
+fi
+echo
+
+# --- Diagnostics helpers ---------------------------------------------------
+# docker compose word-splits COMPOSE intentionally (filenames carry no spaces).
+
+# Names of services that are not up-and-running right now (exited/restarting/created).
+unhealthy_services() {
+  for svc in $(docker compose $COMPOSE ps --services 2>/dev/null); do
+    state="$(docker compose $COMPOSE ps -a --format '{{.Service}} {{.State}}' 2>/dev/null | awk -v s="$svc" '$1==s{print $2; exit}')"
+    case "$state" in
+      running|"") ;;              # running, or not created yet (nothing to report)
+      *) echo "$svc" ;;
+    esac
+  done
+}
+
+# Print what went wrong in operator terms: status table, the culprit's last logs,
+# and the handful of causes that actually bite on a first install.
+diagnose() {
+  echo
+  echo "Capka didn't come up cleanly. Current status:" >&2
+  docker compose $COMPOSE ps >&2 || true
+  for svc in $(unhealthy_services); do
+    echo >&2
+    echo "--- last logs: $svc ---" >&2
+    docker compose $COMPOSE logs --tail=40 "$svc" >&2 2>&1 || true
+  done
+  echo >&2
+  echo "Common first-install causes:" >&2
+  if [ -n "$DOMAIN_EFFECTIVE" ]; then
+    echo "  * Ports 80/443 must be free and open in your provider's firewall (Caddy needs them for the certificate)." >&2
+    echo "  * DNS for $DOMAIN_EFFECTIVE must point at THIS server, or the certificate can't be issued." >&2
+  fi
+  echo "  * Provider firewall/security group may block port $PORT — open it, or put a reverse proxy in front." >&2
+  echo "  * Reinstalling over an old database with a fresh password is auto-repaired; a half-initialised" >&2
+  echo "    volume is not — if postgres won't start, 'docker compose $COMPOSE down -v' wipes data and starts clean." >&2
+  echo "  * Still starting? Re-run this script in a minute to check again: sh scripts/up.sh" >&2
+}
+
+# --- Bring the stack up ----------------------------------------------------
 # Default: pull the prebuilt GHCR images (fast — no build toolchain on the box).
 # The base compose is pull-only, so there is no silent build fallback: to compile
 # your own changes or run an unpublished commit, set CAPKA_BUILD=1 — it layers
 # docker-compose.build.yml and builds from source instead.
 if [ "${CAPKA_BUILD:-}" = "1" ]; then
-  set -- "$@" -f docker-compose.build.yml
-  echo "  building images from source (CAPKA_BUILD=1) ..."
-  docker compose "$@" up --build -d
+  COMPOSE="$COMPOSE -f docker-compose.build.yml"
+  echo "Building images from source (CAPKA_BUILD=1) ..."
+  docker compose $COMPOSE build
 else
-  docker compose "$@" pull --ignore-pull-failures || true
-  docker compose "$@" up -d
+  echo "Pulling images ..."
+  docker compose $COMPOSE pull --ignore-pull-failures || true
+  # The ~7.5 GB sandbox execution image isn't a compose service on the pull path,
+  # so it isn't fetched here — the controller pulls it in the BACKGROUND on boot
+  # (see sandbox-controller/server.js). The app is usable immediately; only the
+  # first sandbox tool call may wait for that download to finish.
 fi
 
-echo
-# If the operator opted into the SETUP_TOKEN hardening, hand them a ready-to-click
-# link with the token in the URL FRAGMENT (#token=…) — the browser never sends a
-# fragment to the server, so it stays out of proxy/access logs and Referer; the
-# wizard reads it and scrubs it. Otherwise just point at the app (no token step).
-SETUP_TOKEN_VALUE="$(sed -n 's/^SETUP_TOKEN=//p' "$ENV_FILE" | head -n1)"
-if [ "${SETUP_TOKEN_VALUE:-}" != "" ]; then
-  echo "Capka is starting. Open this link to finish setup:"
-  echo "    ${OPEN_URL%/}/setup#token=$SETUP_TOKEN_VALUE"
-else
-  echo "Capka is starting. Open $OPEN_URL and finish setup."
+# Bring Postgres up first and repair the role password to match .env. On a fresh
+# volume this is a no-op; on a REINSTALL the old volume keeps its original
+# password while .env got a freshly generated one, so the app can't authenticate
+# and crash-loops. Local socket connections inside the container are trusted, so
+# we can reset the password without knowing the old one. This makes .env the
+# source of truth and removes the need to wipe the volume to recover.
+echo "Starting database ..."
+docker compose $COMPOSE up -d postgres || { diagnose; exit 1; }
+i=0
+until docker compose $COMPOSE exec -T postgres pg_isready -U Capka >/dev/null 2>&1; do
+  i=$((i + 1))
+  [ "$i" -gt 60 ] && { echo "  postgres didn't accept connections in time — continuing, diagnostics will show why"; break; }
+  sleep 1
+done
+DESIRED_PW="$(env_value POSTGRES_PASSWORD)"
+if [ -n "$DESIRED_PW" ]; then
+  # Escape single quotes for the SQL string literal (standard_conforming_strings
+  # is on by default, so backslashes are literal — only quotes need doubling).
+  esc_pw="$(printf '%s' "$DESIRED_PW" | sed "s/'/''/g")"
+  docker compose $COMPOSE exec -T postgres \
+    psql -v ON_ERROR_STOP=1 -U Capka -d Capka \
+    -c "ALTER ROLE \"Capka\" WITH PASSWORD '$esc_pw'" >/dev/null 2>&1 \
+    && echo "  database password synced with $ENV_FILE" \
+    || echo "  (couldn't sync database password — continuing; diagnostics will show if it matters)"
 fi
-echo "(First HTTPS request may take ~30s while Caddy provisions the certificate.)"
+
+# Bring up the rest. --remove-orphans clears a leftover container from a previous
+# layout (e.g. a `caddy` left behind after switching away from DOMAIN); it does
+# not touch named volumes or ./data, so no persistent state is lost. (If you run
+# the optional backup overlay, include it here too, or its sidecar is removed.)
+# On failure (e.g. a host port is already taken — including the loopback rescue
+# publish in TLS mode), `set -e` would abort here before diagnostics run and dump
+# a raw compose error. Route it through diagnose() instead, which names the cause.
+echo "Starting the rest of the stack ..."
+if [ "${CAPKA_BUILD:-}" = "1" ]; then
+  docker compose $COMPOSE up -d --build --remove-orphans || { diagnose; exit 1; }
+else
+  docker compose $COMPOSE up -d --remove-orphans || { diagnose; exit 1; }
+fi
+
+# --- Wait until the app is healthy, then print the address -----------------
+# Poll the platform's container HEALTH (its healthcheck already probes /login
+# every 15s). Reading health instead of curling a host port is independent of
+# DNS/TLS and of PLATFORM_BIND/PORT, so it can't false-negative on a loopback or
+# custom-interface bind, and needs no curl/wget on the host.
+READY=0
+echo "Waiting for Capka to come up ..."
+i=0
+while [ "$i" -lt 60 ]; do
+  line="$(docker compose $COMPOSE ps -a --format '{{.Service}} {{.State}} {{.Health}}' platform 2>/dev/null | head -1)"
+  case "$line" in
+    *" healthy") READY=1; break ;;
+    *" running "*|*" running") ;;   # up, health still starting — keep waiting
+    "") ;;                          # not created yet — keep waiting
+    *) break ;;                     # exited/restarting — stop; diagnose explains
+  esac
+  i=$((i + 1)); sleep 3
+done
+
+echo
+if [ "$READY" -eq 1 ]; then
+  # Prominent, un-missable final block.
+  echo "  ────────────────────────────────────────────────"
+  echo "   Capka is up. Open:"
+  echo "     $LINK"
+  echo "  ────────────────────────────────────────────────"
+  [ -n "$DOMAIN_EFFECTIVE" ] && echo "  (First HTTPS request may take ~30s while Caddy provisions the certificate.)"
+  echo "  Lost this address later? Run:  cd \"$(pwd)\" && sh scripts/up.sh"
+elif [ -n "$(unhealthy_services)" ]; then
+  # A service actually failed (not just slow) — show why, then repeat the link.
+  diagnose
+  echo >&2
+  echo "  Once fixed, open:  $LINK" >&2
+  exit 1
+else
+  # Everything is running but not healthy within the window — almost always just
+  # a slow first boot (migrations + warm-up). Don't cry wolf.
+  echo "  Capka is starting but isn't ready yet — give it another minute, then open:"
+  echo "    $LINK"
+  echo "  Check status any time with:  docker compose $COMPOSE ps"
+  echo "  Re-run to check again:  sh scripts/up.sh"
+fi

@@ -56,6 +56,9 @@ way to make a container escape *not* equal host root is to run the Docker daemon
 # (see https://docs.docker.com/engine/security/rootless/)
 dockerd-rootless-setuptool.sh install
 export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
+# Point the socket-proxy bind at the rootless socket (the default is the rootful
+# path, so this line is REQUIRED for rootless — otherwise sandboxes can't start):
+echo "DOCKER_SOCKET=/run/user/$(id -u)/docker.sock" >> .env
 npm run up   # the stack now drives a rootless daemon; an escape lands unprivileged
 ```
 

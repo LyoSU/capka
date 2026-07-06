@@ -129,25 +129,31 @@ setup. After that, add a provider key in **Settings -> Connections**.
 
 ## Deploy
 
-On a Linux server with DNS pointed at the host:
+On a fresh Linux server, one command installs Docker (if needed), fetches Capka,
+generates secrets, and brings the stack up:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | sh
+```
+
+It asks how people should reach Capka. **No domain? Just press Enter** — you get
+a free HTTPS address with a real certificate (`https://<your-ip>.sslip.io`). Have
+a domain? Type it and Caddy provisions HTTPS for it automatically. Either way the
+installer waits until the app answers and then prints the address to open.
+
+Already own a domain and want to skip the prompt:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh | DOMAIN=capka.example.com sh
 ```
 
-Already cloned:
+Already cloned the repo? Run `./scripts/up.sh` (or `DOMAIN=… ./scripts/up.sh`).
+Re-running the installer or `up.sh` upgrades in place and reprints the address.
 
-```bash
-git clone https://github.com/LyoSU/capka
-cd capka
-DOMAIN=capka.example.com ./scripts/up.sh
-```
-
-`DOMAIN` enables automatic HTTPS through Caddy. Without it, Capka serves plain
-HTTP on `:3000`; put it behind your own TLS proxy and set `PUBLIC_URL`.
-
-See [`docs/DEPLOY.md`](docs/DEPLOY.md) for Coolify, compose files, host nginx,
-and common deployment gotchas.
+Running on a server that already hosts other sites? The installer notices an
+existing web server on ports 80/443, or a busy port 3000, stays out of their way,
+and prints how to front Capka with your own proxy. See
+[`docs/DEPLOY.md`](docs/DEPLOY.md) for Coolify, host nginx, and gotchas.
 
 ## Requirements
 
@@ -158,11 +164,15 @@ Linux with Docker, on `x86_64` or `arm64`.
 | Minimum | 1-2 vCPU | 2 GB | 20 GB |
 | Recommended | 2 vCPU | 4 GB | 40 GB |
 
-Use more RAM for concurrent users, large document jobs, or gVisor.
+Use more RAM for concurrent users, large document jobs, or gVisor. The installer
+checks memory and disk up front and refuses a box that's clearly too small (the
+sandbox image alone unpacks to ~7.5 GB).
 
 ## First Run
 
-1. Open your domain, server IP, or <http://localhost:3000>
+1. Open the address the installer printed — your domain, the free `sslip.io`
+   address, or `http://<server-ip>:3000`. Lost it? Re-run `sudo ./scripts/up.sh`
+   in the install directory and it prints the address again.
 2. Capka redirects to setup if no admin account exists
 3. Add provider keys in **Settings -> Connections**
 4. Choose default models
@@ -171,6 +181,23 @@ Use more RAM for concurrent users, large document jobs, or gVisor.
 
 Registration is closed by default after setup. Admins can switch it to open or
 approval mode in **Settings -> Authentication**.
+
+## Troubleshooting
+
+- **Certificate warning right after install.** Caddy is still fetching the
+  certificate — wait ~30s and reload; first issuance can take a minute.
+- **Can't reach the address at all.** Open the needed ports in your cloud
+  provider's firewall / security group — 80 and 443 for HTTPS, or your app port
+  for plain HTTP. This is the most common cause on a fresh VPS.
+- **It skipped HTTPS / "port 80 in use".** Another web server is already on this
+  box; Capka runs on `http://127.0.0.1:<port>`. Point your existing proxy at it
+  and set `PUBLIC_URL` (see [`docs/DEPLOY.md`](docs/DEPLOY.md)).
+- **Reinstalling and the database won't start.** A regenerated password is
+  repaired automatically. Only if Postgres itself is corrupt: `docker compose
+  down -v` wipes the database volume and starts clean — this deletes chats and
+  settings.
+- **See what's happening.** In the install directory: `docker compose ps`, and
+  `docker compose logs platform` (or `sandbox-controller`).
 
 ## Security Short Version
 
@@ -181,14 +208,18 @@ raw Docker socket.
 Sandbox internet access is controlled in **Settings -> Security -> Internet
 access**. When enabled, Capka blocks private ranges and cloud metadata endpoints.
 
-For untrusted or multi-tenant use, read [`SECURITY.md`](SECURITY.md). Prefer
-rootless Docker and gVisor:
+For untrusted or multi-tenant use, read [`SECURITY.md`](SECURITY.md). Turn on
+gVisor for kernel-level sandbox isolation:
 
 ```bash
-sudo sh scripts/install-gvisor.sh
-# restart Docker
+sudo sh scripts/install-gvisor.sh   # installs runsc, enables userns-remap
+# restart Docker, then set in .env:
 SANDBOX_RUNTIME=runsc
 ```
+
+For the strongest boundary, also run Docker rootless (a container escape then
+lands unprivileged); it needs one extra `DOCKER_SOCKET` setting —
+see [`SECURITY.md`](SECURITY.md).
 
 ## Useful Links
 

@@ -656,19 +656,28 @@ async function boot() {
   // Serve early so the orchestrator can probe /health (503 elsewhere until ready).
   server.listen(PORT, () => log("listening", { port: PORT, profile: PROFILE, runtime: RUNTIME }));
 
-  // Recovery (image prewarm + reconcile) needs the daemon. A transient blip here
-  // shouldn't crash-loop the process: retry with backoff while readiness stays
-  // false (so /health reports 503 and the orchestrator holds traffic), and only
-  // give up — exit, letting the restart policy take over — after the budget.
-  const summary = await withRetry(async () => {
-    await backend.ensureRuntime(); // first user doesn't pay the image pull
-    return reconcile({ store, backend });
-  }, { attempts: 5, baseMs: 3000, label: "recover", log });
+  // Readiness depends only on reconcile — which needs the daemon but NOT the
+  // sandbox image (it lists and tears down containers; it never creates one). So
+  // report healthy as soon as reconcile succeeds and pull the sandbox image in
+  // the BACKGROUND: a fresh box goes healthy in seconds instead of after a
+  // multi-GB pull, and every orchestrator benefits (compose, Coolify), not just
+  // the install scripts. A transient blip here shouldn't crash-loop the process:
+  // retry with backoff while readiness stays false (so /health reports 503 and
+  // the orchestrator holds traffic), giving up only after the budget.
+  const summary = await withRetry(() => reconcile({ store, backend }),
+    { attempts: 5, baseMs: 3000, label: "recover", log });
   liveCount = summary.kept.length;
   log("recover", summary);
 
   ready = true;
   log("ready", { profile: PROFILE });
+
+  // Best-effort image prewarm so the first session doesn't pay the pull. Never
+  // gates readiness; create() awaits this same promise, so a session that lands
+  // mid-pull simply waits for it, and a failed pull self-heals on next create().
+  void backend.ensureRuntime()
+    .then(() => log("prewarm.done", {}))
+    .catch((e) => log("prewarm.failed", { err: e.message }, "warn"));
 
   setInterval(idleSweep, 60_000);
   setInterval(flushAndGc, FLUSH_INTERVAL_MS);

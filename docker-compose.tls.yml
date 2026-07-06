@@ -14,16 +14,31 @@ services:
       - DOMAIN=${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Operator config snippets (currently just an optional ACME `email` line for
+      # the ZeroSSL fallback). scripts/up.sh writes ./data/caddy/conf.d/email.caddy
+      # when ACME_EMAIL is set; empty dir ⇒ Let's Encrypt only. Read-only.
+      - ./data/caddy/conf.d:/etc/caddy/conf.d:ro
       - caddy-data:/data
       - caddy-config:/config
+    # service_started, NOT service_healthy: Caddy must bind 80/443 and start
+    # serving the ACME HTTP-01 challenge even while the platform is still warming
+    # up — otherwise a slow/failed platform boot leaves the host completely dark
+    # (no cert, no port, unreachable even by IP). Caddy proxies to platform:3000
+    # over the compose network and returns 502 until it answers; the cert
+    # provisions independently in the meantime.
     depends_on:
       platform:
-        condition: service_healthy
+        condition: service_started
 
-  # With Caddy in front, the platform must not publish a raw host port — only
-  # Caddy's 80/443 should be reachable. `expose` keeps it on the compose network.
+  # With Caddy in front, the platform is reachable through it on the compose
+  # network (platform:3000), so it doesn't need a public host port. We keep ONE
+  # loopback-only publish as a rescue hatch: if the domain or cert ever fails, the
+  # operator can still reach the app over an SSH tunnel / localhost to diagnose,
+  # without exposing it to the internet. `!override` REPLACES the base ports list
+  # (which defaults to 0.0.0.0) — never merge, or the app binds the public iface.
   platform:
-    ports: !reset []
+    ports: !override
+      - "127.0.0.1:${PLATFORM_PORT:-3000}:3000"
     expose:
       - "3000"
 

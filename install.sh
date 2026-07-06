@@ -8,15 +8,22 @@
 #   curl -fsSL https://raw.githubusercontent.com/LyoSU/capka/master/install.sh -o install.sh
 #   less install.sh && sh install.sh
 #
-# What it does, idempotently: installs Docker (via the official get.docker.com) if
-# missing, clones/updates the repo into $CAPKA_DIR, then hands off to
-# scripts/up.sh, which generates secrets and brings the stack up on prebuilt
-# images. Re-running it upgrades an existing install (git pull + image refresh).
+# What it does, idempotently: checks the box can hold the stack, installs Docker
+# (via the official get.docker.com) if missing, clones/updates the repo into
+# $CAPKA_DIR, then hands off to scripts/up.sh, which generates secrets and brings
+# the stack up on prebuilt images. Re-running it upgrades an existing install
+# (git pull + image refresh).
+#
+# It adapts to the box: on a server that already runs a web proxy it stays off
+# ports 80/443 and prints how to front it; if port 3000 is taken it picks a free
+# one. It never reinstalls Docker over a daemon that's already running other
+# containers.
 #
 # Config via environment:
 #   DOMAIN        turnkey HTTPS for this domain (Caddy + Let's Encrypt)
 #   PUBLIC_URL    explicit public origin (set behind your own reverse proxy)
 #   SETUP_TOKEN   require this token when claiming the admin account (hardening)
+#   ACME_EMAIL    ACME account email (enables the ZeroSSL cert fallback)
 #   CAPKA_DIR     install location           (default: /opt/capka)
 #   CAPKA_REPO    git remote                 (default: https://github.com/LyoSU/capka.git)
 #   CAPKA_BRANCH  git ref to install         (default: newest release tag, else master)
@@ -40,13 +47,15 @@ main() {
   banner
 
   require_linux
+  preflight_ram
   setup_privilege
-  ensure_git
+  ensure_prereqs
   ensure_docker
+  detect_docker_caveats
   preflight_disk
   resolve_version
   fetch_repo
-  prompt_domain
+  choose_access
 
   # Hand off to up.sh: it owns secret generation and the compose invocation.
   # Pass config explicitly through `env` so it survives the sudo boundary
@@ -57,8 +66,12 @@ main() {
     ${DOMAIN:+DOMAIN=$DOMAIN} \
     ${PUBLIC_URL:+PUBLIC_URL=$PUBLIC_URL} \
     ${SETUP_TOKEN:+SETUP_TOKEN=$SETUP_TOKEN} \
+    ${ACME_EMAIL:+ACME_EMAIL=$ACME_EMAIL} \
     ${CAPKA_VERSION:+CAPKA_VERSION=$CAPKA_VERSION} \
     ${CAPKA_BUILD:+CAPKA_BUILD=$CAPKA_BUILD} \
+    ${PLATFORM_PORT:+PLATFORM_PORT=$PLATFORM_PORT} \
+    ${PLATFORM_BIND:+PLATFORM_BIND=$PLATFORM_BIND} \
+    ${PUBLIC_IP:+CAPKA_PUBLIC_IP=$PUBLIC_IP} \
     sh scripts/up.sh
 }
 
@@ -93,6 +106,21 @@ require_linux() {
   esac
 }
 
+# Fail fast on a box that can't hold the stack: the platform build/runtime and
+# sandboxes need real memory. Swap counts toward the floor (slow but survives).
+preflight_ram() {
+  kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || true)
+  [ -n "${kb:-}" ] || return 0
+  mb=$((kb / 1024))
+  swkb=$(awk '/^SwapTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  swmb=$(( ${swkb:-0} / 1024 ))
+  if [ "$mb" -lt 1900 ] && [ $((mb + swmb)) -lt 1900 ]; then
+    err "only ${mb} MB RAM (+${swmb} MB swap) — Capka needs ~2 GB. Add RAM, or create a swap file: https://docs.docker.com (search 'add swap')."
+  elif [ "$mb" -lt 3800 ]; then
+    warn "${mb} MB RAM — workable, but 4 GB+ is recommended (large document jobs and gVisor need headroom)."
+  fi
+}
+
 # Root is needed to install Docker and write to /opt. If we're not root, lean on
 # sudo; if sudo isn't available either, fail with a clear instruction.
 setup_privilege() {
@@ -106,41 +134,93 @@ setup_privilege() {
   fi
 }
 
-ensure_git() {
-  have git && return 0
-  info "Installing git ..."
-  if   have apt-get; then $SUDO apt-get update -qq && $SUDO apt-get install -y -qq git
-  elif have dnf;     then $SUDO dnf install -y -q git
-  elif have yum;     then $SUDO yum install -y -q git
-  elif have apk;     then $SUDO apk add --no-cache git
-  else err "couldn't find a package manager to install git — install it and re-run"
+# git and curl are both needed below (curl fetches Docker's installer and probes
+# the public IP). The script itself may have arrived via wget, so don't assume curl.
+ensure_prereqs() {
+  need=""
+  have git  || need="$need git"
+  have curl || need="$need curl"
+  [ -n "$need" ] || return 0
+  info "Installing:$need ..."
+  if   have apt-get; then $SUDO apt-get update -qq && $SUDO apt-get install -y -qq $need
+  elif have dnf;     then $SUDO dnf install -y -q $need
+  elif have yum;     then $SUDO yum install -y -q $need
+  elif have apk;     then $SUDO apk add --no-cache $need
+  else err "couldn't find a package manager to install:$need — install them and re-run"
   fi
 }
 
 ensure_docker() {
+  # Reject podman aliased as `docker`: it doesn't expose the container/exec socket
+  # API the sandbox controller drives, and get.docker.com won't change that.
+  if have docker && docker --version 2>/dev/null | grep -qi podman; then
+    err "found podman aliased as 'docker' — Capka needs the real Docker Engine + compose plugin. Install docker-ce (https://docs.docker.com/engine/install/) and re-run."
+  fi
+
   if have docker && docker compose version >/dev/null 2>&1; then
     info "Docker present — skipping install."
+  elif have docker; then
+    # Docker present but no compose plugin. Reinstalling can restart the daemon
+    # and disrupt other containers, so only auto-install on a box that isn't
+    # already running any; otherwise tell the operator to add just the plugin.
+    running=$($SUDO docker ps -q 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${running:-0}" -gt 0 ]; then
+      err "Docker is running ${running} container(s) but the 'docker compose' plugin is missing. Add it without disrupting your daemon (https://docs.docker.com/compose/install/linux/) and re-run."
+    fi
+    info "Adding the docker compose plugin (via get.docker.com) ..."
+    curl -fsSL https://get.docker.com | $SUDO sh
   else
+    # get.docker.com's convenience script doesn't support Alpine.
+    if have apk && ! have apt-get && ! have dnf && ! have yum; then
+      err "on Alpine install Docker with: apk add docker docker-cli-compose && rc-update add docker && service docker start — then re-run."
+    fi
     info "Installing Docker (via get.docker.com) ..."
     curl -fsSL https://get.docker.com | $SUDO sh
   fi
+
   # A freshly installed daemon may be down on minimal images; nudge it.
   if have systemctl; then $SUDO systemctl enable --now docker >/dev/null 2>&1 || true; fi
   $SUDO docker version >/dev/null 2>&1 || err "Docker is installed but the daemon isn't reachable — start it and re-run"
+  ensure_compose_version
+}
+
+# The compose files use override tags (!override / !reset) that need Compose
+# v2.24+. An older plugin fails with a cryptic YAML error instead — gate here.
+ensure_compose_version() {
+  v=$($SUDO docker compose version --short 2>/dev/null | tr -dc '0-9.')
+  maj=${v%%.*}; case "$maj" in ''|*[!0-9]*) return 0 ;; esac   # unknown format — don't block
+  rest=${v#*.}; min=${rest%%.*}; case "$min" in ''|*[!0-9]*) min=0 ;; esac
+  if [ "$maj" -lt 2 ] || { [ "$maj" -eq 2 ] && [ "$min" -lt 24 ]; }; then
+    err "docker compose v$v is too old — Capka needs v2.24+. Update the compose plugin (https://docs.docker.com/compose/install/linux/) and re-run."
+  fi
+}
+
+# Non-fatal warnings for Docker setups where the socket/bind-mount model the
+# sandbox relies on may not hold. We warn rather than refuse: advanced operators
+# may have configured around it.
+detect_docker_caveats() {
+  case "$(command -v docker)" in
+    */snap/*) warn "Docker looks installed via snap; its confinement can block bind mounts under $CAPKA_DIR. If sandboxes fail to start, install Docker from docs.docker.com instead." ;;
+  esac
+  if $SUDO docker info --format '{{println .SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+    warn "rootless Docker detected. The sandbox controller mounts /var/run/docker.sock; rootless exposes the socket elsewhere, so sandboxes may not start without extra setup (see SECURITY.md)."
+  fi
 }
 
 # The prebuilt stack lands ~8-9 GB of images, plus headroom for Postgres data
-# and the per-session sandbox containers. Refuse on a box that clearly can't hold
-# it; warn on a tight one. (CAPKA_BUILD or an unpublished arch needs even more.)
+# and the per-session sandbox containers. Check the filesystem the DAEMON stores
+# images on (often a different mount than $CAPKA_DIR), and refuse a box that
+# clearly can't hold it. (CAPKA_BUILD or an unpublished arch needs even more.)
 preflight_disk() {
-  target="$CAPKA_DIR"
-  while [ ! -d "$target" ] && [ "$target" != "/" ]; do target=$(dirname "$target"); done
-  avail_gb=$(df -Pk "$target" 2>/dev/null | awk 'NR==2 { printf "%d", $4 / 1048576 }')
+  ddir=$($SUDO docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)
+  [ -n "${ddir:-}" ] && [ -d "$ddir" ] || ddir=/var/lib/docker
+  [ -d "$ddir" ] || ddir=/var/lib
+  avail_gb=$(df -Pk "$ddir" 2>/dev/null | awk 'NR==2 { printf "%d", $4 / 1048576 }')
   [ -n "$avail_gb" ] || return 0   # df unavailable — don't block the install
-  if [ "$avail_gb" -lt 10 ]; then
-    err "only ${avail_gb} GB free on $target — Capka needs ~10 GB minimum (20+ GB recommended)"
+  if [ "$avail_gb" -lt 15 ]; then
+    err "only ${avail_gb} GB free on $ddir (Docker's image store) — Capka needs ~15 GB minimum; the sandbox image alone unpacks to ~7.5 GB (20+ GB recommended)."
   elif [ "$avail_gb" -lt 20 ]; then
-    warn "${avail_gb} GB free on $target — workable, but 20+ GB is recommended (sandbox image alone is ~7.5 GB)"
+    warn "${avail_gb} GB free on $ddir — workable, but 20+ GB gives comfortable headroom for images, data, and sandboxes."
   fi
 }
 
@@ -191,37 +271,109 @@ public_ip() {
   done
 }
 
-# Choose the public origin. With no DOMAIN/PUBLIC_URL we offer a free, zero-setup
-# HTTPS hostname derived from the host's public IP: sslip.io resolves
-# <ip>.sslip.io → <ip>, so Caddy can fetch a real Let's Encrypt cert without the
-# user owning a domain. Interactive runs are prompted (the suggestion is the
-# default); piped runs (curl | sh) can't prompt, so they stay on HTTP and we print
-# the ready-to-use command.
-prompt_domain() {
+# Is a TCP port already listened on? Best-effort via ss/netstat; if neither
+# exists we can't tell, so assume free (don't block the install on a probe gap).
+port_busy() {
+  p=$1
+  if have ss; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${p}\$"
+  elif have netstat; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${p}\$"
+  else
+    return 1
+  fi
+}
+
+# Decide how the app is reached, adapting to what's already on the box:
+#  - something on 80/443 ⇒ an existing proxy; stay off those ports, bind loopback,
+#    and print how to front Capka with it (no Caddy, no sslip offer).
+#  - app port taken ⇒ pick a free one.
+#  - otherwise offer turnkey HTTPS with a friendly prompt (free sslip.io default).
+# Sets globals consumed by main()'s handoff: DOMAIN, PUBLIC_URL, PLATFORM_PORT,
+# PLATFORM_BIND, PUBLIC_IP.
+choose_access() {
   DOMAIN="${DOMAIN:-}"
   PUBLIC_URL="${PUBLIC_URL:-}"
   SETUP_TOKEN="${SETUP_TOKEN:-}"
+  ACME_EMAIL="${ACME_EMAIL:-}"
   CAPKA_BUILD="${CAPKA_BUILD:-}"
+  PLATFORM_PORT="${PLATFORM_PORT:-}"
+  PLATFORM_BIND="${PLATFORM_BIND:-}"
+  PUBLIC_IP="$(public_ip 2>/dev/null || true)"
+
+  # Existing install (upgrade / re-run): keep the persisted config. Probing ports
+  # here would flag Capka's OWN listeners as conflicts (its platform on 3000, its
+  # Caddy on 80/443) and mangle a working setup. up.sh reads DOMAIN/PORT/BIND from
+  # .env; any value the operator explicitly passed this run is still honored.
+  if [ -f "$CAPKA_DIR/.env" ]; then
+    info "Existing install detected — keeping your configuration (pass DOMAIN=… to change it)."
+    return 0
+  fi
+
+  existing_proxy=""
+  if port_busy 80 || port_busy 443; then existing_proxy=1; fi
+
+  # Pick a free app port if the wanted one is taken.
+  want="${PLATFORM_PORT:-3000}"
+  if port_busy "$want"; then
+    for p in 3000 3100 3200 8080 8090 8300 8800; do
+      port_busy "$p" || { new_port="$p"; break; }
+    done
+    warn "port $want is already in use — Capka will use ${new_port:-$want} instead."
+    want="${new_port:-$want}"
+  fi
+  PLATFORM_PORT="$want"
+
+  # On a shared box, bind the app to loopback so it doesn't fight the existing
+  # proxy or get published past a host firewall.
+  if [ -n "$existing_proxy" ] && [ -z "$PLATFORM_BIND" ]; then PLATFORM_BIND="127.0.0.1"; fi
+
+  # Origin already chosen by the operator → up.sh handles DOMAIN/PUBLIC_URL.
   if [ -n "$DOMAIN" ] || [ -n "$PUBLIC_URL" ]; then return 0; fi
 
-  ip="$(public_ip)"
+  # Existing web server on 80/443 → can't run Caddy there; guide them to front it.
+  if [ -n "$existing_proxy" ]; then
+    info "Detected a web server already on port 80/443 — skipping built-in HTTPS."
+    cat >&2 <<EOF
+  This box already serves web traffic, so Capka will listen on
+  http://127.0.0.1:$PLATFORM_PORT and you point your existing proxy at it:
+    * add a vhost proxying your domain to http://127.0.0.1:$PLATFORM_PORT
+    * then set PUBLIC_URL=https://your.domain in $CAPKA_DIR/.env and re-run:
+        cd $CAPKA_DIR && sudo ./scripts/up.sh
+  See docs/DEPLOY.md (host-nginx runbook) for a full example.
+EOF
+    return 0
+  fi
+
+  # Clean box: offer turnkey HTTPS. sslip.io resolves <ip>.sslip.io → <ip>, so
+  # Caddy can fetch a real Let's Encrypt cert with no domain of your own.
   suggested=""
-  [ -n "$ip" ] && suggested="$(echo "$ip" | tr '.' '-').sslip.io"
+  [ -n "$PUBLIC_IP" ] && suggested="$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io"
 
   # `-r /dev/tty` is true even with no controlling terminal (the node exists and
   # is mode-readable), yet the open then fails with ENXIO. Probe the actual open.
   if ( exec </dev/tty ) 2>/dev/null; then
-    printf '%s\n' "Domain for automatic HTTPS (blank = the free hostname below, or plain HTTP):" >&2
-    [ -n "$suggested" ] && printf '%s\n' "  suggested: $suggested" >&2
-    printf '%s' "> " >&2
-    read -r DOMAIN </dev/tty || DOMAIN=""
-    if [ -z "$DOMAIN" ] && [ -n "$suggested" ]; then
-      printf '%s' "Use $suggested for instant HTTPS? [Y/n]: " >&2
-      read -r ans </dev/tty || ans=""
-      case "$ans" in [Nn]*) ;; *) DOMAIN="$suggested" ;; esac
+    printf '\n%s\n' "How should people reach Capka?" >&2
+    printf '%s\n' "  • Have a domain? Type it — we'll set up HTTPS automatically." >&2
+    if [ -n "$suggested" ]; then
+      printf '%s\n' "  • No domain? Just press Enter — you get a free HTTPS address with a padlock:" >&2
+      printf '%s\n' "      https://$suggested" >&2
     fi
+    # Escape hatch: plain HTTP, for when ports 80/443 are blocked upstream (a
+    # firewall this probe can't see) and automatic HTTPS would just hang on a
+    # certificate that never issues.
+    printf '%s\n' "  • Just want plain HTTP for now? Type: http" >&2
+    printf '%s' "Domain (Enter = free HTTPS, 'http' = no cert): " >&2
+    read -r DOMAIN </dev/tty || DOMAIN=""
+    case "$DOMAIN" in
+      http|HTTP|https|none|no|plain)
+        DOMAIN=""
+        info "OK — plain HTTP on port $PLATFORM_PORT (no certificate). Set PUBLIC_URL later if you put it behind a proxy." ;;
+      "")
+        if [ -n "$suggested" ]; then DOMAIN="$suggested"; info "Great — using $suggested for instant HTTPS."; fi ;;
+    esac
   elif [ -n "$suggested" ]; then
-    info "No domain set — serving HTTP on :3000. For instant HTTPS, re-run with: DOMAIN=$suggested"
+    info "No domain set — serving HTTP on :$PLATFORM_PORT. For instant HTTPS, re-run with: DOMAIN=$suggested"
   fi
 }
 

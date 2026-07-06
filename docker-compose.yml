@@ -54,7 +54,10 @@ services:
       - IMAGES=1
       - INFO=1
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Host Docker socket, read-only. Parameterized so a ROOTLESS daemon (whose
+      # socket lives at /run/user/<uid>/docker.sock) works by setting DOCKER_SOCKET
+      # in .env — the default is the standard rootful path, unchanged. See SECURITY.md.
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
     networks:
       - docker-proxy
     restart: unless-stopped
@@ -120,6 +123,12 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      # Readiness is gated only on reconcile now (the sandbox-image pull runs in
+      # the background — see server.js boot), so the controller goes healthy in
+      # seconds. This grace just covers reconcile + daemon-connect retries on a
+      # busy host without a spurious early "unhealthy". Failing checks during
+      # start_period don't count.
+      start_period: 120s
     depends_on:
       postgres:
         condition: service_healthy
@@ -164,8 +173,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # service_started, NOT service_healthy: login and the first-run setup wizard
+      # never touch the sandbox, so the app must come up and be usable while the
+      # controller is still warming (pulling the ~7.5 GB image on a fresh box).
+      # Gating platform on controller health was the first-run deadlock — a slow
+      # image pull tripped the controller "unhealthy" and aborted `up -d` with
+      # "dependency failed to start". Only actual sandbox tool calls wait for the
+      # controller; those already tolerate its 503 (see src/lib/sandbox/client.ts).
       sandbox-controller:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     mem_limit: ${PLATFORM_MEM_LIMIT:-4g}
     pids_limit: ${PLATFORM_PIDS_LIMIT:-1024}
