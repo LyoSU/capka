@@ -248,10 +248,24 @@ export async function requiresApproval(reg: Registry, ctx: ManageContext, input:
   if (input.action === "add") {
     const coll = reg.collection(input.target);
     if (!coll || !canAccess(ctx, coll)) return false;
-    // Args the schema rejects are doomed anyway: skip the approval card and let
-    // execute return the actionable invalid_value (with the collection's usage)
-    // instead of making the user approve a change that can never apply.
-    if (coll.addSchema && !coll.addSchema.safeParse(input.args).success) return false;
+    // Args the schema OR validateAdd reject are doomed to fail at apply: skip the
+    // approval card and let execute return the actionable error (invalid_value, or
+    // validateAdd's friendly message) instead of making the user approve — or even
+    // see — a change that can never apply. `canAccess` is only the COARSE role gate
+    // (the folder collection is `user`-visible for personal folders), so without the
+    // validateAdd pre-flight a non-admin was shown a SERVER-folder confirm card that
+    // applyAdd then rejected. This honors validateAdd's own contract ("run BEFORE a
+    // confirm card is shown ... refuse up front instead of previewing"); applyAdd
+    // still re-checks it at apply. Pass parsed args so the prediction matches apply.
+    const parsed = coll.addSchema?.safeParse(input.args);
+    if (parsed && !parsed.success) return false;
+    if (coll.validateAdd) {
+      try {
+        await coll.validateAdd(ctx, (parsed ? parsed.data : input.args) as Record<string, unknown>);
+      } catch {
+        return false;
+      }
+    }
     return !!coll.alwaysConfirm || !(await autonomous(reg, ctx));
   }
   if (input.action === "remove") {

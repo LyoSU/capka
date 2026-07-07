@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- `manage` no longer shows a non-admin the confirm card for attaching a server folder (or an admin-only connector): the authorization pre-flight now runs before any approval card, so a change the user can't apply isn't offered as a dead end.
+
 ## [0.4.1] - 2026-07-07
 
 ### Added

@@ -109,6 +109,33 @@ describe("manage/dispatch collections", () => {
     expect(await requiresApproval(reg, ctx(), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } })).toBe(true);
   });
 
+  it("requiresApproval skips the card when validateAdd rejects (doomed args aren't offered for approval)", async () => {
+    // Mirrors the folder case: the collection is user-visible (canAccess passes),
+    // but validateAdd denies THIS caller/payload — so no confirm card is shown.
+    const { collection } = memCollection({
+      validateAdd: async (c) => {
+        if (!c.isAdmin) throw new Error("Only an administrator can do this.");
+      },
+    });
+    const reg = createRegistry([], [collection]);
+    const input = { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } } as const;
+    expect(await requiresApproval(reg, ctx({ isAdmin: false }), input)).toBe(false);
+    expect(await requiresApproval(reg, ctx({ isAdmin: true }), input)).toBe(true);
+  });
+
+  it("an unauthorized add gets the actionable error at apply, not a dead-end confirm card", async () => {
+    const { collection, items } = memCollection({
+      validateAdd: async (c) => {
+        if (!c.isAdmin) throw new Error("Only an administrator can do this.");
+      },
+    });
+    const reg = createRegistry([], [collection]);
+    const res = await dispatch(reg, ctx({ isAdmin: false }), { action: "add", target: "mcp", args: { name: "grok", url: "https://x" } });
+    expect(res.status).toBe("error");
+    if (res.status === "error") expect(res.summary).toContain("administrator");
+    expect(items).toHaveLength(1); // nothing was added
+  });
+
   it("preview() carries an async previewAdd's probe details (Responds — N tools) for the approval card", async () => {
     const { collection } = memCollection({
       // Simulates a network probe run before the approval card is shown (#11).
