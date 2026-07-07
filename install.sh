@@ -294,6 +294,28 @@ port_busy() {
   fi
 }
 
+# On the turnkey-HTTPS path, Caddy needs inbound 80/443 for the Let's Encrypt
+# challenge; an active host firewall (ufw/firewalld) that hasn't allowed them
+# makes the certificate silently never issue — the top "it just won't open"
+# footgun. Since the installer already runs as root to stand up a public web
+# server, open exactly those two ports (idempotent, trivially reverted) and say
+# so. Escape hatch: CAPKA_NO_FIREWALL=1 to manage the firewall yourself. A raw
+# iptables setup is left untouched (too risky to edit blind), and a cloud/
+# provider firewall is a separate layer this can't reach — up.sh's post-boot
+# certificate check catches both of those.
+ensure_firewall_open() {
+  [ "${CAPKA_NO_FIREWALL:-}" = "1" ] && return 0
+  if have ufw && $SUDO ufw status 2>/dev/null | grep -qi '^Status: active'; then
+    $SUDO ufw allow 80/tcp  >/dev/null 2>&1 || true
+    $SUDO ufw allow 443/tcp >/dev/null 2>&1 || true
+    info "Opened ports 80 and 443 in ufw (needed for HTTPS). Undo: sudo ufw delete allow 80/tcp && sudo ufw delete allow 443/tcp"
+  elif have firewall-cmd && $SUDO firewall-cmd --state 2>/dev/null | grep -qi running; then
+    $SUDO firewall-cmd --add-service=http --add-service=https --permanent >/dev/null 2>&1 || true
+    $SUDO firewall-cmd --reload >/dev/null 2>&1 || true
+    info "Opened http/https in firewalld (needed for HTTPS). Undo: sudo firewall-cmd --remove-service=http --remove-service=https --permanent && sudo firewall-cmd --reload"
+  fi
+}
+
 # Decide how the app is reached, adapting to what's already on the box:
 #  - something on 80/443 ⇒ an existing proxy; stay off those ports, bind loopback,
 #    and print how to front Capka with it (no Caddy, no sslip offer).
@@ -309,16 +331,19 @@ choose_access() {
   CAPKA_BUILD="${CAPKA_BUILD:-}"
   PLATFORM_PORT="${PLATFORM_PORT:-}"
   PLATFORM_BIND="${PLATFORM_BIND:-}"
-  PUBLIC_IP="$(public_ip 2>/dev/null || true)"
 
   # Existing install (upgrade / re-run): keep the persisted config. Probing ports
   # here would flag Capka's OWN listeners as conflicts (its platform on 3000, its
   # Caddy on 80/443) and mangle a working setup. up.sh reads DOMAIN/PORT/BIND from
   # .env; any value the operator explicitly passed this run is still honored.
+  # (Return BEFORE probing the public IP — that's a network round-trip we'd
+  # otherwise pay on every upgrade for a value a re-run doesn't need.)
   if [ -f "$CAPKA_DIR/.env" ]; then
     info "Existing install detected — keeping your configuration (pass DOMAIN=… to change it)."
     return 0
   fi
+
+  PUBLIC_IP="$(public_ip 2>/dev/null || true)"
 
   existing_proxy=""
   if port_busy 80 || port_busy 443; then existing_proxy=1; fi
@@ -338,8 +363,32 @@ choose_access() {
   # proxy or get published past a host firewall.
   if [ -n "$existing_proxy" ] && [ -z "$PLATFORM_BIND" ]; then PLATFORM_BIND="127.0.0.1"; fi
 
-  # Origin already chosen by the operator → up.sh handles DOMAIN/PUBLIC_URL.
-  if [ -n "$DOMAIN" ] || [ -n "$PUBLIC_URL" ]; then return 0; fi
+  # A domain was requested but 80/443 are already taken → Caddy can't bind them,
+  # so turnkey HTTPS is impossible on this box. Don't start a crash-looping Caddy
+  # on a cert that can never issue: fall back to reverse-proxy mode (serve on
+  # loopback; the existing proxy terminates TLS for the domain) and explain it.
+  if [ -n "$existing_proxy" ] && [ -n "$DOMAIN" ]; then
+    warn "ports 80/443 are already in use — can't run built-in HTTPS for $DOMAIN on this box."
+    [ -z "$PUBLIC_URL" ] && PUBLIC_URL="https://$DOMAIN"
+    DOMAIN=""
+    cat >&2 <<EOF
+  Capka will listen on http://127.0.0.1:$PLATFORM_PORT. Point your existing web
+  server at it and terminate TLS there:
+    * add a vhost for ${PUBLIC_URL#https://} proxying to http://127.0.0.1:$PLATFORM_PORT
+    * PUBLIC_URL=$PUBLIC_URL will be written to $CAPKA_DIR/.env
+  See docs/DEPLOY.md (host-nginx runbook) for a full example.
+EOF
+    return 0
+  fi
+
+  # Origin already chosen by the operator (own domain via Caddy, or explicit
+  # PUBLIC_URL behind their own proxy) → up.sh handles DOMAIN/PUBLIC_URL. On the
+  # Caddy path (DOMAIN set, nothing already on 80/443) make sure the host firewall
+  # lets the ACME challenge through.
+  if [ -n "$DOMAIN" ] || [ -n "$PUBLIC_URL" ]; then
+    [ -n "$DOMAIN" ] && [ -z "$existing_proxy" ] && ensure_firewall_open
+    return 0
+  fi
 
   # Existing web server on 80/443 → can't run Caddy there; guide them to front it.
   if [ -n "$existing_proxy" ]; then
@@ -382,6 +431,10 @@ EOF
       "")
         if [ -n "$suggested" ]; then DOMAIN="$suggested"; info "Great — using $suggested for instant HTTPS."; fi ;;
     esac
+    # Turnkey HTTPS chosen (typed domain or sslip) → open the firewall so Caddy
+    # can complete the ACME challenge. (No existing proxy on this path — those
+    # cases returned above.)
+    [ -n "$DOMAIN" ] && ensure_firewall_open
   elif [ -n "$suggested" ]; then
     info "No domain set — serving HTTP on :$PLATFORM_PORT. For instant HTTPS, re-run with: DOMAIN=$suggested"
   fi

@@ -1,7 +1,9 @@
 #!/usr/bin/env sh
 # Install gVisor (runsc) on a Linux Docker host and register it as a runtime, so
-# the secure profile (SANDBOX_RUNTIME=runsc, the default) can boot. gVisor needs
-# NO KVM (the systrap platform is userspace), so this works on ordinary VPS hosts.
+# the OPT-IN secure profile can boot. The default runtime is runc (works on any
+# host, no setup) — run this and set SANDBOX_RUNTIME=runsc only to opt into the
+# hardened, fail-closed profile. gVisor needs NO KVM (the systrap platform is
+# userspace), so this works on ordinary VPS hosts.
 #
 # Run as root on the DOCKER HOST (not inside a container):
 #   sudo sh scripts/install-gvisor.sh && sudo systemctl restart docker

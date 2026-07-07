@@ -42,14 +42,21 @@ services:
     mem_limit: ${POSTGRES_MEM_LIMIT:-2g}
     pids_limit: ${POSTGRES_PIDS_LIMIT:-512}
 
-  # One-shot: sync the Postgres role password to POSTGRES_PASSWORD on every start.
-  # The official image only applies POSTGRES_PASSWORD when it INITIALISES a fresh
+  # One-shot: keep the Postgres role password in sync with POSTGRES_PASSWORD. The
+  # official image only applies POSTGRES_PASSWORD when it INITIALISES a fresh
   # volume, so a volume that outlives a password change (reinstall / rotation)
-  # keeps the old password and the app crash-loops on auth. This resets it over
-  # the LOCAL trusted socket (shared via postgres-run) — no current password
-  # needed — on EVERY deploy path, including Coolify and plain `docker compose up`
-  # (not just the install scripts). No-op on a fresh volume and when
-  # POSTGRES_PASSWORD is unset (dev). Best-effort: it never fails the stack.
+  # keeps the old password and the app crash-loops on auth. Runs on EVERY deploy
+  # path, including Coolify and plain `docker compose up` (not just the install
+  # scripts). No-op when POSTGRES_PASSWORD is unset (dev). Best-effort: it never
+  # fails the stack (a fail-hard here could block a perfectly healthy deploy on a
+  # transient blip; a genuinely unhealable drift surfaces in the platform logs).
+  #
+  # Strategy: PROBE over TCP with the desired password first — if it already
+  # works (fresh volume, or already synced) we exit success and touch nothing, so
+  # the service_completed_successfully gate actually MEANS "password verified",
+  # even on an orchestrator that didn't mount the local socket. Only on an auth
+  # failure (real drift) do we reset it over the LOCAL trusted socket (shared via
+  # postgres-run, no current password needed), then re-verify over TCP.
   db-init:
     image: postgres:17-alpine
     depends_on:
@@ -64,12 +71,17 @@ services:
       - -euc
       - |
         [ -n "$${DESIRED_PW:-}" ] || { echo "db-init: POSTGRES_PASSWORD unset — skipping"; exit 0; }
+        if PGPASSWORD="$$DESIRED_PW" psql -h postgres -U Capka -d Capka -tAc 'select 1' >/dev/null 2>&1; then
+          echo "db-init: database password already in sync"
+          exit 0
+        fi
         esc=$$(printf '%s' "$$DESIRED_PW" | sed "s/'/''/g")
-        if psql -h /var/run/postgresql -U Capka -d Capka -v ON_ERROR_STOP=1 \
-             -c "ALTER ROLE \"Capka\" WITH PASSWORD '$$esc'" >/dev/null 2>&1; then
+        psql -h /var/run/postgresql -U Capka -d Capka -v ON_ERROR_STOP=1 \
+          -c "ALTER ROLE \"Capka\" WITH PASSWORD '$$esc'" >/dev/null 2>&1 || true
+        if PGPASSWORD="$$DESIRED_PW" psql -h postgres -U Capka -d Capka -tAc 'select 1' >/dev/null 2>&1; then
           echo "db-init: database password synced with POSTGRES_PASSWORD"
         else
-          echo "db-init: WARNING - could not sync password (continuing)"
+          echo "db-init: WARNING - could not sync password (the app may fail to authenticate — check its logs)"
         fi
     restart: "no"
 

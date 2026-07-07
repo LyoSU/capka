@@ -66,6 +66,12 @@ async function request(path: string, method: string, body?: unknown) {
     if (data.code === "WORKSPACE_FULL") {
       throw new SandboxError(String(raw), op, false, 413);
     }
+    // First-use on a fresh box: the sandbox image is still downloading. Surface
+    // the controller's plain-language "still preparing" message (retryable) so
+    // the agent tells the user to wait, not the misleading "can't reach the AI".
+    if (data.code === "IMAGE_PULLING") {
+      throw new SandboxError(String(raw), op, true, 503);
+    }
     throw new SandboxError("Sandbox operation failed", op, res.status >= 500);
   }
   return data;

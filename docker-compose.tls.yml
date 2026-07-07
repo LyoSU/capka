@@ -25,7 +25,11 @@ services:
     # up — otherwise a slow/failed platform boot leaves the host completely dark
     # (no cert, no port, unreachable even by IP). Caddy proxies to platform:3000
     # over the compose network and returns 502 until it answers; the cert
-    # provisions independently in the meantime.
+    # provisions independently in the meantime. Trade-off: on a permanently-broken
+    # platform Caddy still obtains a real cert, and on an <ip>.sslip.io hostname
+    # that spends issuances against sslip.io's shared Let's Encrypt rate limit — so
+    # repeated failed installs on sslip can hit it (set ACME_EMAIL to enable the
+    # ZeroSSL fallback). up.sh's post-boot cert check surfaces the real failure.
     depends_on:
       platform:
         condition: service_started

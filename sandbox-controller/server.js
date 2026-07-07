@@ -266,6 +266,21 @@ const server = createServer(async (req, res) => {
         return jsonRes(res, 200, { sessionId: sid, status: "reused" });
       }
 
+      // A fresh container is needed below — but on a first-boot box the sandbox
+      // image may still be downloading in the background (see prewarm). Wait
+      // briefly; if it's not ready, tell the caller we're still preparing rather
+      // than letting their request time out on a multi-GB pull. Reuse of a live
+      // container above never reaches here (its image is already present).
+      if (backend.runtimeReady && !backend.runtimeReady()) {
+        const imgReady = await backend.awaitRuntime(120_000);
+        if (!imgReady) {
+          return jsonRes(res, 503, {
+            error: "Setting up the sandbox for first use (one-time download) — try again in a minute.",
+            code: "IMAGE_PULLING",
+          });
+        }
+      }
+
       // Slow path — spin a container (fresh workspace OR revive a stopped one).
       // Serialize per-session so two concurrent requests can't each create a
       // container (the loser would leak). Re-read inside the lock: another request
@@ -673,11 +688,14 @@ async function boot() {
   log("ready", { profile: PROFILE });
 
   // Best-effort image prewarm so the first session doesn't pay the pull. Never
-  // gates readiness; create() awaits this same promise, so a session that lands
-  // mid-pull simply waits for it, and a failed pull self-heals on next create().
-  void backend.ensureRuntime()
+  // gates readiness (create() answers 503 IMAGE_PULLING while this runs). A
+  // transient failure — registry blip, momentary disk pressure — shouldn't leave
+  // the image un-pulled until a user first hits it, so retry with backoff in the
+  // background; if the budget is exhausted, log loudly and fall back on create()'s
+  // own lazy ensureRuntime as the final self-heal.
+  void withRetry(() => backend.ensureRuntime(), { attempts: 5, baseMs: 5000, label: "prewarm", log })
     .then(() => log("prewarm.done", {}))
-    .catch((e) => log("prewarm.failed", { err: e.message }, "warn"));
+    .catch((e) => log("prewarm.gaveup", { err: e.message, hint: "image not prefetched; first session pulls it on demand" }, "warn"));
 
   setInterval(idleSweep, 60_000);
   setInterval(flushAndGc, FLUSH_INTERVAL_MS);

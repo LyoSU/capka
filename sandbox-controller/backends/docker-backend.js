@@ -35,6 +35,31 @@ export class DockerBackend {
     return this._ensuring;
   }
 
+  /** True once the sandbox image is confirmed present (prewarm finished, or a
+   *  prior create pulled it). False while the first multi-GB pull is still in
+   *  flight — the create route uses this to answer "still preparing" instead of
+   *  blocking a client request for minutes. */
+  runtimeReady() {
+    return this._ensured;
+  }
+
+  /** Wait up to `ms` for the image to become ready, kicking the (idempotent,
+   *  deduped) pull if it isn't already running. Resolves true if ready in time,
+   *  false if the pull is still going (or failed) — so the caller can 503 with a
+   *  "preparing" message well under the client's request timeout rather than
+   *  letting a fresh-box first pull abort it. */
+  async awaitRuntime(ms) {
+    if (this._ensured) return true;
+    let timer;
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(false), ms); });
+    const ready = this.ensureRuntime().then(() => true, () => false);
+    try {
+      return await Promise.race([ready, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async create(spec) {
     await this.ensureRuntime();
     const config = buildSandboxConfig({

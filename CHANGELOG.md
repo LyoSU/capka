@@ -6,19 +6,22 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-07
+
 ### Added
-- Optional `ACME_EMAIL` enables Caddy's ZeroSSL fallback issuer on `DOMAIN` deploys (helps when free `sslip.io` hostnames hit the shared Let's Encrypt rate limit).
+- Optional `ACME_EMAIL` enables Caddy's ZeroSSL fallback issuer on `DOMAIN` deploys (helps when free `sslip.io` hostnames hit the shared Let's Encrypt rate limit). Applied by `up.sh`; on plain `docker compose`/Coolify, write the `email` line to `data/caddy/conf.d/email.caddy` yourself.
 - `DOCKER_SOCKET` sets the socket-proxy's host socket path; required for rootless Docker (see SECURITY.md). Defaults to `/var/run/docker.sock`.
+- `install.sh` opens ports 80/443 in an active `ufw`/`firewalld` on the turnkey-HTTPS path so the certificate can issue. Set `CAPKA_NO_FIREWALL=1` to manage the firewall yourself.
 
 ### Changed
-- The sandbox image now downloads in the background on controller boot, so the stack reports healthy in seconds instead of after a multi-GB pull.
-- `install.sh` preflights RAM/disk, requires `docker compose` v2.24+, and adapts to servers already running other sites (stays off busy 80/443/3000, binds loopback, prints how to front Capka with your proxy); it no longer reinstalls Docker over a daemon running containers.
+- The sandbox image downloads in the background on controller boot, so the stack reports healthy in seconds instead of after a multi-GB pull; a failed pull retries with backoff, and the first sandbox call returns a clear "still preparing" message if it lands mid-download.
+- `install.sh` preflights RAM/disk, requires `docker compose` v2.24+, and adapts to servers already running other sites (stays off busy 80/443/3000, binds loopback, prints how to front Capka); a `DOMAIN=` install where 80/443 are already taken now falls back to reverse-proxy mode instead of a crash-looping Caddy. It no longer reinstalls Docker over a daemon running containers.
 - Default install command no longer needs `DOMAIN=` — the installer offers a free `sslip.io` HTTPS address, or type `http` for plain HTTP.
-- `up.sh` waits until the app is healthy before printing the address to open, and on failure prints service status and the failing service's logs. Re-run it any time to reprint the address.
+- `up.sh` waits until the app is healthy before printing the address, verifies Caddy obtained the certificate on `DOMAIN` deploys (printing firewall/DNS causes if not), and flags a running-but-unhealthy service instead of calling it "still starting". Re-run it any time to reprint the address.
 
 ### Fixed
 - First install no longer fails while the sandbox image is still downloading (platform starts independently of the controller).
-- Reinstalling or rotating `POSTGRES_PASSWORD` over an existing database volume no longer crash-loops on an auth error: a `db-init` one-shot re-syncs the role password on every start, on all deploy paths (plain `docker compose up`, Coolify, and the scripts).
+- Reinstalling or rotating `POSTGRES_PASSWORD` over an existing database volume no longer crash-loops on an auth error: a `db-init` one-shot verifies the role password over TCP and re-syncs it on drift, on all deploy paths (plain `docker compose up`, Coolify, and the scripts).
 - A failed certificate or platform boot no longer leaves the host unreachable — Caddy starts independently and keeps a `127.0.0.1` rescue publish.
 - `.env` files saved with Windows (CRLF) line endings are normalized on start.
 

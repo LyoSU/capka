@@ -15,10 +15,11 @@ services:
       - "127.0.0.1:5432:5432"
 
   # In dev the DB password is a fixed `Capka` (above) and the controller/platform
-  # DATABASE_URLs are hardcoded to it. The base db-init would instead apply
-  # ${POSTGRES_PASSWORD} from any stray .env in the repo (e.g. left by a prior
-  # `up.sh`), rotating the role out from under those hardcoded URLs and breaking
-  # dev. Make it an explicit no-op here — dev volumes are ephemeral, no drift to heal.
+  # DATABASE_URLs are hardcoded to it. Given a stray .env in the repo (e.g. left by
+  # a prior `up.sh`) with a different POSTGRES_PASSWORD, the base db-init would
+  # probe with it, see a mismatch, and rotate the role to it — out from under those
+  # hardcoded URLs, breaking dev. Make it an explicit no-op here — dev volumes are
+  # ephemeral, no drift to heal.
   db-init:
     entrypoint: ["sh", "-c", "echo 'db-init: no-op in dev'; exit 0"]
 

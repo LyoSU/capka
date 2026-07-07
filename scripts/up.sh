@@ -209,13 +209,27 @@ echo
 
 # Services that actually failed, in ONE compose call. A container that exited 0
 # is a successful one-shot (db-init), NOT a failure; a service not created yet
-# isn't listed, so it isn't reported. Everything else running-but-not (exited
-# non-zero, restarting, dead) is a real problem.
+# isn't listed, so it isn't reported. A container that is running but whose
+# healthcheck reports "unhealthy" IS a failure (e.g. a bad master key or a stuck
+# migration keeps platform running while /login never answers) — without this it
+# would masquerade as "just slow" forever. Everything else running-but-not
+# (exited non-zero, restarting, dead) is a real problem. Fields are pipe-
+# delimited so an empty Health column can't shift the others under awk.
 unhealthy_services() {
-  docker compose $COMPOSE ps -a --format '{{.Service}} {{.State}} {{.ExitCode}}' 2>/dev/null | awk '
+  docker compose $COMPOSE ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}' 2>/dev/null | awk -F'|' '
+    $2 == "running" && $3 == "unhealthy" { print $1; next }
     $2 == "running" { next }
-    $2 == "exited" && $3 == "0" { next }
+    $2 == "exited" && $4 == "0" { next }
     { print $1 }'
+}
+
+# Has Caddy actually obtained the TLS certificate for $1? Checks the cert file in
+# Caddy's data volume from inside the container — a hairpin-NAT-proof positive
+# signal that the ACME challenge succeeded, unlike curling our own public IP
+# (which can fail on a working setup). Non-zero if the cert is absent OR Caddy
+# isn't running (crash-loop) — either way, "HTTPS isn't live yet".
+caddy_has_cert() {
+  docker compose $COMPOSE exec -T caddy sh -c "ls /data/caddy/certificates/*/$1/$1.crt" >/dev/null 2>&1
 }
 
 # Print what went wrong in operator terms: status table, the culprit's last logs,
@@ -248,8 +262,9 @@ diagnose() {
 # docker-compose.build.yml and builds from source instead.
 if [ "${CAPKA_BUILD:-}" = "1" ]; then
   COMPOSE="$COMPOSE -f docker-compose.build.yml"
-  echo "Building images from source (CAPKA_BUILD=1) ..."
-  docker compose $COMPOSE build
+  echo "Building images from source (CAPKA_BUILD=1) — this can take a while ..."
+  # The build happens in the single `up --build` below; a separate `build` pass
+  # here would just compile everything twice.
 else
   echo "Pulling images ..."
   docker compose $COMPOSE pull --ignore-pull-failures || true
@@ -264,6 +279,10 @@ fi
 # reinstall/rotation over an existing volume — see docker-compose.yml), then the
 # app. --remove-orphans clears a container left by a previous layout (e.g. a
 # `caddy` after switching away from DOMAIN); it touches no named volume or ./data.
+# NOTE: it also removes containers from overlays NOT passed on this command line
+# — including the pg-backup sidecar from docker-compose.backup.yml. If you run
+# that overlay, bring it up in the SAME command (add -f docker-compose.backup.yml)
+# so re-running this script doesn't silently tear the backup job down.
 # On failure (e.g. a host port already taken — including the TLS loopback rescue
 # publish), `set -e` would abort before diagnostics; route through diagnose().
 echo "Starting the stack ..."
@@ -284,6 +303,7 @@ i=0
 while [ "$i" -lt 60 ]; do
   line="$(docker compose $COMPOSE ps -a --format '{{.Service}} {{.State}} {{.Health}}' platform 2>/dev/null | head -1)"
   case "$line" in
+    *" unhealthy") break ;;         # healthcheck ran and keeps failing — stop, diagnose (don't wait it out)
     *" healthy") READY=1; break ;;
     *" running "*|*" running") ;;   # up, health still starting — keep waiting
     "") ;;                          # not created yet — keep waiting
@@ -294,12 +314,34 @@ done
 
 echo
 if [ "$READY" -eq 1 ]; then
+  # The platform is healthy — but on the HTTPS path the site is only truly
+  # reachable once Caddy has the certificate, which silently fails when inbound
+  # 80/443 are firewalled (a shared/cloud footgun the port probe can't see). So
+  # don't promise HTTPS until the cert exists: wait briefly, then tell the truth.
+  cert_ok=""
+  if [ -n "$DOMAIN_EFFECTIVE" ]; then
+    echo "  Waiting for the HTTPS certificate ..."
+    k=0
+    while [ "$k" -lt 20 ]; do
+      if caddy_has_cert "$DOMAIN_EFFECTIVE"; then cert_ok=1; break; fi
+      k=$((k + 1)); sleep 3
+    done
+  fi
   # Prominent, un-missable final block.
   echo "  ────────────────────────────────────────────────"
   echo "   Capka is up. Open:"
   echo "     $LINK"
   echo "  ────────────────────────────────────────────────"
-  [ -n "$DOMAIN_EFFECTIVE" ] && echo "  (First HTTPS request may take ~30s while Caddy provisions the certificate.)"
+  if [ -n "$DOMAIN_EFFECTIVE" ] && [ -z "$cert_ok" ]; then
+    echo "  NOTE: the TLS certificate isn't issued yet — $LINK may not load until it is."
+    echo "  Let's Encrypt validates over port 80, so if it doesn't come up in a minute, check:"
+    echo "    * ports 80 AND 443 are open in your host firewall (ufw/firewalld) AND your cloud/provider firewall"
+    echo "    * DNS for $DOMAIN_EFFECTIVE points at THIS server"
+    echo "    * then read the reason:  docker compose $COMPOSE logs caddy"
+    echo "  Reach it locally meanwhile (SSH tunnel):  http://127.0.0.1:$PORT"
+  elif [ -n "$DOMAIN_EFFECTIVE" ]; then
+    echo "  (Certificate issued — HTTPS is live.)"
+  fi
   echo "  Lost this address later? Run:  cd \"$(pwd)\" && sh scripts/up.sh"
 elif [ -n "$(unhealthy_services)" ]; then
   # A service actually failed (not just slow) — show why, then repeat the link.
