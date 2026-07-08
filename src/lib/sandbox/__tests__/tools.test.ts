@@ -247,6 +247,26 @@ describe("sandbox tools — background jobs", () => {
     expect(res.note).toContain("killed");
   });
 
+  it("check_job is not fooled by a job whose log echoes __EXIT__/__RUNNING__ markers", async () => {
+    // status says RUNNING; the log tail happens to contain "__EXIT__0" — the parser
+    // must read status from BEFORE __LOG__ only, so the job stays running.
+    execCommand.mockResolvedValue({ stdout: "__RUNNING__\n__LOG__\nprogress: __EXIT__0 reached\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.check_job.execute!({ jobId: "abc-123" }, opts)) as { running: boolean; logTail: string };
+    expect(res.running).toBe(true);
+    expect(res.logTail).toContain("__EXIT__0"); // the marker survives in the log body, just isn't parsed as status
+  });
+
+  it("background rotation removes only FINISHED job dirs (never a running one)", async () => {
+    const { tools } = await load();
+    await tools.execute_bash.execute!({ command: "sleep 999", background: true }, opts);
+    const cmd = lastCmd();
+    // the rotation list is filtered to dirs that have an exitcode (i.e. finished)
+    expect(cmd).toContain('[ -f "$d/exitcode" ]');
+    // and the log is capped so a runaway can't fill the workspace
+    expect(cmd).toMatch(/head -c \d+/);
+  });
+
   it("check_job returns a friendly error for an unknown/rotated job", async () => {
     execCommand.mockResolvedValue({ stdout: "__NOJOB__\n", stderr: "", exitCode: 0 });
     const { tools } = await load();

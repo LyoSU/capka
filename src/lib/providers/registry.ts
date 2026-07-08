@@ -296,6 +296,20 @@ export function supportsImageToolResults(provider: string, apiStyle?: ApiStyle):
   return false;
 }
 
+/**
+ * Stricter than `acceptsNativeFile` for images, used to gate the `view_file` tool.
+ * A USER attachment can be optimistic (the runner soft-retries without it if the
+ * model rejects it), but a `view_file` image has NO such retry — an over-claimed
+ * capability there fails the whole turn. So offer it only on POSITIVE evidence:
+ * a provider that genuinely takes images, or per-model catalog data that says so.
+ * A catalog-less openai-compatible endpoint (whose static fallback claims "image"
+ * but might front a text-only model) gets the tool ABSENT — graceful, not a crash.
+ */
+export function modelTakesImages(provider: string, modelInput?: Modality[] | null): boolean {
+  if (modelInput && modelInput.length) return modelInput.includes("image");
+  return provider === "anthropic" || provider === "google" || provider === "openai" || provider === "openrouter";
+}
+
 // ── Model id encoding ──────────────────────────────────────────────────────
 //
 // A model is stored as a bare model id (e.g. `openai/gpt-5.2` for OpenRouter,

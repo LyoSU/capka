@@ -50,13 +50,16 @@ describe("view_file — rendering + ref shape", () => {
     expect(cmd).toContain("pdftoppm");
   });
 
-  it("renders an image via ImageMagick convert (first frame, downscale-only)", async () => {
-    execCommand.mockResolvedValue({ stdout: "__COUNT__1\n__PNG__/workspace/.capka/view/ab/p-1.png\n", stderr: "", exitCode: 0 });
+  it("renders a photo to JPEG (not multi-MB PNG) so it fits the per-image cap", async () => {
+    execCommand.mockResolvedValue({ stdout: "__COUNT__1\n__PNG__/workspace/.capka/view/ab/p-1.jpg\n", stderr: "", exitCode: 0 });
     const { view_file } = make();
-    await view_file.execute!({ path: "photo.jpg" }, opts);
+    const res = (await view_file.execute!({ path: "photo.jpg" }, opts)) as MediaRef;
     const cmd = lastCmd();
     expect(cmd).toContain("convert");
     expect(cmd).toContain('-resize \'1536x1536>\'');
+    expect(cmd).toContain("-quality 85");
+    expect(cmd).toContain("p-1.jpg");
+    expect(res.pages[0]).toEqual({ page: 1, path: ".capka/view/ab/p-1.jpg" });
   });
 
   it("screenshots HTML with headless Chromium", async () => {
@@ -115,6 +118,32 @@ describe("view_file — capable transport (toModelOutput)", () => {
     const value = (out as { value: { type: string }[] }).value;
     expect(value.filter((v) => v.type === "image-data")).toHaveLength(2);
     expect(value[0].type).toBe("text");
+  });
+
+  it("skips a page over the per-image byte cap instead of sending it", async () => {
+    // a 4 MiB page — over MAX_IMG_BYTES (3 MiB); it must be skipped, not sent
+    downloadFile.mockResolvedValue({ arrayBuffer: async () => new Uint8Array(4 * 1024 * 1024).buffer });
+    const { view_file } = make(true);
+    const ref: MediaRef = {
+      kind: "media", source: "photo.jpg", mime: "image/jpeg", pageCount: 1,
+      pages: [{ page: 1, path: ".capka/view/ab/p-1.jpg" }], note: "x",
+    };
+    const out = await view_file.toModelOutput!({ output: ref } as never);
+    const value = (out as { value: { type: string; text?: string }[] }).value;
+    expect(value.some((v) => v.type === "image-data")).toBe(false);
+    expect(value[0].text).toContain("skipped");
+  });
+
+  it("labels a JPEG page with image/jpeg (not a blanket image/png)", async () => {
+    downloadFile.mockResolvedValue(pngResponse());
+    const { view_file } = make(true);
+    const ref: MediaRef = {
+      kind: "media", source: "photo.jpg", mime: "image/jpeg", pageCount: 1,
+      pages: [{ page: 1, path: ".capka/view/ab/p-1.jpg" }], note: "x",
+    };
+    const out = await view_file.toModelOutput!({ output: ref } as never);
+    const img = (out as { value: { type: string; mediaType?: string }[] }).value.find((v) => v.type === "image-data");
+    expect(img?.mediaType).toBe("image/jpeg");
   });
 
   it("never throws — a failed download degrades to text", async () => {

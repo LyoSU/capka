@@ -50,6 +50,11 @@ const kbBytes = (n: number) => `${Math.round(n / 1024)} KB`;
 // in the workspace so a later check_job (or read_file) can recover them.
 const JOBS_DIR = "/workspace/.capka/jobs";
 const JOBS_KEEP = Number(process.env.JOBS_KEEP_DIRS) || 20;
+/** Per-job stdout+stderr log ceiling. A runaway job that spews past this is
+ *  truncated (and stops, via SIGPIPE) so it can't fill the workspace quota — the
+ *  same protection the foreground tee-capture gives. Generous: real progress logs
+ *  are tiny; JOBS_KEEP × this stays well under the 500 MB workspace cap. */
+const JOB_LOG_CAP_BYTES = (Number(process.env.JOB_LOG_CAP_MB) || 10) * 1024 * 1024;
 
 /** Launch `command` detached in its OWN session and return at once. The
  *  controller already runs our exec under `setsid … & wait`, so nesting another
@@ -58,13 +63,18 @@ const JOBS_KEEP = Number(process.env.JOBS_KEEP_DIRS) || 20;
  *  to the container's PID 1) survives past this turn. The user command is base64'd
  *  so it's written verbatim; it stays UNQUOTED inside the single-quoted job script
  *  (the base64 alphabet has no shell metacharacters), which is why it can't break
- *  out of the surrounding quotes. */
+ *  out of the surrounding quotes.
+ *
+ *  Rotation removes only FINISHED job dirs (those with an `exitcode`) so it can
+ *  never delete a job that's still running. `$RC=$?` captures the user command's
+ *  own exit (last in the pipeline = bash) before the log is written; the log is
+ *  capped via `head -c`. */
 function backgroundWrapper(command: string, jobId: string): string {
   const encoded = Buffer.from(command).toString("base64");
   const j = `${JOBS_DIR}/${jobId}`;
   return `mkdir -p '${j}'
-( cd '${JOBS_DIR}' && ls -1td */ 2>/dev/null | tail -n +${JOBS_KEEP + 1} | xargs -r rm -rf )
-setsid bash -c 'echo ${encoded} | base64 -d | bash > "${j}/log" 2>&1; echo $? > "${j}/exitcode"' </dev/null >/dev/null 2>&1 &
+( cd '${JOBS_DIR}' 2>/dev/null && for d in $(ls -1td */ 2>/dev/null); do [ -f "$d/exitcode" ] && printf '%s\\n' "$d"; done | tail -n +${JOBS_KEEP + 1} | xargs -r rm -rf )
+setsid bash -c '{ echo ${encoded} | base64 -d | bash; RC=$?; echo $RC > "${j}/exitcode"; } 2>&1 | head -c ${JOB_LOG_CAP_BYTES} > "${j}/log"' </dev/null >/dev/null 2>&1 &
 echo $! > '${j}/pid'
 echo started`;
 }
@@ -170,7 +180,10 @@ export async function loadSandboxTools(sessionKey: string, userId: string, ensur
             logPath: `${JOBS_DIR}/${jobId}/log`,
             note:
               "Job started and keeps running after your reply ends (the sandbox persists between turns). " +
-              "Get the result with check_job when you next need it — don't block waiting.",
+              "Get the result with check_job when you next need it — don't block waiting. " +
+              "Note: if the chat sits idle ~15 min with no sandbox activity the container is reclaimed and the " +
+              "job stops; its log and exit code (if written) survive. For a job that may run that long, keep the " +
+              "chat active or check back within that window.",
           };
         }
         return captureResult(await run(withCapture(command), timeout));
@@ -198,16 +211,21 @@ echo __LOG__
 tail -c 4000 "$__j/log" 2>/dev/null || true`;
         const result = await run(cmd);
         const out = result.stdout;
-        if (out.includes("__NOJOB__")) {
+        // Split the status record from the log BEFORE parsing: the log tail is
+        // arbitrary job output and could itself contain "__EXIT__0"/"__RUNNING__",
+        // which would spoof the status if we matched over the whole stdout.
+        const logIdx = out.indexOf("__LOG__");
+        const statusPart = logIdx >= 0 ? out.slice(0, logIdx) : out;
+        const logTail = logIdx >= 0 ? out.slice(logIdx + "__LOG__".length).replace(/^\n/, "") : "";
+        if (statusPart.includes("__NOJOB__")) {
           return { error: `No job ${jobId} — it may have been rotated out. Its output, if any, is under ${JOBS_DIR}.` };
         }
-        const logTail = out.includes("__LOG__") ? out.slice(out.indexOf("__LOG__") + "__LOG__".length).replace(/^\n/, "") : "";
-        const exitMatch = out.match(/__EXIT__(-?\d+)/);
+        const exitMatch = statusPart.match(/__EXIT__(-?\d+)/);
         if (exitMatch) {
           const exitCode = parseInt(exitMatch[1], 10);
           return { running: false, exitCode, success: exitCode === 0, logTail: clampOutput(logTail).text };
         }
-        if (out.includes("__RUNNING__")) {
+        if (statusPart.includes("__RUNNING__")) {
           return { running: true, logTail: clampOutput(logTail).text };
         }
         return {

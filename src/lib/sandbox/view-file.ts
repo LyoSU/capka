@@ -86,10 +86,13 @@ if [ ! -f "$src" ]; then echo __NOFILE__; exit 0; fi`;
 
   switch (kind) {
     case "image":
-      // `[0]` takes the first frame of a multi-frame image; `>` only shrinks.
+      // Photographs → JPEG, not PNG: a detailed photo at this size is multiple MB
+      // as lossless PNG (over the per-image cap, so it'd be dropped and never seen),
+      // but a fraction of that as JPEG. `[0]` takes the first frame of a multi-frame
+      // image; `>` only shrinks. (Documents/PDF/HTML stay PNG below — crisp text.)
       return `${head}
 echo __COUNT__1
-convert "$src[0]" -resize '${RENDER_PX}x${RENDER_PX}>' "$d/p-1.png" && echo __PNG__"$d/p-1.png"`;
+convert "$src[0]" -resize '${RENDER_PX}x${RENDER_PX}>' -quality 85 "$d/p-1.jpg" && echo __PNG__"$d/p-1.jpg"`;
     case "pdf":
       return `${head}\n${pdfTail(wanted)}`;
     case "office":
@@ -110,9 +113,11 @@ chromium --headless --no-sandbox --disable-gpu --hide-scrollbars --screenshot="$
 }
 
 const pageNum = (p: string): number => {
-  const m = p.match(/\/p-(\d+)\.png$/);
+  const m = p.match(/\/p-(\d+)\.(?:png|jpe?g)$/);
   return m ? parseInt(m[1], 10) : 1;
 };
+
+const mimeOfPage = (p: string): string => (/\.jpe?g$/i.test(p) ? "image/jpeg" : "image/png");
 
 /** Download rendered pages back from the workspace, bounded per-page and in
  *  aggregate (mirrors the runner's downloadBounded). Buffers, not base64 — each
@@ -121,8 +126,8 @@ export async function hydrateMediaRef(
   ref: MediaRef,
   sessionKey: string,
   userId: string,
-): Promise<{ pages: { page: number; buf: Buffer }[]; skipped: number[] }> {
-  const out: { page: number; buf: Buffer }[] = [];
+): Promise<{ pages: { page: number; buf: Buffer; mediaType: string }[]; skipped: number[] }> {
+  const out: { page: number; buf: Buffer; mediaType: string }[] = [];
   const skipped: number[] = [];
   let total = 0;
   for (const pg of ref.pages) {
@@ -134,7 +139,7 @@ export async function hydrateMediaRef(
         continue;
       }
       total += buf.length;
-      out.push({ page: pg.page, buf });
+      out.push({ page: pg.page, buf, mediaType: mimeOfPage(pg.path) });
     } catch (e) {
       skipped.push(pg.page);
       log.warn("view_file: page download failed", { userId, path: pg.path, err: String(e) });
@@ -179,7 +184,7 @@ export async function buildViewFileInjection(
       type: "text",
       text: `Rendered page(s) of ${ref.source}${skippedNote(skipped)}:`,
     });
-    for (const pg of pages) content.push({ type: "image", image: pg.buf, mediaType: "image/png" });
+    for (const pg of pages) content.push({ type: "image", image: pg.buf, mediaType: pg.mediaType });
   }
   if (content.length === 0) return null;
   return { role: "user", content };
@@ -263,7 +268,7 @@ export function makeViewFileTool(opts: {
             text: `${output.source} — showing ${shown} page(s)${output.pageCount > shown ? ` of ${output.pageCount}` : ""}${skippedNote(skipped)}.`,
           },
         ];
-        for (const pg of pages) value.push({ type: "image-data", data: pg.buf.toString("base64"), mediaType: "image/png" });
+        for (const pg of pages) value.push({ type: "image-data", data: pg.buf.toString("base64"), mediaType: pg.mediaType });
         if (shown === 0) value.push({ type: "text", text: "The pages were rendered but could not be loaded back." });
         return { type: "content", value };
       } catch (e) {

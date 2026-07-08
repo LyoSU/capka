@@ -19,7 +19,7 @@ import { providerNativeTools } from "@/lib/providers";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles, findBlindModalities } from "@/lib/chat/prompt";
-import { mimeToModality, acceptsNativeFile, supportsImageToolResults, type Modality } from "@/lib/providers/registry";
+import { mimeToModality, supportsImageToolResults, modelTakesImages, type Modality } from "@/lib/providers/registry";
 import { makeViewFileTool, buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
@@ -385,7 +385,9 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     // model splits by transport: capable adapters carry it in the tool result
     // (emitImageToolResult); chat-completions transports can't, so the runner
     // bridges it as a following user message (viewFileBridge → prepareStep).
-    const visionOk = acceptsNativeFile("image/png", provider, modelInput);
+    // Stricter than a user attachment's gate: view_file images have no soft-retry,
+    // so an over-claimed capability would fail the turn (see modelTakesImages).
+    const visionOk = modelTakesImages(provider, modelInput);
     const emitImageToolResult = supportsImageToolResults(provider, apiStyle);
     const viewFileBridge = visionOk && !emitImageToolResult;
     const tools = {
