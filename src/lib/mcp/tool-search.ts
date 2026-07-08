@@ -70,22 +70,51 @@ function splitMcpName(name: string): { server: string; short: string } {
     : { server: rest.slice(0, i), short: rest.slice(i + 2) };
 }
 
-/** A diverse sample of a server's tool names for the prompt index: one per
- *  distinct capability family (the token after any server-name echo) so breadth
- *  wins over an alphabetical prefix. `shorts` is pre-sorted; caps at 12 families. */
-function sampleNames(shorts: string[], server: string, cap = 12): string {
+/** The capability "family" of a tool: the token after any server-name echo, so
+ *  `firecrawl_monitor_check` and `firecrawl_monitor_run` collapse to "monitor". */
+function familyKey(short: string, server: string): string {
+  const toks = short.split(/[_-]/).filter(Boolean);
+  return toks[0] === server ? toks[1] ?? toks[0] : toks[0];
+}
+
+/** A short human gist of what a tool DOES, for the prompt index — the first clause
+ *  of its (already length-clamped) description, cut at a NATURAL break (comma,
+ *  parenthesis, "and", …) so it reads as a whole phrase, not a mid-word stub. Falls
+ *  back to the de-prefixed, spaced-out name when a connector ships no description. */
+function toolGist(short: string, server: string, description?: string): string {
+  const d = (description ?? "").trim();
+  if (d) {
+    // first line → first sentence → first clause (stop at the earliest natural break)
+    let g = d.split("\n")[0].split(/(?<=[.!?])\s/)[0].split(/[,(:;]| [-–—] | and /i)[0].trim();
+    const MAX = 52;
+    if (g.length > MAX) g = g.slice(0, MAX).replace(/\s+\S*$/, "");
+    g = g.replace(/[.;:,()\s]+$/, "").trim();
+    if (g) return g;
+  }
+  const toks = short.split(/[_-]/).filter(Boolean);
+  return (toks[0] === server ? toks.slice(1) : toks).join(" ") || short;
+}
+
+/** A one-line CAPABILITY overview of a connector for the prompt index: a short
+ *  gist per distinct tool family (deduped, so seven `monitor_*` tools read as one
+ *  "monitor a URL for changes"), so the model learns what the connector can DO —
+ *  not a truncated list of tool names it has to decode. `tools` is pre-sorted; the
+ *  cap is a high safety ceiling (a connector rarely has this many distinct
+ *  families) so every capability domain is surfaced — not hidden behind a "…", the
+ *  whole point being that the model must SEE a capability to think to search it. */
+function connectorSummary(tools: { short: string; description?: string }[], server: string, cap = 16): string {
   const seen = new Set<string>();
-  const picked: string[] = [];
-  for (const s of shorts) {
-    const toks = s.split(/[_-]/).filter(Boolean);
-    const key = toks[0] === server ? toks[1] ?? toks[0] : toks[0];
+  const parts: string[] = [];
+  let truncated = false;
+  for (const { short, description } of tools) {
+    const key = familyKey(short, server);
     if (seen.has(key)) continue;
     seen.add(key);
-    picked.push(s);
-    if (picked.length >= cap) break;
+    if (parts.length >= cap) { truncated = true; break; }
+    const g = toolGist(short, server, description);
+    if (!parts.includes(g)) parts.push(g);
   }
-  const more = shorts.length > picked.length ? `, … (${shorts.length} total)` : "";
-  return `${picked.join(", ")}${more}`;
+  return `${parts.join(", ")}${truncated ? ", …" : ""}`;
 }
 
 /** Rough token estimate for a tool's serialized definition (name + description +
@@ -223,20 +252,21 @@ export function planToolSearch(opts: {
     return { name, description, terms: tokenize(`${short} ${description}`) };
   });
 
-  // ── System-prompt index: one line per connector with a DIVERSE sample of tool
-  //    names so the model has the vocabulary to phrase a find_tool query. A big
-  //    server (Firecrawl: scrape + crawl + monitor_* + research_* …) needs the
-  //    breadth of its sub-families surfaced, not the first-N alphabetically —
-  //    otherwise the model never thinks to ask for a whole capability. ──────────
-  const byServer = new Map<string, string[]>();
+  // ── System-prompt index: one line per connector describing what it CAN DO — a
+  //    short capability gist per tool family (from the tools' descriptions), not a
+  //    truncated list of tool names. A big server (Firecrawl: scrape + web search +
+  //    change monitors + paper search + GitHub …) then surfaces the breadth of its
+  //    capabilities, so the model knows what to ask find_tool for. ────────────────
+  const byServer = new Map<string, { short: string; description?: string }[]>();
   for (const name of sortedMcp) {
     const { server, short } = splitMcpName(name);
+    const entry = { short, description: opts.tools[name]?.description };
     const list = byServer.get(server);
-    if (list) list.push(short);
-    else byServer.set(server, [short]);
+    if (list) list.push(entry);
+    else byServer.set(server, [entry]);
   }
   const serverLines = [...byServer.entries()].map(
-    ([server, shorts]) => `- **${server}** (${shorts.length} tool${shorts.length === 1 ? "" : "s"}): ${sampleNames(shorts, server)}`,
+    ([server, tools]) => `- **${server}** (${tools.length} tool${tools.length === 1 ? "" : "s"}): ${connectorSummary(tools, server)}`,
   );
   const indexText = [
     "## Connector tools (loaded on demand)",

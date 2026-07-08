@@ -113,25 +113,46 @@ describe("find_tool — BM25", () => {
   });
 });
 
-describe("connector index — diversity sampling", () => {
-  it("surfaces distinct tool families of a large server, not just the alphabetical head", () => {
+describe("connector index — capability summary", () => {
+  it("describes what a connector CAN DO (from descriptions), deduped by family, not tool names", () => {
     const tools: Record<string, Tool> = { bash: fakeTool("run a command") };
-    for (const t of [
-      "firecrawl_scrape",
-      "firecrawl_search",
-      "firecrawl_crawl",
-      "firecrawl_monitor_create",
-      "firecrawl_monitor_list",
-      "firecrawl_research_read_paper",
-      "firecrawl_research_search_papers",
-    ]) {
-      tools[`mcp__firecrawl__${t}`] = fakeTool(bulky(t));
-    }
+    const defs: [string, string][] = [
+      ["firecrawl_scrape", "Scrape a webpage"],
+      ["firecrawl_search", "Search the web"],
+      ["firecrawl_monitor_create", "Monitor a URL for changes"],
+      ["firecrawl_monitor_list", "List existing change monitors"],
+      ["firecrawl_research_search_papers", "Search academic papers"],
+      ["firecrawl_research_read_paper", "Read a paper's full text"],
+    ];
+    // Pad so the block crosses the defer threshold; the gist takes the first clause.
+    for (const [t, d] of defs) tools[`mcp__firecrawl__${t}`] = fakeTool(`${d}. ${"lorem ipsum ".repeat(20)}`);
     const plan = planToolSearch({ tools, effectiveLimit: 2000 });
     expect(plan.defer).toBe(true);
-    // The monitor_* and research_* families must appear despite sorting after
-    // scrape/search/crawl — otherwise the model never learns to ask for them.
-    expect(plan.indexText).toContain("monitor");
-    expect(plan.indexText).toContain("research");
+
+    // Capability gists — the model sees WHAT the connector does, incl. the
+    // monitor and research domains that a truncated name list would have hidden.
+    expect(plan.indexText).toContain("Monitor a URL for changes");
+    expect(plan.indexText).toContain("Scrape a webpage");
+    expect(plan.indexText).toContain("paper"); // the research domain is represented
+    // Not a list of tool names.
+    expect(plan.indexText).not.toContain("firecrawl_monitor_create");
+    // Deduped by family: the domain shows ONCE (one representative per family), so
+    // the seven-tool monitor family doesn't spam the line.
+    expect((plan.indexText.match(/Monitor a URL for changes/g) ?? []).length).toBe(1);
+    expect(plan.indexText).not.toContain("List existing change monitors");
+  });
+
+  it("falls back to the de-prefixed tool name when a connector ships no descriptions", () => {
+    const tools: Record<string, Tool> = { bash: fakeTool("run a command") };
+    // No descriptions → gist must degrade to the readable name, still crossing the
+    // threshold via schema bulk.
+    const schema = { type: "object", properties: Object.fromEntries([...Array(30)].map((_, i) => [`p${i}`, { type: "string", description: "x".repeat(30) }])) };
+    for (const t of ["acme_send_message", "acme_list_channels"]) {
+      tools[`mcp__acme__${t}`] = { description: "", inputSchema: { jsonSchema: schema } } as unknown as Tool;
+    }
+    const plan = planToolSearch({ tools, effectiveLimit: 1500 });
+    expect(plan.defer).toBe(true);
+    expect(plan.indexText).toContain("send message");
+    expect(plan.indexText).toContain("list channels");
   });
 });
