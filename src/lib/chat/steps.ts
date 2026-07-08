@@ -130,14 +130,23 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
 
   if (name === "manage") {
     // The running / generic label; a finished result usually replaces this with its
-    // own localized one-liner (see `manageStepLabel`). Diagnostics get a plug so a
-    // connector check reads as connector-shaped, not a generic settings tweak.
-    const isDebug = args.action === "debug";
+    // own localized one-liner (see `manageStepLabel`), EXCEPT for internal reads
+    // (list/capabilities/get) whose summary is deliberately hidden — those fall back
+    // to THIS label, so it must not say "Updated settings" when nothing was updated
+    // (a false alarm when the user merely asked a question). Split read vs mutate:
+    //  - debug: connector-shaped diagnostic read (plug).
+    //  - list/capabilities/get: settings read → "Checked settings".
+    //  - everything else (set/add/remove/enable/disable/…): a real change.
+    const action = typeof args.action === "string" ? args.action : "";
+    if (action === "debug") {
+      return { iconKey: "plug", label: t("checkedConnector"), activeLabel: t("checkingConnector"), category: "mcp" };
+    }
+    const isRead = action === "list" || action === "capabilities" || action === "get";
     return {
-      iconKey: isDebug ? "plug" : "sliders",
-      label: isDebug ? t("checkedConnector") : t("managedSettings"),
-      activeLabel: isDebug ? t("checkingConnector") : t("managingSettings"),
-      category: isDebug ? "mcp" : "other",
+      iconKey: "sliders",
+      label: isRead ? t("checkedSettings") : t("managedSettings"),
+      activeLabel: isRead ? t("checkingSettings") : t("managingSettings"),
+      category: "other",
     };
   }
 

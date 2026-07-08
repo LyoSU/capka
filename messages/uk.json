@@ -128,6 +128,8 @@
     "working": "Працюю…",
     "managedSettings": "Налаштування оновлено",
     "managingSettings": "Оновлюю налаштування…",
+    "checkedSettings": "Налаштування переглянуто",
+    "checkingSettings": "Переглядаю налаштування…",
     "checkedConnector": "Конектор перевірено",
     "checkingConnector": "Перевіряю конектор…"
   },

@@ -128,6 +128,8 @@
     "working": "Working…",
     "managedSettings": "Updated settings",
     "managingSettings": "Updating settings…",
+    "checkedSettings": "Checked settings",
+    "checkingSettings": "Checking settings…",
     "checkedConnector": "Checked a connector",
     "checkingConnector": "Checking a connector…"
   },
