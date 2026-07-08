@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight, FilePen, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
+import type { StepTranslator } from "@/lib/chat/steps";
 
 type RequiredAction = { kind: string; url?: string; label: string; description?: string };
 
@@ -67,11 +68,12 @@ export function isManageCard(output: unknown): boolean {
   return false;
 }
 
-/** A demoted `manage` result rendered as a quiet one-line rail step: its already-
- *  localized `summary` (an applied change, a diagnostic, a value). Returns null for
- *  renders with no crisp one-liner (`list`/`collection`/`capabilities` — internal
- *  reads that keep the generic "managed settings" step label instead). */
-export function manageStepLabel(output: unknown): string | null {
+/** A demoted `manage` result rendered as a quiet one-line rail step. Mutations and
+ *  single-value reads carry their own localized `summary` ("Enabled X", "Language:
+ *  Ukrainian"); a whole-collection read is named by its domain (Connectors/Skills/…)
+ *  so it doesn't collapse into the generic "settings" step. `list`/`capabilities`
+ *  are genuinely cross-domain overviews and fall back to the generic read label. */
+export function manageStepLabel(output: unknown, t: StepTranslator): string | null {
   const o = output as ManageOutput | null;
   switch (o?.render) {
     case "setting":
@@ -82,6 +84,10 @@ export function manageStepLabel(output: unknown): string | null {
       // `editing` (skill checked out) summarises as a long model instruction — show
       // just the item name; the rest are short localized lines ("Enabled X").
       return o.data?.op === "editing" ? (o.data.itemTitle ?? null) : (o.summary ?? null);
+    case "collection":
+      // Name the domain read (e.g. "Reviewed connectors"). The server `summary`
+      // carries a model-facing "(you can add here)" hint, so use the clean title.
+      return o.data?.title ? t("reviewedNamed", { name: o.data.title }) : null;
     default:
       return null;
   }

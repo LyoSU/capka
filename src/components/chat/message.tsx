@@ -339,7 +339,7 @@ function StepRow({ part }: { part: ToolPart }) {
   // A demoted `manage` result (an applied change / diagnostic that isn't a card)
   // carries a ready, localized one-liner — show it as the label and drop the raw
   // JSON expander, so the timeline reads cleanly instead of "Manage" + a blob.
-  const manageLabel = !isRunning && !isError && rawName === "manage" ? manageStepLabel(part.output) : null;
+  const manageLabel = !isRunning && !isError && rawName === "manage" ? manageStepLabel(part.output, tSteps) : null;
   const doneLabel = manageLabel ?? d.label;
   const expandable = !isRunning && (isError ? !!part.errorText : rawName === "manage" ? false : !!formatValue(part.output));
 

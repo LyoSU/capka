@@ -130,6 +130,7 @@
     "managingSettings": "Updating settings…",
     "checkedSettings": "Checked settings",
     "checkingSettings": "Checking settings…",
+    "reviewedNamed": "Reviewed {name}",
     "checkedConnector": "Checked a connector",
     "checkingConnector": "Checking a connector…"
   },

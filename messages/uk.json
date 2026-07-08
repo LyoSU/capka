@@ -130,6 +130,7 @@
     "managingSettings": "Оновлюю налаштування…",
     "checkedSettings": "Налаштування переглянуто",
     "checkingSettings": "Переглядаю налаштування…",
+    "reviewedNamed": "Переглянуто: {name}",
     "checkedConnector": "Конектор перевірено",
     "checkingConnector": "Перевіряю конектор…"
   },
