@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-08
+
 ### Added
 - New `view_file` tool lets the agent SEE a workspace file — image, PDF, office document (docx/pptx/xlsx…), or HTML — rendered to page images, so it can check its own generated documents for broken layout before handing them over. Offered only to vision models; on chat-completions transports (OpenAI Chat, LiteLLM/openai-compatible) the pages are delivered as a follow-up message since those can't carry an image in a tool result.
 - The agent can run long sandbox work in the background: `execute_bash` with `background:true` starts a detached job and returns at once (surviving the 300s exec cap and past the reply), and a new `check_job` tool reports its status, exit code, and log tail. The job keeps running as long as the sandbox lives.
