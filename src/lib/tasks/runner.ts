@@ -23,6 +23,7 @@ import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
+import { planToolSearch } from "@/lib/mcp/tool-search";
 import { getSandboxNetworkDefault, getMaxContextTokens, getSetting, setSetting } from "@/lib/settings";
 import { makeManageTool } from "@/lib/manage/tool";
 import { hostFolderEnabled, sessionMounts } from "@/lib/manage/controls/folders";
@@ -417,6 +418,22 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       }
     }
 
+    // Context-window budget inputs: the model's real window (catalog) and any
+    // admin cap (which only ever tightens it). Fetched up front — the effective
+    // window drives both the deferral decision below and the NEXT-turn compaction
+    // check (which reuses contextLength/adminCap after the turn).
+    const [contextLength, adminCap] = await Promise.all([
+      getModelContextLength(modelId),
+      getMaxContextTokens(),
+    ]);
+    const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
+    // Progressive tool disclosure: when the connector tools would tax the window,
+    // hide them behind `find_tool` + a compact system-prompt index instead of
+    // serializing every schema every turn (provider-agnostic; see tool-search.ts).
+    // Inert (all tools active, empty index) below the threshold.
+    const toolSearch = planToolSearch({ tools, effectiveLimit });
+    if (toolSearch.defer) Object.assign(tools, toolSearch.extraTools);
+
     const prompt = buildSystemPrompt({
       project,
       memoryDocs,
@@ -431,17 +448,10 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       conversationStartedAt: chat?.createdAt ?? null,
       locale: user?.locale ?? payload.origin?.locale ?? null,
       concierge,
+      connectorIndex: toolSearch.indexText,
     });
 
-    // Context-window budget inputs: the model's real window (catalog) and any
-    // admin cap (which only ever tightens it). Both feed contextBudget() after the
-    // turn to decide whether the NEXT turn should compact.
-    const [contextLength, adminCap] = await Promise.all([
-      getModelContextLength(modelId),
-      getMaxContextTokens(),
-    ]);
-
-    return { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: closeAll, prompt, contextLength, adminCap };
+    return { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch };
   } catch (e) {
     await closeAll();
     throw e;
@@ -590,7 +600,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: close, prompt, contextLength, adminCap } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: close, prompt, contextLength, adminCap, toolSearch } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
@@ -811,10 +821,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         ...(hasTools
           ? {
               tools: tools as never,
+              // Progressive disclosure: when deferring, connector tools start
+              // hidden (only the eager core + find_tool are active) and prepareStep
+              // re-exposes whatever the model has discovered. `undefined` when not
+              // deferring = all tools active (the SDK default).
+              ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
               stopWhen: stepCountIs(25),
               prepareStep: ({ stepNumber, messages }) => ({
                 ...stepSettings(stepNumber),
                 ...(reasoningStripped ? { messages: foldReasoningIntoText(messages) } : {}),
+                ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
               }),
             }
           : {}),

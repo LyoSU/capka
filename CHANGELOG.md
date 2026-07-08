@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Connector tools are now loaded on demand once they would tax the model's context window: the agent sees a compact per-connector index plus a `find_tool` search instead of every connector's full schema each turn, cutting token cost and improving tool selection for chats with large MCP connectors (e.g. Firecrawl). Provider-agnostic (works on any model). Tune the trigger with `MCP_DEFER_TOKEN_PCT` (default 10, percent of the effective context window).
+
 ### Fixed
 - `manage` no longer shows a non-admin the confirm card for attaching a server folder (or an admin-only connector): the authorization pre-flight now runs before any approval card, so a change the user can't apply isn't offered as a dead end.
 

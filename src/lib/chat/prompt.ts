@@ -101,6 +101,11 @@ export function buildSystemPrompt(opts: {
    *  one-time concierge nudge so the agent welcomes them and offers to configure
    *  the optional bits (language, Telegram, a first connector) via `manage`. */
   concierge?: boolean;
+  /** Compact per-connector index for progressive tool disclosure (tool-search.ts).
+   *  Present only when connector tools are being deferred this turn; "" otherwise.
+   *  Deterministic (sorted, changes only on connector install/toggle), so it lives
+   *  in the cached stable tier alongside skills. */
+  connectorIndex?: string;
 }): BuiltPrompt {
   // ── Stable prefix (cacheable) ───────────────────────────────────────────
   let stable = `${SYSTEM_PROMPT}\n\n${SANDBOX_PROMPT}`;
@@ -112,6 +117,11 @@ export function buildSystemPrompt(opts: {
   const skillsBlock = formatAvailableSkills(opts.skills ?? []);
   if (skillsBlock) {
     stable += `\n\n${skillsBlock}`;
+  }
+  // Deferred-connector index (progressive tool disclosure). Deterministic like
+  // skills, so it sits in the cached prefix rather than the volatile tail.
+  if (opts.connectorIndex) {
+    stable += `\n\n${opts.connectorIndex}`;
   }
   stable += `\n\n${MANAGE_PROMPT}`;
 
