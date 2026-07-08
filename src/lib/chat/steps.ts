@@ -199,8 +199,21 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         category: "search",
       };
     }
+    case "view_file": {
+      const file = basename(args.path);
+      return {
+        iconKey: "file-text",
+        label: file ? t("viewedFile", { file }) : t("viewedFileGeneric"),
+        activeLabel: file ? t("viewingFile", { file }) : t("viewingFileGeneric"),
+        category: "file",
+      };
+    }
+    case "check_job":
+      return { iconKey: "terminal", label: t("checkedJob"), activeLabel: t("checkingJob"), category: "exec" };
     case "execute_bash":
-      return { iconKey: "terminal", label: t("ranCommand"), activeLabel: t("runningCommand"), detail: clip(args.command), category: "exec" };
+      return args.background
+        ? { iconKey: "terminal", label: t("startedJob"), activeLabel: t("startingJob"), detail: clip(args.command), category: "exec" }
+        : { iconKey: "terminal", label: t("ranCommand"), activeLabel: t("runningCommand"), detail: clip(args.command), category: "exec" };
     case "execute_python":
       return { iconKey: "code", label: t("ranPython"), activeLabel: t("runningPython"), category: "exec" };
     case "execute_node":

@@ -43,6 +43,32 @@ exit $__rc`;
 
 const kbBytes = (n: number) => `${Math.round(n / 1024)} KB`;
 
+// ── Background jobs ──────────────────────────────────────────────────────────
+// A long command (bulk conversion, a big scrape) outlives the 300s exec cap by
+// running detached: the "start" exec returns immediately, and the job keeps
+// running because the container persists between turns. Output + exit code land
+// in the workspace so a later check_job (or read_file) can recover them.
+const JOBS_DIR = "/workspace/.capka/jobs";
+const JOBS_KEEP = Number(process.env.JOBS_KEEP_DIRS) || 20;
+
+/** Launch `command` detached in its OWN session and return at once. The
+ *  controller already runs our exec under `setsid … & wait`, so nesting another
+ *  `setsid` fully detaches the job from that session — the controller's `wait`
+ *  returns on our `echo`, its timeout-killer never fires, and the job (reparented
+ *  to the container's PID 1) survives past this turn. The user command is base64'd
+ *  so it's written verbatim; it stays UNQUOTED inside the single-quoted job script
+ *  (the base64 alphabet has no shell metacharacters), which is why it can't break
+ *  out of the surrounding quotes. */
+function backgroundWrapper(command: string, jobId: string): string {
+  const encoded = Buffer.from(command).toString("base64");
+  const j = `${JOBS_DIR}/${jobId}`;
+  return `mkdir -p '${j}'
+( cd '${JOBS_DIR}' && ls -1td */ 2>/dev/null | tail -n +${JOBS_KEEP + 1} | xargs -r rm -rf )
+setsid bash -c 'echo ${encoded} | base64 -d | bash > "${j}/log" 2>&1; echo $? > "${j}/exitcode"' </dev/null >/dev/null 2>&1 &
+echo $! > '${j}/pid'
+echo started`;
+}
+
 /**
  * Shape a captured exec result for the model with a THREE-state truncation signal:
  *  - "discarded": the controller hit its in-memory ceiling AND no log survived —
@@ -121,12 +147,76 @@ export async function loadSandboxTools(sessionKey: string, userId: string, ensur
       description:
         "Run a bash command in the Linux sandbox — shell tasks, pipelines, file management, " +
         "running command-line tools, and installing packages (pip/npm). Common runtimes and CLI " +
-        "tools are preinstalled. No network by default.",
+        "tools are preinstalled. No network by default. " +
+        "Set background:true for work that won't finish inside the 300s limit (bulk conversion, a " +
+        "long scrape): it starts the command detached and returns a jobId immediately — the job " +
+        "keeps running after your reply. Check it later with check_job.",
       inputSchema: z.object({
         command: z.string().describe("Bash command to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
+        background: z
+          .boolean()
+          .optional()
+          .describe("Run detached and return a jobId at once, for commands longer than 300s"),
       }),
-      execute: async ({ command, timeout }) => captureResult(await run(withCapture(command), timeout)),
+      execute: async ({ command, timeout, background }) => {
+        if (background) {
+          const jobId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+          const result = await run(backgroundWrapper(command, jobId));
+          if (result.exitCode !== 0) return { started: false, error: result.stderr || "Failed to start job" };
+          return {
+            started: true,
+            jobId,
+            logPath: `${JOBS_DIR}/${jobId}/log`,
+            note:
+              "Job started and keeps running after your reply ends (the sandbox persists between turns). " +
+              "Get the result with check_job when you next need it — don't block waiting.",
+          };
+        }
+        return captureResult(await run(withCapture(command), timeout));
+      },
+    }),
+
+    check_job: tool({
+      description:
+        "Check a background job started by execute_bash(background:true). Returns whether it's still " +
+        "running, its exit code once finished, and the tail of its output log.",
+      inputSchema: z.object({
+        jobId: z.string().describe("The jobId returned by execute_bash(background:true)"),
+      }),
+      execute: async ({ jobId }) => {
+        const j = `${JOBS_DIR}/${jobId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+        // One round-trip: exit code (source of truth for "finished"), then pid
+        // liveness (distinguishes still-running from killed-without-recording, e.g.
+        // a container restart), then a bounded tail of the merged output log.
+        const cmd = `__j='${j}'
+if [ ! -d "$__j" ]; then echo __NOJOB__; exit 0; fi
+if [ -f "$__j/exitcode" ]; then echo "__EXIT__$(cat "$__j/exitcode")"
+elif [ -f "$__j/pid" ] && kill -0 "$(cat "$__j/pid")" 2>/dev/null; then echo __RUNNING__
+else echo __DEAD__; fi
+echo __LOG__
+tail -c 4000 "$__j/log" 2>/dev/null || true`;
+        const result = await run(cmd);
+        const out = result.stdout;
+        if (out.includes("__NOJOB__")) {
+          return { error: `No job ${jobId} — it may have been rotated out. Its output, if any, is under ${JOBS_DIR}.` };
+        }
+        const logTail = out.includes("__LOG__") ? out.slice(out.indexOf("__LOG__") + "__LOG__".length).replace(/^\n/, "") : "";
+        const exitMatch = out.match(/__EXIT__(-?\d+)/);
+        if (exitMatch) {
+          const exitCode = parseInt(exitMatch[1], 10);
+          return { running: false, exitCode, success: exitCode === 0, logTail: clampOutput(logTail).text };
+        }
+        if (out.includes("__RUNNING__")) {
+          return { running: true, logTail: clampOutput(logTail).text };
+        }
+        return {
+          running: false,
+          exitCode: null,
+          note: "The job process is gone but never recorded an exit code — it was likely killed (e.g. a sandbox restart). The log below is whatever it wrote before stopping.",
+          logTail: clampOutput(logTail).text,
+        };
+      },
     }),
 
     execute_python: tool({

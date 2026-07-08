@@ -46,12 +46,12 @@ async function sandboxFetch(input: RequestInfo, init?: RequestInit): Promise<Res
   }
 }
 
-async function request(path: string, method: string, body?: unknown) {
+async function request(path: string, method: string, body?: unknown, timeoutMs?: number) {
   const res = await sandboxFetch(`${CONTROLLER_URL}${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(method === "POST" ? 150_000 : 10_000),
+    signal: AbortSignal.timeout(timeoutMs ?? (method === "POST" ? 150_000 : 10_000)),
   });
 
   const data = await res.json().catch(() => ({ error: `Sandbox ${res.status}` }));
@@ -119,7 +119,13 @@ export async function validateMount(hostPath: string) {
 }
 
 export async function execCommand(sessionId: string, command: string, timeout?: number) {
-  return request(`/sessions/${sanitizeId(sessionId)}/exec`, "POST", { command, timeout }) as Promise<{
+  // The client abort must OUTLIVE the controller's own exec cap, or a long exec is
+  // killed here (fetch abort) before the controller returns its result. The controller
+  // clamps exec to ≤300s, so budget that ceiling + a 15s buffer regardless of what the
+  // caller asked for (an unset timeout falls back to the controller's env default, which
+  // is itself ≤300s). Previously the fixed 150s POST abort silently truncated any exec >150s.
+  const clientTimeout = Math.min(timeout ?? 300_000, 300_000) + 15_000;
+  return request(`/sessions/${sanitizeId(sessionId)}/exec`, "POST", { command, timeout }, clientTimeout) as Promise<{
     stdout: string;
     stderr: string;
     exitCode: number;

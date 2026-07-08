@@ -150,10 +150,41 @@ function getToolName(part: ToolPart): string {
 
 // --- Tool detail renderer ---
 
-function ToolDetails({ toolName, output, errorText }: { toolName: string; output?: unknown; errorText?: string }) {
+/** The small ref view_file persists (bytes never touch the DB) — detected by
+ *  shape so we can render the rendered pages as thumbnails instead of its JSON.
+ *  Shape-checked inline (not imported from view-file.ts, which is server-only). */
+type MediaRefLike = { kind: "media"; pages: { page: number; path: string }[] };
+function asMediaRef(v: unknown): MediaRefLike | null {
+  const o = v as MediaRefLike | null;
+  return o && typeof o === "object" && o.kind === "media" && Array.isArray(o.pages) ? o : null;
+}
+
+function ToolDetails({ toolName, output, errorText, chatId }: { toolName: string; output?: unknown; errorText?: string; chatId?: string }) {
   const t = useTranslations("chat.tool");
   if (errorText) {
     return <p className="text-xs text-destructive">{errorText}</p>;
+  }
+
+  // view_file result: show the rendered page(s) as thumbnails, served inline from
+  // the workspace (no base64 in the DB or the payload). A page rotated out of the
+  // sandbox 404s — hide it rather than showing a broken image.
+  const media = asMediaRef(output);
+  if (media && chatId && media.pages.length) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {media.pages.slice(0, 4).map((pg) => (
+          // eslint-disable-next-line @next/next/no-img-element -- authed same-origin workspace stream, not a static asset
+          <img
+            key={pg.path}
+            src={`/api/sandbox/files/download?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(pg.path)}&inline=1`}
+            alt=""
+            loading="lazy"
+            className="max-h-40 rounded-md border border-border"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
+        ))}
+      </div>
+    );
   }
 
   const text = formatValue(output);
@@ -327,7 +358,7 @@ function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error"
 
 /** One step on the rail: badge + intent label + optional dim detail, with the
  *  output/error tucked into a click-to-expand block beneath it. */
-function StepRow({ part }: { part: ToolPart }) {
+function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
   const tSteps = useTranslations("steps");
   const t = useTranslations("chat.tool");
   const rawName = getToolName(part);
@@ -372,7 +403,7 @@ function StepRow({ part }: { part: ToolPart }) {
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mb-2 ml-10 rounded-lg bg-muted/40 p-2.5">
-          <ToolDetails toolName={rawName} output={part.output} errorText={part.errorText} />
+          <ToolDetails toolName={rawName} output={part.output} errorText={part.errorText} chatId={chatId} />
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -401,13 +432,13 @@ function DoneRow() {
  *  rail — a single thin line connecting each node, so thinking and actions read
  *  as one quiet "here's what I did" timeline rather than two different styles.
  *  A finished run is capped with a terminal "Done ✓" node. */
-function ActivityRail({ items, isStreaming }: { items: ActivityItem[]; isStreaming?: boolean }) {
+function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string }) {
   const lastIdx = items.length - 1;
   const rows = items.map((it, i) => {
     const streaming = isStreaming && i === lastIdx;
     return it.kind === "reasoning"
       ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={streaming} />
-      : <StepRow key={it.part.toolCallId} part={it.part} />;
+      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} />;
   });
   if (!isStreaming) rows.push(<DoneRow key="done" />);
 
@@ -435,7 +466,7 @@ function ActivityRail({ items, isStreaming }: { items: ActivityItem[]; isStreami
  *  measured value. Reloaded history (never streamed in this session) falls back
  *  to the stored turn duration so it still shows a number. Auto-opens while live
  *  and auto-collapses when the answer begins, with a manual click taking over. */
-function ActivityGroup({ items, isStreaming, fallbackMs }: { items: ActivityItem[]; isStreaming?: boolean; fallbackMs?: number }) {
+function ActivityGroup({ items, isStreaming, fallbackMs, chatId }: { items: ActivityItem[]; isStreaming?: boolean; fallbackMs?: number; chatId?: string }) {
   const t = useTranslations("chat.message");
   const streaming = !!isStreaming;
   const [userToggled, setUserToggled] = useState(false);
@@ -480,7 +511,7 @@ function ActivityGroup({ items, isStreaming, fallbackMs }: { items: ActivityItem
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">
-          <ActivityRail items={items} isStreaming={isStreaming} />
+          <ActivityRail items={items} isStreaming={isStreaming} chatId={chatId} />
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -1170,7 +1201,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             // and on expand each rail row surfaces with .animate-step-in.
             return (
               <div key={gi} className={gi > 0 ? "mt-1.5" : ""}>
-                <ActivityGroup items={g.items} isStreaming={isStreaming && gi === lastIdx} fallbackMs={metadata?.reasoningMs} />
+                <ActivityGroup items={g.items} isStreaming={isStreaming && gi === lastIdx} fallbackMs={metadata?.reasoningMs} chatId={chatId} />
               </div>
             );
           })

@@ -205,9 +205,19 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
   // provider rejects a modality it claimed — so trusting the metadata never turns
   // into a hard failure for the user.
   const modelInput = await getModelInputModalities(modelId, config.provider);
+  // The EFFECTIVE OpenAI wire transport, resolved exactly like getModel above
+  // (auto ⇒ baseUrl?chat:responses). Only the tool-result-image gate reads it —
+  // @ai-sdk/openai's chat path can't carry an image inside a tool result, its
+  // responses path can. Meaningless for other providers, and ignored by them.
+  const apiStyle: ApiStyle =
+    config.apiStyle === "chat" || config.apiStyle === "responses"
+      ? config.apiStyle
+      : config.baseUrl
+        ? "chat"
+        : "responses";
   // configId lets a later request (e.g. the (i) popover's GET /generation) re-resolve
   // the very same key this turn ran on, without re-deriving it from the chat model.
-  return { model, provider: config.provider, modelId, modelInput, isShared: config.isShared, configId: config.id };
+  return { model, provider: config.provider, modelId, modelInput, apiStyle, isShared: config.isShared, configId: config.id };
 }
 
 export async function resolveUserModel(userId: string, requestModel?: string) {

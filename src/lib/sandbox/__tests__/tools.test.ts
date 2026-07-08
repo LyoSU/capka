@@ -189,6 +189,72 @@ describe("sandbox tools — capture full output to a workspace log file", () => 
   });
 });
 
+describe("sandbox tools — background jobs", () => {
+  beforeEach(() => {
+    execCommand.mockReset();
+    execCommand.mockResolvedValue({ stdout: "started", stderr: "", exitCode: 0 });
+  });
+
+  it("execute_bash(background) launches a detached, own-session job and returns a jobId at once", async () => {
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "sleep 400; echo done", background: true }, opts)) as {
+      started: boolean; jobId: string; logPath: string;
+    };
+    const cmd = lastCmd();
+    // detached in its own session, records exit code + pid, never blocks
+    expect(cmd).toContain("setsid bash -c");
+    expect(cmd).toContain("/workspace/.capka/jobs/");
+    expect(cmd).toContain("exitcode");
+    expect(cmd).toContain("/pid");
+    // the user command travels base64'd (verbatim), not inline — so it can't break quoting
+    expect(cmd).not.toContain("sleep 400; echo done");
+    expect(cmd).toContain("base64 -d | bash");
+    // NOT wrapped in the synchronous tee-capture path
+    expect(cmd).not.toContain("tee");
+    expect(res.started).toBe(true);
+    expect(res.jobId).toMatch(/^[a-z0-9]+-[a-z0-9]+$/);
+    expect(res.logPath).toBe(`/workspace/.capka/jobs/${res.jobId}/log`);
+  });
+
+  it("check_job reports a finished job's exit code and log tail", async () => {
+    execCommand.mockResolvedValue({ stdout: "__EXIT__0\n__LOG__\nhello from job\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.check_job.execute!({ jobId: "abc-123" }, opts)) as {
+      running: boolean; exitCode: number; success: boolean; logTail: string;
+    };
+    expect(res.running).toBe(false);
+    expect(res.exitCode).toBe(0);
+    expect(res.success).toBe(true);
+    expect(res.logTail).toContain("hello from job");
+  });
+
+  it("check_job reports a still-running job (pid alive, no exit code yet)", async () => {
+    execCommand.mockResolvedValue({ stdout: "__RUNNING__\n__LOG__\npartial\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.check_job.execute!({ jobId: "abc-123" }, opts)) as { running: boolean; logTail: string };
+    expect(res.running).toBe(true);
+    expect(res.logTail).toContain("partial");
+  });
+
+  it("check_job flags a job that died without recording an exit code", async () => {
+    execCommand.mockResolvedValue({ stdout: "__DEAD__\n__LOG__\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.check_job.execute!({ jobId: "abc-123" }, opts)) as {
+      running: boolean; exitCode: number | null; note: string;
+    };
+    expect(res.running).toBe(false);
+    expect(res.exitCode).toBeNull();
+    expect(res.note).toContain("killed");
+  });
+
+  it("check_job returns a friendly error for an unknown/rotated job", async () => {
+    execCommand.mockResolvedValue({ stdout: "__NOJOB__\n", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    const res = (await tools.check_job.execute!({ jobId: "gone" }, opts)) as { error: string };
+    expect(res.error).toContain("No job gone");
+  });
+});
+
 describe("sandbox tools — delete_path", () => {
   beforeEach(() => {
     execCommand.mockReset();

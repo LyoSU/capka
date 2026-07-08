@@ -19,7 +19,8 @@ import { providerNativeTools } from "@/lib/providers";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles, findBlindModalities } from "@/lib/chat/prompt";
-import { mimeToModality, type Modality } from "@/lib/providers/registry";
+import { mimeToModality, acceptsNativeFile, supportsImageToolResults, type Modality } from "@/lib/providers/registry";
+import { makeViewFileTool, buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
 import { loadMcpTools } from "@/lib/mcp/load";
@@ -282,7 +283,7 @@ async function injectNativeFiles(
 async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string, messageId: string) {
   // A project chat sees its project memory doc + the user-global doc. A
   // standalone chat sees only the user-global doc, so projects don't leak.
-  const [{ model, provider, modelId, modelInput, isShared, configId }, project, memoryDocs, user, chat] = await Promise.all([
+  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, memoryDocs, user, chat] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
@@ -379,8 +380,17 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     // stops the run, which the runner turns into a durable "awaiting_answer"
     // suspend resolved by the user's answer (see the tool-call handler below).
     const ask = makeAskTool();
+    // `view_file` (render a workspace file to image so the model can SEE it) is
+    // offered only to a model that takes images at all. HOW the image reaches the
+    // model splits by transport: capable adapters carry it in the tool result
+    // (emitImageToolResult); chat-completions transports can't, so the runner
+    // bridges it as a following user message (viewFileBridge → prepareStep).
+    const visionOk = acceptsNativeFile("image/png", provider, modelInput);
+    const emitImageToolResult = supportsImageToolResults(provider, apiStyle);
+    const viewFileBridge = visionOk && !emitImageToolResult;
     const tools = {
       ...sandbox.tools,
+      ...(visionOk ? makeViewFileTool({ sessionKey, userId, ensureSession, emitImageToolResult }) : {}),
       ...mcp.tools,
       skill: skillTool,
       ...manage,
@@ -451,7 +461,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       connectorIndex: toolSearch.indexText,
     });
 
-    return { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch };
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch };
   } catch (e) {
     await closeAll();
     throw e;
@@ -600,7 +610,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, modelInput, isShared, configId, tools, closeMcp: close, prompt, contextLength, adminCap, toolSearch } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
@@ -827,11 +837,23 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               // deferring = all tools active (the SDK default).
               ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
               stopWhen: stepCountIs(25),
-              prepareStep: ({ stepNumber, messages }) => ({
-                ...stepSettings(stepNumber),
-                ...(reasoningStripped ? { messages: foldReasoningIntoText(messages) } : {}),
-                ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
-              }),
+              prepareStep: async ({ stepNumber, messages }) => {
+                const base = reasoningStripped ? foldReasoningIntoText(messages) : messages;
+                // BRIDGE: on a chat-completions transport the image can't ride the
+                // view_file tool result, so append the rendered pages as a user
+                // message for the one step right after the call (null otherwise, so
+                // we don't override `messages` — and break the cache — on every step).
+                let msgs = base;
+                if (viewFileBridge) {
+                  const inject = await buildViewFileInjection(messages, sessionKey, userId);
+                  if (inject) msgs = [...base, inject];
+                }
+                return {
+                  ...stepSettings(stepNumber),
+                  ...(msgs !== messages ? { messages: msgs } : {}),
+                  ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
+                };
+              },
             }
           : {}),
         messages: [...systemMessages, ...modelMessages, ...resumeMessages],

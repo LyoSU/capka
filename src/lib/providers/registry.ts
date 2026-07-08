@@ -6,6 +6,10 @@
  * server-only `getModel()` factory.
  */
 
+// Type-only (erased at build) — keeps this file free of the SDK-heavy index.ts at
+// runtime while sharing the one ApiStyle definition.
+import type { ApiStyle } from "./index";
+
 // Gateways (LiteLLM proxy, OpenRouter) are listed first: routing every backend
 // through one OpenAI-compatible endpoint is the recommended, most scalable
 // setup — one adapter, one model list, unified cost/limits. Then the two big
@@ -270,6 +274,26 @@ export function acceptsNativeFile(
   if (modelInput && modelInput.length) return modelInput.includes(mod);
   if (isProviderName(provider)) return PROVIDER_META[provider].nativeInput.includes(mod);
   return mod === "image";
+}
+
+/**
+ * Whether this provider+transport correctly serializes an IMAGE returned INSIDE a
+ * tool result (the LanguageModelV3 `{type:'content'}` output with `image-data`
+ * parts — how `view_file` shows rendered pages to the model). This is a stricter
+ * question than `acceptsNativeFile`: it's about tool-result content, not user
+ * message content.
+ *
+ * `@ai-sdk/openai`'s Chat Completions path and `@ai-sdk/openai-compatible`
+ * (litellm/deepseek/mistral/xai/zhipu/ollama) `JSON.stringify` the content value,
+ * so a base64 image would be injected into the prompt as megabytes of TEXT —
+ * excluded. anthropic/google/openrouter and OpenAI's *Responses* transport
+ * convert it to a real image block. `apiStyle` here must be the EFFECTIVE style
+ * (see resolveUserModelInfo), not the raw "auto".
+ */
+export function supportsImageToolResults(provider: string, apiStyle?: ApiStyle): boolean {
+  if (provider === "anthropic" || provider === "google" || provider === "openrouter") return true;
+  if (provider === "openai") return apiStyle === "responses";
+  return false;
 }
 
 // ── Model id encoding ──────────────────────────────────────────────────────
