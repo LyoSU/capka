@@ -6,7 +6,7 @@ import Gemini from "@lobehub/icons/es/Gemini";
 import Meta from "@lobehub/icons/es/Meta";
 import Mistral from "@lobehub/icons/es/Mistral";
 import DeepSeek from "@lobehub/icons/es/DeepSeek";
-import Grok from "@lobehub/icons/es/Grok";
+import XAI from "@lobehub/icons/es/XAI";
 import Qwen from "@lobehub/icons/es/Qwen";
 import Minimax from "@lobehub/icons/es/Minimax";
 import XiaomiMiMo from "@lobehub/icons/es/XiaomiMiMo";
@@ -27,6 +27,9 @@ import Baichuan from "@lobehub/icons/es/Baichuan";
 import Stepfun from "@lobehub/icons/es/Stepfun";
 import LongCat from "@lobehub/icons/es/LongCat";
 import Yi from "@lobehub/icons/es/Yi";
+import Upstage from "@lobehub/icons/es/Upstage";
+import NousResearch from "@lobehub/icons/es/NousResearch";
+import Liquid from "@lobehub/icons/es/Liquid";
 import Ollama from "@lobehub/icons/es/Ollama";
 import OpenRouter from "@lobehub/icons/es/OpenRouter";
 import Groq from "@lobehub/icons/es/Groq";
@@ -43,6 +46,9 @@ import Baseten from "@lobehub/icons/es/Baseten";
 import Vllm from "@lobehub/icons/es/Vllm";
 import LmStudio from "@lobehub/icons/es/LmStudio";
 import Azure from "@lobehub/icons/es/Azure";
+import HuggingFace from "@lobehub/icons/es/HuggingFace";
+import Cloudflare from "@lobehub/icons/es/Cloudflare";
+import Github from "@lobehub/icons/es/Github";
 import OpenCode from "@lobehub/icons/es/OpenCode";
 import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
 import OpenHands from "@lobehub/icons/es/OpenHands";
@@ -59,7 +65,7 @@ const ICONS: Record<string, IconComponent> = {
   meta: Meta,
   mistral: Mistral,
   deepseek: DeepSeek,
-  xai: Grok,
+  xai: XAI,
   qwen: Qwen,
   minimax: Minimax,
   xiaomi: XiaomiMiMo,
@@ -80,6 +86,9 @@ const ICONS: Record<string, IconComponent> = {
   stepfun: Stepfun,
   longcat: LongCat,
   yi: Yi,
+  upstage: Upstage,
+  nousresearch: NousResearch,
+  liquid: Liquid,
   ollama: Ollama,
   // Routers/gateways (route to many upstreams — distinct from the inference
   // providers below, which host models on their own hardware).
@@ -101,6 +110,9 @@ const ICONS: Record<string, IconComponent> = {
   vllm: Vllm,
   lmstudio: LmStudio,
   azure: Azure,
+  huggingface: HuggingFace,
+  cloudflare: Cloudflare,
+  github: Github,
   // Agent tools (offered as connection glyphs only, never model-creator icons).
   opencode: OpenCode,
   claudecode: ClaudeCode,

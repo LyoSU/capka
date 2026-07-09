@@ -46,6 +46,9 @@ const ICON_RULES: [RegExp, string][] = [
   [/stepfun/i, "stepfun"],
   [/longcat/i, "longcat"],
   [/01[.-]?ai|\byi\b/i, "yi"], // 01.AI's Yi family
+  [/upstage|\bsolar\b/i, "upstage"],
+  [/nous|hermes/i, "nousresearch"],
+  [/liquid|\blfm\b/i, "liquid"],
   [/ollama/i, "ollama"],
   [/openrouter/i, "openrouter"],
 ];
