@@ -1,6 +1,6 @@
 {
   "name": "capka",
-  "version": "0.1.0",
+  "version": "0.6.4",
   "private": true,
   "license": "AGPL-3.0-only",
   "homepage": "https://github.com/LyoSU/capka",
@@ -13,6 +13,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "release": "node scripts/release.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "up": "sh scripts/up.sh",

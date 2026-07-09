@@ -169,5 +169,10 @@ entry under `## [Unreleased]` in the same commit/PR — don't batch it for later
   the required action (e.g. "must set `SANDBOX_ALLOW_NETWORK=true`"). One line.
 - **No marketing language, no emoji outside the ⚠ breaking-change marker.** Plain,
   precise, terse.
-- Cutting a release renames `[Unreleased]` to `## [x.y.z] - YYYY-MM-DD` and opens
-  a fresh empty `[Unreleased]`.
+- Cut a release with `npm run release <x.y.z|patch|minor|major>`: it bumps
+  `package.json`, renames `[Unreleased]` to `## [x.y.z] - YYYY-MM-DD`, opens a
+  fresh empty `[Unreleased]`, commits `chore(release): cut vX.Y.Z`, and tags it.
+  Push `master` and the tag to publish (CI builds the images). The git tag is the
+  source of truth for the running version — CI stamps it into the image as
+  `CAPKA_VERSION`; `package.json.version` is kept in sync only for hygiene and is
+  not read at runtime.
