@@ -406,6 +406,36 @@
     animation-delay: 0s !important;
   }
 }
+/* App-wide scrollbars — replace the default chunky OS/Chrome bars with a calm,
+   unobtrusive floating pill. Theme-aware via --muted-foreground (the .dark class
+   already remaps it), so no separate dark rule is needed. Class-based utilities
+   below (.scrollbar-thin / .scrollbar-none) out-specify these and still win. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 32%, transparent)
+    transparent;
+}
+*::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+  border-radius: 999px;
+  /* transparent border + content-box clip insets the thumb inside the track,
+     leaving breathing room so it reads as a floating pill, not a full-width bar */
+  border: 3px solid transparent;
+  background-clip: content-box;
+  transition: background-color 0.15s ease;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--muted-foreground) 55%, transparent);
+}
+
 /* Thin scrollbar for textareas and overflow areas */
 .scrollbar-thin {
   scrollbar-width: thin;
