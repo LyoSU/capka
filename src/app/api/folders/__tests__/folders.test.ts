@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ForbiddenError, NotFoundError } from "@/lib/errors";
+import { NotFoundError } from "@/lib/errors";
 
 // Stub the auth gate + the folder-access level + ownership; keep apiHandler and the
 // real error classes so thrown AppErrors map to their status codes.

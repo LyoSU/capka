@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Runtime user-sandbox data (bind-mounted workspaces) — not project source;
+    // it holds arbitrary user/agent code and must never gate the project's lint.
+    "data/**",
     // Vendored agent/tooling scratch dirs (not project source) — their lint noise
     // was drowning real signal and is not the project's to fix.
     ".claude/**",

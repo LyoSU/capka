@@ -6,7 +6,6 @@ import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 vi.mock("@/lib/providers/resolve", () => ({
   resolveUserModelInfo: async () => ({
     model: new MockLanguageModelV3({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       doStream: async () => ({
         stream: simulateReadableStream({
           chunks: [
