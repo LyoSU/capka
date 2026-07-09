@@ -275,7 +275,7 @@ export function WorkspacePanel({
             </span>
           </span>
         </button>
-        <a href={downloadUrl(entry.path)} download={entry.name}
+        <a href={downloadUrl(entry.path)} download={entry.name} aria-label={t("download", { name: entry.name })}
           className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-all hover:bg-accent hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100">
           <Download className="h-3.5 w-3.5" />
         </a>
@@ -354,6 +354,7 @@ export function WorkspacePanel({
   return (
     <aside
       aria-hidden={!open}
+      inert={!open}
       className={cn(
         "z-40 flex h-full shrink-0 justify-end overflow-hidden border-l bg-card shadow-lg transition-[width,transform] duration-300 ease-out",
         // Mobile: full-screen sheet sliding from the right. Desktop: a flex item

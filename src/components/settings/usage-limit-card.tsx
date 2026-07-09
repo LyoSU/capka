@@ -20,8 +20,8 @@ function Bar({ committedPct, reservedPct }: { committedPct: number; reservedPct:
   const reservedW = Math.min(100 - committedW, Math.max(0, reservedPct));
   return (
     <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
-      <div className={cn("h-full transition-all", barColor(committedPct + reservedPct))} style={{ width: `${committedW}%` }} />
-      <div className={cn("h-full opacity-40 transition-all", barColor(committedPct + reservedPct))} style={{ width: `${reservedW}%` }} />
+      <div className={cn("h-full transition-[width]", barColor(committedPct + reservedPct))} style={{ width: `${committedW}%` }} />
+      <div className={cn("h-full opacity-40 transition-[width]", barColor(committedPct + reservedPct))} style={{ width: `${reservedW}%` }} />
     </div>
   );
 }

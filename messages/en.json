@@ -346,6 +346,7 @@
       "close": "Close panel",
       "files": "Files",
       "upload": "Upload files",
+      "download": "Download {name}",
       "downloadAll": "Download all",
       "notCreated": "File wasn't created",
       "createHint": "Send a message to create the workspace.",
