@@ -6,6 +6,17 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Security
+- Outbound fetches to user-supplied URLs (MCP servers, OAuth discovery, marketplace, custom provider base URLs, and provider model listing) now pin the TCP connection to the pre-validated IP, closing the DNS-rebinding window to a private/metadata address. First-party fixed hosts are unaffected.
+- Cleared the `js-yaml` moderate advisory pulled in transitively through `gray-matter` (`npm audit`).
+
+### Changed
+- The `sandbox-controller` image now installs strictly from its lockfile (`npm ci`) and fails the build on a broken/absent lockfile instead of silently falling back to `npm install`.
+
+### Fixed
+- `GET /api/automations` resolves each automation's last-run chat in one batched query instead of one round-trip per automation.
+- Workspace panel accessibility: file download buttons now have an accessible name, the closed panel is no longer reachable by keyboard (`inert`), and the usage-limit bar animates only its width.
+
 ## [0.6.5] - 2026-07-09
 
 ### Added

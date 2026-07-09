@@ -1,5 +1,6 @@
 import { isIPv4 } from "node:net";
 import { lookup } from "node:dns/promises";
+import { Agent, type Dispatcher } from "undici";
 
 /** Per-request ceiling for OAuth discovery / DCR / token fetches to a user-supplied
  *  provider. Without it, a host that accepts the connection but never answers stalls
@@ -45,11 +46,75 @@ export function isBlockedAddress(ip: string, blockPrivate: boolean): boolean {
   return false;
 }
 
+type ResolvedAddr = { address: string; family: number };
+
+/** Resolve a hostname and refuse if ANY returned address is blocked (conservative:
+ *  a host that resolves to a mix of public + private is rejected). Returns the full
+ *  validated set so a caller can pin the connection to it. Friendly, non-jargon
+ *  errors — these surface directly to the admin. */
+async function resolveGuarded(hostname: string, blockPrivate: boolean): Promise<ResolvedAddr[]> {
+  let addrs: ResolvedAddr[];
+  try {
+    addrs = await lookup(hostname, { all: true });
+  } catch {
+    throw new Error(`Could not resolve host: ${hostname}`);
+  }
+  for (const { address } of addrs) {
+    if (isBlockedAddress(address, blockPrivate)) {
+      throw new Error("That address isn't allowed. Check the URL or ask your admin about network restrictions.");
+    }
+  }
+  return addrs;
+}
+
+function assertHttpUrl(raw: string): URL {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error("Invalid URL");
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error("URL must use http or https");
+  }
+  return u;
+}
+
+/**
+ * An undici dispatcher that pins the TCP connection to addresses we already
+ * validated, closing the DNS-rebinding window: without it, `assertSafeUrl` resolves
+ * the host, then `fetch` resolves it AGAIN at connect time — a hostname that answers
+ * a public IP to the first lookup and a private/metadata IP to the second would slip
+ * past the guard. We override only the connect-time `lookup`, so the URL hostname is
+ * left intact and the Host header, TLS SNI, and certificate validation still use the
+ * real hostname — only the resolved IP is fixed to a vetted one.
+ */
+function pinnedDispatcher(addrs: ResolvedAddr[]): Dispatcher {
+  return new Agent({
+    connect: {
+      // Node's net `lookup` contract: single-address form by default, array form
+      // when the caller passes `{ all: true }`. All addrs here already passed
+      // isBlockedAddress, so returning any of them is safe.
+      lookup: ((_hostname: string, options: unknown, callback: unknown) => {
+        const cb = (typeof options === "function" ? options : callback) as (
+          err: Error | null,
+          address: string | ResolvedAddr[],
+          family?: number,
+        ) => void;
+        const opts = (typeof options === "function" ? {} : options) as { all?: boolean } | undefined;
+        if (opts?.all) cb(null, addrs.map((a) => ({ address: a.address, family: a.family })));
+        else cb(null, addrs[0].address, addrs[0].family);
+      }) as never,
+    },
+  });
+}
+
 /**
  * A `fetch` that is safe to hand to untrusted-URL machinery (MCP transport, OAuth
  * discovery/token requests). It validates the target of EVERY request — and every
  * 3xx redirect hop — through `assertSafeUrl`, with `redirect: "manual"` so a public
- * host can't bounce us to an internal address (cloud metadata) after the check.
+ * host can't bounce us to an internal address (cloud metadata) after the check, and
+ * pins each connection to the vetted IP so DNS can't rebind between check and connect.
  * Optionally injects fixed headers and bounds each request with a timeout.
  */
 export function createGuardedFetch(opts: {
@@ -60,7 +125,7 @@ export function createGuardedFetch(opts: {
   const MAX_REDIRECTS = 5;
   const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number, originHost: string): Promise<Response> => {
     const reqUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    await assertSafeUrl(reqUrl, opts.blockPrivate);
+    const dispatcher = pinnedDispatcher(await resolveGuarded(assertHttpUrl(reqUrl).hostname, opts.blockPrivate));
     const sameOrigin = new URL(reqUrl).host === originHost;
     const h = new Headers(init?.headers);
     // Inject fixed headers (which may carry credentials, e.g. a GitHub token) ONLY
@@ -75,7 +140,7 @@ export function createGuardedFetch(opts: {
       const ts = AbortSignal.timeout(opts.timeoutMs);
       signal = signal ? AbortSignal.any([signal, ts]) : ts;
     }
-    const res = await fetch(input, { ...init, headers: h, signal, redirect: "manual" });
+    const res = await fetch(input, { ...init, headers: h, signal, redirect: "manual", dispatcher } as RequestInit);
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       if (!loc) return res;
@@ -91,24 +156,15 @@ export function createGuardedFetch(opts: {
 }
 
 export async function assertSafeUrl(raw: string, blockPrivate: boolean): Promise<void> {
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    throw new Error("Invalid URL");
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:") {
-    throw new Error("URL must use http or https");
-  }
-  let addrs: { address: string }[];
-  try {
-    addrs = await lookup(u.hostname, { all: true });
-  } catch {
-    throw new Error(`Could not resolve host: ${u.hostname}`);
-  }
-  for (const { address } of addrs) {
-    if (isBlockedAddress(address, blockPrivate)) {
-      throw new Error("That address isn't allowed. Check the URL or ask your admin about network restrictions.");
-    }
-  }
+  await resolveGuarded(assertHttpUrl(raw).hostname, blockPrivate);
+}
+
+/**
+ * Pre-flight validation that ALSO returns a connection-pinned dispatcher, for
+ * callers that do a single request outside `createGuardedFetch` (provider model
+ * listing). Pass the dispatcher into `fetch(url, { dispatcher })` so the request
+ * connects to the same IP that was just vetted — no rebinding window.
+ */
+export async function guardedDispatcherFor(raw: string, blockPrivate: boolean): Promise<Dispatcher> {
+  return pinnedDispatcher(await resolveGuarded(assertHttpUrl(raw).hostname, blockPrivate));
 }

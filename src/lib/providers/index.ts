@@ -10,9 +10,9 @@ import { createGuardedFetch } from "@/lib/net/ssrf";
 /**
  * A user-supplied custom base URL is an SSRF surface. Routing the SDK through
  * createGuardedFetch re-validates EVERY request and follows 3xx hops manually
- * with a per-hop check — closing the redirect-to-metadata bypass and re-checking
- * DNS on each call (it narrows, but can't fully close, a connect-time DNS-rebind
- * race; pinning the resolved IP would be the complete fix). Link-local/metadata
+ * with a per-hop check — closing the redirect-to-metadata bypass — and pins each
+ * connection to the vetted IP, so a connect-time DNS rebind can't swap in a
+ * private/metadata address after the check. Link-local/metadata
  * (169.254/fe80) are blocked regardless of blockPrivate. `blockPrivate` is threaded
  * from the admin's strict-SSRF setting so the per-hop redirect re-check matches the
  * pre-flight policy: with strict off a self-hosted gateway on a private/loopback

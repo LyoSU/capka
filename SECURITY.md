@@ -195,11 +195,14 @@ deployments — not a turnkey-certified multi-tenant platform.
   `base-uri`, `form-action`, `frame-ancestors`). A strict `script-src` without
   `unsafe-inline` (per-request nonce) is **not yet enabled**, so this is not full
   XSS containment for model/user-generated content.
-- **SSRF is narrowed, not fully pinned.** Outbound fetches block private/loopback/
-  metadata ranges and strip credentials on cross-host redirects, but DNS-rebinding
-  is not yet fully closed (would require connection-level IP pinning). Don't point
-  the instance at a network where SSRF to an internal service would be catastrophic
-  without additional network-level egress controls.
+- **SSRF is narrowed and connection-pinned.** Outbound fetches to user-supplied
+  URLs (MCP servers, OAuth discovery, marketplace, custom provider base URLs, and
+  provider model listing) block private/loopback/metadata ranges, strip credentials
+  on cross-host redirects, and pin the TCP connection to the vetted IP so DNS can't
+  rebind between the address check and the connect. First-party fixed hosts (e.g.
+  api.anthropic.com) use the default fetch — not a user-controlled SSRF vector. This
+  is app-level defense-in-depth, not a substitute for network-level egress controls
+  on an instance where reaching an internal service would be catastrophic.
 - **Auth depends on `better-auth`.** A young dependency carries its own advisory
   surface; keep it updated. Enterprise SSO/OIDC/SCIM is a separate commercial
   edition, not in this repo.

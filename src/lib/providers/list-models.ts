@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { models as modelsTable } from "@/lib/db/schema";
 import { iconForGroup, prettyName } from "@/lib/models/normalize";
 import { getBlockPrivateProviderUrls, getModelMinContext, getModelMaxPrice } from "@/lib/settings";
-import { assertSafeUrl } from "@/lib/net/ssrf";
+import { assertSafeUrl, guardedDispatcherFor } from "@/lib/net/ssrf";
 import { parseOpenRouterModels, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
 import { PROVIDER_META, type ProviderName, type Modality } from "./registry";
 
@@ -66,10 +66,13 @@ function brandOf(id: string, fallbackGroup: string | null): { group: string | nu
   return { group: BRAND_LABELS[slug] ?? fallbackGroup, icon: slug };
 }
 
-async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
+async function fetchJson(url: string, init?: RequestInit, blockPrivate?: boolean): Promise<unknown> {
   // `redirect: "manual"` so a permitted host can't 3xx-bounce us to a blocked
-  // target (e.g. cloud metadata) after the pre-flight address check.
-  const res = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(15_000) });
+  // target (e.g. cloud metadata) after the pre-flight address check. For a
+  // user-supplied endpoint, pass `blockPrivate` so the connection is pinned to a
+  // vetted IP (no DNS-rebind window); first-party fixed hosts omit it.
+  const dispatcher = blockPrivate === undefined ? undefined : await guardedDispatcherFor(url, blockPrivate);
+  const res = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(15_000), ...(dispatcher ? { dispatcher } : {}) } as RequestInit);
   if (res.status >= 300 && res.status < 400) {
     throw new Error("Provider endpoint returned an unexpected redirect");
   }
@@ -251,12 +254,13 @@ async function listOpenAICompatible(
   apiKey: string | undefined,
   opts: { filterChat?: boolean; blockPrivate?: boolean } = {},
 ): Promise<ModelInfo[]> {
-  await assertSafeUrl(baseUrl, opts.blockPrivate ?? false);
+  const blockPrivate = opts.blockPrivate ?? false;
   const root = baseUrl.replace(/\/+$/, "");
   // Append `/models` when the base already carries a version segment (/v1, but
   // also Z.ai's /v4); otherwise assume the conventional /v1/models.
   const url = /\/v\d+$/.test(root) ? `${root}/models` : `${root}/v1/models`;
-  const raw = (await fetchJson(url, apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined)) as {
+  // fetchJson validates + pins the derived URL's host (user-supplied endpoint).
+  const raw = (await fetchJson(url, apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined, blockPrivate)) as {
     data?: { id: string }[];
   };
   let ids = (raw.data ?? []).map((m) => m.id).filter(Boolean);
@@ -307,10 +311,10 @@ async function listGoogle(apiKey: string): Promise<ModelInfo[]> {
 }
 
 async function listOllama(baseUrl: string, blockPrivate: boolean): Promise<ModelInfo[]> {
-  await assertSafeUrl(baseUrl, blockPrivate);
   // baseUrl is typically ".../api"; /api/tags is the model list endpoint.
   const root = baseUrl.replace(/\/+$/, "").replace(/\/api$/, "");
-  const raw = (await fetchJson(`${root}/api/tags`)) as { models?: { name: string }[] };
+  // fetchJson validates + pins the derived URL's host (user-supplied endpoint).
+  const raw = (await fetchJson(`${root}/api/tags`, undefined, blockPrivate)) as { models?: { name: string }[] };
   return (raw.models ?? [])
     .map((m) => toModelInfo(m.name, prettyName(m.name), "Ollama", null, true))
     .sort((a, b) => a.name.localeCompare(b.name));

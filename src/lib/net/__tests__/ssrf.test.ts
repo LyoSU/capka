@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { lookup } from "node:dns/promises";
 import { isBlockedAddress, createGuardedFetch } from "../ssrf";
 
 // IP literals resolve to themselves; named hosts resolve to a public IP.
@@ -67,6 +68,33 @@ describe("createGuardedFetch", () => {
     expect(calls).toHaveLength(2);
     expect(calls[1].url).toBe("https://api.example.com/v2/mcp");
     expect(calls[1].auth).toBe("Bearer t");
+  });
+
+  it("pins the connection to the vetted IP (closes the DNS-rebind window)", async () => {
+    // Real fetch so the pinned undici dispatcher is actually honored (the other
+    // tests stub globalThis.fetch, which ignores the dispatcher).
+    globalThis.fetch = realFetch;
+    const http = await import("node:http");
+    const server = http.createServer((req, res) => {
+      res.setHeader("connection", "close"); // don't keep the socket alive past the test
+      res.end(JSON.stringify({ host: req.headers.host }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const port = (server.address() as import("node:net").AddressInfo).port;
+    try {
+      // DNS says this hostname is 127.0.0.1 (our server). The guard vets it
+      // (blockPrivate=false allows loopback) and must connect THERE — with the Host
+      // header still the hostname, proving the connection used the vetted IP rather
+      // than re-resolving at connect time (where a rebind could swap in a bad IP).
+      vi.mocked(lookup).mockResolvedValueOnce([{ address: "127.0.0.1", family: 4 }] as never);
+      const guarded = createGuardedFetch({ blockPrivate: false });
+      const res = await guarded(`http://vetted.example:${port}/`);
+      const body = (await res.json()) as { host: string };
+      expect(res.status).toBe(200);
+      expect(body.host).toBe(`vetted.example:${port}`);
+    } finally {
+      server.close();
+    }
   });
 
   it("strips credentials on a cross-host redirect (no token leak to a different host)", async () => {
