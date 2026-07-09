@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-07-09
+
 ### Added
 - Brand icons now cover more model creators (Tencent/Hunyuan, ByteDance/Doubao, Baidu/Ernie, Databricks/DBRX, InternLM, Baichuan, Stepfun, LongCat, 01.AI/Yi) and inference providers (Groq, Cerebras, Together, Fireworks, SambaNova, DeepInfra, Novita, Hyperbolic, SiliconFlow, Nebius, Baseten, vLLM, LM Studio, Azure); the extra provider glyphs are selectable when naming a custom OpenAI-compatible connection.
 
