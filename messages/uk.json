@@ -328,7 +328,8 @@
       "tooLarge": "Завеликий файл (макс. {max}): {files}",
       "dropHere": "Відпустіть файли, щоб прикріпити",
       "uploadFailed": "Не вдалося завантажити: {files}",
-      "retryUpload": "Повторити завантаження {name}"
+      "retryUpload": "Повторити завантаження {name}",
+      "blindModalities": "Ця модель не побачить {modalities} напряму"
     },
     "ask": {
       "title": "Невелике запитання",
@@ -392,7 +393,6 @@
       "more": "+{count} ще"
     },
     "notice": {
-      "blindModalities": "Ця модель не переглядає {modalities} напряму — оберіть іншу з підтримкою:",
       "modality": {
         "audio": "аудіо",
         "video": "відео",

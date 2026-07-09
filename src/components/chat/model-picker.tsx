@@ -936,8 +936,15 @@ interface ModelPickerProps {
   /** Reports whether `value` resolves to a real, currently-serveable model once
    *  the list has settled. Lets the parent (the chat composer) block sending to
    *  a model whose provider was disconnected or whose entry was removed. While
-   *  the list is still loading `settled` is false — callers must not block yet. */
-  onResolved?: (status: { settled: boolean; available: boolean }) => void;
+   *  the list is still loading `settled` is false — callers must not block yet.
+   *  Also carries the resolved model's provider and native input modalities, so
+   *  the composer can warn when a staged attachment won't be read natively. */
+  onResolved?: (status: {
+    settled: boolean;
+    available: boolean;
+    provider?: string;
+    inputModalities?: Modality[] | null;
+  }) => void;
 }
 
 export function ModelPicker({
@@ -1105,9 +1112,11 @@ export function ModelPicker({
   const settled = !state.loading && !state.syncing && !state.needsKey;
   const modelMissing = settled && !state.error && state.models.length > 0 && !!value && !currentModel;
 
+  const resolvedProvider = currentModel?.configProvider;
+  const resolvedInput = currentModel?.capabilities?.input ?? null;
   useEffect(() => {
-    onResolved?.({ settled, available: !modelMissing });
-  }, [settled, modelMissing, onResolved]);
+    onResolved?.({ settled, available: !modelMissing, provider: resolvedProvider, inputModalities: resolvedInput });
+  }, [settled, modelMissing, resolvedProvider, resolvedInput, onResolved]);
 
   const renderList = (orientation: "vertical" | "horizontal") => (
     <ModelList

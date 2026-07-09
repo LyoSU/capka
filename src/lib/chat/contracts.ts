@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { Modality } from "@/lib/providers/registry";
 import { askFormSchema, askAnswerSchema } from "@/lib/ask/types";
 
 // Inbound POST /api/chat body
@@ -95,11 +94,6 @@ export type MessageMeta = {
   // Lets the chat history show what was attached; the bytes live in the sandbox
   // workspace and are fetched lazily by the client (never re-sent to the model).
   attachedFiles?: { name: string; type: string }[];
-  // A non-fatal heads-up surfaced on the turn. `blind-modalities` means the
-  // resolved model couldn't natively take one of the attached media types (e.g.
-  // an audio note on a text-only model), so it answered without seeing/hearing
-  // it — the UI nudges the user to switch to a capable model.
-  notice?: { kind: "blind-modalities"; modalities: Modality[] };
   // Marks this row as a COMPACTION CHECKPOINT — a summary that stands in for
   // every turn up to `summarizedUpTo` when building context for the model. The
   // full history stays in the DB and in the UI transcript (rendered as a

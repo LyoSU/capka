@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
@@ -35,6 +35,7 @@ import { useComposerAttachments } from "@/components/chat/use-composer-attachmen
 import { useChatDraft } from "@/components/chat/use-chat-draft";
 import { useChatQueue } from "@/components/chat/use-chat-queue";
 import type { FileRef } from "@/lib/constants";
+import { acceptsNativeFile, mimeToModality, type Modality } from "@/lib/providers/registry";
 import { FileDropZone } from "@/components/chat/file-drop-zone";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
@@ -78,8 +79,22 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // we never block before the list settles. When it settles unavailable, the
   // composer is replaced with a "pick another model" notice — sending to a dead
   // model just produces a failed turn, so we stop it at the source.
-  const [modelStatus, setModelStatus] = useState<{ settled: boolean; available: boolean }>({ settled: false, available: true });
-  const handleModelResolved = useCallback((s: { settled: boolean; available: boolean }) => setModelStatus(s), []);
+  // The picker also hands back what the resolved model can take natively
+  // (provider + per-model input modalities) — the same signal the runner uses
+  // server-side — so we can warn, at attach time, that a staged file won't be
+  // seen. Null modalities means "unknown", which falls back to the provider's
+  // static caps inside `acceptsNativeFile`.
+  const [modelStatus, setModelStatus] = useState<{
+    settled: boolean;
+    available: boolean;
+    provider?: string;
+    inputModalities?: Modality[] | null;
+  }>({ settled: false, available: true });
+  const handleModelResolved = useCallback(
+    (s: { settled: boolean; available: boolean; provider?: string; inputModalities?: Modality[] | null }) =>
+      setModelStatus(s),
+    [],
+  );
 
   // The new-chat greeting varies by local time and weaves in the user's name,
   // so it's random + timezone-dependent — compute it on the client after mount
@@ -127,6 +142,22 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // retry never re-uploads) and persist their refs per chat — they survive a
   // reload just like the text draft.
   const attachments = useComposerAttachments({ chatId, ensureChat });
+
+  // Media modalities among the staged attachments the current model can't read
+  // natively — mirrors the server's `findBlindModalities`, but computed here so
+  // the composer can warn before sending. Plain documents have no modality and
+  // never warn (the sandbox handles them). Empty until the picker resolves.
+  const blindModalities = useMemo(() => {
+    const blind: Modality[] = [];
+    for (const af of attachments.files) {
+      const mod = mimeToModality(af.type);
+      if (!mod || blind.includes(mod)) continue;
+      if (acceptsNativeFile(af.type, modelStatus.provider ?? "", modelStatus.inputModalities ?? null)) continue;
+      blind.push(mod);
+    }
+    return blind;
+  }, [attachments.files, modelStatus.provider, modelStatus.inputModalities]);
+
   // PC folders (File System Access): pushed before a message, pulled after the
   // turn. A no-op when the chat has no connected folders, so it costs nothing on
   // the common path.
@@ -606,6 +637,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       onAddFiles={attachments.add}
       onRemoveFile={attachments.remove}
       onRetryFile={attachments.retry}
+      blindModalities={blindModalities}
       contextUsage={contextUsage}
       isNewChat={showGreeting}
       folders={folderSync}
@@ -686,7 +718,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                   later sibling paints over the open dropdown. */}
               <div className="animate-blur-rise relative z-20 -mt-3 flex justify-center [animation-delay:140ms]">
                 <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
-                  <ModelPicker variant="pill" value={model} onChange={setModel} />
+                  <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
                 </div>
               </div>
               {/* Hint + recent + starters collapse away the moment the user starts
@@ -754,8 +786,6 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                       onSwitchBranch={switchBranch}
                       onFork={handleFork}
                       actionsDisabled={isLoading}
-                      model={model}
-                      onModelChange={readOnly ? undefined : setModel}
                       onSend={readOnly ? undefined : handleManageSend}
                     />
                   </div>

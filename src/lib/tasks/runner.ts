@@ -1495,9 +1495,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // decides/answers.
         taskId, status: awaitingApproval ? "awaiting_approval" : awaitingAnswer ? "awaiting_answer" : finalStatus, parts: parts.length > 0 ? parts : undefined,
         ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
-        // Capability gap: the model couldn't natively take one of the attached
-        // media types — flag it so the UI can nudge a model switch.
-        ...(blindModalities.length ? { notice: { kind: "blind-modalities" as const, modalities: blindModalities } } : {}),
         // Tech details for the (i) popover. A manual cancel still did real work
         // (it has a model, elapsed time, and billed tokens), so carry them too —
         // otherwise the stopped turn loses its (i) affordance. A failed turn owns

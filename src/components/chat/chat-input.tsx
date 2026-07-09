@@ -2,13 +2,14 @@
 
 import { useRef, useCallback, useMemo, useEffect, type KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowUp, Loader2, Paperclip, RotateCw, Square, X } from "lucide-react";
+import { ArrowUp, Info, Loader2, Paperclip, RotateCw, Square, X } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
 import { AttachFolderMenu } from "@/components/chat/attach-folder-menu";
 import { useIsMobile, MOBILE_BREAKPOINT } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { BinaryFileThumb, FileTile, SandboxFileTile, type PreviewFile } from "./file-preview";
 import type { FileRef } from "@/lib/constants";
+import type { Modality } from "@/lib/providers/registry";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
 
 /**
@@ -70,6 +71,12 @@ interface ChatInputProps {
   onAddFiles: (files: FileList | File[]) => void;
   onRemoveFile: (id: string) => void;
   onRetryFile: (id: string) => void;
+  /** Media modalities among the *staged* attachments that the currently-picked
+   *  model can't read natively (image/pdf/audio/video). Drives a quiet heads-up
+   *  under the file tiles at attach time — so the user learns the model is blind
+   *  to a file *before* sending, not after, and can switch the model that's
+   *  already sitting right there in the picker. Empty/undefined → no hint. */
+  blindModalities?: Modality[];
   /** Context-window fill, shown as a ring left of the send button. */
   contextUsage?: { used: number; window: number } | null;
   /** Fresh, empty chat — focus the composer on mount so it's ready to type. */
@@ -91,11 +98,13 @@ export function ChatInput({
   onAddFiles,
   onRemoveFile,
   onRetryFile,
+  blindModalities,
   contextUsage,
   isNewChat,
   folders,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
+  const tNotice = useTranslations("chat.notice");
   const isMobile = useIsMobile();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -244,6 +253,22 @@ export function ChatInput({
 
                 return <FileTile key={af.id} thumb={thumb} name={af.name} overlay={overlay} />;
               })}
+            </div>
+          )}
+
+          {/* Quiet heads-up when the picked model can't read a staged file's
+              media type natively. Deliberately understated — muted text, an info
+              glyph, no button — because the model picker is already a tap away in
+              this very composer, and the file still reaches the sandbox either
+              way. Just so the user isn't surprised after sending. */}
+          {blindModalities && blindModalities.length > 0 && (
+            <div className="flex items-center gap-1.5 px-3.5 pt-2 text-xs text-muted-foreground">
+              <Info className="h-3.5 w-3.5 shrink-0 opacity-70" />
+              <span>
+                {t("blindModalities", {
+                  modalities: blindModalities.map((m) => tNotice(`modality.${m}`)).join(", "),
+                })}
+              </span>
             </div>
           )}
 

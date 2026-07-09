@@ -3,7 +3,6 @@ import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
   ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb, Info,
 } from "lucide-react";
-import { ModelPicker } from "@/components/chat/model-picker";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -545,36 +544,6 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: stri
   );
 }
 
-/** Quiet heads-up shown when the model couldn't natively read an attached media
- *  type (e.g. an image sent to a text-only model). Deliberately understated —
- *  muted text, an info glyph, no coloured panel — because it's a limitation, not
- *  a failure: the file still reached the sandbox, the model just can't *see* it
- *  directly. The embedded model picker is the one-tap fix: switch to a capable
- *  model, then regenerate. */
-function CapabilityNotice({
-  modalities, model, onModelChange,
-}: {
-  modalities: string[];
-  model?: string;
-  onModelChange?: (model: string) => void;
-}) {
-  const t = useTranslations("chat.notice");
-  const list = modalities.map((m) => t(`modality.${m}`)).join(", ");
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5">
-        <Info className="h-3.5 w-3.5 shrink-0 opacity-70" />
-        {t("blindModalities", { modalities: list })}
-      </span>
-      {onModelChange && model !== undefined && (
-        <span className="inline-flex rounded-full border border-border bg-card/60 px-1">
-          <ModelPicker variant="pill" value={model} onChange={onModelChange} />
-        </span>
-      )}
-    </div>
-  );
-}
-
 /** Hover-revealed "copy" action for an assistant reply. Swaps to a check for a
  *  beat on success and fires a light haptic — quiet until the user reaches for it. */
 function CopyButton({ text }: { text: string }) {
@@ -1037,10 +1006,6 @@ interface ChatMessageProps {
   /** A turn is streaming: edit/fork/branch/regenerate render disabled instead
    *  of unmounting — icons that vanish and reappear read as the UI glitching. */
   actionsDisabled?: boolean;
-  /** The chat's active model + setter — lets the capability notice offer a
-   *  one-tap switch to a model that can actually see/hear the attachment. */
-  model?: string;
-  onModelChange?: (model: string) => void;
   /** Sends a message as the user — used by manage cards' confirm/undo buttons,
    *  so a config change is driven through the same chat turn (works in Telegram
    *  too, where the agent still holds the confirm/undo token in its context). */
@@ -1069,14 +1034,14 @@ function CompactionDivider({ summary }: { summary: string }) {
   );
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, model, onModelChange, onSend }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; notice?: { kind: string; modalities: string[] }; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -1220,13 +1185,6 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
             ownsResource={metadata.errorOwned ?? undefined}
-          />
-        )}
-        {metadata?.notice?.kind === "blind-modalities" && metadata.notice.modalities.length > 0 && (
-          <CapabilityNotice
-            modalities={metadata.notice.modalities}
-            model={model}
-            onModelChange={onModelChange}
           />
         )}
         {!isStreaming && (() => {

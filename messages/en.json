@@ -328,7 +328,8 @@
       "tooLarge": "Too large (max {max}): {files}",
       "dropHere": "Drop files to attach",
       "uploadFailed": "Upload failed: {files}",
-      "retryUpload": "Retry upload of {name}"
+      "retryUpload": "Retry upload of {name}",
+      "blindModalities": "This model won't see {modalities} directly"
     },
     "ask": {
       "title": "A quick question",
@@ -392,7 +393,6 @@
       "more": "+{count} more"
     },
     "notice": {
-      "blindModalities": "This model can't view {modalities} directly — pick one that can:",
       "modality": {
         "audio": "audio",
         "video": "video",
