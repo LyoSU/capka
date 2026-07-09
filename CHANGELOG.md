@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-07-09
+
 ### Security
 - Outbound fetches to user-supplied URLs (MCP servers, OAuth discovery, marketplace, custom provider base URLs, and provider model listing) now pin the TCP connection to the pre-validated IP, closing the DNS-rebinding window to a private/metadata address. First-party fixed hosts are unaffected.
 - Cleared the `js-yaml` moderate advisory pulled in transitively through `gray-matter` (`npm audit`).
