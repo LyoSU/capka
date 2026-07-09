@@ -93,10 +93,12 @@ export default function ActivityPage() {
   const actionLabel = (action: string) =>
     t.has(`actions.${action}` as never) ? t(`actions.${action}` as never) : action;
 
-  // The thing acted on: prefer a stored human name, fall back to the raw key.
+  // The thing acted on: prefer a stored human name/label (people, collection
+  // items, and the localized control title the API resolves), then the collection
+  // item, and only fall back to the raw key when nothing better exists.
   const targetLabel = (e: Entry): string | null => {
     const d = e.detail || {};
-    return (d.name as string) || (d.label as string) || e.targetKey || null;
+    return (d.name as string) || (d.label as string) || (d.item as string) || e.targetKey || null;
   };
 
   // Friendly chips for the values that matter, localized. Unknown detail keys

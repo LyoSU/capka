@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- The activity log now shows the human title of a changed setting (e.g. "Interface language") in the viewer's locale instead of the raw control id (`user.locale`); collection changes show the affected item's name.
+
 ## [0.6.3] - 2026-07-09
 
 ### Changed
