@@ -205,7 +205,7 @@ export async function syncModelCatalog(): Promise<{ openrouter: number; litellm:
   }
   try {
     const parsed = parseLiteLLMModels(await fetchJson(LITELLM_PRICES_URL));
-    await upsertModels(parsed, { skipExisting: true });
+    await upsertModels(parsed, { deferToOtherSources: true });
     ll = parsed.length;
   } catch (err) {
     console.error("[catalog] LiteLLM sync failed (non-fatal):", err);
@@ -226,7 +226,7 @@ export async function syncModelCatalog(): Promise<{ openrouter: number; litellm:
 
 const CHUNK = 500; // keep well under Postgres' parameter limit
 
-async function upsertModels(list: CatalogModel[], opts?: { skipExisting?: boolean }) {
+async function upsertModels(list: CatalogModel[], opts?: { deferToOtherSources?: boolean }) {
   if (!list.length) return;
   const now = new Date();
   const rows = list.map((m) => ({
@@ -247,27 +247,31 @@ async function upsertModels(list: CatalogModel[], opts?: { skipExisting?: boolea
   // Bulk upsert in chunks. One round-trip per chunk instead of per row keeps
   // a ~3k-model sync fast. Admin curation (enabled/featured) is preserved by
   // not touching those columns on conflict.
+  const set = {
+    source: sql`excluded.source`,
+    displayName: sql`excluded.display_name`,
+    group: sql`excluded."group"`,
+    icon: sql`excluded.icon`,
+    contextLength: sql`excluded.context_length`,
+    inputPrice: sql`excluded.input_price`,
+    outputPrice: sql`excluded.output_price`,
+    cacheReadPrice: sql`excluded.cache_read_price`,
+    capabilities: sql`excluded.capabilities`,
+    updatedAt: sql`excluded.updated_at`,
+  };
   for (let i = 0; i < rows.length; i += CHUNK) {
     const batch = rows.slice(i, i + CHUNK);
     const insert = db.insert(models).values(batch);
-    if (opts?.skipExisting) {
-      await insert.onConflictDoNothing();
+    if (opts?.deferToOtherSources) {
+      // Secondary source (LiteLLM): still REFRESH the rows it already owns — a
+      // plain onConflictDoNothing would freeze a row's metadata at its first
+      // insert forever, so a later parser/price-book improvement (e.g. per-model
+      // input modalities) never reaches an existing row even on a manual resync.
+      // The `where` keeps the original intent: never clobber a row a richer
+      // source (OpenRouter) already owns for the same id.
+      await insert.onConflictDoUpdate({ target: models.id, set, setWhere: sql`${models.source} = excluded.source` });
     } else {
-      await insert.onConflictDoUpdate({
-        target: models.id,
-        set: {
-          source: sql`excluded.source`,
-          displayName: sql`excluded.display_name`,
-          group: sql`excluded."group"`,
-          icon: sql`excluded.icon`,
-          contextLength: sql`excluded.context_length`,
-          inputPrice: sql`excluded.input_price`,
-          outputPrice: sql`excluded.output_price`,
-          cacheReadPrice: sql`excluded.cache_read_price`,
-          capabilities: sql`excluded.capabilities`,
-          updatedAt: sql`excluded.updated_at`,
-        },
-      });
+      await insert.onConflictDoUpdate({ target: models.id, set });
     }
   }
 }

@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Model-catalog resync now refreshes LiteLLM-sourced rows instead of freezing them at first insert, so a model's later-known input modalities (e.g. audio for Gemini) reach the picker — fixing a spurious "model can't read this file" for audio on LiteLLM/OpenAI-compatible gateways. Resync the catalog (Settings → Connections) after upgrading.
+
 ## [0.6.1] - 2026-07-09
 
 ### Changed
