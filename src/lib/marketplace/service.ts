@@ -194,8 +194,8 @@ export async function setPluginMutedForUser(installId: string, userId: string, m
 
 /** Scope + owner of an install, for API ownership checks (a member may only act on
  *  their own personal install; system installs are admin-only). */
-export async function getInstallOwner(installId: string): Promise<{ scope: string; userId: string | null } | null> {
-  const row = (await db.select({ scope: pluginInstalls.scope, userId: pluginInstalls.userId })
+export async function getInstallOwner(installId: string): Promise<{ scope: string; userId: string | null; pluginName: string } | null> {
+  const row = (await db.select({ scope: pluginInstalls.scope, userId: pluginInstalls.userId, pluginName: pluginInstalls.pluginName })
     .from(pluginInstalls).where(eq(pluginInstalls.id, installId)).limit(1))[0];
   return row ?? null;
 }

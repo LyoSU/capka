@@ -46,7 +46,7 @@ export const PATCH = apiHandler(async (req: Request) => {
   const skill = await getSkillMeta(id);
   if (!skill || skill.scope === "user") return Response.json({ error: "Not found" }, { status: 404 });
   await setSkillEnabled(id, enabled);
-  await audit({ actorId: userId, action: enabled ? "skill.enable" : "skill.disable", targetType: "skill", targetKey: id });
+  await audit({ actorId: userId, action: enabled ? "skill.enable" : "skill.disable", targetType: "skill", targetKey: id, detail: { name: skill.name } });
   return Response.json({ ok: true });
 });
 
@@ -59,6 +59,6 @@ export const DELETE = apiHandler(async (req: Request) => {
   const skill = await getSkillMeta(id);
   if (!skill || skill.scope === "user") return Response.json({ error: "Not found" }, { status: 404 });
   await deleteSkill(id);
-  await audit({ actorId: userId, action: "skill.remove", targetType: "skill", targetKey: id });
+  await audit({ actorId: userId, action: "skill.remove", targetType: "skill", targetKey: id, detail: { name: skill.name } });
   return Response.json({ ok: true });
 });

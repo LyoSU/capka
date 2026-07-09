@@ -7,7 +7,7 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Fixed
-- The activity log now shows the human title of a changed setting (e.g. "Interface language") in the viewer's locale instead of the raw control id (`user.locale`); collection changes show the affected item's name.
+- The activity log now shows human names instead of raw internal ids: a changed setting shows its localized title (e.g. "Interface language", not `user.locale`), and enabling/disabling/removing a connector, skill, or plugin shows the item's name instead of its opaque id.
 
 ## [0.6.3] - 2026-07-09
 

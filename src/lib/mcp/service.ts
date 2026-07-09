@@ -236,12 +236,13 @@ export async function deleteServer(id: string): Promise<void> {
   await db.delete(mcpServers).where(eq(mcpServers.id, id));
 }
 
-/** Scope of a connector by id, or null if it doesn't exist. Lets the admin route
- *  refuse (404) to manage a member's PERSONAL (`user`-scope) connector, mirroring
- *  the skills route's getSkillMeta scope guard. */
-export async function getServerScope(id: string): Promise<McpScope | null> {
-  const row = (await db.select({ scope: mcpServers.scope }).from(mcpServers).where(eq(mcpServers.id, id)).limit(1))[0];
-  return row ? (row.scope as McpScope) : null;
+/** Scope + display name of a connector by id, or null if it doesn't exist. Lets
+ *  the admin route refuse (404) to manage a member's PERSONAL (`user`-scope)
+ *  connector, mirroring the skills route's getSkillMeta scope guard, and gives the
+ *  audit log the human name instead of the opaque id. */
+export async function getServerMeta(id: string): Promise<{ scope: McpScope; name: string } | null> {
+  const row = (await db.select({ scope: mcpServers.scope, name: mcpServers.name }).from(mcpServers).where(eq(mcpServers.id, id)).limit(1))[0];
+  return row ? { scope: row.scope as McpScope, name: row.name } : null;
 }
 
 /** True if a real project with this id exists — the admin connector route trusts a

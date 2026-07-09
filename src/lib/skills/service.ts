@@ -117,11 +117,11 @@ export async function getSkillForRun(
 /** Owner-relevant metadata for one skill, or null if it doesn't exist. */
 export async function getSkillMeta(
   id: string,
-): Promise<{ id: string; scope: SkillScope; userId: string | null } | null> {
+): Promise<{ id: string; name: string; scope: SkillScope; userId: string | null } | null> {
   const row = (
-    await db.select({ id: skills.id, scope: skills.scope, userId: skills.userId }).from(skills).where(eq(skills.id, id)).limit(1)
+    await db.select({ id: skills.id, name: skills.name, scope: skills.scope, userId: skills.userId }).from(skills).where(eq(skills.id, id)).limit(1)
   )[0];
-  return row ? { id: row.id, scope: row.scope as SkillScope, userId: row.userId } : null;
+  return row ? { id: row.id, name: row.name, scope: row.scope as SkillScope, userId: row.userId } : null;
 }
 
 /** Flip a skill's enabled flag. Authorization is the caller's responsibility. */
