@@ -156,11 +156,16 @@ async function localHashed(handle: DirHandle, folderId: string, onProgress?: (p:
   const prev = lastLocal.get(folderId) ?? {};
   const fresh: Record<string, string> = {};
   const cand = hashCandidates(stats, prev);
-  let i = 0;
-  for (const path of cand) {
-    onProgress?.({ phase: "hashing", done: i++, total: cand.length });
-    fresh[path] = await sha256Hex(await readLocalFile(handle, path));
-  }
+  // Hash candidates with a bounded pool — each file's read + SHA-256 is independent,
+  // so a handful in flight turns a serial file-by-file wait into concurrent work on
+  // the first sync of a large folder (later syncs re-hash only what changed). Writes
+  // to `fresh`/`done` are safe: JS runs these callbacks on one thread.
+  let done = 0;
+  await runPool(cand, 8, async (path) => {
+    const hex = await sha256Hex(await readLocalFile(handle, path));
+    fresh[path] = hex;
+    onProgress?.({ phase: "hashing", done: ++done, total: cand.length });
+  });
   const merged = mergeHashed(stats, prev, fresh);
   lastLocal.set(folderId, merged);
   return { hashed: merged, skipped, excluded };
