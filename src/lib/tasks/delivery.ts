@@ -13,7 +13,6 @@
 import { InputFile, InlineKeyboard } from "grammy";
 import { log } from "@/lib/log";
 import { getTranslator, type Translator } from "@/lib/i18n/translator";
-import { formatShortDuration } from "@/lib/chat/duration";
 import type { Modality } from "@/lib/providers/registry";
 import type { AskForm } from "@/lib/ask/types";
 
@@ -142,9 +141,10 @@ export function draftIdFrom(seed: string): number {
  *  and answer text; if we floated a reasoning/tool block above the already-shown
  *  answer it would jump in and out and merge thinking from separate phases — a
  *  visual mess as the model thinks again after a tool. So mid-answer activity
- *  stays out of the live view; the finished reply still folds all the reasoning
- *  into a collapsed <details> (see `composeFinal`). Markdown isn't parsed inside
- *  <tg-thinking> (only HTML tags are), so the reasoning is HTML-escaped. */
+ *  stays out of the live view, and the reasoning is dropped entirely once the
+ *  turn finishes (`composeFinal` keeps only the tool-log footer). Markdown isn't
+ *  parsed inside <tg-thinking> (only HTML tags are), so the reasoning is
+ *  HTML-escaped. */
 export function composeDraft(answer: string, reasoning: string, status: StreamStatus, t: Translator): DraftBody {
   if (answer.trim()) return { markdown: answer };
   const think = reasoning.trim().slice(-THINKING_MAX_CHARS);
@@ -155,36 +155,25 @@ export function composeDraft(answer: string, reasoning: string, status: StreamSt
   return { html: `<tg-thinking>${inner}</tg-thinking>` };
 }
 
-/** Final view: the answer verbatim, then the turn summary as a FOOTER — the
- *  model's thinking folded into a collapsed `<details>` ("💭 Reasoned for Xs"),
- *  or the lighter one-line tool log ("✅ N tools · Ts") when it only ran tools.
- *  Footer, not header, deliberately (diverging from the web, which collapses
- *  reasoning above the answer): Telegram clients adopt the streamed draft into
- *  the final message by matching text PREFIXES, so the final must be the draft
- *  plus appended text — a header above the answer zeroes the prefix and the
- *  whole bubble repaints from scratch instead of "typing out" the summary. A
- *  header can't stream live either: tool count and durations only settle at
- *  the end of the turn. Bot API 10.1 rich Markdown renders the `<details>`
- *  body as Markdown; we only HTML-escape angle brackets that would be read as
- *  tags. `doneLog` is an ICU plural string, so the tool-count grammar is
- *  correct in every locale. */
+/** Final view: the answer verbatim, then a light one-line tool log
+ *  ("✅ N tools · Ts") as a FOOTER when the turn ran any tools. The model's
+ *  thinking is deliberately NOT folded into the final message — it lives only in
+ *  the ephemeral streamed draft (see `composeDraft`); a stale reasoning dump
+ *  under the answer adds noise without value.
+ *  Footer, not header, deliberately: Telegram clients adopt the streamed draft
+ *  into the final message by matching text PREFIXES, so the final must be the
+ *  draft plus appended text — a header above the answer zeroes the prefix and
+ *  the whole bubble repaints from scratch instead of "typing out" the summary. A
+ *  header can't stream live either: tool count and duration only settle at the
+ *  end of the turn. `doneLog` is an ICU plural string, so the tool-count grammar
+ *  is correct in every locale. */
 export function composeFinal(
   body: string,
-  reasoning: string,
   toolCount: number,
   elapsedMs: number,
   t: Translator,
-  reasoningMs?: number,
 ): string {
   const log = toolCount > 0 ? t("doneLog", { count: toolCount, secs: Math.round(elapsedMs / 1000) }) : null;
-  const think = reasoning.trim().slice(-THINKING_MAX_CHARS);
-  if (think) {
-    // Grok-style summary: "💭 Reasoned for 58s" — the reasoning phase, not the
-    // whole turn (which would over-count the answer streaming time).
-    const summary = escapeHtml(t("reasonedFor", { duration: formatShortDuration(reasoningMs ?? elapsedMs) }));
-    const block = `<details><summary>${summary}</summary>\n\n${escapeHtml(think)}\n\n</details>`;
-    return body ? `${body}\n\n${block}` : block;
-  }
   if (log) return body ? `${body}\n\n> ${log}` : `> ${log}`;
   return body;
 }
@@ -440,16 +429,14 @@ class TelegramSink implements DeliverySink {
     }
 
     const body = result.text.trim();
-    const reasoning = result.reasoning ?? "";
     let markdown: string | null;
     if (body) {
-      // The whole answer, one message — closed with the summary footer (tool
-      // log / the draft's <tg-thinking> reasoning folded into <details>).
-      markdown = composeFinal(body, reasoning, result.toolCount, result.elapsedMs, this.t, result.reasoningMs);
-    } else if (result.toolCount > 0 || reasoning.trim()) {
-      // Tools ran / it thought but wrote no closing text — still cap the reply
-      // with a "done" footer so it doesn't just trail off.
-      markdown = composeFinal("", reasoning, result.toolCount, result.elapsedMs, this.t, result.reasoningMs);
+      // The whole answer, one message — closed with the tool-log footer.
+      markdown = composeFinal(body, result.toolCount, result.elapsedMs, this.t);
+    } else if (result.toolCount > 0) {
+      // Tools ran but the turn wrote no closing text — still cap the reply with a
+      // "done" footer so it doesn't just trail off.
+      markdown = composeFinal("", result.toolCount, result.elapsedMs, this.t);
     } else {
       markdown = `_${this.t("noText")}_`;
     }

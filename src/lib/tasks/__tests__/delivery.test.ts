@@ -28,7 +28,7 @@ describe("composeDraft", () => {
   });
   it("content wins once any answer text exists — no thinking/tool block jumps in above it", () => {
     // Reasoning continues (thinking-again after a tool) but the live view stays
-    // the clean answer — the reasoning is kept for the final <details>, not the draft.
+    // the clean answer — mid-answer reasoning is dropped, never shown.
     expect(composeDraft("Привіт", "Зважую варіанти", undefined, uk)).toEqual({ markdown: "Привіт" });
     // A tool running mid-answer doesn't float a `> 🔧` line above the streamed text.
     expect(composeDraft("partial", "", { kind: "tool", label: "Виконання команди…" }, uk)).toEqual({
@@ -102,42 +102,25 @@ describe("composeFinal", () => {
   // adopt the draft with an append-only "typing out" animation instead of
   // repainting the whole bubble from scratch.
   it("appends a collapsed tool log with correct plural grammar (uk)", () => {
-    expect(composeFinal("Готово.", "", 1, 3000, uk)).toBe("Готово.\n\n> ✅ 1 інструмент · 3с");
-    expect(composeFinal("Готово.", "", 2, 12_300, uk)).toBe("Готово.\n\n> ✅ 2 інструменти · 12с");
-    expect(composeFinal("Готово.", "", 5, 9000, uk)).toBe("Готово.\n\n> ✅ 5 інструментів · 9с");
+    expect(composeFinal("Готово.", 1, 3000, uk)).toBe("Готово.\n\n> ✅ 1 інструмент · 3с");
+    expect(composeFinal("Готово.", 2, 12_300, uk)).toBe("Готово.\n\n> ✅ 2 інструменти · 12с");
+    expect(composeFinal("Готово.", 5, 9000, uk)).toBe("Готово.\n\n> ✅ 5 інструментів · 9с");
   });
   it("localizes the log for English", () => {
-    expect(composeFinal("Done.", "", 1, 3000, en)).toBe("Done.\n\n> ✅ 1 tool · 3s");
-    expect(composeFinal("Done.", "", 2, 12_000, en)).toBe("Done.\n\n> ✅ 2 tools · 12s");
+    expect(composeFinal("Done.", 1, 3000, en)).toBe("Done.\n\n> ✅ 1 tool · 3s");
+    expect(composeFinal("Done.", 2, 12_000, en)).toBe("Done.\n\n> ✅ 2 tools · 12s");
   });
-  it("returns the bare answer when no tools ran and there's no reasoning", () => {
-    expect(composeFinal("Just chatting.", "", 0, 4000, en)).toBe("Just chatting.");
+  it("returns the bare answer when no tools ran", () => {
+    expect(composeFinal("Just chatting.", 0, 4000, en)).toBe("Just chatting.");
   });
-  it("folds reasoning into a collapsed <details> with a Grok-style 'reasoned for' summary", () => {
-    expect(composeFinal("Готово.", "Зважую варіанти", 2, 6000, uk)).toBe(
-      "Готово.\n\n<details><summary>💭 Розмірковування протягом 6s</summary>\n\nЗважую варіанти\n\n</details>",
-    );
-  });
-  it("uses the reasoning summary even when no tools ran", () => {
-    expect(composeFinal("Hi.", "thought it through", 0, 1000, en)).toBe(
-      "Hi.\n\n<details><summary>💭 Reasoned for 1s</summary>\n\nthought it through\n\n</details>",
-    );
-  });
-  it("prefers the reasoning-phase duration over the whole-turn elapsed", () => {
-    // 30s turn, but only 5s spent reasoning before the answer began.
-    expect(composeFinal("Done.", "thinking", 2, 30_000, en, 5000)).toBe(
-      "Done.\n\n<details><summary>💭 Reasoned for 5s</summary>\n\nthinking\n\n</details>",
-    );
-  });
-  it("escapes angle brackets in the reasoning so they aren't read as tags", () => {
-    expect(composeFinal("ok", "a < b && </details> c", 0, 0, en)).toBe(
-      "ok\n\n<details><summary>💭 Reasoned for 0s</summary>\n\na &lt; b &amp;&amp; &lt;/details&gt; c\n\n</details>",
-    );
+  it("never folds reasoning into the final message — thinking is draft-only", () => {
+    // Even when the turn reasoned, the final carries only the answer (+ tool log).
+    expect(composeFinal("Hi.", 0, 1000, en)).toBe("Hi.");
+    expect(composeFinal("Готово.", 2, 6000, uk)).toBe("Готово.\n\n> ✅ 2 інструменти · 6с");
   });
   it("keeps the streamed draft a strict prefix of the final (append-only convergence)", () => {
     const body = "Стрімлена відповідь.";
-    expect(composeFinal(body, "думав", 3, 9000, uk, 2000).startsWith(body)).toBe(true);
-    expect(composeFinal(body, "", 3, 9000, uk).startsWith(body)).toBe(true);
+    expect(composeFinal(body, 3, 9000, uk).startsWith(body)).toBe(true);
   });
 });
 
@@ -321,7 +304,7 @@ describe("TelegramSink streaming", () => {
     expect(api.sendRichMessage.mock.calls[0][1].markdown).toContain("Isolated → Network access");
   });
 
-  it("persists the whole answer (reasoning folded into <details>) as one final message", async () => {
+  it("persists the whole answer as one final message, dropping the reasoning", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 13, locale: "uk" });
     sink.push("Готово.", "Зважую варіанти", undefined);
     await sink.finish({
@@ -329,9 +312,7 @@ describe("TelegramSink streaming", () => {
       toolCount: 0, elapsedMs: 6000, reasoningMs: 6000,
     });
     expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
-    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe(
-      "Готово.\n\n<details><summary>💭 Розмірковування протягом 6s</summary>\n\nЗважую варіанти\n\n</details>",
-    );
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("Готово.");
   });
 
   it("finish falls back to a no-text note when nothing was produced", async () => {

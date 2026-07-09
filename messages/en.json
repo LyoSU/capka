@@ -1477,7 +1477,6 @@
     "startError": "⚠️ Couldn't start the assistant. Please try again in a moment.\n\n`{error}`",
     "statusThinking": "thinking…",
     "reasoningLog": "💭 Reasoning",
-    "reasonedFor": "💭 Reasoned for {duration}",
     "noText": "(the assistant returned no text)",
     "genericError": "Something went wrong. Please try again.",
     "technicalDetails": "Technical details",

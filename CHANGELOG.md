@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- Telegram replies no longer append the model's reasoning as a collapsed
+  "💭 Reasoned for Xs" block; the final message is the answer plus the tool-log
+  footer only. Live thinking still shows in the streamed draft.
+
 ## [0.6.2] - 2026-07-09
 
 ### Fixed
