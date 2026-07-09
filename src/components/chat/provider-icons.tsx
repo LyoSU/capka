@@ -18,8 +18,31 @@ import Bedrock from "@lobehub/icons/es/Bedrock";
 import Ai21 from "@lobehub/icons/es/Ai21";
 import Zhipu from "@lobehub/icons/es/Zhipu";
 import Moonshot from "@lobehub/icons/es/Moonshot";
+import Hunyuan from "@lobehub/icons/es/Hunyuan";
+import Doubao from "@lobehub/icons/es/Doubao";
+import Baidu from "@lobehub/icons/es/Baidu";
+import Dbrx from "@lobehub/icons/es/Dbrx";
+import InternLM from "@lobehub/icons/es/InternLM";
+import Baichuan from "@lobehub/icons/es/Baichuan";
+import Stepfun from "@lobehub/icons/es/Stepfun";
+import LongCat from "@lobehub/icons/es/LongCat";
+import Yi from "@lobehub/icons/es/Yi";
 import Ollama from "@lobehub/icons/es/Ollama";
 import OpenRouter from "@lobehub/icons/es/OpenRouter";
+import Groq from "@lobehub/icons/es/Groq";
+import Cerebras from "@lobehub/icons/es/Cerebras";
+import Together from "@lobehub/icons/es/Together";
+import Fireworks from "@lobehub/icons/es/Fireworks";
+import SambaNova from "@lobehub/icons/es/SambaNova";
+import DeepInfra from "@lobehub/icons/es/DeepInfra";
+import Novita from "@lobehub/icons/es/Novita";
+import Hyperbolic from "@lobehub/icons/es/Hyperbolic";
+import SiliconCloud from "@lobehub/icons/es/SiliconCloud";
+import Nebius from "@lobehub/icons/es/Nebius";
+import Baseten from "@lobehub/icons/es/Baseten";
+import Vllm from "@lobehub/icons/es/Vllm";
+import LmStudio from "@lobehub/icons/es/LmStudio";
+import Azure from "@lobehub/icons/es/Azure";
 import OpenCode from "@lobehub/icons/es/OpenCode";
 import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
 import OpenHands from "@lobehub/icons/es/OpenHands";
@@ -48,8 +71,37 @@ const ICONS: Record<string, IconComponent> = {
   ai21: Ai21,
   zhipu: Zhipu,
   moonshot: Moonshot,
+  hunyuan: Hunyuan,
+  doubao: Doubao,
+  baidu: Baidu,
+  dbrx: Dbrx,
+  internlm: InternLM,
+  baichuan: Baichuan,
+  stepfun: Stepfun,
+  longcat: LongCat,
+  yi: Yi,
   ollama: Ollama,
+  // Routers/gateways (route to many upstreams — distinct from the inference
+  // providers below, which host models on their own hardware).
   openrouter: OpenRouter,
+  // Inference providers: OpenAI-compatible /v1 endpoints that serve open-weight
+  // models. No ICON_RULES entry (a model's *group* is its creator, e.g. Llama),
+  // just a glyph so a custom "OpenAI-compatible" connection can be branded.
+  groq: Groq,
+  cerebras: Cerebras,
+  together: Together,
+  fireworks: Fireworks,
+  sambanova: SambaNova,
+  deepinfra: DeepInfra,
+  novita: Novita,
+  hyperbolic: Hyperbolic,
+  siliconflow: SiliconCloud,
+  nebius: Nebius,
+  baseten: Baseten,
+  vllm: Vllm,
+  lmstudio: LmStudio,
+  azure: Azure,
+  // Agent tools (offered as connection glyphs only, never model-creator icons).
   opencode: OpenCode,
   claudecode: ClaudeCode,
   openhands: OpenHands,

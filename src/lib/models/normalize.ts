@@ -37,6 +37,15 @@ const ICON_RULES: [RegExp, string][] = [
   [/xiaomi|mimo/i, "xiaomi"],
   [/zhipu|z\.?ai|glm/i, "zhipu"],
   [/moonshot|kimi/i, "moonshot"],
+  [/tencent|hunyuan/i, "hunyuan"],
+  [/bytedance|doubao/i, "doubao"],
+  [/baidu|ernie|wenxin/i, "baidu"],
+  [/databricks|dbrx/i, "dbrx"],
+  [/internlm/i, "internlm"],
+  [/baichuan/i, "baichuan"],
+  [/stepfun/i, "stepfun"],
+  [/longcat/i, "longcat"],
+  [/01[.-]?ai|\byi\b/i, "yi"], // 01.AI's Yi family
   [/ollama/i, "ollama"],
   [/openrouter/i, "openrouter"],
 ];

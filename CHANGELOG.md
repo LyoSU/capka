@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Brand icons now cover more model creators (Tencent/Hunyuan, ByteDance/Doubao, Baidu/Ernie, Databricks/DBRX, InternLM, Baichuan, Stepfun, LongCat, 01.AI/Yi) and inference providers (Groq, Cerebras, Together, Fireworks, SambaNova, DeepInfra, Novita, Hyperbolic, SiliconFlow, Nebius, Baseten, vLLM, LM Studio, Azure); the extra provider glyphs are selectable when naming a custom OpenAI-compatible connection.
+
 ### Fixed
 - The activity log now shows human names instead of raw internal ids: a changed setting shows its localized title (e.g. "Interface language", not `user.locale`), and enabling/disabling/removing a connector, skill, or plugin shows the item's name instead of its opaque id.
 
