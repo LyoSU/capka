@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-07-09
+
 ### Added
 - More brand icons selectable for a custom OpenAI-compatible connection: model creators Upstage (Solar), Nous Research, Liquid AI; inference endpoints Hugging Face, Cloudflare Workers AI, GitHub Models.
 
