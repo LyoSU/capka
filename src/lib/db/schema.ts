@@ -94,6 +94,10 @@ export const providerConfigs = pgTable("provider_configs", {
   // Chat Completions, "responses" forces the Responses API. Only the `openai`
   // provider reads this; every other provider has a single correct transport.
   apiStyle: text("api_style"),
+  // User-chosen ordering of their own connections. Drives the settings list and,
+  // through resolveEnabledConfigs, the order connections appear in the chat model
+  // picker. Lower comes first; ties fall back to createdAt.
+  sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_provider_configs_user_id").on(table.userId)]);

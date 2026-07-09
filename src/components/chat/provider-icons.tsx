@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { createElement, type ComponentType } from "react";
 import { Sparkles } from "lucide-react";
 import OpenAI from "@lobehub/icons/es/OpenAI";
 import Anthropic from "@lobehub/icons/es/Anthropic";
@@ -122,6 +122,13 @@ const ICONS: Record<string, IconComponent> = {
 
 export function iconForSlug(slug?: string | null): IconComponent {
   return (slug && ICONS[slug]) || Sparkles;
+}
+
+/** Brand glyph — resolves a slug to its (stable) icon component and renders it.
+ *  Use this instead of `const Icon = iconForSlug(...)` + `<Icon/>`, which the
+ *  static-components lint flags as creating a component during render. */
+export function ProviderGlyph({ slug, size, className }: { slug?: string | null; size?: number; className?: string }) {
+  return createElement(iconForSlug(slug), { size, className });
 }
 
 /** Brand glyphs offered when naming a custom connection. Display labels are

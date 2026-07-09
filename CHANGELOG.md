@@ -10,6 +10,7 @@ All notable changes to Capka are documented here. Format follows
 - More brand icons selectable for a custom OpenAI-compatible connection: model creators Upstage (Solar), Nous Research, Liquid AI; inference endpoints Hugging Face, Cloudflare Workers AI, GitHub Models.
 
 ### Changed
+- Settings → Connections is now a compact list: each connection is a single row that expands to its settings, and connections can be dragged (or moved with the keyboard) to set their order. That order also drives the chat model picker, and the top enabled connection is the default a new chat opens with (marked "default").
 - The xAI provider icon is now the corporate xAI mark instead of the Grok product glyph.
 
 ## [0.6.4] - 2026-07-09

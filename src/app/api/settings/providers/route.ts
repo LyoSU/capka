@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -46,7 +46,8 @@ export const GET = apiHandler(async () => {
       createdAt: providerConfigs.createdAt,
     })
     .from(providerConfigs)
-    .where(eq(providerConfigs.userId, userId));
+    .where(eq(providerConfigs.userId, userId))
+    .orderBy(providerConfigs.sortOrder, providerConfigs.createdAt);
 
   return Response.json(rows);
 });
@@ -74,6 +75,11 @@ export const POST = apiHandler(async (req: Request) => {
   // Several configs can be enabled at once (the picker aggregates them), so a
   // new one is simply added enabled — it no longer disables the others.
   const id = nanoid();
+  // Append after the user's existing connections in their chosen order.
+  const [{ next }] = await db
+    .select({ next: sql<number>`coalesce(max(${providerConfigs.sortOrder}), -1) + 1` })
+    .from(providerConfigs)
+    .where(eq(providerConfigs.userId, userId));
   await db.insert(providerConfigs).values({
     id,
     userId,
@@ -87,6 +93,7 @@ export const POST = apiHandler(async (req: Request) => {
     iconSlug: iconSlug || null,
     // Only meaningful for the openai provider; harmless null elsewhere.
     apiStyle: provider === "openai" ? normalizeApiStyle(apiStyle) : null,
+    sortOrder: next,
   });
 
   invalidateModelsCache();
@@ -95,7 +102,40 @@ export const POST = apiHandler(async (req: Request) => {
 
 export const PUT = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
-  const { id, defaultModel, enabled, label, iconSlug, shared, apiStyle } = await req.json();
+  const { id, defaultModel, enabled, label, iconSlug, shared, apiStyle, order } = await req.json();
+
+  // Reorder: an ordered list of the caller's OWN config ids. Every id must
+  // belong to the caller and the list must cover exactly their configs — so a
+  // request can never touch, or leave gaps against, someone else's rows. Assign
+  // sortOrder by position; the picker then follows this order.
+  if (Array.isArray(order)) {
+    if (order.some((x) => typeof x !== "string")) {
+      return Response.json({ error: "Invalid order" }, { status: 400 });
+    }
+    const owned = await db
+      .select({ id: providerConfigs.id })
+      .from(providerConfigs)
+      .where(eq(providerConfigs.userId, userId));
+    const ownedIds = new Set(owned.map((r) => r.id));
+    const orderIds = order as string[];
+    const sameSize = orderIds.length === ownedIds.size;
+    const allOwned = orderIds.every((x) => ownedIds.has(x));
+    const noDupes = new Set(orderIds).size === orderIds.length;
+    if (!sameSize || !allOwned || !noDupes) {
+      return Response.json({ error: "Order must list exactly your connections" }, { status: 400 });
+    }
+    await db.transaction(async (tx) => {
+      for (let i = 0; i < orderIds.length; i++) {
+        await tx
+          .update(providerConfigs)
+          .set({ sortOrder: i })
+          .where(and(eq(providerConfigs.id, orderIds[i]), eq(providerConfigs.userId, userId)));
+      }
+    });
+    invalidateModelsCache();
+    return Response.json({ ok: true });
+  }
+
   if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
   // Toggle a single config's enabled state — others are left untouched, since

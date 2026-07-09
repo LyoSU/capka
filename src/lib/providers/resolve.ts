@@ -25,7 +25,7 @@ export async function resolveEnabledConfigs(
     .select()
     .from(providerConfigs)
     .where(and(eq(providerConfigs.userId, userId), eq(providerConfigs.isActive, true)))
-    .orderBy(providerConfigs.createdAt);
+    .orderBy(providerConfigs.sortOrder, providerConfigs.createdAt);
   const ownConfigs = own.map((c) => ({ ...c, isShared: false }));
 
   if (!(await sharedKeyEnabled())) return ownConfigs;
@@ -39,7 +39,7 @@ export async function resolveEnabledConfigs(
     // caller IS an admin, their shared configs are already in `ownConfigs` above
     // (as own, not shared) — re-adding them here would duplicate the connection.
     .where(and(eq(users.role, "admin"), eq(providerConfigs.isActive, true), eq(providerConfigs.shared, true), ne(providerConfigs.userId, userId)))
-    .orderBy(providerConfigs.createdAt);
+    .orderBy(providerConfigs.sortOrder, providerConfigs.createdAt);
   return [...ownConfigs, ...rows.map((r) => ({ ...r.config, isShared: true }))];
 }
 
