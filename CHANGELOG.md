@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-09
+
 ### Changed
 - The "this model can't read that file" heads-up now appears quietly in the composer while a file is attached, instead of under the reply after sending — so the user can switch models before spending a turn.
 
