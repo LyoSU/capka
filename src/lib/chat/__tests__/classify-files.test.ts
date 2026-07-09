@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { classifyFiles, findBlindModalities } from "../prompt";
-import { acceptsNativeFile, mimeToModality } from "@/lib/providers/registry";
+import { acceptsNativeFile, mimeToModality, audioNeedsTranscode } from "@/lib/providers/registry";
 import type { FileRef } from "@/lib/constants";
 
 const file = (type: string): FileRef => ({ name: `f.${type.split("/")[1]}`, type, size: 1 } as FileRef);
@@ -77,6 +77,35 @@ describe("acceptsNativeFile (per-model modalities win)", () => {
     // lack 'file' even for PDF-capable models, so per-model must not gate it.
     expect(acceptsNativeFile("application/pdf", "openrouter", ["image"])).toBe(true);
     expect(acceptsNativeFile("application/pdf", "openrouter", [])).toBe(true);
+  });
+});
+
+describe("audioNeedsTranscode (transport container reality)", () => {
+  it("passes wav/mp3 through untouched on OpenAI-style transports", () => {
+    for (const t of ["audio/wav", "audio/mp3", "audio/mpeg"]) {
+      expect(audioNeedsTranscode(t, "litellm")).toBe(false);
+      expect(audioNeedsTranscode(t, "openrouter")).toBe(false);
+      expect(audioNeedsTranscode(t, "openai")).toBe(false);
+    }
+  });
+
+  it("flags exotic containers for transcode on OpenAI-style transports", () => {
+    // opus/ogg is exactly the case that reaches the SDK's throw pre-request.
+    for (const t of ["audio/ogg", "audio/opus", "audio/mp4", "audio/x-m4a", "audio/flac", "audio/x-wav"]) {
+      expect(audioNeedsTranscode(t, "litellm")).toBe(true);
+      expect(audioNeedsTranscode(t, "openrouter")).toBe(true);
+    }
+  });
+
+  it("never transcodes for Gemini — @ai-sdk/google serializes any container", () => {
+    expect(audioNeedsTranscode("audio/ogg", "google")).toBe(false);
+    expect(audioNeedsTranscode("audio/flac", "google")).toBe(false);
+  });
+
+  it("ignores non-audio files", () => {
+    expect(audioNeedsTranscode("image/png", "litellm")).toBe(false);
+    expect(audioNeedsTranscode("video/mp4", "litellm")).toBe(false);
+    expect(audioNeedsTranscode("application/pdf", "openrouter")).toBe(false);
   });
 });
 

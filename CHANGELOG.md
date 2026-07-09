@@ -9,6 +9,9 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 - The "this model can't read that file" heads-up now appears quietly in the composer while a file is attached, instead of under the reply after sending — so the user can switch models before spending a turn.
 
+### Fixed
+- Audio attachments in a container the model transport can't serialize (opus/ogg/m4a/flac) are now transcoded to mp3 in the sandbox before sending, so voice notes reach audio-capable models over LiteLLM/OpenAI-compatible and OpenRouter — previously only wav/mp3 got through and anything else was dropped with a "can't read" notice.
+
 ## [0.6.0] - 2026-07-08
 
 ### Added

@@ -277,6 +277,30 @@ export function acceptsNativeFile(
 }
 
 /**
+ * Audio container mediaTypes every OpenAI-style transport serializes as
+ * `input_audio` without complaint. The AI-SDK providers only map a narrow set —
+ * `@ai-sdk/openai-compatible` accepts exactly wav/mp3/mpeg and throws
+ * `UnsupportedFunctionalityError` on anything else BEFORE the request goes out
+ * (opus/ogg/m4a/flac/…), which the soft-retry can only degrade to "can't read",
+ * not fix. So any audio outside this set must be transcoded to mp3 first.
+ */
+const NATIVE_AUDIO_CONTAINERS = new Set(["audio/wav", "audio/mp3", "audio/mpeg"]);
+
+/**
+ * Whether an attached audio file must be transcoded to mp3 before it can be sent
+ * as a native `input_audio` part to this provider. Gemini (`@ai-sdk/google`)
+ * serializes any container, so it never needs it; every OpenAI-style transport
+ * (openai-compatible/openrouter/openai) only takes wav/mp3, so exotic containers
+ * do. Non-audio files never do (`false`). Callers gate the actual ffmpeg call on
+ * this — see the runner's `injectNativeFiles`.
+ */
+export function audioNeedsTranscode(mimeType: string, provider: string): boolean {
+  if (!mimeType.startsWith("audio/")) return false;
+  if (provider === "google") return false;
+  return !NATIVE_AUDIO_CONTAINERS.has(mimeType);
+}
+
+/**
  * Whether this provider+transport correctly serializes an IMAGE returned INSIDE a
  * tool result (the LanguageModelV3 `{type:'content'}` output with `image-data`
  * parts — how `view_file` shows rendered pages to the model). This is a stricter
