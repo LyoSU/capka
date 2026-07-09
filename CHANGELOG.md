@@ -11,6 +11,9 @@ All notable changes to Capka are documented here. Format follows
   "💭 Reasoned for Xs" block; the final message is the answer plus the tool-log
   footer only. Live thinking still shows in the streamed draft.
 
+### Fixed
+- The sandbox prompt now reflects the session's actual egress: when network is enabled (`SANDBOX_ALLOW_NETWORK=true` + `sandbox_network=bridge` or a project override), the model is told it has internet instead of the hardcoded "no network by default", so it stops refusing to install packages or make requests.
+
 ## [0.6.2] - 2026-07-09
 
 ### Fixed

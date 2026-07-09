@@ -135,7 +135,12 @@ function captureResult(result: { stdout: string; stderr: string; exitCode: numbe
  * `ensureSession` is the run's shared, memoized session creator: the container is
  * spun up on the FIRST tool call (lazy) and shared with the MCP/skill paths.
  */
-export async function loadSandboxTools(sessionKey: string, userId: string, ensureSession: () => Promise<unknown>) {
+export async function loadSandboxTools(
+  sessionKey: string,
+  userId: string,
+  ensureSession: () => Promise<unknown>,
+  networkMode: "none" | "bridge" = "none",
+) {
   const run = async (cmd: string, timeout?: number) => {
     await ensureSession();
     try {
@@ -157,7 +162,10 @@ export async function loadSandboxTools(sessionKey: string, userId: string, ensur
       description:
         "Run a bash command in the Linux sandbox — shell tasks, pipelines, file management, " +
         "running command-line tools, and installing packages (pip/npm). Common runtimes and CLI " +
-        "tools are preinstalled. No network by default. " +
+        "tools are preinstalled. " +
+        (networkMode === "bridge"
+          ? "Network access is available. "
+          : "No network access — package installs and internet requests will fail. ") +
         "Set background:true for work that won't finish inside the 300s limit (bulk conversion, a " +
         "long scrape): it starts the command detached and returns a jobId immediately — the job " +
         "keeps running after your reply. Check it later with check_job.",

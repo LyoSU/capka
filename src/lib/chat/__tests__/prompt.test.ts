@@ -16,3 +16,20 @@ describe("buildSystemPrompt — concierge", () => {
     expect(without.volatile).not.toContain("First run");
   });
 });
+
+describe("buildSystemPrompt — network state", () => {
+  it("tells the model it has network when egress is bridged", () => {
+    const p = buildSystemPrompt({ networkMode: "bridge" });
+    expect(p.stable).toContain("outbound network access");
+    expect(p.stable).not.toContain("no network access");
+  });
+
+  it("tells the model there is no network when egress is cut, and defaults to no network when unspecified", () => {
+    const off = buildSystemPrompt({ networkMode: "none" });
+    expect(off.stable).toContain("no network access");
+    expect(off.stable).not.toContain("outbound network access");
+
+    // Safe default: absent an explicit mode, assume no egress.
+    expect(buildSystemPrompt({}).stable).toContain("no network access");
+  });
+});

@@ -1,4 +1,4 @@
-import { SYSTEM_PROMPT, SANDBOX_PROMPT } from "@/lib/agents/chat-agent";
+import { SYSTEM_PROMPT, buildSandboxPrompt } from "@/lib/agents/chat-agent";
 import { type FileRef } from "@/lib/constants";
 import { acceptsNativeFile, mimeToModality, type Modality } from "@/lib/providers/registry";
 import { formatAvailableSkills } from "@/lib/skills/fmt";
@@ -106,9 +106,14 @@ export function buildSystemPrompt(opts: {
    *  Deterministic (sorted, changes only on connector install/toggle), so it lives
    *  in the cached stable tier alongside skills. */
   connectorIndex?: string;
+  /** Effective sandbox egress for this session (resolved in the task runner).
+   *  Drives the network line in the sandbox prompt so the model knows whether it
+   *  can reach the internet. Conversation-stable, so it stays in the cached
+   *  prefix. Defaults to "none" — the safe assumption when egress is unknown. */
+  networkMode?: "none" | "bridge";
 }): BuiltPrompt {
   // ── Stable prefix (cacheable) ───────────────────────────────────────────
-  let stable = `${SYSTEM_PROMPT}\n\n${SANDBOX_PROMPT}`;
+  let stable = `${SYSTEM_PROMPT}\n\n${buildSandboxPrompt(opts.networkMode ?? "none")}`;
   if (opts.project?.systemPrompt) {
     stable += `\n\n--- Project Instructions ---\n${opts.project.systemPrompt}`;
   }

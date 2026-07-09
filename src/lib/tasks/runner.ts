@@ -395,7 +395,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
     }
     return sessionEnsured;
   };
-  const sandbox = await loadSandboxTools(sessionKey, userId, ensureSession);
+  const sandbox = await loadSandboxTools(sessionKey, userId, ensureSession, networkMode);
   const mcp = await loadMcpTools({
     userId,
     projectId: payload.projectId ?? null,
@@ -516,6 +516,7 @@ async function prepareRun(userId: string, sessionKey: string, payload: TaskPaylo
       locale: user?.locale ?? payload.origin?.locale ?? null,
       concierge,
       connectorIndex: toolSearch.indexText,
+      networkMode,
     });
 
     return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch };

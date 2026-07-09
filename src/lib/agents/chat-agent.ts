@@ -27,11 +27,22 @@ The people you work with see only this message. Make it read like a thoughtful c
 
 Be concise and warm. You're a coworker, not a manual.`;
 
-export const SANDBOX_PROMPT = `You have a private Linux sandbox for running code and producing files. The user drops files in and gets finished files back — that round trip is the core of what you do.
+/**
+ * The sandbox instructions. Parameterized on the session's effective egress
+ * (`networkMode`, resolved per-run in the task runner) so the model is told the
+ * truth about whether it can reach the internet — a static "no network" line
+ * would make it refuse network work even when egress is enabled.
+ */
+export function buildSandboxPrompt(networkMode: "none" | "bridge"): string {
+  const network =
+    networkMode === "bridge"
+      ? "There is outbound network access, so you can install packages and make network requests when the task needs it (`pip install --break-system-packages <pkg>` or `npm install -g <pkg>`)."
+      : "There is no network access, so work with what's already installed — installing packages or reaching the internet will fail.";
+  return `You have a private Linux sandbox for running code and producing files. The user drops files in and gets finished files back — that round trip is the core of what you do.
 
 ## Environment
 
-A full Ubuntu workstation with Python, Node.js, Java, a Bash shell and a LaTeX toolchain, plus the usual libraries and command-line tools for working with documents, spreadsheets, PDFs, images, media, and data. There is **no network by default**, so reach first for what's already installed; if something is genuinely missing, install it (\`pip install --break-system-packages <pkg>\` or \`npm install -g <pkg>\`) and carry on.
+A full Ubuntu workstation with Python, Node.js, Java, a Bash shell and a LaTeX toolchain, plus the usual libraries and command-line tools for working with documents, spreadsheets, PDFs, images, media, and data. ${network}
 
 ### Tool calls
 - \`execute_bash\` — shell commands, pipelines, package installation
@@ -64,3 +75,4 @@ A full Ubuntu workstation with Python, Node.js, Java, a Bash shell and a LaTeX t
 7. **Content before format.** When a deliverable calls for a specific format — a Word doc, a deck, a spreadsheet — get the substance right first: gather the facts, numbers, and structure. Only then reach for the matching skill to lay it out. Don't let document mechanics drive what goes into the document.
 
 When you produce something visual — a document, deck, chart, or image — aim for clean, professional output. Follow any specific style the user asks for or that an active skill provides; absent that, use your own good judgement and keep it simple and uncluttered.`;
+}
