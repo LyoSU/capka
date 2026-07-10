@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 import {
   ArrowDownUp, ChevronLeft, Cloud, Check, Download, Folder, LayoutGrid, List, Loader2, RefreshCw, Upload, X,
@@ -101,16 +101,27 @@ export function WorkspacePanel({
 
   // `silent` refreshes (live updates while the agent works) don't toggle the
   // spinner or wipe the list on a transient blip — they just swap in new entries.
+  const inFlight = useRef<AbortController | null>(null);
   const fetchFiles = useCallback(async (silent = false) => {
+    // Single-flight: a silent poll never stacks on an in-flight request (a slow
+    // list under the 4s poll would otherwise pile up and race). A user-driven
+    // refresh (folder change) instead aborts the stale request and supersedes it.
+    if (silent && inFlight.current) return;
+    inFlight.current?.abort();
+    const ac = new AbortController();
+    inFlight.current = ac;
     if (!silent) setLoading(true);
     try {
-      const res = await fetch(`/api/sandbox/files?${new URLSearchParams({ chatId, path })}`);
+      const res = await fetch(`/api/sandbox/files?${new URLSearchParams({ chatId, path })}`, { signal: ac.signal });
       const data = await res.json();
+      if (ac.signal.aborted) return; // superseded — don't clobber with stale entries
       setError(data.error ?? null);
       setEntries(data.entries ?? []);
-    } catch {
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") return;
       if (!silent) setError(t("loadError"));
     } finally {
+      if (inFlight.current === ac) inFlight.current = null;
       if (!silent) setLoading(false);
     }
   }, [chatId, path, t]);
@@ -130,6 +141,10 @@ export function WorkspacePanel({
     const id = setInterval(() => fetchFiles(true), 4000);
     return () => clearInterval(id);
   }, [open, running, revision, fetchFiles]);
+
+  // Abort any in-flight listing on unmount so a late response can't setState on a
+  // gone component (and the request doesn't linger).
+  useEffect(() => () => inFlight.current?.abort(), []);
 
   // Folders always come first (sorted by name); files obey the chosen sort. When
   // grouping is on, files are then split into Images / Documents / Other, each
