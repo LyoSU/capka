@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { pool } from "../db";
-import { provisionTelegramUser } from "../auth";
+import { provisionTelegramUser, unlinkTelegramIdentity } from "../auth";
 import { getSetting, setSetting } from "../settings";
 
 // Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run telegram-provision.integration
@@ -120,6 +120,44 @@ run("provisionTelegramUser", () => {
     expect(Number(rows[0].n)).toBe(1);
     expect(await accountCount(id)).toBe(1);
     expect(await linkCount(id)).toBe(1);
+  });
+
+  it("unlink revokes BOTH the delivery link and the login identity (account row)", async () => {
+    await setSetting("registration_mode", "open");
+    const id = IDS[0];
+    const provisioned = await provisionTelegramUser(id, { name: "Alice", username: "alice" });
+    if ("refused" in provisioned) throw new Error("unexpected refusal");
+    expect(await accountCount(id)).toBe(1);
+    expect(await linkCount(id)).toBe(1);
+
+    await unlinkTelegramIdentity(provisioned.userId);
+
+    // The Telegram login identity must be gone too — not just the delivery link —
+    // so the old Telegram account can no longer sign in as this user.
+    expect(await accountCount(id)).toBe(0);
+    expect(await linkCount(id)).toBe(0);
+  });
+
+  it("unlink leaves OTHER auth methods (email account row) intact", async () => {
+    await setSetting("registration_mode", "open");
+    const id = IDS[1];
+    const provisioned = await provisionTelegramUser(id, { name: "Bob", username: "bob" });
+    if ("refused" in provisioned) throw new Error("unexpected refusal");
+    // Give the user a second, non-Telegram credential (email/password).
+    await pool.query(
+      `INSERT INTO account (id, account_id, provider_id, user_id, password) VALUES ($1, $2, 'credential', $3, 'hash')`,
+      [`cred-${id}`, provisioned.userId, provisioned.userId],
+    );
+
+    await unlinkTelegramIdentity(provisioned.userId);
+
+    expect(await accountCount(id)).toBe(0);
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM account WHERE user_id = $1 AND provider_id = 'credential'`,
+      [provisioned.userId],
+    );
+    expect(Number(rows[0].n)).toBe(1);
+    await pool.query(`DELETE FROM account WHERE id = $1`, [`cred-${id}`]);
   });
 
   it("reattaches an orphaned link to the existing account without duplicating the user", async () => {

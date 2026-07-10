@@ -219,6 +219,26 @@ async function upsertTelegramLink(userId: string, telegramUserId: number, userna
     .where(and(eq(schema.telegramLinks.userId, userId), ne(schema.telegramLinks.telegramUserId, telegramUserId)));
 }
 
+/**
+ * Fully disconnect a user's Telegram: the delivery link, any pending link code,
+ * AND the better-auth `account` mapping that lets that Telegram id sign in as the
+ * user. Deleting only the delivery link (the old behaviour) left the login
+ * identity behind, so the previously-linked Telegram account could still
+ * authenticate as the user — and switching Telegram A→B could strand A's mapping.
+ * All three drop together in one transaction so an unlink can't half-apply.
+ * A re-link (via the bot or web OIDC) re-provisions the mapping, so this is not
+ * a lockout even for a Telegram-only account.
+ */
+export async function unlinkTelegramIdentity(userId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.delete(schema.telegramLinks).where(eq(schema.telegramLinks.userId, userId));
+    await tx.delete(schema.linkCodes).where(eq(schema.linkCodes.userId, userId));
+    await tx
+      .delete(schema.accounts)
+      .where(and(eq(schema.accounts.providerId, TELEGRAM_PROVIDER_ID), eq(schema.accounts.userId, userId)));
+  });
+}
+
 // Namespace for the per-Telegram-id advisory lock that serializes provisioning
 // (arbitrary stable 32-bit key; the id is the lock's second arg).
 const TG_PROVISION_LOCK = 0x74677576; // 'tguv'

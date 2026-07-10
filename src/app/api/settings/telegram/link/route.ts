@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { requireRole, apiHandler } from "@/lib/auth";
+import { requireRole, apiHandler, unlinkTelegramIdentity } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { linkCodes, telegramLinks } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
@@ -44,10 +44,10 @@ export const GET = apiHandler(async () => {
 });
 
 // Unlink the caller's Telegram account so they can connect a different one.
-// Also clears any pending link code so a stale code can't re-bind the old one.
+// Revokes the delivery link, any pending link code, AND the login identity
+// (see unlinkTelegramIdentity) so the old Telegram account can't still sign in.
 export const DELETE = apiHandler(async () => {
   const { userId } = await requireRole("admin", "user");
-  await db.delete(telegramLinks).where(eq(telegramLinks.userId, userId));
-  await db.delete(linkCodes).where(eq(linkCodes.userId, userId));
+  await unlinkTelegramIdentity(userId);
   return Response.json({ ok: true });
 });
