@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-10
+
 ### Changed
 - The model picker no longer lays out and paints every catalog row on each keystroke: off-screen rows use `content-visibility: auto`, so filtering a large provider catalog (e.g. OpenRouter) stays smooth. Behaviour, keyboard navigation, and screen-reader access are unchanged.
 - Chat messages, edits, and streaming answer blocks now settle in with a short opacity fade instead of the 500ms blur-rise, so the busiest surface reads calm and does no per-mount GPU blur work; the cinematic entrance stays on rare surfaces (onboarding, auth, empty states).
