@@ -366,6 +366,12 @@ export const attachedFolders = pgTable("attached_folders", {
   hostPath: text("host_path"),
   readOnly: boolean("read_only").notNull().default(true),
   state: jsonb("state"),
+  // Server-side sync lease so two tabs / project members can't run destructive
+  // file operations against the same folder at once (the state CAS only protects
+  // the merge-ancestor row, not the files already touched). `{ token, expiresAt }`;
+  // NULL or expired = free. Held for one sync, cleared on completion, and
+  // self-expiring so a crashed client never locks the folder permanently.
+  syncLease: jsonb("sync_lease").$type<{ token: string; expiresAt: string } | null>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

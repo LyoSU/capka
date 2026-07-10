@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - Unlinking Telegram now also revokes the Telegram login identity (the better-auth `account` mapping), not just the delivery link — so a previously-linked Telegram account can no longer sign in as the user after an unlink or a Telegram A→B switch.
 
 ### Fixed
+- PC folder sync now takes a server-side lease before touching files, so two browser tabs or project members can't run destructive sync operations against the same folder at once (the manifest CAS only guarded the ancestor row, not the files). The lease self-expires, so a client that dies mid-sync never locks the folder.
 - `view_file` on HTML no longer fails with a "Trace/breakpoint trap" — the headless-Chromium screenshot now runs with `--headless=new --disable-dev-shm-usage`, so it stops exhausting the sandbox's tiny `/dev/shm` and crashing before the render lands.
 - A finished turn whose task reached a terminal (failed/cancelled) status but whose assistant message was left stuck at "running" (a lost message write on the failure path) is now healed by the zombie reconciler, so it no longer revives a stuck spinner on every reload. Completed answers are never rewritten.
 - Automations: pausing (or deleting) an automation while its run is in flight is no longer undone — the scheduler's error-recovery re-arms a failed run only when the row is untouched, so a manual pause during a fire is respected instead of resurrected.

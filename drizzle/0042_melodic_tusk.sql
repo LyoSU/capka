@@ -1,0 +1,1 @@
+ALTER TABLE "attached_folders" ADD COLUMN "sync_lease" jsonb;

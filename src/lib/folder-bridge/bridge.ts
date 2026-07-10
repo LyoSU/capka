@@ -280,6 +280,23 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
   const handle = await loadHandle(folder.id);
   if (!handle) throw new Error("Folder not connected.");
 
+  // Take the server-side sync lease BEFORE touching any file, so a second tab or
+  // project member can't run destructive operations against this folder at the
+  // same time (the state CAS only guards the manifest row, not the files). If it's
+  // already held, skip quietly — the in-flight sync covers this one (sync is
+  // idempotent). The lease self-expires, and we release it in `finally`.
+  const leaseRes = await fetch(`/api/folders/${folder.id}/lease`, { method: "POST" }).catch(() => null);
+  if (leaseRes && leaseRes.status === 409) return { synced: 0, conflicts: 0, skipped: 0 };
+  const leaseToken = leaseRes && leaseRes.ok ? ((await leaseRes.json()) as { token?: string }).token ?? null : null;
+  try {
+    return await runSync(handle);
+  } finally {
+    if (leaseToken) {
+      await fetch(`/api/folders/${folder.id}/lease?token=${encodeURIComponent(leaseToken)}`, { method: "DELETE" }).catch(() => {});
+    }
+  }
+
+  async function runSync(handle: DirHandle): Promise<{ synced: number; conflicts: number; skipped: number }> {
   // Load the merge ancestor FRESH from the shared row (source of truth across
   // tabs/members) plus its revision for the optimistic write below. A missing/empty
   // base makes this sync a safe union (no data loss, just forgets deletes once).
@@ -340,4 +357,5 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
     conflicts: plan.conflicts.length,
     skipped,
   };
+  }
 }
