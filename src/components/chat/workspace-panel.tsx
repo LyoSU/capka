@@ -381,7 +381,7 @@ export function WorkspacePanel({
           </div>
         </label>
         {canDownloadAll(folders.length, fileCount) && (
-          <button onClick={downloadAll} title={t("downloadAll")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+          <button onClick={downloadAll} title={t("downloadAll")} aria-label={t("downloadAll")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
             <Download className="h-3.5 w-3.5" />
           </button>
         )}

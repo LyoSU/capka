@@ -140,9 +140,16 @@ export default function AuthenticationPage() {
               <Label>{t("telegram.redirectUri")}</Label>
               <div className="flex items-center gap-2">
                 <code className="flex-1 truncate rounded-md bg-muted px-3 py-2 text-xs font-mono">{redirectUri}</code>
-                <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={copyRedirect}>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={copyRedirect}
+                  aria-label={copied ? t("copied") : t("copyRedirect")}
+                >
                   {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </Button>
+                <span role="status" aria-live="polite" className="sr-only">{copied ? t("copied") : ""}</span>
               </div>
               <p className="text-xs text-muted-foreground">{t("telegram.redirectHint")}</p>
             </div>

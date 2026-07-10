@@ -1123,6 +1123,7 @@
       "saved": "Saved",
       "saveFailed": "Couldn't save. Please try again.",
       "copied": "Copied",
+      "copyRedirect": "Copy redirect URI",
       "telegram": {
         "title": "Login with Telegram",
         "desc": "Let people sign in with one tap using their Telegram account.",
