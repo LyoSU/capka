@@ -29,6 +29,9 @@ run("runAgentTask: model/provider gone (prepareRun throws before insert)", () =>
     await pool.query(`INSERT INTO chats (id, user_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [C, U]);
     await pool.query(`DELETE FROM tasks WHERE user_id=$1`, [U]);
     await pool.query(`DELETE FROM messages WHERE chat_id=$1`, [C]);
+    // The user turn the API persists before enqueue: the runner parents its reply
+    // to this row (messages.parent_id → messages.id FK), so it must exist first.
+    await pool.query(`INSERT INTO messages (id, chat_id, role, content) VALUES ('mf1',$1,'user','hi')`, [C]);
   });
   afterAll(async () => {
     await pool.query(`DELETE FROM messages WHERE chat_id=$1`, [C]);
