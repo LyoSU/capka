@@ -1,4 +1,4 @@
-import { apiHandler, requireSession, requireActive } from "@/lib/auth";
+import { apiHandler, requireSession, requireWriter } from "@/lib/auth";
 import { getInstallOwner, listInstalledPlugins, setPluginEnabled, setPluginMutedForUser } from "@/lib/marketplace/service";
 import { uninstallPlugin, upgradePlugin } from "@/lib/marketplace/install";
 import { audit } from "@/lib/governance/audit";
@@ -26,7 +26,7 @@ export const GET = apiHandler(async () => {
  *  - `{ enabled }` → global enable/disable of the whole plugin. Managers only
  *                    (admin for org-wide installs, the owner for a personal one). */
 export const PATCH = apiHandler(async (req: Request) => {
-  const { userId, role } = await requireSession();
+  const { userId, role } = await requireWriter();
   const { installId, enabled, muted } = await req.json();
   if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
 
@@ -48,8 +48,8 @@ export const PATCH = apiHandler(async (req: Request) => {
 
 /** Re-pull a plugin from its source (update to latest). */
 export const POST = apiHandler(async (req: Request) => {
-  // requireActive: re-pulling third-party code is install-class, like POST /install.
-  const { userId, role } = await requireActive();
+  // requireWriter: re-pulling third-party code is install-class, like POST /install.
+  const { userId, role } = await requireWriter();
   const { installId, toSha } = await req.json();
   if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
   // toSha binds the upgrade to the commit the user reviewed (see previewUpgrade).
@@ -65,7 +65,7 @@ export const POST = apiHandler(async (req: Request) => {
 });
 
 export const DELETE = apiHandler(async (req: Request) => {
-  const { userId, role } = await requireSession();
+  const { userId, role } = await requireWriter();
   const installId = new URL(req.url).searchParams.get("installId");
   if (!installId) return Response.json({ error: "installId required" }, { status: 400 });
   const inst = await canManage(installId, userId, role === "admin");

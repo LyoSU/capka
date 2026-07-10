@@ -390,6 +390,14 @@ export async function requireAdmin() {
   return requireRole("admin");
 }
 
+/** Require a write-capable, active account (admin or user — NOT viewer, NOT
+ *  pending/rejected). Use on mutations so a read-only viewer and a not-yet-approved
+ *  account can't create/modify/delete content; ownership is still checked per-route
+ *  on top of this. Reads and self-scoped preferences use requireActive instead. */
+export async function requireWriter() {
+  return requireRole("admin", "user");
+}
+
 /** Wrap a route handler — catches AppError → safe response, unknown errors → generic 500. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function apiHandler<T extends (...args: any[]) => Promise<Response>>(handler: T): T {

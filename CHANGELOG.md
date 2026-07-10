@@ -7,6 +7,7 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Security
+- Content mutations (adding/toggling/deleting skills, enabling/disabling/uninstalling/upgrading plugins, revoking a connector's OAuth tokens) now require a write-capable, active account: a read-only `viewer` and a `pending`/`rejected` account are refused instead of relying on session presence alone. Chat branch switching still requires an active account (blocks pending).
 - Unlinking Telegram now also revokes the Telegram login identity (the better-auth `account` mapping), not just the delivery link — so a previously-linked Telegram account can no longer sign in as the user after an unlink or a Telegram A→B switch.
 
 ### Fixed

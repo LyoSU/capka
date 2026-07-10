@@ -1,6 +1,6 @@
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSession, requireRole, apiHandler } from "@/lib/auth";
+import { requireSession, requireActive, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages, projects } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
@@ -195,7 +195,9 @@ export const GET = apiHandler(async (req: Request) => {
 // PATCH /api/chat — flip the visible branch to the prev/next version of a
 // message (the "‹ i/N ›" switcher), then descend to that branch's leaf.
 export const PATCH = apiHandler(async (req: Request) => {
-  const { userId } = await requireSession();
+  // requireActive: block pending/rejected from mutating chat state (branch switch);
+  // navigation of one's own chat stays open to viewers.
+  const { userId } = await requireActive();
   const { chatId, messageId, direction } = (await req.json()) as {
     chatId?: string;
     messageId?: string;
