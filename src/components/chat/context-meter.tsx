@@ -52,7 +52,7 @@ export function ContextMeter({ used, window: limit }: { used: number; window: nu
             strokeDasharray={circ}
             strokeDashoffset={offset}
             transform="rotate(-90 8 8)"
-            className={`${color} transition-all`}
+            className={`${color} transition-[stroke-dashoffset,stroke] duration-300 ease-out`}
           />
         </svg>
       </PopoverTrigger>

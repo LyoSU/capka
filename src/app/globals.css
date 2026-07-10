@@ -72,6 +72,11 @@
 
 :root {
   color-scheme: light;
+  /* One strong ease-out for every entrance/exit in the app. A single token, not
+     a curve copy-pasted per keyframe — so the app's motion stays in one voice
+     and there's one place to retune it. Deliberately punchier than CSS's built-in
+     `ease-out`, which is too weak to read as intentional. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --background: oklch(0.97 0.004 75);
   --foreground: oklch(0.18 0.005 285);
   --card: oklch(0.995 0.002 75);
@@ -201,8 +206,8 @@
   from { opacity: 0; filter: blur(18px); transform: translateY(18px) scale(0.965); }
   to   { opacity: 1; transform: none; }
 }
-.animate-blur-rise { animation: blur-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-card-morph { animation: card-morph 0.65s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-blur-rise { animation: blur-rise 0.5s var(--ease-out) both; }
+.animate-card-morph { animation: card-morph 0.65s var(--ease-out) both; }
 
 /* Title swap: when a new chat's placeholder is replaced by its generated title,
    the new text resolves in with a soft de-blur. No vertical travel — the row is
@@ -211,7 +216,7 @@
   from { opacity: 0; filter: blur(5px); }
   to   { opacity: 1; filter: blur(0); }
 }
-.animate-title-swap { animation: title-swap 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-title-swap { animation: title-swap 0.45s var(--ease-out) both; }
 
 /* A chat row that arrives AFTER first paint — you just created it, or it
    streamed in over SSE — eases down into the list with a soft de-blur. Lands
@@ -221,21 +226,20 @@
   from { opacity: 0; filter: blur(6px); transform: translateY(-6px); }
   to   { opacity: 1; filter: blur(0); transform: none; }
 }
-.animate-chat-row-in { animation: chat-row-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-chat-row-in { animation: chat-row-in 0.45s var(--ease-out) both; }
 
-/* Step rail: each thought/action row decelerates in as it streams, and its
-   node springs in with a touch of overshoot — so a sequence of work reads as a
-   timeline assembling itself rather than text popping into place. */
+/* Step rail: each thought/action row resolves in as it streams. A streaming
+   turn emits these DOZENS of times, so per the frequency rule this is opacity
+   only — no blur, translate, or scale. Movement/scale/blur repeated that often
+   reads as noise and does per-frame compositing work on the hottest screen in
+   the app; a plain short fade keeps the timeline calm and cheap. Both the row
+   and its node share the one fade. */
 @keyframes step-in {
-  from { opacity: 0; filter: blur(8px); transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-@keyframes step-badge-in {
-  from { transform: scale(0.45); }
-  to   { transform: scale(1); }
-}
-.animate-step-in { animation: step-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-step-badge-in { animation: step-badge-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.animate-step-in { animation: step-in 0.18s var(--ease-out) both; }
+.animate-step-badge-in { animation: step-in 0.18s var(--ease-out) both; }
 
 /* Claw reveal: each tapered blade wipes in from its top to its tip via
    clip-path, staggered left to right, then settles with one delicate flash.
@@ -257,7 +261,7 @@
   transform-box: fill-box;
   clip-path: inset(0 0 100% 0);
   animation:
-    claw-reveal 0.9s cubic-bezier(0.16, 1, 0.3, 1) both,
+    claw-reveal 0.9s var(--ease-out) both,
     claw-flash 1.4s ease both;
 }
 .claw-reveal path:nth-child(1) { animation-delay: 0.05s; }
@@ -269,7 +273,7 @@
   from { opacity: 0; transform: translateY(8px); filter: blur(6px); }
   to   { opacity: 1; transform: none; filter: none; }
 }
-.animate-claw-greet { animation: claw-greet 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.7s both; }
+.animate-claw-greet { animation: claw-greet 0.6s var(--ease-out) 0.7s both; }
 
 /* Quiet page entrance: a short opacity+rise for route content (settings,
    projects). Fast (≤300ms) per product-motion guidance — life, not a sequence
@@ -278,7 +282,7 @@
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
 }
-.animate-fade-in { animation: fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-fade-in { animation: fade-in 0.3s var(--ease-out) both; }
 
 /* Skeleton pulse: Tailwind's default `animate-pulse` runs a slow 2s ease-in-out,
    which reads as sluggish for a loading state. This is the same opacity pulse at
@@ -394,7 +398,14 @@
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    /* Zero delays too, not just durations: a delayed entrance with fill-mode
+       `both` (e.g. claw-greet's 700ms, or a 350ms stagger step) otherwise holds
+       its invisible `from` state for the full delay — a reduced-motion user
+       stares at a blank spot, then it snaps in. Collapsing the delay makes the
+       final state appear at once. */
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
   /* View-transition snapshots are pseudo-elements outside the * reset above, so
@@ -404,6 +415,24 @@
   ::view-transition-group(*) {
     animation-duration: 0s !important;
     animation-delay: 0s !important;
+  }
+}
+
+/* Some people find translucent, blurred surfaces harder to read. Honour the two
+   OS signals for that: drop the backdrop blur everywhere (it's exactly what
+   these settings ask to remove), and make the one near-transparent scrim — the
+   sheet overlay (bg-black/10) — solid enough to still separate the drawer from
+   the page behind it. The other translucent chrome (dialog scrims at 50%, sticky
+   headers at 80–95%) stays legible once the blur is gone. apple-design §14. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  *,
+  *::before,
+  *::after {
+    -webkit-backdrop-filter: none !important;
+            backdrop-filter: none !important;
+  }
+  [data-slot="sheet-overlay"] {
+    background-color: rgb(0 0 0 / 0.45) !important;
   }
 }
 /* App-wide scrollbars — replace the default chunky OS/Chrome bars with a calm,

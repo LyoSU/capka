@@ -865,7 +865,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                 size="icon"
                 tabIndex={showScrollDown ? 0 : -1}
                 aria-hidden={!showScrollDown}
-                className={`h-9 w-9 rounded-full shadow-md transition-transform hover:scale-105 ${
+                className={`h-9 w-9 rounded-full shadow-md transition-transform [@media(hover:hover)]:hover:scale-105 ${
                   showScrollDown ? "pointer-events-auto" : "pointer-events-none"
                 }`}
                 onClick={scrollToLatest}

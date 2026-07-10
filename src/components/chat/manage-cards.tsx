@@ -259,13 +259,14 @@ function ConfirmCard({ o, t, onSend, chatId }: { o: ManageOutput; t: T; onSend?:
   const confirm = async () => {
     if (!o.pendingId || phase !== "idle") return;
     setPhase("applying");
-    haptic("success");
+    haptic("tap"); // press acknowledgement — NOT success; the server hasn't applied it yet
     try {
       const r = await consumePending(o.pendingId);
-      if (r.status === "ok") { setFollowUp(r.data?.action ?? r.action ?? null); setPhase("done"); }
+      if (r.status === "ok") { haptic("success"); setFollowUp(r.data?.action ?? r.action ?? null); setPhase("done"); }
       else if (r.code === "confirm_expired") setPhase("expired");
-      else { setErrText(r.summary || t("applyError")); setPhase("error"); }
+      else { haptic("error"); setErrText(r.summary || t("applyError")); setPhase("error"); }
     } catch {
+      haptic("error");
       setErrText(t("applyError"));
       setPhase("error");
     }
@@ -394,15 +395,20 @@ export function ApprovalCard({
   const decide = async (approved: boolean) => {
     if (submitting) return;
     setSubmitting(true);
-    haptic(approved ? "success" : "tap");
+    haptic("tap"); // press acknowledgement — success only once the server accepts, below
     try {
-      await fetch("/api/manage/approve", {
+      const r = await fetch("/api/manage/approve", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageId, toolCallId, approved }),
       });
-      // The resume turn now runs; its realtime updates (and the finish reload) flip
-      // this part to its resolved state, which re-renders the card. No local phase.
+      // Confirm the decision landed before any success feedback — never fire it
+      // optimistically ahead of the response. The resume turn now runs; its
+      // realtime updates (and the finish reload) flip this part to its resolved
+      // state, which re-renders the card. No local phase.
+      if (!r.ok) haptic("error");
+      else if (approved) haptic("success");
     } catch {
+      haptic("error");
       setSubmitting(false); // let the user retry the click
     }
   };
