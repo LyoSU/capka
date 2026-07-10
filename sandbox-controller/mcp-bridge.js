@@ -40,6 +40,23 @@ export function createMcpBridge(docker, { user, rpcTimeoutMs = 60000 } = {}) {
     return argv.map((a) => `'${String(a).replace(/'/g, `'\\''`)}'`).join(" ");
   }
 
+  // The one teardown path — idempotent. Rejecting a pending call runs its wrapper
+  // (see rpc), which clears the per-call timeout, so tearing down here immediately
+  // frees the pending promises and their timers instead of leaving them to a
+  // possibly-delayed stream `close` (or to the 60s rpc timeout if close never
+  // comes). Both the stream error/close handlers AND stopAll route through this.
+  function closeEntry(key, err) {
+    const entry = live.get(key);
+    if (!entry) return; // already torn down
+    entry.closed = true;
+    const detail = entry.stderr.trim();
+    const e = detail ? new Error(`${(err?.message ?? "mcp server closed")}: ${detail.slice(-500)}`) : (err ?? new Error("mcp server closed"));
+    for (const p of entry.pending.values()) p.reject(e);
+    entry.pending.clear();
+    try { entry.stream.end(); } catch { /* already gone */ }
+    live.delete(key);
+  }
+
   async function start(handle, name, { command, args = [], env = {} }) {
     const key = `${handle}:${name}`;
     const cur = live.get(key);
@@ -97,16 +114,8 @@ export function createMcpBridge(docker, { user, rpcTimeoutMs = 60000 } = {}) {
     stderr.on("data", (chunk) => {
       entry.stderr = (entry.stderr + chunk.toString("utf8")).slice(-4000);
     });
-    const fail = (err) => {
-      entry.closed = true;
-      const detail = entry.stderr.trim();
-      const e = detail ? new Error(`${err.message}: ${detail.slice(-500)}`) : err;
-      for (const p of entry.pending.values()) p.reject(e);
-      entry.pending.clear();
-      live.delete(key);
-    };
-    stream.on("close", () => fail(new Error("mcp server exited")));
-    stream.on("error", (e) => fail(e instanceof Error ? e : new Error("mcp stream error")));
+    stream.on("close", () => closeEntry(key, new Error("mcp server exited")));
+    stream.on("error", (e) => closeEntry(key, e instanceof Error ? e : new Error("mcp stream error")));
   }
 
   /** Send one JSON-RPC message. Returns the matching response, or null for a
@@ -128,13 +137,12 @@ export function createMcpBridge(docker, { user, rpcTimeoutMs = 60000 } = {}) {
     });
   }
 
-  /** Tear down every MCP process for a container (called on session destroy). */
+  /** Tear down every MCP process for a container (called on session destroy).
+   *  Routes through closeEntry so pending RPCs reject and their timers clear now,
+   *  rather than lingering until the stream's close event or the rpc timeout. */
   function stopAll(handle) {
-    for (const [key, entry] of live) {
-      if (key.startsWith(`${handle}:`)) {
-        try { entry.stream.end(); } catch { /* already gone */ }
-        live.delete(key);
-      }
+    for (const key of [...live.keys()]) {
+      if (key.startsWith(`${handle}:`)) closeEntry(key, new Error("mcp session destroyed"));
     }
   }
 

@@ -57,20 +57,46 @@ function intEnv(name, def) {
   return n;
 }
 
+// Same fail-closed contract as intEnv, but for values that must be strictly
+// positive (limits, timeouts, sizes, counts) — a typo'd `parseInt("30s")` used to
+// yield NaN and silently break the comparison it fed. Unset → default.
+function posIntEnv(name, def) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return def;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.error(`[sandbox-controller] FATAL: ${name}="${raw}" is not a positive integer.`);
+    process.exit(1);
+  }
+  return n;
+}
+
+// Positive float (e.g. CPU count). Same fail-closed contract.
+function posFloatEnv(name, def) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.error(`[sandbox-controller] FATAL: ${name}="${raw}" is not a positive number.`);
+    process.exit(1);
+  }
+  return n;
+}
+
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "capka-sandbox";
-const TMP_MB = parseInt(process.env.SANDBOX_TMP_MB || "64");
-const MCP_TMP_MB = parseInt(process.env.SANDBOX_MCP_TMP_MB || "256");
-const MEMORY_LIMIT = parseInt(process.env.SANDBOX_MEMORY_MB || "512") * 1024 * 1024;
-const CPU_LIMIT = parseFloat(process.env.SANDBOX_CPUS || "1.0") * 1e9;
-const EXEC_TIMEOUT = parseInt(process.env.SANDBOX_EXEC_TIMEOUT_MS || "30000");
-const IDLE_TTL = parseInt(process.env.SANDBOX_IDLE_TTL_MS || "900000"); // 15 min — stop idle CONTAINER (files stay)
-const WORKSPACE_TTL_MS = parseInt(process.env.WORKSPACE_TTL_MS || "2592000000"); // 30d — delete a workspace (row + disk) unused this long
+const TMP_MB = posIntEnv("SANDBOX_TMP_MB", 64);
+const MCP_TMP_MB = posIntEnv("SANDBOX_MCP_TMP_MB", 256);
+const MEMORY_LIMIT = posIntEnv("SANDBOX_MEMORY_MB", 512) * 1024 * 1024;
+const CPU_LIMIT = posFloatEnv("SANDBOX_CPUS", 1.0) * 1e9;
+const EXEC_TIMEOUT = posIntEnv("SANDBOX_EXEC_TIMEOUT_MS", 30000);
+const IDLE_TTL = posIntEnv("SANDBOX_IDLE_TTL_MS", 900000); // 15 min — stop idle CONTAINER (files stay)
+const WORKSPACE_TTL_MS = posIntEnv("WORKSPACE_TTL_MS", 2592000000); // 30d — delete a workspace (row + disk) unused this long
 const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 // Optional hard perimeter for host folder mounts: when set (`:`-separated roots),
 // only paths under one of these may be mounted. Unset ⇒ any path passing the
 // denylist is allowed, with the in-chat admin confirm as the final gate.
 const MOUNT_ALLOW_ROOTS = (process.env.SANDBOX_MOUNT_ALLOW || "").split(":").filter(Boolean);
-const MAX_SESSIONS_PER_USER = parseInt(process.env.MAX_SESSIONS_PER_USER || "5");
+const MAX_SESSIONS_PER_USER = posIntEnv("MAX_SESSIONS_PER_USER", 5);
 const MAX_WORKSPACE_MB = intEnv("MAX_WORKSPACE_MB", 500);
 // Hard per-file size cap (RLIMIT_FSIZE), kernel-enforced. Defaults to the whole
 // workspace budget: no single file may exceed the total quota anyway, and this
@@ -79,22 +105,22 @@ const MAX_WORKSPACE_MB = intEnv("MAX_WORKSPACE_MB", 500);
 const MAX_FILE_MB = intEnv("MAX_FILE_MB", MAX_WORKSPACE_MB);
 // How long a measured workspace size is trusted before re-walking the tree. Keeps
 // the expensive du off the hot exec path and coalesces command bursts.
-const QUOTA_CACHE_TTL_MS = parseInt(process.env.QUOTA_CACHE_TTL_MS || "5000");
-const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB || "100");
-const SANDBOX_UID = parseInt(process.env.SANDBOX_UID || "1000");
-const SANDBOX_GID = parseInt(process.env.SANDBOX_GID || "1000");
-const GC_GRACE_MS = parseInt(process.env.GC_GRACE_MS || "3600000"); // 1h
-const FLUSH_INTERVAL_MS = parseInt(process.env.FLUSH_INTERVAL_MS || "60000");
+const QUOTA_CACHE_TTL_MS = intEnv("QUOTA_CACHE_TTL_MS", 5000);
+const MAX_UPLOAD_MB = posIntEnv("MAX_UPLOAD_MB", 100);
+const SANDBOX_UID = intEnv("SANDBOX_UID", 1000);
+const SANDBOX_GID = intEnv("SANDBOX_GID", 1000);
+const GC_GRACE_MS = posIntEnv("GC_GRACE_MS", 3600000); // 1h
+const FLUSH_INTERVAL_MS = posIntEnv("FLUSH_INTERVAL_MS", 60000);
 // The over-quota breach is advisory (ops alerting only) — no need to `du` every
 // live workspace each minute. Scan on a slow cadence and warn once per crossing.
-const OVER_QUOTA_SCAN_MS = parseInt(process.env.OVER_QUOTA_SCAN_MS || "600000"); // 10min
+const OVER_QUOTA_SCAN_MS = posIntEnv("OVER_QUOTA_SCAN_MS", 600000); // 10min
 // Before warning, try to reclaim space from regenerable deps (node_modules,
 // .venv, __pycache__, …) in workspaces that are over quota AND have sat idle this
 // long with their container stopped — safe because nothing's using the deps and
 // they reinstall on the next run. Only over-quota workspaces (which can't run
 // until freed anyway) ever pay that reinstall. The 30d whole-workspace reap is
 // the harder backstop; this is the gentler, files-preserving step.
-const REGEN_REAP_IDLE_MS = parseInt(process.env.REGEN_REAP_IDLE_MS || "86400000"); // 1d
+const REGEN_REAP_IDLE_MS = posIntEnv("REGEN_REAP_IDLE_MS", 86400000); // 1d
 // Deployment-level egress kill-switch. The platform resolves a per-run mode
 // (org default + per-project "bridge"), but a deployment that never sets
 // SANDBOX_ALLOW_NETWORK=true gets NO network for any sandbox, regardless of what
@@ -120,8 +146,8 @@ const store = new PostgresSessionStore({ pool });
 // platform. They run under a SEPARATE uid from the agent (1000) so agent code
 // can't read an MCP server's secret env via /proc/<pid>/environ. The `mcp` user
 // (1001) is baked into the sandbox image.
-const MCP_UID = parseInt(process.env.SANDBOX_MCP_UID || "1001");
-const MCP_GID = parseInt(process.env.SANDBOX_MCP_GID || "1001");
+const MCP_UID = intEnv("SANDBOX_MCP_UID", 1001);
+const MCP_GID = intEnv("SANDBOX_MCP_GID", 1001);
 // The isolation above only holds if the MCP uid is non-root AND distinct from the
 // agent's uid. Root would let an MCP server escape the uid boundary; the same uid
 // as the agent would let agent code read the server's secret env. Refuse to boot
@@ -697,10 +723,25 @@ async function boot() {
     .then(() => log("prewarm.done", {}))
     .catch((e) => log("prewarm.gaveup", { err: e.message, hint: "image not prefetched; first session pulls it on demand" }, "warn"));
 
-  setInterval(idleSweep, 60_000);
-  setInterval(flushAndGc, FLUSH_INTERVAL_MS);
+  // Single-flight each periodic job: if a run is still going when the next tick
+  // fires, skip it. flushAndGc and overQuotaScan do expensive du/tree walks over
+  // every workspace, so under disk pressure a run can outlast its interval —
+  // overlapping ticks would pile contending walks on top of each other. Also
+  // catches a job's own throw so a bad tick can't crash the process.
+  const periodic = (fn, everyMs, label) => {
+    let running = false;
+    setInterval(async () => {
+      if (running) return log("maintenance.skip", { job: label }, "warn");
+      running = true;
+      try { await fn(); }
+      catch (e) { log("maintenance.error", { job: label, err: e.message }, "warn"); }
+      finally { running = false; }
+    }, everyMs);
+  };
+  periodic(idleSweep, 60_000, "idleSweep");
+  periodic(flushAndGc, FLUSH_INTERVAL_MS, "flushAndGc");
   void overQuotaScan(); // one breach report on boot, then on the slow cadence
-  setInterval(overQuotaScan, OVER_QUOTA_SCAN_MS);
+  periodic(overQuotaScan, OVER_QUOTA_SCAN_MS, "overQuotaScan");
 }
 
 // Test seam: with CONTROLLER_NO_BOOT set, skip the Docker-dependent boot so the
