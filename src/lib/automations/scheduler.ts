@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { automations } from "@/lib/db/schema";
 import { nextOccurrenceAfter, type AutomationTrigger } from "./schedule";
@@ -15,7 +15,12 @@ import { log } from "@/lib/log";
  */
 export async function schedulerTick(now: Date = new Date()): Promise<void> {
   const client = await pool.connect();
-  const claimed: AutomationRow[] = [];
+  // Each claimed row is tagged with the exact updated_at this tick stamped on it,
+  // so the error-recovery below can tell "nobody touched it" from "the user paused
+  // or deleted it mid-fire" via a CAS on updated_at (a JS-precision timestamp we
+  // control, not now(), so it round-trips exactly for the compare).
+  const claimed: Array<{ row: AutomationRow; tickTs: Date }> = [];
+  const tickTs = new Date();
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
@@ -37,16 +42,19 @@ export async function schedulerTick(now: Date = new Date()): Promise<void> {
         log.error("automation trigger unparseable — disabling", { automationId: raw.id, err: String(e) });
       }
       await client.query(
-        `UPDATE automations SET next_run_at = $2, enabled = $3, updated_at = now() WHERE id = $1`,
-        [raw.id, next, next !== null], // once-triggers naturally finish here
+        `UPDATE automations SET next_run_at = $2, enabled = $3, updated_at = $4 WHERE id = $1`,
+        [raw.id, next, next !== null, tickTs], // once-triggers naturally finish here
       );
       claimed.push({
-        ...raw,
-        // pg returns snake_case — map the fields fireAutomation reads:
-        userId: raw.user_id, projectId: raw.project_id, lastTaskId: raw.last_task_id,
-        lastRunAt: raw.last_run_at, nextRunAt: raw.next_run_at,
-        consecutiveFailures: raw.consecutive_failures, createdAt: raw.created_at, updatedAt: raw.updated_at,
-      } as AutomationRow);
+        row: {
+          ...raw,
+          // pg returns snake_case — map the fields fireAutomation reads:
+          userId: raw.user_id, projectId: raw.project_id, lastTaskId: raw.last_task_id,
+          lastRunAt: raw.last_run_at, nextRunAt: raw.next_run_at,
+          consecutiveFailures: raw.consecutive_failures, createdAt: raw.created_at, updatedAt: tickTs,
+        } as AutomationRow,
+        tickTs,
+      });
     }
     await client.query("COMMIT");
   } catch (e) {
@@ -65,17 +73,29 @@ export async function schedulerTick(now: Date = new Date()): Promise<void> {
   // broken automation still auto-disables after MAX_CONSECUTIVE_FAILURES instead
   // of retry-looping forever. `a.nextRunAt` is the pre-advance due time (mapped
   // from the SELECT snapshot, untouched by the UPDATE above).
-  for (const a of claimed) {
+  for (const { row: a, tickTs: ts } of claimed) {
     try {
       await fireAutomation(a);
     } catch (e) {
       log.error("automation fire failed", { automationId: a.id, err: String(e) });
-      const [row] = await db.update(automations)
-        .set({ nextRunAt: a.nextRunAt, enabled: true, consecutiveFailures: sql`${automations.consecutiveFailures} + 1`, updatedAt: new Date() })
-        .where(eq(automations.id, a.id))
-        .returning()
-        .catch(() => [] as (typeof automations.$inferSelect)[]);
-      if (row && row.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      // Re-arm for retry ONLY if nobody changed the row since this tick stamped it
+      // (updated_at still equals our tickTs). If the user paused or deleted it while
+      // the fire was in flight, its updated_at moved (the pause/delete API bumps it)
+      // — so the CAS misses and we leave their intent alone instead of resurrecting
+      // a paused automation. Raw query so the timestamp param serializes exactly the
+      // same way the tick wrote it (drizzle vs node-pg Date encoding otherwise differ
+      // and the equality would never match).
+      const { rows: upd } = await pool
+        .query<{ consecutive_failures: number }>(
+          `UPDATE automations
+              SET next_run_at = $2, enabled = true,
+                  consecutive_failures = consecutive_failures + 1, updated_at = $3
+            WHERE id = $1 AND updated_at = $4
+          RETURNING consecutive_failures`,
+          [a.id, a.nextRunAt, new Date(), ts],
+        )
+        .catch(() => ({ rows: [] as { consecutive_failures: number }[] }));
+      if (upd[0] && upd[0].consecutive_failures >= MAX_CONSECUTIVE_FAILURES) {
         await db.update(automations).set({ enabled: false, updatedAt: new Date() })
           .where(eq(automations.id, a.id)).catch(() => {});
       }

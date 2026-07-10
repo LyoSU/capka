@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { pool } from "../../db";
@@ -78,6 +78,59 @@ run("schedulerTick", () => {
     const [row] = await db.select().from(automations).where(eq(automations.id, id));
     expect(row.lastTaskId).toBeNull(); // never fired
     expect(row.enabled).toBe(true); // re-enabled for retry (not silently dropped)
+    expect(row.nextRunAt!.getTime()).toBe(due.getTime()); // due time restored
+    expect(row.consecutiveFailures).toBe(1);
+  });
+
+  it("recovery does NOT resurrect an automation the user paused during the fire", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const runs = await import("../runs");
+    const { schedulerTick } = await import("../scheduler");
+    const id = nanoid();
+    const due = new Date(Date.now() - 60_000);
+    await db.insert(automations).values({
+      id, userId: U, title: "Paused mid-fire", prompt: "go",
+      trigger: { kind: "schedule", cron: "0 9 * * 1", timezone: "Europe/Kyiv" },
+      nextRunAt: due,
+    });
+    // Simulate the user pausing the automation WHILE it fires: the fire flips
+    // enabled=false (as the pause API would) and then throws. The error-recovery
+    // must respect that pause, not blindly re-enable it.
+    const spy = vi.spyOn(runs, "fireAutomation").mockImplementation(async () => {
+      await db.update(automations).set({ enabled: false, updatedAt: new Date() }).where(eq(automations.id, id));
+      throw new Error("boom");
+    });
+    try {
+      await schedulerTick();
+    } finally {
+      spy.mockRestore();
+    }
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    expect(row.enabled).toBe(false); // pause honored, NOT resurrected by recovery
+  });
+
+  it("recovery DOES re-arm for retry when the fire throws and nobody intervened", async () => {
+    const { db } = await import("@/lib/db");
+    const { automations } = await import("@/lib/db/schema");
+    const runs = await import("../runs");
+    const { schedulerTick } = await import("../scheduler");
+    const id = nanoid();
+    const due = new Date(Date.now() - 60_000);
+    await db.insert(automations).values({
+      id, userId: U, title: "Transient failure", prompt: "go",
+      trigger: { kind: "schedule", cron: "0 9 * * 1", timezone: "Europe/Kyiv" },
+      nextRunAt: due,
+    });
+    const spy = vi.spyOn(runs, "fireAutomation").mockRejectedValue(new Error("boom"));
+    try {
+      await schedulerTick();
+    } finally {
+      spy.mockRestore();
+    }
+    const [row] = await db.select().from(automations).where(eq(automations.id, id));
+    // No user intervention → the CAS matches, so the occurrence is retried:
+    expect(row.enabled).toBe(true);
     expect(row.nextRunAt!.getTime()).toBe(due.getTime()); // due time restored
     expect(row.consecutiveFailures).toBe(1);
   });
