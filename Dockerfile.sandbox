@@ -14,6 +14,19 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
 # ---------------------------------------------------------------------------
+# 0. apt resilience (ports.ubuntu.com is flaky on arm64)
+# ---------------------------------------------------------------------------
+# The arm64 base image resolves apt to ports.ubuntu.com — a single community
+# mirror that regularly times out under load, unlike the fast amd64 mirror. A
+# bare `apt-get update` then dies with "connection timed out", and every later
+# `apt-get install` fails with "Unable to locate package". Retry each fetch and
+# cap the per-attempt timeout so a hung connection retries fast instead of
+# burning apt's ~120s default. Written to apt.conf.d so EVERY apt invocation —
+# including Playwright's internal `install --with-deps` — inherits it.
+RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+    > /etc/apt/apt.conf.d/80-retries
+
+# ---------------------------------------------------------------------------
 # 1. Base system packages
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
