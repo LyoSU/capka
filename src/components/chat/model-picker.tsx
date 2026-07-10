@@ -834,7 +834,7 @@ function ModelList({
                   data-index={globalIdx}
                   onClick={() => onSelect(model)}
                   onMouseEnter={() => onActiveIndex(globalIdx)}
-                  className={`group/row flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
+                  className={`group/row flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent [content-visibility:auto] [contain-intrinsic-size:auto_44px] ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
                 >
                   {searching ? (
                     <BrandIcon slug={model.icon} size={14} className="shrink-0 text-muted-foreground" />

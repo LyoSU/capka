@@ -92,6 +92,24 @@ widens the blast radius of any sandbox compromise. Whenever egress is on, the
 in-container firewall additionally blocks private and cloud-metadata ranges and
 refuses to start if its rules can't be verified.
 
+## Disk / workspace quota
+
+Each workspace has a byte budget (`MAX_WORKSPACE_MB`, default 500). It is
+enforced **at command boundaries**: the controller re-measures the tree and
+refuses the *next* command with `413 WORKSPACE_FULL` once it's over. A single
+command (or a detached background job) can therefore transiently overshoot the
+budget before the following command is blocked. A per-file hard cap
+(`MAX_FILE_MB`, kernel-enforced via `RLIMIT_FSIZE`) stops the one-shot disk bomb
+(`fallocate -l 100G`), but many-small-files growth within one command is only
+caught on the next check.
+
+This poll-based quota is adequate for single-operator / trusted-user
+deployments. For **multi-tenant or untrusted** workloads, back `DATA_ROOT` with
+a filesystem that enforces a real hard limit — an XFS/ext4 **project quota** or
+a **size-limited volume** per deployment — so no single workspace can exhaust
+the host disk regardless of command timing. The app-level quota then stays as
+defense-in-depth on top.
+
 ## Host folder mounts
 
 The agent can work with folders that live **outside** its workspace: a directory

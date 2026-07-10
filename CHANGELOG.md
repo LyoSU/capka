@@ -10,6 +10,10 @@ All notable changes to Capka are documented here. Format follows
 - Content mutations (adding/toggling/deleting skills, enabling/disabling/uninstalling/upgrading plugins, revoking a connector's OAuth tokens) now require a write-capable, active account: a read-only `viewer` and a `pending`/`rejected` account are refused instead of relying on session presence alone. Chat branch switching still requires an active account (blocks pending).
 - Unlinking Telegram now also revokes the Telegram login identity (the better-auth `account` mapping), not just the delivery link — so a previously-linked Telegram account can no longer sign in as the user after an unlink or a Telegram A→B switch.
 
+### Changed
+- The model picker no longer lays out and paints every catalog row on each keystroke: off-screen rows use `content-visibility: auto`, so filtering a large provider catalog (e.g. OpenRouter) stays smooth. Behaviour, keyboard navigation, and screen-reader access are unchanged.
+- `SECURITY.md` now documents that the workspace disk quota is enforced at command boundaries (a single command can transiently overshoot) and recommends a filesystem project quota / size-limited volume for multi-tenant or untrusted deployments.
+
 ### Fixed
 - Workspace panel: the live file-listing refresh is now single-flighted and abortable, so a slow listing under the during-task safety-net poll can't stack overlapping requests or clobber the list with a stale/out-of-order response, and a late response can't fire after the panel closes.
 - Accessibility: the "Copy redirect URI" button (Settings → Authentication) and the "Download all" button (workspace panel) now have accessible names, and copying the redirect URI is announced to screen readers via a polite live region.
