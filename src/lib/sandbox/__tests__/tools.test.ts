@@ -44,6 +44,26 @@ describe("sandbox tools never rely on /tmp scratch space", () => {
     expect(cmd).toMatch(/\|\s*python3\s+-/);
   });
 
+  it("read_file turns a raw sed 'No such file' into a calm, path-first message", async () => {
+    execCommand.mockResolvedValue({
+      stdout: "",
+      stderr: "sed: can't read /workspace/README.md: No such file or directory",
+      exitCode: 2,
+    });
+    const { tools } = await load();
+    const res = (await tools.read_file.execute!({ path: "README.md" }, opts)) as { error: string };
+    expect(res.error).toBe("File not found: README.md");
+    expect(res.error).not.toContain("sed"); // no shell jargon leaks to the card
+  });
+
+  it("read_file passes an unrecognized failure (e.g. over-quota) through unchanged", async () => {
+    // The 413/WORKSPACE_FULL message is actionable — sanitizing must not swallow it.
+    execCommand.mockResolvedValue({ stdout: "", stderr: "Workspace storage limit reached", exitCode: 1 });
+    const { tools } = await load();
+    const res = (await tools.read_file.execute!({ path: "big.csv" }, opts)) as { error: string };
+    expect(res.error).toBe("Workspace storage limit reached");
+  });
+
   it("propagates a non-zero exit code from the sandbox as failure", async () => {
     execCommand.mockResolvedValue({ stdout: "", stderr: "boom", exitCode: 1 });
     const { tools } = await load();

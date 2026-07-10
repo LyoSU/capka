@@ -125,6 +125,20 @@ function captureResult(result: { stdout: string; stderr: string; exitCode: numbe
   };
 }
 
+/** The file-access tools shell out to sed/ls/rg/python, and their raw stderr
+ *  (`sed: can't read /workspace/x: No such file or directory`) renders verbatim
+ *  in the chat card — jargon a non-technical user should never see. Rewrite the
+ *  known OS phrases into a calm, path-first sentence; pass anything else through
+ *  unchanged so an actionable message (notably the over-quota WORKSPACE_FULL text
+ *  that `run` surfaces on HTTP 413) is never swallowed. */
+function friendlyFsError(stderr: string, path: string): string {
+  const e = (stderr || "").toLowerCase();
+  if (/no such file|not found/.test(e)) return `File not found: ${path}`;
+  if (/is a directory/.test(e)) return `${path} is a folder, not a file.`;
+  if (/permission denied/.test(e)) return `Permission denied: ${path}`;
+  return (stderr || "").trim() || `Could not access ${path}.`;
+}
+
 /**
  * Create sandbox tools for a chat session.
  * Modeled after Anthropic's Claude Code Execution tool set.
@@ -303,7 +317,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         // sidesteps the head-closes-the-pipe SIGPIPE trap.
         const last = start + count;
         const result = await run(`sed -n '${start},${last}p;${last}q' '${safePath}'`);
-        if (result.exitCode !== 0) return { error: result.stderr || "File not found", content: null };
+        if (result.exitCode !== 0) return { error: friendlyFsError(result.stderr, path), content: null };
         // A NUL byte means this is binary, not text. Returning the raw bytes
         // would (a) feed the model useless mojibake that bloats context and
         // invites byte-level hallucination, and (b) carry a NUL that Postgres
@@ -378,7 +392,16 @@ print('OK')`;
         const encoded = Buffer.from(pyCode).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | python3 -`;
         const result = await run(cmd);
-        if (result.exitCode !== 0) return { error: result.stdout + result.stderr, success: false };
+        if (result.exitCode !== 0) {
+          // The script's own "text not found" signal (stdout) is the common case;
+          // spell out that the match must be exact. Anything else is a shell/OS
+          // failure (missing file, etc.) — sanitize it like the other file tools
+          // rather than leaking a Python traceback into the card.
+          const error = result.stdout.includes("text not found")
+            ? `The old_str was not found in ${path}. It must match the file exactly, including whitespace and indentation.`
+            : friendlyFsError(result.stderr, path);
+          return { error, success: false };
+        }
         return { success: true, path };
       },
     }),
@@ -395,7 +418,11 @@ print('OK')`;
           mode: "head",
           note: "Narrow it: pass a subdirectory, or use search_files by name.",
         });
-        return { listing: clamped.text, error: result.exitCode !== 0 ? result.stderr : null, truncated: clamped.clipped };
+        return {
+          listing: clamped.text,
+          error: result.exitCode !== 0 ? friendlyFsError(result.stderr, path || ".") : null,
+          truncated: clamped.clipped,
+        };
       },
     }),
 
@@ -440,7 +467,11 @@ print('OK')`;
         const note = capped
           ? "\n[… Capka: showing the first 100 matches — more exist. Narrow the pattern, path, or glob.]"
           : "";
-        return { matches: matches + note, error: result.exitCode > 1 ? result.stderr : null, truncated: capped };
+        return {
+          matches: matches + note,
+          error: result.exitCode > 1 ? friendlyFsError(result.stderr, path || ".") : null,
+          truncated: capped,
+        };
       },
     }),
   };
