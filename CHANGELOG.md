@@ -11,6 +11,7 @@ All notable changes to Capka are documented here. Format follows
 - Unlinking Telegram now also revokes the Telegram login identity (the better-auth `account` mapping), not just the delivery link — so a previously-linked Telegram account can no longer sign in as the user after an unlink or a Telegram A→B switch.
 
 ### Fixed
+- `view_file` on HTML no longer fails with a "Trace/breakpoint trap" — the headless-Chromium screenshot now runs with `--headless=new --disable-dev-shm-usage`, so it stops exhausting the sandbox's tiny `/dev/shm` and crashing before the render lands.
 - A finished turn whose task reached a terminal (failed/cancelled) status but whose assistant message was left stuck at "running" (a lost message write on the failure path) is now healed by the zombie reconciler, so it no longer revives a stuck spinner on every reload. Completed answers are never rewritten.
 - Automations: pausing (or deleting) an automation while its run is in flight is no longer undone — the scheduler's error-recovery re-arms a failed run only when the row is untouched, so a manual pause during a fire is respected instead of resurrected.
 - Permissions: the "Ask" capability effect was labelled as behaving like "Allow" while the runtime actually blocks it (fail-safe, same as "Deny") until human-in-the-loop approval ships. Corrected the label and dimmed the "Ask" row to match.

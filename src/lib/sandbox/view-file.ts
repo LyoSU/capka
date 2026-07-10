@@ -104,10 +104,15 @@ if [ ! -f "$src" ]; then echo __NOFILE__; exit 0; fi
 ${pdfTail(wanted)}`;
     case "html":
       // Headless Chromium full-page screenshot; needs an absolute file:// URL.
+      // --headless=new + --disable-dev-shm-usage are load-bearing here, not
+      // cosmetic: the sandbox's /dev/shm is tiny (see Dockerfile.sandbox), and
+      // without the flag Chromium exhausts it and CHECK()-aborts with a SIGTRAP
+      // ("Trace/breakpoint trap") before writing the PNG. These match the image's
+      // own html2pdf wrapper, which documents the same rationale.
       return `${head}
 case "$src" in /*) f="$src";; *) f="$PWD/$src";; esac
 echo __COUNT__1
-chromium --headless --no-sandbox --disable-gpu --hide-scrollbars --screenshot="$d/p-1.png" --window-size=1280,2000 "file://$f" >/dev/null 2>&1
+chromium --headless=new --no-sandbox --disable-dev-shm-usage --disable-gpu --hide-scrollbars --screenshot="$d/p-1.png" --window-size=1280,2000 "file://$f" >/dev/null 2>&1
 [ -f "$d/p-1.png" ] && echo __PNG__"$d/p-1.png"`;
   }
 }

@@ -66,7 +66,11 @@ describe("view_file — rendering + ref shape", () => {
     execCommand.mockResolvedValue({ stdout: "__COUNT__1\n__PNG__/workspace/.capka/view/ab/p-1.png\n", stderr: "", exitCode: 0 });
     const { view_file } = make();
     await view_file.execute!({ path: "page.html" }, opts);
-    expect(lastCmd()).toContain("chromium --headless");
+    const cmd = lastCmd();
+    expect(cmd).toContain("chromium --headless=new");
+    // The sandbox's /dev/shm is tiny; without this flag Chromium SIGTRAPs before
+    // the screenshot lands. Guard it so the regression can't silently return.
+    expect(cmd).toContain("--disable-dev-shm-usage");
   });
 
   it("caps rendering to 4 pages per call", async () => {
