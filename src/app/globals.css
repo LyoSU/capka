@@ -209,6 +209,18 @@
 .animate-blur-rise { animation: blur-rise 0.5s var(--ease-out) both; }
 .animate-card-morph { animation: card-morph 0.65s var(--ease-out) both; }
 
+/* Chat message entrance. The chat log is the hottest surface in the app, so
+   messages must NOT use the cinematic blur-rise above — a 12px blur + scale +
+   500ms reads as heavy and does GPU filter work every time a bubble mounts or a
+   streamed answer surfaces a new text block. This is the calm, cheap equivalent:
+   a short opacity + 4px settle, compositor-only, no blur. Same restraint the
+   step rail already applies (step-in). Fires once per mount, not per token. */
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-message-in { animation: message-in 0.18s var(--ease-out) both; }
+
 /* Title swap: when a new chat's placeholder is replaced by its generated title,
    the new text resolves in with a soft de-blur. No vertical travel — the row is
    a single line in a dense list, so a translateY would read as jitter. */

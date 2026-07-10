@@ -93,7 +93,7 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
                     <span>{folders.progress ? t(`progress.${folders.progress.phase}`, { done: folders.progress.done, total: folders.progress.total }) : t("syncing")}</span>
                     {folders.progress && folders.progress.total > 0 && (
                       <span className="mt-1 block h-0.5 w-full overflow-hidden rounded-full bg-muted">
-                        <span className="block h-full bg-primary transition-all" style={{ width: `${Math.round((folders.progress.done / folders.progress.total) * 100)}%` }} />
+                        <span className="block h-full bg-primary transition-[width]" style={{ width: `${Math.round((folders.progress.done / folders.progress.total) * 100)}%` }} />
                       </span>
                     )}
                   </>

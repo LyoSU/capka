@@ -78,7 +78,7 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
           >
             <ActionIcon className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover/sg:text-foreground" />
             <span className="flex-1">{t(`${type}.${a}.label`)}</span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-all group-hover/sg:translate-x-0 group-hover/sg:opacity-100" />
+            <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-[transform,opacity] group-hover/sg:translate-x-0 group-hover/sg:opacity-100" />
           </button>
         ))}
       </div>

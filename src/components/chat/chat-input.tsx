@@ -200,7 +200,7 @@ export function ChatInput({
   return (
     <div className="px-4 md:px-6 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto max-w-3xl lg:max-w-4xl">
-        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm transition-all focus-within:shadow-md">
+        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm transition-shadow focus-within:shadow-md">
           {/* Attached files preview — same square FileTile used in chat history, so
               a staged file looks identical to a sent one. A ready file shows its
               real sandbox thumbnail; one still uploading (or failed) shows its local

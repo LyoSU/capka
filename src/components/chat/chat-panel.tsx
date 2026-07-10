@@ -728,7 +728,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                   from tab/click order; the global reduced-motion rule flattens the
                   transition to instant. */}
               <div
-                className={`grid transition-all duration-300 ease-out ${
+                className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
                   input ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100"
                 }`}
                 inert={input ? true : undefined}
@@ -825,7 +825,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             <Button
               variant="ghost"
               size="icon"
-              className={`h-8 w-8 transition-all duration-200 ${
+              className={`h-8 w-8 transition-[transform,opacity] duration-200 ${
                 filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
               }`}
               onClick={() => setFilesOpen(true)}
@@ -856,7 +856,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             style={{ transform: "translateY(calc(-1 * var(--kb, 0px)))" }}
           >
             <div
-              className={`pointer-events-none mb-2 flex justify-center transition-all duration-200 ${
+              className={`pointer-events-none mb-2 flex justify-center transition-[transform,opacity] duration-200 ${
                 showScrollDown ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
               }`}
             >

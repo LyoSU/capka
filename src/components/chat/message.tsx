@@ -708,7 +708,7 @@ function UserBubble({
 
   if (editing) {
     return (
-      <div className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4">
+      <div className="group/msg flex animate-message-in justify-end px-4 md:px-6 py-4">
         <div className="w-full max-w-[85%]">
           <textarea
             ref={taRef}
@@ -734,7 +734,7 @@ function UserBubble({
 
   return (
     <div
-      className="group/msg flex animate-blur-rise justify-end px-4 md:px-6 py-4 pointer-coarse:select-none"
+      className="group/msg flex animate-message-in justify-end px-4 md:px-6 py-4 pointer-coarse:select-none"
       {...longPress}
     >
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -1140,12 +1140,14 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
       <div className="max-w-none">
         {groups.length > 0 ? (
           groups.map((g, gi) => {
-            // Each part animates in on mount (blur-rise) — new steps and text
-            // surface live as they stream, so the message feels alive.
+            // Each part settles in on mount (message-in) — new steps and text
+            // surface live as they stream. Calm opacity+4px, never the cinematic
+            // blur-rise: this block re-mounts as an answer grows, so blur here
+            // would strobe on the hottest surface in the app.
             if (g.kind === "text") {
               const afterActivity = gi > 0 && groups[gi - 1].kind !== "text";
               return (
-                <div key={gi} className={`animate-blur-rise ${afterActivity ? "mt-3 border-t border-border/30 pt-3" : gi > 0 ? "mt-3" : ""}`}>
+                <div key={gi} className={`animate-message-in ${afterActivity ? "mt-3 border-t border-border/30 pt-3" : gi > 0 ? "mt-3" : ""}`}>
                   <TextContent text={g.text} isStreaming={isStreaming && gi === lastTextIdx} chatId={chatId} />
                 </div>
               );
