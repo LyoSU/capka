@@ -8,6 +8,9 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 - Adding a skill, connector (MCP), or automation through chat works again: the `manage` tool's `args` object was serialized to the model with `additionalProperties: false`, silently forbidding every field (`repo`/`content`/`path`, `name`/`url`, …) so the agent could never fill it. A malformed `add` now also echoes the collection's expected shape instead of a generic error.
+- The chat minimap (right-edge jump list of your own messages) is now keyboard-operable — reachable by Tab, opens on Enter, closes on Escape; it was previously mouse-hover only, leaving the jump list unreachable without a pointer.
+- Reduced-motion now also collapses animation delays, so delayed and staggered entrances no longer sit invisible before appearing; added a reduced-transparency / high-contrast fallback that drops backdrop blur on overlays and chrome.
+- Confirmation and approval cards play their success haptic only after the server accepts the action (error haptic on failure) instead of optimistically on press.
 
 ## [0.6.6] - 2026-07-09
 
