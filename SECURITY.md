@@ -11,7 +11,8 @@ undisclosed vulnerabilities. We aim to acknowledge within 72 hours.
 Untrusted code runs in per-session containers locked down by a tested builder
 (`sandbox-controller/sandbox-spec.js`): never privileged, `no-new-privileges`,
 **all capabilities dropped** (only `CHOWN`/`SETUID`/`SETGID` added back for the
-boot sequence), memory / CPU / PID limits, and **no network by default**. The
+boot sequence), memory / CPU / PID limits, and **no network until egress is explicitly enabled**
+(see "Network egress from sandboxes" below). The
 container starts as root just long enough for its entrypoint to chown the
 bind-mounted workspace, then **drops to the unprivileged `1000:1000` user**;
 every command the agent runs is pinned to `1000:1000`, so no untrusted code ever
@@ -66,17 +67,30 @@ npm run up   # the stack now drives a rootless daemon; an escape lands unprivile
 
 | Deployment | Required posture |
 |---|---|
-| Single-operator / trusted users | Default stack. Keep `SANDBOX_ALLOW_NETWORK=false` unless needed. |
+| Single-operator / trusted users | Default stack. Egress is off until an admin enables it in-app; set `SANDBOX_ALLOW_NETWORK=false` to hard-forbid it regardless of the UI. |
 | Team, semi-trusted users | Above + rootless Docker, set `PUBLIC_URL`, TLS in front (see Caddy profile). |
-| Multi-tenant / internet-facing | Above + rootless or gVisor (`runsc`) runtime, network egress policy, external managed Postgres, regular backups. |
+| Multi-tenant / internet-facing | Above + rootless or gVisor (`runsc`) runtime, `SANDBOX_ALLOW_NETWORK=false` (or a vetted egress policy), external managed Postgres, regular backups. |
 
 ## Network egress from sandboxes
 
-Sandboxes have **no outbound network by default** (fail-closed). Set
-`SANDBOX_ALLOW_NETWORK=true` only if agent code legitimately needs the internet
-(package installs, scraping, outbound APIs) — it widens the blast radius of any
-sandbox compromise. The in-container egress firewall additionally blocks the
-cloud metadata range and refuses to start if its rules can't be verified.
+Egress is governed by **two independent layers**, and a sandbox reaches the
+internet only when *both* allow it:
+
+1. **`SANDBOX_ALLOW_NETWORK`** — the deployment-level kill-switch on the
+   controller. When unset the controller is fail-closed (no sandbox gets network,
+   regardless of any in-app setting). The shipped `docker-compose.yml` defaults it
+   to `true` so an admin can turn egress on from the UI without editing `.env` and
+   redeploying — it raises the ceiling, it does not by itself grant egress.
+2. **`sandbox_network`** — the org-wide default (Settings), which is **`none` out
+   of the box**. This is what makes a fresh deployment effectively **no-outbound by
+   default** even though the kill-switch above ships open.
+
+So the default posture is: no egress until an admin explicitly enables it in-app.
+For untrusted / multi-tenant hosts, set `SANDBOX_ALLOW_NETWORK=false` to hard-forbid
+egress at the controller so the in-app toggle can't open it at all. Enabling egress
+widens the blast radius of any sandbox compromise. Whenever egress is on, the
+in-container firewall additionally blocks private and cloud-metadata ranges and
+refuses to start if its rules can't be verified.
 
 ## Host folder mounts
 
