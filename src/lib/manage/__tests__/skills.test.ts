@@ -13,7 +13,7 @@ vi.mock("@/lib/skills/service", () => ({
   setSkillEnabled: vi.fn(),
   deleteSkill: vi.fn(),
 }));
-const uploadFile = vi.fn(() => Promise.resolve({ ok: true }));
+const uploadFile = vi.fn<(...a: unknown[]) => Promise<{ ok: boolean }>>(() => Promise.resolve({ ok: true }));
 vi.mock("@/lib/sandbox/client", () => ({ uploadFile: (...a: unknown[]) => uploadFile(...a) }));
 
 import { skillScope, skillCollection } from "../controls/skills";

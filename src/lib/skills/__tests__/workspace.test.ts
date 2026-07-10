@@ -10,7 +10,7 @@ vi.mock("@/lib/sandbox/client", () => ({
   listFiles: (...a: unknown[]) => listFiles(...a),
   downloadFile: (...a: unknown[]) => downloadFile(...a),
 }));
-const ingestSkill = vi.fn(() => Promise.resolve("id"));
+const ingestSkill = vi.fn<(...a: unknown[]) => Promise<string>>(() => Promise.resolve("id"));
 vi.mock("@/lib/skills/service", () => ({ ingestSkill: (...a: unknown[]) => ingestSkill(...a) }));
 
 import { discoverWorkspaceSkills, ingestWorkspaceSkills, WorkspacePathError } from "../workspace";

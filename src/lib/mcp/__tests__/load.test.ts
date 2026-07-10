@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const listEnabledServerConfigs = vi.fn();
 const connectMcpServer = vi.fn();
 const recordConnectError = vi.fn();
-const hasUserTokens = vi.fn(() => Promise.resolve(true));
+const hasUserTokens = vi.fn<(...a: unknown[]) => Promise<boolean>>(() => Promise.resolve(true));
 
 vi.mock("../service", () => ({ listEnabledServerConfigs: (...a: unknown[]) => listEnabledServerConfigs(...a) }));
 vi.mock("../client", () => ({
