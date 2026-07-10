@@ -99,33 +99,39 @@ export async function enqueueTask(input: {
     if (row.created) await realtime.publish("task_enqueued", { id: row.id });
     return row;
   }
-  // Rare race: the incumbent was claimed (queued → running) between our failed
-  // insert and the SELECT, so neither arm returned a row. The partial unique
-  // index only covers QUEUED rows, so the slot is free again now — retry the
-  // insert once. This creates a real queued follow-up carrying THIS message's
-  // payload (its model switch / attachments) instead of silently dropping it
-  // onto the running turn (which only re-reads message TEXT from the live tree,
-  // not the new task payload).
-  const retry = await pool.query<{ id: string }>(
-    `INSERT INTO tasks (id, chat_id, user_id, status, payload)
-     VALUES ($1, $2, $3, 'queued', $4)
-     ON CONFLICT (chat_id) WHERE status = 'queued' DO NOTHING
-     RETURNING id`,
-    [input.id, input.chatId, input.userId, JSON.stringify(input.payload)],
-  );
-  if (retry.rows[0]) {
-    await realtime.publish("task_enqueued", { id: retry.rows[0].id });
-    return { id: retry.rows[0].id, created: true };
+  // Neither arm returned a row: the incumbent was claimed (queued → running)
+  // between our failed insert and the SELECT, so the partial unique index (QUEUED
+  // rows only) no longer constrains the chat and the SELECT saw nothing. Loop the
+  // insert-then-find a few times to settle the race deterministically:
+  //   • the slot is free now → the re-insert creates a real queued follow-up
+  //     carrying THIS message's payload (model switch / attachments), instead of
+  //     dropping it onto the running turn (which re-reads only message TEXT);
+  //   • another queued turn beat us to the freed slot → return THAT incumbent's
+  //     real id so the caller's stop button targets the turn that will answer.
+  // Either way we return a real, cancellable task id — never our own uninserted id.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const retry = await pool.query<{ id: string }>(
+      `INSERT INTO tasks (id, chat_id, user_id, status, payload)
+       VALUES ($1, $2, $3, 'queued', $4)
+       ON CONFLICT (chat_id) WHERE status = 'queued' DO NOTHING
+       RETURNING id`,
+      [input.id, input.chatId, input.userId, JSON.stringify(input.payload)],
+    );
+    if (retry.rows[0]) {
+      await realtime.publish("task_enqueued", { id: retry.rows[0].id });
+      return { id: retry.rows[0].id, created: true };
+    }
+    const incumbent = await pool.query<{ id: string }>(
+      `SELECT id FROM tasks WHERE chat_id = $1 AND status = 'queued' LIMIT 1`,
+      [input.chatId],
+    );
+    if (incumbent.rows[0]) return { id: incumbent.rows[0].id, created: false };
+    // Raced again (the incumbent was claimed before we read it): loop and retry.
   }
-  // Still nothing — another queued turn beat us to the freed slot. Return THAT
-  // incumbent's real id (not our message id) so the caller's stop button targets
-  // the turn that will actually answer; the message we persisted folds into its
-  // live-tree rebuild.
-  const incumbent = await pool.query<{ id: string }>(
-    `SELECT id FROM tasks WHERE chat_id = $1 AND status = 'queued' LIMIT 1`,
-    [input.chatId],
-  );
-  return { id: incumbent.rows[0]?.id ?? input.id, created: false };
+  // Sustained churn kept flipping the slot for every attempt (not seen in practice
+  // — a chat has one human driving it). Surface it rather than hand back an id that
+  // maps to no task; the caller persisted the message, so a manual resend recovers.
+  throw new Error(`enqueueTask: could not settle a turn for chat ${input.chatId}`);
 }
 
 /** Atomically claim the oldest queued task, taking a lease. Returns null if none. */
