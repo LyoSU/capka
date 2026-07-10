@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-07-10
+
 ### Fixed
 - Adding a skill, connector (MCP), or automation through chat works again: the `manage` tool's `args` object was serialized to the model with `additionalProperties: false`, silently forbidding every field (`repo`/`content`/`path`, `name`/`url`, …) so the agent could never fill it. A malformed `add` now also echoes the collection's expected shape instead of a generic error.
 - The chat minimap (right-edge jump list of your own messages) is now keyboard-operable — reachable by Tab, opens on Enter, closes on Escape; it was previously mouse-hover only, leaving the jump list unreachable without a pointer.
