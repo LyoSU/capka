@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Adding a skill, connector (MCP), or automation through chat works again: the `manage` tool's `args` object was serialized to the model with `additionalProperties: false`, silently forbidding every field (`repo`/`content`/`path`, `name`/`url`, …) so the agent could never fill it. A malformed `add` now also echoes the collection's expected shape instead of a generic error.
+
 ## [0.6.6] - 2026-07-09
 
 ### Security

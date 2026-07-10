@@ -1,5 +1,4 @@
-import { tool } from "ai";
-import { z } from "zod";
+import { tool, jsonSchema } from "ai";
 import { buildRegistry } from "./controls";
 import { dispatch, requiresApproval } from "./dispatch";
 import type { ManageContext, ManageInput, ManageResult } from "./types";
@@ -21,20 +20,55 @@ export interface ManageIdentity {
   model?: string | null;
 }
 
-const inputSchema = z.object({
-  action: z
-    .enum(["capabilities", "list", "get", "set", "add", "remove", "enable", "disable", "debug", "connect", "edit"])
-    .describe("What to do. Start with `list` or `capabilities` to discover what can be managed."),
-  target: z
-    .string()
-    .optional()
-    .describe('A setting/control id (get/set) OR a collection id (get/add/remove/…), e.g. "user.locale", "org.sandbox_network", "mcp".'),
-  value: z.string().optional().describe("New value for `set`, always as a string (e.g. \"uk\", \"true\", \"bridge\", \"200000\")."),
-  itemId: z.string().optional().describe("Id of a collection item for remove/enable/disable/debug/connect."),
-  args: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe("Fields for `add` to a collection — the exact shape is documented in that collection's `usage` (returned by get; e.g. mcp: {name, url})."),
+const ACTIONS = [
+  "capabilities", "list", "get", "set", "add", "remove", "enable", "disable", "debug", "connect", "edit",
+] as const;
+
+type ManageArgs = {
+  action: (typeof ACTIONS)[number];
+  target?: string;
+  value?: string;
+  itemId?: string;
+  args?: Record<string, unknown>;
+};
+
+// Hand-written JSON Schema, NOT derived from Zod. The AI SDK's Zod→JSONSchema
+// path (draft-07) collapses ANY open-object Zod construct — `z.record(z.unknown())`,
+// `z.any()`, `.passthrough()`, `looseObject` — to `additionalProperties: false`,
+// which forbids the model from sending a single `args` key (repo/content/path,
+// name/url, …) and makes every collection `add` impossible. The raw `jsonSchema`
+// helper passes through `asSchema` verbatim, so leaving `args.additionalProperties`
+// absent keeps it OPEN. Runtime field-shape validation isn't lost: `toInput` maps
+// the envelope and each collection's `addSchema`/control `schema` validates the
+// payload in `dispatch` with a better (usage-echoing) error than the SDK's generic
+// one. (See the tool-schema regression test, and mcp/adapt.ts for the same escape hatch.)
+const inputSchema = jsonSchema<ManageArgs>({
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: [...ACTIONS],
+      description: "What to do. Start with `list` or `capabilities` to discover what can be managed.",
+    },
+    target: {
+      type: "string",
+      description: 'A setting/control id (get/set) OR a collection id (get/add/remove/…), e.g. "user.locale", "org.sandbox_network", "mcp".',
+    },
+    value: {
+      type: "string",
+      description: 'New value for `set`, always as a string (e.g. "uk", "true", "bridge", "200000").',
+    },
+    itemId: {
+      type: "string",
+      description: "Id of a collection item for remove/enable/disable/debug/connect.",
+    },
+    args: {
+      type: "object",
+      description: "Fields for `add` to a collection — the exact shape is documented in that collection's `usage` (returned by get; e.g. mcp: {name, url}).",
+    },
+  },
+  required: ["action"],
+  additionalProperties: false,
 });
 
 /** Map the flat tool args to a discriminated ManageInput (or null if a required
@@ -43,7 +77,7 @@ const inputSchema = z.object({
 export function toManageInput(a: {
   action: string; target?: string; value?: string; itemId?: string; args?: Record<string, unknown>;
 }): ManageInput | null {
-  return toInput(a as z.infer<typeof inputSchema>);
+  return toInput(a as ManageArgs);
 }
 
 /** Which fields each action requires — echoed back on a malformed call so the
@@ -60,7 +94,7 @@ const REQUIRED_FIELDS: Record<string, string> = {
   edit: "`target` and `itemId`",
 };
 
-function toInput(a: z.infer<typeof inputSchema>): ManageInput | null {
+function toInput(a: ManageArgs): ManageInput | null {
   switch (a.action) {
     case "capabilities":
       return { action: "capabilities" };
@@ -71,7 +105,12 @@ function toInput(a: z.infer<typeof inputSchema>): ManageInput | null {
     case "set":
       return a.target && a.value !== undefined ? { action: "set", target: a.target, value: a.value } : null;
     case "add":
-      return a.target && a.args ? { action: "add", target: a.target, args: a.args } : null;
+      // Only `target` is structurally required here. Missing/misplaced `args`
+      // (e.g. the model put the payload in `value`, a `set`-only field) flows on
+      // with `{}` so `dispatch.add` fails the collection's `addSchema` and echoes
+      // its `usage` — a one-step repair — instead of dead-ending on a generic
+      // "needs target and args" with no shape hint.
+      return a.target ? { action: "add", target: a.target, args: a.args ?? {} } : null;
     case "remove":
       return a.target && a.itemId ? { action: "remove", target: a.target, itemId: a.itemId } : null;
     case "enable":
@@ -84,6 +123,11 @@ function toInput(a: z.infer<typeof inputSchema>): ManageInput | null {
       return a.target && a.itemId ? { action: "connect", target: a.target, itemId: a.itemId } : null;
     case "edit":
       return a.target && a.itemId ? { action: "edit", target: a.target, itemId: a.itemId } : null;
+    default:
+      // The model-facing schema is hand-written JSON (no Zod enum validation at
+      // the SDK boundary), so an unknown action reaches here at runtime; the
+      // caller turns null into the friendly `bad_request`.
+      return null;
   }
 }
 
