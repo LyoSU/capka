@@ -41,6 +41,35 @@ const addSchema = z.union([
 
 type AddArgs = z.infer<typeof addSchema>;
 
+// preview→apply commit pin. `previewAdd` resolves the repo's HEAD to a concrete
+// commit and shows the user the skills AT that commit; `add` must install THAT
+// commit, not re-resolve HEAD when the (separate) approval call runs — otherwise a
+// hostile upstream could move the branch between the card and the click. Native
+// tool approval has nowhere to stash the sha, so it hops through this in-memory
+// map: platform routes and the worker share one process, so preview and apply land
+// here together. A miss (restart, TTL, or a repo the user never previewed) falls
+// back to live HEAD — exactly the advisory-preview behaviour we already ship, not a
+// new fallback. Keyed by the raw `repo` arg, which is identical across the two calls
+// (it's the same persisted tool-call input).
+const previewedShas = new Map<string, { sha: string; at: number }>();
+const PIN_TTL_MS = 10 * 60_000;
+const pinKey = (userId: string, repo: string) => `${userId}:${repo.trim()}`;
+
+function parkPreviewedSha(userId: string, repo: string, sha: string): void {
+  const now = Date.now();
+  for (const [k, v] of previewedShas) if (now - v.at > PIN_TTL_MS) previewedShas.delete(k);
+  previewedShas.set(pinKey(userId, repo), { sha, at: now });
+}
+
+/** Take (and forget) the commit a just-shown preview pinned for this user+repo, or
+ *  undefined if none is live — install then falls back to HEAD. */
+function claimPreviewedSha(userId: string, repo: string): string | undefined {
+  const k = pinKey(userId, repo);
+  const v = previewedShas.get(k);
+  previewedShas.delete(k);
+  return v && Date.now() - v.at <= PIN_TTL_MS ? v.sha : undefined;
+}
+
 /** A user-scope skill is personal; an org skill is shared and admin-only. */
 export function skillScope(args: { scope?: string }): { scope: SkillScope; needsAdmin: boolean } {
   const scope: SkillScope = args.scope === "org" ? "system" : "user";
@@ -134,7 +163,8 @@ export const skillCollection: Collection = {
     // whole SET before confirming (like `npx skills add owner/repo --list`).
     if ("repo" in a) {
       try {
-        const { owner, repo, skills } = await discoverRepoSkills(a.repo);
+        const { owner, repo, sha, skills } = await discoverRepoSkills(a.repo);
+        parkPreviewedSha(ctx.userId, a.repo, sha); // pin what the user is about to approve
         const only = a.only?.length ? new Set(a.only) : null;
         const names = (only ? skills.filter((s) => only.has(s.name)) : skills).map((s) => s.name);
         return {
@@ -191,6 +221,9 @@ export const skillCollection: Collection = {
         installedBy: ctx.userId,
         scope: scope === "system" ? "system" : "user",
         only: a.only,
+        // Install the commit the approval card showed; falls back to HEAD if the
+        // preview's pin is no longer live (see parkPreviewedSha).
+        sha: claimPreviewedSha(ctx.userId, a.repo),
       });
       const n = manifest.skills.length;
       return { itemTitle: loc(t, "skill.repoInstalled", `${n} skill${n === 1 ? "" : "s"} from ${a.repo}`, { n, repo: a.repo }) };

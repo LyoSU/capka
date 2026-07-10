@@ -265,6 +265,11 @@ export async function installPlugin(opts: {
   scope?: "system" | "user";
   /** Narrow to specific skills by name (`--skill`); omit for all. */
   only?: string[];
+  /** Pin a FIRST install to a specific reviewed commit (from the pre-install
+   *  preview) instead of live HEAD — closes the preview→apply TOCTOU. Ignored on
+   *  re-install, which stays on its already-pinned commit (moving the pin is an
+   *  explicit upgrade). */
+  pinSha?: string;
 }): Promise<InstallManifest> {
   const { gh } = await resolvePlugin(opts.marketplaceId, opts.pluginName);
   const scope = opts.scope ?? "system";
@@ -283,8 +288,10 @@ export async function installPlugin(opts: {
     )).limit(1))[0];
   const installId = existing?.id ?? nanoid();
   // Re-install stays PINNED: re-pull the commit already installed, not whatever the
-  // branch points at now. Moving the pin is an explicit upgrade (with a diff).
-  const ref = existing?.commitSha || gh.ref;
+  // branch points at now. A first install uses the reviewed commit from the preview
+  // (`pinSha`) when present, else live HEAD (`gh.ref`). Moving the pin is an explicit
+  // upgrade (with a diff).
+  const ref = existing?.commitSha || opts.pinSha || gh.ref;
   const { manifest, files } = await applyPlugin({ ...gh, ref }, `catalog:${installId}`, target, opts.only);
 
   if (existing) {
@@ -395,6 +402,8 @@ export async function installSkillRepo(opts: {
   installedBy: string;
   scope?: "system" | "user";
   only?: string[];
+  /** Reviewed commit from the pre-install preview — pins a first install to it (TOCTOU). */
+  sha?: string;
 }): Promise<InstallManifest> {
   const repo = parseGitHubUrl(opts.url);
   if (!repo) throw new ValidationError("Only GitHub repositories are supported. Paste a github.com repo URL.");
@@ -412,7 +421,7 @@ export async function installSkillRepo(opts: {
       id: marketplaceId, url: clean, name: `${repo.owner}/${repo.repo}`, owner: repo.owner, catalog, refreshedAt: new Date(),
     });
   }
-  return installPlugin({ marketplaceId, pluginName, installedBy: opts.installedBy, scope: opts.scope, only: opts.only });
+  return installPlugin({ marketplaceId, pluginName, installedBy: opts.installedBy, scope: opts.scope, only: opts.only, pinSha: opts.sha });
 }
 
 /** Remove everything an install routed (FK cascade drops skill files, plugin

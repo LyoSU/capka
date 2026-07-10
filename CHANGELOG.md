@@ -12,6 +12,9 @@ All notable changes to Capka are documented here. Format follows
 - Reduced-motion now also collapses animation delays, so delayed and staggered entrances no longer sit invisible before appearing; added a reduced-transparency / high-contrast fallback that drops backdrop blur on overlays and chrome.
 - Confirmation and approval cards play their success haptic only after the server accepts the action (error haptic on failure) instead of optimistically on press.
 
+### Security
+- Installing a skills repo through chat now pins to the exact commit shown in the approval preview instead of re-resolving the branch tip when the user approves, closing a window where upstream could swap the installed skills between preview and install.
+
 ## [0.6.6] - 2026-07-09
 
 ### Security
