@@ -80,7 +80,7 @@ export default function PermissionsPage() {
         {items.map((i) => {
           const effect = policyFor(i.capabilityType, i.capabilityKey)?.effect ?? "allow";
           return (
-            <div key={`${i.capabilityType}:${i.capabilityKey}`} className={cn("flex items-center justify-between gap-4 rounded-md border p-2.5", effect === "deny" && "opacity-60")}>
+            <div key={`${i.capabilityType}:${i.capabilityKey}`} className={cn("flex items-center justify-between gap-4 rounded-md border p-2.5", (effect === "deny" || effect === "ask") && "opacity-60")}>
               <span className="truncate text-sm">{i.capabilityKey}</span>
               <EffectControl value={effect} onChange={(e) => change(i.capabilityType, i.capabilityKey, e)} t={t} />
             </div>

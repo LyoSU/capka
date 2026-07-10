@@ -6,6 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Permissions: the "Ask" capability effect was labelled as behaving like "Allow" while the runtime actually blocks it (fail-safe, same as "Deny") until human-in-the-loop approval ships. Corrected the label and dimmed the "Ask" row to match.
+
+### Changed
+- Chat messages, edits, and streaming answer blocks now settle in with a short opacity fade instead of the 500ms blur-rise, so the busiest surface reads calm and does no per-mount GPU blur work; the cinematic entrance stays on rare surfaces (onboarding, auth, empty states).
+- Buttons and several chat transitions no longer animate every property (`transition-all` → explicit property lists), removing accidental layout/color animation and keeping motion on `transform`/`opacity`; the button press is a single `scale`, not scale + nudge.
+- Tooltips now wait ~400ms before opening (was instant), so passing the cursor over controls no longer flashes stray tooltips; a series of tooltips still opens instantly after the first.
+
 ## [0.6.7] - 2026-07-10
 
 ### Fixed

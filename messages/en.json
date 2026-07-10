@@ -1113,7 +1113,7 @@
         "ask": "Ask",
         "deny": "Deny"
       },
-      "askSoon": "Ask (human-in-the-loop) is coming soon. For now it behaves as Allow.",
+      "askSoon": "Ask (human-in-the-loop) is coming soon. Until then it blocks the capability, the same as Deny.",
       "saveFailed": "Couldn't save that change."
     },
     "authentication": {
