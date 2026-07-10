@@ -1,5 +1,5 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
-import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
+import type { ModelMessage, UserModelMessage, TextPart } from "ai";
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -9,7 +9,6 @@ import { stripNul } from "./sanitize";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 import { describeStep } from "@/lib/chat/steps";
-import { extractWorkspacePaths } from "@/lib/chat/artifacts";
 import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
@@ -19,7 +18,7 @@ import { providerNativeTools } from "@/lib/providers";
 import { loadSandboxTools } from "@/lib/sandbox/tools";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { buildSystemPrompt, classifyFiles, findBlindModalities } from "@/lib/chat/prompt";
-import { mimeToModality, supportsImageToolResults, modelTakesImages, audioNeedsTranscode, type Modality } from "@/lib/providers/registry";
+import { mimeToModality, supportsImageToolResults, modelTakesImages, type Modality } from "@/lib/providers/registry";
 import { makeViewFileTool, buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { listAvailableSkills } from "@/lib/skills/service";
 import { makeSkillTool } from "@/lib/skills/tool";
@@ -48,10 +47,11 @@ import { delay } from "@ai-sdk/provider-utils";
 import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
 import { errorText } from "@/lib/errors/message";
-import { downloadFile, createSession, execCommand } from "@/lib/sandbox/client";
-import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
+import { createSession } from "@/lib/sandbox/client";
+import { type FileRef } from "@/lib/constants";
 import type { StoredPart, MessageMeta } from "@/lib/chat/contracts";
 import { log } from "@/lib/log";
+import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 
 const errMsg = (e: unknown) => errorText(e);
 
@@ -134,9 +134,6 @@ export interface ClaimedTask {
   payload: unknown;
 }
 
-/** Max concurrent file downloads from sandbox */
-const MAX_CONCURRENT_DOWNLOADS = 5;
-
 /**
  * Cap on a tool result's serialized size when streamed over realtime. Postgres
  * NOTIFY tops out at 8 KB, and the realtime layer replaces any oversized payload
@@ -176,161 +173,6 @@ const MAX_RECOVERIES = 3;
  *  messages to keep when mechanically trimming a prompt the model rejected as too
  *  long. Generous enough to preserve the live exchange, small enough to fit. */
 const EMERGENCY_KEEP_RECENT = 10;
-
-/** Download files with bounded concurrency and total size budget */
-async function downloadBounded(
-  files: FileRef[],
-  sessionKey: string,
-  userId: string,
-): Promise<{ file: FileRef; buf: Buffer }[]> {
-  const results: { file: FileRef; buf: Buffer }[] = [];
-  let totalBytes = 0;
-
-  for (let i = 0; i < files.length; i += MAX_CONCURRENT_DOWNLOADS) {
-    if (totalBytes >= MAX_NATIVE_TOTAL_BYTES) break;
-
-    const batch = files.slice(i, i + MAX_CONCURRENT_DOWNLOADS);
-    const settled = await Promise.allSettled(
-      batch.map(async (file) => {
-        const res = await downloadFile(sessionKey, file.name, userId);
-        return { file, buf: Buffer.from(await res.arrayBuffer()) };
-      }),
-    );
-    for (const r of settled) {
-      if (r.status === "rejected") {
-        log.warn("native file read failed", { userId, err: String(r.reason) });
-        continue;
-      }
-      const { file, buf } = r.value;
-      if (buf.length > MAX_NATIVE_FILE_BYTES) {
-        log.info("skipping native file: over per-file limit", { userId, file: file.name, bytes: buf.length });
-        continue;
-      }
-      if (totalBytes + buf.length > MAX_NATIVE_TOTAL_BYTES) {
-        log.info("skipping native file: over aggregate limit", { userId, file: file.name, bytes: buf.length });
-        continue;
-      }
-      totalBytes += buf.length;
-      results.push(r.value);
-    }
-  }
-  return results;
-}
-
-const MAX_OUTPUT_FILES = 10;
-const MAX_OUTPUT_FILE_BYTES = 45 * 1024 * 1024; // under Telegram's 50 MB document cap
-const MAX_OUTPUT_TOTAL_BYTES = 50 * 1024 * 1024;
-
-/**
- * The workspace files the agent's reply explicitly refers to by their
- * `/workspace/…` path — the same "artifacts" the web transcript surfaces as file
- * tiles. Delivered to channels that can't browse the sandbox (Telegram); we send
- * what the model points at, not every file it happened to touch. Bounded in
- * count and bytes, always best-effort.
- */
-async function collectReferencedFiles(sessionKey: string, userId: string, text: string) {
-  const paths = extractWorkspacePaths(text).slice(0, MAX_OUTPUT_FILES);
-  const out: { name: string; data: Buffer }[] = [];
-  let total = 0;
-  for (const rel of paths) {
-    try {
-      const res = await downloadFile(sessionKey, rel, userId);
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length > MAX_OUTPUT_FILE_BYTES || total + buf.length > MAX_OUTPUT_TOTAL_BYTES) continue;
-      total += buf.length;
-      out.push({ name: rel.split("/").pop() || rel, data: buf });
-    } catch (e) {
-      // A referenced path might be a directory or only mentioned, not a real
-      // downloadable file — skip it quietly.
-      log.warn("referenced file download failed", { userId, file: rel, err: String(e) });
-    }
-  }
-  return out;
-}
-
-// Single-quote a path for `sh -c` so a user-supplied filename can't break out
-// of the ffmpeg argument. `'…'` is literal in sh; the only escape needed is the
-// quote itself.
-const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-
-/**
- * Transcode any attached audio whose container the target transport can't
- * serialize (only wav/mp3 are universal — see `audioNeedsTranscode`) into mp3,
- * using the sandbox's ffmpeg. Returns FileRefs pointing at the converted copies
- * (in a per-turn hidden dir) so the normal download path picks them up. Purely
- * best-effort: on any failure the original FileRef is kept and the runner's
- * soft-retry strips it with a note if the provider then rejects it — a transcode
- * hiccup never becomes a hard turn failure. The hidden dir is removed after.
- */
-async function transcodeUnsupportedAudio(
-  sessionKey: string,
-  userId: string,
-  provider: string,
-  files: FileRef[],
-): Promise<{ files: FileRef[]; cleanupDir?: string }> {
-  if (!files.some((f) => audioNeedsTranscode(f.type, provider))) return { files };
-  const dir = `.capka/native-audio/${nanoid(8)}`;
-  const out = await Promise.all(
-    files.map(async (f, i) => {
-      if (!audioNeedsTranscode(f.type, provider)) return f;
-      const dest = `${dir}/${i}.mp3`;
-      try {
-        const r = await execCommand(
-          sessionKey,
-          `mkdir -p /workspace/${shq(dir)} && ffmpeg -y -nostdin -i /workspace/${shq(f.name)} -vn -ac 1 -c:a libmp3lame -q:a 4 /workspace/${shq(dest)}`,
-          120_000,
-        );
-        if (r.exitCode !== 0) {
-          log.warn("audio transcode failed; keeping original", {
-            userId, file: f.name, exitCode: r.exitCode, stderr: r.stderr.slice(-300),
-          });
-          return f;
-        }
-        return { name: dest, type: "audio/mpeg" };
-      } catch (e) {
-        log.warn("audio transcode errored; keeping original", { userId, file: f.name, err: String(e) });
-        return f;
-      }
-    }),
-  );
-  return { files: out, cleanupDir: dir };
-}
-
-/** Read multimodal files from sandbox and inject as FilePart in the last user message */
-async function injectNativeFiles(
-  modelMessages: ModelMessage[],
-  sessionKey: string,
-  userId: string,
-  provider: string,
-  files: FileRef[],
-): Promise<void> {
-  if (files.length === 0) return;
-
-  const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
-  if (!lastUser) return;
-
-  const { files: prepared, cleanupDir } = await transcodeUnsupportedAudio(sessionKey, userId, provider, files);
-  const downloaded = await downloadBounded(prepared, sessionKey, userId);
-  // Ephemeral transcode output — remove it once its bytes are in the prompt. Fire
-  // and forget; the workspace is disposable and GC'd with the sandbox anyway.
-  if (cleanupDir) {
-    execCommand(sessionKey, `rm -rf /workspace/${shq(cleanupDir)}`).catch(() => {});
-  }
-  if (downloaded.length === 0) return;
-
-  const parts: FilePart[] = downloaded.map(({ file, buf }) => ({
-    type: "file", mediaType: file.type, data: buf, filename: file.name,
-  }));
-  const totalBytes = downloaded.reduce((sum, { buf }) => sum + buf.length, 0);
-
-  type UserPart = TextPart | ImagePart | FilePart;
-  const existing: UserPart[] = typeof lastUser.content === "string"
-    ? [{ type: "text", text: lastUser.content }]
-    : [...lastUser.content];
-  lastUser.content = [...existing, ...parts];
-
-  log.info("injected native files", { userId, count: parts.length, bytes: totalBytes });
-}
 
 /** Re-resolve everything needed to run the task from its persisted payload.
  *  `sessionKey` is the project (shared folder) or the chat itself — see
