@@ -179,6 +179,45 @@ run("durable queue", () => {
     await pool.query(`DELETE FROM chats WHERE id = 'qz2-chat'`);
   });
 
+  it("reconciles a stuck 'running' message whose task already reached a terminal status", async () => {
+    // Failure-path repair: finalizeTask flipped the task to 'failed' but the message
+    // UPDATE was lost (swallowed .catch), leaving the message stuck at 'running'. The
+    // task is NOT a lease-expired zombie — it's already terminal — so the dead-CTE
+    // never sees it. This must still clear the stuck spinner on the next sweep.
+    await enqueueTask({ id: "qt6", chatId: C, userId: U, payload: {} });
+    await pool.query(`UPDATE tasks SET status='failed', error='boom' WHERE id='qt6'`);
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','partial',$3)`,
+      ["qmsg6", C, JSON.stringify({ taskId: "qt6", status: "running", parts: [] })],
+    );
+
+    await reconcileZombies();
+
+    const { rows } = await pool.query<{ metadata: { status: string; taskId: string; parts: unknown[] } }>(
+      `SELECT metadata FROM messages WHERE id='qmsg6'`,
+    );
+    expect(rows[0].metadata.status).not.toBe("running");
+    // Existing fields preserved.
+    expect(rows[0].metadata.parts).toEqual([]);
+    expect(rows[0].metadata.taskId).toBe("qt6");
+  });
+
+  it("leaves a completed task's message alone (never rewrites a real answer to interrupted)", async () => {
+    await enqueueTask({ id: "qt7", chatId: C, userId: U, payload: {} });
+    await pool.query(`UPDATE tasks SET status='completed' WHERE id='qt7'`);
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','the answer',$3)`,
+      ["qmsg7", C, JSON.stringify({ taskId: "qt7", status: "completed", parts: [] })],
+    );
+
+    await reconcileZombies();
+
+    const { rows } = await pool.query<{ metadata: { status: string } }>(
+      `SELECT metadata FROM messages WHERE id='qmsg7'`,
+    );
+    expect(rows[0].metadata.status).toBe("completed");
+  });
+
   it("leaves messages of healthy tasks untouched", async () => {
     await enqueueTask({ id: "qt5", chatId: C, userId: U, payload: {} });
     await pool.query(

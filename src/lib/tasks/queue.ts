@@ -259,6 +259,21 @@ export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "us
           FROM dead
          WHERE m.metadata->>'taskId' = dead.id
            AND m.metadata->>'status' = 'running'
+     ), reconciled_terminal AS (
+        -- Messages stranded at 'running' whose owning task ALREADY reached a
+        -- terminal, non-success status: the failure path's finalizeTask succeeded
+        -- but the message UPDATE was lost (swallowed .catch), so the row keeps a
+        -- live spinner across every reload. The dead CTE above only covers
+        -- lease-expired zombies (status still 'running'), never an already-failed
+        -- task, so this is the sibling repair -- mirroring swept_holds' broader
+        -- terminal sweep. 'completed' is excluded so a genuinely finished answer is
+        -- never rewritten to "interrupted".
+        UPDATE messages m
+           SET metadata = m.metadata || jsonb_build_object('status', 'failed', 'error', $1::text, 'errorCategory', 'interrupted')
+          FROM tasks t
+         WHERE m.metadata->>'taskId' = t.id
+           AND m.metadata->>'status' = 'running'
+           AND t.status IN ('failed', 'cancelled')
      ), swept_holds AS (
         -- Release every pending hold whose task is no longer live: the ones we
         -- just reaped (the dead CTE flips them this same statement, so a sibling
