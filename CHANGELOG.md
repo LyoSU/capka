@@ -6,13 +6,12 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
-### Security
-- Content mutations (adding/toggling/deleting skills, enabling/disabling/uninstalling/upgrading plugins, revoking a connector's OAuth tokens) now require a write-capable, active account: a read-only `viewer` and a `pending`/`rejected` account are refused instead of relying on session presence alone. Chat branch switching still requires an active account (blocks pending).
-- Unlinking Telegram now also revokes the Telegram login identity (the better-auth `account` mapping), not just the delivery link — so a previously-linked Telegram account can no longer sign in as the user after an unlink or a Telegram A→B switch.
-
 ### Changed
 - The model picker no longer lays out and paints every catalog row on each keystroke: off-screen rows use `content-visibility: auto`, so filtering a large provider catalog (e.g. OpenRouter) stays smooth. Behaviour, keyboard navigation, and screen-reader access are unchanged.
-- `SECURITY.md` now documents that the workspace disk quota is enforced at command boundaries (a single command can transiently overshoot) and recommends a filesystem project quota / size-limited volume for multi-tenant or untrusted deployments.
+- Chat messages, edits, and streaming answer blocks now settle in with a short opacity fade instead of the 500ms blur-rise, so the busiest surface reads calm and does no per-mount GPU blur work; the cinematic entrance stays on rare surfaces (onboarding, auth, empty states).
+- Buttons and several chat transitions no longer animate every property (`transition-all` → explicit property lists), removing accidental layout/color animation and keeping motion on `transform`/`opacity`; the button press is a single `scale`, not scale + nudge.
+- Tooltips now wait ~400ms before opening (was instant), so passing the cursor over controls no longer flashes stray tooltips; a series of tooltips still opens instantly after the first.
+- `SECURITY.md` now documents that the workspace disk quota is enforced at command boundaries (a single command can transiently overshoot) and recommends a filesystem project quota / size-limited volume for multi-tenant or untrusted deployments, and clarifies the two-layer sandbox egress model (the `SANDBOX_ALLOW_NETWORK` kill-switch vs the `sandbox_network` org default).
 
 ### Fixed
 - Workspace panel: the live file-listing refresh is now single-flighted and abortable, so a slow listing under the during-task safety-net poll can't stack overlapping requests or clobber the list with a stale/out-of-order response, and a late response can't fire after the panel closes.
@@ -21,13 +20,13 @@ All notable changes to Capka are documented here. Format follows
 - PC folder sync now takes a server-side lease before touching files, so two browser tabs or project members can't run destructive sync operations against the same folder at once (the manifest CAS only guarded the ancestor row, not the files). The lease self-expires, so a client that dies mid-sync never locks the folder.
 - `view_file` on HTML no longer fails with a "Trace/breakpoint trap" — the headless-Chromium screenshot now runs with `--headless=new --disable-dev-shm-usage`, so it stops exhausting the sandbox's tiny `/dev/shm` and crashing before the render lands.
 - A finished turn whose task reached a terminal (failed/cancelled) status but whose assistant message was left stuck at "running" (a lost message write on the failure path) is now healed by the zombie reconciler, so it no longer revives a stuck spinner on every reload. Completed answers are never rewritten.
+- A rare enqueue race no longer hands the client a task id that maps to no task (the stop button targeted nothing); the follow-up now always resolves to a real, cancellable turn.
 - Automations: pausing (or deleting) an automation while its run is in flight is no longer undone — the scheduler's error-recovery re-arms a failed run only when the row is untouched, so a manual pause during a fire is respected instead of resurrected.
 - Permissions: the "Ask" capability effect was labelled as behaving like "Allow" while the runtime actually blocks it (fail-safe, same as "Deny") until human-in-the-loop approval ships. Corrected the label and dimmed the "Ask" row to match.
 
-### Changed
-- Chat messages, edits, and streaming answer blocks now settle in with a short opacity fade instead of the 500ms blur-rise, so the busiest surface reads calm and does no per-mount GPU blur work; the cinematic entrance stays on rare surfaces (onboarding, auth, empty states).
-- Buttons and several chat transitions no longer animate every property (`transition-all` → explicit property lists), removing accidental layout/color animation and keeping motion on `transform`/`opacity`; the button press is a single `scale`, not scale + nudge.
-- Tooltips now wait ~400ms before opening (was instant), so passing the cursor over controls no longer flashes stray tooltips; a series of tooltips still opens instantly after the first.
+### Security
+- Content mutations (adding/toggling/deleting skills, enabling/disabling/uninstalling/upgrading plugins, revoking a connector's OAuth tokens) now require a write-capable, active account: a read-only `viewer` and a `pending`/`rejected` account are refused instead of relying on session presence alone. Chat branch switching still requires an active account (blocks pending).
+- Unlinking Telegram now also revokes the Telegram login identity (the better-auth `account` mapping), not just the delivery link — so a previously-linked Telegram account can no longer sign in as the user after an unlink or a Telegram A→B switch.
 
 ## [0.6.7] - 2026-07-10
 
