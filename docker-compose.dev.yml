@@ -64,3 +64,6 @@ services:
       - DATABASE_URL=postgresql://Capka:Capka@postgres:5432/Capka
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
       - CONTROLLER_SECRET=capka-sandbox-secret
+      # Experimental share-link import — enabled in dev so it can be exercised
+      # locally; stays off by default in prod (operators opt in explicitly).
+      - CAPKA_SHARE_IMPORT=true

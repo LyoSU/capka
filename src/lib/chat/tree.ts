@@ -290,3 +290,64 @@ export async function cloneSharedChat(opts: {
 
   return newChatId;
 }
+
+/**
+ * Materialize an imported conversation (from another AI service's public share
+ * link) as a brand-new chat owned by `userId`. The messages arrive already parsed
+ * and capped (see `src/lib/import`) — this function only writes the tree: a linear
+ * user→assistant→… chain (each message the sole child of the previous), with
+ * `activeLeafId` pinned to the tail so the user lands ready to continue.
+ *
+ * The model is NOT run here: import ends at a persisted history, and the model
+ * only sees it on the user's next turn (where normal context trimming applies, so
+ * a large import can't blow the budget just by existing). Imported text is
+ * untrusted content stored as ordinary messages with zero elevated status.
+ * Returns the new chat id (always — an empty import is rejected upstream).
+ */
+export async function createImportedChat(opts: {
+  userId: string;
+  model?: string | null;
+  title: string | null;
+  messages: { role: "user" | "assistant"; content: string }[];
+  /** Marks provenance on every row (e.g. "claude"/"chatgpt") for a subtle
+   *  "Imported from …" affordance and so these turns are distinguishable later. */
+  importSource: string;
+}): Promise<string> {
+  const { userId, model, title, messages: imported, importSource } = opts;
+  const newChatId = nanoid();
+
+  // Linear chain: each row's parent is the previous row. createdAt is set
+  // explicitly and strictly increasing so sibling ordering (and any later fork)
+  // is deterministic even though these rows are inserted in one batch.
+  const base = Date.now();
+  let prevId: string | null = null;
+  const rows = imported.map((m, i) => {
+    const id = nanoid();
+    const row = {
+      id,
+      chatId: newChatId,
+      parentId: prevId,
+      role: m.role,
+      content: m.content,
+      platform: `import:${importSource}`,
+      createdAt: new Date(base + i),
+    };
+    prevId = id;
+    return row;
+  });
+
+  await db.transaction(async (tx) => {
+    await tx.insert(chats).values({
+      id: newChatId,
+      userId,
+      title: title || "Imported chat",
+      model: model ?? undefined,
+    });
+    if (rows.length > 0) {
+      await tx.insert(messages).values(rows);
+      await tx.update(chats).set({ activeLeafId: rows[rows.length - 1].id }).where(eq(chats.id, newChatId));
+    }
+  });
+
+  return newChatId;
+}

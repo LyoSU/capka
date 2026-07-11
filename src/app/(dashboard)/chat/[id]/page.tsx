@@ -6,6 +6,7 @@ import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, chats, users } from "@/lib/db/schema";
 import { resolveInitialModel } from "@/lib/providers/default-model";
+import { isShareImportEnabled } from "@/lib/import/flag";
 import { ChatPanel } from "@/components/chat/chat-panel";
 
 export default async function ChatIdPage({
@@ -76,6 +77,7 @@ export default async function ChatIdPage({
       initialHasHistory={!!existingChat?.activeLeafId}
       recentChats={recentChats}
       userName={session.user.name}
+      shareImportEnabled={isShareImportEnabled()}
     />
   );
 }

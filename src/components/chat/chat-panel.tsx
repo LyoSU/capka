@@ -34,6 +34,11 @@ import { deriveContextFill } from "@/lib/chat/context/fill";
 import { useComposerAttachments } from "@/components/chat/use-composer-attachments";
 import { useChatDraft } from "@/components/chat/use-chat-draft";
 import { useChatQueue } from "@/components/chat/use-chat-queue";
+import { useShareImport } from "@/components/chat/use-share-import";
+import { ImportCard } from "@/components/chat/import-card";
+import { ProviderGlyph } from "@/components/chat/provider-icons";
+import { sourceLabel } from "@/lib/import/detect";
+import type { ImportSource } from "@/lib/import/types";
 import type { FileRef } from "@/lib/constants";
 import { acceptsNativeFile, mimeToModality, type Modality } from "@/lib/providers/registry";
 import { FileDropZone } from "@/components/chat/file-drop-zone";
@@ -66,9 +71,13 @@ interface ChatPanelProps {
   recentChats?: { id: string; title: string | null; updatedAt: string | null }[];
   /** The signed-in user's display name — woven into the new-chat greeting. */
   userName?: string | null;
+  /** Experimental: offer to import a pasted Claude/ChatGPT share link. Off unless
+   *  the operator sets CAPKA_SHARE_IMPORT; resolved server-side and threaded here
+   *  so the client never reads env. */
+  shareImportEnabled?: boolean;
 }
 
-export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, initialHasHistory, recentChats, userName }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, initialHasHistory, recentChats, userName, shareImportEnabled }: ChatPanelProps) {
   const t = useTranslations("chat");
   const locale = useLocale();
   const [model, setModel] = useState(defaultModel);
@@ -207,6 +216,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // The message that starts the latest turn. Changing this (a new send, or
   // opening a chat) is what triggers the pin-to-top animation.
   const lastUserId = messages.findLast((m) => m.role === "user")?.id;
+
+  // Provenance: an imported chat marks every row `import:<source>`. Read it off
+  // the root message so the transcript can show a single quiet "Imported from …"
+  // pill at the top (not per message).
+  const importedFrom = (() => {
+    const p = (messages[0]?.metadata as { platform?: string } | undefined)?.platform;
+    return p?.startsWith("import:") ? (p.slice("import:".length) as ImportSource) : null;
+  })();
 
   // Context-window fill for the composer meter (hidden below 50%, and hidden
   // right after a compaction until the next turn re-measures).
@@ -419,6 +436,29 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // Persisted per-chat to localStorage so the queue survives the `key={chatId}`
   // remount on a chat switch (the in-memory version was dropped on the floor).
   const { queued, setQueued } = useChatQueue(chatId);
+
+  // Pasting a public Claude/ChatGPT share link into the composer offers to import
+  // that conversation as a fresh chat and continue it here. Detection is free
+  // (pure, no tokens); the render+parse only runs when the user clicks Import.
+  const shareImport = useShareImport({
+    text: input,
+    model,
+    onImported: (id) => {
+      clearDraft();
+      router.push(`/chat/${id}`);
+    },
+  });
+  const importCardEl = shareImportEnabled && shareImport.detected ? (
+    <ImportCard
+      detected={shareImport.detected}
+      state={shareImport.state}
+      onImport={shareImport.startPreview}
+      onConfirm={shareImport.confirmImport}
+      onDismiss={shareImport.dismiss}
+      onRetry={shareImport.retry}
+    />
+  ) : null;
+
   const dispatchingRef = useRef(false);
   // Synchronous "a direct send is in flight" guard. `isLoading` is React state
   // and only flips to running on the next committed render, so for the brief
@@ -722,6 +762,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
               </h1>
             </div>
 
+            {importCardEl}
             <div className="animate-blur-rise [animation-delay:80ms]">{inputEl}</div>
 
             <div className="mx-auto max-w-3xl px-4 md:px-6 lg:max-w-4xl">
@@ -777,6 +818,14 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
             style={{ paddingBottom: `calc(${composerH + 16}px + var(--kb, 0px))` }}
           >
             <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
+              {importedFrom && (
+                <div className="flex justify-center pb-2 pt-1">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
+                    <ProviderGlyph slug={importedFrom === "claude" ? "anthropic" : "openai"} size={12} />
+                    {t("panel.importedFrom", { service: sourceLabel(importedFrom) })}
+                  </span>
+                </div>
+              )}
               {messages.map((message, i) => {
                 const isLast = i === messages.length - 1;
                 const isStreamingMsg = isLoading && isLast && message.role === "assistant";
@@ -907,6 +956,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
                   </div>
                 </div>
               )}
+              {importCardEl}
               {queuedEl}
               {inputEl}
             </div>

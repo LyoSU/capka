@@ -227,6 +227,7 @@
       "telegramBusy": "The bot is working on this chat…",
       "stopBot": "Stop",
       "continueHere": "Continue in a web chat",
+      "importedFrom": "Imported from {service}",
       "queuedFiles": "{count, plural, one {# file} other {# files}}",
       "cancelQueued": "Remove from queue",
       "contextFull": "Context: {pct}%",
@@ -330,6 +331,29 @@
       "uploadFailed": "Upload failed: {files}",
       "retryUpload": "Retry upload of {name}",
       "blindModalities": "This model won't see {modalities} directly"
+    },
+    "import": {
+      "offer": "This is a {service} conversation. Import it here and keep going?",
+      "import": "Import",
+      "dismiss": "Just send the link",
+      "reading": "Reading the {service} conversation…",
+      "creating": "Creating the chat…",
+      "untitled": "{service} conversation",
+      "summary": "{service} · {count, plural, one {# message} other {# messages}}",
+      "droppedNote": "Attachments and images won't be imported.",
+      "truncatedNote": "The conversation was long, so only part of it was imported.",
+      "confirm": "Import and continue",
+      "cancel": "Cancel",
+      "retry": "Try again",
+      "error": {
+        "NETWORK_DISABLED": "Importing from {service} needs sandbox network access, which is turned off on this instance. Ask your admin, or paste the conversation text instead.",
+        "PLAYWRIGHT_MISSING": "This instance can't open external pages to import them. Ask your admin, or paste the conversation text instead.",
+        "BLOCKED": "{service} blocked the import. Try again in a moment, or paste the conversation text instead.",
+        "NOT_FOUND": "That share link didn't load — check that it's public and correct.",
+        "FORMAT_CHANGED": "{service} changed how shared chats look, so import is temporarily unavailable. You can paste the conversation text instead.",
+        "EMPTY": "There was no text to import from that conversation.",
+        "RENDER_FAILED": "Couldn't import that conversation. Try again in a moment."
+      }
     },
     "ask": {
       "title": "A quick question",
@@ -442,6 +466,7 @@
       "workedFor": "Worked for {duration}",
       "activity": "Activity",
       "fork": "Fork into a new chat",
+      "actions": "Message actions",
       "prevVersion": "Previous version",
       "nextVersion": "Next version",
       "versions": "{count} versions"
