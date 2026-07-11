@@ -123,6 +123,13 @@ export function ChatInput({
     if (!el) return;
     el.style.height = "0";
     el.style.height = `${el.scrollHeight}px`;
+    // Only scroll once the content actually outgrows max-height. Below that the
+    // box always fits its text exactly, so `overflow-y-auto` must stay off:
+    // a single line's fractional height (e.g. 15px × 1.625 = 24.375px) rounds
+    // `scrollHeight` down to an integer smaller than the real content, which
+    // otherwise paints a phantom scrollbar in the empty/one-line composer.
+    const max = parseFloat(getComputedStyle(el).maxHeight);
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
   }, []);
 
   // Keep the textarea height in sync with `value` on EVERY change, not just on
@@ -282,14 +289,15 @@ export function ChatInput({
               disabled={awaitingInput}
               aria-label={files.length > 0 ? t("placeholderFiles") : t("placeholder")}
               rows={1}
-              // The textarea is its OWN scroller (max-height + overflow-y-auto),
-              // not an overflow-hidden box inside a scrolling wrapper. When the
+              // The textarea is its OWN scroller (max-height + overflow toggled
+              // in `resize`), not an overflow-hidden box inside a scrolling
+              // wrapper. When the
               // element that scrolls is also the one holding the caret, the
               // browser keeps the caret in view natively; the old wrapper-scrolls
               // arrangement had `resize()` collapse the textarea to height 0 each
               // keystroke, which clamped the wrapper's scrollTop to 0 and jumped
               // long text back to the top on every character.
-              className="w-full resize-none max-h-52 overflow-y-auto scrollbar-thin bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none disabled:opacity-60 md:text-[15px]"
+              className="w-full resize-none max-h-52 overflow-y-hidden scrollbar-thin bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none disabled:opacity-60 md:text-[15px]"
             />
             {/* Overlay placeholder instead of the native one: a textarea's own
                 placeholder wraps to a second line on a narrow screen and can't be

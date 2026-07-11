@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- The composer no longer shows a phantom vertical scrollbar when empty or on a single line (sub-pixel rounding of the auto-grow height); it now scrolls only once the text actually exceeds the max height.
+
 ## [0.7.1] - 2026-07-11
 
 ### Changed
