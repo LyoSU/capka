@@ -2,15 +2,20 @@
 
 import { useTranslations } from "next-intl";
 import { AlertCircle, ArrowRight, Download, Loader2 } from "lucide-react";
+import Claude from "@lobehub/icons/es/Claude";
+import OpenAI from "@lobehub/icons/es/OpenAI";
 import { Button } from "@/components/ui/button";
-import { ProviderGlyph } from "./provider-icons";
 import { sourceLabel } from "@/lib/import/detect";
 import type { DetectedShareLink, ImportSource } from "@/lib/import/types";
 import type { ImportPhase } from "./use-share-import";
 
-/** The brand-icon slug for a share source (Claude → Anthropic, ChatGPT → OpenAI). */
-export function brandSlug(source: ImportSource): string {
-  return source === "claude" ? "anthropic" : "openai";
+/** The source's monochrome brand mark (Claude's, or the OpenAI/ChatGPT blossom —
+ *  they share one glyph), tinted to the surrounding text color with no badge/
+ *  background. Static component refs, so no "component created during render"
+ *  lint. */
+export function SourceGlyph({ source, size = 18, className }: { source: ImportSource; size?: number; className?: string }) {
+  const cls = `text-muted-foreground ${className ?? ""}`;
+  return source === "claude" ? <Claude size={size} className={cls} /> : <OpenAI size={size} className={cls} />;
 }
 
 /**
@@ -43,7 +48,7 @@ export function ImportCard({
         {state.phase === "idle" && (
           <div className="flex flex-col gap-2.5">
             <div className="flex items-start gap-3">
-              <ProviderGlyph slug={brandSlug(detected.source)} size={18} className="mt-0.5 shrink-0" />
+              <SourceGlyph source={detected.source} size={18} className="mt-0.5 shrink-0" />
               <span className="min-w-0 flex-1 text-sm text-foreground/90">{t("offer", { service })}</span>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -68,7 +73,7 @@ export function ImportCard({
         {state.phase === "preview" && (
           <div className="flex flex-col gap-2.5">
             <div className="flex items-start gap-3">
-              <ProviderGlyph slug={brandSlug(detected.source)} size={18} className="mt-0.5 shrink-0" />
+              <SourceGlyph source={detected.source} size={18} className="mt-0.5 shrink-0" />
               <div className="min-w-0 flex-1 text-sm">
                 <p className="font-medium text-foreground">{state.data.title || t("untitled", { service })}</p>
                 <p className="text-muted-foreground">

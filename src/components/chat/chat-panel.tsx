@@ -36,7 +36,7 @@ import { useChatDraft } from "@/components/chat/use-chat-draft";
 import { useChatQueue } from "@/components/chat/use-chat-queue";
 import { useShareImport } from "@/components/chat/use-share-import";
 import { ImportCard } from "@/components/chat/import-card";
-import { ProviderGlyph } from "@/components/chat/provider-icons";
+import { SourceGlyph } from "@/components/chat/import-card";
 import { sourceLabel } from "@/lib/import/detect";
 import type { ImportSource } from "@/lib/import/types";
 import type { FileRef } from "@/lib/constants";
@@ -821,7 +821,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
               {importedFrom && (
                 <div className="flex justify-center pb-2 pt-1">
                   <span className="inline-flex items-center gap-1.5 rounded-full border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
-                    <ProviderGlyph slug={importedFrom === "claude" ? "anthropic" : "openai"} size={12} />
+                    <SourceGlyph source={importedFrom} size={12} />
                     {t("panel.importedFrom", { service: sourceLabel(importedFrom) })}
                   </span>
                 </div>
