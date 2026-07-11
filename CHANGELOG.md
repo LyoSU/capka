@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-11
+
 ### Changed
 - Large attached images are downscaled in the sandbox (long edge 2048px) before being sent to the model, keeping them under provider per-image caps and cutting token cost; the full-resolution original stays in the workspace for `view_file` and metadata questions.
 
