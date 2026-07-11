@@ -52,14 +52,24 @@ export function ChatContextMenu({
   chat,
   onUpdate,
   children,
+  open,
+  onOpenChange,
 }: {
   chat: ChatItem;
   onUpdate: () => void;
   children: React.ReactNode;
+  // The menu's open state can be driven from the row (a long-press on touch,
+  // where the visible ⋮ trigger is hidden). Falls back to internal state so the
+  // component still works uncontrolled.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const router = useRouter();
   const t = useTranslations("chat");
   const tc = useTranslations("common");
+  const [internalOpen, setInternalOpen] = useState(false);
+  const menuOpen = open ?? internalOpen;
+  const setMenuOpen = onOpenChange ?? setInternalOpen;
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -165,14 +175,31 @@ export function ChatContextMenu({
   return (
     <>
       {children}
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        {/* Invisible anchor: keeps the menu positioned even when the visible ⋮
+            trigger is hidden on touch, and lets a long-press open it (via the
+            controlled `open`) with no tap target of its own. pointer-events-none
+            so a normal tap never opens it. */}
         <DropdownMenuTrigger
+          aria-hidden
+          tabIndex={-1}
+          nativeButton={false}
+          render={<span />}
+          className="pointer-events-none absolute right-1 top-1/2 z-10 h-0 w-0 -translate-y-1/2"
+        />
+        {/* Visible ⋮ — desktop hover-reveal; hidden on touch (pointer-coarse),
+            where the row's long-press opens the same menu. A plain button, not
+            the trigger, so it can sit beside the anchor and open the controlled
+            menu on click. */}
+        <button
+          type="button"
           data-sidebar="menu-action"
           aria-label={t("menu.options")}
-          className="absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 data-[popup-open]:bg-sidebar-accent data-[popup-open]:text-sidebar-accent-foreground data-[popup-open]:opacity-100 sm:opacity-0 sm:group-hover/menu-item:opacity-100"
+          onClick={() => setMenuOpen(true)}
+          className={`absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 pointer-coarse:hidden sm:opacity-0 sm:group-hover/menu-item:opacity-100 ${menuOpen ? "bg-sidebar-accent text-sidebar-accent-foreground opacity-100" : ""}`}
         >
           <MoreVertical className="size-4" />
-        </DropdownMenuTrigger>
+        </button>
           <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-auto">
             <DropdownMenuItem onClick={startRename}>
               <Pencil className="h-4 w-4" />

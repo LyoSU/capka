@@ -79,8 +79,6 @@ interface ChatInputProps {
   blindModalities?: Modality[];
   /** Context-window fill, shown as a ring left of the send button. */
   contextUsage?: { used: number; window: number } | null;
-  /** Fresh, empty chat — focus the composer on mount so it's ready to type. */
-  isNewChat: boolean;
   /** PC-folder sync state + actions. When the user may attach a folder, the
    *  paperclip becomes a small menu (Upload files / Connect a folder). */
   folders?: ReturnType<typeof useFolderSync>;
@@ -100,7 +98,6 @@ export function ChatInput({
   onRetryFile,
   blindModalities,
   contextUsage,
-  isNewChat,
   folders,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
@@ -136,18 +133,18 @@ export function ChatInput({
     resize();
   }, [value, resize]);
 
-  // Land the caret in the composer when a chat opens. Desktop: always — the
-  // keyboard is physical, so focus costs nothing. Mobile: only for a fresh chat,
-  // since raising the on-screen keyboard over an existing thread would cover the
-  // conversation the user came to read. We read matchMedia directly rather than
-  // `isMobile`, because the hook reports `false` until its own effect resolves —
-  // so a mount-time `autoFocus` prop would focus on mobile before we knew it was
-  // mobile, popping the keyboard on every open. Keyed on `chatId` so switching
-  // threads re-evaluates.
+  // Land the caret in the composer when a chat opens — DESKTOP ONLY, where the
+  // keyboard is physical so focus costs nothing. We never auto-focus on mobile,
+  // not even a fresh chat: this effect re-runs on any page-lifecycle remount
+  // (e.g. a PWA resuming from the background reloads the tab), so focusing here
+  // would pop the on-screen keyboard every time the user returns to the app.
+  // matchMedia is read directly rather than via `isMobile`, since the hook
+  // reports `false` until its own effect resolves. Keyed on `chatId` so
+  // switching threads re-evaluates.
   useEffect(() => {
     const isMobileNow = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches;
-    if (!isMobileNow || isNewChat) textareaRef.current?.focus();
-  }, [chatId, isNewChat]);
+    if (!isMobileNow) textareaRef.current?.focus();
+  }, [chatId]);
 
   // Something is uploading → hold the send until it settles, so we never send a
   // message whose attachment isn't in the sandbox yet.
@@ -272,7 +269,7 @@ export function ChatInput({
             </div>
           )}
 
-          <div className="relative mx-4 mt-3 mb-1 max-h-52 overflow-y-auto scrollbar-thin">
+          <div className="relative mx-4 mt-3 mb-1">
             <textarea
               ref={textareaRef}
               value={value}
@@ -285,7 +282,14 @@ export function ChatInput({
               disabled={awaitingInput}
               aria-label={files.length > 0 ? t("placeholderFiles") : t("placeholder")}
               rows={1}
-              className="w-full resize-none overflow-hidden bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none disabled:opacity-60 md:text-[15px]"
+              // The textarea is its OWN scroller (max-height + overflow-y-auto),
+              // not an overflow-hidden box inside a scrolling wrapper. When the
+              // element that scrolls is also the one holding the caret, the
+              // browser keeps the caret in view natively; the old wrapper-scrolls
+              // arrangement had `resize()` collapse the textarea to height 0 each
+              // keystroke, which clamped the wrapper's scrollTop to 0 and jumped
+              // long text back to the top on every character.
+              className="w-full resize-none max-h-52 overflow-y-auto scrollbar-thin bg-transparent pr-2 text-base leading-relaxed focus-visible:outline-none disabled:opacity-60 md:text-[15px]"
             />
             {/* Overlay placeholder instead of the native one: a textarea's own
                 placeholder wraps to a second line on a narrow screen and can't be

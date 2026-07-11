@@ -134,7 +134,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   const prevComposerH = useRef(160);
 
   const router = useRouter();
-  const { messages, isLoading, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, taskInfo } = useBackgroundChat({
+  const { messages, isLoading, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, taskInfo } = useBackgroundChat({
     chatId,
     projectId,
   });
@@ -175,8 +175,18 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // Stable identities for the same reason as handleFork — these are passed to
   // every ChatMessage even while a turn runs (the buttons render disabled, not
   // hidden — see actionsDisabled), so a changing identity would bust the memo.
-  const handleEdit = useCallback((id: string, text: string) => editMessage(id, text, model), [editMessage, model]);
-  const handleRegenerate = useCallback(() => regenerate(model), [regenerate, model]);
+  // Surface edit/regenerate failures (esp. a network reject, now localized in
+  // the hook) as a toast — without a catch these rejected silently, so a failed
+  // edit looked like it just vanished.
+  const handleEdit = useCallback(
+    (id: string, text: string) =>
+      editMessage(id, text, model).catch((e) => toast.error(e instanceof Error ? e.message : t("panel.sendFailed"))),
+    [editMessage, model, t],
+  );
+  const handleRegenerate = useCallback(
+    () => regenerate(model).catch((e) => toast.error(e instanceof Error ? e.message : t("panel.sendFailed"))),
+    [regenerate, model, t],
+  );
 
   // "Continue here": fork a read-only Telegram chat from its latest message into
   // a fresh, fully-interactive web chat so the user can take the thread over.
@@ -464,7 +474,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     // instead of sending now. `sendingRef` is the synchronous part of that
     // check: it's true the instant a send starts, so a fast second submit
     // queues as the next turn rather than racing out as a concurrent send.
-    if (isLoading || queued.length > 0 || dispatchingRef.current || sendingRef.current) {
+    // `!historyLoaded`: a chat opened moments ago may not have its history yet,
+    // so sending now would carry no conversation context to the model. Queue it
+    // (persisted) and let the drain effect fire once history resolves.
+    if (!historyLoaded || isLoading || queued.length > 0 || dispatchingRef.current || sendingRef.current) {
       // nanoid (not crypto.randomUUID, which is undefined on non-secure origins)
       // — and this id rides through the drain into the POST as the message id, so
       // a double-drain (same chat in two tabs) collapses server-side.
@@ -487,7 +500,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
   // the whole burst into a single reply. Sent sequentially so they chain in
   // order; the ref guards the async gap before isLoading flips.
   useEffect(() => {
-    if (isLoading || dispatchingRef.current || queued.length === 0) return;
+    if (!historyLoaded || isLoading || dispatchingRef.current || queued.length === 0) return;
     const batch = queued;
     dispatchingRef.current = true;
     void (async () => {
@@ -505,7 +518,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       }
     })().finally(() => { dispatchingRef.current = false; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, queued]);
+  }, [isLoading, queued, historyLoaded]);
 
   // Show the new-chat greeting ONLY for a genuinely fresh chat. `messages` start
   // empty until the hook's history fetch resolves, so `messages.length === 0`
@@ -639,7 +652,6 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
       onRetryFile={attachments.retry}
       blindModalities={blindModalities}
       contextUsage={contextUsage}
-      isNewChat={showGreeting}
       folders={folderSync}
     />
   );

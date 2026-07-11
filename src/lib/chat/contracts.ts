@@ -11,6 +11,17 @@ export const chatRequestSchema = z.object({
   // keeps the React key stable across the optimistic → loaded transition, so the
   // bubble doesn't remount (and visibly flash) when history reloads.
   userMessageId: z.string().optional(),
+  // Explicit parent for the new user message. The server NEVER infers parent
+  // linkage from the position of the message inside `messages` — a client whose
+  // history hasn't loaded yet (e.g. a persisted send queue draining on mount)
+  // would send a stale/empty array and graft the turn onto the wrong node or a
+  // second root. Semantics:
+  //   absent (undefined) → a normal send: the server anchors to the chat's own
+  //                        `activeLeafId` (authoritative, from the DB).
+  //   string | null      → an edit/regenerate: the caller computed the sibling
+  //                        parent from loaded history (null = editing the first
+  //                        message, so the new version is a root sibling).
+  parentId: z.string().nullable().optional(),
   attachedFiles: z.array(z.object({ name: z.string(), type: z.string() })).optional(),
   messages: z.array(z.any()).optional(),
 });

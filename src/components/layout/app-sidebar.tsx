@@ -54,6 +54,8 @@ import { ProjectSelector } from "@/components/projects/project-selector";
 import { ChatSearch } from "@/components/chat/chat-search";
 import { ChatContextMenu } from "@/components/chat/chat-context-menu";
 import { cn } from "@/lib/utils";
+import { useLongPress } from "@/hooks/use-long-press";
+import { haptic } from "@/lib/haptics";
 
 type ChatItem = {
   id: string;
@@ -185,9 +187,32 @@ function ChatRow({
   fallback: string;
   onUpdate: () => void;
 }) {
+  // Touch has no hover to reveal the ⋮ action, so a long-press opens the same
+  // menu (mirrors the message action menu). The visible ⋮ is hidden on touch in
+  // ChatContextMenu; here we drive the menu's open state and swallow the click
+  // the finger-lift fires on the underlying Link so the row doesn't navigate
+  // while the menu opens.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const firedRef = useRef(false);
+  const longPress = useLongPress(() => {
+    firedRef.current = true;
+    setMenuOpen(true);
+    haptic("tap");
+  });
   return (
-    <SidebarMenuItem className={entering ? "animate-chat-row-in" : undefined}>
-      <ChatContextMenu chat={chat} onUpdate={onUpdate}>
+    <SidebarMenuItem
+      className={cn("pointer-coarse:select-none [-webkit-touch-callout:none]", entering && "animate-chat-row-in")}
+      {...longPress}
+      onTouchStart={(e) => { firedRef.current = false; longPress.onTouchStart(e); }}
+      onClickCapture={(e) => {
+        if (firedRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          firedRef.current = false;
+        }
+      }}
+    >
+      <ChatContextMenu chat={chat} onUpdate={onUpdate} open={menuOpen} onOpenChange={setMenuOpen}>
         <SidebarMenuButton
           render={<Link href={`/chat/${chat.id}`} />}
           data-active={active || undefined}
@@ -602,7 +627,7 @@ export function AppSidebar() {
               {t("telegram")}
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-1">
                 {visibleTelegramChats.map((chat) => (
                   <ChatRow
                     key={chat.id}
@@ -635,7 +660,7 @@ export function AppSidebar() {
           <SidebarGroup>
             <SidebarGroupLabel>{t("pinned")}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-1">
                 {pinnedChats.map((chat) => (
                   <ChatRow
                     key={chat.id}
@@ -656,7 +681,7 @@ export function AppSidebar() {
           <SidebarGroup key={group.key}>
             <SidebarGroupLabel>{t(`groups.${group.key}`)}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-1">
                 {group.chats.map((chat) => (
                   <ChatRow
                     key={chat.id}

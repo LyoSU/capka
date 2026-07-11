@@ -41,7 +41,7 @@ export const POST = apiHandler(async (req: Request) => {
 
   const [chatRow, project] = await Promise.all([
     requestChatId
-      ? db.select({ id: chats.id, userId: chats.userId, title: chats.title, model: chats.model, source: chats.source }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
+      ? db.select({ id: chats.id, userId: chats.userId, title: chats.title, model: chats.model, source: chats.source, activeLeafId: chats.activeLeafId }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
       : undefined,
     projectId
       ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
@@ -103,14 +103,15 @@ export const POST = apiHandler(async (req: Request) => {
   if (text) {
     const isNewChat = !existingChat || existingChat.title === "New Chat";
     const newUserId = userMessageId || nanoid();
-    // The user message's parent is whatever it follows in the visible path the
-    // client sent. Editing re-sends history ending at the *edited* message, so
-    // this naturally makes the edit a sibling of the original — no deletes.
-    const uiMsgs = body.messages ?? [];
-    const selfIdx = uiMsgs.findIndex((m) => m.id === newUserId);
-    const parentId = selfIdx > 0 ? uiMsgs[selfIdx - 1].id : null;
-    // The parent comes from the client's view of the conversation; never trust
-    // it blind. It must be a real message *in this chat* — otherwise a stale or
+    // Parent linkage is server-authoritative — NEVER inferred from the position
+    // of this message inside the client's `messages` array. A client whose
+    // history hasn't loaded (a persisted send queue draining on mount) would
+    // send an empty/stale array and root this turn as a second tree or graft it
+    // mid-thread — surfacing as "my send edited/forked an old message". A normal
+    // send (parentId absent) anchors to the chat's own leaf; an edit passes the
+    // sibling parent it computed from loaded history (null = first-message edit).
+    const parentId = body.parentId !== undefined ? body.parentId : (existingChat?.activeLeafId ?? null);
+    // The parent must be a real message *in this chat* — otherwise a stale or
     // tampered client would 500 on the FK, or (with a real id from another
     // chat) silently graft this turn onto a foreign branch.
     if (parentId) {

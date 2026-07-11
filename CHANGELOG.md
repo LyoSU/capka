@@ -7,6 +7,11 @@ All notable changes to Capka are documented here. Format follows
 ## [Unreleased]
 
 ### Fixed
+- Sending a message could, rarely, attach it to the wrong point in the conversation — appearing to edit or fork an earlier message — when a persisted send queue drained before the chat's history finished loading. Message parent linkage is now server-authoritative (anchored to the chat's active branch), and sends wait for history to load.
+- A network drop mid-send (or mid-edit/regenerate) now surfaces a localized "no connection" message instead of the browser's raw `Failed to fetch`; failed edits/regenerations no longer fail silently.
+- The composer no longer scrolls a long message back to the top on every keystroke, and no longer raises the on-screen keyboard when returning to the app on mobile (autofocus is desktop-only).
+- Markdown tables in chat now scroll horizontally on narrow screens instead of crushing their columns to fit the message width.
+- Chat list: more spacing between rows, and on touch devices the per-chat actions open via long-press (the always-visible ⋮ is hidden on touch, matching the message action menu).
 - File tools (`read_file`, `list_files`, `search_files`, `str_replace`) no longer leak raw shell errors like `sed: can't read …: No such file or directory` into the chat; a missing/inaccessible path now reads as a plain "File not found: …". Actionable failures (e.g. over-quota) still pass through unchanged.
 - Sandbox image rendering no longer exhausts the process budget under gVisor and fail with misleading `Cannot allocate memory` errors: the new `SANDBOX_PIDS_LIMIT` setting defaults to 256 (up from the previous fixed limit of 100), while `view_file` bounds ImageMagick's worker threads per render.
 

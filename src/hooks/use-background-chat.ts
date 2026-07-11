@@ -56,6 +56,12 @@ export function useBackgroundChat({
   const appliedSeqRef = useRef<Map<string, number>>(new Map());
 
   const [error, setError] = useState<string | null>(null);
+  // Has the initial history fetch resolved at least once? Guards the send/drain
+  // path: sending before history loads means `msgRef.current` is still empty, so
+  // the turn would carry no conversation context to the model. (Parent linkage is
+  // already safe — the server anchors to its own leaf — but the prompt would be
+  // context-blind.) A persisted send queue draining on mount is the trigger.
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   // ── Load history from DB ───────────────────────────────────
   const loadHistory = useCallback(() => {
@@ -74,6 +80,7 @@ export function useBackgroundChat({
           setMessages(mergePendingMessages(history, pendingRef.current));
         }
         setError(null);
+        setHistoryLoaded(true);
         // Find the running assistant reply (the snapshot we may be resuming). It's
         // normally the last message, but a just-queued user follow-up can sit
         // after it — so scan from the end rather than assuming `last`.
@@ -99,6 +106,10 @@ export function useBackgroundChat({
       .catch((e) => {
         console.error("[chat] loadHistory failed:", e);
         setError(t("loadFailed"));
+        // Release the send gate even on failure: parent linkage is safe server-
+        // side regardless, so blocking sends forever on a transient load error
+        // would be worse UX than sending with possibly-incomplete context.
+        setHistoryLoaded(true);
       });
   }, [chatId, t]);
 
@@ -604,7 +615,11 @@ export function useBackgroundChat({
         pendingRef.current = pendingRef.current.filter((m) => m.id !== userMsg.id);
         setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
         setStatus("idle");
-        throw e;
+        // fetch() rejects with a TypeError when the network itself fails (offline,
+        // DNS, connection reset) — swap the browser's raw, English "Failed to
+        // fetch"/"Load failed" for a localized line. HTTP errors above are already
+        // thrown as localized Error strings, so they pass through untouched.
+        throw e instanceof TypeError ? new Error(t("offline")) : e;
       }
     },
     [chatId, projectId, t],
@@ -618,9 +633,13 @@ export function useBackgroundChat({
   // insert a new user row" (regenerate); a non-empty one re-inserts the edited
   // message (edit).
   const rerun = useCallback(
-    async (history: Message[], userMessage: string, userMessageId?: string, attachedFiles?: FileRef[], model?: string) => {
-      // Non-destructive: the server inserts a sibling branch keyed off the
-      // history we send, so the previous version stays reachable via ‹ i/N ›.
+    async (history: Message[], userMessage: string, userMessageId?: string, attachedFiles?: FileRef[], model?: string, parentId?: string | null) => {
+      // Non-destructive: the server inserts a sibling branch under the explicit
+      // `parentId` we compute here, so the previous version stays reachable via
+      // ‹ i/N ›. Passing parentId explicitly (rather than letting the server read
+      // it off the history array) is what makes an edit a sibling instead of an
+      // append: the server anchors a *normal* send to the chat's leaf, so edit
+      // MUST state its own (older) parent — null when editing the first message.
       setMessages(history);
       setStatus("running");
       try {
@@ -632,6 +651,7 @@ export function useBackgroundChat({
             projectId,
             userMessage,
             userMessageId,
+            parentId,
             model,
             // Edit only changes the text — the original attachments ride along so
             // the server re-persists them and the runner re-feeds them to the model.
@@ -652,7 +672,8 @@ export function useBackgroundChat({
       } catch (e) {
         setStatus("idle");
         loadHistory(); // the DB and UI may now disagree — resync from source
-        throw e;
+        // See sendMessage: turn a raw fetch network reject into a localized line.
+        throw e instanceof TypeError ? new Error(t("offline")) : e;
       }
     },
     [chatId, projectId, t, loadHistory],
@@ -689,7 +710,12 @@ export function useBackgroundChat({
       parts: [{ type: "text", text }],
       metadata: attachedFiles?.length ? { attachedFiles } : undefined,
     };
-    await rerun([...history, edited], text, edited.id, attachedFiles, model);
+    // The edited message is a sibling of the original, so its parent is whatever
+    // preceded the original in the visible path (null = the original was the
+    // first message). Passed explicitly so the server branches instead of
+    // appending to the current leaf.
+    const parentId = history[history.length - 1]?.id ?? null;
+    await rerun([...history, edited], text, edited.id, attachedFiles, model, parentId);
   }, [rerun]);
 
   // ── Switch branch (‹ i/N › version arrows) ─────────────────
@@ -748,5 +774,5 @@ export function useBackgroundChat({
     ),
   );
 
-  return { messages, status, error, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", awaitingInput, taskInfo };
+  return { messages, status, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload: loadHistory, isLoading: status === "running", awaitingInput, taskInfo };
 }

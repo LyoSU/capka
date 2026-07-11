@@ -537,7 +537,13 @@
   margin: 0.75rem 0;
 }
 [data-streamdown="table"] {
-  width: 100%;
+  /* max-content + min-width:100%: a short table fills the message width, a wide
+     one keeps its natural width and overflows the wrapper — which already has
+     overflow-x-auto from Streamdown — so it scrolls horizontally on a narrow
+     screen instead of crushing every column to fit the bubble. `width:100%`
+     (the old value) forced the squish. */
+  width: max-content;
+  min-width: 100%;
   font-size: 0.8125rem;
 }
 [data-streamdown="table-header-cell"],
@@ -545,6 +551,10 @@
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  /* .chat-prose sets overflow-wrap:anywhere for running prose; inherited into
+     cells it shatters values mid-word under width pressure. Cells size to their
+     content — the table scrolls instead of the words breaking. */
+  overflow-wrap: normal;
 }
 [data-streamdown="table-header-cell"] {
   font-weight: 600;

@@ -462,7 +462,8 @@
       "processFiles": "Process these files",
       "requestFailed": "Request failed.",
       "rateLimited": "Too many messages, please wait a moment.",
-      "budgetReached": "Spending limit reached. Please contact your admin."
+      "budgetReached": "Spending limit reached. Please contact your admin.",
+      "offline": "No connection. Check your internet and try again."
     },
     "clearSearch": "Clear search",
     "manage": {
