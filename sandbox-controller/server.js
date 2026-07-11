@@ -87,6 +87,7 @@ const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "capka-sandbox";
 const TMP_MB = posIntEnv("SANDBOX_TMP_MB", 64);
 const MCP_TMP_MB = posIntEnv("SANDBOX_MCP_TMP_MB", 256);
 const MEMORY_LIMIT = posIntEnv("SANDBOX_MEMORY_MB", 512) * 1024 * 1024;
+const PIDS_LIMIT = posIntEnv("SANDBOX_PIDS_LIMIT", 256);
 const CPU_LIMIT = posFloatEnv("SANDBOX_CPUS", 1.0) * 1e9;
 const EXEC_TIMEOUT = posIntEnv("SANDBOX_EXEC_TIMEOUT_MS", 30000);
 const IDLE_TTL = posIntEnv("SANDBOX_IDLE_TTL_MS", 900000); // 15 min — stop idle CONTAINER (files stay)
@@ -349,6 +350,7 @@ const server = createServer(async (req, res) => {
         const { handle } = await backend.create({
           sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
           networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
+          pidsLimit: PIDS_LIMIT,
           tmpMb: TMP_MB, mcpTmpMb: MCP_TMP_MB,
           fsizeBytes: MAX_FILE_MB * 1024 * 1024,
           mounts: reqMounts,

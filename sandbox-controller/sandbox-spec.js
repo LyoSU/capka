@@ -29,7 +29,12 @@ export function buildSandboxConfig({
   networkMode = "none",
   memoryBytes,
   nanoCpus,
-  pidsLimit = 100,
+  // gVisor's host-side runtime threads count toward Docker's pids cgroup. A
+  // limit of 100 leaves too little headroom for normal image/document renderers
+  // (ImageMagick, Chromium, LibreOffice) and can surface as misleading ENOMEM
+  // errors from unrelated helpers such as tail/xargs. 256 still contains fork
+  // bombs while leaving a useful workload budget across runc and runsc.
+  pidsLimit = 256,
   nofileLimit = 65536,
   // Max bytes any single file may reach (RLIMIT_FSIZE). 0 = no cap. This is the
   // kernel-enforced, synchronous backstop the poll-based workspace quota lacks:

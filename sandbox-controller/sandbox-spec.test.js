@@ -106,6 +106,10 @@ describe("buildSandboxConfig — isolation hardening", () => {
   it("applies the configured pids limit", () => {
     expect(buildSandboxConfig({ ...base, pidsLimit: 256 }).HostConfig.PidsLimit).toBe(256);
   });
+
+  it("defaults to a runsc-safe pids budget", () => {
+    expect(buildSandboxConfig(base).HostConfig.PidsLimit).toBe(256);
+  });
 });
 
 describe("buildSandboxConfig — resource exhaustion limits", () => {

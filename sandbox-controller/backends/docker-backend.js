@@ -72,6 +72,7 @@ export class DockerBackend {
       networkMode: spec.networkMode,
       memoryBytes: spec.memoryBytes,
       nanoCpus: spec.nanoCpus,
+      pidsLimit: spec.pidsLimit,
       tmpMb: spec.tmpMb,
       mcpTmpMb: spec.mcpTmpMb,
       fsizeBytes: spec.fsizeBytes,

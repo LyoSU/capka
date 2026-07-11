@@ -56,6 +56,7 @@ describe("view_file — rendering + ref shape", () => {
     const res = (await view_file.execute!({ path: "photo.jpg" }, opts)) as MediaRef;
     const cmd = lastCmd();
     expect(cmd).toContain("convert");
+    expect(cmd).toContain("-limit thread 2");
     expect(cmd).toContain('-resize \'1536x1536>\'');
     expect(cmd).toContain("-quality 85");
     expect(cmd).toContain("p-1.jpg");

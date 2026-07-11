@@ -30,6 +30,10 @@ const VIEW_DIR = "/workspace/.capka/view";
 const VIEW_KEEP = Number(process.env.VIEW_KEEP_DIRS) || 4;
 const MAX_PAGES = 4;
 const RENDER_PX = 1536; // long-edge target — a document page at this size is well under the cap
+// ImageMagick defaults its worker pool from the host CPU count. Keep this
+// renderer from consuming the universal sandbox PID/thread budget; application-
+// specific tuning belongs here rather than in the generic container spec.
+const IMAGE_RENDER_THREADS = 2;
 const MAX_IMG_BYTES = 3 * 1024 * 1024; // per page; Anthropic's per-image ceiling is ~5 MB
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
@@ -92,7 +96,7 @@ if [ ! -f "$src" ]; then echo __NOFILE__; exit 0; fi`;
       // image; `>` only shrinks. (Documents/PDF/HTML stay PNG below — crisp text.)
       return `${head}
 echo __COUNT__1
-convert "$src[0]" -resize '${RENDER_PX}x${RENDER_PX}>' -quality 85 "$d/p-1.jpg" && echo __PNG__"$d/p-1.jpg"`;
+convert -limit thread ${IMAGE_RENDER_THREADS} "$src[0]" -resize '${RENDER_PX}x${RENDER_PX}>' -quality 85 "$d/p-1.jpg" && echo __PNG__"$d/p-1.jpg"`;
     case "pdf":
       return `${head}\n${pdfTail(wanted)}`;
     case "office":

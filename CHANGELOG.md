@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 - File tools (`read_file`, `list_files`, `search_files`, `str_replace`) no longer leak raw shell errors like `sed: can't read …: No such file or directory` into the chat; a missing/inaccessible path now reads as a plain "File not found: …". Actionable failures (e.g. over-quota) still pass through unchanged.
+- Sandbox image rendering no longer exhausts the process budget under gVisor and fail with misleading `Cannot allocate memory` errors: the new `SANDBOX_PIDS_LIMIT` setting defaults to 256 (up from the previous fixed limit of 100), while `view_file` bounds ImageMagick's worker threads per render.
 
 ## [0.7.0] - 2026-07-10
 

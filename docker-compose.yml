@@ -152,6 +152,9 @@ services:
       # Per-sandbox RAM. The /tmp + /opt/mcp tmpfs are charged to this same
       # cgroup, so keep headroom.
       - SANDBOX_MEMORY_MB=${SANDBOX_MEMORY_MB:-1024}
+      # gVisor runtime threads count against this budget. 256 leaves enough
+      # headroom for image/document rendering while still containing fork bombs.
+      - SANDBOX_PIDS_LIMIT=${SANDBOX_PIDS_LIMIT:-256}
       - MAX_SESSIONS_PER_USER=${MAX_SESSIONS_PER_USER:-2}
       # Stop an idle CONTAINER after this (files + row survive, revived on the
       # next tool call).

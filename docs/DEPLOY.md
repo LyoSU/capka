@@ -55,6 +55,7 @@ deploys onto a host with a Docker daemon.
      `runsc` — the controller then refuses to boot until gVisor is present
      (fail-closed).
    - Optional tuning (defaults in parentheses): `SANDBOX_MEMORY_MB` (1024),
+     `SANDBOX_PIDS_LIMIT` (256),
      `MAX_SESSIONS_PER_USER` (2), `SANDBOX_IDLE_TTL_MS` (900000),
      `WORKSPACE_TTL_MS` (2592000000), `GC_GRACE_MS` (604800000),
      `SANDBOX_ALLOW_NETWORK` (true).
