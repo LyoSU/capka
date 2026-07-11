@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-11
+
 ### Added
 - Import a public Claude or ChatGPT share link (**experimental**, off by default — set `CAPKA_SHARE_IMPORT=true` to enable): paste a `claude.ai/share/…` or `chatgpt.com/share/…` URL into the composer and Capka offers to import that conversation as a new chat and continue it with any configured model. The page is rendered in the sandbox (never the platform process), so it also needs sandbox egress (`SANDBOX_ALLOW_NETWORK=true`); when egress is off the attempt fails with a clear, non-blocking notice. Text/markdown only; attachments, images, and tool calls are not imported. The model is not run until the user's first reply.
 
