@@ -19,13 +19,15 @@ const MAX_OUTPUT_FILES = 10;
 const MAX_OUTPUT_FILE_BYTES = 45 * 1024 * 1024; // under Telegram's 50 MB document cap
 const MAX_OUTPUT_TOTAL_BYTES = 50 * 1024 * 1024;
 
-/** Download files with bounded concurrency and total size budget */
+/** Download files with bounded concurrency and total size budget. Each result
+ *  carries its `index` in `files` so the caller can map a prepared/downscaled
+ *  copy back to the original attachment it stands in for. */
 async function downloadBounded(
   files: FileRef[],
   sessionKey: string,
   userId: string,
-): Promise<{ file: FileRef; buf: Buffer }[]> {
-  const results: { file: FileRef; buf: Buffer }[] = [];
+): Promise<{ index: number; file: FileRef; buf: Buffer }[]> {
+  const results: { index: number; file: FileRef; buf: Buffer }[] = [];
   let totalBytes = 0;
 
   for (let i = 0; i < files.length; i += MAX_CONCURRENT_DOWNLOADS) {
@@ -33,9 +35,9 @@ async function downloadBounded(
 
     const batch = files.slice(i, i + MAX_CONCURRENT_DOWNLOADS);
     const settled = await Promise.allSettled(
-      batch.map(async (file) => {
+      batch.map(async (file, j) => {
         const res = await downloadFile(sessionKey, file.name, userId);
-        return { file, buf: Buffer.from(await res.arrayBuffer()) };
+        return { index: i + j, file, buf: Buffer.from(await res.arrayBuffer()) };
       }),
     );
     for (const r of settled) {
@@ -134,27 +136,107 @@ async function transcodeUnsupportedAudio(
   return { files: out, cleanupDir: dir };
 }
 
-/** Read multimodal files from sandbox and inject as FilePart in the last user message */
+// ImageMagick defaults its worker pool from the host CPU count; cap it so a
+// downscale can't consume the sandbox PID/thread budget (see view-file.ts).
+const RENDER_THREADS = 2;
+// Long-edge target + JPEG quality for the downscaled copy. Providers downsample
+// images to ~1568px internally, so 2048 keeps small-text legibility (receipts,
+// contracts, whiteboards) with headroom to spare; the copy lands well under the
+// per-image caps that oversize originals blow past.
+const DOWNSCALE_LONG_EDGE = 2048;
+const DOWNSCALE_QUALITY = 83;
+// Only re-encode originals large enough to be worth it (and to risk the caps).
+const DOWNSCALE_OVER_BYTES = 3 * 1024 * 1024;
+// Raster formats ImageMagick can safely re-encode. GIF is excluded (a re-encode
+// would flatten animation); SVG/HEIC and anything else fall through untouched to
+// the download path, where the honest injected-set return still routes an
+// oversize file to the tool path instead of falsely promising it inline.
+const DOWNSCALABLE = new Set(["image/jpeg", "image/pjpeg", "image/png", "image/webp"]);
+
+/**
+ * Shrink oversized raster images IN THE SANDBOX before injection — mirrors
+ * `transcodeUnsupportedAudio`. A full-res phone photo is both wasteful (the
+ * provider never sees more than ~1568px) and a false-native hazard: it blows
+ * past the native byte cap and gets silently dropped. The downscaled copy goes
+ * to a hidden per-turn dir so the user's ORIGINAL stays in /workspace intact
+ * (full resolution, EXIF/GPS) for `view_file` and metadata questions. Returns a
+ * `files` array index-aligned with the input; on any failure the original ref
+ * is kept, so a downscale hiccup never becomes a hard turn failure.
+ */
+async function downscaleLargeImages(
+  sessionKey: string,
+  userId: string,
+  files: FileRef[],
+): Promise<{ files: FileRef[]; cleanupDir?: string }> {
+  if (!files.some((f) => DOWNSCALABLE.has(f.type))) return { files };
+  const dir = `.capka/native-img/${nanoid(8)}`;
+  const out = await Promise.all(
+    files.map(async (f, i) => {
+      if (!DOWNSCALABLE.has(f.type)) return f;
+      // PNG stays PNG (lossless resize keeps alpha + text crisp); everything
+      // else normalizes to JPEG.
+      const keepPng = f.type === "image/png";
+      const dest = `${dir}/${i}.${keepPng ? "png" : "jpg"}`;
+      try {
+        const r = await execCommand(
+          sessionKey,
+          `src=/workspace/${shq(f.name)}; ` +
+            `sz=$(stat -c%s "$src" 2>/dev/null || echo 0); ` +
+            `if [ "$sz" -le ${DOWNSCALE_OVER_BYTES} ]; then echo __KEEP__; exit 0; fi; ` +
+            `mkdir -p /workspace/${shq(dir)} && ` +
+            `convert -limit thread ${RENDER_THREADS} "$src[0]" -auto-orient ` +
+            `-resize '${DOWNSCALE_LONG_EDGE}x${DOWNSCALE_LONG_EDGE}>'` +
+            `${keepPng ? "" : ` -quality ${DOWNSCALE_QUALITY}`} /workspace/${shq(dest)} && echo __DONE__`,
+          120_000,
+        );
+        if (r.exitCode === 0 && r.stdout.includes("__DONE__")) {
+          return { name: dest, type: keepPng ? "image/png" : "image/jpeg" };
+        }
+        // __KEEP__ (already small) or a convert failure — use the original.
+        return f;
+      } catch (e) {
+        log.warn("image downscale errored; keeping original", { userId, file: f.name, err: String(e) });
+        return f;
+      }
+    }),
+  );
+  return { files: out, cleanupDir: dir };
+}
+
+/**
+ * Read multimodal files from sandbox and inject as FilePart in the last user
+ * message. Returns the ORIGINAL FileRefs whose bytes actually reached the model
+ * — the caller announces only those as inline-readable and routes the rest to
+ * the tool path, so a file that couldn't be delivered (download failed, still
+ * over cap after downscale, aggregate budget) is never falsely promised visible.
+ */
 export async function injectNativeFiles(
   modelMessages: ModelMessage[],
   sessionKey: string,
   userId: string,
   provider: string,
   files: FileRef[],
-): Promise<void> {
-  if (files.length === 0) return;
+): Promise<FileRef[]> {
+  if (files.length === 0) return [];
 
   const lastUser = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
-  if (!lastUser) return;
+  if (!lastUser) return [];
 
-  const { files: prepared, cleanupDir } = await transcodeUnsupportedAudio(sessionKey, userId, provider, files);
+  // Prepare in-sandbox copies the transport can actually carry, each step
+  // index-aligned with `files` so a substitute maps back to its original.
+  const audio = await transcodeUnsupportedAudio(sessionKey, userId, provider, files);
+  const img = await downscaleLargeImages(sessionKey, userId, audio.files);
+  const prepared = img.files;
+  const cleanupDirs = [audio.cleanupDir, img.cleanupDir].filter((d): d is string => !!d);
+
   const downloaded = await downloadBounded(prepared, sessionKey, userId);
-  // Ephemeral transcode output — remove it once its bytes are in the prompt. Fire
-  // and forget; the workspace is disposable and GC'd with the sandbox anyway.
-  if (cleanupDir) {
-    execCommand(sessionKey, `rm -rf /workspace/${shq(cleanupDir)}`).catch(() => {});
+  // Ephemeral transcode/downscale output — remove once its bytes are in the
+  // prompt. Fire and forget; the workspace is disposable and GC'd with the
+  // sandbox anyway.
+  for (const d of cleanupDirs) {
+    execCommand(sessionKey, `rm -rf /workspace/${shq(d)}`).catch(() => {});
   }
-  if (downloaded.length === 0) return;
+  if (downloaded.length === 0) return [];
 
   const parts: FilePart[] = downloaded.map(({ file, buf }) => ({
     type: "file", mediaType: file.type, data: buf, filename: file.name,
@@ -168,4 +250,5 @@ export async function injectNativeFiles(
   lastUser.content = [...existing, ...parts];
 
   log.info("injected native files", { userId, count: parts.length, bytes: totalBytes });
+  return downloaded.map(({ index }) => files[index]);
 }

@@ -446,9 +446,28 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let injectedNative = false;
     const turnFiles = [...(payload.attachedFiles ?? []), ...extraAttachedFiles];
     const { nativeFiles } = classifyFiles(turnFiles, provider, modelInput);
+    let injectedFiles: FileRef[] = [];
     if (nativeFiles.length) {
-      await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles);
-      injectedNative = true;
+      injectedFiles = await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles);
+      injectedNative = injectedFiles.length > 0;
+    }
+    // Ground-truth "attached files" prompt block, built HERE (not in
+    // buildSystemPrompt) because delivery is only known after injection: only a
+    // file whose bytes actually reached the model is announced as inline-readable.
+    // A native-eligible file that couldn't be delivered (download failed, still
+    // over cap after downscale, aggregate budget) is routed to the tool path
+    // instead of being falsely promised visible — the root of the false-native
+    // bug. Uncached volatile tier (own system message), so no cache-prefix cost.
+    if (turnFiles.length) {
+      const injectedNames = new Set(injectedFiles.map((f) => f.name));
+      const lines = turnFiles.map(
+        (f) => `  - /workspace/${f.name}${injectedNames.has(f.name) ? " (attached — you can see/read it directly)" : ""}`,
+      );
+      let block = `## User just attached these files:\n${lines.join("\n")}`;
+      if (turnFiles.some((f) => !injectedNames.has(f.name))) {
+        block += `\nOpen the files without that note using tools as needed (e.g. view_file for images and PDFs).`;
+      }
+      systemMessages.push({ role: "system", content: block });
     }
     // Modalities of the files we DID inject — if the provider then rejects them at
     // runtime (the catalog over-claimed for a custom backend), the soft retry below

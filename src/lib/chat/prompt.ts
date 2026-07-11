@@ -82,12 +82,6 @@ export function buildSystemPrompt(opts: {
   memoryDocs?: { user?: string; project?: string };
   skills?: { name: string; description: string | null; body?: string | null }[];
   workspaceSnapshot?: string;
-  attachedFiles?: FileRef[];
-  /** Resolved provider — gates which attachments are presented as native. */
-  provider?: string;
-  /** Resolved model's native input modalities (OpenRouter catalog), if known —
-   *  takes precedence over the provider's static caps when gating attachments. */
-  modelInput?: Modality[] | null;
   user?: { name?: string | null; timezone?: string | null } | null;
   /** Server host folders bind-mounted into this session at /folders/<name>.
    *  Listed so the model knows they exist without probing the filesystem. */
@@ -171,18 +165,10 @@ export function buildSystemPrompt(opts: {
     volatile += `${volatile ? "\n\n" : ""}## Folders synced to the user's computer:\n${lines}\nFiles you create or edit INSIDE these folders are copied back to the user's computer after you reply. To give the user a file, write it there (e.g. /workspace/${opts.syncedFolders[0].name}/result.xlsx) — files elsewhere in /workspace are NOT synced.`;
   }
 
-  // Single-pass: classify files and build prompt lines
-  const promptLines: string[] = [];
-  let hasToolOnly = false;
-  for (const f of opts.attachedFiles ?? []) {
-    const native = acceptsNativeFile(f.type, opts.provider ?? "", opts.modelInput);
-    if (!native) hasToolOnly = true;
-    promptLines.push(`  - /workspace/${f.name}${native ? " (attached natively — you can see/read it directly)" : ""}`);
-  }
-  if (promptLines.length > 0) {
-    volatile += `${volatile ? "\n\n" : ""}## User just attached these files:\n${promptLines.join("\n")}`;
-    if (hasToolOnly) volatile += `\nOpen non-native files with tools as needed.`;
-  }
+  // The "## User just attached these files" block lives in the task runner, not
+  // here: whether a file is inline-readable is only known AFTER injection (a
+  // download can fail or an oversize file can't be delivered), so building it
+  // from a capability prediction here would promise files the model never got.
 
   // One-time, first-message-after-setup concierge. In the volatile tier (never
   // cached) since it fires exactly once. English — the model relays in the user's

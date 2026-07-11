@@ -6,7 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- Large attached images are downscaled in the sandbox (long edge 2048px) before being sent to the model, keeping them under provider per-image caps and cutting token cost; the full-resolution original stays in the workspace for `view_file` and metadata questions.
+
 ### Fixed
+- The agent is no longer told it can "see" an attached photo whose bytes never reached the model (sandbox download failure, over the per-file/aggregate size cap) — it now announces only successfully delivered files as inline-readable and routes the rest to its tools, instead of answering as if it saw an image it didn't.
 - Sending a message could, rarely, attach it to the wrong point in the conversation — appearing to edit or fork an earlier message — when a persisted send queue drained before the chat's history finished loading. Message parent linkage is now server-authoritative (anchored to the chat's active branch), and sends wait for history to load.
 - A network drop mid-send (or mid-edit/regenerate) now surfaces a localized "no connection" message instead of the browser's raw `Failed to fetch`; failed edits/regenerations no longer fail silently.
 - The composer no longer scrolls a long message back to the top on every keystroke, and no longer raises the on-screen keyboard when returning to the app on mobile (autofocus is desktop-only).
