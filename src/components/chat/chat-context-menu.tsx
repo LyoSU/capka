@@ -18,13 +18,8 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
 import {
   Dialog,
   DialogContent,
@@ -172,14 +167,51 @@ export function ChatContextMenu({
     );
   }
 
+  const items: ActionItem[] = [
+    { key: "rename", icon: <Pencil />, label: t("menu.rename"), onSelect: startRename },
+    {
+      key: "pin",
+      icon: chat.pinned ? <PinOff /> : <Pin />,
+      label: chat.pinned ? t("menu.unpin") : t("menu.pin"),
+      onSelect: () => patchChat({ pinned: !chat.pinned }),
+    },
+    {
+      key: "archive",
+      icon: <Archive />,
+      label: chat.archived ? t("menu.unarchive") : t("menu.archive"),
+      onSelect: () => patchChat({ archived: !chat.archived }),
+    },
+    {
+      key: "export",
+      icon: <Download />,
+      label: t("menu.export"),
+      onSelect: () => window.open(`/api/chats/${chat.id}/export?format=markdown`, "_blank"),
+    },
+    { key: "share", icon: <Share2 />, label: t("menu.share"), onSelect: () => setShareOpen(true) },
+    {
+      key: "delete",
+      icon: <Trash2 />,
+      label: tc("delete"),
+      variant: "destructive",
+      onSelect: () => setDeleteOpen(true),
+    },
+  ];
+
   return (
     <>
       {children}
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        {/* Invisible anchor: keeps the menu positioned even when the visible ⋮
-            trigger is hidden on touch, and lets a long-press open it (via the
-            controlled `open`) with no tap target of its own. pointer-events-none
-            so a normal tap never opens it. */}
+      <ActionMenu
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        title={chat.title || t("untitled")}
+        ariaLabel={t("menu.options")}
+        items={items}
+        contentProps={{ side: "right", align: "start", sideOffset: 8, className: "w-auto" }}
+      >
+        {/* Invisible anchor: keeps the desktop popover positioned even when the
+            visible ⋮ trigger is hidden on touch, and lets a long-press open it
+            (via the controlled `open`) with no tap target of its own.
+            pointer-events-none so a normal tap never opens it. */}
         <DropdownMenuTrigger
           aria-hidden
           tabIndex={-1}
@@ -188,9 +220,9 @@ export function ChatContextMenu({
           className="pointer-events-none absolute right-1 top-1/2 z-10 h-0 w-0 -translate-y-1/2"
         />
         {/* Visible ⋮ — desktop hover-reveal; hidden on touch (pointer-coarse),
-            where the row's long-press opens the same menu. A plain button, not
-            the trigger, so it can sit beside the anchor and open the controlled
-            menu on click. */}
+            where the row's long-press opens the same menu as a bottom sheet. A
+            plain button, not the trigger, so it can sit beside the anchor and
+            open the controlled menu on click. */}
         <button
           type="button"
           data-sidebar="menu-action"
@@ -200,54 +232,7 @@ export function ChatContextMenu({
         >
           <MoreVertical className="size-4" />
         </button>
-          <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-auto">
-            <DropdownMenuItem onClick={startRename}>
-              <Pencil className="h-4 w-4" />
-              {t("menu.rename")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => patchChat({ pinned: !chat.pinned })}
-            >
-              {chat.pinned ? (
-                <>
-                  <PinOff className="h-4 w-4" />
-                  {t("menu.unpin")}
-                </>
-              ) : (
-                <>
-                  <Pin className="h-4 w-4" />
-                  {t("menu.pin")}
-                </>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => patchChat({ archived: !chat.archived })}
-            >
-              <Archive className="h-4 w-4" />
-              {chat.archived ? t("menu.unarchive") : t("menu.archive")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                window.open(`/api/chats/${chat.id}/export?format=markdown`, "_blank");
-              }}
-            >
-              <Download className="h-4 w-4" />
-              {t("menu.export")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setShareOpen(true)}>
-              <Share2 className="h-4 w-4" />
-              {t("menu.share")}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 className="h-4 w-4" />
-              {tc("delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+      </ActionMenu>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>

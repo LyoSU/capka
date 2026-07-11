@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- On touch devices, long-pressing a chat row or a message now opens a full-width bottom action sheet (swipe-down / tap-outside to dismiss) instead of a cramped popover; desktop keeps the dropdown menu.
+
 ### Fixed
 - The code viewer now keeps `Ctrl+A` / `Cmd+A` scoped to the open file instead of selecting text across the whole page.
 - The composer no longer shows a phantom vertical scrollbar when empty or on a single line (sub-pixel rounding of the auto-grow height); it now scrolls only once the text actually exceeds the max height.

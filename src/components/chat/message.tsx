@@ -5,7 +5,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
 import { Markdown } from "@/components/chat/markdown";
 import { haptic } from "@/lib/haptics";
 import { useLongPress } from "@/hooks/use-long-press";
@@ -732,12 +733,45 @@ function UserBubble({
 
   const hasFiles = !!chatId && !!attachedFiles && attachedFiles.length > 0;
 
+  const menuItems: ActionItem[] = [
+    {
+      key: "copy",
+      icon: <Copy />,
+      label: tMsg("copy"),
+      hidden: !text,
+      onSelect: () => navigator.clipboard?.writeText(text).catch(() => {}),
+    },
+    {
+      key: "edit",
+      icon: <Pencil />,
+      label: tMsg("edit"),
+      hidden: !onEdit || !text,
+      disabled: actionsDisabled,
+      onSelect: () => { setDraft(text); setEditing(true); },
+    },
+    {
+      key: "fork",
+      icon: <GitBranch />,
+      label: tMsg("fork"),
+      hidden: !onFork,
+      disabled: actionsDisabled,
+      onSelect: () => onFork?.(messageId),
+    },
+  ];
+
   return (
     <div
       className="group/msg flex animate-message-in justify-end px-4 md:px-6 py-4 pointer-coarse:select-none"
       {...longPress}
     >
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <ActionMenu
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        title={text ? text.slice(0, 120) : undefined}
+        ariaLabel={tMsg("actions")}
+        items={menuItems}
+        contentProps={{ align: "end", side: "bottom", className: "min-w-40" }}
+      >
         <div className="relative flex max-w-[75%] flex-col items-end lg:max-w-[65%] [-webkit-touch-callout:none]">
           {/* Invisible anchor for the long-press menu. pointer-events-none so it
               never opens on a normal tap — only the long-press (setMenuOpen). */}
@@ -789,24 +823,7 @@ function UserBubble({
             <TimestampRow timestamp={timestamp} isTelegram={isTelegram} />
           </div>
         </div>
-        <DropdownMenuContent align="end" side="bottom" className="min-w-40">
-          {text && (
-            <DropdownMenuItem onClick={() => { navigator.clipboard?.writeText(text).catch(() => {}); haptic("tap"); }}>
-              <Copy /> {tMsg("copy")}
-            </DropdownMenuItem>
-          )}
-          {onEdit && text && (
-            <DropdownMenuItem disabled={actionsDisabled} onClick={() => { setDraft(text); setEditing(true); }}>
-              <Pencil /> {tMsg("edit")}
-            </DropdownMenuItem>
-          )}
-          {onFork && (
-            <DropdownMenuItem disabled={actionsDisabled} onClick={() => onFork(messageId)}>
-              <GitBranch /> {tMsg("fork")}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      </ActionMenu>
     </div>
   );
 }
