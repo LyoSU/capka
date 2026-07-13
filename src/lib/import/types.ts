@@ -1,7 +1,7 @@
 /**
- * Importing a shared conversation from another AI service (Claude, ChatGPT) into
- * a fresh Capka chat, so a user can bring context they built elsewhere and keep
- * working here with any model this instance has configured.
+ * Importing a shared conversation from another AI service (Claude, ChatGPT,
+ * Gemini, Grok) into a fresh Capka chat, so a user can bring context they built
+ * elsewhere and keep working here with any model this instance has configured.
  *
  * The pipeline has three isolated stages, each with one job:
  *  1. `detect`   — is this pasted text a supported share link? (pure; runs on
@@ -19,7 +19,7 @@
  */
 
 /** Services we can import a public share link from. */
-export type ImportSource = "claude" | "chatgpt";
+export type ImportSource = "claude" | "chatgpt" | "gemini" | "grok";
 
 /** A single turn lifted from the source conversation. Roles collapse to the two
  *  Capka stores; anything else (tool/system) is dropped upstream. */

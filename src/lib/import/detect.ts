@@ -25,6 +25,25 @@ const MATCHERS: {
     // enterprise/edu share variant.
     path: /^\/share\/(?:e\/)?([0-9a-z-]{16,64})\/?$/i,
   },
+  {
+    source: "grok",
+    hosts: ["grok.com", "www.grok.com"],
+    // /share/<id> — id is a base64-ish prefix + underscore + uuid.
+    path: /^\/share\/([A-Za-z0-9_-]{16,128})\/?$/,
+  },
+  {
+    source: "gemini",
+    hosts: ["gemini.google.com"],
+    // Canonical /share/<hex>.
+    path: /^\/share\/([0-9a-f]{6,32})\/?$/i,
+  },
+  {
+    source: "gemini",
+    hosts: ["share.gemini.google"],
+    // Short link: a bare /<id> with no /share prefix; it 3xx-redirects to the
+    // canonical gemini.google.com/share/<hex>, which the headless browser follows.
+    path: /^\/([A-Za-z0-9_-]{8,64})\/?$/,
+  },
 ];
 
 /**
@@ -65,5 +84,14 @@ export function detectShareLink(text: string): DetectedShareLink | null {
 
 /** Human-facing service name for UI copy and error messages. */
 export function sourceLabel(source: ImportSource): string {
-  return source === "claude" ? "Claude" : "ChatGPT";
+  switch (source) {
+    case "claude":
+      return "Claude";
+    case "chatgpt":
+      return "ChatGPT";
+    case "gemini":
+      return "Gemini";
+    case "grok":
+      return "Grok";
+  }
 }

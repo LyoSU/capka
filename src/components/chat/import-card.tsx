@@ -4,18 +4,21 @@ import { useTranslations } from "next-intl";
 import { AlertCircle, ArrowRight, Download, Loader2 } from "lucide-react";
 import Claude from "@lobehub/icons/es/Claude";
 import OpenAI from "@lobehub/icons/es/OpenAI";
+import Gemini from "@lobehub/icons/es/Gemini";
+import Grok from "@lobehub/icons/es/Grok";
 import { Button } from "@/components/ui/button";
 import { sourceLabel } from "@/lib/import/detect";
 import type { DetectedShareLink, ImportSource } from "@/lib/import/types";
 import type { ImportPhase } from "./use-share-import";
 
-/** The source's monochrome brand mark (Claude's, or the OpenAI/ChatGPT blossom —
- *  they share one glyph), tinted to the surrounding text color with no badge/
- *  background. Static component refs, so no "component created during render"
- *  lint. */
+/** The source's monochrome brand mark (Claude's, the OpenAI/ChatGPT blossom that
+ *  the two share, Gemini's, or Grok's), tinted to the surrounding text color with
+ *  no badge/background. Static component refs, so no "component created during
+ *  render" lint. */
 export function SourceGlyph({ source, size = 18, className }: { source: ImportSource; size?: number; className?: string }) {
   const cls = `text-muted-foreground ${className ?? ""}`;
-  return source === "claude" ? <Claude size={size} className={cls} /> : <OpenAI size={size} className={cls} />;
+  const Glyph = source === "claude" ? Claude : source === "chatgpt" ? OpenAI : source === "gemini" ? Gemini : Grok;
+  return <Glyph size={size} className={cls} />;
 }
 
 /**

@@ -8,7 +8,7 @@ import { sourceLabel } from "@/lib/import/detect";
 import { isShareImportEnabled } from "@/lib/import/flag";
 
 const schema = z.object({
-  source: z.enum(["claude", "chatgpt"]),
+  source: z.enum(["claude", "chatgpt", "gemini", "grok"]),
   title: z.string().max(1000).nullable().optional(),
   // The model the user has selected — the imported chat adopts it so their next
   // turn runs on the model they picked here, not a stale default.
