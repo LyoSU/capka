@@ -94,9 +94,13 @@ if [ ! -f "$src" ]; then echo __NOFILE__; exit 0; fi`;
       // as lossless PNG (over the per-image cap, so it'd be dropped and never seen),
       // but a fraction of that as JPEG. `[0]` takes the first frame of a multi-frame
       // image; `>` only shrinks. (Documents/PDF/HTML stay PNG below — crisp text.)
+      // `-auto-orient` bakes EXIF rotation into pixels (no provider applies it),
+      // `-colorspace sRGB` fixes CMYK photos — same normalization the native
+      // attachment path does, so a re-viewed image isn't shown sideways or with
+      // inverted colors.
       return `${head}
 echo __COUNT__1
-convert -limit thread ${IMAGE_RENDER_THREADS} "$src[0]" -resize '${RENDER_PX}x${RENDER_PX}>' -quality 85 "$d/p-1.jpg" && echo __PNG__"$d/p-1.jpg"`;
+convert -limit thread ${IMAGE_RENDER_THREADS} "$src[0]" -auto-orient -colorspace sRGB -resize '${RENDER_PX}x${RENDER_PX}>' -quality 85 "$d/p-1.jpg" && echo __PNG__"$d/p-1.jpg"`;
     case "pdf":
       return `${head}\n${pdfTail(wanted)}`;
     case "office":

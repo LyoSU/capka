@@ -1,7 +1,7 @@
 import type { ModelMessage, UserModelMessage, TextPart, ImagePart, FilePart } from "ai";
 import { nanoid } from "nanoid";
 import { extractWorkspacePaths } from "@/lib/chat/artifacts";
-import { audioNeedsTranscode } from "@/lib/providers/registry";
+import { audioNeedsTranscode, NATIVE_IMAGE_FORMATS } from "@/lib/providers/registry";
 import { downloadFile, execCommand } from "@/lib/sandbox/client";
 import { MAX_NATIVE_FILE_BYTES, MAX_NATIVE_TOTAL_BYTES, type FileRef } from "@/lib/constants";
 import { log } from "@/lib/log";
@@ -137,70 +137,140 @@ async function transcodeUnsupportedAudio(
 }
 
 // ImageMagick defaults its worker pool from the host CPU count; cap it so a
-// downscale can't consume the sandbox PID/thread budget (see view-file.ts).
+// re-encode can't consume the sandbox PID/thread budget (see view-file.ts).
 const RENDER_THREADS = 2;
-// Long-edge target + JPEG quality for the downscaled copy. Providers downsample
-// images to ~1568px internally, so 2048 keeps small-text legibility (receipts,
-// contracts, whiteboards) with headroom to spare; the copy lands well under the
-// per-image caps that oversize originals blow past.
-const DOWNSCALE_LONG_EDGE = 2048;
-const DOWNSCALE_QUALITY = 83;
-// Only re-encode originals large enough to be worth it (and to risk the caps).
-const DOWNSCALE_OVER_BYTES = 3 * 1024 * 1024;
-// Raster formats ImageMagick can safely re-encode. GIF is excluded (a re-encode
-// would flatten animation); SVG/HEIC and anything else fall through untouched to
-// the download path, where the honest injected-set return still routes an
-// oversize file to the tool path instead of falsely promising it inline.
-const DOWNSCALABLE = new Set(["image/jpeg", "image/pjpeg", "image/png", "image/webp"]);
+// Long-edge downscale target. Providers cap what they actually process (Claude
+// standard 1568px, high-resolution tier 2576px; others tile comparably), so a
+// copy at this size keeps small-text legibility (receipts, contracts, UI
+// screenshots) while staying comfortably under every per-image byte limit. The
+// user's ORIGINAL is never touched — it stays in /workspace at full resolution
+// with EXIF/GPS intact for `view_file` and metadata questions.
+const IMAGE_LONG_EDGE = 2048;
+// JPEG quality for a re-encoded copy — high enough that thin fonts and table
+// rules survive (provider docs warn aggressive JPEG compression eats small text),
+// low enough to stay small.
+const IMAGE_JPEG_QUALITY = 90;
+// Re-encode an image whose raw bytes exceed this even when its dimensions are
+// already fine: a small-dimension but multi-MB file (noisy PNG, un-optimized
+// export) can otherwise blow past a provider's per-image byte ceiling
+// (Anthropic ~5MB base64). Converting to JPEG at that point reliably shrinks it.
+const IMAGE_REENCODE_OVER_BYTES = 3.5 * 1024 * 1024;
+// Raster formats ImageMagick can decode and re-encode. GIF is included so a huge
+// animated GIF normalizes to its static first frame (all a vision model sees of
+// it anyway). SVG and vector/unknown formats are absent on purpose — they never
+// reach here because `acceptsNativeFile` already routes non-deliverable formats
+// to the tool path.
+const NORMALIZABLE = new Set([
+  "image/jpeg", "image/pjpeg", "image/png", "image/gif", "image/webp",
+  "image/heic", "image/heif", "image/tiff", "image/bmp", "image/avif",
+]);
 
 /**
- * Shrink oversized raster images IN THE SANDBOX before injection — mirrors
- * `transcodeUnsupportedAudio`. A full-res phone photo is both wasteful (the
- * provider never sees more than ~1568px) and a false-native hazard: it blows
- * past the native byte cap and gets silently dropped. The downscaled copy goes
- * to a hidden per-turn dir so the user's ORIGINAL stays in /workspace intact
- * (full resolution, EXIF/GPS) for `view_file` and metadata questions. Returns a
- * `files` array index-aligned with the input; on any failure the original ref
- * is kept, so a downscale hiccup never becomes a hard turn failure.
+ * The atomic sandbox step for one image: read its real geometry with `identify`,
+ * decide whether a re-encode is needed, pick the output format, and convert.
+ * Echoes `__KEEP__` (leave the original as-is), `__DONE__ png|jpg` (re-encoded
+ * copy written), or `__ERR__`.
+ *
+ * A re-encode is triggered when the format isn't natively transportable (caller
+ * sets `force`), the image is larger than the long-edge target, it carries EXIF
+ * orientation the provider would ignore (no provider auto-rotates — the top
+ * cause of "the model sees my photo sideways"), it's in a CMYK color space, or
+ * its bytes exceed the ceiling. `-auto-orient` bakes rotation into pixels,
+ * `-strip` drops the now-redundant metadata, `-colorspace sRGB` fixes CMYK, and
+ * JPEG output flattens alpha onto white so transparency can't render as black.
  */
-async function downscaleLargeImages(
+function normalizeImageScript(
+  name: string,
+  dir: string,
+  base: string,
+  opts: { edge: number; quality: number; overBytes: number; force: boolean; srcIsPng: boolean },
+): string {
+  const { edge, quality, overBytes, force, srcIsPng } = opts;
+  const src = `/workspace/${shq(name)}`;
+  // `set -- $info` word-splits identify's space-separated fields; the values
+  // (dimensions, an orientation keyword, a colorspace keyword) never contain
+  // spaces. `"$src[0]"` selects the first frame of a multi-frame image.
+  return `set -e
+src=${src}
+bytes=$(stat -c%s "$src" 2>/dev/null || echo 0)
+info=$(identify -format '%w %h %[orientation] %[colorspace]' "$src[0]" 2>/dev/null | head -1)
+[ -z "$info" ] && { echo __ERR__; exit 0; }
+set -- $info; w=$1; h=$2; orient=$3; cs=$4
+need=${force ? "1" : "0"}; over=0
+{ [ "\${w:-0}" -gt ${edge} ] || [ "\${h:-0}" -gt ${edge} ]; } && need=1
+case "$orient" in ""|Undefined|TopLeft) ;; *) need=1 ;; esac
+[ "$cs" = "CMYK" ] && need=1
+[ "\${bytes:-0}" -gt ${overBytes} ] && { need=1; over=1; }
+[ "$need" != 1 ] && { echo __KEEP__; exit 0; }
+mkdir -p /workspace/${shq(dir)}
+if [ ${srcIsPng ? "1" : "0"} = 1 ] && [ "$over" != 1 ]; then
+  convert -limit thread ${RENDER_THREADS} "$src[0]" -auto-orient -resize '${edge}x${edge}>' -colorspace sRGB -strip /workspace/${shq(`${base}.png`)} && echo "__DONE__ png" || echo __ERR__
+else
+  convert -limit thread ${RENDER_THREADS} "$src[0]" -auto-orient -resize '${edge}x${edge}>' -colorspace sRGB -background white -flatten -quality ${quality} -strip /workspace/${shq(`${base}.jpg`)} && echo "__DONE__ jpg" || echo __ERR__
+fi`;
+}
+
+/**
+ * Normalize attached raster images IN THE SANDBOX before injection so the bytes
+ * that reach the vision model are a format the provider accepts and can read
+ * well — mirrors `transcodeUnsupportedAudio`. Each image is re-encoded only when
+ * needed (see `normalizeImageScript`); a correctly-oriented, accepted-format,
+ * in-budget image is passed through untouched.
+ *
+ * Returns a `refs` array index-aligned with the input:
+ *  - a re-encoded copy (hidden per-turn dir) for images that were normalized,
+ *  - the original ref for images left as-is (or whose re-encode failed but whose
+ *    format is natively deliverable anyway),
+ *  - `null` for a NON-native format whose re-encode failed — it can't be sent
+ *    inline, so it's dropped here and the caller routes it to the tool path
+ *    rather than injecting bytes the provider would 400 on.
+ */
+async function normalizeImagesForProvider(
   sessionKey: string,
   userId: string,
   files: FileRef[],
-): Promise<{ files: FileRef[]; cleanupDir?: string }> {
-  if (!files.some((f) => DOWNSCALABLE.has(f.type))) return { files };
+): Promise<{ refs: (FileRef | null)[]; cleanupDir?: string }> {
+  if (!files.some((f) => NORMALIZABLE.has(f.type))) return { refs: files };
   const dir = `.capka/native-img/${nanoid(8)}`;
-  const out = await Promise.all(
-    files.map(async (f, i) => {
-      if (!DOWNSCALABLE.has(f.type)) return f;
-      // PNG stays PNG (lossless resize keeps alpha + text crisp); everything
-      // else normalizes to JPEG.
-      const keepPng = f.type === "image/png";
-      const dest = `${dir}/${i}.${keepPng ? "png" : "jpg"}`;
+  const refs = await Promise.all(
+    files.map(async (f, i): Promise<FileRef | null> => {
+      if (!NORMALIZABLE.has(f.type)) return f;
+      const nativeRaw = NATIVE_IMAGE_FORMATS.has(f.type);
+      const base = `${dir}/${i}`;
       try {
         const r = await execCommand(
           sessionKey,
-          `src=/workspace/${shq(f.name)}; ` +
-            `sz=$(stat -c%s "$src" 2>/dev/null || echo 0); ` +
-            `if [ "$sz" -le ${DOWNSCALE_OVER_BYTES} ]; then echo __KEEP__; exit 0; fi; ` +
-            `mkdir -p /workspace/${shq(dir)} && ` +
-            `convert -limit thread ${RENDER_THREADS} "$src[0]" -auto-orient ` +
-            `-resize '${DOWNSCALE_LONG_EDGE}x${DOWNSCALE_LONG_EDGE}>'` +
-            `${keepPng ? "" : ` -quality ${DOWNSCALE_QUALITY}`} /workspace/${shq(dest)} && echo __DONE__`,
+          normalizeImageScript(f.name, dir, base, {
+            edge: IMAGE_LONG_EDGE,
+            quality: IMAGE_JPEG_QUALITY,
+            overBytes: IMAGE_REENCODE_OVER_BYTES,
+            force: !nativeRaw,
+            srcIsPng: f.type === "image/png",
+          }),
           120_000,
         );
-        if (r.exitCode === 0 && r.stdout.includes("__DONE__")) {
-          return { name: dest, type: keepPng ? "image/png" : "image/jpeg" };
+        const done = r.stdout.match(/__DONE__ (png|jpg)/);
+        if (r.exitCode === 0 && done) {
+          const ext = done[1];
+          return { name: `${base}.${ext}`, type: ext === "png" ? "image/png" : "image/jpeg" };
         }
-        // __KEEP__ (already small) or a convert failure — use the original.
+        if (r.stdout.includes("__KEEP__")) return f;
+        // __ERR__ or unexpected output. A natively-deliverable format is still
+        // fine to send as-is; a convertible-only one is not — drop it so the
+        // caller uses the tool path instead of injecting a format the provider
+        // rejects.
+        if (!nativeRaw) {
+          log.info("image normalize failed for non-native format; routing to tools", { userId, file: f.name, type: f.type });
+          return null;
+        }
         return f;
       } catch (e) {
-        log.warn("image downscale errored; keeping original", { userId, file: f.name, err: String(e) });
-        return f;
+        log.warn("image normalize errored", { userId, file: f.name, err: String(e) });
+        return nativeRaw ? f : null;
       }
     }),
   );
-  return { files: out, cleanupDir: dir };
+  return { refs, cleanupDir: dir };
 }
 
 /**
@@ -225,12 +295,20 @@ export async function injectNativeFiles(
   // Prepare in-sandbox copies the transport can actually carry, each step
   // index-aligned with `files` so a substitute maps back to its original.
   const audio = await transcodeUnsupportedAudio(sessionKey, userId, provider, files);
-  const img = await downscaleLargeImages(sessionKey, userId, audio.files);
-  const prepared = img.files;
+  const img = await normalizeImagesForProvider(sessionKey, userId, audio.files);
   const cleanupDirs = [audio.cleanupDir, img.cleanupDir].filter((d): d is string => !!d);
 
-  const downloaded = await downloadBounded(prepared, sessionKey, userId);
-  // Ephemeral transcode/downscale output — remove once its bytes are in the
+  // `img.refs` is index-aligned with `files`; a `null` entry is an image whose
+  // format couldn't be made deliverable — it's excluded from the download and
+  // the injected set so the caller routes it to the tool path. Carry each
+  // survivor's ORIGINAL index so the returned set names the user's file, not the
+  // hidden re-encoded copy.
+  const pending = img.refs
+    .map((ref, index) => ({ ref, index }))
+    .filter((e): e is { ref: FileRef; index: number } => e.ref !== null);
+
+  const downloaded = await downloadBounded(pending.map((e) => e.ref), sessionKey, userId);
+  // Ephemeral transcode/normalize output — remove once its bytes are in the
   // prompt. Fire and forget; the workspace is disposable and GC'd with the
   // sandbox anyway.
   for (const d of cleanupDirs) {
@@ -247,8 +325,12 @@ export async function injectNativeFiles(
   const existing: UserPart[] = typeof lastUser.content === "string"
     ? [{ type: "text", text: lastUser.content }]
     : [...lastUser.content];
-  lastUser.content = [...existing, ...parts];
+  // Attachments go BEFORE the user's text: providers (Anthropic says so
+  // explicitly) attend to images best when they precede the prompt text.
+  lastUser.content = [...parts, ...existing];
 
   log.info("injected native files", { userId, count: parts.length, bytes: totalBytes });
-  return downloaded.map(({ index }) => files[index]);
+  // `downloadBounded` indexes into the array it was handed (`pending`), so map
+  // each result back through `pending` to the caller's original FileRef.
+  return downloaded.map(({ index }) => files[pending[index].index]);
 }

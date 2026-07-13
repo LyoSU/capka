@@ -469,11 +469,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
       systemMessages.push({ role: "system", content: block });
     }
-    // Modalities of the files we DID inject — if the provider then rejects them at
-    // runtime (the catalog over-claimed for a custom backend), the soft retry below
-    // strips them and folds these into the notice so the user is still told.
+    // Modalities of the files we actually DELIVERED — if the provider then rejects
+    // them at runtime (the catalog over-claimed for a custom backend), the soft
+    // retry below strips them and folds these into the notice so the user is still
+    // told. Built from `injectedFiles`, not `nativeFiles`: a file that failed to
+    // download or didn't fit the budget never reached the model, so its modality
+    // must not be blamed for a runtime rejection.
     const nativeModalities = Array.from(
-      new Set(nativeFiles.map((f) => mimeToModality(f.type)).filter((m): m is Modality => m !== null)),
+      new Set(injectedFiles.map((f) => mimeToModality(f.type)).filter((m): m is Modality => m !== null)),
     );
     // Media the chosen model can't take natively (e.g. an audio note on a text-only
     // model) — known upfront from gating. The model would otherwise answer blind, so

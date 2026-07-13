@@ -109,6 +109,32 @@ describe("audioNeedsTranscode (transport container reality)", () => {
   });
 });
 
+describe("acceptsNativeFile (image container-format gate)", () => {
+  it("accepts the universally-native raster formats", () => {
+    for (const t of ["image/jpeg", "image/png", "image/gif", "image/webp"]) {
+      expect(acceptsNativeFile(t, "anthropic")).toBe(true);
+    }
+  });
+
+  it("accepts convertible formats — the sandbox re-encodes them to JPEG before injection", () => {
+    for (const t of ["image/heic", "image/heif", "image/tiff", "image/bmp", "image/avif"]) {
+      expect(acceptsNativeFile(t, "anthropic")).toBe(true);
+      expect(acceptsNativeFile(t, "openai")).toBe(true);
+    }
+  });
+
+  it("rejects SVG and unknown image/* — undeliverable inline, routed to tools", () => {
+    expect(acceptsNativeFile("image/svg+xml", "anthropic")).toBe(false);
+    expect(acceptsNativeFile("image/x-icon", "openai")).toBe(false);
+  });
+
+  it("still gates convertible formats by modality support (text-only model)", () => {
+    // A model whose per-model modalities lack 'image' takes no image, any format.
+    expect(acceptsNativeFile("image/heic", "openrouter", ["pdf"])).toBe(false);
+    expect(acceptsNativeFile("image/png", "openrouter", ["pdf"])).toBe(false);
+  });
+});
+
 describe("classifyFiles (provider + per-model aware)", () => {
   it("keeps a PDF native for Anthropic", () => {
     const { nativeFiles, hasToolOnly } = classifyFiles([file("application/pdf")], "anthropic");
@@ -165,5 +191,12 @@ describe("findBlindModalities (what the model can't see/hear)", () => {
   it("returns nothing for an empty / missing file list", () => {
     expect(findBlindModalities([], "openrouter")).toEqual([]);
     expect(findBlindModalities(undefined, "openrouter")).toEqual([]);
+  });
+
+  it("does NOT flag an undeliverable image format as blind on a vision model", () => {
+    // SVG is tool-only (classifyFiles routes it away from native injection)…
+    expect(classifyFiles([file("image/svg+xml")], "anthropic").hasToolOnly).toBe(true);
+    // …but the model reads images, so it must NOT tell the user to switch models.
+    expect(findBlindModalities([file("image/svg+xml")], "anthropic")).toEqual([]);
   });
 });

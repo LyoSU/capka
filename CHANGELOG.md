@@ -12,6 +12,10 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 - Refined English and Ukrainian interface copy for clearer terminology, more natural punctuation, and correct singular and plural forms.
 
+### Fixed
+- Attached photos are now normalized in the sandbox before the model sees them: EXIF orientation is baked into the pixels (no provider auto-rotates, so sideways phone photos were the top "the model can't read my image" cause), HEIC/HEIF/TIFF/BMP/AVIF are converted to JPEG (providers accept only JPEG/PNG/GIF/WebP — sending these raw returned a provider error), CMYK is converted to sRGB, and oversized images are downscaled by dimension rather than only by byte size. An image whose format can't be delivered (e.g. SVG) is routed to the agent's file tools instead of being wrongly reported as unreadable. The user's original file stays untouched in the workspace.
+- Attached images are placed before the prompt text in the request, matching provider guidance for image understanding.
+
 ## [0.8.1] - 2026-07-13
 
 ### Fixed

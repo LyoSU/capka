@@ -40,7 +40,7 @@ import { SourceGlyph } from "@/components/chat/import-card";
 import { sourceLabel } from "@/lib/import/detect";
 import type { ImportSource } from "@/lib/import/types";
 import type { FileRef } from "@/lib/constants";
-import { acceptsNativeFile, mimeToModality, type Modality } from "@/lib/providers/registry";
+import { modelSupportsModality, mimeToModality, type Modality } from "@/lib/providers/registry";
 import { FileDropZone } from "@/components/chat/file-drop-zone";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
@@ -161,7 +161,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
     for (const af of attachments.files) {
       const mod = mimeToModality(af.type);
       if (!mod || blind.includes(mod)) continue;
-      if (acceptsNativeFile(af.type, modelStatus.provider ?? "", modelStatus.inputModalities ?? null)) continue;
+      if (modelSupportsModality(mod, modelStatus.provider ?? "", modelStatus.inputModalities ?? null)) continue;
       blind.push(mod);
     }
     return blind;

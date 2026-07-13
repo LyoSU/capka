@@ -247,9 +247,32 @@ export function mimeToModality(mimeType: string): Modality | null {
 }
 
 /**
- * Whether this file can be pushed into the message `content` as a native inline
- * part the model API accepts. Anything that returns `false` is left in
- * /workspace for the agent to open with sandbox tools (tool-only).
+ * Image container formats a vision model can be shown. Two tiers:
+ * - `NATIVE_IMAGE_FORMATS`: every image-capable provider accepts these inline,
+ *   byte-for-byte (the union across Anthropic/OpenAI/Google/OpenRouter is exactly
+ *   JPEG/PNG/GIF/WebP).
+ * - `CONVERTIBLE_IMAGE_FORMATS`: not universally accepted raw, but the sandbox
+ *   re-encodes them to JPEG before injection (see `normalizeImagesForProvider`),
+ *   so they're still deliverable inline.
+ * Anything outside both (SVG, unknown `image/*`) can't be delivered as an inline
+ * image part; it stays tool-only, where `read_file`/`view_file` handle it rather
+ * than the provider rejecting an unsupported format with a 400.
+ */
+export const NATIVE_IMAGE_FORMATS: ReadonlySet<string> = new Set([
+  "image/jpeg", "image/pjpeg", "image/png", "image/gif", "image/webp",
+]);
+export const CONVERTIBLE_IMAGE_FORMATS: ReadonlySet<string> = new Set([
+  "image/heic", "image/heif", "image/tiff", "image/bmp", "image/avif",
+]);
+export function isDeliverableImageFormat(mimeType: string): boolean {
+  return NATIVE_IMAGE_FORMATS.has(mimeType) || CONVERTIBLE_IMAGE_FORMATS.has(mimeType);
+}
+
+/**
+ * Whether the resolved model takes this MODALITY inline at all — the "is the
+ * model blind to this kind of file?" question. Container format is not
+ * considered here (see `acceptsNativeFile` for that); a model that reads images
+ * reads images, whatever the file's format.
  *
  * Precedence:
  * 1. Video only serializes through the Google SDK — gated to Gemini regardless
@@ -262,6 +285,29 @@ export function mimeToModality(mimeType: string): Modality | null {
  * 4. Otherwise fall back to the provider's static `nativeInput`.
  * 5. An unknown provider falls to the safe side: only the universal image block.
  */
+export function modelSupportsModality(
+  mod: Modality,
+  provider: string,
+  modelInput?: Modality[] | null,
+): boolean {
+  if (mod === "video") return provider === "google";
+  if (mod === "pdf" && provider === "openrouter") return true;
+  if (modelInput && modelInput.length) return modelInput.includes(mod);
+  if (isProviderName(provider)) return PROVIDER_META[provider].nativeInput.includes(mod);
+  return mod === "image";
+}
+
+/**
+ * Whether this file can be pushed into the message `content` as a native inline
+ * part the model API accepts. Anything that returns `false` is left in
+ * /workspace for the agent to open with sandbox tools (tool-only).
+ *
+ * Two conditions must both hold: the model supports the modality
+ * (`modelSupportsModality`), AND — for images — the container format is one we
+ * can actually deliver (`isDeliverableImageFormat`). The format gate keeps an
+ * undeliverable image (SVG) off the native path even on a vision model, so it's
+ * routed to tools instead of triggering a provider format rejection.
+ */
 export function acceptsNativeFile(
   mimeType: string,
   provider: string,
@@ -269,11 +315,8 @@ export function acceptsNativeFile(
 ): boolean {
   const mod = mimeToModality(mimeType);
   if (!mod) return false;
-  if (mod === "video") return provider === "google";
-  if (mod === "pdf" && provider === "openrouter") return true;
-  if (modelInput && modelInput.length) return modelInput.includes(mod);
-  if (isProviderName(provider)) return PROVIDER_META[provider].nativeInput.includes(mod);
-  return mod === "image";
+  if (mod === "image" && !isDeliverableImageFormat(mimeType)) return false;
+  return modelSupportsModality(mod, provider, modelInput);
 }
 
 /**
