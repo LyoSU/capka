@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-13
+
 ### Fixed
 - Share import no longer fails on large Grok/Claude/ChatGPT conversations whose raw payload exceeds the sandbox output ceiling (~1MB): the sandbox script now ships only the fields the importer reads and applies the import caps before emitting.
 - sandbox-controller: a single Docker stream frame larger than the exec output ceiling is now dropped and flagged as truncated instead of bypassing the cap. Applies with the next controller image pull.
