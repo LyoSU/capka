@@ -26,12 +26,14 @@ async function downloadBounded(
   files: FileRef[],
   sessionKey: string,
   userId: string,
+  maxFileBytes: number,
+  maxTotalBytes: number,
 ): Promise<{ index: number; file: FileRef; buf: Buffer }[]> {
   const results: { index: number; file: FileRef; buf: Buffer }[] = [];
   let totalBytes = 0;
 
   for (let i = 0; i < files.length; i += MAX_CONCURRENT_DOWNLOADS) {
-    if (totalBytes >= MAX_NATIVE_TOTAL_BYTES) break;
+    if (totalBytes >= maxTotalBytes) break;
 
     const batch = files.slice(i, i + MAX_CONCURRENT_DOWNLOADS);
     const settled = await Promise.allSettled(
@@ -46,11 +48,11 @@ async function downloadBounded(
         continue;
       }
       const { file, buf } = r.value;
-      if (buf.length > MAX_NATIVE_FILE_BYTES) {
+      if (buf.length > maxFileBytes) {
         log.info("skipping native file: over per-file limit", { userId, file: file.name, bytes: buf.length });
         continue;
       }
-      if (totalBytes + buf.length > MAX_NATIVE_TOTAL_BYTES) {
+      if (totalBytes + buf.length > maxTotalBytes) {
         log.info("skipping native file: over aggregate limit", { userId, file: file.name, bytes: buf.length });
         continue;
       }
@@ -307,7 +309,18 @@ export async function injectNativeFiles(
     .map((ref, index) => ({ ref, index }))
     .filter((e): e is { ref: FileRef; index: number } => e.ref !== null);
 
-  const downloaded = await downloadBounded(pending.map((e) => e.ref), sessionKey, userId);
+  // Gemini caps the ENTIRE inline request (prompt + every inlineData part) at
+  // 20 MB, and base64 inflates raw bytes ~33% (4/3). So a raw budget of ~13 MiB
+  // per file and ~13 MiB aggregate keeps 13 * 1.33 ≈ 17.3 MB of encoded payload
+  // plus the text prompt under that one request cap. Images are already kept
+  // small by normalizeImagesForProvider (re-encodes >3.5MB), so this mainly
+  // protects large audio/video/PDF. Every other provider keeps the generous
+  // per-file / aggregate caps, which are enforced per request, not per file+prompt.
+  const GOOGLE_INLINE_BYTES = 13 * 1024 * 1024;
+  const maxFileBytes = provider === "google" ? GOOGLE_INLINE_BYTES : MAX_NATIVE_FILE_BYTES;
+  const maxTotalBytes = provider === "google" ? GOOGLE_INLINE_BYTES : MAX_NATIVE_TOTAL_BYTES;
+
+  const downloaded = await downloadBounded(pending.map((e) => e.ref), sessionKey, userId, maxFileBytes, maxTotalBytes);
   // Ephemeral transcode/normalize output — remove once its bytes are in the
   // prompt. Fire and forget; the workspace is disposable and GC'd with the
   // sandbox anyway.
@@ -329,8 +342,20 @@ export async function injectNativeFiles(
   // explicitly) attend to images best when they precede the prompt text.
   lastUser.content = [...parts, ...existing];
 
-  log.info("injected native files", { userId, count: parts.length, bytes: totalBytes });
   // `downloadBounded` indexes into the array it was handed (`pending`), so map
-  // each result back through `pending` to the caller's original FileRef.
+  // each result back through `pending` to the caller's original FileRef — the
+  // user's filename — while `file.type` is the MIME actually sent (post
+  // transcode/normalize). Never log file contents, only metadata.
+  log.info("injected native files", {
+    userId,
+    provider,
+    count: parts.length,
+    bytes: totalBytes,
+    files: downloaded.map(({ index, file, buf }) => ({
+      name: files[pending[index].index].name,
+      sentType: file.type,
+      bytes: buf.length,
+    })),
+  });
   return downloaded.map(({ index }) => files[pending[index].index]);
 }

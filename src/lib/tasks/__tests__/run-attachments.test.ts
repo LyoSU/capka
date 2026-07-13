@@ -97,6 +97,32 @@ describe("injectNativeFiles — honest injected-set return", () => {
   });
 });
 
+describe("injectNativeFiles — provider-aware inline budget (Google)", () => {
+  // 14 MiB: under the default 20 MiB per-file cap, over Google's ~13 MiB inline
+  // cap (Gemini's whole request must fit 20 MB and base64 inflates ~33%).
+  const overGoogle = 14 * 1024 * 1024;
+
+  it("skips a file over the Google budget and omits it from the delivered set", async () => {
+    dl.mockResolvedValue(asResponse(Buffer.alloc(overGoogle)));
+    const msgs = userMessages();
+    const injected = await injectNativeFiles(msgs, "sess", "u1", "google", [
+      { name: "big.pdf", type: "application/pdf" },
+    ]);
+    expect(injected).toEqual([]);
+    expect(fileParts(msgs)).toHaveLength(0);
+  });
+
+  it("delivers the same file for a non-Google provider (still under its cap)", async () => {
+    dl.mockResolvedValue(asResponse(Buffer.alloc(overGoogle)));
+    const msgs = userMessages();
+    const injected = await injectNativeFiles(msgs, "sess", "u1", "openai", [
+      { name: "big.pdf", type: "application/pdf" },
+    ]);
+    expect(injected.map((f) => f.name)).toEqual(["big.pdf"]);
+    expect(fileParts(msgs)).toHaveLength(1);
+  });
+});
+
 describe("injectNativeFiles — image normalization", () => {
   it("injects the re-encoded copy but maps the return back to the ORIGINAL ref", async () => {
     exec.mockResolvedValue({ stdout: "__DONE__ jpg", stderr: "", exitCode: 0 });

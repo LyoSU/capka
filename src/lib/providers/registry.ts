@@ -320,12 +320,16 @@ export function acceptsNativeFile(
 }
 
 /**
- * Audio container mediaTypes every OpenAI-style transport serializes as
- * `input_audio` without complaint. The AI-SDK providers only map a narrow set —
- * `@ai-sdk/openai-compatible` accepts exactly wav/mp3/mpeg and throws
- * `UnsupportedFunctionalityError` on anything else BEFORE the request goes out
- * (opus/ogg/m4a/flac/…), which the soft-retry can only degrade to "can't read",
- * not fix. So any audio outside this set must be transcoded to mp3 first.
+ * Audio containers we treat as the universal, safe-to-send set. wav/mp3 (with
+ * mpeg as mp3's alias) are the deliberate lowest common denominator: they cross
+ * every OpenAI-style transport AND the upstream models reachable through them.
+ * `@ai-sdk/openai-compatible` throws `UnsupportedFunctionalityError` on anything
+ * outside wav/mp3/mpeg BEFORE the request goes out, which the soft-retry can only
+ * degrade to "can't read", not fix. The `@openrouter/ai-sdk-provider` adapter
+ * maps more containers (ogg/aac/m4a/aiff/flac/pcm…) but still throws on
+ * `audio/opus`, and even a container it serializes can 400 at the upstream model
+ * (OpenAI audio models accept only wav/mp3, so a passed-through ogg fails there).
+ * So any audio outside this set is transcoded to mp3 first rather than gambled.
  */
 const NATIVE_AUDIO_CONTAINERS = new Set(["audio/wav", "audio/mp3", "audio/mpeg"]);
 
@@ -333,9 +337,11 @@ const NATIVE_AUDIO_CONTAINERS = new Set(["audio/wav", "audio/mp3", "audio/mpeg"]
  * Whether an attached audio file must be transcoded to mp3 before it can be sent
  * as a native `input_audio` part to this provider. Gemini (`@ai-sdk/google`)
  * serializes any container, so it never needs it; every OpenAI-style transport
- * (openai-compatible/openrouter/openai) only takes wav/mp3, so exotic containers
- * do. Non-audio files never do (`false`). Callers gate the actual ffmpeg call on
- * this — see the runner's `injectNativeFiles`.
+ * (openai-compatible/openrouter/openai) is held to the wav/mp3 universal set
+ * above — the compatible adapter can't serialize exotic containers at all, and
+ * openrouter maps more but can't guarantee the upstream model accepts them — so
+ * exotic containers are transcoded. Non-audio files never do (`false`). Callers
+ * gate the actual ffmpeg call on this — see the runner's `injectNativeFiles`.
  */
 export function audioNeedsTranscode(mimeType: string, provider: string): boolean {
   if (!mimeType.startsWith("audio/")) return false;

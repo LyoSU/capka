@@ -446,6 +446,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let injectedNative = false;
     const turnFiles = [...(payload.attachedFiles ?? []), ...extraAttachedFiles];
     const { nativeFiles } = classifyFiles(turnFiles, provider, modelInput);
+    if (turnFiles.length) {
+      // One line an operator can grep after the fact to prove whether a given
+      // attachment was even considered native for this provider+model, before
+      // delivery narrows it further (see "injected native files").
+      const nativeNames = new Set(nativeFiles.map((f) => f.name));
+      tlog.info("attachments.classified", {
+        provider,
+        model: modelId,
+        native: nativeFiles.map((f) => ({ name: f.name, type: f.type })),
+        toolOnly: turnFiles.filter((f) => !nativeNames.has(f.name)).map((f) => ({ name: f.name, type: f.type })),
+      });
+    }
     let injectedFiles: FileRef[] = [];
     if (nativeFiles.length) {
       injectedFiles = await injectNativeFiles(modelMessages, sessionKey, userId, provider, nativeFiles);
@@ -464,6 +476,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         (f) => `  - /workspace/${f.name}${injectedNames.has(f.name) ? " (attached — you can see/read it directly)" : ""}`,
       );
       let block = `## User just attached these files:\n${lines.join("\n")}`;
+      if (injectedFiles.length) {
+        block += `\nFor files marked "attached", analyze the inline content you can already see directly — do NOT run sandbox tools to read, convert, or transcode them unless the user explicitly asks you to manipulate the file or your direct analysis fails.`;
+      }
       if (turnFiles.some((f) => !injectedNames.has(f.name))) {
         block += `\nOpen the files without that note using tools as needed (e.g. view_file for images and PDFs).`;
       }

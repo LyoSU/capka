@@ -6,6 +6,13 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- The model is now instructed to analyze delivered attachments from the inline content it already has, instead of re-reading or transcoding them with sandbox tools.
+- Attachment delivery decisions are now logged (provider, model, and per-file MIME type) to diagnose whether a given file was sent natively.
+
+### Fixed
+- Google/Gemini attachments no longer produce oversized inline requests: audio, video, and PDF files over ~13 MiB now go to the agent's file tools instead of exceeding Gemini's 20 MB request cap.
+
 ## [0.9.0] - 2026-07-13
 
 ### Added
