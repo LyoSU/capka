@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video, SlidersHorizontal, Sparkles, Layers } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
-import { parseModelId, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
+import { parseModelId, splitModelRef, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
 import { customModelOption } from "@/lib/providers/custom-model";
 
@@ -1096,13 +1096,48 @@ export function ModelPicker({
     [onChange, state.models],
   );
 
+  // A persisted selection can be an off-catalog id — a stealth/preview model the
+  // admin typed as the connection default, which routes and runs fine but is
+  // absent from the provider's catalog. It never passed through `select` this
+  // session, so `customModel` doesn't cover it; without recovery a brand-new chat
+  // opening on such a default false-flags the model as gone and blocks the
+  // composer. As long as its connection is still live (some loaded model shares
+  // its configId), trust it and synthesize a stand-in bound to that connection.
+  // Only when NO loaded model shares its config is it genuinely gone (the
+  // connection was removed) — the case the missing flag is meant to catch.
+  const recoveredModel = useMemo(() => {
+    if (!value || state.models.length === 0) return undefined;
+    if (state.models.some((m) => refOf(m) === value || m.id === parseModelId(value).modelId)) return undefined;
+    const { configId, modelId } = splitModelRef(value);
+    const sample = configId ? state.models.find((m) => m.configId === configId) : undefined;
+    if (!sample) return undefined;
+    const recovered: ModelInfo = {
+      id: modelId,
+      name: modelId,
+      provider: sample.provider ?? "Custom",
+      context: 0,
+      pricing: { prompt: 0, completion: 0 },
+      group: sample.group ?? sample.provider ?? null,
+      icon: sample.configIcon ?? sample.icon ?? null,
+      capabilities: { vision: false, tools: true, reasoning: false },
+      featured: false,
+      configId: sample.configId,
+      configLabel: sample.configLabel,
+      configIcon: sample.configIcon,
+      configProvider: sample.configProvider,
+    };
+    return recovered;
+  }, [value, state.models]);
+
   // Resolve the current selection: match the full ref first (the new tagged
   // form), then fall back to a bare/legacy id so old chats still light up, then
-  // the just-typed custom model so an off-catalog pick isn't shown as missing.
+  // the just-typed custom model so an off-catalog pick isn't shown as missing,
+  // then a persisted off-catalog default whose connection is still live.
   const currentModel =
     state.models.find((m) => refOf(m) === value) ??
     state.models.find((m) => m.id === parseModelId(value).modelId) ??
-    (customModel && refOf(customModel) === value ? customModel : undefined);
+    (customModel && refOf(customModel) === value ? customModel : undefined) ??
+    recoveredModel;
   const currentRef = currentModel ? refOf(currentModel) : value;
   const groupLabel = currentModel ? groupOf(currentModel) : null;
   const displayName = stripGroup(currentModel?.name || (value ? displayModelName(value) : ""), groupLabel);

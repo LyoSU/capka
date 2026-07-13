@@ -232,7 +232,7 @@
       "cancelQueued": "Remove from queue",
       "contextFull": "Context: {pct}%",
       "contextTokens": "{used} / {total} tokens",
-      "modelGoneBody": "This model isn't available anymore — pick another from the switcher above to keep chatting",
+      "modelGoneBody": "This model isn't available anymore — pick another model to keep chatting",
       "modelGoneNew": "New chat"
     },
     "menu": {

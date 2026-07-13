@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- A new chat opening on an off-catalog default model (a stealth/preview id typed as a connection's default) no longer false-flags it as unavailable and blocks the composer; the model is now trusted as long as its connection still exists.
+- The "model unavailable" notice no longer tells users to pick from a switcher "above" when the picker sits below it.
+
 ## [0.9.2] - 2026-07-13
 
 ### Fixed
