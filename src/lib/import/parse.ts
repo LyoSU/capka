@@ -27,6 +27,12 @@ function asArray(v: unknown): unknown[] {
 function asString(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
+/** The sandbox script's projections cap the payload INSIDE the sandbox (count/
+ *  byte budgets the platform can no longer observe); this flag carries the fact
+ *  that they dropped something, so `truncated` survives the projection. */
+function sandboxTruncated(root: Record<string, unknown> | null): boolean {
+  return root?.__capkaTruncated === true;
+}
 
 // ── Claude (claude.ai/share) ─────────────────────────────────
 //
@@ -78,8 +84,11 @@ export function parseClaudeSnapshot(raw: unknown): SharedChatImport {
     if (!content) content = asString(msg.text).trim();
 
     // Attachments / uploaded files / images are dropped even when text survives.
+    // `hasRichContent` is the projected form of the same fact — the sandbox
+    // script saw rich fields it no longer ships.
     if (
       sawRich ||
+      msg.hasRichContent === true ||
       asArray(msg.attachments).length > 0 ||
       asArray(msg.files).length > 0 ||
       Number(msg.image_count) > 0 ||
@@ -91,7 +100,7 @@ export function parseClaudeSnapshot(raw: unknown): SharedChatImport {
     if (content) messages.push({ role, content });
   }
 
-  return { source: "claude", title, messages, truncated: false, droppedRichContent };
+  return { source: "claude", title, messages, truncated: sandboxTruncated(root), droppedRichContent };
 }
 
 // ── ChatGPT (chatgpt.com/share) ──────────────────────────────
@@ -111,7 +120,7 @@ export function parseChatGptState(raw: unknown): SharedChatImport {
   const messages: ImportedMessage[] = [];
   let droppedRichContent = false;
 
-  if (!mapping) return { source: "chatgpt", title, messages, truncated: false, droppedRichContent };
+  if (!mapping) return { source: "chatgpt", title, messages, truncated: sandboxTruncated(root), droppedRichContent };
 
   // Order the branch leaf → root by following parents, then reverse to root → leaf.
   const chain: string[] = [];
@@ -168,7 +177,7 @@ export function parseChatGptState(raw: unknown): SharedChatImport {
     if (content) messages.push({ role: rawRole, content });
   }
 
-  return { source: "chatgpt", title, messages, truncated: false, droppedRichContent };
+  return { source: "chatgpt", title, messages, truncated: sandboxTruncated(root), droppedRichContent };
 }
 
 // ── Grok (grok.com/share) ────────────────────────────────────
@@ -207,6 +216,7 @@ export function parseGrokResponses(raw: unknown): SharedChatImport {
     const content = asString(resp.message).trim();
 
     if (
+      resp.hasRichContent === true ||
       asArray(resp.webSearchResults).length > 0 ||
       asArray(resp.xposts).length > 0 ||
       asArray(resp.xpostIds).length > 0 ||
@@ -220,7 +230,7 @@ export function parseGrokResponses(raw: unknown): SharedChatImport {
     if (content) messages.push({ role, content });
   }
 
-  return { source: "grok", title, messages, truncated: false, droppedRichContent };
+  return { source: "grok", title, messages, truncated: sandboxTruncated(root), droppedRichContent };
 }
 
 // ── Gemini (share.gemini.google / gemini.google.com/share) ───
@@ -247,7 +257,7 @@ export function parseGeminiTurns(raw: unknown): SharedChatImport {
     if (response) messages.push({ role: "assistant", content: response });
   }
 
-  return { source: "gemini", title, messages, truncated: false, droppedRichContent: Boolean(root?.droppedRichContent) };
+  return { source: "gemini", title, messages, truncated: sandboxTruncated(root), droppedRichContent: Boolean(root?.droppedRichContent) };
 }
 
 /** Dispatch to the right parser for a rendered payload. */

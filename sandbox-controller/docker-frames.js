@@ -40,7 +40,10 @@ export function createFrameDemux(maxBytes = MAX_EXEC_OUTPUT_BYTES) {
         if (buf.length < 8 + size) break; // wait for the rest of this frame
         const payload = Buffer.from(buf.subarray(8, 8 + size));
         buf = buf.subarray(8 + size);
-        if (bytes >= maxBytes) { truncated = true; continue; } // drain & drop the overflow
+        // Count the frame BEFORE keeping it: a single oversized frame could
+        // otherwise sail past the ceiling unflagged (bytes was only checked
+        // against the total so far). Drop any frame that would cross the line.
+        if (truncated || bytes + payload.length > maxBytes) { truncated = true; continue; } // drain & drop the overflow
         bytes += payload.length;
         if (type === 1) out.push(payload);
         else if (type === 2) err.push(payload);

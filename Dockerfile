@@ -52,4 +52,10 @@ ENV PORT=3000 HOSTNAME="0.0.0.0"
 # which for a background task with no open SSE fires before the drain. Set on the
 # prod image only — `next dev` (the dev stage) keeps Next's instant Ctrl-C.
 ENV NEXT_MANUAL_SIG_HANDLE=1
+# Size the V8 heap to the container: Node's own default (~2 GB) makes the process
+# die with "JavaScript heap out of memory" at half of the compose default
+# PLATFORM_MEM_LIMIT (4 GB). 3 GB of heap leaves ~1 GB for native memory, buffers
+# and code. Operators who change the container limit should override NODE_OPTIONS
+# to match (the builder stage's build-time cap above is unrelated).
+ENV NODE_OPTIONS="--max-old-space-size=3072"
 CMD ["node", "server.js"]

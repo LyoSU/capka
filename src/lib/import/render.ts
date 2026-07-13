@@ -3,7 +3,7 @@ import { createSession, destroySession, execCommand, getSandboxAllowNetwork } fr
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/log";
 import { SANDBOX_IMPORT_SCRIPT } from "./sandbox-script";
-import type { DetectedShareLink, ImportErrorCode } from "./types";
+import { MAX_IMPORT_MESSAGES, MAX_IMPORT_MESSAGE_CHARS, MAX_IMPORT_TOTAL_CHARS, type DetectedShareLink, type ImportErrorCode } from "./types";
 
 /**
  * A typed import failure. Carries a machine `code` the client turns into a calm,
@@ -44,7 +44,20 @@ export async function renderSharedChat(link: DetectedShareLink, userId: string):
     await createSession(sessionId, userId, "bridge");
 
     const b64script = Buffer.from(SANDBOX_IMPORT_SCRIPT, "utf8").toString("base64");
-    const b64args = Buffer.from(JSON.stringify({ url: link.url, source: link.source }), "utf8").toString("base64");
+    // The caps ride along so the script's projections clip INSIDE the sandbox,
+    // before the payload crosses the controller's ~1MB stdout ceiling. The byte
+    // budget = the total-chars cap plus one over-cap message of margin, so an
+    // at-cap ASCII conversation still transits whole and normalizeImport (which
+    // re-caps on the platform regardless) stays the source of truth.
+    const b64args = Buffer.from(JSON.stringify({
+      url: link.url,
+      source: link.source,
+      caps: {
+        maxMessages: MAX_IMPORT_MESSAGES,
+        maxMsgChars: MAX_IMPORT_MESSAGE_CHARS,
+        maxTotalBytes: MAX_IMPORT_TOTAL_CHARS + MAX_IMPORT_MESSAGE_CHARS,
+      },
+    }), "utf8").toString("base64");
     // NODE_PATH → global node_modules so the CJS `require("playwright")` resolves
     // no matter where we drop the script. base64 for both the script and the args
     // means no shell metacharacter (or the URL) is ever interpreted.

@@ -32,11 +32,21 @@ describe("createFrameDemux", () => {
 
   it("caps in-memory output and flags it, draining the rest (RAM guard against runaway commands)", () => {
     const demux = createFrameDemux(50); // tiny ceiling for the test
-    demux.push(encodeFrame(1, "x".repeat(60))); // reaches the ceiling
-    demux.push(encodeFrame(1, "y".repeat(40))); // now over — dropped & flagged
+    demux.push(encodeFrame(1, "x".repeat(50))); // fills the ceiling exactly — kept
+    demux.push(encodeFrame(1, "y".repeat(40))); // would cross — dropped & flagged
     const { stdout, truncated } = demux.result();
     expect(truncated).toBe(true);
-    expect(stdout).toBe("x".repeat(60)); // overflow frame dropped, not appended
+    expect(stdout).toBe("x".repeat(50)); // overflow frame dropped, not appended
+  });
+
+  it("flags a SINGLE frame bigger than the ceiling instead of keeping it whole", () => {
+    // A lone oversized frame used to sail past the cap unflagged (the total was
+    // only checked before adding), defeating the RAM guard by up to one frame.
+    const demux = createFrameDemux(50);
+    demux.push(encodeFrame(1, "x".repeat(60)));
+    const { stdout, truncated } = demux.result();
+    expect(truncated).toBe(true);
+    expect(stdout).toBe("");
   });
 
   it("does not truncate large multi-frame output spanning many chunks", () => {

@@ -20,10 +20,150 @@
  * (require, not import) so NODE_PATH — which the exec command points at the global
  * node_modules — resolves `playwright` regardless of the script's own directory.
  */
+
+/**
+ * Node-side projections of provider payloads down to the fields parse.ts
+ * actually reads, capped so the emitted JSON always fits the controller's ~1MB
+ * stdout ceiling. Without this, a payload's dead weight (Grok steps +
+ * webSearchResults, Claude tool/thinking blocks, ChatGPT per-node metadata)
+ * trips the ceiling and fails the whole import even when the conversation text
+ * itself is small — ~94% of a real oversized Grok share was fields the parser
+ * discards anyway.
+ *
+ * Cap semantics: each text keeps a +9-char margin past the per-message cap so
+ * the platform's normalizeImport still SEES the overage and clips/flags it
+ * itself (single source of truth for the visible clip marker); when the caps
+ * force dropping data the platform can no longer observe (whole messages past
+ * the count/byte budget), __capkaTruncated carries that fact instead. Rich
+ * content the parser would detect from fields we no longer ship travels as a
+ * per-message hasRichContent: true.
+ *
+ * Exported separately (and spliced into SANDBOX_IMPORT_SCRIPT below) so unit
+ * tests can exercise the projection logic directly via new Function.
+ */
+export const IMPORT_PROJECTIONS = `
+function importCapText(v, caps) {
+  var s = typeof v === "string" ? v : "";
+  return s.length > caps.maxMsgChars + 9 ? s.slice(0, caps.maxMsgChars + 9) : s;
+}
+
+function projectGrokImport(json, caps) {
+  var root = json || {};
+  var conv = root.conversation || {};
+  var src = Array.isArray(root.responses) ? root.responses : [];
+  var out = [];
+  var bytes = 0;
+  var truncated = false;
+  for (var i = 0; i < src.length; i++) {
+    var r = src[i] || {};
+    if (out.length > caps.maxMessages) { truncated = true; break; }
+    var m = importCapText(r.message, caps);
+    bytes += Buffer.byteLength(m, "utf8");
+    if (bytes > caps.maxTotalBytes) { truncated = true; break; }
+    var rich =
+      (Array.isArray(r.webSearchResults) && r.webSearchResults.length > 0) ||
+      (Array.isArray(r.xposts) && r.xposts.length > 0) ||
+      (Array.isArray(r.xpostIds) && r.xpostIds.length > 0) ||
+      (Array.isArray(r.generatedImageUrls) && r.generatedImageUrls.length > 0) ||
+      (Array.isArray(r.imageAttachments) && r.imageAttachments.length > 0) ||
+      (Array.isArray(r.fileAttachments) && r.fileAttachments.length > 0);
+    var slim = { sender: r.sender, message: m };
+    if (rich) slim.hasRichContent = true;
+    out.push(slim);
+  }
+  return { conversation: { title: conv.title || null }, responses: out, __capkaTruncated: truncated };
+}
+
+function projectClaudeImport(json, caps) {
+  var root = json || {};
+  var src = Array.isArray(root.chat_messages) ? root.chat_messages : [];
+  var out = [];
+  var bytes = 0;
+  var truncated = false;
+  for (var i = 0; i < src.length; i++) {
+    var m = src[i] || {};
+    if (out.length > caps.maxMessages) { truncated = true; break; }
+    var blocks = Array.isArray(m.content) ? m.content : [];
+    var texts = [];
+    var rich = false;
+    for (var j = 0; j < blocks.length; j++) {
+      var b = blocks[j] || {};
+      if (b.type === "text") {
+        if (typeof b.text === "string" && b.text) texts.push({ type: "text", text: importCapText(b.text, caps) });
+      } else {
+        rich = true;
+      }
+    }
+    if (
+      (Array.isArray(m.attachments) && m.attachments.length > 0) ||
+      (Array.isArray(m.files) && m.files.length > 0) ||
+      Number(m.image_count) > 0 ||
+      Number(m.file_count) > 0
+    ) rich = true;
+    var flat = texts.length ? "" : importCapText(m.text, caps);
+    var size = Buffer.byteLength(flat, "utf8");
+    for (var k = 0; k < texts.length; k++) size += Buffer.byteLength(texts[k].text, "utf8");
+    bytes += size;
+    if (bytes > caps.maxTotalBytes) { truncated = true; break; }
+    var slim = { sender: m.sender, content: texts, text: flat };
+    if (rich) slim.hasRichContent = true;
+    out.push(slim);
+  }
+  return { snapshot_name: root.snapshot_name || null, chat_messages: out, __capkaTruncated: truncated };
+}
+
+function projectChatGptImport(json, caps) {
+  var root = json || {};
+  var mapping = root.mapping && typeof root.mapping === "object" ? root.mapping : {};
+  var slim = {};
+  var bytes = 0;
+  var truncated = false;
+  var ids = Object.keys(mapping);
+  for (var i = 0; i < ids.length; i++) {
+    var node = mapping[ids[i]] || {};
+    var entry = { parent: node.parent, children: Array.isArray(node.children) ? node.children : [] };
+    var msg = node.message;
+    if (msg && typeof msg === "object") {
+      var content = msg.content && typeof msg.content === "object" ? msg.content : {};
+      var parts = Array.isArray(content.parts) ? content.parts : [];
+      var slimParts = [];
+      for (var j = 0; j < parts.length; j++) {
+        if (typeof parts[j] === "string") {
+          var t = importCapText(parts[j], caps);
+          bytes += Buffer.byteLength(t, "utf8");
+          slimParts.push(t);
+        } else {
+          slimParts.push(null); // non-string marker: the parser reads it as rich content
+        }
+      }
+      entry.message = {
+        author: { role: msg.author && msg.author.role },
+        content: { content_type: content.content_type, parts: slimParts },
+      };
+    }
+    slim[ids[i]] = entry;
+    // Mapping order isn't branch order, so a byte overflow can't drop "the tail"
+    // precisely — stop enlarging and let the parser's branch walk surface
+    // whatever survived, flagged as truncated.
+    if (bytes > caps.maxTotalBytes) { truncated = true; break; }
+  }
+  return { title: root.title || null, mapping: slim, current_node: root.current_node, __capkaTruncated: truncated };
+}
+`;
+
 export const SANDBOX_IMPORT_SCRIPT = `
 const args = JSON.parse(Buffer.from(process.env.CAPKA_IMPORT_ARGS || "", "base64").toString("utf8"));
 const url = String(args.url || "");
 const source = String(args.source || "");
+// Caps arrive from render.ts (mirroring the platform's MAX_IMPORT_* constants);
+// the defaults are a safety net sized to the controller's stdout ceiling.
+const rawCaps = args.caps || {};
+const caps = {
+  maxMessages: Number(rawCaps.maxMessages) || 200,
+  maxMsgChars: Number(rawCaps.maxMsgChars) || 100000,
+  maxTotalBytes: Number(rawCaps.maxTotalBytes) || 700000,
+};
+` + IMPORT_PROJECTIONS + `
 
 // Wrap the payload in sentinels so the platform can extract it cleanly even if
 // the browser/runtime writes stray noise to stdout around it.
@@ -65,7 +205,7 @@ async function main() {
           return { __status: 0 };
         }
       }, uuid);
-      if (result && result.__json) { emit({ ok: true, raw: result.__json }); return; }
+      if (result && result.__json) { emit({ ok: true, raw: projectClaudeImport(result.__json, caps) }); return; }
       const status = result ? result.__status : 0;
       if (status === 404) { emit({ ok: false, code: "NOT_FOUND" }); return; }
       if (status === 403 || status === 0) { emit({ ok: false, code: "BLOCKED" }); return; }
@@ -86,7 +226,7 @@ async function main() {
           return { __status: 0 };
         }
       }, shareId);
-      if (result && result.__json) { emit({ ok: true, raw: result.__json }); return; }
+      if (result && result.__json) { emit({ ok: true, raw: projectGrokImport(result.__json, caps) }); return; }
       const status = result ? result.__status : 0;
       if (status === 404) { emit({ ok: false, code: "NOT_FOUND" }); return; }
       if (status === 403 || status === 0) { emit({ ok: false, code: "BLOCKED" }); return; }
@@ -112,7 +252,7 @@ async function main() {
           return { title: c.title || null, mapping: c.mapping, current_node: c.current_node };
         }, { timeout: 30000, polling: 500 });
         const raw = await handle.jsonValue();
-        if (raw && raw.mapping) { emit({ ok: true, raw: raw }); return; }
+        if (raw && raw.mapping) { emit({ ok: true, raw: projectChatGptImport(raw, caps) }); return; }
         emit({ ok: false, code: "FORMAT_CHANGED" }); return;
       } catch (e) {
         // Never hydrated: either a bot challenge or the page shape moved.
@@ -147,7 +287,7 @@ async function main() {
         await page.waitForTimeout(400);
       }
 
-      const raw = await page.evaluate(() => {
+      const raw = await page.evaluate((caps) => {
         // HTML -> markdown, run in-page so the DOM is live. Kept backtick- and
         // template-literal-free for clean embedding: BT is a literal backtick from
         // its code point, and every runtime newline is written as an escape.
@@ -336,8 +476,17 @@ async function main() {
         const turnEls = document.querySelectorAll("share-turn-viewer");
         const turns = [];
         let droppedRichContent = false;
+        // Same cap semantics as the projection helpers: +9-char margin so the
+        // platform's normalizeImport observes and clips the overage itself; a
+        // count/byte overflow (whole turns dropped here) rides __capkaTruncated.
+        const enc = new TextEncoder();
+        const capText = (s) => (s.length > caps.maxMsgChars + 9 ? s.slice(0, caps.maxMsgChars + 9) : s);
+        let msgCount = 0;
+        let bytes = 0;
+        let capTruncated = false;
         for (let i = 0; i < turnEls.length; i++) {
           const tv = turnEls[i];
+          if (msgCount > caps.maxMessages) { capTruncated = true; break; }
 
           // User query: the p.query-text-line paragraphs (a multi-line query has
           // several), excluding the cdk screen-reader label that also sits in
@@ -373,10 +522,15 @@ async function main() {
             if (mc.querySelector("img, canvas, video, audio, source")) droppedRichContent = true;
           }
 
+          query = capText(query);
+          response = capText(response);
+          bytes += enc.encode(query).length + enc.encode(response).length;
+          if (bytes > caps.maxTotalBytes) { capTruncated = true; break; }
+          msgCount += (query ? 1 : 0) + (response ? 1 : 0);
           turns.push({ query: query, response: response });
         }
-        return { title: title || null, turns: turns, droppedRichContent: droppedRichContent };
-      });
+        return { title: title || null, turns: turns, droppedRichContent: droppedRichContent, __capkaTruncated: capTruncated };
+      }, caps);
 
       if (raw && raw.turns) { emit({ ok: true, raw: raw }); return; }
       emit({ ok: false, code: "FORMAT_CHANGED" }); return;
