@@ -9,19 +9,23 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { PreviewProvider } from "@/components/chat/file-preview";
+import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspaceBrowser, type FileEntry } from "@/components/chat/workspace-browser";
 import { useFolderSync } from "@/components/chat/use-folder-sync";
-import { ProjectDialog, type Project } from "@/components/projects/project-dialog";
+import { type Project } from "@/components/projects/project-dialog";
 import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
 import { projectTarget, targetQuery } from "@/lib/workspace-target";
 import { displayModelName } from "@/lib/providers/registry";
 import { cn } from "@/lib/utils";
 
 type ChatRow = { id: string; title: string | null; updatedAt: string | null };
-type Tab = "overview" | "files" | "chats";
+export type HubTab = "overview" | "files" | "chats" | "settings";
 
 const noop = async () => {};
 
@@ -38,13 +42,20 @@ function ChatRowLink({ chat, locale, fallback }: { chat: ChatRow; locale: string
   );
 }
 
-export function ProjectHub({ project: initial, isAdmin }: { project: Project; isAdmin?: boolean }) {
+export function ProjectHub({
+  project: initial,
+  isAdmin,
+  initialTab,
+}: {
+  project: Project;
+  isAdmin?: boolean;
+  initialTab?: HubTab;
+}) {
   const t = useTranslations("projects.hub");
   const router = useRouter();
   const locale = useLocale();
   const [project, setProject] = useState<Project>(initial);
-  const [tab, setTab] = useState<Tab>("overview");
-  const [editOpen, setEditOpen] = useState(false);
+  const [tab, setTab] = useState<HubTab>(initialTab ?? "overview");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [chats, setChats] = useState<ChatRow[] | null>(null);
   // Root workspace entries — fetched ONCE here (for the overview file count) and
@@ -76,10 +87,11 @@ export function ProjectHub({ project: initial, isAdmin }: { project: Project; is
 
   const newChatHref = `/chat?projectId=${project.id}`;
 
-  const tabs: { key: Tab; label: string }[] = [
+  const tabs: { key: HubTab; label: string }[] = [
     { key: "overview", label: t("tabs.overview") },
     { key: "files", label: t("tabs.files") },
     { key: "chats", label: t("tabs.chats") },
+    { key: "settings", label: t("settings") },
   ];
 
   return (
@@ -104,7 +116,7 @@ export function ProjectHub({ project: initial, isAdmin }: { project: Project; is
               <Plus className="h-4 w-4" />
               {t("newChat")}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+            <Button variant="outline" size="sm" onClick={() => setTab("settings")}>
               <Settings className="h-4 w-4" />
               {t("settings")}
             </Button>
@@ -131,7 +143,10 @@ export function ProjectHub({ project: initial, isAdmin }: { project: Project; is
           ))}
         </div>
 
-        <div className="min-h-0 flex-1">
+        {/* The tab pane is the scroll container (the dashboard main is
+            overflow-hidden), so long content scrolls under the pinned header +
+            tabs instead of being clipped. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {tab === "overview" && (
             <OverviewTab
               project={project}
@@ -142,8 +157,6 @@ export function ProjectHub({ project: initial, isAdmin }: { project: Project; is
               locale={locale}
               onOpenFiles={() => setTab("files")}
               onAllChats={() => setTab("chats")}
-              onDelete={() => setDeleteOpen(true)}
-              isAdmin={isAdmin}
             />
           )}
 
@@ -159,15 +172,18 @@ export function ProjectHub({ project: initial, isAdmin }: { project: Project; is
           )}
 
           {tab === "chats" && <ChatsList chats={chats} locale={locale} emptyLabel={t("noChats")} />}
+
+          {tab === "settings" && (
+            <SettingsTab
+              project={project}
+              isAdmin={isAdmin}
+              onSaved={setProject}
+              onDelete={() => setDeleteOpen(true)}
+            />
+          )}
         </div>
       </div>
 
-      <ProjectDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        project={project}
-        onSaved={(p) => setProject(p)}
-      />
       <DeleteProjectDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
@@ -179,7 +195,7 @@ export function ProjectHub({ project: initial, isAdmin }: { project: Project; is
 }
 
 function OverviewTab({
-  project, chats, fileCount, folderCount, syncing, locale, onOpenFiles, onAllChats, onDelete, isAdmin,
+  project, chats, fileCount, folderCount, syncing, locale, onOpenFiles, onAllChats,
 }: {
   project: Project;
   chats: ChatRow[] | null;
@@ -189,8 +205,6 @@ function OverviewTab({
   locale: string;
   onOpenFiles: () => void;
   onAllChats: () => void;
-  onDelete: () => void;
-  isAdmin?: boolean;
 }) {
   const t = useTranslations("projects.hub");
   const recent = (chats ?? []).slice(0, 6);
@@ -263,17 +277,143 @@ function OverviewTab({
         </div>
         <MemoryEditor projectId={project.id} />
       </section>
+    </div>
+  );
+}
+
+/** The Settings tab — the project's create-time basics plus the advanced knobs
+ *  (instructions, model, internet). Lives on the hub page rather than in a modal
+ *  so the model picker's dropdown has room to open (a dialog's centering
+ *  transform + overflow clipping used to cut it off). */
+function SettingsTab({
+  project, isAdmin, onSaved, onDelete,
+}: {
+  project: Project;
+  isAdmin?: boolean;
+  onSaved: (p: Project) => void;
+  onDelete: () => void;
+}) {
+  const t = useTranslations("projects");
+  const th = useTranslations("projects.hub");
+  const tc = useTranslations("common");
+  const [saving, setSaving] = useState(false);
+
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? "");
+  const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt ?? "");
+  const [defaultModel, setDefaultModel] = useState(project.defaultModel ?? "");
+  const [internetAccess, setInternetAccess] = useState(project.sandboxNetwork === "bridge");
+
+  const dirty =
+    name !== project.name ||
+    description !== (project.description ?? "") ||
+    systemPrompt !== (project.systemPrompt ?? "") ||
+    defaultModel !== (project.defaultModel ?? "") ||
+    internetAccess !== (project.sandboxNetwork === "bridge");
+
+  async function save() {
+    if (!name.trim()) {
+      toast.error(t("nameRequired"));
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, description, systemPrompt, defaultModel, sandboxNetwork: internetAccess ? "bridge" : "none" }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || t("updateError"));
+        return;
+      }
+      const saved = await res.json();
+      toast.success(t("updated"));
+      // Rename shows in the sidebar's Projects section — nudge it to refresh.
+      window.dispatchEvent(new Event("projects:changed"));
+      onSaved(saved);
+    } catch {
+      toast.error(t("updateError"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4 pb-6">
+      <div className="space-y-1.5">
+        <Label htmlFor="project-name">{t("form.name")}</Label>
+        <Input
+          id="project-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("form.namePlaceholder")}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="project-description">{t("form.description")}</Label>
+        <Textarea
+          id="project-description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder={t("form.descriptionPlaceholder")}
+          className="max-h-40 min-h-16"
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="project-system-prompt">{t("form.systemPrompt")}</Label>
+        <Textarea
+          id="project-system-prompt"
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+          placeholder={t("form.systemPromptPlaceholder")}
+          className="max-h-[50vh] min-h-28 font-mono text-xs"
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="project-default-model">{t("form.defaultModel")}</Label>
+        <ModelPicker
+          variant="field"
+          value={defaultModel}
+          onChange={setDefaultModel}
+          placeholder={t("form.useGlobalDefault")}
+          clearable
+        />
+        <p className="text-xs text-muted-foreground">{t("form.defaultModelHint")}</p>
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="space-y-0.5">
+          <Label htmlFor="sandbox-internet">{t("form.internet")}</Label>
+          <p className="text-xs text-muted-foreground">{t("form.internetHint")}</p>
+        </div>
+        <Switch
+          id="sandbox-internet"
+          checked={internetAccess}
+          onCheckedChange={setInternetAccess}
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={!dirty || saving}>
+          {saving ? tc("saving") : tc("save")}
+        </Button>
+      </div>
 
       {isAdmin && (
         <section className="rounded-xl border border-destructive/30 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold">{t("dangerTitle")}</h2>
-              <p className="text-xs text-muted-foreground">{t("dangerHint")}</p>
+              <h2 className="text-sm font-semibold">{th("dangerTitle")}</h2>
+              <p className="text-xs text-muted-foreground">{th("dangerHint")}</p>
             </div>
             <Button variant="outline" size="sm" className="shrink-0 text-destructive hover:text-destructive" onClick={onDelete}>
               <Trash2 className="h-4 w-4" />
-              {t("delete")}
+              {th("delete")}
             </Button>
           </div>
         </section>

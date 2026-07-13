@@ -22,7 +22,6 @@ export default function ProjectsPage() {
   const locale = useLocale();
   const [projects, setProjects] = useState<Project[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editProject, setEditProject] = useState<Project | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   const fetchProjects = useCallback(() => {
@@ -37,12 +36,6 @@ export default function ProjectsPage() {
   }, [fetchProjects]);
 
   function handleCreate() {
-    setEditProject(null);
-    setDialogOpen(true);
-  }
-
-  function handleEdit(project: Project) {
-    setEditProject(project);
     setDialogOpen(true);
   }
 
@@ -107,7 +100,12 @@ export default function ProjectsPage() {
                   <span>{t("lastChat", { date: formatDate(project.lastChatAt) })}</span>
                 </span>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon-xs" onClick={() => handleEdit(project)} aria-label={tc("edit")}>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    render={<Link href={`/projects/${project.id}?tab=settings`} />}
+                    aria-label={tc("edit")}
+                  >
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   <Button variant="ghost" size="icon-xs" onClick={() => setDeleteTarget(project)} aria-label={tc("delete")}>
@@ -123,7 +121,6 @@ export default function ProjectsPage() {
       <ProjectDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        project={editProject}
         onSaved={fetchProjects}
       />
 

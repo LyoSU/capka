@@ -563,8 +563,6 @@
     "createError": "Could not create project. Please try again.",
     "updateError": "Could not update project. Please try again.",
     "nameRequired": "Name is required",
-    "editTitle": "Edit project",
-    "editDesc": "Update project settings",
     "createDesc": "Create a new project to organize your chats",
     "form": {
       "name": "Name",

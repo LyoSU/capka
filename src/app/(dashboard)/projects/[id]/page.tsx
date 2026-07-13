@@ -6,14 +6,23 @@ import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, users } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
-import { ProjectHub } from "@/components/projects/project-hub";
+import { ProjectHub, type HubTab } from "@/components/projects/project-hub";
 
-export default async function ProjectHubPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProjectHubPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/login");
 
   const { id } = await params;
+  const { tab } = await searchParams;
+  const initialTab: HubTab | undefined =
+    tab === "files" || tab === "chats" || tab === "settings" ? tab : undefined;
   const [project] = await db
     .select()
     .from(projects)
@@ -26,6 +35,7 @@ export default async function ProjectHubPage({ params }: { params: Promise<{ id:
   return (
     <ProjectHub
       isAdmin={userRow?.role === "admin"}
+      initialTab={initialTab}
       project={{
         id: project.id,
         name: project.name,

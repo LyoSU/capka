@@ -1072,6 +1072,58 @@ export function ModelPicker({
     };
   }, [open, isMobile, variant]);
 
+  // Field panel placement — measured on open (and on resize/scroll while open).
+  // The panel prefers opening downward; when the space below the trigger can't
+  // fit it and above is roomier, it flips up. Either way its height is capped
+  // to the space actually visible: not just the viewport, but the tightest
+  // overflow ancestor (a settings pane's scroller, a dialog body) — an
+  // absolutely-positioned panel poking above a scroller's top edge is clipped
+  // with no way to scroll to it, so viewport-only math rendered a decapitated
+  // panel whose search bar and list head were cut off.
+  const [fieldPos, setFieldPos] = useState<{ up: boolean; maxH: number; maxW: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open || isMobile || variant !== "field") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears measured placement on close; measurement must live in useLayoutEffect
+      setFieldPos(null);
+      return;
+    }
+    const compute = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const margin = 8;
+      const gap = 4; // matches mt-1/mb-1
+      const panelH = 480; // the preferred h-[30rem]
+      let clipTop = 0;
+      let clipBottom = document.documentElement.clientHeight;
+      let clipRight = document.documentElement.clientWidth;
+      for (let el = trigger.parentElement; el; el = el.parentElement) {
+        const st = getComputedStyle(el);
+        const cr = el.getBoundingClientRect();
+        if (st.overflowY !== "visible") {
+          clipTop = Math.max(clipTop, cr.top);
+          clipBottom = Math.min(clipBottom, cr.bottom);
+        }
+        if (st.overflowX !== "visible") clipRight = Math.min(clipRight, cr.right);
+      }
+      const r = trigger.getBoundingClientRect();
+      const below = clipBottom - r.bottom - gap - margin;
+      const above = r.top - clipTop - gap - margin;
+      const up = below < panelH && above > below;
+      setFieldPos({
+        up,
+        maxH: Math.round(Math.min(panelH, Math.max(240, up ? above : below))),
+        maxW: Math.round(Math.max(240, clipRight - r.left - margin)),
+      });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    window.addEventListener("scroll", compute, true);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("scroll", compute, true);
+    };
+  }, [open, isMobile, variant]);
+
   const toggleOpen = useCallback(() => {
     if (disabled) return;
     setOpen((prev) => {
@@ -1260,12 +1312,15 @@ export function ModelPicker({
         </button>
       )}
 
-      {/* Field variant: anchored under its full-width trigger (forms have no
-          transformed ancestor, so absolute is fine and matches the trigger width). */}
-      {open && !isMobile && variant === "field" && (
+      {/* Field variant: anchored to its full-width trigger, flipping above it
+          when the viewport has more room there (see the fieldPos measurement). */}
+      {open && !isMobile && variant === "field" && fieldPos && (
         <div
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
-          className="absolute top-full left-0 mt-1 z-50 flex h-[30rem] w-[34rem] min-w-full overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 max-w-[calc(100vw-1rem)]"
+          style={{ height: fieldPos.maxH, maxWidth: fieldPos.maxW }}
+          className={`absolute left-0 z-50 flex w-[34rem] min-w-full overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 ${
+            fieldPos.up ? "bottom-full mb-1" : "top-full mt-1"
+          }`}
         >
           {renderList("vertical")}
         </div>
