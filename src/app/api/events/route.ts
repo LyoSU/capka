@@ -39,6 +39,16 @@ export async function GET(req: Request) {
       const send = (data: string) => {
         if (torndown) return;
         try {
+          // Backpressure guard: a consumer that stopped reading (a laptop asleep
+          // behind NAT, a wedged proxy) never errors the stream — enqueue just
+          // buffers without bound. Past a sane backlog treat the client as dead
+          // and drop the connection; a live client reconnects and resyncs from
+          // the DB snapshot anyway.
+          if ((controller.desiredSize ?? 0) < -1_000_000) {
+            teardown();
+            try { controller.close(); } catch { /* already closed */ }
+            return;
+          }
           controller.enqueue(encoder.encode(data));
         } catch {
           // Controller closed without cancel() firing — clean up proactively.
@@ -69,7 +79,10 @@ export async function GET(req: Request) {
       // Called when client disconnects
       teardown();
     },
-  });
+    // Byte-counting strategy so the backpressure guard above measures the
+    // backlog in BYTES (the default strategy counts chunks, which would let a
+    // dead client hoard gigabytes of large events before tripping the guard).
+  }, new ByteLengthQueuingStrategy({ highWaterMark: 65_536 }));
 
   return new Response(stream, {
     headers: {

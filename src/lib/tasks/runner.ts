@@ -686,7 +686,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Flush reasoning before text so the live stream keeps the model's order
     // (it reasons, then answers). The persisted `parts` array is the source of
     // truth, so any minor live drift self-heals on the next save.
-    const flushBuffers = async () => {
+    const doFlush = async () => {
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       await flushReasoning();
       await flushText();
@@ -698,6 +698,26 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // (throttled inside saveSnapshot). Runs AFTER the flushes above, so the
       // snapshot's streamSeq covers every delta published this tick.
       await saveSnapshot();
+    };
+    // Serialize flushes: the timer fires while a previous flush may still be
+    // awaiting Postgres, and unchained they'd stack concurrent queries on the
+    // shared NOTIFY client without bound when the DB lags (each pending flush
+    // pinning its deltas in memory). Chaining caps it at one running + one
+    // queued: a flush that hasn't started yet will drain whatever is in the
+    // buffers by the time it runs, so further callers just share its promise.
+    // The chain itself swallows the failure (one lost NOTIFY must not wedge
+    // every later flush); the caller-facing promise still rejects for `await`s.
+    let flushChain: Promise<void> = Promise.resolve();
+    let queuedFlush: Promise<void> | null = null;
+    const flushBuffers = () => {
+      if (queuedFlush) return queuedFlush;
+      const run = flushChain.then(() => {
+        queuedFlush = null; // started — the next caller must queue a fresh one
+        return doFlush();
+      });
+      queuedFlush = run;
+      flushChain = run.catch(() => {});
+      return run;
     };
     const scheduleFlush = () => {
       if (flushTimer) return;

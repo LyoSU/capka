@@ -6,6 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- The worker now logs a per-minute `ops` health line (heap, RSS, realtime listeners, NOTIFY queue depth, in-flight/aux tasks) so memory incidents can be diagnosed from the log trail.
+
+### Fixed
+- A realtime (SSE) subscription no longer leaks a dead listener when the Postgres LISTEN connection fails mid-subscribe; reconnect storms during a DB blip used to accumulate them.
+- An SSE client that stopped reading (sleeping laptop, wedged proxy) is now disconnected once its event backlog passes ~1 MB instead of buffering events without bound.
+- Background LLM calls (chat title, memory maintenance, compaction) now carry a 3-minute deadline, so a hung provider request can't pin the whole conversation context in memory indefinitely.
+- Streaming flushes are serialized per turn, so a lagging database no longer stacks unbounded concurrent NOTIFY publishes (the source of the pg `client.query() when the client is already executing` warning).
+
 ## [0.10.1] - 2026-07-13
 
 ### Fixed

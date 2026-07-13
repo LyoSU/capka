@@ -1,5 +1,6 @@
 import { generateText, type ModelMessage, type LanguageModel } from "ai";
 import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
+import { AUX_TIMEOUT_MS } from "./aux";
 import { log } from "@/lib/log";
 
 /**
@@ -56,6 +57,9 @@ export async function compactConversation(
     const { text, usage } = await generateText({
       model,
       messages: buildCompactionMessages(systemMessages, modelMessages),
+      // Same deadline as the other fire-and-forget aux calls: a hung provider
+      // request here pins the whole conversation prefix (see AUX_TIMEOUT_MS).
+      abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS),
     });
     const billable = toTokenUsage(usage);
     if (billable && onUsage) onUsage(billable);

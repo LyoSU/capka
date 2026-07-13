@@ -100,12 +100,23 @@ class Realtime {
     const ch = channelName(channel);
     if (!this.chans.has(ch)) this.chans.set(ch, new Set());
     this.chans.get(ch)!.add(cb);
-    await this.ensureSub();
-    // Quote the identifier: pg_notify() takes a case-SENSITIVE text channel,
-    // but an unquoted `LISTEN ident` is folded to lowercase by Postgres. With a
-    // mixed-case channel (user IDs contain uppercase) the two would never match
-    // and no event would ever be delivered. Quoting preserves case on both sides.
-    await this.sub!.query(`LISTEN "${ch}"`);
+    try {
+      await this.ensureSub();
+      // Quote the identifier: pg_notify() takes a case-SENSITIVE text channel,
+      // but an unquoted `LISTEN ident` is folded to lowercase by Postgres. With a
+      // mixed-case channel (user IDs contain uppercase) the two would never match
+      // and no event would ever be delivered. Quoting preserves case on both sides.
+      await this.sub!.query(`LISTEN "${ch}"`);
+    } catch (e) {
+      // Roll the registration back: the caller sees the failure and never gets
+      // an unsubscribe, so a callback left behind here would be a dead closure
+      // fanned out to on every future NOTIFY — forever. Reconnect storms during
+      // a DB blip used to accumulate these.
+      const set = this.chans.get(ch);
+      set?.delete(cb);
+      if (set && set.size === 0) this.chans.delete(ch);
+      throw e;
+    }
     return () => {
       const set = this.chans.get(ch);
       if (!set) return;
@@ -169,6 +180,19 @@ class Realtime {
       });
     }
     await pub.query("SELECT pg_notify($1, $2)", [channelName(channel), payload]);
+  }
+
+  /** Ops counters for the worker's periodic health line. `pubQueue` reads pg's
+   *  internal per-client query queue (concurrent publishes serialize there) —
+   *  a persistently growing value means the NOTIFY connection is wedged and
+   *  every queued publish is pinning its payload in memory. `_queryQueue` (not
+   *  the public `queryQueue` getter) deliberately: the getter prints a
+   *  deprecation notice on every read. */
+  stats(): { channels: number; listeners: number; pubQueue: number } {
+    let listeners = 0;
+    for (const s of this.chans.values()) listeners += s.size;
+    const q = (this.pub as unknown as { _queryQueue?: unknown[] } | null)?._queryQueue;
+    return { channels: this.chans.size, listeners, pubQueue: Array.isArray(q) ? q.length : 0 };
   }
 }
 

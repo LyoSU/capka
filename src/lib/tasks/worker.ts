@@ -129,6 +129,22 @@ export async function startWorker(): Promise<void> {
   void refreshCatalogIfStale();
   const catalogTimer = setInterval(() => void refreshCatalogIfStale(), CATALOG_REFRESH_MS);
 
+  // Periodic health line: heap + the retainers a slow leak would show up in
+  // (realtime listeners, the NOTIFY client's query queue, in-flight/aux work).
+  // One line a minute so a memory incident can be diagnosed from the log
+  // trail instead of requiring a live heap snapshot after the fact.
+  const opsTimer = setInterval(() => {
+    const mu = process.memoryUsage();
+    log.info("ops", {
+      heapUsedMb: Math.round(mu.heapUsed / 1048576),
+      rssMb: Math.round(mu.rss / 1048576),
+      externalMb: Math.round(mu.external / 1048576),
+      inFlight: s.inFlight,
+      aux: auxInFlight(),
+      ...realtime.stats(),
+    });
+  }, 60_000);
+
   // Fire due automations (scheduled agent runs). Same pattern as reconcile:
   // cheap DB poll, safe across replicas via SKIP LOCKED inside the tick.
   const { schedulerTick } = await import("@/lib/automations/scheduler");
@@ -161,6 +177,7 @@ export async function startWorker(): Promise<void> {
     clearInterval(pollTimer);
     clearInterval(reconcileTimer);
     clearInterval(catalogTimer);
+    clearInterval(opsTimer);
     clearInterval(schedulerTimer);
     clearInterval(teardownTimer);
     log.info("worker draining on signal — no new tasks; waiting for in-flight", { signal, workerId: s.workerId, inFlight: s.inFlight });

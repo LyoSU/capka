@@ -52,15 +52,25 @@ type AuxArgs =
   | { messages: ModelMessage[]; maxOutputTokens: number }
   | { system: string; prompt: string; maxOutputTokens: number };
 
+/** Hard deadline per aux LLM call. These are fire-and-forget (trackAux) and
+ *  their prompt is the WHOLE conversation prefix — a provider request that
+ *  hangs past undici's between-chunks timeouts (a server trickling bytes)
+ *  would otherwise pin megabytes of context for as long as it pleases, and
+ *  every finished turn spawns new such calls. Aux outputs are short (a title,
+ *  a memory doc, a summary), so 3 minutes is generous. */
+export const AUX_TIMEOUT_MS = 180_000;
+
 /** generateText for aux calls: suppress reasoning, but if a non-reasoning model
  *  rejects the knob (gpt-4o, claude-3.5…), retry once without it — same
  *  optimistic-then-fallback philosophy as the main run. */
 export async function auxGenerate(model: LanguageModel, provider: string, args: AuxArgs) {
   const providerOptions = auxReasoningOptions(provider);
   try {
-    return await generateText({ model, ...args, ...(providerOptions ? { providerOptions: providerOptions as never } : {}) });
+    return await generateText({ model, ...args, abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS), ...(providerOptions ? { providerOptions: providerOptions as never } : {}) });
   } catch (e) {
-    if (providerOptions && isReasoningUnsupportedError(e)) return await generateText({ model, ...args });
+    if (providerOptions && isReasoningUnsupportedError(e)) {
+      return await generateText({ model, ...args, abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS) });
+    }
     throw e;
   }
 }
