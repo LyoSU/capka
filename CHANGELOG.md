@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-13
+
 ### Added
 - Each project now has a hub at `/projects/[id]` (Overview, Files, Chats), reachable from a new "Projects" section in the sidebar.
 - Chats can be moved between projects (or out of one) from the chat context menu.
