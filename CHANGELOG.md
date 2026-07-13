@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-13
+
 ### Changed
 - The model is now instructed to analyze delivered attachments from the inline content it already has, instead of re-reading or transcoding them with sandbox tools.
 - Attachment delivery decisions are now logged (provider, model, and per-file MIME type) to diagnose whether a given file was sent natively.
