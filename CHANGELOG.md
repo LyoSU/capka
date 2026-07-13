@@ -20,7 +20,7 @@ All notable changes to Capka are documented here. Format follows
 - Deleting a project now durably tears down its sandbox, workspace, and attached folders and pauses its automations; a failed teardown is retried by the worker.
 - A new chat opening on an off-catalog default model (a stealth/preview id typed as a connection's default) no longer false-flags it as unavailable and blocks the composer; the model is now trusted as long as its connection still exists.
 - The "model unavailable" notice no longer tells users to pick from a switcher "above" when the picker sits below it.
-- The model picker in forms now opens upward when there's more room above the field, and caps its height to the viewport instead of spilling below the fold.
+- The model picker in forms now opens upward when there's more room above the field, and caps its size to the nearest scroll container so it's never clipped below the fold or above a scroller's edge.
 
 ## [0.9.2] - 2026-07-13
 
