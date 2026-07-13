@@ -47,22 +47,36 @@ export function useShareImport(opts: { text: string; model: string; onImported: 
 
   const active: DetectedShareLink | null = detected && detected.url !== dismissedUrl ? detected : null;
 
+  // Guards against a double-click firing two preview renders (each spins a
+  // headless browser). Also lets a late response be dropped if the composer URL
+  // changed underneath it — see the `lastUrl.current !== url` checks below.
+  const previewingRef = useRef(false);
   const startPreview = useCallback(async () => {
-    if (!active) return;
+    if (!active || previewingRef.current) return;
+    const url = active.url;
+    previewingRef.current = true;
     setState({ phase: "previewing" });
     try {
       const res = await fetch("/api/chats/import/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: active.url }),
+        body: JSON.stringify({ url }),
       });
+      // The user may have edited the composer to a different link while this
+      // rendered; a stale response must not overwrite the reset state (or the
+      // fresh URL's card). Drop it silently.
+      if (lastUrl.current !== url) return;
       if (!res.ok) {
         setState({ phase: "error", code: codeFromResponse(await res.json().catch(() => ({}))) });
         return;
       }
-      setState({ phase: "preview", data: (await res.json()) as SharedChatImport });
+      const data = (await res.json()) as SharedChatImport;
+      if (lastUrl.current !== url) return;
+      setState({ phase: "preview", data });
     } catch {
-      setState({ phase: "error", code: "RENDER_FAILED" });
+      if (lastUrl.current === url) setState({ phase: "error", code: "RENDER_FAILED" });
+    } finally {
+      previewingRef.current = false;
     }
   }, [active]);
 

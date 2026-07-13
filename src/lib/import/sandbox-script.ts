@@ -107,5 +107,5 @@ async function main() {
   }
 }
 
-main().catch(() => { process.stdout.write(JSON.stringify({ ok: false, code: "RENDER_FAILED" })); });
+main().catch(() => { emit({ ok: false, code: "RENDER_FAILED" }); });
 `;

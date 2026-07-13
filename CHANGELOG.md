@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- The share-import offer card now shows the Claude/ChatGPT brand mark instead of a generic icon.
+- Share-link import is more robust: concurrent previews (e.g. two tabs) no longer share and wipe one sandbox session, a slow preview response can't overwrite a newer paste, and previews are rate-limited per user.
+- The touch action sheet (long-press menu) now honors `prefers-reduced-motion`, shows a visible keyboard-focus state, and is chosen by pointer type rather than screen width — so a tablet gets the sheet and a narrow desktop window keeps the dropdown.
+
 ## [0.8.0] - 2026-07-11
 
 ### Added

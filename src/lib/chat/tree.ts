@@ -340,7 +340,9 @@ export async function createImportedChat(opts: {
     await tx.insert(chats).values({
       id: newChatId,
       userId,
-      title: title || "Imported chat",
+      // The caller passes an already-localized fallback title (the commit route),
+      // so no English literal is baked in here.
+      title: title || undefined,
       model: model ?? undefined,
     });
     if (rows.length > 0) {

@@ -405,6 +405,7 @@
       "tooLarge": "File too large to preview",
       "rendered": "Preview",
       "source": "Source",
+      "codeViewer": "Code viewer",
       "fullscreen": "Fullscreen",
       "exitFullscreen": "Exit fullscreen"
     },

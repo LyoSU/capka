@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useIsMobile } from "@/hooks/use-mobile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +10,24 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { haptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
+
+/**
+ * Presentation is chosen by input capability, not viewport width: a touch device
+ * (phone, tablet) gets the bottom sheet, a mouse-driven one the popover — so a
+ * narrow desktop window keeps the dropdown and an iPad still gets the sheet.
+ * SSR-safe: false until the effect runs, matching the server's markup.
+ */
+function useCoarsePointer() {
+  const [coarse, setCoarse] = React.useState(false);
+  React.useEffect(() => {
+    const mql = window.matchMedia("(pointer: coarse)");
+    const onChange = () => setCoarse(mql.matches);
+    onChange();
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return coarse;
+}
 
 export type ActionItem = {
   key: string;
@@ -56,13 +73,13 @@ export function ActionMenu({
   children: React.ReactNode;
   contentProps?: React.ComponentProps<typeof DropdownMenuContent>;
 }) {
-  const isMobile = useIsMobile();
+  const isTouch = useCoarsePointer();
   const visible = items.filter((it) => !it.hidden);
 
   return (
-    <DropdownMenu open={isMobile ? false : open} onOpenChange={onOpenChange}>
+    <DropdownMenu open={isTouch ? false : open} onOpenChange={onOpenChange}>
       {children}
-      {!isMobile && (
+      {!isTouch && (
         <DropdownMenuContent {...contentProps}>
           {visible.map((it, i) => {
             const prev = visible[i - 1];
@@ -84,7 +101,7 @@ export function ActionMenu({
           })}
         </DropdownMenuContent>
       )}
-      {isMobile && (
+      {isTouch && (
         <Sheet open={open} onOpenChange={onOpenChange}>
           <ActionSheet
             title={title}
@@ -144,10 +161,15 @@ function ActionSheet({
       <SheetTitle className="sr-only">{ariaLabel}</SheetTitle>
       <div
         ref={dragRef}
-        style={{
-          transform: dragY ? `translateY(${dragY}px)` : undefined,
-          transition: dragY ? "none" : "transform 0.2s cubic-bezier(0.32,0.72,0,1)",
-        }}
+        style={{ transform: dragY ? `translateY(${dragY}px)` : undefined }}
+        className={cn(
+          // Snap-back animates via a class so it honors prefers-reduced-motion;
+          // during an active drag the transform must track the finger with no
+          // transition at all.
+          dragY
+            ? "transition-none"
+            : "transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+        )}
       >
         {/* Grab strip — the drag gesture lives only here so taps on the action
             rows are never turned into a drag. */}
@@ -183,7 +205,7 @@ function ActionSheet({
                     it.onSelect();
                   }}
                   className={cn(
-                    "flex min-h-[3rem] items-center gap-3 rounded-xl px-4 text-[15px] outline-none transition-colors active:bg-accent disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-5 [&_svg]:shrink-0",
+                    "flex min-h-[3rem] items-center gap-3 rounded-xl px-4 text-[15px] outline-none transition-colors focus-visible:bg-accent active:bg-accent disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-5 [&_svg]:shrink-0",
                     it.variant === "destructive"
                       ? "text-destructive [&_svg]:text-destructive"
                       : "text-foreground [&_svg]:text-muted-foreground",

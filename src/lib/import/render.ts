@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import { createSession, destroySession, execCommand, getSandboxAllowNetwork } from "@/lib/sandbox/client";
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/log";
@@ -23,8 +24,11 @@ export class ImportError extends AppError {
  * the isolated container — never in the platform process — and only JSON crosses
  * back. Parsing/validation is the caller's job (`parse.ts`).
  *
- * A dedicated per-user session (`imp-<userId>`) keeps import decoupled from any
- * chat's sandbox (there may be no chat yet at preview time). It's created with
+ * A dedicated one-shot session (`imp-<userId>-<rand>`) keeps import decoupled
+ * from any chat's sandbox (there may be no chat yet at preview time) AND from a
+ * second concurrent import: two previews (e.g. two tabs) must not share a
+ * container, or the first's teardown would wipe the second mid-render. It's
+ * created with
  * egress ("bridge"; the controller still gates that on SANDBOX_ALLOW_NETWORK) and
  * torn down when we're done, so an import leaves no lingering container.
  */
@@ -35,7 +39,7 @@ export async function renderSharedChat(link: DetectedShareLink, userId: string):
   // proceed, so a transient blip doesn't mislabel a network-enabled box.
   if ((await getSandboxAllowNetwork()) === false) throw new ImportError("NETWORK_DISABLED");
 
-  const sessionId = `imp-${userId}`;
+  const sessionId = `imp-${userId}-${nanoid(8)}`;
   try {
     await createSession(sessionId, userId, "bridge");
 

@@ -405,6 +405,7 @@
       "tooLarge": "Завеликий файл для перегляду",
       "rendered": "Перегляд",
       "source": "Код",
+      "codeViewer": "Перегляд коду",
       "fullscreen": "На весь екран",
       "exitFullscreen": "Згорнути"
     },
