@@ -118,7 +118,7 @@ export const automationCollection: Collection = {
       details: trigger.kind === "once"
         ? loc(t, "automation.previewOnce", `Runs once: ${nextDates[0]}.`, { date: nextDates[0] })
         : loc(t, "automation.previewRecurring",
-            `Next runs: ${nextDates.join(" · ")} — about ${perMonth} runs per month, each spending tokens like a normal turn.`,
+            `Next runs: ${nextDates.join(" · ")} — about ${perMonth} ${perMonth === 1 ? "run" : "runs"} per month, each spending tokens like a normal turn.`,
             { dates: nextDates.join(" · "), count: perMonth }),
       body: String(args.prompt),
     };
@@ -191,8 +191,8 @@ export const automationCollection: Collection = {
           ? loc(t, "automation.lastRun", `Last run: ${row.lastRunAt.toISOString()}`, { date: row.lastRunAt.toISOString() })
           : loc(t, "automation.neverRan", "Never ran yet"),
         cost?.avg
-          ? loc(t, "automation.avgCost", `Average cost per run: ≈$${Number(cost.avg).toFixed(4)} over ${cost.runs} runs`,
-              { cost: Number(cost.avg).toFixed(4), runs: cost.runs })
+          ? loc(t, "automation.avgCost", `Average cost per run: ≈$${Number(cost.avg).toFixed(4)} over ${cost.runs} ${Number(cost.runs) === 1 ? "run" : "runs"}`,
+              { cost: Number(cost.avg).toFixed(4), runs: Number(cost.runs) })
           : undefined,
         row.consecutiveFailures ? loc(t, "automation.failures", `Consecutive failures: ${row.consecutiveFailures}`, { n: row.consecutiveFailures }) : undefined,
       ].filter(Boolean).join(" · "),

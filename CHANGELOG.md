@@ -6,6 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- Refined English and Ukrainian interface copy for clearer terminology, more natural punctuation, and correct singular and plural forms.
+
 ## [0.8.1] - 2026-07-13
 
 ### Fixed
