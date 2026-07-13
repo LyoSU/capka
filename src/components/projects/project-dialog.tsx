@@ -99,7 +99,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEdit ? t("editTitle") : t("new")}</DialogTitle>
           <DialogDescription>
@@ -107,7 +107,11 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        {/* -mx-4 px-4 lets the scrollbar sit at the modal edge while the fields
+            keep their padding (and their focus rings aren't clipped); min-h-0
+            lets this region shrink below its content so it — not the whole
+            modal — scrolls once a long system prompt outgrows the viewport. */}
+        <div className="-mx-4 min-h-0 space-y-4 overflow-y-auto px-4">
           <div className="space-y-1.5">
             <Label htmlFor="project-name">{t("form.name")}</Label>
             <Input
@@ -125,7 +129,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("form.descriptionPlaceholder")}
-              className="min-h-16"
+              className="max-h-40 min-h-16"
             />
           </div>
 
@@ -136,7 +140,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               placeholder={t("form.systemPromptPlaceholder")}
-              className="min-h-20 font-mono text-xs"
+              className="max-h-[50vh] min-h-24 font-mono text-xs"
             />
           </div>
 
@@ -147,6 +151,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
               value={defaultModel}
               onChange={setDefaultModel}
               placeholder={t("form.useGlobalDefault")}
+              clearable
             />
             <p className="text-xs text-muted-foreground">
               {t("form.defaultModelHint")}

@@ -143,7 +143,11 @@ export default function MemoryPage() {
             <h3 className="text-sm font-medium">{t("projectTitle")}</h3>
             <p className="text-xs text-muted-foreground">{t("projectDesc")}</p>
           </div>
-          <Select value={selectedProject ?? ""} onValueChange={(v) => setSelectedProject(v || null)}>
+          <Select
+            value={selectedProject ?? ""}
+            onValueChange={(v) => setSelectedProject(v || null)}
+            items={projectDocs.map((p) => ({ value: p.id, label: p.name }))}
+          >
             <SelectTrigger className="w-full">
               <SelectValue placeholder={t("selectProject")} />
             </SelectTrigger>

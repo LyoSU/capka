@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/card";
 import { ProjectDialog, type Project } from "@/components/projects/project-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { displayModelName } from "@/lib/providers/registry";
 
 export default function ProjectsPage() {
   const t = useTranslations("projects");
@@ -130,7 +131,7 @@ export default function ProjectsPage() {
                 <CardContent>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     {project.defaultModel && (
-                      <span className="truncate max-w-[140px]">{project.defaultModel}</span>
+                      <span className="truncate max-w-[140px]">{displayModelName(project.defaultModel)}</span>
                     )}
                     {project.systemPrompt && (
                       <span>{t("customPrompt")}</span>
@@ -138,7 +139,7 @@ export default function ProjectsPage() {
                   </div>
                 </CardContent>
               )}
-              <CardFooter className="justify-between">
+              <CardFooter className="mt-auto justify-between">
                 <span className="text-xs text-muted-foreground">
                   {formatDate(project.updatedAt)}
                 </span>

@@ -277,6 +277,7 @@
       "search": "Search models…",
       "placeholder": "Select a model",
       "selectModel": "Select model",
+      "clearSelection": "Use the global default",
       "needKey": "Enter your API key to load models",
       "noneFound": "No models found",
       "noneFoundHint": "To use a model that isn't listed, type its full ID (e.g. openrouter/owl-alpha)",
@@ -560,7 +561,8 @@
     "confirmDeleteDesc": "Chats will be kept but unlinked from this project.",
     "selector": {
       "allChats": "All chats",
-      "fallback": "Project"
+      "fallback": "Project",
+      "manage": "Manage projects"
     },
     "created": "Project created",
     "updated": "Project updated",

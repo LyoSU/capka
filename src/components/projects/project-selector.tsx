@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { FolderOpen, Plus, ChevronDown } from "lucide-react";
+import { FolderOpen, Plus, ChevronDown, FolderKanban } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,6 +63,10 @@ export function ProjectSelector({ value, onChange }: ProjectSelectorProps) {
           <DropdownMenuItem onClick={() => setDialogOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
             {t("new")}
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<Link href="/projects" />}>
+            <FolderKanban className="h-3.5 w-3.5" />
+            {t("selector.manage")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

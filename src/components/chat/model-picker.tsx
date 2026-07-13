@@ -933,6 +933,10 @@ interface ModelPickerProps {
   configId?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Show a reset affordance (field variant) that clears the selection back to
+   *  the empty value — used where an empty value is meaningful, e.g. a project's
+   *  "use the global default model". */
+  clearable?: boolean;
   /** Reports whether `value` resolves to a real, currently-serveable model once
    *  the list has settled. Lets the parent (the chat composer) block sending to
    *  a model whose provider was disconnected or whose entry was removed. While
@@ -957,6 +961,7 @@ export function ModelPicker({
   configId,
   placeholder,
   disabled,
+  clearable,
   onResolved,
 }: ModelPickerProps) {
   const t = useTranslations("chat.model");
@@ -1184,7 +1189,9 @@ export function ModelPicker({
           disabled={disabled}
           aria-haspopup="listbox"
           aria-expanded={open}
-          className="flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className={`flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50 ${
+            clearable && value && !state.loading ? "pr-9" : ""
+          }`}
         >
           <BrandIcon slug={currentModel?.icon} size={15} className="shrink-0 text-muted-foreground" />
           {state.loading && !currentModel ? (
@@ -1199,6 +1206,22 @@ export function ModelPicker({
           ) : (
             <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform ${open ? "rotate-180" : ""}`} />
           )}
+        </button>
+      )}
+
+      {/* Reset-to-empty affordance (field variant). An empty value is meaningful
+          here — it falls back to the global default — so let the user undo a pick
+          without hunting for it in the list. Sits right of the chevron (the
+          trigger reserves pr-9 for it). */}
+      {clearable && variant === "field" && value && !state.loading && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onChange(""); }}
+          aria-label={t("clearSelection")}
+          title={t("clearSelection")}
+          className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
         </button>
       )}
 
