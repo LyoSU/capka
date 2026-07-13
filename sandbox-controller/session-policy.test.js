@@ -28,4 +28,21 @@ describe("pickLruVictim", () => {
   it("treats others.length == maxLive as 'at cap' (evicts)", () => {
     expect(pickLruVictim([live("a", 1)], 1, "new").sessionId).toBe("a");
   });
+
+  it("sacrifices a disposable import (imp-*) session before any chat, even a more-idle one", () => {
+    // At cap of 3; 'a' is the most idle, but imp-x is a one-shot import container
+    // and is evicted first regardless of recency.
+    const sessions = [live("imp-x", 99), live("a", 1), live("b", 2)];
+    expect(pickLruVictim(sessions, 3, "new").sessionId).toBe("imp-x");
+  });
+
+  it("evicts the least-recently-used import when several are live", () => {
+    const sessions = [live("imp-x", 50), live("imp-y", 10), live("a", 1)];
+    expect(pickLruVictim(sessions, 3, "new").sessionId).toBe("imp-y");
+  });
+
+  it("falls back to plain LRU when no import session is live", () => {
+    const sessions = [live("a", 30), live("b", 10), live("c", 20)];
+    expect(pickLruVictim(sessions, 3, "new").sessionId).toBe("b");
+  });
 });

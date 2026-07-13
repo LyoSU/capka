@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { nanoid } from "nanoid";
 import { detectShareLink } from "@/lib/import/detect";
 import type { DetectedShareLink, SharedChatImport } from "@/lib/import/types";
 
@@ -40,8 +41,12 @@ export function useShareImport(opts: { text: string; model: string; onImported: 
   // the "store info from previous render" pattern (React docs) rather than an
   // effect, so it happens before paint with no cascading re-render.
   const lastUrl = useRef(detected?.url);
+  // Idempotency key for the commit, minted per successful preview so a retried
+  // or double-clicked commit reuses the same chat instead of creating two.
+  const commitKey = useRef<string | null>(null);
   if (lastUrl.current !== detected?.url) {
     lastUrl.current = detected?.url;
+    commitKey.current = null;
     setState({ phase: "idle" });
   }
 
@@ -72,6 +77,7 @@ export function useShareImport(opts: { text: string; model: string; onImported: 
       }
       const data = (await res.json()) as SharedChatImport;
       if (lastUrl.current !== url) return;
+      commitKey.current = nanoid();
       setState({ phase: "preview", data });
     } catch {
       if (lastUrl.current === url) setState({ phase: "error", code: "RENDER_FAILED" });
@@ -94,7 +100,7 @@ export function useShareImport(opts: { text: string; model: string; onImported: 
       const res = await fetch("/api/chats/import/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: data.source, title: data.title, messages: data.messages, model }),
+        body: JSON.stringify({ source: data.source, title: data.title, messages: data.messages, model, key: commitKey.current ?? undefined }),
       });
       if (!res.ok) {
         setState({ phase: "error", code: "RENDER_FAILED" });

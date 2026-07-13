@@ -15,6 +15,9 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 - Attached photos are now normalized in the sandbox before the model sees them: EXIF orientation is baked into the pixels (no provider auto-rotates, so sideways phone photos were the top "the model can't read my image" cause), HEIC/HEIF/TIFF/BMP/AVIF are converted to JPEG (providers accept only JPEG/PNG/GIF/WebP — sending these raw returned a provider error), CMYK is converted to sRGB, and oversized images are downscaled by dimension rather than only by byte size. An image whose format can't be delivered (e.g. SVG) is routed to the agent's file tools instead of being wrongly reported as unreadable. The user's original file stays untouched in the workspace.
 - Attached images are placed before the prompt text in the request, matching provider guidance for image understanding.
+- Share-import commit is now rate-limited per user (429) and idempotent (a retried or double-clicked import reuses the created chat instead of duplicating it), and rejects oversized request bodies (413).
+- Share-import parsers now whitelist message roles strictly (an unknown sender is dropped, not treated as the assistant) and guarantee the imported history starts with a user turn; ChatGPT shares without a `current_node` follow one deterministic branch instead of mixing branches.
+- One-shot import sandboxes (`imp-*`) are now evicted before any chat sandbox when a user hits the live-container cap, so a preview render can't stop an active chat's workspace.
 
 ## [0.8.1] - 2026-07-13
 

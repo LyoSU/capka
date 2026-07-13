@@ -62,6 +62,18 @@ describe("parseClaudeSnapshot", () => {
     expect(parseClaudeSnapshot(raw).messages).toHaveLength(0);
   });
 
+  it("skips a message with an unknown sender and flags dropped content", () => {
+    const raw = {
+      chat_messages: [
+        { sender: "human", content: [{ type: "text", text: "агов" }] },
+        { sender: "moderator", content: [{ type: "text", text: "не імпортувати" }] },
+      ],
+    };
+    const r = parseClaudeSnapshot(raw);
+    expect(r.messages).toEqual([{ role: "user", content: "агов" }]);
+    expect(r.droppedRichContent).toBe(true);
+  });
+
   it("survives a garbage payload", () => {
     expect(parseClaudeSnapshot(null).messages).toEqual([]);
     expect(parseClaudeSnapshot({ chat_messages: "nope" }).messages).toEqual([]);
@@ -96,6 +108,28 @@ describe("parseChatGptState", () => {
     // current_node points at n2 → chain is n0,n1,n2; the n2b sibling is not on it.
     const r = parseChatGptState({ current_node: "n2", mapping: branched });
     expect(r.messages.map((m) => m.content)).toEqual(["Привіт", "Вітаю!"]);
+  });
+
+  it("without current_node, descends the last branch deterministically (no sibling mixing)", () => {
+    const branched = {
+      r0: { id: "r0", message: { author: { role: "user" }, content: { content_type: "text", parts: ["корінь"] } }, parent: null, children: ["a1", "b1"] },
+      a1: { id: "a1", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["ПЕРША ГІЛКА"] } }, parent: "r0", children: [] },
+      b1: { id: "b1", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["ОСТАННЯ ГІЛКА"] } }, parent: "r0", children: [] },
+    };
+    // No current_node → descend from root via the last child → only b1's branch.
+    const r = parseChatGptState({ mapping: branched });
+    expect(r.messages).toEqual([
+      { role: "user", content: "корінь" },
+      { role: "assistant", content: "ОСТАННЯ ГІЛКА" },
+    ]);
+  });
+
+  it("returns nothing when the mapping has no root (a cycle)", () => {
+    const cyclic = {
+      x: { id: "x", message: { author: { role: "user" }, content: { content_type: "text", parts: ["a"] } }, parent: "y", children: ["y"] },
+      y: { id: "y", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["b"] } }, parent: "x", children: ["x"] },
+    };
+    expect(parseChatGptState({ mapping: cyclic }).messages).toEqual([]);
   });
 
   it("flags rich content for a tool turn and for non-text content", () => {
@@ -161,7 +195,7 @@ describe("parseGrokResponses", () => {
     expect(parseGrokResponses({ responses: "nope" }).messages).toEqual([]);
   });
 
-  it("drops a whitespace-only or missing message, and defaults an unknown sender to assistant", () => {
+  it("drops a whitespace-only or missing message, and skips an unknown sender (flagging dropped content)", () => {
     const raw = {
       responses: [
         { sender: "human", message: "   " },
@@ -170,7 +204,9 @@ describe("parseGrokResponses", () => {
       ],
     };
     const r = parseGrokResponses(raw);
-    expect(r.messages).toEqual([{ role: "assistant", content: "Я асистент." }]);
+    // "system" is not in the role whitelist → dropped, not coerced to assistant.
+    expect(r.messages).toEqual([]);
+    expect(r.droppedRichContent).toBe(true);
   });
 });
 
@@ -232,10 +268,14 @@ describe("normalizeImport", () => {
 
   it("drops empty messages and strips control characters", () => {
     const r = normalizeImport({ ...base, messages: [
+      { role: "user", content: "питання" },
       { role: "user", content: "  " },
-      { role: "assistant", content: "hello  world\r\nsecond" },
+      { role: "assistant", content: "hello\x00\x07 world\r\nsecond" },
     ] });
-    expect(r.messages).toEqual([{ role: "assistant", content: "hello world\nsecond" }]);
+    expect(r.messages).toEqual([
+      { role: "user", content: "питання" },
+      { role: "assistant", content: "hello world\nsecond" },
+    ]);
   });
 
   it("clips an over-long message and marks the import truncated", () => {
@@ -256,5 +296,37 @@ describe("normalizeImport", () => {
   it("preserves a title but bounds its length", () => {
     expect(normalizeImport({ ...base, title: null, messages: [] }).title).toBeNull();
     expect(normalizeImport({ ...base, title: "x".repeat(500), messages: [] }).title?.length).toBe(200);
+  });
+
+  it("drops leading assistant messages so the history starts with a user turn", () => {
+    const r = normalizeImport({ ...base, messages: [
+      { role: "assistant", content: "привіт наперед" },
+      { role: "user", content: "питання" },
+      { role: "assistant", content: "відповідь" },
+    ] });
+    expect(r.messages).toEqual([
+      { role: "user", content: "питання" },
+      { role: "assistant", content: "відповідь" },
+    ]);
+    expect(r.truncated).toBe(true);
+  });
+
+  it("drops everything (and marks truncated) when there is no user turn at all", () => {
+    const r = normalizeImport({ ...base, messages: [
+      { role: "assistant", content: "лише асистент" },
+    ] });
+    expect(r.messages).toEqual([]);
+    expect(r.truncated).toBe(true);
+  });
+
+  it("re-checks user-first AFTER sanitize: a user turn that empties out can't leave a leading assistant", () => {
+    // The user turn is non-empty in the source but sanitizes to nothing (control
+    // chars only), so it's skipped and the assistant would otherwise lead.
+    const r = normalizeImport({ ...base, messages: [
+      { role: "user", content: "\x07\x00" },
+      { role: "assistant", content: "привіт" },
+    ] });
+    expect(r.messages).toEqual([]);
+    expect(r.truncated).toBe(true);
   });
 });

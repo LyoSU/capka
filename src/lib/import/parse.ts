@@ -49,7 +49,16 @@ export function parseClaudeSnapshot(raw: unknown): SharedChatImport {
   for (const m of asArray(root?.chat_messages)) {
     const msg = asRecord(m);
     if (!msg) continue;
-    const role: ImportedMessage["role"] = msg.sender === "human" ? "user" : "assistant";
+    // Strict role whitelist: only the two known senders map through; anything
+    // else (a future/unknown sender) is dropped rather than silently coerced to
+    // assistant, which could mislabel who said what.
+    let role: ImportedMessage["role"];
+    if (msg.sender === "human") role = "user";
+    else if (msg.sender === "assistant") role = "assistant";
+    else {
+      droppedRichContent = true;
+      continue;
+    }
 
     const textBlocks: string[] = [];
     let sawRich = false;
@@ -107,17 +116,32 @@ export function parseChatGptState(raw: unknown): SharedChatImport {
   // Order the branch leaf → root by following parents, then reverse to root → leaf.
   const chain: string[] = [];
   const seen = new Set<string>();
-  let cursor = asString(root?.current_node);
-  if (!cursor) {
-    // No current_node (older/edge payloads): fall back to mapping insertion order.
-    for (const id of Object.keys(mapping)) chain.push(id);
-  } else {
-    while (cursor && !seen.has(cursor)) {
-      seen.add(cursor);
-      chain.push(cursor);
-      cursor = asString(asRecord(mapping[cursor])?.parent);
+  const cursor = asString(root?.current_node);
+  if (cursor && mapping[cursor]) {
+    let c: string = cursor;
+    while (c && !seen.has(c)) {
+      seen.add(c);
+      chain.push(c);
+      c = asString(asRecord(mapping[c])?.parent);
     }
     chain.reverse();
+  } else {
+    // No usable current_node (older/edge payloads): descend deterministically
+    // from the root through the LAST child of each node (ChatGPT's convention
+    // for the active branch), so we follow one coherent branch instead of mixing
+    // siblings in mapping insertion order. No root → nothing importable.
+    let node: string | undefined = Object.keys(mapping).find((id) => {
+      const parent = asString(asRecord(mapping[id])?.parent);
+      return !parent || !mapping[parent];
+    });
+    while (node && !seen.has(node)) {
+      seen.add(node);
+      chain.push(node);
+      const children = asArray(asRecord(mapping[node])?.children).filter(
+        (c): c is string => typeof c === "string",
+      );
+      node = children.length ? children[children.length - 1] : undefined;
+    }
   }
 
   for (const id of chain) {
@@ -169,7 +193,17 @@ export function parseGrokResponses(raw: unknown): SharedChatImport {
   for (const r of asArray(root?.responses)) {
     const resp = asRecord(r);
     if (!resp) continue;
-    const role: ImportedMessage["role"] = asString(resp.sender).toLowerCase() === "human" ? "user" : "assistant";
+    // `sender` casing is inconsistent within one conversation, so compare
+    // case-insensitively — but still whitelist strictly: an unknown sender is
+    // dropped, not coerced to assistant.
+    const sender = asString(resp.sender).toLowerCase();
+    let role: ImportedMessage["role"];
+    if (sender === "human") role = "user";
+    else if (sender === "assistant") role = "assistant";
+    else {
+      droppedRichContent = true;
+      continue;
+    }
     const content = asString(resp.message).trim();
 
     if (
@@ -235,7 +269,7 @@ export function parseSharedChat(source: ImportSource, raw: unknown): SharedChatI
 // Control characters have no place in imported prose and can hide injected
 // directives from a human reviewing the preview. We keep tab (0x09) and newline
 // (0x0A); everything else in the C0 range plus DEL (0x7F) is stripped.
-const CONTROL_CHARS = /[ --]/g;
+const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
 function sanitize(text: string): string {
   // Normalize CRLF/CR to \n first, then strip the remaining control bytes.
@@ -270,6 +304,19 @@ export function normalizeImport(imp: SharedChatImport): SharedChatImport {
     }
     total += content.length;
     out.push({ role: m.role, content });
+  }
+
+  // The Anthropic Messages API requires the first message to be a user turn.
+  // Enforce this on the FINAL list, not the source: a message can be non-empty
+  // in the source yet sanitize to nothing (control-chars only) and be skipped
+  // above, leaving a now-leading assistant turn that must still be dropped.
+  const firstUser = out.findIndex((m) => m.role === "user");
+  if (firstUser === -1) {
+    if (out.length > 0) truncated = true;
+    out.length = 0;
+  } else if (firstUser > 0) {
+    out.splice(0, firstUser);
+    truncated = true;
   }
 
   const title = imp.title ? sanitize(imp.title).trim().slice(0, 200) || null : null;
