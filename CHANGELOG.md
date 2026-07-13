@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-13
+
 ### Fixed
 - The share-import offer card now shows the Claude/ChatGPT brand mark instead of a generic icon.
 - Share-link import is more robust: concurrent previews (e.g. two tabs) no longer share and wipe one sandbox session, a slow preview response can't overwrite a newer paste, and previews are rate-limited per user.
