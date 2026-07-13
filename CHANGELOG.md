@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-13
+
 ### Fixed
 - The project create/edit dialog no longer overflows the screen with a long system prompt: it caps at the viewport height and scrolls its fields, and the prompt field now grows further before scrolling internally.
 - The project default-model field is now clearable back to "use the global default" (a reset control appears once a model is picked).
