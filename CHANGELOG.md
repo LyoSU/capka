@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-13
+
 ### Added
 - Share-link import now also handles Gemini (`share.gemini.google` / `gemini.google.com/share`) and Grok (`grok.com/share`), alongside Claude and ChatGPT; still experimental and gated behind `CAPKA_SHARE_IMPORT`.
 
