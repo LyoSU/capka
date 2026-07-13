@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chats, projects, users, attachedFolders } from "@/lib/db/schema";
+import { projectNotDeleted } from "@/lib/projects/live";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { providerNativeTools } from "@/lib/providers";
 import { modelTakesImages, supportsImageToolResults } from "@/lib/providers/registry";
@@ -39,13 +40,20 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, memoryDocs, user, chat] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
-      ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
+      ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
     readMemoryDocs(userId, payload.projectId ?? null),
     db.select({ name: users.name, timezone: users.timezone, locale: users.locale, role: users.role })
       .from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]),
     db.select({ createdAt: chats.createdAt }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
   ]);
+
+  // The task was enqueued for a project that has since been deleted (a worker retry
+  // of an old task, or a delete that raced the enqueue). Running now would apply the
+  // gone project's egress and point at its wiped workspace — fail calmly instead.
+  if (payload.projectId && !project) {
+    throw new Error("This project was deleted, so this chat can no longer run here. Start a new chat to continue.");
+  }
 
   // Sandbox tools (execute_bash, read_file, …) + MCP connector tools (sub-project
   // B, namespaced mcp__<server>__<tool>) + the skill tool. Each piece has a stable

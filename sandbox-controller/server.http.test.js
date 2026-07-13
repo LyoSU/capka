@@ -141,6 +141,52 @@ d("controller HTTP API (lifecycle)", () => {
     expect(await store.get("sdel")).toBeNull();
   });
 
+  it("DELETE wipes a disk-only workspace with no session row", async () => {
+    // A workspace can exist on disk with no session row (upload before first
+    // create, or after an invalidation). Teardown must still wipe it.
+    const ws = new LocalFsStore({ dataRoot: DATA_ROOT, uid: UID, gid: GID });
+    await ws.ensure("udisk", "wdisk");
+    await ws.write("udisk", "wdisk", "orphan.txt", Buffer.from("x"));
+    expect(await store.get("wdisk")).toBeNull(); // no row — disk only
+    const q = new URLSearchParams({ userId: "udisk", token: token("udisk", "wdisk") });
+    const del = await fetch(`${base}/sessions/wdisk?${q}`, { method: "DELETE", headers: auth });
+    expect(del.status).toBe(200);
+    expect((await ws.list("udisk", "wdisk", ".")).entries).toEqual([]); // files gone
+  });
+
+  it("archives the whole workspace as a gzip stream (owner-gated)", async () => {
+    const ws = new LocalFsStore({ dataRoot: DATA_ROOT, uid: UID, gid: GID });
+    await ws.ensure("uarc", "warc");
+    await ws.write("uarc", "warc", "report.txt", Buffer.from("data"));
+    const noTok = await fetch(`${base}/sessions/warc/archive`, { headers: { Authorization: `Bearer ${SECRET}` } });
+    expect(noTok.status).toBe(400);
+    const q = new URLSearchParams({ userId: "uarc", token: token("uarc", "warc") });
+    const r = await fetch(`${base}/sessions/warc/archive?${q}`, { headers: { Authorization: `Bearer ${SECRET}` } });
+    expect(r.status).toBe(200);
+    const buf = Buffer.from(await r.arrayBuffer());
+    expect(buf[0]).toBe(0x1f); // gzip magic
+    expect(buf[1]).toBe(0x8b);
+  });
+
+  it("copies one workspace into another under a subdir (idempotent, owner-gated both ends)", async () => {
+    const ws = new LocalFsStore({ dataRoot: DATA_ROOT, uid: UID, gid: GID });
+    await ws.ensure("ucopy", "wsrc");
+    await ws.ensure("ucopy", "wdst");
+    await ws.write("ucopy", "wsrc", "carry.txt", Buffer.from("x"));
+    const q = new URLSearchParams({ userId: "ucopy", token: token("ucopy", "wdst") });
+    const body = JSON.stringify({ srcSessionId: "wsrc", srcToken: token("ucopy", "wsrc"), subdir: "From chat" });
+    const r = await fetch(`${base}/sessions/wdst/copy-from?${q}`, { method: "POST", headers: auth, body });
+    expect(r.status).toBe(200);
+    const inside = (await ws.list("ucopy", "wdst", "From chat")).entries.map((e) => e.name);
+    expect(inside).toContain("carry.txt");
+    // Bad source token → 403.
+    const bad = await fetch(`${base}/sessions/wdst/copy-from?${q}`, {
+      method: "POST", headers: auth,
+      body: JSON.stringify({ srcSessionId: "wsrc", srcToken: "deadbeef", subdir: "From chat" }),
+    });
+    expect(bad.status).toBe(403);
+  });
+
   it("refuses exec with 413 WORKSPACE_FULL once the workspace exceeds its quota (no command runs)", async () => {
     expect((await post("sfull", "ufull")).status).toBe(201);
     // Write straight to the bind mount, the way an in-sandbox process would —

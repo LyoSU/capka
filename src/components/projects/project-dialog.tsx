@@ -27,6 +27,10 @@ export type Project = {
   sandboxNetwork: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  // Aggregates from GET /api/projects (non-archived chats). Optional — not every
+  // caller (e.g. the create/edit dialog) has them.
+  chatCount?: number;
+  lastChatAt?: string | null;
 };
 
 interface ProjectDialogProps {
@@ -88,6 +92,8 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
 
       const saved = await res.json();
       toast.success(isEdit ? t("updated") : t("created"));
+      // Nudge the sidebar's Projects section to refresh (create/rename/settings).
+      window.dispatchEvent(new Event("projects:changed"));
       onSaved?.(saved);
       onOpenChange(false);
     } catch {
@@ -133,44 +139,52 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: ProjectD
             />
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="project-system-prompt">{t("form.systemPrompt")}</Label>
-            <Textarea
-              id="project-system-prompt"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder={t("form.systemPromptPlaceholder")}
-              className="max-h-[50vh] min-h-24 font-mono text-xs"
-            />
-          </div>
+          {/* Instructions, model and internet are advanced settings — kept out of
+              the create form (which is just name + description, so a first-time
+              user isn't confronted with jargon) and shown only when editing an
+              existing project from its hub Settings. */}
+          {isEdit && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="project-system-prompt">{t("form.systemPrompt")}</Label>
+                <Textarea
+                  id="project-system-prompt"
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  placeholder={t("form.systemPromptPlaceholder")}
+                  className="max-h-[50vh] min-h-24 font-mono text-xs"
+                />
+              </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="project-default-model">{t("form.defaultModel")}</Label>
-            <ModelPicker
-              variant="field"
-              value={defaultModel}
-              onChange={setDefaultModel}
-              placeholder={t("form.useGlobalDefault")}
-              clearable
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("form.defaultModelHint")}
-            </p>
-          </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="project-default-model">{t("form.defaultModel")}</Label>
+                <ModelPicker
+                  variant="field"
+                  value={defaultModel}
+                  onChange={setDefaultModel}
+                  placeholder={t("form.useGlobalDefault")}
+                  clearable
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("form.defaultModelHint")}
+                </p>
+              </div>
 
-          <div className="flex items-center justify-between rounded-lg border p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="sandbox-internet">{t("form.internet")}</Label>
-              <p className="text-xs text-muted-foreground">
-                {t("form.internetHint")}
-              </p>
-            </div>
-            <Switch
-              id="sandbox-internet"
-              checked={internetAccess}
-              onCheckedChange={setInternetAccess}
-            />
-          </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="sandbox-internet">{t("form.internet")}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("form.internetHint")}
+                  </p>
+                </div>
+                <Switch
+                  id="sandbox-internet"
+                  checked={internetAccess}
+                  onCheckedChange={setInternetAccess}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         <DialogFooter>

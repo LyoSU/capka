@@ -6,7 +6,17 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Each project now has a hub at `/projects/[id]` (Overview, Files, Chats), reachable from a new "Projects" section in the sidebar.
+- Chats can be moved between projects (or out of one) from the chat context menu.
+- New endpoint `GET /api/sandbox/files/archive` streams a complete workspace archive; "download all" and the delete-project dialog use it.
+
+### Changed
+- The sidebar's project dropdown is replaced by a "Projects" section; the chat list is no longer filtered by a selected project.
+- Creating a project now asks only for a name and description; instructions, model, and internet access moved to the project's Settings.
+
 ### Fixed
+- Deleting a project now durably tears down its sandbox, workspace, and attached folders and pauses its automations; a failed teardown is retried by the worker.
 - A new chat opening on an off-catalog default model (a stealth/preview id typed as a connection's default) no longer false-flags it as unavailable and blocks the composer; the model is now trusted as long as its connection still exists.
 - The "model unavailable" notice no longer tells users to pick from a switcher "above" when the picker sits below it.
 

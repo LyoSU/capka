@@ -6,6 +6,7 @@ import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, chats, users } from "@/lib/db/schema";
 import { resolveInitialModel } from "@/lib/providers/default-model";
+import { projectNotDeleted } from "@/lib/projects/live";
 import { isShareImportEnabled } from "@/lib/import/flag";
 import { ChatPanel } from "@/components/chat/chat-panel";
 
@@ -39,7 +40,7 @@ export default async function ChatIdPage({
     ? await db
         .select()
         .from(projects)
-        .where(and(eq(projects.id, projectId), eq(projects.userId, session.user.id)))
+        .where(and(eq(projects.id, projectId), eq(projects.userId, session.user.id), projectNotDeleted))
         .limit(1)
         .then((r) => r[0])
     : undefined;
@@ -73,6 +74,7 @@ export default async function ChatIdPage({
       defaultModel={defaultModel}
       projectId={projectId ?? undefined}
       isAdmin={userRow?.role === "admin"}
+      projectName={project?.name}
       readOnly={existingChat?.source === "telegram"}
       initialHasHistory={!!existingChat?.activeLeafId}
       recentChats={recentChats}

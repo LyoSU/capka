@@ -17,9 +17,11 @@ import {
   Users,
   Copy,
   Check,
+  FolderInput,
 } from "lucide-react";
 import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
+import { MoveToProjectDialog } from "@/components/projects/move-to-project-dialog";
 import {
   Dialog,
   DialogContent,
@@ -37,6 +39,7 @@ type ChatItem = {
   title: string | null;
   pinned: boolean | null;
   archived: boolean | null;
+  projectId?: string | null;
   visibility?: string | null;
   shareToken?: string | null;
 };
@@ -66,6 +69,7 @@ export function ChatContextMenu({
   const menuOpen = open ?? internalOpen;
   const setMenuOpen = onOpenChange ?? setInternalOpen;
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
@@ -182,6 +186,12 @@ export function ChatContextMenu({
       onSelect: () => patchChat({ archived: !chat.archived }),
     },
     {
+      key: "move",
+      icon: <FolderInput />,
+      label: t("menu.moveToProject"),
+      onSelect: () => setMoveOpen(true),
+    },
+    {
       key: "export",
       icon: <Download />,
       label: t("menu.export"),
@@ -233,6 +243,13 @@ export function ChatContextMenu({
           <MoreVertical className="size-4" />
         </button>
       </ActionMenu>
+
+      <MoveToProjectDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        chat={{ id: chat.id, title: chat.title, projectId: chat.projectId ?? null }}
+        onMoved={onUpdate}
+      />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>

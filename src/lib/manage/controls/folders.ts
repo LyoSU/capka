@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { attachedFolders, projects } from "@/lib/db/schema";
 import { getSetting, getSandboxNetworkDefault } from "@/lib/settings";
 import { validateMount, createSession, type SandboxMount } from "@/lib/sandbox/client";
+import { projectNotDeleted } from "@/lib/projects/live";
 import { sanitizeFolderName } from "@/lib/folder-bridge/filter";
 import { loc, manageT } from "../i18n";
 import type { Collection, ManageContext } from "../types";
@@ -77,7 +78,9 @@ export async function sessionMounts(sessionKey: string): Promise<SandboxMount[]>
  *  silently downgrade an egress-enabled sandbox to isolated (mirrors runner.ts). */
 export async function resolveNetwork(projectId: string | null): Promise<"none" | "bridge"> {
   if (projectId) {
-    const [p] = await db.select({ net: projects.sandboxNetwork }).from(projects).where(eq(projects.id, projectId)).limit(1);
+    // A tombstoned project must not apply its egress mode — fall through to the org
+    // default (its workspace is being wiped anyway).
+    const [p] = await db.select({ net: projects.sandboxNetwork }).from(projects).where(and(eq(projects.id, projectId), projectNotDeleted)).limit(1);
     if (p?.net === "bridge") return "bridge";
   }
   return getSandboxNetworkDefault();

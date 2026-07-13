@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
@@ -54,11 +55,15 @@ import { ChatNav } from "@/components/chat/chat-nav";
 import { ClawMark } from "@/components/brand/claw-mark";
 import { pickGreeting, type GreetingLocale } from "@/lib/chat/greeting";
 import { haptic } from "@/lib/haptics";
+import { chatTarget } from "@/lib/workspace-target";
 
 interface ChatPanelProps {
   chatId: string;
   defaultModel: string;
   projectId?: string;
+  /** The owning project's name (when the chat belongs to one) — drives the calm
+   *  read-only breadcrumb linking back to the project hub. */
+  projectName?: string;
   isAdmin?: boolean;
   /** Telegram-sourced chats are read-only on the web — no composer, no edits;
    *  the user replies from Telegram or forks the chat to continue here. */
@@ -77,7 +82,7 @@ interface ChatPanelProps {
   shareImportEnabled?: boolean;
 }
 
-export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, initialHasHistory, recentChats, userName, shareImportEnabled }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, projectId, projectName, isAdmin, readOnly, initialHasHistory, recentChats, userName, shareImportEnabled }: ChatPanelProps) {
   const t = useTranslations("chat");
   const locale = useLocale();
   const [model, setModel] = useState(defaultModel);
@@ -169,8 +174,10 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
 
   // PC folders (File System Access): pushed before a message, pulled after the
   // turn. A no-op when the chat has no connected folders, so it costs nothing on
-  // the common path.
-  const folderSync = useFolderSync({ chatId, ensureChat });
+  // the common path. The target is memoized so the sync effects don't re-run on
+  // every render.
+  const folderTarget = useMemo(() => chatTarget(chatId), [chatId]);
+  const folderSync = useFolderSync({ target: folderTarget, ensureChat });
 
   // Fork the conversation from a message into a fresh chat, then jump to it.
   // useCallback keeps this identity stable across composer keystrokes so it
@@ -882,6 +889,16 @@ export function ChatPanel({ chatId, defaultModel, projectId, isAdmin, readOnly, 
               <div className="pointer-events-auto inline-flex rounded-full border bg-card px-1 shadow-sm">
                 <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
               </div>
+              {projectId && projectName && (
+                <Link
+                  href={`/projects/${projectId}`}
+                  className="pointer-events-auto inline-flex max-w-[40vw] items-center gap-1 truncate rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+                  title={projectName}
+                >
+                  <FolderOpen className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{projectName}</span>
+                </Link>
+              )}
             </div>
             <Button
               variant="ghost"

@@ -148,7 +148,8 @@ function PickFolderButton({ chatId, action, onPicked }: { chatId?: string; actio
     setErr("");
     try {
       const { pickAndCreate } = await import("@/lib/folder-bridge/bridge");
-      const folder = await pickAndCreate(chatId);
+      const { chatTarget } = await import("@/lib/workspace-target");
+      const folder = await pickAndCreate(chatTarget(chatId));
       if (folder) onPicked?.(folder.name);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not attach the folder.");

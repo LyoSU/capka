@@ -1,8 +1,6 @@
 import { requireRole, apiHandler } from "@/lib/auth";
 import { uploadFile } from "@/lib/sandbox/client";
-import { requireOwned } from "@/lib/db/ownership";
-import { workspaceSessionKey } from "@/lib/sandbox/workspace";
-import { chats } from "@/lib/db/schema";
+import { resolveWorkspaceTarget } from "@/lib/sandbox/target";
 import { take } from "@/lib/rate-limit";
 
 export const POST = apiHandler(async (req: Request) => {
@@ -10,14 +8,14 @@ export const POST = apiHandler(async (req: Request) => {
   const rl = take(`sandbox-upload:${userId}`);
   if (!rl.ok) return Response.json({ error: "Too many uploads — please slow down." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   const formData = await req.formData();
-  const chatId = formData.get("chatId") as string;
+  const chatId = formData.get("chatId") as string | null;
+  const projectId = formData.get("projectId") as string | null;
   const path = (formData.get("path") as string) || ".";
   const file = formData.get("file") as File;
 
-  if (!chatId || !file) return Response.json({ error: "Missing chatId or file" }, { status: 400 });
+  if (!file) return Response.json({ error: "Missing file" }, { status: 400 });
 
-  const chat = await requireOwned(chats, chatId, userId, "Chat");
-  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
-  const result = await uploadFile(key, path, file, userId);
+  const { sessionKey } = await resolveWorkspaceTarget({ userId, chatId, projectId });
+  const result = await uploadFile(sessionKey, path, file, userId);
   return Response.json(result);
 });

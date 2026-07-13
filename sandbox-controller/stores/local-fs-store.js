@@ -1,8 +1,8 @@
 import { createReadStream, constants as FS } from "node:fs";
-import { readdir, stat, lstat, mkdir, chown, rm, open } from "node:fs/promises";
+import { readdir, stat, lstat, mkdir, chown, rm, open, cp } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { sanitize, safeRealPath, assertNoSymlinkEscape } from "../path-safety.js";
 
@@ -209,6 +209,55 @@ export class LocalFsStore {
 
   async remove(userId, sessionId) {
     await rm(this.#wsPath(userId, sessionId), { recursive: true, force: true });
+  }
+
+  /** Stream the WHOLE workspace as a gzipped tar, read straight from the host
+   *  directory — no container, and no dependence on a client-visible listing (the
+   *  file-browser's `download-all` archives only paths the client enumerated, so a
+   *  truncated listing silently drops files; this is the honest "download before
+   *  delete" backup). Packs the directory contents at the archive root (`.`).
+   *  Returns the spawned `tar` process; the caller pipes `.stdout` and watches for
+   *  a non-zero exit. Ensures the dir first so an empty workspace still tars. */
+  async archive(userId, sessionId) {
+    const dir = this.#wsPath(userId, sessionId);
+    await mkdir(dir, { recursive: true });
+    return spawn("tar", ["-czf", "-", "-C", dir, "."], { stdio: ["ignore", "pipe", "pipe"] });
+  }
+
+  /** Copy the entire contents of one workspace into another (same user) under a
+   *  named subdir — the chat→project file carry-over on a move. Idempotent by
+   *  destination: any prior copy at `subdir` is removed first, so a retry after a
+   *  failed move leaves ONE folder, not a pile. Quota-gates the TARGET (measured
+   *  after clearing the old copy, so the retry doesn't double-count) and throws a
+   *  WORKSPACE_FULL-tagged error if the incoming bytes wouldn't fit. `safeRealPath`
+   *  keeps `subdir` inside the destination workspace. */
+  async copyInto(userId, srcSessionId, destSessionId, subdir, { limitBytes } = {}) {
+    const src = this.#wsPath(userId, srcSessionId);
+    const destBase = this.#wsPath(userId, destSessionId);
+    await mkdir(destBase, { recursive: true });
+    const destDir = await safeRealPath(destBase, subdir);
+    await assertNoSymlinkEscape(destBase, destDir);
+    await rm(destDir, { recursive: true, force: true }); // idempotent replace
+
+    if (limitBytes != null) {
+      const [destBytes, srcBytes] = await Promise.all([
+        this.size(userId, destSessionId), // subdir already removed above
+        this.size(userId, srcSessionId),
+      ]);
+      if (destBytes + srcBytes > limitBytes) {
+        throw Object.assign(new Error("Workspace is full"), { code: "WORKSPACE_FULL" });
+      }
+    }
+
+    await mkdir(destDir, { recursive: true });
+    // fs.cp copies the whole tree (dotfiles included) with a CONSTANT argv, so a
+    // workspace with thousands of files can't blow the exec arg limit (E2BIG) the
+    // way a per-entry `cp` argv would. A missing/empty source is a no-op.
+    await cp(src, destDir, { recursive: true, force: true }).catch((e) => {
+      if (e?.code !== "ENOENT") throw e;
+    });
+    await execFileP("chown", ["-R", `${this.uid}:${this.gid}`, destDir]).catch(() => {});
+    return { subdir };
   }
 
   /** Delete a workspace path — a file, or a directory and its whole subtree.

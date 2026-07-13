@@ -16,6 +16,12 @@ import {
   type DirHandle, type HashedManifest,
 } from "./local-fs";
 import { ignoredPath, oversized, exceedsCeiling, sanitizeFolderName, FolderTooLargeError } from "./filter";
+import { type WorkspaceTarget, targetQuery } from "@/lib/workspace-target";
+
+/** The chatId / projectId body fields that address a target on the folders API. */
+function targetBody(target: WorkspaceTarget): Record<string, string> {
+  return target.kind === "chat" ? { chatId: target.chatId } : { projectId: target.projectId };
+}
 
 export type PcFolder = { id: string; name: string };
 
@@ -77,10 +83,10 @@ const lastLocal = new Map<string, HashedManifest>();
 // flags `truncated` if even this isn't enough, which aborts the sync (see below).
 const SYNC_LIST_LIMIT = 15000;
 
-async function serverTree(chatId: string, name: string): Promise<{ files: Manifest; dirs: string[]; excluded: string[] }> {
+async function serverTree(target: WorkspaceTarget, name: string): Promise<{ files: Manifest; dirs: string[]; excluded: string[] }> {
   // hash=1 makes each file carry a content SHA-256 so plan.ts compares by content,
   // not by size — a same-length edit on the server must still count as a change.
-  const res = await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(name)}&depth=20&limit=${SYNC_LIST_LIMIT}&hash=1`);
+  const res = await fetch(`/api/sandbox/files?${targetQuery(target)}&path=${encodeURIComponent(name)}&depth=20&limit=${SYNC_LIST_LIMIT}&hash=1`);
   // A non-OK response must NOT look like "the server is empty" — that would drive a
   // destructive local delete of every synced file on a transient 403/500. Abort the
   // sync instead (base is left untouched, so the next sync retries cleanly).
@@ -122,11 +128,11 @@ async function runPool<T>(items: T[], limit: number, fn: (item: T) => Promise<vo
 // chunk, rate-limited per request) — NOT the interactive per-file upload route,
 // which caps at ~10/min and would 429 on any real folder.
 const UPLOAD_CHUNK = 100;
-export async function uploadBatch(chatId: string, name: string, paths: string[], read: (rel: string) => Promise<Blob>, onProgress?: (p: SyncProgress) => void): Promise<void> {
+export async function uploadBatch(target: WorkspaceTarget, name: string, paths: string[], read: (rel: string) => Promise<Blob>, onProgress?: (p: SyncProgress) => void): Promise<void> {
   for (let i = 0; i < paths.length; i += UPLOAD_CHUNK) {
     const chunk = paths.slice(i, i + UPLOAD_CHUNK);
     const form = new FormData();
-    form.append("chatId", chatId);
+    for (const [k, v] of Object.entries(targetBody(target))) form.append(k, v);
     form.append("name", name);
     for (const rel of chunk) form.append("files", new File([await read(rel)], rel));
     const res = await fetch("/api/folders/upload", { method: "POST", body: form });
@@ -135,14 +141,14 @@ export async function uploadBatch(chatId: string, name: string, paths: string[],
   }
 }
 
-async function downloadFromWorkspace(chatId: string, name: string, rel: string): Promise<Blob> {
-  const res = await fetch(`/api/sandbox/files/download?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(`${name}/${rel}`)}`);
+async function downloadFromWorkspace(target: WorkspaceTarget, name: string, rel: string): Promise<Blob> {
+  const res = await fetch(`/api/sandbox/files/download?${targetQuery(target)}&path=${encodeURIComponent(`${name}/${rel}`)}`);
   if (!res.ok) throw new Error("download failed");
   return res.blob();
 }
 
-async function deleteFromWorkspace(chatId: string, name: string, rel: string): Promise<void> {
-  const res = await fetch(`/api/sandbox/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(`${name}/${rel}`)}`, { method: "DELETE" });
+async function deleteFromWorkspace(target: WorkspaceTarget, name: string, rel: string): Promise<void> {
+  const res = await fetch(`/api/sandbox/files?${targetQuery(target)}&path=${encodeURIComponent(`${name}/${rel}`)}`, { method: "DELETE" });
   // A swallowed delete failure would let base advance as if the file were gone,
   // so the next sync re-creates it (or reports a false "synced"). Abort instead;
   // the controller delete is idempotent, so a missing path still returns OK.
@@ -194,7 +200,7 @@ async function loadState(folderId: string): Promise<{ files: Manifest; dirs: str
  *  `ensureChat` (a fresh chat has no DB row yet) runs AFTER the picker so the
  *  showDirectoryPicker call stays inside the user gesture, but BEFORE the POST so
  *  the row the folder references exists. */
-export async function pickAndCreate(chatId: string, opts?: { name?: string; ensureChat?: () => Promise<void> }): Promise<PcFolder | null> {
+export async function pickAndCreate(target: WorkspaceTarget, opts?: { name?: string; ensureChat?: () => Promise<void> }): Promise<PcFolder | null> {
   let handle: DirHandle;
   try {
     handle = await window.showDirectoryPicker!({ mode: "readwrite" });
@@ -218,23 +224,23 @@ export async function pickAndCreate(chatId: string, opts?: { name?: string; ensu
   // Folders attach to the SANDBOX (shared by a project's chats), so the same
   // folder may already be attached from a sibling chat. Re-picking it should
   // re-link the handle locally + sync, not fail — so adopt an existing row.
-  const listed = await fetch(`/api/folders?chatId=${encodeURIComponent(chatId)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const listed = await fetch(`/api/folders?${targetQuery(target)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const match = (listed?.folders as PcFolder[] | undefined)?.find?.((f) => (f as { kind?: string }).kind !== "host" && f.name === name);
   if (match) {
     await saveHandle(match.id, handle);
-    await sync(chatId, match);
+    await sync(target, match);
     return match;
   }
 
   const res = await fetch("/api/folders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chatId, name }),
+    body: JSON.stringify({ ...targetBody(target), name }),
   });
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || "Could not attach the folder.");
   const { folder } = (await res.json()) as { folder: PcFolder };
   await saveHandle(folder.id, handle);
-  await sync(chatId, folder);
+  await sync(target, folder);
   return folder;
 }
 
@@ -276,7 +282,7 @@ export async function forget(folderId: string): Promise<void> {
 /** Full bidirectional reconcile between the local folder and /workspace/<name>.
  *  push (before a message) and pull (after the turn) are the same sync at
  *  different times — a sync is idempotent, so running it both ends is safe. */
-export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: SyncProgress) => void): Promise<{ synced: number; conflicts: number; skipped: number }> {
+export async function sync(target: WorkspaceTarget, folder: PcFolder, onProgress?: (p: SyncProgress) => void): Promise<{ synced: number; conflicts: number; skipped: number }> {
   const handle = await loadHandle(folder.id);
   if (!handle) throw new Error("Folder not connected.");
 
@@ -304,7 +310,7 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
   onProgress?.({ phase: "scanning", done: 0, total: 0 });
   const { hashed: local, skipped, excluded: localExcluded } = await localHashed(handle, folder.id, onProgress);
   const localDirs = await walkLocalDirs(handle);
-  const { files: remote, dirs: remoteDirs, excluded: remoteExcluded } = await serverTree(chatId, folder.name);
+  const { files: remote, dirs: remoteDirs, excluded: remoteExcluded } = await serverTree(target, folder.name);
   // Paths skipped (oversized) on either side: their absence from a manifest is a
   // "didn't look", not a delete. The planner leaves them untouched entirely.
   const excluded = new Set([...localExcluded, ...remoteExcluded]);
@@ -314,19 +320,19 @@ export async function sync(chatId: string, folder: PcFolder, onProgress?: (p: Sy
   const localWins = plan.conflicts.filter((c) => c.winner === "local").map((c) => c.path);
   const remoteWins = plan.conflicts.filter((c) => c.winner === "remote").map((c) => c.path);
 
-  await uploadBatch(chatId, folder.name, [...plan.upload, ...localWins], (rel) => readLocalFile(handle, rel), onProgress);
+  await uploadBatch(target, folder.name, [...plan.upload, ...localWins], (rel) => readLocalFile(handle, rel), onProgress);
   const downloads = [...plan.download, ...remoteWins];
   let di = 0;
   await runPool(downloads, 6, async (path) => {
-    await writeLocalFile(handle, path, await downloadFromWorkspace(chatId, folder.name, path));
+    await writeLocalFile(handle, path, await downloadFromWorkspace(target, folder.name, path));
     onProgress?.({ phase: "downloading", done: ++di, total: downloads.length });
   });
-  await runPool(plan.deleteRemote, 6, (path) => deleteFromWorkspace(chatId, folder.name, path));
+  await runPool(plan.deleteRemote, 6, (path) => deleteFromWorkspace(target, folder.name, path));
   await runPool(plan.deleteLocal, 6, (path) => deleteLocalFile(handle, path));
   // Directory sync (3-way, so a folder deleted on the PC is removed on the server
   // instead of being blindly re-mirrored back down). Delete husks first, then
   // create genuinely-new server dirs — mirrors empty folders the agent made.
-  for (const d of dirPlan.deleteRemote) await deleteFromWorkspace(chatId, folder.name, d);
+  for (const d of dirPlan.deleteRemote) await deleteFromWorkspace(target, folder.name, d);
   for (const d of dirPlan.deleteLocal) await deleteLocalDir(handle, d);
   for (const d of dirPlan.createLocal) await ensureLocalDir(handle, d).catch(() => {});
 

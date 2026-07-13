@@ -313,9 +313,21 @@ export const projects = pgTable("projects", {
   systemPrompt: text("system_prompt"),
   defaultModel: text("default_model"),
   sandboxNetwork: text("sandbox_network").default("none"), // "none" | "bridge"
+  // Tombstone for durable deletion. A non-null value hides the project from every
+  // query (all reads filter `deleted_at is null`) the instant the delete transaction
+  // commits, while the physical row + its cascades survive until post-commit teardown
+  // (kill sandbox, wipe workspace, detach folders) succeeds. A worker tick retries
+  // teardown for any row left tombstoned by a failed attempt, so there is never a
+  // state where the project is visible without its files or its files outlive the row.
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [index("idx_projects_user_id").on(table.userId)]);
+}, (table) => [
+  index("idx_projects_user_id").on(table.userId),
+  // Partial index over just the tombstoned rows — the worker's teardown-retry scan
+  // (deleted_at is not null) stays cheap without indexing the all-null common case.
+  index("idx_projects_deleted_at").on(table.deletedAt).where(sql`deleted_at is not null`),
+]);
 
 // ── Automations (scheduled agent runs) ───────────────────────
 

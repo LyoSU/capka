@@ -22,6 +22,7 @@ import { pickLruVictim } from "./session-policy.js";
 import { notReadyGuard } from "./readiness.js";
 import { withRetry } from "./retry.js";
 import { createMcpBridge } from "./mcp-bridge.js";
+import { streamArchive } from "./archive-stream.js";
 import { log } from "./log.js";
 
 // --- Talk to the Docker API via DOCKER_HOST (socket-proxy) when set. ---
@@ -530,6 +531,58 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // GET /sessions/:id/archive — stream the WHOLE workspace as a gzipped tar,
+    // owner-gated exactly like the file ops. Reads from the host directory root, so
+    // it is complete regardless of any listing limit (unlike download-all). Powers
+    // "download all files" and "download before deleting the project".
+    const archiveMatch = path.match(/^\/sessions\/([^/]+)\/archive$/);
+    if (method === "GET" && archiveMatch) {
+      const r = await resolveOwner(archiveMatch[1], url.searchParams.get("userId"), url.searchParams.get("token"));
+      if (r.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (r.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
+      store.touch(r.sessionId);
+      const child = await workspace.archive(r.userId, r.sessionId);
+      res.writeHead(200, {
+        "Content-Type": "application/gzip",
+        "Content-Disposition": `attachment; filename="workspace.tar.gz"`,
+      });
+      // streamArchive owns res.end()/destroy: a non-zero tar exit aborts the socket
+      // instead of ending cleanly, so a truncated archive never reads as complete.
+      streamArchive(child, res, log);
+      return;
+    }
+
+    // POST /sessions/:id/copy-from — copy another workspace of the SAME user into
+    // this one under a subdir (the chat→project file carry-over on a move). Both
+    // source and destination are owner-gated by HMAC; idempotent by destination;
+    // quota-gated on the target.
+    const copyMatch = path.match(/^\/sessions\/([^/]+)\/copy-from$/);
+    if (method === "POST" && copyMatch) {
+      const destR = await resolveOwner(copyMatch[1], url.searchParams.get("userId"), url.searchParams.get("token"));
+      if (destR.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (destR.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
+      const { srcSessionId, srcToken, subdir } = await parseBody(req);
+      if (!srcSessionId || !subdir) return jsonRes(res, 400, { error: "Missing srcSessionId or subdir" });
+      // The source must be owned by the SAME user — verify its own HMAC token so a
+      // caller can't copy out of a workspace they don't own.
+      const srcR = await resolveOwner(sanitize(srcSessionId), destR.userId, srcToken);
+      if (srcR.forbidden || srcR.missing) return jsonRes(res, 403, { error: "Invalid or missing source token" });
+      store.touch(destR.sessionId);
+      try {
+        const out = await workspace.copyInto(destR.userId, srcR.sessionId, destR.sessionId, subdir, {
+          limitBytes: MAX_WORKSPACE_MB * 1024 * 1024,
+        });
+        quota.forget(destR.sessionId); // size grew — next exec must re-measure
+        log("workspace.copy", { from: srcR.sessionId, to: destR.sessionId });
+        return jsonRes(res, 200, { ok: true, subdir: out.subdir });
+      } catch (e) {
+        if (e.code === "WORKSPACE_FULL") {
+          return jsonRes(res, 413, { error: `Workspace is full (max ${MAX_WORKSPACE_MB}MB).`, code: "WORKSPACE_FULL" });
+        }
+        return jsonRes(res, 400, { error: e.message });
+      }
+    }
+
     // POST /sessions/:id/upload (multipart)
     const upMatch = path.match(/^\/sessions\/([^/]+)\/upload$/);
     if (method === "POST" && upMatch) {
@@ -573,18 +626,23 @@ const server = createServer(async (req, res) => {
       if (r.missing) return jsonRes(res, 400, { error: "Missing userId" });
       if (r.forbidden) return jsonRes(res, 403, { error: "Invalid or missing workspace token" });
       const s = await store.get(r.sessionId);
+      // Explicit teardown: kill the container (if any) AND wipe the workspace. The
+      // workspace wipe must run even with NO session row — a workspace can exist on
+      // disk with no row (files uploaded before the first session was created, or
+      // after an invalidation). Leaving `remove` under `if (s)` orphaned those dirs
+      // forever, since the orphan GC only sweeps dirs with no row AFTER a grace
+      // window and the project delete flow needs the files gone now.
       if (s) {
-        // Explicit teardown: kill the container (if any) AND wipe the workspace.
         if (s.handle != null) {
           mcpBridge.stopAll(s.handle);
           await backend.destroy(s.handle).catch(() => {});
           liveCount = Math.max(0, liveCount - 1);
         }
         await store.delete(s.sessionId);
-        await workspace.remove(s.userId, s.sessionId).catch(() => {});
-        quota.forget(s.sessionId); // wipe → a recycled id must not read a stale size
-        log("session.destroy", { sessionId: s.sessionId });
       }
+      await workspace.remove(r.userId, r.sessionId).catch(() => {});
+      quota.forget(r.sessionId); // wipe → a recycled id must not read a stale size
+      log("session.destroy", { sessionId: r.sessionId });
       return jsonRes(res, 200, { ok: true });
     }
 

@@ -3,21 +3,18 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
-import { Plus, Pencil, Trash2, FolderKanban } from "lucide-react";
-import { toast } from "sonner";
+import { Plus, Pencil, Trash2, FolderKanban, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
   Card,
   CardHeader,
   CardTitle,
   CardDescription,
-  CardContent,
   CardFooter,
 } from "@/components/ui/card";
 import { ProjectDialog, type Project } from "@/components/projects/project-dialog";
+import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { displayModelName } from "@/lib/providers/registry";
 
 export default function ProjectsPage() {
   const t = useTranslations("projects");
@@ -49,32 +46,9 @@ export default function ProjectsPage() {
     setDialogOpen(true);
   }
 
-  async function handleDelete(project: Project) {
-    try {
-      const res = await fetch(`/api/projects/${project.id}`, { method: "DELETE" });
-      if (!res.ok) {
-        toast.error(t("deleteError"));
-        return;
-      }
-      toast.success(t("deleted"));
-      setDeleteTarget(null);
-      fetchProjects();
-    } catch {
-      toast.error(t("deleteError"));
-    }
-  }
-
-  function handleSaved() {
-    fetchProjects();
-  }
-
-  function formatDate(d: string | null) {
-    if (!d) return "";
-    return new Date(d).toLocaleDateString(locale, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
+  function formatDate(d: string | null | undefined) {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" });
   }
 
   return (
@@ -114,10 +88,7 @@ export default function ProjectsPage() {
             <Card key={project.id} size="sm">
               <CardHeader>
                 <CardTitle>
-                  <Link
-                    href={`/chat?projectId=${project.id}`}
-                    className="hover:underline underline-offset-2"
-                  >
+                  <Link href={`/projects/${project.id}`} className="hover:underline underline-offset-2">
                     {project.name}
                   </Link>
                 </CardTitle>
@@ -127,37 +98,19 @@ export default function ProjectsPage() {
                   </CardDescription>
                 )}
               </CardHeader>
-              {(project.defaultModel || project.systemPrompt) && (
-                <CardContent>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    {project.defaultModel && (
-                      <span className="truncate max-w-[140px]">{displayModelName(project.defaultModel)}</span>
-                    )}
-                    {project.systemPrompt && (
-                      <span>{t("customPrompt")}</span>
-                    )}
-                  </div>
-                </CardContent>
-              )}
               <CardFooter className="mt-auto justify-between">
-                <span className="text-xs text-muted-foreground">
-                  {formatDate(project.updatedAt)}
+                <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    <MessageSquare className="h-3 w-3" />
+                    {t("chatCount", { n: project.chatCount ?? 0 })}
+                  </span>
+                  <span>{t("lastChat", { date: formatDate(project.lastChatAt) })}</span>
                 </span>
                 <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => handleEdit(project)}
-                    aria-label={tc("edit")}
-                  >
+                  <Button variant="ghost" size="icon-xs" onClick={() => handleEdit(project)} aria-label={tc("edit")}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => setDeleteTarget(project)}
-                    aria-label={tc("delete")}
-                  >
+                  <Button variant="ghost" size="icon-xs" onClick={() => setDeleteTarget(project)} aria-label={tc("delete")}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -171,16 +124,17 @@ export default function ProjectsPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         project={editProject}
-        onSaved={handleSaved}
+        onSaved={fetchProjects}
       />
 
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
-        title={t("confirmDeleteTitle", { name: deleteTarget?.name ?? "" })}
-        description={t("confirmDeleteDesc")}
-      />
+      {deleteTarget && (
+        <DeleteProjectDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+          project={{ id: deleteTarget.id, name: deleteTarget.name }}
+          onDeleted={() => { setDeleteTarget(null); fetchProjects(); }}
+        />
+      )}
     </div>
   );
 }

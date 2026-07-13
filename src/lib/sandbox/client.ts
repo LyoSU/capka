@@ -217,6 +217,38 @@ export async function deleteFile(sessionId: string, filePath: string, userId?: s
   return request(`/sessions/${id}/files?${params}`, "DELETE");
 }
 
+/** Stream the whole workspace as a gzipped tar from the controller (owner-gated).
+ *  Complete regardless of any listing limit — the honest "download everything"
+ *  backup, used by the hub's "download all" and the delete-project flow. */
+export async function archiveWorkspace(sessionId: string, userId: string): Promise<Response> {
+  const id = sanitizeId(sessionId);
+  const params = new URLSearchParams({ userId: sanitizeId(userId), token: workspaceToken(userId, sessionId) });
+  const res = await sandboxFetch(`${CONTROLLER_URL}/sessions/${id}/archive?${params}`, {
+    headers: authHeaders(),
+    // A big workspace takes a while to tar+gzip; give it room but still bound it.
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!res.ok) {
+    log.error("sandbox archive failed", { status: res.status });
+    const status = res.status >= 500 ? 502 : res.status;
+    throw new SandboxError("Archive failed", "archive", res.status >= 500, status);
+  }
+  return res;
+}
+
+/** Copy another workspace of the same user into this one under `subdir` (the
+ *  chat→project carry-over on a move). Idempotent by destination; quota-gated on
+ *  the target (a WORKSPACE_FULL SandboxError, status 413, surfaces if it won't fit). */
+export async function copyWorkspace(destSessionId: string, srcSessionId: string, subdir: string, userId: string): Promise<void> {
+  const dest = sanitizeId(destSessionId);
+  const params = new URLSearchParams({ userId: sanitizeId(userId), token: workspaceToken(userId, destSessionId) });
+  await request(`/sessions/${dest}/copy-from?${params}`, "POST", {
+    srcSessionId: sanitizeId(srcSessionId),
+    srcToken: workspaceToken(userId, srcSessionId),
+    subdir,
+  });
+}
+
 export async function uploadFile(sessionId: string, path: string, file: File, userId?: string): Promise<{ ok: boolean; path: string; name: string }> {
   const id = sanitizeId(sessionId);
   const form = new FormData();

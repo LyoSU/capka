@@ -2,6 +2,7 @@ import { and, eq, or, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { mcpServers, projects } from "@/lib/db/schema";
+import { projectNotDeleted } from "@/lib/projects/live";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
@@ -222,7 +223,7 @@ export async function getAccessibleServer(userId: string, serverId: string) {
   if (s.scope === "user" && s.userId === userId) return s;
   if (s.scope === "project" && s.projectId) {
     const p = await db.select({ id: projects.id }).from(projects)
-      .where(and(eq(projects.id, s.projectId), eq(projects.userId, userId))).limit(1);
+      .where(and(eq(projects.id, s.projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1);
     if (p[0]) return s;
   }
   return null;
@@ -249,6 +250,6 @@ export async function getServerMeta(id: string): Promise<{ scope: McpScope; name
  *  projectId from the request body, so it must verify the target before attaching a
  *  connector (with secret headers/env) to it. */
 export async function projectExists(projectId: string): Promise<boolean> {
-  const row = (await db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).limit(1))[0];
+  const row = (await db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), projectNotDeleted)).limit(1))[0];
   return !!row;
 }

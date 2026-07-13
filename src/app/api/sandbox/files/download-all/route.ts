@@ -1,9 +1,7 @@
 import { requireSession, apiHandler } from "@/lib/auth";
 import { createSession, execCommand, downloadFile } from "@/lib/sandbox/client";
-import { requireOwned } from "@/lib/db/ownership";
-import { workspaceSessionKey } from "@/lib/sandbox/workspace";
+import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
 import { sessionMounts, resolveNetwork } from "@/lib/manage/controls/folders";
-import { chats } from "@/lib/db/schema";
 
 // Only allow safe characters in file paths (matches client-side WORKSPACE_PATH_RE)
 const SAFE_PATH_RE = /^[\w/.А-Яа-яІіЇїЄєҐґ_\- ()]+$/;
@@ -11,19 +9,16 @@ const SAFE_PATH_RE = /^[\w/.А-Яа-яІіЇїЄєҐґ_\- ()]+$/;
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
   const { searchParams } = new URL(req.url);
-  const chatId = searchParams.get("chatId");
   const paths = searchParams.getAll("paths");
 
-  if (!chatId || paths.length === 0) {
-    return Response.json({ error: "Missing chatId or paths" }, { status: 400 });
+  if (paths.length === 0) {
+    return Response.json({ error: "Missing paths" }, { status: 400 });
   }
   if (paths.some((p) => !SAFE_PATH_RE.test(p) || p.includes(".."))) {
     return Response.json({ error: "Invalid path" }, { status: 400 });
   }
 
-  const chat = await requireOwned(chats, chatId, userId, "Chat");
-  const projectId = (chat.projectId as string | null) ?? null;
-  const key = workspaceSessionKey({ id: chatId, projectId });
+  const { sessionKey: key, projectId } = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
   // Archiving shells out to zip/tar, so a live container is required here. Pass
   // the session's real mounts + network so an existing container with host folders
   // is REUSED — omitting them reads as mount drift and would destroy (and reset the

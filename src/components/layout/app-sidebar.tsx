@@ -8,6 +8,7 @@ import {
   Plus,
   Settings,
   FolderKanban,
+  FolderOpen,
   Archive,
   Send,
   LogOut,
@@ -50,7 +51,7 @@ import {
 import { ClawMark } from "@/components/brand/claw-mark";
 import { useTheme } from "@/components/providers";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
-import { ProjectSelector } from "@/components/projects/project-selector";
+import { ProjectsNav } from "@/components/projects/projects-nav";
 import { ChatSearch } from "@/components/chat/chat-search";
 import { ChatContextMenu } from "@/components/chat/chat-context-menu";
 import { cn } from "@/lib/utils";
@@ -61,6 +62,9 @@ type ChatItem = {
   id: string;
   title: string | null;
   projectId: string | null;
+  // The owning project's name (from GET /api/chats LEFT JOIN) — drives the small
+  // project badge on the row. Null for project-less chats.
+  projectName?: string | null;
   pinned: boolean | null;
   archived: boolean | null;
   updatedAt: string | null;
@@ -222,7 +226,19 @@ function ChatRow({
             running={chat.running}
             labels={statusLabels}
           />
-          <ChatTitle title={chat.title} fallback={fallback} />
+          {/* Single line: the badge sits inline at the right edge so project rows
+              stay the same height as plain ones (a second line read as a nested
+              sub-item). The badge is capped so a long project name can't starve
+              the title, which keeps flex-1 priority. */}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <ChatTitle title={chat.title} fallback={fallback} />
+            {chat.projectName && (
+              <span className="flex max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-muted-foreground/70">
+                <FolderOpen className="h-3 w-3 shrink-0" />
+                <span className="truncate">{chat.projectName}</span>
+              </span>
+            )}
+          </span>
         </SidebarMenuButton>
       </ChatContextMenu>
     </SidebarMenuItem>
@@ -256,7 +272,6 @@ export function AppSidebar() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   // Telegram chats can pile up; show the most recent and tuck the rest behind a
@@ -272,10 +287,9 @@ export function AppSidebar() {
 
   const baseParams = useCallback(() => {
     const params = new URLSearchParams();
-    if (selectedProject) params.set("projectId", selectedProject);
     if (debouncedSearch) params.set("search", debouncedSearch);
     return params;
-  }, [selectedProject, debouncedSearch]);
+  }, [debouncedSearch]);
 
   // Chats whose mark-read POST is still in flight. A refresh that races the POST
   // would report them unread again and flash the dot the instant you navigate
@@ -481,7 +495,6 @@ export function AppSidebar() {
     const onCreated = (e: Event) => {
       const d = (e as CustomEvent<{ id: string; title: string; projectId: string | null }>).detail;
       if (!d?.id) return;
-      if (selectedProject && d.projectId !== selectedProject) return;
       if (debouncedSearch) return;
       setChats((prev) => {
         if (prev.some((c) => c.id === d.id)) return prev;
@@ -502,7 +515,7 @@ export function AppSidebar() {
     };
     window.addEventListener("chat:created", onCreated);
     return () => window.removeEventListener("chat:created", onCreated);
-  }, [selectedProject, debouncedSearch]);
+  }, [debouncedSearch]);
 
   // Enter animation bookkeeping: any chat id that wasn't in the previous render
   // is "new" and animates in once. The FIRST loaded batch is the baseline — it's
@@ -543,9 +556,9 @@ export function AppSidebar() {
   const groups = groupByDate(regularChats);
   const statusLabels = { unread: t("unreadReply"), working: t("working") };
 
-  const newChatHref = selectedProject
-    ? `/chat?projectId=${selectedProject}`
-    : "/chat";
+  // A new chat from the sidebar is always project-less — a chat joins a project
+  // only via its hub's "New chat" or the "Move to project" action.
+  const newChatHref = "/chat";
 
   const user = session?.user;
   const displayName = user?.name || user?.email || t("account");
@@ -586,12 +599,6 @@ export function AppSidebar() {
        <div className="contents group-data-[collapsible=icon]:hidden">
         <SidebarGroup>
           <SidebarGroupContent>
-            <div className="px-2 pb-1">
-              <ProjectSelector
-                value={selectedProject}
-                onChange={setSelectedProject}
-              />
-            </div>
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton render={<Link href={newChatHref} />}>
@@ -602,6 +609,8 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <ProjectsNav />
 
         <ChatSearch value={search} onChange={setSearch} />
 

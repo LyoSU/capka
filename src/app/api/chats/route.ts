@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages, tasks, projects } from "@/lib/db/schema";
-import { requireOwned } from "@/lib/db/ownership";
+import { projectNotDeleted, requireLiveProject } from "@/lib/projects/live";
 
 const createChatSchema = z.object({
   id: z.string().optional(),
@@ -79,6 +79,11 @@ export const GET = apiHandler(async (req: Request) => {
       pinned: chats.pinned,
       archived: chats.archived,
       projectId: chats.projectId,
+      // The owning project's name (LEFT JOIN — null for project-less chats), so the
+      // sidebar can badge a chat with its project without a second projects fetch.
+      // A dedicated join (not a client-side map of the top-N projects) is required:
+      // an old chat's project may be well outside the sidebar's recent list.
+      projectName: projects.name,
       source: chats.source,
       visibility: chats.visibility,
       shareToken: chats.shareToken,
@@ -117,6 +122,9 @@ export const GET = apiHandler(async (req: Request) => {
       cursorTs: tsExpr,
     })
     .from(chats)
+    // Tombstoned projects are excluded from the join, so a chat mid-deletion of its
+    // project shows no (stale) badge — it reads as project-less until teardown resets it.
+    .leftJoin(projects, and(eq(chats.projectId, projects.id), projectNotDeleted))
     .where(and(...conditions))
     .orderBy(desc(chats.pinned), desc(chats.updatedAt), desc(chats.id))
     .limit(PAGE_SIZE);
@@ -146,10 +154,10 @@ export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
   const body = createChatSchema.parse(await req.json());
 
-  // A project id must belong to the caller — otherwise a user could attach their
-  // chat to someone else's project and inherit its sandbox workspace / system
-  // prompt / egress mode. /api/chat validates this; this route must match it.
-  if (body.projectId) await requireOwned(projects, body.projectId, userId, "Project");
+  // A project id must belong to the caller AND still be live — otherwise a user
+  // could attach their chat to someone else's (or a tombstoned) project and inherit
+  // its sandbox workspace / system prompt / egress mode. /api/chat matches this.
+  if (body.projectId) await requireLiveProject(body.projectId, userId);
 
   const id = body.id || nanoid();
   await db.insert(chats).values({

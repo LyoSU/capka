@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PcFolder, SyncProgress } from "@/lib/folder-bridge/bridge";
 import type { Manifest } from "@/lib/folder-bridge/plan";
+import { type WorkspaceTarget, targetQuery } from "@/lib/workspace-target";
 
 export type FolderSyncPhase = "idle" | "syncing" | "error";
 export type ConnectResult = { ok: boolean; error?: string; tooLarge?: { count: number; bytes: number } };
@@ -15,9 +16,13 @@ export type ConnectResult = { ok: boolean; error?: string; tooLarge?: { count: n
  * sets "error" but never throws into the send path.
  *
  * `ensureChat` creates the chat's DB row if this is a brand-new chat — a folder
- * row references it, so it must exist before the first attach.
+ * row references it, so it must exist before the first attach. For a project
+ * target the row always exists, so `ensureChat` is a no-op there.
+ *
+ * `target` must be referentially stable (memoize it in the caller) — the effects
+ * key off it.
  */
-export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureChat: () => Promise<void> }) {
+export function useFolderSync({ target, ensureChat }: { target: WorkspaceTarget; ensureChat: () => Promise<void> }) {
   const [folders, setFolders] = useState<PcFolder[]>([]);
   const [needReconnect, setNeedReconnect] = useState<string[]>([]);
   const [phase, setPhase] = useState<FolderSyncPhase>("idle");
@@ -46,7 +51,7 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   needReconnectRef.current = needReconnect;
 
   const refresh = useCallback(async () => {
-    const res = await fetch(`/api/folders?chatId=${encodeURIComponent(chatId)}`).catch(() => null);
+    const res = await fetch(`/api/folders?${targetQuery(target)}`).catch(() => null);
     if (!res?.ok) return;
     const { folders: rows } = (await res.json()) as { folders: { id: string; kind: string; name: string }[] };
     const pc = rows.filter((r) => r.kind === "pc").map((r) => ({ id: r.id, name: r.name }));
@@ -58,7 +63,7 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
       if (state !== "ok") lapsed.push(f.id);
     }
     setNeedReconnect(lapsed);
-  }, [chatId]);
+  }, [target]);
 
   useEffect(() => {
     let alive = true;
@@ -90,7 +95,7 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
         let totalConflicts = 0;
         let totalSkipped = 0;
         for (const f of live) {
-          const r = await sync(chatId, f, setProgress);
+          const r = await sync(target, f, setProgress);
           totalConflicts += r.conflicts;
           totalSkipped += r.skipped;
         }
@@ -113,7 +118,7 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
     });
     chain.current = run;
     return run;
-  }, [chatId]);
+  }, [target]);
 
   // Connect a live folder (Chromium): pick → create row → first sync. ensureChat
   // runs inside the bridge, after the picker opens (keeps the user gesture) but
@@ -121,7 +126,7 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   const connect = useCallback(async (): Promise<ConnectResult> => {
     try {
       const { pickAndCreate } = await import("@/lib/folder-bridge/bridge");
-      const folder = await pickAndCreate(chatId, { ensureChat });
+      const folder = await pickAndCreate(target, { ensureChat });
       if (folder) { setLastSyncedAt(Date.now()); await refresh(); }
       return { ok: true };
     } catch (e) {
@@ -132,14 +137,14 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
       }
       return { ok: false, error: e instanceof Error ? e.message : "Could not attach the folder." };
     }
-  }, [chatId, ensureChat, refresh]);
+  }, [target, ensureChat, refresh]);
 
   // One-shot import (non-Chromium fallback): bulk-upload a picked directory.
   const importFallback = useCallback(async (): Promise<{ name: string; count: number } | null> => {
     await ensureChat();
     const { importFolderFallback } = await import("@/lib/folder-bridge/fallback");
-    return importFolderFallback(chatId);
-  }, [chatId, ensureChat]);
+    return importFolderFallback(target);
+  }, [target, ensureChat]);
 
   const reconnectOne = useCallback(async (id: string) => {
     const { requestReconnect } = await import("@/lib/folder-bridge/bridge");
@@ -157,7 +162,7 @@ export function useFolderSync({ chatId, ensureChat }: { chatId: string; ensureCh
   }, [refresh]);
 
   return {
-    chatId, folders, needReconnect, phase, progress, skipped, lastSyncedAt, conflicts, supported, canAttach, synced,
+    target, folders, needReconnect, phase, progress, skipped, lastSyncedAt, conflicts, supported, canAttach, synced,
     pushAll: syncAll, pullAll: syncAll, connect, importFallback, reconnect: reconnectOne, remove, refresh,
   };
 }

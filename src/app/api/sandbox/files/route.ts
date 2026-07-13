@@ -1,13 +1,10 @@
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { listFiles, deleteFile } from "@/lib/sandbox/client";
-import { requireOwned } from "@/lib/db/ownership";
-import { workspaceSessionKey } from "@/lib/sandbox/workspace";
-import { chats } from "@/lib/db/schema";
+import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
 
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
   const { searchParams } = new URL(req.url);
-  const chatId = searchParams.get("chatId");
   const path = searchParams.get("path") || ".";
   // Depth of the listing (default 1 = a single level, the file browser's view).
   // The folder-sync bridge asks for a deep tree so nested files under a synced
@@ -20,28 +17,23 @@ export const GET = apiHandler(async (req: Request) => {
   const limitRaw = parseInt(searchParams.get("limit") || "0", 10);
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
 
-  if (!chatId) return Response.json({ error: "Missing chatId" }, { status: 400 });
-
-  // Browse the chat's project folder (shared) or its own — read from host fs,
-  // no running container required.
-  const chat = await requireOwned(chats, chatId, userId, "Chat");
-  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
-  const data = await listFiles(key, path, userId, depth, limit);
+  // Browse a chat's or a project's shared workspace (exactly one target), resolved
+  // + ownership-checked server-side — read from the host fs, no running container.
+  const { sessionKey } = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
+  const data = await listFiles(sessionKey, path, userId, depth, limit);
   return Response.json(data);
 });
 
-// Remove one file from a chat's workspace — used when the user detaches a staged
-// attachment from the composer (eager upload already put it in the sandbox).
+// Remove one file from a workspace — used when the user detaches a staged
+// attachment from the composer (eager upload already put it in the sandbox), or
+// deletes a file from the hub's file browser.
 export const DELETE = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
   const { searchParams } = new URL(req.url);
-  const chatId = searchParams.get("chatId");
   const path = searchParams.get("path");
+  if (!path) return Response.json({ error: "Missing path" }, { status: 400 });
 
-  if (!chatId || !path) return Response.json({ error: "Missing chatId or path" }, { status: 400 });
-
-  const chat = await requireOwned(chats, chatId, userId, "Chat");
-  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
-  const data = await deleteFile(key, path, userId);
+  const { sessionKey } = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
+  const data = await deleteFile(sessionKey, path, userId);
   return Response.json(data);
 });

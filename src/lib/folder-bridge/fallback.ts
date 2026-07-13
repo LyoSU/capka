@@ -9,6 +9,7 @@
 
 import { ignoredPath, oversized, exceedsCeiling, sanitizeFolderName, FolderTooLargeError } from "./filter";
 import { uploadBatch } from "./bridge";
+import type { WorkspaceTarget } from "@/lib/workspace-target";
 
 /** Open the OS directory picker via a hidden `<input webkitdirectory>` and resolve
  *  the chosen files (each carries `webkitRelativePath`). Resolves [] on cancel. */
@@ -41,7 +42,7 @@ function pickDirectory(): Promise<File[]> {
   });
 }
 
-export async function importFolderFallback(chatId: string): Promise<{ name: string; count: number } | null> {
+export async function importFolderFallback(target: WorkspaceTarget): Promise<{ name: string; count: number } | null> {
   const picked = await pickDirectory();
   if (picked.length === 0) return null;
 
@@ -67,6 +68,6 @@ export async function importFolderFallback(chatId: string): Promise<{ name: stri
 
   // Reuse the live-sync batch upload (same endpoint, chunking, and rate-limit
   // handling) so the two paths can't drift.
-  await uploadBatch(chatId, name, [...byRel.keys()], async (rel) => byRel.get(rel)!);
+  await uploadBatch(target, name, [...byRel.keys()], async (rel) => byRel.get(rel)!);
   return { name, count: byRel.size };
 }

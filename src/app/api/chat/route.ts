@@ -4,6 +4,7 @@ import { requireSession, requireActive, requireRole, apiHandler } from "@/lib/au
 import { db } from "@/lib/db";
 import { chats, messages, projects } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
+import { projectNotDeleted } from "@/lib/projects/live";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { BudgetExceededError, ForbiddenError } from "@/lib/errors";
@@ -44,7 +45,9 @@ export const POST = apiHandler(async (req: Request) => {
       ? db.select({ id: chats.id, userId: chats.userId, title: chats.title, model: chats.model, source: chats.source, activeLeafId: chats.activeLeafId }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
       : undefined,
     projectId
-      ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1).then((r) => r[0])
+      // A tombstoned project resolves to undefined → the chat/turn falls back to
+      // project-less instead of enqueuing against a workspace being wiped.
+      ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
   ]);
 

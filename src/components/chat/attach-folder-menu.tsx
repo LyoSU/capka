@@ -5,6 +5,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { FileUp, FolderPlus, FolderUp, Folder, RefreshCw, Download, Loader2, X } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
+import { targetQuery } from "@/lib/workspace-target";
 import { FOLDER_MAX_FILES, FOLDER_MAX_TOTAL_MB } from "@/lib/folder-bridge/filter";
 import { formatSize } from "@/lib/constants";
 
@@ -115,7 +116,7 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
               <div className="px-2 pt-1 text-xs text-muted-foreground">
                 {t("imported", { n: imported.count, name: imported.name })}{" "}
                 <a
-                  href={`/api/sandbox/files/download-all?chatId=${encodeURIComponent(folders.chatId)}&paths=${encodeURIComponent(imported.name)}`}
+                  href={`/api/sandbox/files/download-all?${targetQuery(folders.target)}&paths=${encodeURIComponent(imported.name)}`}
                   className="inline-flex items-center gap-1 text-foreground hover:underline"
                 >
                   <Download className="h-3 w-3" />

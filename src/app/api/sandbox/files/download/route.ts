@@ -1,9 +1,7 @@
 import { lookup } from "mime-types";
 import { requireSession, apiHandler } from "@/lib/auth";
 import { downloadFile } from "@/lib/sandbox/client";
-import { requireOwned } from "@/lib/db/ownership";
-import { workspaceSessionKey } from "@/lib/sandbox/workspace";
-import { chats } from "@/lib/db/schema";
+import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
 
 // The controller serves every file as application/octet-stream. For inline
 // previews that's fine for raster images (the browser sniffs them from magic
@@ -22,17 +20,15 @@ function inlineContentType(filename: string): string | null {
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireSession();
   const { searchParams } = new URL(req.url);
-  const chatId = searchParams.get("chatId");
   const filePath = searchParams.get("path");
   // Quick Look fetches the same bytes but renders them in-page. `inline` flips
   // the disposition so the browser displays instead of saving.
   const inline = searchParams.get("inline") === "1";
 
-  if (!chatId || !filePath) return Response.json({ error: "Missing chatId or path" }, { status: 400 });
+  if (!filePath) return Response.json({ error: "Missing path" }, { status: 400 });
 
-  const chat = await requireOwned(chats, chatId, userId, "Chat");
-  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
-  const controllerRes = await downloadFile(key, filePath, userId);
+  const { sessionKey } = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
+  const controllerRes = await downloadFile(sessionKey, filePath, userId);
 
   // Proxy the binary stream from controller to client
   const filename = filePath.split("/").pop() || "file";

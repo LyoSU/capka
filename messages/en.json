@@ -245,7 +245,8 @@
       "deleteTitle": "Delete chat",
       "deleteDescription": "This will permanently delete “{title}” and all its messages.",
       "options": "Chat actions",
-      "share": "Share"
+      "share": "Share",
+      "moveToProject": "Move to project"
     },
     "share": {
       "title": "Share chat",
@@ -554,14 +555,7 @@
     "new": "New project",
     "create": "Create project",
     "empty": "No projects yet. Create one to organize your chats.",
-    "customPrompt": "Custom instructions",
-    "deleted": "Project deleted",
-    "deleteError": "Could not delete project. Please try again.",
-    "confirmDeleteTitle": "Delete “{name}”?",
-    "confirmDeleteDesc": "Chats will be kept but unlinked from this project.",
     "selector": {
-      "allChats": "All chats",
-      "fallback": "Project",
       "manage": "Manage projects"
     },
     "created": "Project created",
@@ -584,6 +578,69 @@
       "defaultModelHint": "Overrides the global default for chats in this project.",
       "internet": "Internet access",
       "internetHint": "Let the assistant download files and reach the internet while working on this project."
+    },
+    "chatCount": "{n, plural, one {# chat} other {# chats}}",
+    "lastChat": "Last chat: {date}",
+    "hub": {
+      "tabsLabel": "Project sections",
+      "tabs": {
+        "overview": "Overview",
+        "files": "Files",
+        "chats": "Chats"
+      },
+      "newChat": "New chat",
+      "settings": "Settings",
+      "recentChats": "Recent chats",
+      "allChats": "All chats",
+      "untitledChat": "Untitled",
+      "noChats": "This project has no chats yet.",
+      "emptyExplainer": "Every chat in this project works with the same files, memory and instructions.",
+      "workspace": "Workspace",
+      "openFiles": "Open files",
+      "fileCount": "{n, plural, one {# file} other {# files}}",
+      "folderCount": "{n, plural, one {# connected folder} other {# connected folders}}",
+      "context": "Context",
+      "hasInstructions": "Has instructions",
+      "noInstructions": "No instructions",
+      "defaultModel": "Default model",
+      "internetOn": "Internet on",
+      "internetOff": "Internet off",
+      "memoryLabel": "What the assistant remembered",
+      "memoryPlaceholder": "This is where what the assistant remembers about this project builds up.",
+      "memorySaved": "Saved",
+      "memoryError": "Could not save",
+      "dangerTitle": "Delete project",
+      "dangerHint": "Workspace files will be deleted. Chats will be kept.",
+      "delete": "Delete project"
+    },
+    "delete": {
+      "title": "Delete “{name}”?",
+      "intro": "This can't be undone. Here's what happens:",
+      "memory": "Project memory will be deleted.",
+      "connectors": "{n, plural, one {# connector} other {# connectors}} will be deleted.",
+      "skills": "{n, plural, one {# skill} other {# skills}} will be deleted.",
+      "chats": "{n, plural, one {# chat will stay} other {# chats will stay}} without a project.",
+      "automations": "{n, plural, one {# automation} other {# automations}} will be paused.",
+      "files": "Workspace files will be deleted.",
+      "downloadFirst": "Download the files first",
+      "confirm": "Delete",
+      "deleted": "Project deleted",
+      "error": "Could not delete project. Please try again.",
+      "blockedTask": "A chat in this project is still working. Wait for the reply to finish.",
+      "blockedSync": "A folder in this project is still syncing. Try again in a moment."
+    },
+    "move": {
+      "title": "Move to project",
+      "subtitle": "Choose where to move this conversation.",
+      "removeFromProject": "Remove from project",
+      "noProjects": "No projects yet.",
+      "toNone": "The conversation will get a fresh, empty workspace.",
+      "fromNone": "This chat's files will be copied into “{name}”'s workspace.",
+      "betweenProjects": "The conversation will move to “{to}” and work with its files and context. “{from}”'s shared files stay in “{from}”.",
+      "blockedTask": "This chat is still working. Wait for the reply to finish.",
+      "error": "Could not move the chat.",
+      "moved": "Chat moved",
+      "moveButton": "Move"
     }
   },
   "settings": {

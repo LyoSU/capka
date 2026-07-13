@@ -1,8 +1,6 @@
 import { apiHandler, requireActive } from "@/lib/auth";
 import { uploadFile } from "@/lib/sandbox/client";
-import { requireOwned } from "@/lib/db/ownership";
-import { workspaceSessionKey } from "@/lib/sandbox/workspace";
-import { chats } from "@/lib/db/schema";
+import { resolveWorkspaceTarget } from "@/lib/sandbox/target";
 import { take } from "@/lib/rate-limit";
 import { pcFolderLevel, canAttachPc } from "@/lib/manage/controls/folders";
 import { ignoredPath, oversized } from "@/lib/folder-bridge/filter";
@@ -24,12 +22,12 @@ export const POST = apiHandler(async (req: Request) => {
 
   const form = await req.formData();
   const chatId = form.get("chatId") as string | null;
+  const projectId = form.get("projectId") as string | null;
   const name = form.get("name") as string | null;
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
-  if (!chatId || !name || files.length === 0) return Response.json({ error: "Missing chatId, name, or files" }, { status: 400 });
+  if (!name || files.length === 0) return Response.json({ error: "Missing name or files" }, { status: 400 });
 
-  const chat = await requireOwned(chats, chatId, userId, "Chat");
-  const key = workspaceSessionKey({ id: chatId, projectId: (chat.projectId as string | null) ?? null });
+  const { sessionKey: key } = await resolveWorkspaceTarget({ userId, chatId, projectId });
 
   // The client-side skip-list and size cap are conveniences, not a boundary — a
   // hand-crafted request could otherwise smuggle a dependency tree or an oversized

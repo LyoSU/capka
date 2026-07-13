@@ -137,6 +137,13 @@ export async function startWorker(): Promise<void> {
   void schedulerTick().catch(() => {});
   const schedulerTimer = setInterval(() => void schedulerTick().catch(() => {}), 30_000);
 
+  // Finish any project delete whose post-commit teardown failed (controller blip,
+  // crash between commit and teardown): a tombstoned row is retried until its
+  // sandbox/workspace/folders are gone and the row is physically removed.
+  const { retryPendingProjectTeardowns } = await import("@/lib/projects/teardown");
+  void retryPendingProjectTeardowns().catch(() => {});
+  const teardownTimer = setInterval(() => void retryPendingProjectTeardowns().catch(() => {}), 60_000);
+
   // Graceful shutdown: a deploy/restart sends SIGTERM. WITHOUT this, every
   // in-flight task was killed mid-run and surfaced to the user as an interruption
   // (the single biggest source of "worker lost" failures during the beta, one
@@ -155,6 +162,7 @@ export async function startWorker(): Promise<void> {
     clearInterval(reconcileTimer);
     clearInterval(catalogTimer);
     clearInterval(schedulerTimer);
+    clearInterval(teardownTimer);
     log.info("worker draining on signal — no new tasks; waiting for in-flight", { signal, workerId: s.workerId, inFlight: s.inFlight });
     // Also wait on fire-and-forget aux work (title/memory/compaction) so a deploy
     // doesn't kill an in-flight LLM call mid-write and lose the spend/checkpoint.

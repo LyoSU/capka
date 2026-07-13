@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSession, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memoryDocs, projects } from "@/lib/db/schema";
-import { requireOwned } from "@/lib/db/ownership";
+import { projectNotDeleted, requireLiveProject } from "@/lib/projects/live";
 import { setMemoryDoc } from "@/lib/memory/store";
 
 // All of a user's memory docs in one shot: the user-global doc plus every
@@ -19,7 +19,7 @@ export const GET = apiHandler(async () => {
     .select({ id: projects.id, name: projects.name, content: memoryDocs.content })
     .from(projects)
     .leftJoin(memoryDocs, and(eq(memoryDocs.projectId, projects.id), eq(memoryDocs.userId, userId)))
-    .where(eq(projects.userId, userId))
+    .where(and(eq(projects.userId, userId), projectNotDeleted))
     .orderBy(projects.name);
 
   return Response.json({
@@ -36,8 +36,8 @@ const putSchema = z.object({
 export const PUT = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
   const { content, projectId } = putSchema.parse(await req.json());
-  // Guard cross-user writes to a project's doc.
-  if (projectId) await requireOwned(projects, projectId, userId, "Project");
+  // Guard cross-user writes to a project's doc — and refuse a tombstoned project.
+  if (projectId) await requireLiveProject(projectId, userId);
   await setMemoryDoc(userId, projectId ?? null, content);
   return Response.json({ ok: true });
 });

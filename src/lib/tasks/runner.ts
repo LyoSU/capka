@@ -1,9 +1,9 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import type { ModelMessage, UserModelMessage, TextPart } from "ai";
-import { eq } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { chats, messages, users } from "@/lib/db/schema";
+import { chats, messages, users, tasks } from "@/lib/db/schema";
 import { publishTaskEvent } from "./events";
 import { stripNul } from "./sanitize";
 import { makeDeliverySink, type TaskOrigin, type StreamStatus } from "./delivery";
@@ -177,6 +177,25 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // One logger bound to this run's identity, so every line it emits carries
   // taskId/chatId/userId without each call site repeating them.
   const tlog = log.child({ taskId, chatId, userId });
+
+  // Telemetry for the execution-queue decision: note when another turn is already
+  // live against the SAME workspace. Only project chats share a sandbox, so this is
+  // relevant ONLY when the turn has a projectId (a standalone chat's sessionKey is
+  // its unique id — no concurrency possible). v1 accepts the rare concurrent-exec
+  // conflict on purpose; this surfaces how often it really happens. Best-effort.
+  if (payload.projectId) {
+    const pid = payload.projectId;
+    void (async () => {
+      try {
+        const [row] = await db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(tasks)
+          .innerJoin(chats, eq(tasks.chatId, chats.id))
+          .where(and(ne(tasks.id, taskId), eq(tasks.status, "running"), eq(chats.projectId, pid)));
+        if (row && row.n > 0) tlog.info("workspace.concurrent_task", { sessionKey, others: row.n });
+      } catch { /* telemetry only */ }
+    })();
+  }
 
   const ac = new AbortController();
   let deadlineHit = false;
