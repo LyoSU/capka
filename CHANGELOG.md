@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-07-16
+
 ### Changed
 
 - CI now runs the database-backed runner, durable queue, realtime, billing, Telegram provisioning, automation, and folder-lease integration suites against PostgreSQL 17 instead of silently skipping the product's core persistence paths.
