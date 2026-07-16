@@ -2,6 +2,7 @@ import { apiHandler, requireSession, requireWriter } from "@/lib/auth";
 import { getInstallOwner, listInstalledPlugins, setPluginEnabled, setPluginMutedForUser } from "@/lib/marketplace/service";
 import { uninstallPlugin, upgradePlugin } from "@/lib/marketplace/install";
 import { audit } from "@/lib/governance/audit";
+import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /** The install if this user may manage it, else null. Admins manage org-wide
  *  (system) installs; a member manages only their own personal (user-scope) one.
@@ -50,6 +51,12 @@ export const PATCH = apiHandler(async (req: Request) => {
 export const POST = apiHandler(async (req: Request) => {
   // requireWriter: re-pulling third-party code is install-class, like POST /install.
   const { userId, role } = await requireWriter();
+  const limited = guardRateLimit(
+    `extension-mutation:${userId}`,
+    RATE_LIMITS.extensionMutation,
+    "Too many extension requests — please wait before trying again.",
+  );
+  if (limited) return limited;
   const { installId, toSha } = await req.json();
   if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
   // toSha binds the upgrade to the commit the user reviewed (see previewUpgrade).

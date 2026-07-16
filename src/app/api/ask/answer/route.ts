@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { apiHandler, requireActive } from "@/lib/auth";
 import { answerAskForUser, answerElicitationForUser } from "@/lib/ask/authed";
+import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   messageId: z.string().min(1),
@@ -15,6 +16,12 @@ const bodySchema = z.object({
  *  elicitation). Session-authorized — the model can't forge it. */
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
+  const limited = guardRateLimit(
+    `ask-answer:${userId}`,
+    RATE_LIMITS.askAnswer,
+    "Too many answers — please wait before trying again.",
+  );
+  if (limited) return limited;
   const d = bodySchema.parse(await req.json());
   const ok = d.kind === "elicitation"
     ? await answerElicitationForUser(userId, d)

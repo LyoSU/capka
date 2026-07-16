@@ -5,6 +5,25 @@
  */
 type Bucket = { tokens: number; updatedAt: number };
 
+export type RateLimitPolicy = Readonly<{
+  capacity: number;
+  refillPerSec: number;
+}>;
+
+/** Named policies keep related endpoints on the same budget and prevent route
+ *  authors from scattering unexplained token-bucket constants through handlers. */
+export const RATE_LIMITS = {
+  // Archive generation/streaming is CPU + disk + bandwidth heavy. Permit one
+  // retry burst, then replenish one slot every 30 seconds.
+  workspaceArchive: { capacity: 2, refillPerSec: 1 / 30 },
+  // An accepted answer resumes a suspended (potentially paid) model turn.
+  askAnswer: { capacity: 10, refillPerSec: 1 / 6 },
+  // Installs/upgrades fetch and parse third-party repositories.
+  extensionMutation: { capacity: 3, refillPerSec: 1 / 20 },
+  // Fork/clone copy a conversation branch and can amplify large histories.
+  chatCopy: { capacity: 5, refillPerSec: 1 / 12 },
+} satisfies Record<string, RateLimitPolicy>;
+
 const buckets = new Map<string, Bucket>();
 
 const DEFAULT_CAPACITY = 10; // burst size
@@ -39,4 +58,18 @@ export function take(
   }
   buckets.set(key, b);
   return { ok: false, retryAfterSec: Math.ceil((1 - b.tokens) / refillPerSec) };
+}
+
+/** HTTP adapter for route handlers. Returns null when the request may proceed. */
+export function guardRateLimit(
+  key: string,
+  policy: RateLimitPolicy,
+  message = "Too many requests — please slow down.",
+): Response | null {
+  const result = take(key, policy.capacity, policy.refillPerSec);
+  if (result.ok) return null;
+  return Response.json(
+    { error: message },
+    { status: 429, headers: { "Retry-After": String(result.retryAfterSec) } },
+  );
 }

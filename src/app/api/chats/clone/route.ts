@@ -1,5 +1,6 @@
 import { requireRole, apiHandler } from "@/lib/auth";
 import { cloneSharedChat } from "@/lib/chat/tree";
+import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 // POST /api/chats/clone { token }
 //
@@ -9,6 +10,12 @@ import { cloneSharedChat } from "@/lib/chat/tree";
 // cloneSharedChat, which refuses anything that isn't published.
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
+  const limited = guardRateLimit(
+    `chat-copy:${userId}`,
+    RATE_LIMITS.chatCopy,
+    "Too many chat copies — please wait before trying again.",
+  );
+  if (limited) return limited;
   const { token } = (await req.json()) as { token?: string };
   if (!token) return Response.json({ error: "Missing token" }, { status: 400 });
 

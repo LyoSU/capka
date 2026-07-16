@@ -2,9 +2,16 @@ import { apiHandler, requireAdmin } from "@/lib/auth";
 import { installPlugin, uninstallPlugin } from "@/lib/marketplace/install";
 import { findInstall } from "@/lib/marketplace/service";
 import { audit } from "@/lib/governance/audit";
+import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireAdmin();
+  const limited = guardRateLimit(
+    `extension-mutation:${userId}`,
+    RATE_LIMITS.extensionMutation,
+    "Too many extension requests — please wait before trying again.",
+  );
+  if (limited) return limited;
   const { marketplaceId, pluginName } = await req.json();
   if (typeof marketplaceId !== "string" || typeof pluginName !== "string") {
     return Response.json({ error: "marketplaceId and pluginName required" }, { status: 400 });

@@ -3,12 +3,19 @@ import { membersCanInstallPlugins } from "@/lib/settings";
 import { installPlugin } from "@/lib/marketplace/install";
 import { hasSystemInstall } from "@/lib/marketplace/service";
 import { audit } from "@/lib/governance/audit";
+import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /** Install a plugin from an admin-connected marketplace. Admins install org-wide
  *  (system); members install personally (user-scope) — and only when the admin has
  *  enabled member installs. */
 export const POST = apiHandler(async (req: Request) => {
   const { userId, role } = await requireActive();
+  const limited = guardRateLimit(
+    `extension-mutation:${userId}`,
+    RATE_LIMITS.extensionMutation,
+    "Too many extension requests — please wait before trying again.",
+  );
+  if (limited) return limited;
   const isAdmin = role === "admin";
   if (!isAdmin && !(await membersCanInstallPlugins())) {
     return Response.json({ error: "Plugin installs are admin-only on this instance." }, { status: 403 });

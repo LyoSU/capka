@@ -2,12 +2,19 @@ import { requireActive, apiHandler } from "@/lib/auth";
 import { createSession, execCommand, downloadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
 import { sessionMounts, resolveNetwork } from "@/lib/manage/controls/folders";
+import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 // Only allow safe characters in file paths (matches client-side WORKSPACE_PATH_RE)
 const SAFE_PATH_RE = /^[\w/.А-Яа-яІіЇїЄєҐґ_\- ()]+$/;
 
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
+  const limited = guardRateLimit(
+    `workspace-archive:${userId}`,
+    RATE_LIMITS.workspaceArchive,
+    "Too many archive requests — please wait before trying again.",
+  );
+  if (limited) return limited;
   const { searchParams } = new URL(req.url);
   const paths = searchParams.getAll("paths");
 

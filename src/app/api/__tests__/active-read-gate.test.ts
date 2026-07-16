@@ -10,6 +10,7 @@ import path from "node:path";
 describe("sensitive read API authorization perimeter", () => {
   const routes = [
     "chats/[id]/export/route.ts",
+    "sandbox/files/archive/route.ts",
     "sandbox/files/download-all/route.ts",
     "memory-docs/route.ts",
     "events/route.ts",

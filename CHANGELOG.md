@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Security
+
+- Resource-intensive workspace archives, paid ask resumes, extension installs/upgrades, and chat clone/fork operations now have per-user token-bucket limits with shared budgets across equivalent endpoints; full workspace archives also require an active account.
+
 ## [0.10.6] - 2026-07-16
 
 ### Changed
