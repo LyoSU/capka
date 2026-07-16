@@ -110,9 +110,13 @@ export class PostgresSessionStore {
   async flush() {
     if (this._activity.size === 0) return;
     const entries = [...this._activity.entries()];
-    this._activity.clear();
     for (const [sessionId, ts] of entries) {
       await this.pool.query("UPDATE sandbox_sessions SET last_activity = $2 WHERE session_id = $1", [sessionId, ts]);
+      // A request may touch this session while the query is in flight. Delete only
+      // the exact timestamp we persisted; retain a newer value for the next flush.
+      // On query failure the entry also stays cached, so a transient DB outage
+      // cannot silently discard the activity that graceful shutdown is preserving.
+      if (this._activity.get(sessionId) === ts) this._activity.delete(sessionId);
     }
   }
 }

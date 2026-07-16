@@ -1,6 +1,43 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { PostgresSessionStore } from "./session-store.js";
+
+describe("PostgresSessionStore activity flush", () => {
+  it("retains activity for retry when Postgres rejects a flush", async () => {
+    const query = vi.fn()
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValueOnce({ rows: [] });
+    const store = new PostgresSessionStore({ pool: { query } });
+    store.touch("retry", 123);
+
+    await expect(store.flush()).rejects.toThrow("database unavailable");
+    await store.flush();
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenLastCalledWith(expect.any(String), ["retry", 123]);
+  });
+
+  it("does not drop a newer touch that arrives during a flush", async () => {
+    let release;
+    const firstQuery = new Promise((resolve) => { release = resolve; });
+    const query = vi.fn()
+      .mockImplementationOnce(() => firstQuery)
+      .mockResolvedValueOnce({ rows: [] });
+    const store = new PostgresSessionStore({ pool: { query } });
+    store.touch("active", 100);
+
+    const flushing = store.flush();
+    store.touch("active", 200);
+    release({ rows: [] });
+    await flushing;
+    await store.flush();
+
+    expect(query.mock.calls.map(([, values]) => values)).toEqual([
+      ["active", 100],
+      ["active", 200],
+    ]);
+  });
+});
 
 const url = process.env.TEST_DATABASE_URL;
 const d = url ? describe : describe.skip;

@@ -24,6 +24,7 @@ import { withRetry } from "./retry.js";
 import { createMcpBridge } from "./mcp-bridge.js";
 import { streamArchive } from "./archive-stream.js";
 import { log } from "./log.js";
+import { createGracefulShutdown, installShutdownHandlers } from "./shutdown.js";
 
 // --- Talk to the Docker API via DOCKER_HOST (socket-proxy) when set. ---
 const docker = process.env.DOCKER_HOST
@@ -166,6 +167,7 @@ let backend;
 let hostDataRoot; // real host path of DATA_ROOT, resolved at boot; used by mount validation
 let ready = false;
 let liveCount = 0;
+const maintenanceTimers = new Set();
 
 // App-level disk-quota guard. The `size` closure reads the module-level
 // `workspace` lazily, so it picks up the real store after boot (and the fake one
@@ -773,6 +775,23 @@ async function boot() {
   ready = true;
   log("ready", { profile: PROFILE });
 
+  // A controller restart must not discard the in-memory activity cache. Stop
+  // accepting traffic first, let current HTTP requests drain, persist activity,
+  // then close Postgres and exit. Keeping the signal handlers installed makes
+  // repeated orchestrator signals join the same idempotent shutdown sequence.
+  const shutdown = createGracefulShutdown({
+    server,
+    store,
+    pool,
+    markNotReady: () => { ready = false; },
+    stopMaintenance: () => {
+      for (const timer of maintenanceTimers) clearInterval(timer);
+      maintenanceTimers.clear();
+    },
+    log,
+  });
+  installShutdownHandlers(shutdown);
+
   // Best-effort image prewarm so the first session doesn't pay the pull. Never
   // gates readiness (create() answers 503 IMAGE_PULLING while this runs). A
   // transient failure — registry blip, momentary disk pressure — shouldn't leave
@@ -790,13 +809,14 @@ async function boot() {
   // catches a job's own throw so a bad tick can't crash the process.
   const periodic = (fn, everyMs, label) => {
     let running = false;
-    setInterval(async () => {
+    const timer = setInterval(async () => {
       if (running) return log("maintenance.skip", { job: label }, "warn");
       running = true;
       try { await fn(); }
       catch (e) { log("maintenance.error", { job: label, err: e.message }, "warn"); }
       finally { running = false; }
     }, everyMs);
+    maintenanceTimers.add(timer);
   };
   periodic(idleSweep, 60_000, "idleSweep");
   periodic(flushAndGc, FLUSH_INTERVAL_MS, "flushAndGc");

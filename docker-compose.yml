@@ -188,6 +188,9 @@ services:
       socket-proxy:
         condition: service_started
     restart: unless-stopped
+    # Graceful controller shutdown allows up to 8s for active HTTP requests,
+    # followed by the final session-activity flush and Postgres pool close.
+    stop_grace_period: 15s
     mem_limit: ${CONTROLLER_MEM_LIMIT:-1g}
     pids_limit: ${CONTROLLER_PIDS_LIMIT:-512}
 
