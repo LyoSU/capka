@@ -20,6 +20,11 @@ const nextConfig: NextConfig = {
   // Transitions API just navigate instantly, no animation.
   experimental: {
     viewTransition: true,
+    // Uploads accept files up to 100 MiB in both the composer and sandbox
+    // controller. Next's proxy buffers request bodies and otherwise truncates
+    // them at its 10 MiB default before the route can read formData(); leave
+    // multipart overhead above the actual per-file boundary.
+    proxyClientMaxBodySize: "110mb",
   },
   async headers() {
     return [
