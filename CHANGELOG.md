@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-07-16
+
 ### Fixed
 
 - Deactivating an account now revokes its existing sessions atomically, and sensitive exports, workspace downloads, memory documents, and live event streams require an active account.
