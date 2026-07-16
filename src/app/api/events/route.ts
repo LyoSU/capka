@@ -1,4 +1,4 @@
-import { requireSession } from "@/lib/auth";
+import { requireActive } from "@/lib/auth";
 import { isAppError, type AppError } from "@/lib/errors";
 import { realtime } from "@/lib/realtime";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   let userId: string;
   try {
-    const ctx = await requireSession();
+    const ctx = await requireActive();
     userId = ctx.userId;
   } catch (e) {
     if (isAppError(e)) return (e as AppError).toResponse();

@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { requireSession, requireRole, apiHandler } from "@/lib/auth";
+import { requireActive, requireRole, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { memoryDocs, projects } from "@/lib/db/schema";
 import { projectNotDeleted, requireLiveProject } from "@/lib/projects/live";
@@ -9,7 +9,7 @@ import { setMemoryDoc } from "@/lib/memory/store";
 // All of a user's memory docs in one shot: the user-global doc plus every
 // project's doc (left-joined, so projects with no doc yet come back empty).
 export const GET = apiHandler(async () => {
-  const { userId } = await requireSession();
+  const { userId } = await requireActive();
   const [userRow] = await db
     .select({ content: memoryDocs.content })
     .from(memoryDocs)

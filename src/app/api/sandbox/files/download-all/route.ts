@@ -1,4 +1,4 @@
-import { requireSession, apiHandler } from "@/lib/auth";
+import { requireActive, apiHandler } from "@/lib/auth";
 import { createSession, execCommand, downloadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
 import { sessionMounts, resolveNetwork } from "@/lib/manage/controls/folders";
@@ -7,7 +7,7 @@ import { sessionMounts, resolveNetwork } from "@/lib/manage/controls/folders";
 const SAFE_PATH_RE = /^[\w/.А-Яа-яІіЇїЄєҐґ_\- ()]+$/;
 
 export const GET = apiHandler(async (req: Request) => {
-  const { userId } = await requireSession();
+  const { userId } = await requireActive();
   const { searchParams } = new URL(req.url);
   const paths = searchParams.getAll("paths");
 

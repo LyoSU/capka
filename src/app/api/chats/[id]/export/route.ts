@@ -1,5 +1,5 @@
 import { eq, asc } from "drizzle-orm";
-import { requireSession, apiHandler } from "@/lib/auth";
+import { requireActive, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
@@ -11,7 +11,7 @@ function sanitizeFilename(name: string): string {
 }
 
 export const GET = apiHandler(async (req, { params }) => {
-  const { userId } = await requireSession();
+  const { userId } = await requireActive();
   const { id } = await params;
 
   const chat = await requireOwned(chats, id, userId, "Chat");

@@ -6,9 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Deactivating an account now revokes its existing sessions atomically, and sensitive exports, workspace downloads, memory documents, and live event streams require an active account.
+
 ## [0.10.3] - 2026-07-16
 
 ### Fixed
+
 - File uploads up to the platform's existing 100 MB limit now pass through the Next.js proxy intact instead of being truncated at its 10 MB default.
 
 ## [0.10.2] - 2026-07-16

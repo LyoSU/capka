@@ -1,7 +1,7 @@
 import { eq, and, gte, sql } from "drizzle-orm";
 import { requireAdmin, apiHandler, type Role } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { users, usage } from "@/lib/db/schema";
+import { sessions, users, usage } from "@/lib/db/schema";
 import { audit } from "@/lib/governance/audit";
 
 export const GET = apiHandler(async () => {
@@ -35,7 +35,18 @@ export const PUT = apiHandler(async (req: Request) => {
   // Approve a pending account (registration_mode = "approval").
   if (status) {
     if (!["active", "pending"].includes(status)) return Response.json({ error: "Invalid status" }, { status: 400 });
-    const [updated] = await db.update(users).set({ status }).where(eq(users.id, userId)).returning();
+    // Make deactivation and session revocation one transaction. Otherwise a live
+    // cookie remains usable until it expires, and any route that accidentally uses
+    // the authentication-only gate can keep exposing the user's data. Re-activating
+    // an account does not revoke sessions; moving it back to pending does.
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx.update(users).set({ status }).where(eq(users.id, userId)).returning();
+      if (!row) return null;
+      if (status !== "active") {
+        await tx.delete(sessions).where(eq(sessions.userId, userId));
+      }
+      return row;
+    });
     if (!updated) return Response.json({ error: "User not found" }, { status: 404 });
     await audit({ actorId: adminId, action: "user.status_change", targetType: "user", targetKey: userId, detail: { status, name: updated.name ?? updated.email } });
     return Response.json({ id: updated.id, status: updated.status });
