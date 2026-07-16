@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.8] - 2026-07-16
+
 ### Fixed
 
 - The sandbox controller now drains HTTP traffic on `SIGTERM`/`SIGINT`, flushes pending session activity before closing Postgres, and safely retries activity writes after transient database failures instead of silently dropping them; Compose gives this drain an explicit 15-second stop window.
