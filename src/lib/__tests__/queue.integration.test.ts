@@ -186,8 +186,8 @@ run("durable queue", () => {
     );
     // An orphan: a task already flipped to completed but whose hold was never
     // settled (H5 crash window / swallowed releaseHold).
-    await enqueueTask({ id: "qz2", chatId: "qz2-chat", userId: U, payload: {} });
     await pool.query(`INSERT INTO chats (id, user_id) VALUES ('qz2-chat',$1) ON CONFLICT (id) DO NOTHING`, [U]);
+    await enqueueTask({ id: "qz2", chatId: "qz2-chat", userId: U, payload: {} });
     await pool.query(`UPDATE tasks SET status='completed' WHERE id='qz2'`);
     await pool.query(
       `INSERT INTO usage (id, task_id, user_id, provider, model, cost_usd, on_shared_key, pending)

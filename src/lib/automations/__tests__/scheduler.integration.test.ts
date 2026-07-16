@@ -62,19 +62,24 @@ run("schedulerTick", () => {
   it("restores the due time and counts a failure when firing throws", async () => {
     const { db } = await import("@/lib/db");
     const { automations } = await import("@/lib/db/schema");
+    const runs = await import("../runs");
     const { schedulerTick } = await import("../scheduler");
     const id = nanoid();
     const due = new Date(Date.now() - 60_000);
     await db.insert(automations).values({
       id, userId: U, title: "Broken", prompt: "go",
-      // A non-existent projectId makes fireAutomation's chat insert violate the FK
-      // and throw — the occurrence must NOT be lost: the due time is restored so
-      // the next tick retries, and the failure counter advances toward auto-disable.
-      projectId: "no-such-project",
       trigger: { kind: "once", at: due.toISOString(), timezone: "Europe/Kyiv" },
       nextRunAt: due,
     });
-    await schedulerTick();
+    // Fail at the fire boundary, after the scheduler has validly claimed and
+    // advanced the row. The old fixture used an invalid project FK and failed
+    // during setup, so it never exercised recovery at all.
+    const spy = vi.spyOn(runs, "fireAutomation").mockRejectedValue(new Error("boom"));
+    try {
+      await schedulerTick();
+    } finally {
+      spy.mockRestore();
+    }
     const [row] = await db.select().from(automations).where(eq(automations.id, id));
     expect(row.lastTaskId).toBeNull(); // never fired
     expect(row.enabled).toBe(true); // re-enabled for retry (not silently dropped)
