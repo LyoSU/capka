@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-07-16
+
 ### Fixed
 
 - Terminal task payloads, finalized usage records, and governance audit entries now have configurable, replica-safe database retention with conservative per-table defaults and bounded daily cleanup batches.
