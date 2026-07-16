@@ -28,6 +28,7 @@ const POLL_MS = 5_000;
 const RECONCILE_MS = 30_000;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const CATALOG_STALE_MS = 12 * 60 * 60 * 1000;
+const RETENTION_SWEEP_MS = 24 * 60 * 60 * 1000;
 /** On shutdown, how long to let already-running tasks finish before exiting.
  *  Most turns finish well inside this; the rare long one is reconciled as a
  *  retryable "interrupted" by the next instance. Keep the platform's
@@ -139,6 +140,27 @@ export async function startWorker(): Promise<void> {
   void refreshCatalogIfStale();
   const catalogTimer = setInterval(() => void refreshCatalogIfStale(), CATALOG_REFRESH_MS);
 
+  // Bound durable operational history. Advisory locking inside the sweep makes
+  // this safe across replicas; bounded batches keep a first cleanup after a long-
+  // lived install from monopolizing Postgres.
+  const { runRetentionCleanup } = await import("@/lib/db/retention");
+  const sweepRetention = async () => {
+    try {
+      const result = await runRetentionCleanup();
+      if (!result.skipped && (result.tasks || result.usage || result.audit)) {
+        log.info("database retention cleanup", {
+          tasks: result.tasks,
+          usage: result.usage,
+          audit: result.audit,
+        });
+      }
+    } catch (e) {
+      log.error("database retention cleanup failed", { err: String(e) });
+    }
+  };
+  void sweepRetention();
+  const retentionTimer = setInterval(() => void sweepRetention(), RETENTION_SWEEP_MS);
+
   // Periodic health line: heap + the retainers a slow leak would show up in
   // (realtime listeners, the NOTIFY client's query queue, in-flight/aux work).
   // One line a minute so a memory incident can be diagnosed from the log
@@ -187,6 +209,7 @@ export async function startWorker(): Promise<void> {
     clearInterval(pollTimer);
     clearInterval(reconcileTimer);
     clearInterval(catalogTimer);
+    clearInterval(retentionTimer);
     clearInterval(opsTimer);
     clearInterval(schedulerTimer);
     clearInterval(teardownTimer);

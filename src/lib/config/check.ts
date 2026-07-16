@@ -90,6 +90,32 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
     }
   }
 
+  // Retention days accept zero as an explicit "keep forever". The batch size
+  // must stay positive or a cleanup run could spin without making progress.
+  for (const key of ["TASK_RETENTION_DAYS", "USAGE_RETENTION_DAYS", "AUDIT_RETENTION_DAYS"] as const) {
+    const raw = env[key]?.trim();
+    if (raw === undefined || raw === "") continue;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) {
+      issues.push({
+        level: "warn",
+        key,
+        message: `set to "${raw}", which is not a non-negative integer — the built-in default will be used instead.`,
+      });
+    }
+  }
+  const retentionBatch = env.DB_RETENTION_BATCH_SIZE?.trim();
+  if (retentionBatch) {
+    const n = Number(retentionBatch);
+    if (!Number.isInteger(n) || n < 1) {
+      issues.push({
+        level: "warn",
+        key: "DB_RETENTION_BATCH_SIZE",
+        message: `set to "${retentionBatch}", which is not a positive integer — the built-in default will be used instead.`,
+      });
+    }
+  }
+
   return issues;
 }
 

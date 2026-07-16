@@ -217,6 +217,12 @@ services:
       # Opt-in hardening for the first-run wizard — require this token to claim the
       # admin account on a public deploy. Unset ⇒ frictionless setup.
       - SETUP_TOKEN=${SETUP_TOKEN:-}
+      # Bounded daily database cleanup. Zero days disables retention for that
+      # table; live tasks, suspended turns, and pending spend holds are preserved.
+      - TASK_RETENTION_DAYS=${TASK_RETENTION_DAYS:-30}
+      - USAGE_RETENTION_DAYS=${USAGE_RETENTION_DAYS:-365}
+      - AUDIT_RETENTION_DAYS=${AUDIT_RETENTION_DAYS:-365}
+      - DB_RETENTION_BATCH_SIZE=${DB_RETENTION_BATCH_SIZE:-1000}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

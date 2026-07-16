@@ -67,4 +67,15 @@ describe("checkConfig", () => {
     );
     expect(keysOf({ ...VALID, PG_POOL_MAX: "20", WORKER_MAX_CONCURRENCY: "4" })).not.toContain("PG_POOL_MAX");
   });
+
+  it("validates retention knobs while allowing zero days to mean keep forever", () => {
+    expect(keysOf({ ...VALID, TASK_RETENTION_DAYS: "0", USAGE_RETENTION_DAYS: "730", AUDIT_RETENTION_DAYS: "90", DB_RETENTION_BATCH_SIZE: "250" }))
+      .not.toEqual(expect.arrayContaining(["TASK_RETENTION_DAYS", "USAGE_RETENTION_DAYS", "AUDIT_RETENTION_DAYS", "DB_RETENTION_BATCH_SIZE"]));
+    expect(checkConfig({ ...VALID, TASK_RETENTION_DAYS: "-1" })).toContainEqual(
+      expect.objectContaining({ key: "TASK_RETENTION_DAYS", level: "warn" }),
+    );
+    expect(checkConfig({ ...VALID, DB_RETENTION_BATCH_SIZE: "0" })).toContainEqual(
+      expect.objectContaining({ key: "DB_RETENTION_BATCH_SIZE", level: "warn" }),
+    );
+  });
 });
