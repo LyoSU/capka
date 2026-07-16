@@ -146,19 +146,27 @@ export async function claimNextTask(workerId: string): Promise<TaskRow | null> {
             updated_at = now()
       WHERE id = (
         SELECT t.id FROM tasks t
+        INNER JOIN chats candidate_chat ON candidate_chat.id = t.chat_id
          WHERE t.status = 'queued'
-           -- Serialize per chat: don't start a turn while that chat's previous
-           -- turn is still live, so replies stay in order and a follow-up sees
-           -- the prior answer (like Claude Code queueing messages). A dead
-           -- worker's expired lease stops blocking the chat.
+           -- Serialize the workspace, not merely the chat. Every chat in one
+           -- project mounts the same files, memory, and connectors; running two
+           -- turns there concurrently creates nondeterministic writes. A chat
+           -- outside a project is its own workspace. The transaction-scoped
+           -- advisory lock closes the two-worker claim race: only one claimant
+           -- may evaluate a workspace until its running row is committed.
+           AND pg_try_advisory_xact_lock(
+             hashtext(COALESCE(candidate_chat.project_id, candidate_chat.id))
+           )
            AND NOT EXISTS (
              SELECT 1 FROM tasks r
-              WHERE r.chat_id = t.chat_id
+             INNER JOIN chats running_chat ON running_chat.id = r.chat_id
+              WHERE COALESCE(running_chat.project_id, running_chat.id) =
+                    COALESCE(candidate_chat.project_id, candidate_chat.id)
                 AND r.status = 'running'
                 AND r.lease_expires_at > now()
-           )
+         )
          ORDER BY t.created_at
-         FOR UPDATE SKIP LOCKED
+         FOR UPDATE OF t SKIP LOCKED
          LIMIT 1
       )
       RETURNING *`,

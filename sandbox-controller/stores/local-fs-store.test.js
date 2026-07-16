@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rm, mkdir, writeFile, symlink, readFile } from "node:fs/promises";
+import { rm, mkdir, writeFile, symlink, readFile, stat, utimes } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,6 +81,45 @@ describe("LocalFsStore.list depth", () => {
       expect(f.hash).toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
     } finally {
       await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates a cached hash after a same-size rewrite with restored mtime", async () => {
+    const dataRoot = join(TMP, `ws-hash-rewrite-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      const { wsHostPath } = await store.ensure("u1", "s1");
+      const file = join(wsHostPath, "f.txt");
+      await writeFile(file, "hello");
+      const original = await stat(file);
+      const first = await store.list("u1", "s1", ".", 1, 100, { withHash: true });
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await writeFile(file, "world"); // same byte length
+      await utimes(file, original.atime, original.mtime); // restore cache-visible mtime
+
+      const second = await store.list("u1", "s1", ".", 1, 100, { withHash: true });
+      expect(second.entries[0].hash).not.toBe(first.entries[0].hash);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not stat or hash a child symlink that escapes the workspace", async () => {
+    const dataRoot = join(TMP, `ws-list-sec-${Math.random().toString(36).slice(2)}`);
+    const outside = join(TMP, `outside-list-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      await mkdir(outside, { recursive: true });
+      await writeFile(join(outside, "secret.txt"), "do not inspect");
+      const { wsHostPath } = await store.ensure("u1", "s1");
+      await symlink(join(outside, "secret.txt"), join(wsHostPath, "escape.txt"));
+
+      const listed = await store.list("u1", "s1", ".", 1, 100, { withHash: true });
+      expect(listed.entries.map((entry) => entry.path)).not.toContain("escape.txt");
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
     }
   });
 });

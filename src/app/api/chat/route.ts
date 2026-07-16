@@ -42,11 +42,24 @@ export const POST = apiHandler(async (req: Request) => {
 
   const [chatRow, project] = await Promise.all([
     requestChatId
-      ? db.select({ id: chats.id, userId: chats.userId, title: chats.title, model: chats.model, source: chats.source, activeLeafId: chats.activeLeafId }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0])
+      ? db
+          .select({
+            id: chats.id,
+            userId: chats.userId,
+            title: chats.title,
+            model: chats.model,
+            projectId: chats.projectId,
+            projectDeletedAt: projects.deletedAt,
+            source: chats.source,
+            activeLeafId: chats.activeLeafId,
+          })
+          .from(chats)
+          .leftJoin(projects, eq(chats.projectId, projects.id))
+          .where(eq(chats.id, chatId))
+          .limit(1)
+          .then((r) => r[0])
       : undefined,
-    projectId
-      // A tombstoned project resolves to undefined → the chat/turn falls back to
-      // project-less instead of enqueuing against a workspace being wiped.
+    projectId && !requestChatId
       ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
   ]);
@@ -56,6 +69,21 @@ export const POST = apiHandler(async (req: Request) => {
     return Response.json({ error: "Chat not found" }, { status: 404 });
   }
   const existingChat = chatRow?.userId === userId ? chatRow : undefined;
+
+  // A persisted chat owns its project scope. Never let a request body retarget
+  // an existing chat's task to another owned project: the worker would otherwise
+  // run this chat's history against the wrong workspace, skills, and connectors.
+  const persistedProjectId = existingChat?.projectId ?? undefined;
+  if (existingChat && projectId !== undefined && projectId !== persistedProjectId) {
+    return Response.json({ error: "Chat project does not match. Reload and try again." }, { status: 409 });
+  }
+  if (existingChat?.projectId && existingChat.projectDeletedAt) {
+    return Response.json({ error: "This project is being deleted." }, { status: 409 });
+  }
+  if (!existingChat && projectId && !project) {
+    return Response.json({ error: "Project not found" }, { status: 404 });
+  }
+  const effectiveProjectId = existingChat ? persistedProjectId : project?.id;
 
   // Telegram chats are owned by the bot channel and read-only on the web — you
   // reply from Telegram, or fork the chat to take it over on the web. Block the
@@ -97,7 +125,7 @@ export const POST = apiHandler(async (req: Request) => {
       userId,
       title: "New Chat",
       model: effectiveModel ?? null,
-      projectId: project?.id ?? null,
+      projectId: effectiveProjectId ?? null,
     });
   }
 
@@ -158,7 +186,7 @@ export const POST = apiHandler(async (req: Request) => {
   // payload and runs it in the background — independent of this request.
   const payload: TaskPayload = {
     requestModel: effectiveModel,
-    projectId: project?.id,
+    projectId: effectiveProjectId,
     uiMessages: body.messages || [],
     attachedFiles: attachedFiles as FileRef[] | undefined,
   };

@@ -33,16 +33,17 @@ export class LocalFsStore {
     this.gid = gid;
   }
 
-  // Content-hash cache for the folder-sync listing, keyed by absolute path + mtime
-  // + size. Folder sync lists (and hashes) the whole tree twice per turn; without
+  // Content-hash cache for the folder-sync listing, keyed by the file identity and
+  // nanosecond change-time/mtime. Folder sync lists (and hashes) the whole tree twice per turn; without
   // this, every unchanged file is re-read and SHA-256'd each time — material I/O on
-  // a large folder. A changed file gets a new key (mtime/size differ), so the cache
-  // self-invalidates; stale keys age out by FIFO once the cap is hit.
+  // a large folder. `ctimeNs` is essential: an editor (or hostile sandbox process)
+  // can replace same-length content and restore the old mtime, but cannot restore
+  // the kernel-managed change time. Stale keys age out by FIFO once the cap is hit.
   #hashCache = new Map();
   #HASH_CACHE_MAX = 50000;
 
-  async #hashFileCached(full, mtimeMs, size) {
-    const key = `${full}:${mtimeMs}:${size}`;
+  async #hashFileCached(full, s) {
+    const key = `${full}:${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
     const cached = this.#hashCache.get(key);
     if (cached !== undefined) return cached;
     const hash = await hashFile(full).catch(() => undefined);
@@ -104,12 +105,16 @@ export class LocalFsStore {
       for (const name of names) {
         if (entries.length >= limit) { truncated = true; break; }
         try {
-          const full = join(dirPath, name);
-          const s = await stat(full);
           const childRel = rel === "." ? name : `${rel}/${name}`;
+          // Resolve and contain EACH child before reading metadata or hashing it.
+          // A sandbox can plant a symlink in a directory after the parent was
+          // validated; stat/hash on join(dirPath, name) would otherwise follow an
+          // out-of-workspace target before the recursive walk gets a safety check.
+          const full = await safeRealPath(base, childRel);
+          const s = await stat(full, { bigint: true });
           const isDirectory = s.isDirectory();
-          const entry = { name, path: childRel, isDirectory, size: s.size, modifiedAt: s.mtime.toISOString() };
-          if (!isDirectory && withHash) entry.hash = await this.#hashFileCached(full, s.mtimeMs, s.size);
+          const entry = { name, path: childRel, isDirectory, size: Number(s.size), modifiedAt: s.mtime.toISOString() };
+          if (!isDirectory && withHash) entry.hash = await this.#hashFileCached(full, s);
           entries.push(entry);
           if (isDirectory) {
             if (d > 1) await walk(childRel, d - 1);

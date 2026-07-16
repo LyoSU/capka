@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { models as modelsTable } from "@/lib/db/schema";
 import { iconForGroup, prettyName } from "@/lib/models/normalize";
 import { getBlockPrivateProviderUrls, getModelMinContext, getModelMaxPrice } from "@/lib/settings";
-import { assertSafeUrl, guardedDispatcherFor } from "@/lib/net/ssrf";
+import { assertSafeUrl, guardedFetchOnce } from "@/lib/net/ssrf";
 import { parseOpenRouterModels, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
 import { PROVIDER_META, type ProviderName, type Modality } from "./registry";
 
@@ -71,8 +71,10 @@ async function fetchJson(url: string, init?: RequestInit, blockPrivate?: boolean
   // target (e.g. cloud metadata) after the pre-flight address check. For a
   // user-supplied endpoint, pass `blockPrivate` so the connection is pinned to a
   // vetted IP (no DNS-rebind window); first-party fixed hosts omit it.
-  const dispatcher = blockPrivate === undefined ? undefined : await guardedDispatcherFor(url, blockPrivate);
-  const res = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(15_000), ...(dispatcher ? { dispatcher } : {}) } as RequestInit);
+  const requestInit = { ...init, redirect: "manual", signal: AbortSignal.timeout(15_000) } satisfies RequestInit;
+  const res = blockPrivate === undefined
+    ? await fetch(url, requestInit)
+    : await guardedFetchOnce(url, blockPrivate, requestInit);
   if (res.status >= 300 && res.status < 400) {
     throw new Error("Provider endpoint returned an unexpected redirect");
   }

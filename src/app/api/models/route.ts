@@ -8,11 +8,24 @@ import { resolveEnabledConfigs, labelEnabledConfigs } from "@/lib/providers/reso
 import { listProviderModels, applySharedGovernance, type ModelInfo } from "@/lib/providers/list-models";
 import { isProviderName, PROVIDER_META } from "@/lib/providers/registry";
 import { syncModelCatalog } from "@/lib/models/catalog";
+import { classifyLLMError } from "@/lib/errors/friendly";
+import { log } from "@/lib/log";
 
 // Re-exported for the many client components that import the picker's shape.
 export type { ModelInfo };
 
 const empty = () => Response.json({ models: [], provider: null, isShared: false });
+const MODEL_LOAD_ERROR = "Could not load models. Check the provider connection and try again.";
+
+function recordModelLoadFailure(provider: string, error: unknown): void {
+  // Provider errors can echo API keys, signed URLs, upstream response bodies, or
+  // internal hostnames. Keep the response stable and record only the classified
+  // category server-side — never the untrusted raw message.
+  log.warn("provider model catalog load failed", {
+    provider,
+    category: classifyLLMError(error).category,
+  });
+}
 
 async function decryptKey(apiKey: string | null): Promise<string | undefined> {
   if (!apiKey) return undefined;
@@ -31,7 +44,8 @@ async function respond(provider: string, apiKey: string | undefined, baseUrl: st
     // way the runner does (single-config / credentials paths carry no configId).
     models = models.map((m) => ({ ...m, configProvider: provider }));
   } catch (e) {
-    error = e instanceof Error ? e.message : "Could not load models";
+    recordModelLoadFailure(provider, e);
+    error = MODEL_LOAD_ERROR;
   }
 
   // First-run safety net: if OpenRouter's catalog hasn't synced yet, kick a
@@ -73,7 +87,8 @@ async function respondAggregated(
         const tagged = models.map((m) => ({ ...m, configId: c.id, configLabel: labels.get(c.id), configIcon, configProvider: c.provider, configShared: c.isShared }));
         return { models: tagged, provider: c.provider };
       } catch (e) {
-        return { models: [] as ModelInfo[], error: e instanceof Error ? e.message : "Could not load models" };
+        recordModelLoadFailure(c.provider, e);
+        return { models: [] as ModelInfo[], error: MODEL_LOAD_ERROR };
       }
     }),
   );

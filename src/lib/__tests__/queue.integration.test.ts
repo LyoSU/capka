@@ -40,6 +40,36 @@ run("durable queue", () => {
     expect(b).toBeNull();
   });
 
+  it("serializes different chats that share one project workspace", async () => {
+    const projectId = "qtest-project";
+    const chats = ["qtest-project-chat-a", "qtest-project-chat-b"];
+    await pool.query(
+      `INSERT INTO projects (id, user_id, name) VALUES ($1,$2,'Queue project') ON CONFLICT (id) DO NOTHING`,
+      [projectId, U],
+    );
+    for (const chatId of chats) {
+      await pool.query(
+        `INSERT INTO chats (id, user_id, project_id) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING`,
+        [chatId, U, projectId],
+      );
+    }
+    try {
+      await enqueueTask({ id: "qp1", chatId: chats[0], userId: U, payload: {} });
+      await enqueueTask({ id: "qp2", chatId: chats[1], userId: U, payload: {} });
+
+      const first = await claimNextTask("workspace-worker-1");
+      expect(first?.id).toBe("qp1");
+      expect(await claimNextTask("workspace-worker-2")).toBeNull();
+
+      await finalizeTask("qp1", "completed");
+      expect((await claimNextTask("workspace-worker-2"))?.id).toBe("qp2");
+    } finally {
+      await pool.query(`DELETE FROM tasks WHERE chat_id = ANY($1::text[])`, [chats]);
+      await pool.query(`DELETE FROM chats WHERE id = ANY($1::text[])`, [chats]);
+      await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+    }
+  });
+
   it("heartbeats then finalizes", async () => {
     const ok = await heartbeat("qt1", "w1");
     expect(ok).toBe(true);

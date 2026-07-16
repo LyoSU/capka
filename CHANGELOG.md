@@ -9,11 +9,21 @@ All notable changes to Capka are documented here. Format follows
 ### Added
 - The worker now logs a per-minute `ops` health line (heap, RSS, realtime listeners, NOTIFY queue depth, in-flight/aux tasks) so memory incidents can be diagnosed from the log trail.
 
+### Changed
+- Tasks now serialize by workspace rather than only by chat, preventing concurrent chats in the same project from racing over shared files, memory, and connectors.
+- Added targeted database indexes for sidebar pagination, unread-message probes, and durable task-queue lookups.
+
 ### Fixed
 - A realtime (SSE) subscription no longer leaks a dead listener when the Postgres LISTEN connection fails mid-subscribe; reconnect storms during a DB blip used to accumulate them.
 - An SSE client that stopped reading (sleeping laptop, wedged proxy) is now disconnected once its event backlog passes ~1 MB instead of buffering events without bound.
 - Background LLM calls (chat title, memory maintenance, compaction) now carry a 3-minute deadline, so a hung provider request can't pin the whole conversation context in memory indefinitely.
 - Streaming flushes are serialized per turn, so a lagging database no longer stacks unbounded concurrent NOTIFY publishes (the source of the pg `client.query() when the client is already executing` warning).
+- Guarded provider requests now retire their request-scoped Undici agents after use instead of retaining connection pools across repeated model and OAuth calls.
+- Provider model-list failures no longer expose raw upstream errors that may contain credentials, signed URLs, or internal hostnames.
+- Existing chats can no longer be retargeted to another project's workspace through a request-supplied project id, and sends are rejected while their project is being deleted.
+- The task worker starts its polling fallback before the optional Postgres LISTEN fast path, so an initial LISTEN failure can no longer leave the process unable to claim work.
+- A Telegram delivery failure no longer rewrites a successfully completed task as failed; execution state remains durable and the channel failure is logged separately.
+- Workspace listings no longer inspect or hash symlink targets outside the workspace, and cached hashes now invalidate after same-size rewrites even when the old mtime is restored.
 
 ## [0.10.1] - 2026-07-13
 

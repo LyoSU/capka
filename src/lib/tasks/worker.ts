@@ -117,9 +117,19 @@ export async function startWorker(): Promise<void> {
   s.started = true;
   log.info("worker starting", { workerId: s.workerId });
 
-  // Wake on enqueue (cross-process via NOTIFY), with a polling fallback.
-  await realtime.subscribe("task_enqueued", () => void tick());
+  // Polling is the durable baseline and must exist BEFORE the optional LISTEN
+  // fast path. A cold-start DB/LISTEN blip must not reject startWorker after the
+  // started latch is set and leave this process permanently unable to claim work.
   const pollTimer = setInterval(() => void tick(), POLL_MS);
+  void realtime.subscribe("task_enqueued", () => void tick()).catch((e) => {
+    // Polling keeps the worker fully functional; Realtime reconnects established
+    // subscriptions after later drops, while the next process start retries an
+    // initial connection that never registered.
+    log.warn("task LISTEN unavailable; polling fallback active", {
+      workerId: s.workerId,
+      err: String(e),
+    });
+  });
 
   // Reconcile zombies on boot and periodically.
   void reconcile();

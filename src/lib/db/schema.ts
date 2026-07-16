@@ -142,6 +142,9 @@ export const chats = pgTable("chats", {
 }, (table) => [
   index("idx_chats_user_id").on(table.userId),
   index("idx_chats_project_id").on(table.projectId),
+  // Default sidebar query: owner + archive bucket, ordered by pinned/activity/id.
+  // The id tail also supports deterministic keyset pagination without a sort.
+  index("idx_chats_sidebar").on(table.userId, table.archived, table.pinned, table.updatedAt, table.id),
 ]);
 
 export const messages = pgTable("messages", {
@@ -163,6 +166,8 @@ export const messages = pgTable("messages", {
   index("idx_messages_chat_id").on(table.chatId),
   index("idx_messages_created_at").on(table.createdAt),
   index("idx_messages_parent_id").on(table.parentId),
+  // Sidebar unread probe: assistant messages newer than last_read_at per chat.
+  index("idx_messages_chat_role_created").on(table.chatId, table.role, table.createdAt),
 ]);
 
 export const telegramLinks = pgTable("telegram_links", {
@@ -206,8 +211,10 @@ export const tasks = pgTable("tasks", {
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   index("idx_tasks_chat_id").on(table.chatId),
+  index("idx_tasks_chat_status").on(table.chatId, table.status),
   index("idx_tasks_user_id_status").on(table.userId, table.status),
   index("idx_tasks_status_lease").on(table.status, table.leaseExpiresAt),
+  index("idx_tasks_status_created").on(table.status, table.createdAt),
   // One pending turn per chat, enforced by the DB itself — the invariant the
   // whole queue rests on. A chat's turns are serialized (claimNextTask won't
   // start one while another is live), so a follow-up sent while the chat is

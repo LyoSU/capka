@@ -76,7 +76,6 @@ describe("createGuardedFetch", () => {
     globalThis.fetch = realFetch;
     const http = await import("node:http");
     const server = http.createServer((req, res) => {
-      res.setHeader("connection", "close"); // don't keep the socket alive past the test
       res.end(JSON.stringify({ host: req.headers.host }));
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -92,6 +91,12 @@ describe("createGuardedFetch", () => {
       const body = (await res.json()) as { host: string };
       expect(res.status).toBe(200);
       expect(body.host).toBe(`vetted.example:${port}`);
+      // The request-scoped Agent must retire after its body is consumed. Without
+      // close(), undici keeps this socket/pool alive and repeated provider calls
+      // accumulate external memory even though JS heap stays flat.
+      await expect.poll(
+        () => new Promise<number>((resolve) => server.getConnections((_err, count) => resolve(count))),
+      ).toBe(0);
     } finally {
       server.close();
     }

@@ -1,6 +1,6 @@
 import { isIPv4 } from "node:net";
 import { lookup } from "node:dns/promises";
-import { Agent, type Dispatcher } from "undici";
+import { Agent } from "undici";
 
 /** Per-request ceiling for OAuth discovery / DCR / token fetches to a user-supplied
  *  provider. Without it, a host that accepts the connection but never answers stalls
@@ -89,7 +89,7 @@ function assertHttpUrl(raw: string): URL {
  * left intact and the Host header, TLS SNI, and certificate validation still use the
  * real hostname — only the resolved IP is fixed to a vetted one.
  */
-function pinnedDispatcher(addrs: ResolvedAddr[]): Dispatcher {
+function pinnedDispatcher(addrs: ResolvedAddr[]): Agent {
   return new Agent({
     connect: {
       // Node's net `lookup` contract: single-address form by default, array form
@@ -109,6 +109,35 @@ function pinnedDispatcher(addrs: ResolvedAddr[]): Dispatcher {
   });
 }
 
+/** Retire a request-scoped Agent without blocking the caller from consuming the
+ * response body. `fetch()` resolves at headers, while Agent.close() resolves only
+ * after the body/socket is finished; awaiting it here would deadlock streaming
+ * callers. Starting the close immediately disables keep-alive reuse and lets
+ * undici release the pool as soon as the caller consumes (or aborts) the body. */
+function retireDispatcher(dispatcher: Agent): void {
+  void dispatcher.close().catch(() => dispatcher.destroy());
+}
+
+/** One connection-pinned request with a bounded dispatcher lifecycle. Redirect
+ * policy belongs to the caller; createGuardedFetch below uses this once per hop. */
+export async function guardedFetchOnce(
+  raw: string,
+  blockPrivate: boolean,
+  init?: RequestInit,
+): Promise<Response> {
+  const dispatcher = pinnedDispatcher(await resolveGuarded(assertHttpUrl(raw).hostname, blockPrivate));
+  try {
+    const response = await fetch(raw, { ...init, dispatcher } as RequestInit);
+    retireDispatcher(dispatcher);
+    return response;
+  } catch (error) {
+    // No response body can still be using the socket when fetch throws, so tear
+    // it down synchronously instead of leaving close() waiting on a broken request.
+    dispatcher.destroy();
+    throw error;
+  }
+}
+
 /**
  * A `fetch` that is safe to hand to untrusted-URL machinery (MCP transport, OAuth
  * discovery/token requests). It validates the target of EVERY request — and every
@@ -125,7 +154,6 @@ export function createGuardedFetch(opts: {
   const MAX_REDIRECTS = 5;
   const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number, originHost: string): Promise<Response> => {
     const reqUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    const dispatcher = pinnedDispatcher(await resolveGuarded(assertHttpUrl(reqUrl).hostname, opts.blockPrivate));
     const sameOrigin = new URL(reqUrl).host === originHost;
     const h = new Headers(init?.headers);
     // Inject fixed headers (which may carry credentials, e.g. a GitHub token) ONLY
@@ -140,11 +168,20 @@ export function createGuardedFetch(opts: {
       const ts = AbortSignal.timeout(opts.timeoutMs);
       signal = signal ? AbortSignal.any([signal, ts]) : ts;
     }
-    const res = await fetch(input, { ...init, headers: h, signal, redirect: "manual", dispatcher } as RequestInit);
+    const res = await guardedFetchOnce(reqUrl, opts.blockPrivate, {
+      ...init,
+      headers: h,
+      signal,
+      redirect: "manual",
+    });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       if (!loc) return res;
       if (depth >= MAX_REDIRECTS) throw new Error("Too many redirects");
+      // Nobody will consume an intermediate redirect body. Cancel it explicitly
+      // so that hop's retiring Agent can close now rather than retain a pool until
+      // garbage collection or the remote peer times out.
+      await res.body?.cancel().catch(() => {});
       return doFetch(new URL(loc, reqUrl), init, depth + 1, originHost);
     }
     return res;
@@ -165,6 +202,3 @@ export async function assertSafeUrl(raw: string, blockPrivate: boolean): Promise
  * listing). Pass the dispatcher into `fetch(url, { dispatcher })` so the request
  * connects to the same IP that was just vetted — no rebinding window.
  */
-export async function guardedDispatcherFor(raw: string, blockPrivate: boolean): Promise<Dispatcher> {
-  return pinnedDispatcher(await resolveGuarded(assertHttpUrl(raw).hostname, blockPrivate));
-}
