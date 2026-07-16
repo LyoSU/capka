@@ -1,8 +1,8 @@
 name: CI
 
 # Gate every push to master and every PR on the same checks a maintainer runs
-# locally: typecheck, lint, unit tests, and a production build. Integration tests
-# (RUN_INTEGRATION=1) need Docker/Postgres and are not run here.
+# locally: typecheck, lint, unit tests, and a production build. Database-backed
+# integration tests run separately against an ephemeral PostgreSQL service.
 on:
   push:
     branches: [master]
@@ -44,3 +44,38 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  integration-db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: Capka
+          POSTGRES_PASSWORD: Capka
+          POSTGRES_DB: Capka
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U Capka -d Capka"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://Capka:Capka@localhost:5432/Capka
+      RUN_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Apply database migrations
+        run: npm run db:migrate
+
+      - name: Test database integrations
+        run: npm run test:integration:db

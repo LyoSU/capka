@@ -3,6 +3,7 @@ import { realtime } from "../realtime";
 
 // Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run realtime.integration
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
+const unit = process.env.RUN_INTEGRATION ? describe.skip : describe;
 
 // Count every pg Client opened, so the C6 test can assert single-flight. Hoisted
 // so it applies to the statically-imported realtime singleton too — keeping this
@@ -33,7 +34,7 @@ vi.mock("pg", async (importOriginal) => {
 
 // C6 regression: two concurrent publishes when pub === null must open exactly
 // one Client (the single-flight guard), never leak a clobbered second one.
-describe("realtime.publish connection single-flight (C6)", () => {
+unit("realtime.publish connection single-flight (C6)", () => {
   beforeEach(() => {
     opened.count = 0;
   });
