@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-16
+
 ### Added
 - The worker now logs a per-minute `ops` health line (heap, RSS, realtime listeners, NOTIFY queue depth, in-flight/aux tasks) so memory incidents can be diagnosed from the log trail.
 
