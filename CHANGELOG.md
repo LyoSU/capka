@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Azure OpenAI: the model picker now accepts a typed deployment name. Azure's data plane offers no way to list deployments, and the `/openai/v1/models` suggestions are base models — if your deployment is named differently, type its exact name and pick it.
+
 ## [0.10.10] - 2026-07-19
 
 ### Fixed

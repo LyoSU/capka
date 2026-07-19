@@ -19,7 +19,13 @@ import type { ModelInfo } from "./list-models";
  */
 export function customModelOption(query: string, sample: ModelInfo | undefined): ModelInfo | null {
   const id = query.trim();
-  if (!id.includes("/")) return null;
+  // Azure model ids are DEPLOYMENT names — user-chosen bare words that no
+  // listing can enumerate (the data plane has no deployments endpoint; /models
+  // returns base models), so on an Azure connection a typed name-shaped word
+  // must be selectable too. Everywhere else the "/" requirement keeps a plain
+  // word search from spuriously offering a "custom model" row.
+  const bareAzureName = sample?.configProvider === "azure" && /^[\w.-]+$/.test(id);
+  if (!id.includes("/") && !bareAzureName) return null;
   return {
     id,
     name: id,

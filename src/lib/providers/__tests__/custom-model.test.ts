@@ -44,4 +44,26 @@ describe("customModelOption", () => {
     expect(opt).not.toBeNull();
     expect(opt!.configId).toBeUndefined();
   });
+
+  // Azure model ids are DEPLOYMENT names — user-chosen bare words the data
+  // plane offers no way to list, so a typed bare name must be selectable.
+  describe("Azure deployment names (bare ids)", () => {
+    const azureSample: ModelInfo = { ...sample, configProvider: "azure", configId: "cfg_az" };
+
+    it("offers a bare typed id for an Azure connection", () => {
+      const opt = customModelOption("gpt5mini", azureSample);
+      expect(opt?.id).toBe("gpt5mini");
+      expect(opt?.configId).toBe("cfg_az");
+    });
+
+    it("still rejects non-name-shaped input (spaces, empty)", () => {
+      expect(customModelOption("gpt 5 mini", azureSample)).toBeNull();
+      expect(customModelOption("   ", azureSample)).toBeNull();
+    });
+
+    it("never offers a bare id without an Azure sample to justify it", () => {
+      expect(customModelOption("gpt5mini", undefined)).toBeNull();
+      expect(customModelOption("gpt5mini", sample)).toBeNull();
+    });
+  });
 });

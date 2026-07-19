@@ -136,7 +136,10 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
   },
   azure: {
     label: "Azure OpenAI",
-    blurb: "Connect to your Azure OpenAI resource (v1 API) — deployments appear as models.",
+    // The model id is the DEPLOYMENT name. The data plane can't list
+    // deployments, so the picker shows the resource's base models as
+    // suggestions and accepts a typed deployment name.
+    blurb: "Connect to your Azure OpenAI resource (v1 API). The model is your deployment name — type it if it isn't listed.",
     iconSlug: "azure",
     requiresKey: true,
     requiresBaseUrl: true,
