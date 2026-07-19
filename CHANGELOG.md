@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.10] - 2026-07-19
+
 ### Fixed
 
 - Azure OpenAI connections now accept the portal's full "Target URI" (e.g. `…/openai/v1/responses?api-version=…`) in the Base URL field — the operation path and query are stripped automatically; previously model listing failed on Foundry (`*.services.ai.azure.com`) endpoints pasted this way.
