@@ -6,6 +6,13 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Azure OpenAI as a first-class provider (modern v1 API): connect the resource endpoint + API key in Settings → Connections; deployments list into the model picker; Responses API by default with a Chat Completions toggle.
+- Google Vertex AI as a provider via express-mode API keys (no service-account JSON); Gemini's full multimodal input and Google Search grounding work as with the direct Gemini provider.
+- Amazon Bedrock as a provider via long-term Bedrock API keys; the endpoint field takes an AWS Region or a full runtime URL, and the model list resolves inference-profile ids (`eu.anthropic…`) automatically.
+- Groq as a first-party connection preset (previously reachable only as a custom OpenAI-compatible endpoint).
+
 ## [0.10.8] - 2026-07-16
 
 ### Fixed

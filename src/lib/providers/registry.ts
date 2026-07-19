@@ -12,20 +12,24 @@ import type { ApiStyle } from "./index";
 
 // Gateways (LiteLLM proxy, OpenRouter) are listed first: routing every backend
 // through one OpenAI-compatible endpoint is the recommended, most scalable
-// setup — one adapter, one model list, unified cost/limits. Then the two big
-// direct providers, then a cluster of first-party presets that are all just
-// OpenAI-compatible endpoints with a baked-in base URL (DeepSeek, Mistral, xAI,
-// Z.ai) — no SDK of their own, they ride the same litellm code path. Ollama
-// (local) is last.
+// setup — one adapter, one model list, unified cost/limits. Then the big
+// direct providers (each with its own SDK), then a cluster of first-party
+// presets that are all just OpenAI-compatible endpoints with a baked-in base
+// URL (DeepSeek, Mistral, xAI, Z.ai) — no SDK of their own, they ride the same
+// litellm code path. Ollama (local) is last.
 export const PROVIDERS = [
   "litellm",
   "openrouter",
   "openai",
+  "azure",
   "anthropic",
   "google",
+  "vertex",
+  "bedrock",
   "deepseek",
   "mistral",
   "xai",
+  "groq",
   "zhipu",
   "ollama",
 ] as const;
@@ -130,6 +134,19 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     // it stays tool-only rather than risking a hard error on a non-audio model.
     nativeInput: ["image", "pdf"],
   },
+  azure: {
+    label: "Azure OpenAI",
+    blurb: "Connect to your Azure OpenAI resource (v1 API) — deployments appear as models.",
+    iconSlug: "azure",
+    requiresKey: true,
+    requiresBaseUrl: true,
+    baseUrlPlaceholder: "https://your-resource.openai.azure.com",
+    hasCatalog: false,
+    // @ai-sdk/azure wraps the very same @ai-sdk/openai serializers, so the
+    // native-input reality matches OpenAI direct: image + PDF ride the file
+    // part; audio is deployment-specific with no retry, so it stays tool-only.
+    nativeInput: ["image", "pdf"],
+  },
   anthropic: {
     label: "Anthropic",
     blurb: "Connect directly to Claude, or to an Anthropic-compatible endpoint (/v1/messages).",
@@ -155,6 +172,37 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     // Gemini is the multimodal flagship: image, PDF, audio AND video all ride
     // the @ai-sdk/google file part (video can even be a YouTube URL).
     nativeInput: ["image", "pdf", "audio", "video"],
+  },
+  vertex: {
+    label: "Google Vertex AI",
+    blurb: "Gemini through your Google Cloud project — uses a Vertex AI express-mode API key.",
+    iconSlug: "vertexai",
+    requiresKey: true,
+    requiresBaseUrl: false,
+    // Express mode defaults to the global publisher endpoint; a regional
+    // override (or a proxy in front of Vertex) can be pasted here.
+    optionalBaseUrl: true,
+    baseUrlPlaceholder: "https://aiplatform.googleapis.com/v1/publishers/google",
+    hasCatalog: false,
+    // Same @ai-sdk/google language model under the hood as the Gemini provider,
+    // so the full multimodal set serializes: image, PDF, audio AND video.
+    nativeInput: ["image", "pdf", "audio", "video"],
+  },
+  bedrock: {
+    label: "Amazon Bedrock",
+    blurb: "Claude, Nova and open models on AWS — connect with a Bedrock API key and Region.",
+    iconSlug: "bedrock",
+    requiresKey: true,
+    // The field takes a bare AWS Region ("eu-central-1") or a full runtime URL;
+    // see parseBedrockEndpoint. Long-term Bedrock API keys (bearer) only — IAM
+    // SigV4 key pairs are out of scope, use a gateway for those.
+    requiresBaseUrl: true,
+    defaultBaseUrl: "us-east-1",
+    baseUrlPlaceholder: "us-east-1 (AWS region) or https://bedrock-runtime.us-east-1.amazonaws.com",
+    hasCatalog: false,
+    // The Converse API takes image + document blocks across its chat models;
+    // audio/video stay tool-only (model-specific, no retry).
+    nativeInput: ["image", "pdf"],
   },
   deepseek: {
     label: "DeepSeek",
@@ -185,6 +233,16 @@ export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
     requiresKey: true,
     requiresBaseUrl: false,
     defaultBaseUrl: "https://api.x.ai/v1",
+    hasCatalog: false,
+    nativeInput: ["image"],
+  },
+  groq: {
+    label: "Groq",
+    blurb: "Connect directly to Groq — very fast open-weights inference (Llama, Qwen, Kimi).",
+    iconSlug: "groq",
+    requiresKey: true,
+    requiresBaseUrl: false,
+    defaultBaseUrl: "https://api.groq.com/openai/v1",
     hasCatalog: false,
     nativeInput: ["image"],
   },
@@ -275,8 +333,9 @@ export function isDeliverableImageFormat(mimeType: string): boolean {
  * reads images, whatever the file's format.
  *
  * Precedence:
- * 1. Video only serializes through the Google SDK — gated to Gemini regardless
- *    of any catalog claim (OpenRouter's provider has no `video_url`).
+ * 1. Video only serializes through the Google SDK — gated to Gemini (direct or
+ *    via Vertex, the same language model class) regardless of any catalog claim
+ *    (OpenRouter's provider has no `video_url`).
  * 2. OpenRouter parses PDFs server-side for ANY model (its file parser is
  *    model-agnostic), so PDF is always native there — never gated by per-model
  *    `input_modalities`, which often omit `file` even for PDF-capable models.
@@ -290,7 +349,7 @@ export function modelSupportsModality(
   provider: string,
   modelInput?: Modality[] | null,
 ): boolean {
-  if (mod === "video") return provider === "google";
+  if (mod === "video") return provider === "google" || provider === "vertex";
   if (mod === "pdf" && provider === "openrouter") return true;
   if (modelInput && modelInput.length) return modelInput.includes(mod);
   if (isProviderName(provider)) return PROVIDER_META[provider].nativeInput.includes(mod);
@@ -345,7 +404,8 @@ const NATIVE_AUDIO_CONTAINERS = new Set(["audio/wav", "audio/mp3", "audio/mpeg"]
  */
 export function audioNeedsTranscode(mimeType: string, provider: string): boolean {
   if (!mimeType.startsWith("audio/")) return false;
-  if (provider === "google") return false;
+  // Gemini serializes any container — direct or through Vertex (same model class).
+  if (provider === "google" || provider === "vertex") return false;
   return !NATIVE_AUDIO_CONTAINERS.has(mimeType);
 }
 
@@ -360,12 +420,15 @@ export function audioNeedsTranscode(mimeType: string, provider: string): boolean
  * (litellm/deepseek/mistral/xai/zhipu/ollama) `JSON.stringify` the content value,
  * so a base64 image would be injected into the prompt as megabytes of TEXT —
  * excluded. anthropic/google/openrouter and OpenAI's *Responses* transport
- * convert it to a real image block. `apiStyle` here must be the EFFECTIVE style
+ * convert it to a real image block; Azure reuses those very transports, so it
+ * follows the same rule. `apiStyle` here must be the EFFECTIVE style
  * (see resolveUserModelInfo), not the raw "auto".
  */
 export function supportsImageToolResults(provider: string, apiStyle?: ApiStyle): boolean {
-  if (provider === "anthropic" || provider === "google" || provider === "openrouter") return true;
-  if (provider === "openai") return apiStyle === "responses";
+  // vertex rides the same @ai-sdk/google model; bedrock's Converse mapping
+  // emits real image blocks inside toolResult content.
+  if (provider === "anthropic" || provider === "google" || provider === "vertex" || provider === "bedrock" || provider === "openrouter") return true;
+  if (provider === "openai" || provider === "azure") return apiStyle === "responses";
   return false;
 }
 
@@ -380,7 +443,46 @@ export function supportsImageToolResults(provider: string, apiStyle?: ApiStyle):
  */
 export function modelTakesImages(provider: string, modelInput?: Modality[] | null): boolean {
   if (modelInput && modelInput.length) return modelInput.includes("image");
-  return provider === "anthropic" || provider === "google" || provider === "openai" || provider === "openrouter";
+  return ["anthropic", "google", "vertex", "openai", "azure", "bedrock", "openrouter"].includes(provider);
+}
+
+/**
+ * Normalize whatever the admin pasted as an Azure endpoint into the exact
+ * `baseURL` @ai-sdk/azure expects. The SDK treats the two host classes
+ * differently (its isAzureOpenAIBaseURL check): on `*.openai.azure.com` it
+ * appends `/v1` + `?api-version` itself, so the prefix must end at `/openai`;
+ * any other host (Foundry `*.cognitiveservices.azure.com`, an APIM front) is
+ * used verbatim, so the prefix must carry the full `/openai/v1` path. Accepts
+ * the portal's bare endpoint, `/openai`, and `/openai/v1` forms of both.
+ */
+/**
+ * The Bedrock connection's "base URL" field takes either a bare AWS Region
+ * ("eu-central-1") — the friendly default, a fixed public AWS host — or a full
+ * runtime URL (a private gateway / VPC endpoint). Split it into what
+ * @ai-sdk/amazon-bedrock wants: `region` (used to build the default host and
+ * inference-profile prefixes) and an optional explicit `baseURL`. When a URL is
+ * given, the region is read from its `.{region}.amazonaws.com` host when
+ * possible, else falls back to us-east-1 (only prefix inference uses it then).
+ */
+export function parseBedrockEndpoint(raw: string): { region: string; baseURL?: string } {
+  const value = raw.trim().replace(/\/+$/, "");
+  if (/^https?:\/\//.test(value)) {
+    const m = value.match(/\.([a-z]{2}(?:-[a-z]+)+-\d)\.amazonaws\.com$/);
+    return { region: m?.[1] ?? "us-east-1", baseURL: value };
+  }
+  return { region: value || "us-east-1" };
+}
+
+export function normalizeAzureBaseUrl(raw: string): string {
+  const url = raw.trim().replace(/\/+$/, "");
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return url; }
+  if (parsed.hostname.endsWith(".openai.azure.com")) {
+    return `${url.replace(/\/openai(\/v1)?$/, "")}/openai`;
+  }
+  if (url.endsWith("/openai")) return `${url}/v1`;
+  if (parsed.pathname === "" || parsed.pathname === "/") return `${url}/openai/v1`;
+  return url;
 }
 
 // ── Model id encoding ──────────────────────────────────────────────────────

@@ -129,7 +129,7 @@ export function isVisionUnsupportedError(raw: unknown): boolean {
 export function isReasoningUnsupportedError(raw: unknown): boolean {
   const detail = errorText(raw);
   return (
-    /\b(thinking|reasoning|reasoning_effort|reasoningeffort|budget_?tokens|reasoning_?summary)\b/i.test(
+    /\b(thinking|reasoning|reasoning_effort|reasoningeffort|budget_?tokens|reasoning_?summary|reasoning_?config)\b/i.test(
       detail,
     ) &&
     /\b(not supported|unsupported|not available|invalid|unknown|unexpected|unrecognized|does ?n'?t support|do(es)? not support|cannot|not permitted|not allowed)\b/i.test(

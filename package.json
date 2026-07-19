@@ -25,8 +25,11 @@
     "sandbox:build": "docker build -f Dockerfile.sandbox -t capka-sandbox ."
   },
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^4.0.137",
     "@ai-sdk/anthropic": "^3.0.58",
+    "@ai-sdk/azure": "^3.0.91",
     "@ai-sdk/google": "^3.0.83",
+    "@ai-sdk/google-vertex": "^4.0.164",
     "@ai-sdk/openai": "^3.0.41",
     "@ai-sdk/openai-compatible": "^2.0.51",
     "@ai-sdk/react": "^3.0.118",

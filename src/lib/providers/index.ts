@@ -1,5 +1,8 @@
 import { wrapLanguageModel, extractReasoningMiddleware } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createAzure } from "@ai-sdk/azure";
+import { createVertex } from "@ai-sdk/google-vertex";
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
@@ -29,7 +32,7 @@ function guardedFetchFor(baseUrl: string | undefined, blockPrivate: boolean): ty
 // Provider metadata + model-id helpers live in the dependency-free registry so
 // client bundles don't pull these AI SDKs. Re-exported here for back-compat.
 export * from "./registry";
-import { PROVIDER_META, type ProviderName } from "./registry";
+import { PROVIDER_META, normalizeAzureBaseUrl, parseBedrockEndpoint, type ProviderName } from "./registry";
 
 /**
  * Wrap a model so reasoning it emits *inline* as `<think>…</think>` in the
@@ -76,6 +79,7 @@ export function getModel(
     case "deepseek":
     case "mistral":
     case "xai":
+    case "groq":
     case "zhipu": {
       // Every OpenAI-compatible /v1 endpoint shares one adapter: a self-hosted
       // gateway (LiteLLM proxy, vLLM, OpenCode Zen, …) where the user supplies the
@@ -108,6 +112,21 @@ export function getModel(
       if (style === "responses") return p.responses(modelId);
       return config?.baseUrl ? p.chat(modelId) : p(modelId);
     }
+    case "azure": {
+      // Azure OpenAI over the modern v1 surface via the first-party adapter:
+      // model ids are DEPLOYMENT names, auth is the `api-key` header, and the
+      // default transport is the Responses API (the SDK's default) — with the
+      // same Chat Completions escape hatch as the openai provider. Legacy
+      // deployment-based URLs (useDeploymentBasedUrls) are deliberately not
+      // supported. The endpoint is user-supplied → guarded fetch, like any
+      // custom baseUrl.
+      const p = createAzure({
+        baseURL: config?.baseUrl ? normalizeAzureBaseUrl(config.baseUrl) : undefined,
+        apiKey: config?.apiKey,
+        fetch: guardedFetchFor(config?.baseUrl, blockPrivate),
+      });
+      return config?.apiStyle === "chat" ? p.chat(modelId) : p(modelId);
+    }
     case "anthropic": {
       const p = createAnthropic({ apiKey: config?.apiKey, baseURL: config?.baseUrl, fetch: guardedFetchFor(config?.baseUrl, blockPrivate) });
       return p(modelId);
@@ -121,6 +140,35 @@ export function getModel(
       // native video + audio (image/pdf too). Thinking is requested per-call via
       // providerOptions, Google Search grounding via providerNativeTools (below).
       const p = createGoogleGenerativeAI({ apiKey: config?.apiKey });
+      return p(modelId);
+    }
+    case "vertex": {
+      // Vertex AI in EXPRESS MODE: a plain API key from the Google Cloud
+      // console, no service-account JSON / project / location — that keeps the
+      // connection form identical to every other provider. The adapter reuses
+      // @ai-sdk/google's language model, so the full multimodal set and the
+      // `google` providerOptions namespace apply. Tuned endpoints and partner
+      // (Anthropic-on-Vertex) models need real GCP credentials and are out of
+      // scope — route those through a LiteLLM proxy instead.
+      const p = createVertex({
+        apiKey: config?.apiKey,
+        baseURL: config?.baseUrl || undefined,
+        fetch: guardedFetchFor(config?.baseUrl, blockPrivate),
+      });
+      return p(modelId);
+    }
+    case "bedrock": {
+      // Bedrock with a long-term API key (bearer) — the only auth that fits a
+      // paste-one-secret connection form. IAM SigV4 key pairs are deliberately
+      // unsupported. The endpoint field is a bare Region (fixed public AWS
+      // host — no SSRF surface) or a full URL (private gateway → guarded).
+      const { region, baseURL } = parseBedrockEndpoint(config?.baseUrl || "");
+      const p = createAmazonBedrock({
+        apiKey: config?.apiKey,
+        region,
+        baseURL,
+        fetch: guardedFetchFor(baseURL, blockPrivate),
+      });
       return p(modelId);
     }
     case "ollama": {
@@ -142,6 +190,8 @@ export function getModel(
  * coexists with the sandbox/MCP/skill tools. Empty for every other provider.
  */
 export function providerNativeTools(provider: string) {
-  if (provider === "google") return { google_search: google.tools.googleSearch({}) };
+  // Vertex serves the same Gemini models through the same language-model class,
+  // so the Google Search grounding tool applies to both.
+  if (provider === "google" || provider === "vertex") return { google_search: google.tools.googleSearch({}) };
   return {};
 }

@@ -6,7 +6,7 @@ import { iconForGroup, prettyName } from "@/lib/models/normalize";
 import { getBlockPrivateProviderUrls, getModelMinContext, getModelMaxPrice } from "@/lib/settings";
 import { assertSafeUrl, guardedFetchOnce } from "@/lib/net/ssrf";
 import { parseOpenRouterModels, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
-import { PROVIDER_META, type ProviderName, type Modality } from "./registry";
+import { PROVIDER_META, normalizeAzureBaseUrl, parseBedrockEndpoint, type ProviderName, type Modality } from "./registry";
 
 /**
  * A model as the picker consumes it. Kept here (not in the route) so server
@@ -93,8 +93,16 @@ async function fetchJson(url: string, init?: RequestInit, blockPrivate?: boolean
  * Resolves DNS and blocks link-local/metadata (always) plus private ranges when
  * the admin opted into the stricter policy.
  */
-export async function assertSafeProviderConfig(_provider: string, baseUrl?: string | null): Promise<void> {
+export async function assertSafeProviderConfig(provider: string, baseUrl?: string | null): Promise<void> {
   if (!baseUrl) return;
+  // Bedrock's endpoint field may hold a bare AWS Region — that's a fixed public
+  // host, not a URL, so there's nothing to police. Only a real URL is a vector.
+  if (provider === "bedrock") {
+    const { baseURL } = parseBedrockEndpoint(baseUrl);
+    if (!baseURL) return;
+    await assertSafeUrl(baseURL, await getBlockPrivateProviderUrls());
+    return;
+  }
   await assertSafeUrl(baseUrl, await getBlockPrivateProviderUrls());
 }
 
@@ -254,15 +262,18 @@ async function listOpenRouterLive(apiKey?: string): Promise<ModelInfo[]> {
 async function listOpenAICompatible(
   baseUrl: string,
   apiKey: string | undefined,
-  opts: { filterChat?: boolean; blockPrivate?: boolean } = {},
+  opts: { filterChat?: boolean; blockPrivate?: boolean; headers?: Record<string, string> } = {},
 ): Promise<ModelInfo[]> {
   const blockPrivate = opts.blockPrivate ?? false;
   const root = baseUrl.replace(/\/+$/, "");
   // Append `/models` when the base already carries a version segment (/v1, but
   // also Z.ai's /v4); otherwise assume the conventional /v1/models.
   const url = /\/v\d+$/.test(root) ? `${root}/models` : `${root}/v1/models`;
+  // Bearer is the OpenAI-compatible convention; a caller may override the auth
+  // header wholesale (Azure authenticates /models with `api-key` instead).
+  const headers = opts.headers ?? (apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined);
   // fetchJson validates + pins the derived URL's host (user-supplied endpoint).
-  const raw = (await fetchJson(url, apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined, blockPrivate)) as {
+  const raw = (await fetchJson(url, headers ? { headers } : undefined, blockPrivate)) as {
     data?: { id: string }[];
   };
   let ids = (raw.data ?? []).map((m) => m.id).filter(Boolean);
@@ -309,6 +320,89 @@ async function listGoogle(apiKey: string): Promise<ModelInfo[]> {
   const lookup = await catalogLookup(list.map((m) => m.id));
   return list
     .map((m) => toModelInfo(m.id, m.displayName || prettyName(m.id), "Google", lookup(m.id), true))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Vertex AI express mode. The publisher catalog at /publishers/google/models is
+ * the natural listing, but whether an express key may call ListPublisherModels
+ * varies by key restriction — and Gemini ids have no "/" so the picker's
+ * type-a-custom-id fallback can't rescue an empty list. So: try the live
+ * catalog; on ANY failure fall back to the synced price book's bare `gemini-*`
+ * rows (Vertex serves exactly those ids), so the picker always populates.
+ */
+async function listVertexExpress(apiKey: string, baseUrl?: string, blockPrivate = false): Promise<ModelInfo[]> {
+  try {
+    // A custom base URL (regional endpoint / proxy) is honored here too — it's
+    // the same ".../publishers/google" prefix the SDK uses, so "/models" lists it.
+    const root = (baseUrl || "https://aiplatform.googleapis.com/v1/publishers/google").replace(/\/+$/, "");
+    const raw = (await fetchJson(
+      `${root}/models?pageSize=200`,
+      { headers: { "x-goog-api-key": apiKey } },
+      baseUrl ? blockPrivate : undefined,
+    )) as { publisherModels?: { name?: string }[] };
+    const ids = [...new Set(
+      (raw.publisherModels ?? [])
+        .map((m) => m.name?.replace(/^publishers\/google\/models\//, "") ?? "")
+        .filter((id) => /gemini/i.test(id)),
+    )];
+    if (ids.length) {
+      const lookup = await catalogLookup(ids, "litellm");
+      return ids
+        .map((id) => toModelInfo(id, prettyName(id), "Google", lookup(id), true))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+  } catch { /* fall through to the catalog */ }
+  const rows = await db
+    .select()
+    .from(modelsTable)
+    .where(and(eq(modelsTable.source, "litellm"), like(modelsTable.id, "gemini-%")))
+    .orderBy(asc(modelsTable.id));
+  return rows.map((m) => toModelInfo(m.id, m.displayName || prettyName(m.id), "Google", m as CatalogRow, true));
+}
+
+/**
+ * Bedrock's ListFoundationModels (control plane `bedrock.`, not the runtime
+ * host) with the same bearer API key. The nuance that matters: newer models
+ * (Claude 4.x, Nova…) are NOT invokable by their bare id — they require an
+ * inference profile, so `inferenceTypesSupported` decides whether to offer the
+ * bare id (ON_DEMAND) or the geo-prefixed profile id (`eu.anthropic.claude…`)
+ * that the Converse API actually accepts in that region.
+ */
+async function listBedrock(apiKey: string, rawEndpoint: string, blockPrivate: boolean): Promise<ModelInfo[]> {
+  const { region, baseURL } = parseBedrockEndpoint(rawEndpoint);
+  const controlUrl = baseURL
+    ? `${baseURL.replace("bedrock-runtime.", "bedrock.")}/foundation-models`
+    : `https://bedrock.${region}.amazonaws.com/foundation-models`;
+  // Only a user-supplied URL needs the SSRF policy; the region-built AWS host is fixed.
+  const raw = (await fetchJson(
+    `${controlUrl}?byOutputModality=TEXT`,
+    { headers: { Authorization: `Bearer ${apiKey}` } },
+    baseURL ? blockPrivate : undefined,
+  )) as {
+    modelSummaries?: {
+      modelId?: string;
+      modelName?: string;
+      providerName?: string;
+      responseStreamingSupported?: boolean;
+      inferenceTypesSupported?: string[];
+      modelLifecycle?: { status?: string };
+    }[];
+  };
+  // us-* → "us.", eu-* → "eu.", ap-* → "apac." (AWS's one naming exception).
+  const geo = region.startsWith("ap-") ? "apac" : region.split("-")[0];
+  const ids = [...new Set(
+    (raw.modelSummaries ?? [])
+      .filter((m) => m.modelId && m.responseStreamingSupported !== false && m.modelLifecycle?.status !== "LEGACY")
+      .map((m) =>
+        m.inferenceTypesSupported?.includes("ON_DEMAND") ? m.modelId! :
+        m.inferenceTypesSupported?.includes("INFERENCE_PROFILE") ? `${geo}.${m.modelId!}` : "",
+      )
+      .filter(Boolean),
+  )];
+  const lookup = await catalogLookup(ids, "litellm");
+  return ids
+    .map((id) => toModelInfo(id, prettyName(id), null, lookup(id), true))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -453,6 +547,7 @@ async function listProviderModelsLive(opts: {
     case "deepseek":
     case "mistral":
     case "xai":
+    case "groq":
     case "zhipu": {
       // First-party OpenAI-compatible presets: fixed public host (no SSRF
       // policy), key required, base URL from the registry unless overridden.
@@ -463,12 +558,29 @@ async function listProviderModelsLive(opts: {
     case "openai":
       if (!opts.apiKey) return [];
       return listOpenAICompatible("https://api.openai.com/v1", opts.apiKey, { filterChat: true });
+    case "azure": {
+      // The v1 surface lists this resource's DEPLOYMENTS at /openai/v1/models.
+      // The normalized SDK prefix ends in /openai (Azure host) or /openai/v1
+      // (Foundry/gateway host), so the generic version-segment logic above
+      // lands on /openai/v1/models either way.
+      if (!opts.apiKey || !opts.baseUrl) return [];
+      return listOpenAICompatible(normalizeAzureBaseUrl(opts.baseUrl), opts.apiKey, {
+        blockPrivate,
+        headers: { "api-key": opts.apiKey },
+      });
+    }
     case "anthropic":
       if (!opts.apiKey) return [];
       return listAnthropic(opts.apiKey, opts.baseUrl, blockPrivate);
     case "google":
       if (!opts.apiKey) return [];
       return listGoogle(opts.apiKey);
+    case "vertex":
+      if (!opts.apiKey) return [];
+      return listVertexExpress(opts.apiKey, opts.baseUrl, blockPrivate);
+    case "bedrock":
+      if (!opts.apiKey) return [];
+      return listBedrock(opts.apiKey, opts.baseUrl || "", blockPrivate);
     case "ollama":
       return listOllama(opts.baseUrl || PROVIDER_META.ollama.defaultBaseUrl!, blockPrivate);
   }

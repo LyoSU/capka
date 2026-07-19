@@ -46,6 +46,7 @@ import Baseten from "@lobehub/icons/es/Baseten";
 import Vllm from "@lobehub/icons/es/Vllm";
 import LmStudio from "@lobehub/icons/es/LmStudio";
 import Azure from "@lobehub/icons/es/Azure";
+import VertexAI from "@lobehub/icons/es/VertexAI";
 import HuggingFace from "@lobehub/icons/es/HuggingFace";
 import Cloudflare from "@lobehub/icons/es/Cloudflare";
 import Github from "@lobehub/icons/es/Github";
@@ -74,6 +75,8 @@ const ICONS: Record<string, IconComponent> = {
   perplexity: Perplexity,
   microsoft: Microsoft,
   amazon: Bedrock,
+  bedrock: Bedrock,
+  vertexai: VertexAI,
   ai21: Ai21,
   zhipu: Zhipu,
   moonshot: Moonshot,

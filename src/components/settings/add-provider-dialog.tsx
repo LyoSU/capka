@@ -37,8 +37,9 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
   const [iconSlug, setIconSlug] = useState<string | null>(null);
   const [formShared, setFormShared] = useState(true);
   const [showKey, setShowKey] = useState(false);
-  // OpenAI only: drive the model over Chat Completions instead of the default
-  // Responses API. Off persists as null (auto = Responses); on persists "chat".
+  // OpenAI/Azure only: drive the model over Chat Completions instead of the
+  // default Responses API. Off persists as null (auto = Responses); on
+  // persists "chat".
   const [useChatApi, setUseChatApi] = useState(false);
 
   const meta = PROVIDER_META[provider];
@@ -95,8 +96,9 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
         : meta.optionalBaseUrl
           ? baseUrl.trim() || undefined
           : undefined;
-      // The wire transport only applies to OpenAI; default (Responses) stays unset.
-      const effectiveApiStyle = provider === "openai" && useChatApi ? "chat" : undefined;
+      // The wire transport only applies to OpenAI and Azure; default
+      // (Responses) stays unset.
+      const effectiveApiStyle = (provider === "openai" || provider === "azure") && useChatApi ? "chat" : undefined;
 
       const testRes = await fetch("/api/settings/providers/test", {
         method: "POST",
@@ -224,7 +226,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
               </div>
             )}
 
-            {provider === "openai" && (
+            {(provider === "openai" || provider === "azure") && (
               <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{t("chatCompletions")}</p>

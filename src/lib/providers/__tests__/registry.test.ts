@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { supportsImageToolResults } from "../registry";
+import { supportsImageToolResults, normalizeAzureBaseUrl, parseBedrockEndpoint } from "../registry";
 
 // Guards the transport matrix for images returned INSIDE a tool result (view_file).
 // The @ai-sdk/openai chat path and @ai-sdk/openai-compatible JSON.stringify such
@@ -8,20 +8,83 @@ describe("supportsImageToolResults", () => {
   it("allows the providers whose adapters convert image-data to a real image block", () => {
     expect(supportsImageToolResults("anthropic")).toBe(true);
     expect(supportsImageToolResults("google")).toBe(true);
+    expect(supportsImageToolResults("vertex")).toBe(true);
+    expect(supportsImageToolResults("bedrock")).toBe(true);
     expect(supportsImageToolResults("openrouter")).toBe(true);
   });
 
-  it("allows OpenAI only over the Responses transport, not Chat Completions", () => {
-    expect(supportsImageToolResults("openai", "responses")).toBe(true);
-    expect(supportsImageToolResults("openai", "chat")).toBe(false);
-    // effective style is always resolved before this call — "auto" never reaches it,
-    // but guard the default anyway
-    expect(supportsImageToolResults("openai")).toBe(false);
+  it("allows OpenAI and Azure only over the Responses transport, not Chat Completions", () => {
+    for (const p of ["openai", "azure"]) {
+      expect(supportsImageToolResults(p, "responses")).toBe(true);
+      expect(supportsImageToolResults(p, "chat")).toBe(false);
+      // effective style is always resolved before this call — "auto" never reaches it,
+      // but guard the default anyway
+      expect(supportsImageToolResults(p)).toBe(false);
+    }
   });
 
   it("excludes every openai-compatible gateway (base64 image would enter as text)", () => {
-    for (const p of ["litellm", "deepseek", "mistral", "xai", "zhipu", "ollama"]) {
+    for (const p of ["litellm", "deepseek", "mistral", "xai", "groq", "zhipu", "ollama"]) {
       expect(supportsImageToolResults(p)).toBe(false);
     }
+  });
+});
+
+// The SDK's URL builder treats the two host classes differently: on
+// *.openai.azure.com it appends /v1 + ?api-version itself (prefix must stop at
+// /openai); any other host is used verbatim (prefix must carry /openai/v1).
+describe("normalizeAzureBaseUrl", () => {
+  it("ends the prefix at /openai for *.openai.azure.com whatever form was pasted", () => {
+    for (const raw of [
+      "https://res.openai.azure.com",
+      "https://res.openai.azure.com/",
+      "https://res.openai.azure.com/openai",
+      "https://res.openai.azure.com/openai/v1",
+      "https://res.openai.azure.com/openai/v1/",
+      "  https://res.openai.azure.com/openai ",
+    ]) {
+      expect(normalizeAzureBaseUrl(raw)).toBe("https://res.openai.azure.com/openai");
+    }
+  });
+
+  it("carries the full /openai/v1 path for non-Azure hosts (Foundry, APIM, gateways)", () => {
+    expect(normalizeAzureBaseUrl("https://res.cognitiveservices.azure.com")).toBe(
+      "https://res.cognitiveservices.azure.com/openai/v1",
+    );
+    expect(normalizeAzureBaseUrl("https://res.cognitiveservices.azure.com/openai")).toBe(
+      "https://res.cognitiveservices.azure.com/openai/v1",
+    );
+    // A gateway that already exposes a full custom prefix is left alone.
+    expect(normalizeAzureBaseUrl("https://gw.example.com/azure/openai/v1")).toBe(
+      "https://gw.example.com/azure/openai/v1",
+    );
+  });
+
+  it("returns non-URL garbage unchanged (the connect test will surface the failure)", () => {
+    expect(normalizeAzureBaseUrl("not a url")).toBe("not a url");
+  });
+});
+
+// The Bedrock endpoint field is a bare AWS Region (fixed public host — the
+// friendly default) or a full URL (private gateway / VPC endpoint).
+describe("parseBedrockEndpoint", () => {
+  it("treats a bare region as region-only (no baseURL → no SSRF surface)", () => {
+    expect(parseBedrockEndpoint("eu-central-1")).toEqual({ region: "eu-central-1" });
+    expect(parseBedrockEndpoint(" us-east-1 ")).toEqual({ region: "us-east-1" });
+    expect(parseBedrockEndpoint("")).toEqual({ region: "us-east-1" });
+  });
+
+  it("extracts the region from an amazonaws.com runtime URL", () => {
+    expect(parseBedrockEndpoint("https://bedrock-runtime.ap-southeast-2.amazonaws.com/")).toEqual({
+      region: "ap-southeast-2",
+      baseURL: "https://bedrock-runtime.ap-southeast-2.amazonaws.com",
+    });
+  });
+
+  it("keeps a custom gateway URL and falls back to us-east-1 for the region", () => {
+    expect(parseBedrockEndpoint("https://bedrock.internal.example.com")).toEqual({
+      region: "us-east-1",
+      baseURL: "https://bedrock.internal.example.com",
+    });
   });
 });

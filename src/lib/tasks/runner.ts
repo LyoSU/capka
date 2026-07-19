@@ -66,12 +66,22 @@ function reasoningOptions(provider: string): Record<string, Record<string, unkno
     case "openai":
       // Responses API returns a visible reasoning summary.
       return { openai: { reasoningSummary: "auto" } };
+    case "azure":
+      // Same Responses-API summary knob — the azure adapter reads the "azure"
+      // namespace (falling back to "openai"); the chat path ignores it.
+      return { azure: { reasoningSummary: "auto" } };
     case "google":
-      // Gemini: surface its thinking — includeThoughts streams a thought summary
-      // into reasoning-delta. (Google Search grounding is a provider-executed
-      // TOOL in this SDK, not a providerOption, so it's wired into the tool set
-      // via providerNativeTools(), not here.)
+    case "vertex":
+      // Gemini (direct or via Vertex — same model class, same "google"
+      // namespace): includeThoughts streams a thought summary into
+      // reasoning-delta. (Google Search grounding is a provider-executed TOOL
+      // in this SDK, not a providerOption, so it's wired into the tool set via
+      // providerNativeTools(), not here.)
       return { google: { thinkingConfig: { includeThoughts: true } } };
+    case "bedrock":
+      // Converse reasoningConfig — Claude/Nova reasoning models stream
+      // reasoningContent; non-reasoning models trip the retry-without path.
+      return { bedrock: { reasoningConfig: { type: "enabled", budgetTokens: 4000 } } };
     case "litellm":
       // Namespace matches the provider `name` in getModel. reasoningEffort asks
       // the gateway's reasoning model to think; openai-compatible then parses the
@@ -80,6 +90,7 @@ function reasoningOptions(provider: string): Record<string, Record<string, unkno
     case "deepseek":
     case "mistral":
     case "xai":
+    case "groq":
     case "zhipu":
       // First-party OpenAI-compatible presets ride the same mechanism as litellm:
       // the namespace matches the provider `name` in getModel. A non-reasoning
