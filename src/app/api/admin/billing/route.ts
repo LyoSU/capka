@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { requireAdmin, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { tiers, users } from "@/lib/db/schema";
-import { getProviderKeyMode, setSetting, type ProviderKeyMode } from "@/lib/settings";
+import { getProviderKeyMode, getSetting, setSetting, type ProviderKeyMode } from "@/lib/settings";
 import { getDefaultTier } from "@/lib/billing/limits";
 import { audit } from "@/lib/governance/audit";
 
@@ -20,7 +20,7 @@ function parseCap(v: unknown): string | null {
 export const GET = apiHandler(async () => {
   await requireAdmin();
 
-  const [keyMode, defaultTier, allTiers, userRows] = await Promise.all([
+  const [keyMode, defaultTier, allTiers, userRows, budgetRaw] = await Promise.all([
     getProviderKeyMode(),
     getDefaultTier(),
     db.select().from(tiers).orderBy(tiers.createdAt),
@@ -28,9 +28,11 @@ export const GET = apiHandler(async () => {
       .select({ id: users.id, name: users.name, email: users.email, role: users.role, tierId: users.tierId })
       .from(users)
       .orderBy(users.createdAt),
+    getSetting("usage_monthly_budget_usd"),
   ]);
 
-  return Response.json({ keyMode, defaultTier, tiers: allTiers, users: userRows });
+  const monthlyBudget = budgetRaw != null && budgetRaw !== "" && Number.isFinite(Number(budgetRaw)) ? budgetRaw : null;
+  return Response.json({ keyMode, defaultTier, tiers: allTiers, users: userRows, monthlyBudget });
 });
 
 /**
@@ -66,8 +68,13 @@ export const PUT = apiHandler(async (req: Request) => {
       })
       .where(eq(tiers.id, tier.id))
       .returning();
-    await audit({ actorId: adminId, action: "billing.update", targetType: "billing", targetKey: "limits", detail: { field: "limits", limit5h: updated?.limit5h, limitWeek: updated?.limitWeek, limitMonth: updated?.limitMonth } });
-    return Response.json({ ok: true, defaultTier: updated });
+    // Instance monthly budget (the org's whole shared-key bill) is a KV setting,
+    // not a tier field — the analytics page reads it for the overrun trigger and
+    // the "% of budget" line. "" clears it (unset). Saved with the same button.
+    const budget = parseCap(body.budgetMonthly);
+    await setSetting("usage_monthly_budget_usd", budget ?? "");
+    await audit({ actorId: adminId, action: "billing.update", targetType: "billing", targetKey: "limits", detail: { field: "limits", limit5h: updated?.limit5h, limitWeek: updated?.limitWeek, limitMonth: updated?.limitMonth, budgetMonthly: budget } });
+    return Response.json({ ok: true, defaultTier: updated, monthlyBudget: budget });
   }
 
   if (action === "assignTier") {

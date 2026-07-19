@@ -327,7 +327,16 @@ export async function provisionTelegramUser(
 }
 
 export type Role = "admin" | "user" | "viewer";
-export type AccountStatus = "active" | "pending" | "rejected";
+export type AccountStatus = "active" | "pending" | "rejected" | "suspended";
+
+/** Coerce a raw stored status into the AccountStatus union, fail-CLOSED: only the
+ *  three non-active known values survive; anything else (a future/garbage value)
+ *  collapses to "rejected" so an unknown status can never grant access. "suspended"
+ *  is a real value here (admin revoked access) — it must pass through, not be
+ *  coerced away, or a suspended session would be indistinguishable from rejected. */
+export function normalizeAccountStatus(raw: unknown): AccountStatus {
+  return raw === "active" || raw === "pending" || raw === "suspended" ? raw : "rejected";
+}
 
 /** Require authenticated session — throws UnauthorizedError. */
 export async function requireSession(): Promise<{
@@ -349,10 +358,9 @@ export async function requireSession(): Promise<{
   const rawRole = (session.user as Record<string, unknown>).role;
   const role: Role = rawRole === "admin" || rawRole === "viewer" ? rawRole : "user";
   // Fail-CLOSED: only an explicit "active" grants access. Anything else (pending,
-  // rejected, or some future/manually-set value) is non-active and gated out — the
-  // old `!== "pending" ? "active"` defaulted unknown statuses to active.
-  const rawStatus = (session.user as Record<string, unknown>).status;
-  const status: AccountStatus = rawStatus === "active" ? "active" : rawStatus === "pending" ? "pending" : "rejected";
+  // suspended, rejected, or some future/manually-set value) is non-active and gated
+  // out — the old `!== "pending" ? "active"` defaulted unknown statuses to active.
+  const status = normalizeAccountStatus((session.user as Record<string, unknown>).status);
   return { userId: session.user.id, role, status, session };
 }
 
@@ -381,7 +389,9 @@ function inactiveError(status: AccountStatus): ForbiddenError {
   return new ForbiddenError(
     status === "pending"
       ? "Your account is awaiting administrator approval."
-      : "Your account is not active.",
+      : status === "suspended"
+        ? "Your access has been suspended. Contact your administrator."
+        : "Your account is not active.",
   );
 }
 

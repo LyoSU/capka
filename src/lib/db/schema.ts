@@ -1,6 +1,6 @@
 import {
   pgTable, text, boolean, timestamp, integer, jsonb, index, uniqueIndex, bigint, numeric,
-  primaryKey, type AnyPgColumn,
+  primaryKey, check, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -19,8 +19,10 @@ export const users = pgTable("user", {
   image: text("image"),
   role: text("role").notNull().default("user"), // "admin" | "user" | "viewer"
   // Account lifecycle. "active" can use the app; "pending" signed in but awaiting
-  // admin approval (registration_mode = "approval") — gated out of chat/key use.
-  status: text("status").notNull().default("active"), // "active" | "pending" | "rejected"
+  // admin approval (registration_mode = "approval") — gated out of chat/key use;
+  // "suspended" was approved then had access revoked by an admin (sessions killed);
+  // "rejected" was denied. Non-active statuses are all fail-closed server-side.
+  status: text("status").notNull().default("active"), // "active" | "pending" | "suspended" | "rejected"
   locale: text("locale"), // "en" | "uk" | null (null = follow browser/default)
   // IANA tz (e.g. "Europe/Kyiv"), auto-detected from the browser. null → UTC.
   // Fed into the agent's volatile prompt so it knows the user's local date/time.
@@ -585,6 +587,19 @@ export const capabilityPolicies = pgTable("capability_policies", {
 }, (table) => [
   index("idx_capability_policies_type").on(table.capabilityType),
   index("idx_capability_policies_scope").on(table.scope),
+  // One rule per capability per subject, per scope — otherwise concurrent upserts
+  // duplicate rows and the matcher becomes nondeterministic. Partial so each scope
+  // keys off only its own subject column.
+  uniqueIndex("uq_capability_policies_system").on(table.capabilityType, table.capabilityKey).where(sql`scope = 'system'`),
+  uniqueIndex("uq_capability_policies_user").on(table.userId, table.capabilityType, table.capabilityKey).where(sql`scope = 'user'`),
+  uniqueIndex("uq_capability_policies_project").on(table.projectId, table.capabilityType, table.capabilityKey).where(sql`scope = 'project'`),
+  // The subject columns must match the scope: system has neither, user has only a
+  // user, project has only a project. Keeps the three scopes from blurring.
+  check("ck_capability_policies_subject", sql`
+    (scope = 'system' and user_id is null and project_id is null) or
+    (scope = 'user' and user_id is not null and project_id is null) or
+    (scope = 'project' and project_id is not null and user_id is null)
+  `),
 ]);
 
 // Append-only audit trail of governance-relevant actions.

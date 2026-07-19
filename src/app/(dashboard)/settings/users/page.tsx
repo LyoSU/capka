@@ -3,28 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
-import { Shield, ShieldCheck, Eye, Loader2, Users, Search, Trash2, UserCheck, UserX, Clock } from "lucide-react";
+import { Shield, ShieldCheck, Eye, Loader2, Users, Search, UserCheck, UserX, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-
-type User = {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  status: string;
-  createdAt: string | null;
-  cost30d: number;
-};
+import { UserDrawer, type AdminUser, type Tier } from "./user-drawer";
+import { money, relTime } from "./format";
 
 const roleConfig = {
   admin: { icon: ShieldCheck, variant: "default" as const },
@@ -35,12 +20,14 @@ const roleConfig = {
 export default function UsersPage() {
   const t = useTranslations("settings.usersPage");
   const locale = useLocale();
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [tiers, setTiers] = useState<Tier[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "user" | "viewer">("all");
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const load = useCallback(() =>
     fetch("/api/admin/users")
@@ -49,7 +36,7 @@ export default function UsersPage() {
         if (!r.ok) throw new Error("load");
         return r.json();
       })
-      .then(setUsers)
+      .then((data) => { setUsers(data.users ?? []); setTiers(data.tiers ?? []); })
       .catch((e) => {
         const forbidden = e.message === "forbidden";
         setError(forbidden ? t("adminRequired") : t("loadError"));
@@ -59,21 +46,8 @@ export default function UsersPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const updateRole = async (userId: string, role: string) => {
-    setUpdating(userId);
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, role }),
-      });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error || t("roleUpdateFailed")); return; }
-      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: data.role } : u)));
-      toast.success(t("roleUpdated"));
-    } catch { toast.error(t("roleUpdateFailed")); }
-    finally { setUpdating(null); }
-  };
+  const patchUser = useCallback((id: string, patch: Partial<AdminUser>) =>
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u))), []);
 
   const approve = async (userId: string) => {
     setUpdating(userId);
@@ -82,22 +56,17 @@ export default function UsersPage() {
       body: JSON.stringify({ userId, status: "active" }),
     });
     setUpdating(null);
-    if (res.ok) { toast.success(t("approved")); setUsers((p) => p.map((u) => (u.id === userId ? { ...u, status: "active" } : u))); }
+    if (res.ok) { toast.success(t("approved")); patchUser(userId, { status: "active" }); }
     else toast.error(t("actionFailed"));
   };
 
-  const remove = async (userId: string) => {
+  const reject = async (userId: string) => {
     setUpdating(userId);
     const res = await fetch(`/api/admin/users?userId=${encodeURIComponent(userId)}`, { method: "DELETE" });
     setUpdating(null);
     if (res.ok) { toast.success(t("removed")); setUsers((p) => p.filter((u) => u.id !== userId)); }
     else toast.error(t("actionFailed"));
   };
-
-  const money = (n: number) =>
-    new Intl.NumberFormat(locale, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(n || 0);
-  const joined = (iso: string | null) =>
-    iso ? new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric" }).format(new Date(iso)) : "";
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -111,12 +80,24 @@ export default function UsersPage() {
     .filter((u) => roleFilter === "all" || u.role === roleFilter);
   const showFilters = users.length > 6;
 
+  // Effective month cap for the budget bar: the user's assigned tier, else the
+  // instance default tier. null → no cap → plain spend, no bar.
+  const monthCapFor = (u: AdminUser): number | null => {
+    const tier = tiers.find((x) => x.id === u.tierId) ?? tiers.find((x) => x.isDefault);
+    const raw = tier?.limitMonth;
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
   }
 
+  const openUser = users.find((u) => u.id === openId) ?? null;
+
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-medium">{t("title")}</h2>
@@ -162,13 +143,13 @@ export default function UsersPage() {
               <div key={u.id} className="flex items-center justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{u.name || u.email}</p>
-                  <p className="truncate text-xs text-muted-foreground">{u.email} · {t("requestedOn", { date: joined(u.createdAt) })}</p>
+                  <p className="truncate text-xs text-muted-foreground">{u.email}</p>
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button size="sm" onClick={() => approve(u.id)} disabled={updating === u.id}>
                     <UserCheck className="mr-1 h-3.5 w-3.5" />{t("approve")}
                   </Button>
-                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => remove(u.id)} disabled={updating === u.id}>
+                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => reject(u.id)} disabled={updating === u.id}>
                     <UserX className="mr-1 h-3.5 w-3.5" />{t("reject")}
                   </Button>
                 </div>
@@ -178,66 +159,73 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Active members */}
+      {/* Active members — five zones: person · access · usage · budget · status. */}
       <div className="overflow-hidden rounded-lg border">
-        <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b px-4 py-2.5 text-xs font-medium text-muted-foreground sm:grid-cols-[1fr_7rem_6rem_auto]">
+        <div className="hidden grid-cols-[1fr_9rem_5rem_9rem_6rem] items-center gap-4 border-b px-4 py-2.5 text-xs font-medium text-muted-foreground sm:grid">
           <span>{t("colUser")}</span>
-          <span className="hidden text-right sm:block">{t("colSpend")}</span>
-          <span className="hidden sm:block">{t("colRole")}</span>
-          <span className="text-right">{t("colActions")}</span>
+          <span>{t("colAccess")}</span>
+          <span className="text-right">{t("colUsage")}</span>
+          <span>{t("colBudget")}</span>
+          <span>{t("colStatus")}</span>
         </div>
         {active.map((user) => {
           const cfg = roleConfig[user.role as keyof typeof roleConfig] || roleConfig.user;
           const Icon = cfg.icon;
+          const cap = monthCapFor(user);
+          const pct = cap && cap > 0 ? Math.min(999, Math.round((user.cost30d / cap) * 100)) : 0;
           return (
-            <div key={user.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b px-4 py-3 last:border-0 sm:grid-cols-[1fr_7rem_6rem_auto]">
+            <div
+              key={user.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setOpenId(user.id)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenId(user.id); } }}
+              aria-label={t("openDetails", { name: user.name || user.email })}
+              className="grid cursor-pointer grid-cols-[1fr_auto] items-center gap-4 border-b px-4 py-3 text-left outline-none transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 sm:grid-cols-[1fr_9rem_5rem_9rem_6rem]"
+            >
+              {/* person */}
               <div className="flex min-w-0 items-center gap-2.5">
                 <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{user.name || user.email}</p>
-                  <p className="truncate text-xs text-muted-foreground">{user.email}{user.createdAt ? ` · ${t("joined", { date: joined(user.createdAt) })}` : ""}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {user.email}
+                    {user.lastActivityAt ? ` · ${t("activePrefix", { when: relTime(locale, user.lastActivityAt) })}` : ""}
+                  </p>
                 </div>
               </div>
+              {/* access */}
+              <div className="hidden items-center gap-1.5 sm:flex">
+                <Badge variant={cfg.variant} className="text-[10px]">{t(`roles.${user.role}`)}</Badge>
+                {user.exceptionsCount > 0 && (
+                  <span className="text-xs text-muted-foreground">{t("exceptionsChip", { count: user.exceptionsCount })}</span>
+                )}
+              </div>
+              {/* usage */}
               <span className="hidden text-right text-sm tabular-nums sm:block">
-                {user.cost30d > 0 ? money(user.cost30d) : <span className="text-muted-foreground">—</span>}
+                {user.turns30d > 0 ? user.turns30d : <span className="text-muted-foreground">—</span>}
               </span>
-              <Select
-                value={user.role}
-                onValueChange={(v) => v && updateRole(user.id, v)}
-                disabled={updating === user.id}
-                items={{ admin: t("roles.admin"), user: t("roles.user"), viewer: t("roles.viewer") }}
-              >
-                <SelectTrigger className="h-8 w-full text-xs sm:w-28" aria-label={t("changeRole")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">{t("roles.admin")}</SelectItem>
-                  <SelectItem value="user">{t("roles.user")}</SelectItem>
-                  <SelectItem value="viewer">{t("roles.viewer")}</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="flex justify-end">
-                <AlertDialog>
-                  <AlertDialogTrigger
-                    render={
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label={t("remove")} disabled={updating === user.id}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    }
-                  />
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t("removeTitle", { name: user.name || user.email })}</AlertDialogTitle>
-                      <AlertDialogDescription>{t("removeWarn")}</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => remove(user.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                        {t("remove")}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+              {/* budget */}
+              <div className="hidden min-w-0 sm:block">
+                {cap != null ? (
+                  <div className="space-y-1">
+                    <div className="text-xs tabular-nums text-muted-foreground">{money(locale, user.cost30d)} / {money(locale, cap)}</div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div className={`h-full rounded-full ${pct >= 80 ? "bg-warning-text" : "bg-primary/70"}`} style={{ width: `${Math.min(100, pct)}%` }} />
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-sm tabular-nums">{user.cost30d > 0 ? money(locale, user.cost30d) : <span className="text-muted-foreground">—</span>}</span>
+                )}
+              </div>
+              {/* status */}
+              <div>
+                <Badge
+                  variant={user.status === "active" ? "outline" : user.status === "suspended" ? "destructive" : "secondary"}
+                  className="text-[10px]"
+                >
+                  {t(`statuses.${user.status}`)}
+                </Badge>
               </div>
             </div>
           );
@@ -251,6 +239,14 @@ export default function UsersPage() {
       </div>
 
       <p className="text-xs text-muted-foreground/80">{t("spendHint")}</p>
+
+      <UserDrawer
+        user={openUser}
+        tiers={tiers}
+        onPatch={patchUser}
+        onRemoved={(id) => setUsers((p) => p.filter((u) => u.id !== id))}
+        onClose={() => setOpenId(null)}
+      />
     </div>
   );
 }

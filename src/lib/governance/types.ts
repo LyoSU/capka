@@ -2,17 +2,25 @@ export type Effect = "allow" | "deny" | "ask";
 export type CapabilityType = "skill" | "connector";
 export type PolicyScope = "system" | "user" | "project";
 
-/** A policy row as served to the admin UI. */
+/** A policy row as served to the admin UI. Subject columns and their resolved
+ *  display names are joined at read time so the UI never renders a raw id. */
 export interface PolicyInfo {
   id: string;
   scope: PolicyScope;
   capabilityType: CapabilityType;
   capabilityKey: string;
   effect: Effect;
+  userId: string | null;
+  projectId: string | null;
+  userName: string | null;
+  userEmail: string | null;
+  projectName: string | null;
 }
 
-/** Minimal shape buildMatcher needs (pure-testable). */
+/** Minimal shape the matcher needs (pure-testable). `id` is optional so pure
+ *  callers can omit it; explainPolicy returns it as `policyId` when present. */
 export interface PolicyRow {
+  id?: string;
   scope: PolicyScope;
   capabilityType: CapabilityType;
   capabilityKey: string;
@@ -37,6 +45,7 @@ export type AuditAction =
   // master-key exposure, and instance billing/policy all belong in the
   // tamper-evident trail for companies.
   | "user.role_change" | "user.status_change" | "user.remove"
+  | "user.suspend" | "user.reactivate" | "user.sessions_revoke" | "user.tier_change"
   | "auth_config.update" | "master_key.view" | "master_key.remove"
   | "billing.update";
 
@@ -52,6 +61,7 @@ export const AUDIT_ACTIONS = [
   "policy.set", "policy.clear",
   "settings.update", "settings.undo",
   "user.role_change", "user.status_change", "user.remove",
+  "user.suspend", "user.reactivate", "user.sessions_revoke", "user.tier_change",
   "auth_config.update", "master_key.view", "master_key.remove",
   "billing.update",
 ] as const satisfies readonly AuditAction[];

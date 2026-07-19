@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   audit: vi.fn(),
   transaction: vi.fn(),
   update: vi.fn(),
+  select: vi.fn(),
   remove: vi.fn(),
   removeWhere: vi.fn(),
 }));
@@ -37,7 +38,10 @@ describe("admin user status changes", () => {
       }),
     });
     mocks.remove.mockReturnValue({ where: mocks.removeWhere.mockResolvedValue(undefined) });
-    mocks.transaction.mockImplementation(async (callback) => callback({ update: mocks.update, delete: mocks.remove }));
+    // The route reads the prior status inside the transaction to pick the audit
+    // action (suspend vs reactivate vs plain status_change).
+    mocks.select.mockReturnValue({ from: () => ({ where: () => ({ limit: () => Promise.resolve([{ status: "active" }]) }) }) });
+    mocks.transaction.mockImplementation(async (callback) => callback({ update: mocks.update, select: mocks.select, delete: mocks.remove }));
   });
 
   it("revokes every session atomically when an account is deactivated", async () => {

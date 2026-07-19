@@ -29,6 +29,7 @@ export default function BillingPage() {
   const [limit5h, setLimit5h] = useState("");
   const [limitWeek, setLimitWeek] = useState("");
   const [limitMonth, setLimitMonth] = useState("");
+  const [budgetMonthly, setBudgetMonthly] = useState("");
   const [savingLimits, setSavingLimits] = useState(false);
 
   useEffect(() => {
@@ -41,6 +42,7 @@ export default function BillingPage() {
         setLimit5h(dt.limit5h ?? "");
         setLimitWeek(dt.limitWeek ?? "");
         setLimitMonth(dt.limitMonth ?? "");
+        setBudgetMonthly(d.monthlyBudget ?? "");
       })
       .finally(() => setLoading(false));
   }, []);
@@ -72,6 +74,7 @@ export default function BillingPage() {
           limit5h: limit5h.trim() || null,
           limitWeek: limitWeek.trim() || null,
           limitMonth: limitMonth.trim() || null,
+          budgetMonthly: budgetMonthly.trim() || null,
         }),
       });
       if (res.ok) toast.success(tc("saved"));
@@ -150,6 +153,24 @@ export default function BillingPage() {
           </p>
         ) : (
           <>
+            {/* Instance-wide monthly budget — the org's whole shared-key bill.
+                Drives the analytics overrun trigger and "% of budget" line. */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t("budget.label")}</label>
+              <div className="relative max-w-[12rem]">
+                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={budgetMonthly}
+                  onChange={(e) => setBudgetMonthly(e.target.value)}
+                  placeholder={t("budget.placeholder")}
+                  className="pl-6"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">{t("budget.hint")}</p>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {([
                 ["limit5h", limit5h, setLimit5h, t("limits.window.h5")],

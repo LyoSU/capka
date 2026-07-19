@@ -24,8 +24,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // reach the app (which would spend the shared key) — park it on /pending.
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
-  if (session && (session.user as Record<string, unknown>).status === "pending") {
+  const status = session ? (session.user as Record<string, unknown>).status : null;
+  if (status === "pending") {
     redirect("/pending");
+  }
+  // Access revoked after approval — park on its own calm screen (never a dead-end
+  // app view that would spend the shared key). Server APIs already fail closed.
+  if (status === "suspended") {
+    redirect("/suspended");
   }
 
   const t = await getTranslations("common");

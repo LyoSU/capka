@@ -649,7 +649,7 @@
       "integrations": "Integrations",
       "billing": "Keys & limits",
       "memory": "Memory",
-      "usage": "Usage",
+      "usage": "Analytics",
       "users": "Users",
       "skills": "Extensions",
       "automations": "Automations",
@@ -699,7 +699,74 @@
       "removeWarn": "This permanently deletes their account, chats, and files. This can't be undone.",
       "cancel": "Cancel",
       "spendHint": "Spend is this person's usage on the organization's shared key over the last 30 days. Own-key usage isn't counted.",
-      "filterAll": "All"
+      "filterAll": "All",
+      "colAccess": "Access",
+      "colUsage": "Turns (30d)",
+      "colBudget": "Budget",
+      "colStatus": "Status",
+      "openDetails": "Open details for {name}",
+      "activePrefix": "last seen {when}",
+      "exceptionsChip": "{count, plural, one {# exception} other {# exceptions}}",
+      "statuses": {
+        "active": "Active",
+        "pending": "Pending",
+        "suspended": "Suspended",
+        "rejected": "Rejected"
+      },
+      "drawerStatus": "Status",
+      "lastActivity": "Last session activity",
+      "never": "Never",
+      "tgConnected": "Connected",
+      "tgNotConnected": "Not connected",
+      "joinedLabel": "Joined",
+      "accessTitle": "Access",
+      "noExceptions": "No exceptions — the default permissions apply.",
+      "capType": {
+        "skill": "Skill",
+        "connector": "Connector"
+      },
+      "scopeWon": {
+        "system": "org-wide",
+        "user": "for this user",
+        "project": "project"
+      },
+      "effects": {
+        "allow": "Allowed",
+        "deny": "Blocked",
+        "ask": "Block until approved"
+      },
+      "tierLabel": "Spend tier",
+      "defaultTier": "Instance default",
+      "tierUpdated": "Spend tier updated",
+      "usageTitle": "Usage",
+      "window5h": "Last 5 hours",
+      "window7d": "Last 7 days",
+      "window30d": "Last 30 days",
+      "turnsCompleted": "Completed",
+      "turnsFailed": "Failed",
+      "topModels": "Top models",
+      "detailUnavailable": "Details are unavailable right now.",
+      "securityTitle": "Security & history",
+      "sessionSeen": "seen {when}",
+      "sessionUnknown": "Unknown device",
+      "noSessions": "No active sessions.",
+      "revokeAll": "Sign out everywhere",
+      "sessionsRevoked": "Sessions revoked",
+      "historyTitle": "Recent changes",
+      "hSuspended": "Suspended access",
+      "hReactivated": "Reactivated access",
+      "hSetPending": "Moved to approval queue",
+      "hStatusChanged": "Changed status",
+      "hSessionsRevoked": "Revoked sessions",
+      "hRoleChanged": "Changed role",
+      "hRemoved": "Removed account",
+      "hTierChanged": "Changed spend tier",
+      "suspend": "Suspend access",
+      "suspendTitle": "Suspend {name}?",
+      "suspendWarn": "They'll be signed out everywhere and can't use the app until you reactivate them. Their chats and files are kept.",
+      "suspended": "Access suspended",
+      "reactivate": "Reactivate access",
+      "reactivated": "Access reactivated"
     },
     "general": {
       "account": "Account",
@@ -831,6 +898,11 @@
           "d30": "Last 30 days"
         }
       },
+      "budget": {
+        "label": "Instance monthly budget",
+        "placeholder": "No budget",
+        "hint": "The organization's whole shared-key bill. When set, Analytics warns if the monthly projection goes over. Leave empty for none."
+      },
       "tiers": {
         "title": "User tiers",
         "soon": "Limits are the same for everyone for now (the default tier). Per-user tiers are coming later."
@@ -914,20 +986,50 @@
       "changeIcon": "Change icon"
     },
     "usage": {
-      "title": "Usage & cost",
+      "title": "Analytics",
       "subtitleShared": "What the organization is spending on its shared AI key.",
       "subtitleOwn": "How members are using their own provider keys — their own spend, not the organization's.",
       "scopeShared": "Shared key",
       "scopeOwn": "Own keys",
       "rangeDays": "{days, plural, one {# day} other {# days}}",
-      "totalCost": "Total cost",
-      "calls": "Requests",
+      "filters": "Filters",
+      "filterAll": "All",
+      "filterMember": "Member",
+      "filterModel": "Model",
+      "filterProject": "Project",
+      "filterChannel": "Channel",
+      "clearFilters": "Clear all",
+      "channel": {
+        "web": "Web",
+        "telegram": "Telegram",
+        "automation": "Automations"
+      },
+      "spend": "Spend",
+      "projectedMonthly": "Projected {cost}/mo",
+      "projectedOfBudget": "Projected {cost}/mo · {pct} of budget",
+      "completedTurns": "Completed turns",
+      "completedTurnsSub": "technically completed · {rate} failed",
+      "activeMembers": "Active members",
+      "ofWithAccess": "of {n} with access",
+      "costPerTurn": "Cost / completed turn",
+      "costPerTurnHint": "all spend ÷ completed",
+      "tab": {
+        "overview": "Overview",
+        "models": "Models",
+        "people": "People"
+      },
       "byModel": "By model",
-      "byUser": "By user",
+      "byUser": "By member",
+      "byProject": "By project",
+      "byProjectHint": "By the chat's current project.",
+      "noProject": "No project",
+      "byChannel": "By channel",
       "callsN": "{count, plural, one {# request} other {# requests}}",
+      "userTurns": "{count, plural, one {# turn} other {# turns}}",
+      "lastActive": "last active {ago}",
       "unknownUser": "Unknown user",
       "empty": "No usage recorded yet",
-      "avgPerRequest": "Avg / request",
+      "emptyFiltered": "No activity matches these filters",
       "totalTokens": "Total tokens",
       "tokenSplit": "{input} in · {output} out",
       "cacheRate": "Cache hit rate",
@@ -937,9 +1039,6 @@
       "dailyTrend": "Daily cost",
       "peakDay": "Peak {cost}/day",
       "recentActivity": "Recent activity",
-      "projectedMonthly": "Projected / mo",
-      "perDay": "{cost}/day average",
-      "perRequestHint": "cost per request",
       "blendedRate": "Blended rate",
       "perMillionTokens": "per 1M tokens",
       "avgLine": "avg {cost}/day",
@@ -949,7 +1048,14 @@
       "tokensSummary": "{tokens} tokens",
       "searchUser": "Search member",
       "noRecentForUser": "No recent activity for this member",
-      "noMatches": "No one matches your search"
+      "noMatches": "No one matches your search",
+      "attn": {
+        "title": "Needs attention",
+        "budgetOverrun": "At the current pace, monthly spend is projected at {projected}, over the {budget} budget.",
+        "memberNearBudget": "{name} has used {used} — {pct} of their {cap} monthly limit.",
+        "failureSpike": "Turn failures rose to {rate} (was {prev}) across {turns} turns this period.",
+        "idleSeats": "{count, plural, one {# active member hasn't run a turn in two weeks} other {# active members haven't run a turn in two weeks}}: {names}."
+      }
     },
     "skills": {
       "title": "Extensions",
@@ -1189,15 +1295,48 @@
       "subtitle": "Control what the assistant may use, for everyone in the organization.",
       "adminOnly": "Only admins can manage permissions",
       "empty": "Nothing to govern yet. Add skills or connectors first.",
-      "hint": "Deny hides a skill or connector from the assistant for everyone. Allow is the default.",
       "skills": "Skills",
       "connectors": "Connectors",
+      "bannerTitle": "Everything is allowed by default",
+      "bannerBody": "Add an exception only for the skills or connectors you want to hold back.",
+      "typeSkill": "Skill",
+      "typeConnector": "Connector",
+      "exceptions": "{count, plural, one {# exception} other {# exceptions}}",
       "effect": {
         "allow": "Allow",
-        "ask": "Ask",
+        "ask": "Block until approved",
         "deny": "Deny"
       },
-      "askSoon": "Ask (human-in-the-loop) is coming soon. Until then it blocks the capability, the same as Deny.",
+      "scope": {
+        "system": "everyone",
+        "user": "a person",
+        "project": "a project"
+      },
+      "verb": {
+        "allow": "Allowed",
+        "ask": "Blocked until approved",
+        "deny": "Denied"
+      },
+      "globalRule": "Global rule",
+      "globalRuleHint": "Applies to everyone unless an exception below overrides it.",
+      "userExceptions": "Per-person exceptions",
+      "projectExceptions": "Per-project exceptions",
+      "noExceptions": "No exceptions.",
+      "pickMember": "Choose a person",
+      "pickProject": "Choose a project",
+      "pickProjectOptional": "Any project (optional)",
+      "removeException": "Remove exception",
+      "checkAccess": "Check access",
+      "checkAccessHint": "See what a specific person would be allowed to use.",
+      "checkDefault": "Allowed by default — no rule applies.",
+      "checkBySystem": "{verb} by the global rule.",
+      "checkByUser": "{verb} by a rule for {name}.",
+      "checkByProject": "{verb} by a rule for project {name}.",
+      "history": "Change history",
+      "noHistory": "No changes recorded yet.",
+      "histSet": "Set to {effect} for {scope}",
+      "histClear": "Removed the {effect} rule for {scope}",
+      "add": "Add",
       "saveFailed": "Couldn't save that change"
     },
     "authentication": {
@@ -1397,7 +1536,11 @@
         "user": {
           "role_change": "Changed role of",
           "status_change": "Changed status of",
-          "remove": "Removed user"
+          "remove": "Removed user",
+          "suspend": "Suspended access for",
+          "reactivate": "Restored access for",
+          "sessions_revoke": "Signed out all sessions of",
+          "tier_change": "Changed spend tier of"
         },
         "auth_config": {
           "update": "Updated sign-in settings"
@@ -1549,6 +1692,13 @@
       "title": "Almost there",
       "description": "Your account was created and is waiting for approval",
       "hint": "An administrator needs to approve your account before you can start. You'll be able to sign in as soon as they do.",
+      "recheck": "Check again",
+      "signOut": "Sign out"
+    },
+    "suspended": {
+      "title": "Your access is suspended",
+      "description": "An administrator has paused your access to this workspace",
+      "hint": "Your chats and files are kept. Contact your administrator to have your access restored — you'll be able to sign in again as soon as they do.",
       "recheck": "Check again",
       "signOut": "Sign out"
     }

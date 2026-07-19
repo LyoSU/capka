@@ -1,22 +1,14 @@
-import { and, eq, or, isNull } from "drizzle-orm";
+import { and, eq, or, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { capabilityPolicies, skills, mcpServers } from "@/lib/db/schema";
-import type { CapabilityType, Effect, PolicyInfo, PolicyMatcher, PolicyRow, PolicyScope } from "./types";
+import { capabilityPolicies, skills, mcpServers, users, projects } from "@/lib/db/schema";
+import { projectNotDeleted } from "@/lib/projects/live";
+import type { CapabilityType, Effect, PolicyInfo, PolicyMatcher, PolicyScope } from "./types";
 
-const SCOPE_RANK: Record<PolicyScope, number> = { system: 0, user: 1, project: 2 };
-
-/** Build a lookup from policy rows: most-specific scope wins; default allow. Pure. */
-export function buildMatcher(rows: PolicyRow[]): PolicyMatcher {
-  const best = new Map<string, { rank: number; effect: Effect }>();
-  for (const r of rows) {
-    const k = `${r.capabilityType}:${r.capabilityKey}`;
-    const rank = SCOPE_RANK[r.scope];
-    const cur = best.get(k);
-    if (!cur || rank > cur.rank) best.set(k, { rank, effect: r.effect });
-  }
-  return { effect: (type, key) => best.get(`${type}:${key}`)?.effect ?? "allow" };
-}
+// The pure matcher lives in matcher.ts (no db imports, client-importable). It is
+// re-exported here so existing server-side imports keep resolving from ./policy.
+import { buildMatcher } from "./matcher";
+export { buildMatcher, explainPolicy } from "./matcher";
 
 /** A capability is usable only when explicitly allowed (the unmatched default is
  *  "allow", see buildMatcher). "ask" is treated as DENY until a real interactive
@@ -45,42 +37,84 @@ export async function resolvePolicies(userId: string, projectId?: string | null)
 }
 
 export async function listPolicies(): Promise<PolicyInfo[]> {
-  const rows = await db.select().from(capabilityPolicies);
+  // Left-join the subject tables so the drawer renders "Finance" / a person's
+  // name instead of a raw id. System rows carry no subject and stay null.
+  const rows = await db
+    .select({
+      id: capabilityPolicies.id, scope: capabilityPolicies.scope,
+      capabilityType: capabilityPolicies.capabilityType, capabilityKey: capabilityPolicies.capabilityKey,
+      effect: capabilityPolicies.effect, userId: capabilityPolicies.userId, projectId: capabilityPolicies.projectId,
+      userName: users.name, userEmail: users.email, projectName: projects.name,
+    })
+    .from(capabilityPolicies)
+    .leftJoin(users, eq(users.id, capabilityPolicies.userId))
+    .leftJoin(projects, eq(projects.id, capabilityPolicies.projectId));
   return rows.map((r) => ({
     id: r.id, scope: r.scope as PolicyScope, capabilityType: r.capabilityType as CapabilityType,
     capabilityKey: r.capabilityKey, effect: r.effect as Effect,
+    userId: r.userId, projectId: r.projectId,
+    userName: r.userName, userEmail: r.userEmail, projectName: r.projectName,
   }));
 }
 
-/** Upsert a system-scope policy for a capability. Returns the row id. */
+/** Upsert one policy for a capability, scoped to system / a user / a project.
+ *  The (scope, subject, capability) uniqueness is enforced by partial indexes;
+ *  we match on the same tuple so a repeat call updates rather than duplicates.
+ *  Returns the row id. Callers (the API route) validate the scope/subject combo. */
 export async function setPolicy(input: {
   capabilityType: CapabilityType;
   capabilityKey: string;
   effect: Effect;
+  scope: PolicyScope;
+  userId?: string | null;
+  projectId?: string | null;
   createdBy: string;
 }): Promise<string> {
-  const existing = await db.select({ id: capabilityPolicies.id }).from(capabilityPolicies)
-    .where(and(
-      eq(capabilityPolicies.scope, "system"),
-      isNull(capabilityPolicies.userId),
-      isNull(capabilityPolicies.projectId),
-      eq(capabilityPolicies.capabilityType, input.capabilityType),
-      eq(capabilityPolicies.capabilityKey, input.capabilityKey),
-    )).limit(1);
-  if (existing[0]) {
-    await db.update(capabilityPolicies).set({ effect: input.effect, updatedAt: new Date() }).where(eq(capabilityPolicies.id, existing[0].id));
-    return existing[0].id;
-  }
-  const id = nanoid();
-  await db.insert(capabilityPolicies).values({
-    id, scope: "system", userId: null, projectId: null,
-    capabilityType: input.capabilityType, capabilityKey: input.capabilityKey, effect: input.effect, createdBy: input.createdBy,
-  });
-  return id;
+  const userId = input.scope === "user" ? input.userId ?? null : null;
+  const projectId = input.scope === "project" ? input.projectId ?? null : null;
+  // Atomic upsert on the scope's partial unique index — a check-then-insert would
+  // race two concurrent admins into a duplicate-key error. targetWhere carries the
+  // literal predicate so Postgres can infer the right partial index as arbiter.
+  const conflict =
+    input.scope === "system"
+      ? { target: [capabilityPolicies.capabilityType, capabilityPolicies.capabilityKey], targetWhere: sql`scope = 'system'` }
+      : input.scope === "user"
+        ? { target: [capabilityPolicies.userId, capabilityPolicies.capabilityType, capabilityPolicies.capabilityKey], targetWhere: sql`scope = 'user'` }
+        : { target: [capabilityPolicies.projectId, capabilityPolicies.capabilityType, capabilityPolicies.capabilityKey], targetWhere: sql`scope = 'project'` };
+  const [row] = await db.insert(capabilityPolicies)
+    .values({
+      id: nanoid(), scope: input.scope, userId, projectId,
+      capabilityType: input.capabilityType, capabilityKey: input.capabilityKey, effect: input.effect, createdBy: input.createdBy,
+    })
+    .onConflictDoUpdate({ ...conflict, set: { effect: input.effect, updatedAt: new Date() } })
+    .returning({ id: capabilityPolicies.id });
+  return row.id;
 }
 
-export async function clearPolicy(id: string): Promise<void> {
-  await db.delete(capabilityPolicies).where(eq(capabilityPolicies.id, id));
+/** Org-wide live projects (not scoped to one owner) so the admin permissions UI
+ *  can add a project exception for anyone's project. ownerName lets the picker
+ *  disambiguate same-named projects across people. */
+export async function listProjectsForPolicy(): Promise<{ id: string; name: string; ownerId: string; ownerName: string | null }[]> {
+  const rows = await db
+    .select({ id: projects.id, name: projects.name, ownerId: projects.userId, ownerName: users.name, ownerEmail: users.email })
+    .from(projects)
+    .leftJoin(users, eq(users.id, projects.userId))
+    .where(projectNotDeleted)
+    .orderBy(projects.name);
+  return rows.map((r) => ({ id: r.id, name: r.name, ownerId: r.ownerId, ownerName: r.ownerName || r.ownerEmail || null }));
+}
+
+/** Delete a policy, returning the row that was removed (or null) so the caller
+ *  can audit what it contained — the id alone is unreconstructable after delete. */
+export async function clearPolicy(id: string): Promise<PolicyInfo | null> {
+  const [row] = await db.delete(capabilityPolicies).where(eq(capabilityPolicies.id, id)).returning();
+  if (!row) return null;
+  return {
+    id: row.id, scope: row.scope as PolicyScope, capabilityType: row.capabilityType as CapabilityType,
+    capabilityKey: row.capabilityKey, effect: row.effect as Effect,
+    userId: row.userId, projectId: row.projectId,
+    userName: null, userEmail: null, projectName: null,
+  };
 }
 
 /** The set of governable capabilities (distinct skill + connector names) so the

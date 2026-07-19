@@ -6,6 +6,20 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Usage page is now Analytics: completed-turn / active-member / cost-per-completed-turn KPIs, project and channel breakdowns, member/model/project/channel filters, and a "Needs attention" block (projected budget overrun, members near their tier cap, failure spikes, idle seats).
+- Optional instance monthly budget on the billing page (setting `usage_monthly_budget_usd`) — drives the budget share on the Spend KPI and the overrun alert.
+- Users page: budget bars against tier caps, last session activity, and a per-member drawer (permission exceptions, personal tier assignment, active sessions with revoke, audit history).
+- Account suspension: setting a member to "suspended" revokes their sessions in the same transaction and parks them on a dedicated screen until reactivated.
+- Permissions: per-user and per-project exceptions (exception-first list, no matrix), an access checker that explains which policy wins, and per-capability change history.
+
+### Changed
+
+- The "Ask" policy effect is labeled "Block until approved" — it has always blocked; the label now says so until a real approval flow ships.
+- Admin audit records dedicated `user.suspend`, `user.reactivate`, `user.sessions_revoke`, and `user.tier_change` actions (previously folded into generic status/billing entries).
+- Duplicate capability-policy rows are cleaned up and prevented by new DB constraints (migration applies automatically at boot).
+
 ## [0.10.11] - 2026-07-19
 
 ### Fixed
