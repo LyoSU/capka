@@ -6,9 +6,7 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
-### Fixed
-
-- Azure OpenAI model listing now shows the resource's actual deployments (the only runnable model ids) instead of the base-model catalog, whose version-suffixed ids always failed with HTTP 404 (`DeploymentNotFound`). If deployments can't be listed, the catalog is reduced to plausible deployment names, and a deployment name can always be typed into the picker — even when the list is empty.
+## [0.11.0] - 2026-07-19
 
 ### Added
 
@@ -23,6 +21,10 @@ All notable changes to Capka are documented here. Format follows
 - The "Ask" policy effect is labeled "Block until approved" — it has always blocked; the label now says so until a real approval flow ships.
 - Admin audit records dedicated `user.suspend`, `user.reactivate`, `user.sessions_revoke`, and `user.tier_change` actions (previously folded into generic status/billing entries).
 - Duplicate capability-policy rows are cleaned up and prevented by new DB constraints (migration applies automatically at boot).
+
+### Fixed
+
+- Azure OpenAI model listing now shows the resource's actual deployments (the only runnable model ids) instead of the base-model catalog, whose version-suffixed ids always failed with HTTP 404 (`DeploymentNotFound`). If deployments can't be listed, the catalog is reduced to plausible deployment names, and a deployment name can always be typed into the picker — even when the list is empty.
 
 ## [0.10.11] - 2026-07-19
 
