@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.9] - 2026-07-19
+
 ### Added
 
 - Azure OpenAI as a first-class provider (modern v1 API): connect the resource endpoint + API key in Settings → Connections; deployments list into the model picker; Responses API by default with a Chat Completions toggle.
