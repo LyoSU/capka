@@ -570,6 +570,7 @@ function ModelList({
   onClose,
   orientation = "vertical",
   currentMissing = false,
+  credentialsProvider,
 }: {
   state: ModelsState;
   search: string;
@@ -584,6 +585,9 @@ function ModelList({
   /** The current selection is gone (provider disconnected / model removed) —
    *  show a banner explaining why nothing is highlighted and to pick another. */
   currentMissing?: boolean;
+  /** Provider of an unsaved-credentials source (the add-provider form), so a
+   *  typed id can bind to it even when the listing came back empty. */
+  credentialsProvider?: ProviderName;
 }) {
   const t = useTranslations("chat.model");
   const listboxId = useId();
@@ -678,12 +682,26 @@ function ModelList({
       const sample =
         models.find((m) => m.configProvider?.toLowerCase() === prefix) ??
         models.find((m) => m.configId === activeConn) ??
-        models[0];
+        models[0] ??
+        // An Azure resource with zero deployments lists zero models, yet a
+        // typed deployment name is the only runnable id — synthesize a
+        // provider-only sample so manual entry isn't dead-ended.
+        (credentialsProvider === "azure"
+          ? ({
+              id: "",
+              name: "",
+              provider: "",
+              context: 0,
+              pricing: { prompt: 0, completion: 0 },
+              capabilities: { vision: false, tools: true, reasoning: false },
+              configProvider: "azure",
+            } satisfies ModelInfo)
+          : undefined);
       const custom = customModelOption(search, sample);
       if (custom) return [...matched, custom];
     }
     return matched;
-  }, [models, search, searching, passesFilter, activeConn]);
+  }, [models, search, searching, passesFilter, activeConn, credentialsProvider]);
 
   // Which brand fills the pane. Until the user clicks the rail it falls back to
   // the current model's brand (when it belongs to the active connection) — so
@@ -1225,6 +1243,7 @@ export function ModelPicker({
       onClose={close}
       orientation={orientation}
       currentMissing={modelMissing}
+      credentialsProvider={source.mode === "credentials" ? source.provider : undefined}
     />
   );
 

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { supportsImageToolResults, normalizeAzureBaseUrl, parseBedrockEndpoint } from "../registry";
+import {
+  supportsImageToolResults,
+  normalizeAzureBaseUrl,
+  parseBedrockEndpoint,
+  azureDeploymentSuggestions,
+} from "../registry";
 
 // Guards the transport matrix for images returned INSIDE a tool result (view_file).
 // The @ai-sdk/openai chat path and @ai-sdk/openai-compatible JSON.stringify such
@@ -83,6 +88,25 @@ describe("normalizeAzureBaseUrl", () => {
 
   it("returns non-URL garbage unchanged (the connect test will surface the failure)", () => {
     expect(normalizeAzureBaseUrl("not a url")).toBe("not a url");
+  });
+});
+
+// Azure's /openai/v1/models returns the base-model CATALOG with version-suffixed
+// ids ("gpt-5-mini-2025-08-07") — none of which are runnable model ids (Azure
+// wants deployment names). When the deployments endpoint is unreachable, the
+// listing falls back to these ids reduced to plausible deployment names (the
+// portal's default deployment name is the bare model name).
+describe("azureDeploymentSuggestions", () => {
+  it("strips date/version suffixes and dedupes, preserving order", () => {
+    expect(
+      azureDeploymentSuggestions([
+        "gpt-5-mini-2025-08-07",
+        "gpt-5.2-2025-12-11",
+        "gpt-5.2-2026-02-10",
+        "dall-e-3-3.0",
+        "gpt-4.1",
+      ]),
+    ).toEqual(["gpt-5-mini", "gpt-5.2", "dall-e-3", "gpt-4.1"]);
   });
 });
 

@@ -6,7 +6,7 @@ import { iconForGroup, prettyName } from "@/lib/models/normalize";
 import { getBlockPrivateProviderUrls, getModelMinContext, getModelMaxPrice } from "@/lib/settings";
 import { assertSafeUrl, guardedFetchOnce } from "@/lib/net/ssrf";
 import { parseOpenRouterModels, OPENROUTER_MODELS_URL, type CatalogModel } from "@/lib/models/catalog";
-import { PROVIDER_META, normalizeAzureBaseUrl, parseBedrockEndpoint, type ProviderName, type Modality } from "./registry";
+import { PROVIDER_META, normalizeAzureBaseUrl, azureDeploymentSuggestions, parseBedrockEndpoint, type ProviderName, type Modality } from "./registry";
 
 /**
  * A model as the picker consumes it. Kept here (not in the route) so server
@@ -284,6 +284,55 @@ async function listOpenAICompatible(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Azure OpenAI: a runnable model id is a DEPLOYMENT name, so the deployments
+ * list is the only listing that yields working ids. The v1 surface has no
+ * deployments endpoint and /openai/v1/models returns the base-model CATALOG
+ * (~330 rows, version-suffixed ids like "gpt-5-mini-2025-08-07" — every one
+ * 404s as a model id unless a deployment happens to share the name). The
+ * legacy data-plane GET /openai/deployments (api-version 2023-03-15-preview)
+ * still answers to the api-key on current resources (verified live 2026-07),
+ * so it's the primary source; when a gateway blocks it, fall back to catalog
+ * ids reduced to plausible deployment names.
+ */
+async function listAzure(apiKey: string, rawBaseUrl: string, blockPrivate: boolean): Promise<ModelInfo[]> {
+  const prefix = normalizeAzureBaseUrl(rawBaseUrl);
+  const headers = { "api-key": apiKey };
+  // Both host classes reduce to …/openai here (the Foundry/gateway prefix
+  // carries /v1, the classic-host prefix stops at /openai already).
+  const root = prefix.replace(/\/v1$/, "");
+  // Catalog rows key off the underlying model, not the user-chosen deployment
+  // name — strip its version tail the same way the suggestions helper does.
+  const modelKey = (s: string) => s.replace(/-\d{4}-\d{2}-\d{2}$/, "").replace(/-\d+(\.\d+)+$/, "");
+  try {
+    const raw = (await fetchJson(
+      `${root}/deployments?api-version=2023-03-15-preview`,
+      { headers },
+      blockPrivate,
+    )) as { data?: { id?: string; model?: string }[] };
+    const rows = (raw.data ?? []).filter((d): d is { id: string; model?: string } => !!d.id);
+    // A resource with zero deployments genuinely has zero runnable ids — an
+    // honest empty list beats hundreds of catalog ids that all 404.
+    const lookup = await catalogLookup(rows.map((d) => modelKey(d.model || d.id)));
+    return rows
+      .map((d) => toModelInfo(d.id, prettyName(d.id), "OpenAI", lookup(modelKey(d.model || d.id)), true))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    const raw = (await fetchJson(/\/v\d+$/.test(root) ? `${root}/models` : `${root}/v1/models`, { headers }, blockPrivate)) as {
+      data?: { id: string; capabilities?: { chat_completion?: boolean }; lifecycle_status?: string }[];
+    };
+    const ids = azureDeploymentSuggestions(
+      (raw.data ?? [])
+        .filter((m) => m.id && m.capabilities?.chat_completion === true && m.lifecycle_status !== "deprecated")
+        .map((m) => m.id),
+    );
+    const lookup = await catalogLookup(ids);
+    return ids
+      .map((id) => toModelInfo(id, prettyName(id), "OpenAI", lookup(id), true))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+}
+
 async function listAnthropic(
   apiKey: string,
   baseUrl?: string,
@@ -558,17 +607,9 @@ async function listProviderModelsLive(opts: {
     case "openai":
       if (!opts.apiKey) return [];
       return listOpenAICompatible("https://api.openai.com/v1", opts.apiKey, { filterChat: true });
-    case "azure": {
-      // The v1 surface lists this resource's DEPLOYMENTS at /openai/v1/models.
-      // The normalized SDK prefix ends in /openai (Azure host) or /openai/v1
-      // (Foundry/gateway host), so the generic version-segment logic above
-      // lands on /openai/v1/models either way.
+    case "azure":
       if (!opts.apiKey || !opts.baseUrl) return [];
-      return listOpenAICompatible(normalizeAzureBaseUrl(opts.baseUrl), opts.apiKey, {
-        blockPrivate,
-        headers: { "api-key": opts.apiKey },
-      });
-    }
+      return listAzure(opts.apiKey, opts.baseUrl, blockPrivate);
     case "anthropic":
       if (!opts.apiKey) return [];
       return listAnthropic(opts.apiKey, opts.baseUrl, blockPrivate);

@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Azure OpenAI model listing now shows the resource's actual deployments (the only runnable model ids) instead of the base-model catalog, whose version-suffixed ids always failed with HTTP 404 (`DeploymentNotFound`). If deployments can't be listed, the catalog is reduced to plausible deployment names, and a deployment name can always be typed into the picker — even when the list is empty.
+
 ### Added
 
 - Usage page is now Analytics: completed-turn / active-member / cost-per-completed-turn KPIs, project and channel breakdowns, member/model/project/channel filters, and a "Needs attention" block (projected budget overrun, members near their tier cap, failure spikes, idle seats).

@@ -495,6 +495,24 @@ export function normalizeAzureBaseUrl(raw: string): string {
   return `${parsed.origin}${path}`;
 }
 
+/**
+ * Reduce Azure's base-model catalog ids ("gpt-5-mini-2025-08-07",
+ * "dall-e-3-3.0") to plausible DEPLOYMENT names — the portal's default
+ * deployment name is the bare model name. Used only as the listing fallback
+ * when the deployments endpoint itself is unreachable; a runnable Azure model
+ * id is always a deployment name, never a catalog id.
+ */
+export function azureDeploymentSuggestions(ids: string[]): string[] {
+  const seen = new Set<string>();
+  for (const id of ids) {
+    const name = id.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+    // A numeric version tail ("dall-e-3-3.0") is stripped only when a digit
+    // remains in the name — "gpt-5.2"'s 5.2 IS the name, not a version.
+    seen.add(name.match(/^(.*\d.*)-\d+(?:\.\d+)+$/)?.[1] ?? name);
+  }
+  return [...seen];
+}
+
 // ── Model id encoding ──────────────────────────────────────────────────────
 //
 // A model is stored as a bare model id (e.g. `openai/gpt-5.2` for OpenRouter,
