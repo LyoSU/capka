@@ -37,8 +37,11 @@ export interface AttentionInput {
   days: number;
   /** Instance monthly budget in USD, or null when unset. */
   budgetMonthly: number | null;
-  /** Scoped, reconciled spend over the selected period (KPI "Spend"). */
+  /** Settled SHARED-key spend over the selected period, instance-wide (never the
+   *  ad-hoc-filtered KPI figure) — the org bill the budget projection is about. */
   spend: number;
+  /** Instance-wide turn outcomes (no key scope, no dimension filters) — an alert
+   *  must not disappear because of what the admin happens to be looking at. */
   turns: { completed: number; failed: number; cancelled: number };
   prevTurns: { completed: number; failed: number; cancelled: number };
   members: AttentionMember[];

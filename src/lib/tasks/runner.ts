@@ -1494,6 +1494,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     });
     const failureMeta = {
       taskId, status, parts: parts.length > 0 ? parts : undefined,
+      // Which model failed/was cancelled — without it, model-filtered analytics
+      // would silently exclude every failed turn and understate failure rates.
+      // Null only when prepareRun threw before a model was ever resolved.
+      ...(runModelId ? { model: runModelId } : {}),
       ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
     };
     // If prepareRun threw before the assistant row existed (provider gone, model

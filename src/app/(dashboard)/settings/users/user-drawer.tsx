@@ -88,14 +88,14 @@ export function UserDrawer({
       // Effective-permission exceptions. Defensive: the policies response may not
       // carry userId yet (parallel change) — then no exception can be attributed.
       fetch("/api/admin/policies").then((r) => (r.ok ? r.json() : { policies: [] })).catch(() => ({ policies: [] })),
-      // People-scoped audit, filtered to this user client-side (all shown.* rows
-      // carry the user id as targetKey).
-      fetch("/api/admin/audit?category=people&limit=200").then((r) => (r.ok ? r.json() : { entries: [] })).catch(() => ({ entries: [] })),
+      // THIS user's audit history, filtered in SQL — a recent-events window fished
+      // client-side goes blank once busier accounts push past it.
+      fetch(`/api/admin/audit?targetType=user&targetKey=${encodeURIComponent(userId)}&limit=50`).then((r) => (r.ok ? r.json() : { entries: [] })).catch(() => ({ entries: [] })),
     ])
       .then(([d, p, a]) => {
         setDetail(d);
         setPolicies(Array.isArray(p?.policies) ? p.policies : []);
-        setAudit((a?.entries ?? []).filter((e: { targetKey?: string }) => e.targetKey === userId));
+        setAudit(a?.entries ?? []);
       })
       .finally(() => setLoading(false));
   }, [userId]);

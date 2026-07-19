@@ -26,9 +26,15 @@ export const GET = apiHandler(async (req: Request) => {
   const prefixes = category ? CATEGORY_PREFIXES[category] : undefined;
   const actions = prefixes ? AUDIT_ACTIONS.filter((a) => prefixes.some((p) => a.startsWith(p))) : undefined;
 
+  // Optional subject narrowing (a user's history, a capability's history) —
+  // filtered in SQL so paging stays correct for busy instances.
+  const targetType = params.get("targetType");
+  const targetKey = params.get("targetKey");
+  const target = targetType && targetKey ? { type: targetType, key: targetKey } : undefined;
+
   // Fetch one extra to tell the client whether a "load more" page exists,
   // without a second count query.
-  const rows = await listAudit(limit + 1, offset, actions);
+  const rows = await listAudit(limit + 1, offset, actions, target);
   const hasMore = rows.length > limit;
 
   // A `settings.update` stores the control's raw id ("user.locale") as its target.

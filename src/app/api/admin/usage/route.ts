@@ -86,15 +86,43 @@ export const GET = apiHandler(async (req: Request) => {
   const am = alias(messages, "am");
   const um = alias(messages, "um");
   const turnStatus = sql<string>`${am.metadata}->>'status'`;
+  // A turn belongs to the shared or own-key view through its settled usage rows —
+  // otherwise the UI would divide scope-filtered spend by both scopes' turns and
+  // the turn KPIs would ignore the Shared/Own toggle entirely. A turn with no
+  // settled usage at all (failed before any provider call) is key-neutral and
+  // stays visible in both views: it matters for reliability, not for either bill.
+  const turnScope = sql`(
+    exists (select 1 from ${usage} u where u.task_id = ${am.metadata}->>'taskId' and u.pending = false and u.on_shared_key = ${scope === "shared"})
+    or not exists (select 1 from ${usage} u where u.task_id = ${am.metadata}->>'taskId' and u.pending = false)
+  )`;
   const turnBase = and(
     eq(am.role, "assistant"),
     sql`${am.metadata}->>'status' in ('completed', 'failed', 'cancelled')`,
+    turnScope,
     fUser ? eq(chats.userId, fUser) : undefined,
+    // Failed turns recorded before v0.10.12 lack metadata.model (the runner now
+    // writes it), so a model filter slightly understates HISTORICAL failure rates.
     fModel ? sql`${am.metadata}->>'model' = ${fModel}` : undefined,
     fProject ? eq(chats.projectId, fProject) : undefined,
     fChannel ? sql`coalesce(${um.platform}, 'web') = ${fChannel}` : undefined,
   );
   const turnCount = sql<number>`count(*)::int`;
+
+  // Instance-wide turn outcomes for the "Needs attention" block — deliberately
+  // ignoring the ad-hoc dimension filters AND the key scope: an alert about the
+  // whole instance must not disappear because the admin happens to be looking at
+  // one member or one model.
+  const attnTurnQuery = (from: Date, to?: Date) =>
+    db
+      .select({ status: sql<string>`${messages.metadata}->>'status'`, n: sql<number>`count(*)::int` })
+      .from(messages)
+      .where(and(
+        eq(messages.role, "assistant"),
+        sql`${messages.metadata}->>'status' in ('completed', 'failed', 'cancelled')`,
+        gte(messages.createdAt, from),
+        to ? lt(messages.createdAt, to) : undefined,
+      ))
+      .groupBy(sql`${messages.metadata}->>'status'`);
 
   const turnQuery = (from: Date, to?: Date) =>
     db
@@ -126,11 +154,15 @@ export const GET = apiHandler(async (req: Request) => {
     // popover always offers the full set).
     optProjects,
     optModels,
-    // Attention inputs (instance-wide, independent of the ad-hoc filters).
+    // Attention inputs (instance-wide, independent of the ad-hoc filters AND the
+    // key-scope toggle — an alert must not vanish because of what's on screen).
     allUsers,
     allTiers,
     sharedSpend30d,
     lastTurnAll,
+    attnSpendRow,
+    attnTurnRows,
+    attnPrevTurnRows,
     defaultTier,
     budgetRaw,
   ] = await Promise.all([
@@ -234,6 +266,15 @@ export const GET = apiHandler(async (req: Request) => {
       .innerJoin(chats, eq(chats.id, am.chatId))
       .where(and(eq(am.role, "assistant"), sql`${am.metadata}->>'status' is not null`))
       .groupBy(chats.userId),
+    // Settled shared-key spend over the window, unfiltered — the budget projection
+    // is about the org's whole bill regardless of the current view.
+    db
+      .select({ cost })
+      .from(usage)
+      .where(and(eq(usage.pending, false), eq(usage.onSharedKey, true), gte(usage.createdAt, since)))
+      .then((r) => r[0]),
+    attnTurnQuery(since),
+    attnTurnQuery(prevSince, since),
     defaultTierP,
     budgetRawP,
   ]);
@@ -264,13 +305,15 @@ export const GET = apiHandler(async (req: Request) => {
     createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : null,
   }));
 
+  // Alerts get the INSTANCE-WIDE aggregates, never the filtered ones on screen —
+  // picking one member or model must not hide a budget overrun or failure spike.
   const attention = computeAttention({
     scope,
     days,
     budgetMonthly,
-    spend: totals?.cost ?? 0,
-    turns,
-    prevTurns,
+    spend: attnSpendRow?.cost ?? 0,
+    turns: foldTurns(attnTurnRows),
+    prevTurns: foldTurns(attnPrevTurnRows),
     members,
     now: Date.now(),
   });

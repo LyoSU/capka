@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditLog, users } from "@/lib/db/schema";
@@ -26,7 +26,14 @@ export async function audit(e: {
 /** Newest-first page of the audit trail, with the actor resolved to a human
  *  name/email so the UI can say WHO did each thing. A left join keeps rows
  *  whose actor was a system action or a since-deleted user. */
-export async function listAudit(limit = 100, offset = 0, actions?: readonly string[]): Promise<AuditEntry[]> {
+export async function listAudit(
+  limit = 100,
+  offset = 0,
+  actions?: readonly string[],
+  // Narrow to one subject (a user, a capability) server-side, so its history
+  // pages correctly instead of being fished out of a recent-events window.
+  target?: { type: string; key: string },
+): Promise<AuditEntry[]> {
   const rows = await db
     .select({
       id: auditLog.id, actorId: auditLog.actorId,
@@ -36,7 +43,10 @@ export async function listAudit(limit = 100, offset = 0, actions?: readonly stri
     })
     .from(auditLog)
     .leftJoin(users, eq(users.id, auditLog.actorId))
-    .where(actions && actions.length ? inArray(auditLog.action, actions as string[]) : undefined)
+    .where(and(
+      actions && actions.length ? inArray(auditLog.action, actions as string[]) : undefined,
+      target ? and(eq(auditLog.targetType, target.type), eq(auditLog.targetKey, target.key)) : undefined,
+    ))
     .orderBy(desc(auditLog.createdAt))
     .limit(limit)
     .offset(offset);

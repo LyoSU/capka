@@ -61,7 +61,6 @@ export default function PermissionsPage() {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [projects, setProjects] = useState<RawProject[]>([]);
-  const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<InvItem | null>(null);
   const { data: session } = authClient.useSession();
@@ -80,10 +79,9 @@ export default function PermissionsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [p, u, a] = await Promise.all([
+      const [p, u] = await Promise.all([
         fetch("/api/admin/policies"),
         fetch("/api/admin/users"),
-        fetch("/api/admin/audit?category=security&limit=200"),
       ]);
       // Projects come from the policies route (org-wide, admin-scoped) — NOT
       // /api/projects, which is scoped to the requester's own projects.
@@ -91,7 +89,6 @@ export default function PermissionsPage() {
       // The users route may serve a bare array today or `{ users, tiers }` after a
       // parallel change — accept either shape.
       if (u.ok) { const d = await u.json(); setMembers(Array.isArray(d) ? d : d.users ?? []); }
-      if (a.ok) { const d = await a.json(); setAudit(d.entries ?? []); }
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { if (isAdmin) load(); else setLoading(false); }, [isAdmin, load]);
@@ -103,10 +100,14 @@ export default function PermissionsPage() {
   // Global rule: back to the default clears the row, otherwise upsert a system policy.
   const setGlobal = async (i: InvItem, effect: Effect) => {
     const existing = systemPolicy(i);
+    // Re-clicking the already-default Allow must stay a no-op: the default is the
+    // ABSENCE of a row, so materializing an explicit allow would only add policy
+    // and audit noise with no behavior change.
+    if (effect === "allow" && !existing) return;
     if (effect === "allow" && existing) {
       const res = await fetch(`/api/admin/policies?id=${encodeURIComponent(existing.id)}`, { method: "DELETE" });
       if (!res.ok) return toast.error(t("saveFailed"));
-    } else if (effect !== "allow" || !existing) {
+    } else if (effect !== "allow") {
       const res = await fetch("/api/admin/policies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ capabilityType: i.capabilityType, capabilityKey: i.capabilityKey, effect, scope: "system" }) });
       if (!res.ok) return toast.error(t("saveFailed"));
     }
@@ -192,7 +193,6 @@ export default function PermissionsPage() {
               exceptions={exceptionsFor(open)}
               members={members}
               projects={labeledProjects}
-              audit={audit}
               policiesForCap={policies.filter((p) => p.capabilityType === open.capabilityType && p.capabilityKey === open.capabilityKey)}
               onSetGlobal={(e) => setGlobal(open, e)}
               onAddException={(scope, subjectId, e) => addException(open, scope, subjectId, e)}
@@ -215,17 +215,28 @@ function EffectBadge({ effect, t }: { effect: Effect; t: T }) {
 }
 
 function CapabilityDrawer({
-  item, t, globalEffect, exceptions, members, projects, audit, policiesForCap,
+  item, t, globalEffect, exceptions, members, projects, policiesForCap,
   onSetGlobal, onAddException, onRemoveException,
 }: {
   item: InvItem; t: T; globalEffect: Effect; exceptions: Policy[];
-  members: Member[]; projects: Project[]; audit: AuditEntry[]; policiesForCap: Policy[];
+  members: Member[]; projects: Project[]; policiesForCap: Policy[];
   onSetGlobal: (e: Effect) => void;
   onAddException: (scope: "user" | "project", subjectId: string, effect: Effect) => void;
   onRemoveException: (id: string) => void;
 }) {
   const memberLabel = (m: Member) => m.name || m.email || m.id;
-  const history = audit.filter((a) => a.action.startsWith("policy.") && a.targetType === item.capabilityType && a.targetKey === item.capabilityKey);
+  // THIS capability's history, filtered in SQL — a recent-events window fished
+  // client-side goes blank once busier subjects push past it.
+  const [history, setHistory] = useState<AuditEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const q = new URLSearchParams({ targetType: item.capabilityType, targetKey: item.capabilityKey, limit: "50" });
+    fetch(`/api/admin/audit?${q}`)
+      .then((r) => (r.ok ? r.json() : { entries: [] }))
+      .then((d) => { if (!cancelled) setHistory((d.entries ?? []).filter((a: AuditEntry) => a.action.startsWith("policy."))); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [item.capabilityType, item.capabilityKey]);
 
   const userExceptions = exceptions.filter((e) => e.scope === "user");
   const projectExceptions = exceptions.filter((e) => e.scope === "project");
@@ -360,7 +371,11 @@ function CheckAccess({
   const [userId, setUserId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const memberItems = useMemo(() => Object.fromEntries(members.map((m) => [m.id, memberLabel(m)])), [members, memberLabel]);
-  const projectItems = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.label])), [projects]);
+  // Only the selected person's own projects: a runtime check pairs a user with a
+  // project they can actually work in, so offering someone else's project would
+  // "explain" an access state that can never occur.
+  const userProjects = useMemo(() => projects.filter((p) => p.ownerId === userId), [projects, userId]);
+  const projectItems = useMemo(() => Object.fromEntries(userProjects.map((p) => [p.id, p.label])), [userProjects]);
 
   const result = useMemo(() => {
     if (!userId) return undefined;
@@ -385,7 +400,7 @@ function CheckAccess({
       <h3 className="text-sm font-medium">{t("checkAccess")}</h3>
       <p className="text-xs text-muted-foreground">{t("checkAccessHint")}</p>
       <div className="flex flex-wrap gap-2">
-        <Select value={userId} onValueChange={(v) => setUserId(v as string)} items={memberItems}>
+        <Select value={userId} onValueChange={(v) => { setUserId(v as string); setProjectId(null); }} items={memberItems}>
           <SelectTrigger size="sm" className="min-w-40 flex-1">
             <SelectValue placeholder={t("pickMember")} />
           </SelectTrigger>
@@ -393,13 +408,13 @@ function CheckAccess({
             {members.map((m) => (<SelectItem key={m.id} value={m.id}>{memberLabel(m)}</SelectItem>))}
           </SelectContent>
         </Select>
-        {projects.length > 0 && (
+        {userId && userProjects.length > 0 && (
           <Select value={projectId} onValueChange={(v) => setProjectId(v as string)} items={projectItems}>
             <SelectTrigger size="sm" className="min-w-40 flex-1">
               <SelectValue placeholder={t("pickProjectOptional")} />
             </SelectTrigger>
             <SelectContent>
-              {projects.map((p) => (<SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>))}
+              {userProjects.map((p) => (<SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>))}
             </SelectContent>
           </Select>
         )}
