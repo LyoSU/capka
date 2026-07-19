@@ -474,15 +474,22 @@ export function parseBedrockEndpoint(raw: string): { region: string; baseURL?: s
 }
 
 export function normalizeAzureBaseUrl(raw: string): string {
-  const url = raw.trim().replace(/\/+$/, "");
   let parsed: URL;
-  try { parsed = new URL(url); } catch { return url; }
+  try { parsed = new URL(raw.trim()); } catch { return raw.trim().replace(/\/+$/, ""); }
+  // The portal's "Target URI" copy button hands out a full operation endpoint
+  // (…/openai/v1/responses?api-version=…) — reduce whatever was pasted to the
+  // resource prefix. The query must go regardless: the SDK appends its path
+  // AFTER the string, so a surviving query corrupts every request URL.
   if (parsed.hostname.endsWith(".openai.azure.com")) {
-    return `${url.replace(/\/openai(\/v1)?$/, "")}/openai`;
+    // SDK appends /v1{path}?api-version itself — prefix always stops at /openai.
+    return `${parsed.origin}/openai`;
   }
-  if (url.endsWith("/openai")) return `${url}/v1`;
-  if (parsed.pathname === "" || parsed.pathname === "/") return `${url}/openai/v1`;
-  return url;
+  const path = parsed.pathname
+    .replace(/\/(responses|chat\/completions|completions|embeddings|models)\/?$/, "")
+    .replace(/\/+$/, "");
+  if (path === "") return `${parsed.origin}/openai/v1`;
+  if (path.endsWith("/openai")) return `${parsed.origin}${path}/v1`;
+  return `${parsed.origin}${path}`;
 }
 
 // ── Model id encoding ──────────────────────────────────────────────────────

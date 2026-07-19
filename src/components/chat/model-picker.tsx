@@ -356,7 +356,9 @@ function useModels(source: Source, fallbackValue: string, loadErrorMsg: string):
         setState({
           models: data.models ?? [],
           loading: false,
-          error: data.error ?? null,
+          // The server's error is a locale-less constant — treat it as a flag
+          // and render the localized message.
+          error: data.error ? loadErrorMsg : null,
           isShared: !!data.isShared,
           needsKey: false,
           syncing: !!data.syncing,

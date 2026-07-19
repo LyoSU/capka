@@ -47,6 +47,27 @@ describe("normalizeAzureBaseUrl", () => {
     }
   });
 
+  it("strips the operation path + api-version the portal's Target URI copy button includes", () => {
+    // Foundry resource (*.services.ai.azure.com) — verbatim host class.
+    for (const raw of [
+      "https://res.services.ai.azure.com/openai/v1/responses?api-version=v1",
+      "https://res.services.ai.azure.com/openai/v1/chat/completions",
+      "https://res.services.ai.azure.com/openai/responses",
+      "https://res.services.ai.azure.com/openai/v1",
+      "https://res.services.ai.azure.com",
+    ]) {
+      expect(normalizeAzureBaseUrl(raw)).toBe("https://res.services.ai.azure.com/openai/v1");
+    }
+    // Classic resource — SDK builds the path itself, prefix always stops at /openai.
+    for (const raw of [
+      "https://res.openai.azure.com/openai/responses?api-version=2025-04-01-preview",
+      "https://res.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-06-01",
+      "https://res.openai.azure.com/openai/v1/responses",
+    ]) {
+      expect(normalizeAzureBaseUrl(raw)).toBe("https://res.openai.azure.com/openai");
+    }
+  });
+
   it("carries the full /openai/v1 path for non-Azure hosts (Foundry, APIM, gateways)", () => {
     expect(normalizeAzureBaseUrl("https://res.cognitiveservices.azure.com")).toBe(
       "https://res.cognitiveservices.azure.com/openai/v1",
