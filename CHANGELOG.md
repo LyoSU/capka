@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-07-24
+
 ### Fixed
 
 - Telegram `/model` now lists models from the admin's shared connections, not only the user's own — on a shared-key instance every non-admin got "No models available yet" while the web picker worked. Models from deactivated connections are no longer offered.
