@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Library, Plug, Package, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -17,20 +18,24 @@ export default function CustomizePage() {
   const [tab, setTab] = useState<Tab>("library");
   const [pluginsView, setPluginsView] = useState<PluginsView>("installed");
 
-  // Honor ?tab= (old /settings/{marketplace,connectors} redirects + the MCP OAuth
-  // round-trip) without useSearchParams, which would force Suspense. Marketplace is
-  // now the Browse view inside the merged Plugins tab.
+  // Honor ?tab= (old /settings/{marketplace,connectors} redirects, the MCP OAuth
+  // round-trip, and the library's "Browse marketplace" link). Marketplace is now
+  // the Browse view inside the merged Plugins tab.
+  //
+  // Must read the LIVE param, not window.location.search once on mount: the
+  // "Browse marketplace" button links to this same pathname with a different
+  // query, so React never remounts this page (RouteTransition keys its boundary
+  // by pathname) and a mount-only effect never re-ran — the URL changed and the
+  // view didn't, which is exactly how that button looked broken.
+  const tabParam = useSearchParams().get("tab");
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("tab");
-    // Reading the URL must happen post-mount (no window on the server); an effect
-    // is the right tool here and avoids a hydration mismatch on the default tab.
-    if (q === "connectors") setTab("connectors");
-    else if (q === "installed" || q === "plugins") setTab("plugins");
-    else if (q === "marketplace") {
+    if (tabParam === "connectors") setTab("connectors");
+    else if (tabParam === "installed" || tabParam === "plugins") setTab("plugins");
+    else if (tabParam === "marketplace") {
       setTab("plugins");
       setPluginsView("browse");
     }
-  }, []);
+  }, [tabParam]);
 
   const tabs: { key: Tab; label: string; icon: typeof Library; adminOnly?: boolean }[] = [
     { key: "library", label: t("tab.library"), icon: Library },

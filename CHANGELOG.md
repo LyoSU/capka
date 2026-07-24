@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Telegram `/model` now lists models from the admin's shared connections, not only the user's own — on a shared-key instance every non-admin got "No models available yet" while the web picker worked. Models from deactivated connections are no longer offered.
+- The library's "Browse marketplace" button now opens the Browse view instead of only adding `?tab=marketplace` to the URL.
+
 ## [0.12.0] - 2026-07-24
 
 ### Added

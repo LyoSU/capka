@@ -8,7 +8,8 @@
  */
 import { and, eq, desc, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { providerConfigs, chats } from "@/lib/db/schema";
+import { chats } from "@/lib/db/schema";
+import { resolveEnabledConfigs } from "@/lib/providers/resolve";
 import {
   splitModelRef,
   encodeModelRef,
@@ -49,10 +50,12 @@ async function modalitiesFor(provider: string, modelId: string): Promise<Modalit
  * cap on long refs).
  */
 export async function modelChoices(userId: string): Promise<ModelChoice[]> {
-  const configs = await db
-    .select({ id: providerConfigs.id, provider: providerConfigs.provider, defaultModel: providerConfigs.defaultModel })
-    .from(providerConfigs)
-    .where(eq(providerConfigs.userId, userId));
+  // The SAME resolution the web picker uses: the user's own active configs plus
+  // the admin's shared ones. Querying provider_configs by userId directly (as this
+  // did) left every non-admin with an empty menu on the shared-key setup Capka is
+  // built around — "No models available yet" in Telegram while the web picker
+  // listed models fine — and offered models from DEACTIVATED connections.
+  const configs = await resolveEnabledConfigs(userId);
   const providerByConfig = new Map(configs.map((c) => [c.id, c.provider]));
 
   const recent = await db
