@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-24
+
 > **⚠ Breaking — `sandbox_enabled` is now enforced.** It previously saved but did nothing (no code read it). If you ever turned "Sandbox execution" off on Settings → Security, the agent will now really lose file and code access: turn it back on there.
 
 ### Added
