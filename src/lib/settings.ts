@@ -5,6 +5,8 @@ import { encrypt, decrypt, generateSecret } from "./crypto";
 import { checkMasterKey, CANARY_PLAINTEXT } from "./master-key";
 import { parseRegistrationMode, type RegistrationMode } from "./auth/telegram-oidc";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "./constants";
+import { log } from "./log";
+import { ASSISTANT_PROFILE, agentProfileSchema, parseAgentProfile, type AgentProfile } from "./agents/profile";
 
 let masterKeyCache: string | null = null;
 
@@ -188,13 +190,51 @@ export async function getSandboxNetworkDefault(): Promise<"none" | "bridge"> {
 }
 
 /**
- * Org-wide kill switch for long-term memory. On by default. When off, no run on
- * the instance reads or writes a memory doc, whatever an individual project's
- * profile says — the restrictive side always wins (see resolveAgentProfile).
- * Saved memories are kept, merely unused, so flipping it back restores them.
+ * The instance-wide CEILING on what any agent may do — same shape as a project's
+ * profile, folded over it by `resolveAgentProfile`. Defaults to fully permissive,
+ * so an untouched instance behaves exactly as before.
+ *
+ * ONE key is the source of truth. The two predecessors (`sandbox_enabled`,
+ * `memory_enabled`) are read only to seed an instance that has never saved a
+ * profile, so an admin's existing intent survives the upgrade without leaving two
+ * places that can disagree about the same bit.
  */
-export async function getMemoryEnabled(): Promise<boolean> {
-  return (await getSetting("memory_enabled")) !== "false";
+export async function getOrgAgentProfile(): Promise<AgentProfile> {
+  const raw = await getSetting("agent_profile");
+  if (raw?.trim()) {
+    try {
+      return parseAgentProfile(JSON.parse(raw));
+    } catch {
+      // A hand-edited or truncated value must not silently clamp everyone's agent
+      // to nothing — fall through to the permissive default and let the admin
+      // re-save from the UI.
+      log.error("agent_profile setting is not valid JSON; ignoring it");
+    }
+  }
+  // Legacy seeding. `sandbox_enabled` shipped as a no-op switch (nothing read it),
+  // so honoring it now can newly disable a sandbox an admin turned off years ago
+  // expecting nothing to happen — called out as breaking in the changelog.
+  const [legacySandbox, legacyMemory] = await Promise.all([
+    getSetting("sandbox_enabled"),
+    getSetting("memory_enabled"),
+  ]);
+  if (legacySandbox == null && legacyMemory == null) return ASSISTANT_PROFILE;
+  return {
+    ...ASSISTANT_PROFILE,
+    capabilities: {
+      ...ASSISTANT_PROFILE.capabilities,
+      sandbox: legacySandbox !== "false",
+      memory: legacyMemory !== "false",
+    },
+  };
+}
+
+/** Persist the org ceiling. Validated through the schema first, so the stored
+ *  JSON is always a shape `getOrgAgentProfile` can read back. */
+export async function setOrgAgentProfile(profile: unknown): Promise<AgentProfile> {
+  const parsed = agentProfileSchema.parse(profile);
+  await setSetting("agent_profile", JSON.stringify(parsed));
+  return parsed;
 }
 
 /**

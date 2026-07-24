@@ -19,7 +19,7 @@ describe("manage/i18n", () => {
     const t = manageT("uk");
     expect(loc(t, "control.user_locale.title", "Interface language")).toBe("Мова інтерфейсу");
     expect(locValue(t, "org.sandbox_network", "bridge", "Network access")).toBe("З доступом до мережі");
-    expect(locValue(t, "org.sandbox_enabled", "true", "Enabled")).toBe("Увімкнено"); // shared bool key
+    expect(locValue(t, "org.agent_sandbox", "true", "Enabled")).toBe("Увімкнено"); // shared bool key
   });
 
   it("English locale falls back to the in-code literals (no separate en catalog to drift)", () => {

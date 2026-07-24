@@ -4,10 +4,12 @@ import {
   RAW_PROFILE,
   CAPABILITY_GROUPS,
   agentProfileSchema,
+  capProfile,
   parseAgentProfile,
   presetOf,
   profilesEqual,
   resolveAgentProfile,
+  type AgentProfile,
 } from "../profile";
 
 describe("agent profile defaults", () => {
@@ -55,25 +57,64 @@ describe("agent profile defaults", () => {
   });
 });
 
-describe("resolveAgentProfile", () => {
-  it("passes the project's profile through when the org allows memory", () => {
-    expect(resolveAgentProfile(null, { memory: true })).toEqual(ASSISTANT_PROFILE);
-    expect(resolveAgentProfile(RAW_PROFILE, { memory: true })).toEqual(RAW_PROFILE);
+describe("resolveAgentProfile — org ceiling", () => {
+  /** A permissive ceiling with specific things forbidden. */
+  const ceiling = (over: {
+    capabilities?: Partial<AgentProfile["capabilities"]>;
+    persona?: AgentProfile["persona"];
+    sessionContext?: boolean;
+  }): AgentProfile =>
+    agentProfileSchema.parse({
+      ...ASSISTANT_PROFILE,
+      ...over,
+      capabilities: { ...ASSISTANT_PROFILE.capabilities, ...over.capabilities },
+    });
+
+  it("passes a project through untouched under a fully permissive ceiling", () => {
+    // The built-in default IS the maximum, which is why a pure ceiling still gives
+    // an admin complete global control: there's nothing above "everything on".
+    expect(resolveAgentProfile(null, ASSISTANT_PROFILE)).toEqual(ASSISTANT_PROFILE);
+    expect(resolveAgentProfile(RAW_PROFILE, ASSISTANT_PROFILE)).toEqual(RAW_PROFILE);
   });
 
-  it("lets the org kill switch override a project that wants memory", () => {
-    // A switch a project could re-enable would not be a kill switch.
-    const resolved = resolveAgentProfile(ASSISTANT_PROFILE, { memory: false });
+  it("clamps a project that asks for more than the ceiling allows", () => {
+    const resolved = resolveAgentProfile(ASSISTANT_PROFILE, ceiling({ capabilities: { memory: false } }));
     expect(resolved.capabilities.memory).toBe(false);
-    // …and only memory. The org layer must not quietly touch anything else.
+    // …and touches nothing else. A ceiling that leaked into other fields would
+    // silently reshape every project on the instance.
     for (const g of CAPABILITY_GROUPS.filter((x) => x !== "memory")) {
       expect(resolved.capabilities[g]).toBe(true);
     }
     expect(resolved.persona).toBe("append");
+    expect(resolved.sessionContext).toBe(true);
   });
 
-  it("never re-enables memory a project turned off", () => {
-    expect(resolveAgentProfile(RAW_PROFILE, { memory: true }).capabilities.memory).toBe(false);
+  it("never GRANTS what a project turned off", () => {
+    expect(resolveAgentProfile(RAW_PROFILE, ASSISTANT_PROFILE)).toEqual(RAW_PROFILE);
+  });
+
+  it("reaches chats with no project at all", () => {
+    // `null` is a project-less chat — the only lever an admin has over those.
+    const resolved = resolveAgentProfile(null, RAW_PROFILE);
+    expect(resolved).toEqual(RAW_PROFILE);
+  });
+
+  it("treats replace and no-session-context as the restrictive side", () => {
+    // "More restrictive" has to be well defined for the non-boolean fields too,
+    // or the fold couldn't cover them uniformly.
+    const p = resolveAgentProfile(ASSISTANT_PROFILE, ceiling({ persona: "replace", sessionContext: false }));
+    expect(p.persona).toBe("replace");
+    expect(p.sessionContext).toBe(false);
+    // And a project asking for `replace` is not dragged back to `append`.
+    expect(resolveAgentProfile({ persona: "replace" }, ASSISTANT_PROFILE).persona).toBe("replace");
+  });
+
+  it("folds in any order (the ceiling is a commutative min)", () => {
+    const a = ceiling({ capabilities: { sandbox: false }, sessionContext: false });
+    const b = ceiling({ capabilities: { memory: false }, persona: "replace" });
+    expect(capProfile(a, b)).toEqual(capProfile(b, a));
+    // Which is what makes adding a third layer (a user, a chat) one more call.
+    expect(capProfile(capProfile(a, b), ASSISTANT_PROFILE)).toEqual(capProfile(a, b));
   });
 });
 

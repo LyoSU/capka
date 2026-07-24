@@ -599,7 +599,10 @@
           "memory": "Long-term memory"
         },
         "persona": "Instructions replace the built-in persona",
-        "sessionContext": "Pass your name, the date, and your language"
+        "sessionContext": "Pass your name, the date, and your language",
+        "hintOrg": "The instance-wide ceiling. A project can ask for less, never more — and this also covers chats that belong to no project.",
+        "advancedNoteOrg": "Switching a capability off here removes it from every chat, whatever an individual project is set to.",
+        "cappedByAdmin": "Some capabilities are limited instance-wide by an administrator and can't be enabled here."
       }
     },
     "chatCount": "{n, plural, one {# chat} other {# chats}}",
@@ -1461,11 +1464,7 @@
       "autonomousMode": "Autonomous mode",
       "autonomousModeHint": "When on, the agent applies settings changes and installs skills directly, without a confirmation each time — it still asks before installing a connector that runs third-party code. When off, it asks you to confirm each risky change.",
       "autonomousEnabled": "Autonomous mode on — the agent acts without asking.",
-      "autonomousDisabled": "Autonomous mode off — the agent confirms risky changes.",
-      "memory": "Long-term memory",
-      "memoryHint": "Let the assistant remember durable facts about people and their projects between conversations. Turning this off stops all memory use instance-wide, whatever an individual project is set to; saved memories are kept.",
-      "memoryEnabled": "Long-term memory enabled",
-      "memoryDisabled": "Long-term memory disabled"
+      "autonomousDisabled": "Autonomous mode off — the agent confirms risky changes."
     },
     "updates": {
       "title": "Updates",

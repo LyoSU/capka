@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import {
   Plus, Settings, Trash2, FolderKanban, FolderOpen, Cpu, Globe, FileText, MessageSquare, Loader2, RefreshCw, Check,
-  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -21,9 +20,8 @@ import { WorkspaceBrowser, type FileEntry } from "@/components/chat/workspace-br
 import { useFolderSync } from "@/components/chat/use-folder-sync";
 import { type Project } from "@/components/projects/project-dialog";
 import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
-import {
-  ASSISTANT_PROFILE, RAW_PROFILE, CAPABILITY_GROUPS, presetOf, profilesEqual, type AgentProfile,
-} from "@/lib/agents/profile";
+import { AgentModeSection } from "@/components/settings/agent-mode";
+import { ASSISTANT_PROFILE, profilesEqual, type AgentProfile } from "@/lib/agents/profile";
 import { projectTarget, targetQuery } from "@/lib/workspace-target";
 import { displayModelName } from "@/lib/providers/registry";
 import { cn } from "@/lib/utils";
@@ -50,10 +48,15 @@ export function ProjectHub({
   project: initial,
   isAdmin,
   initialTab,
+  orgCeiling,
 }: {
   project: Project;
   isAdmin?: boolean;
   initialTab?: HubTab;
+  /** The instance-wide ceiling this project's profile is clamped by. Resolved
+   *  server-side so the settings tab can show a capped switch as locked instead of
+   *  letting it save a value the run would then ignore. */
+  orgCeiling: AgentProfile;
 }) {
   const t = useTranslations("projects.hub");
   const router = useRouter();
@@ -181,6 +184,7 @@ export function ProjectHub({
             <SettingsTab
               project={project}
               isAdmin={isAdmin}
+              orgCeiling={orgCeiling}
               onSaved={setProject}
               onDelete={() => setDeleteOpen(true)}
             />
@@ -290,10 +294,11 @@ function OverviewTab({
  *  so the model picker's dropdown has room to open (a dialog's centering
  *  transform + overflow clipping used to cut it off). */
 function SettingsTab({
-  project, isAdmin, onSaved, onDelete,
+  project, isAdmin, orgCeiling, onSaved, onDelete,
 }: {
   project: Project;
   isAdmin?: boolean;
+  orgCeiling: AgentProfile;
   onSaved: (p: Project) => void;
   onDelete: () => void;
 }) {
@@ -415,6 +420,7 @@ function SettingsTab({
         onChange={setProfile}
         isAdmin={isAdmin}
         hasInstructions={!!systemPrompt.trim()}
+        ceiling={orgCeiling}
       />
 
       <div className="flex justify-end">
@@ -436,119 +442,6 @@ function SettingsTab({
             </Button>
           </div>
         </section>
-      )}
-    </div>
-  );
-}
-
-/**
- * "Agent mode" — the project's capability allow-list + prompt composition.
- *
- * Two audiences in one section, on purpose. The PRESET is a single plain-language
- * choice everyone can make ("Assistant" or a raw prompt). The per-group switches
- * underneath are admin-only, like the reasoning/cache fields in the (i) popover:
- * a knob a non-technical colleague has no use for shouldn't be in their way — but
- * on a one-person install the sole user IS the admin and sees everything.
- *
- * The preset is DERIVED from the profile (`presetOf`), never stored beside it, so
- * a label can't end up describing something the profile no longer is.
- */
-function AgentModeSection({
-  profile, onChange, isAdmin, hasInstructions,
-}: {
-  profile: AgentProfile;
-  onChange: (p: AgentProfile) => void;
-  isAdmin?: boolean;
-  hasInstructions: boolean;
-}) {
-  const t = useTranslations("projects.form.agent");
-  const [open, setOpen] = useState(false);
-  const preset = presetOf(profile);
-
-  const presets: { key: "assistant" | "raw"; profile: AgentProfile }[] = [
-    { key: "assistant", profile: ASSISTANT_PROFILE },
-    { key: "raw", profile: RAW_PROFILE },
-  ];
-
-  return (
-    <div className="space-y-3 rounded-lg border p-3">
-      <div className="space-y-0.5">
-        <Label>{t("label")}</Label>
-        <p className="text-xs text-muted-foreground">{t(`hint.${preset}`)}</p>
-      </div>
-
-      <div className="inline-flex rounded-lg border bg-muted/40 p-1">
-        {presets.map((p) => (
-          <button
-            key={p.key}
-            type="button"
-            onClick={() => onChange(p.profile)}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm transition-colors",
-              preset === p.key ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t(`preset.${p.key}`)}
-          </button>
-        ))}
-        {/* Not selectable — it's a readout of "this profile matches no preset",
-            shown only while that's true, so the control never lies about state. */}
-        {preset === "custom" && (
-          <span className="rounded-md bg-card px-3 py-1.5 text-sm font-medium shadow-sm">{t("preset.custom")}</span>
-        )}
-      </div>
-
-      {/* The honest consequence of a raw prompt with nothing written in it: the
-          model gets no system message at all. Better seen now than inferred later. */}
-      {profile.persona === "replace" && !hasInstructions && (
-        <p className="text-xs text-amber-600 dark:text-amber-500">{t("rawEmpty")}</p>
-      )}
-
-      {isAdmin && (
-        <div className="border-t pt-3">
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            aria-expanded={open}
-          >
-            <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
-            {t("advanced")}
-          </button>
-
-          {open && (
-            <div className="mt-3 space-y-2.5">
-              {CAPABILITY_GROUPS.map((g) => (
-                <label key={g} className="flex items-center justify-between gap-3 text-sm">
-                  <span>{t(`cap.${g}`)}</span>
-                  <Switch
-                    checked={profile.capabilities[g]}
-                    onCheckedChange={(v) =>
-                      onChange({ ...profile, capabilities: { ...profile.capabilities, [g]: v } })
-                    }
-                  />
-                </label>
-              ))}
-              <div className="space-y-2.5 border-t pt-2.5">
-                <label className="flex items-center justify-between gap-3 text-sm">
-                  <span>{t("persona")}</span>
-                  <Switch
-                    checked={profile.persona === "replace"}
-                    onCheckedChange={(v) => onChange({ ...profile, persona: v ? "replace" : "append" })}
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-3 text-sm">
-                  <span>{t("sessionContext")}</span>
-                  <Switch
-                    checked={profile.sessionContext}
-                    onCheckedChange={(v) => onChange({ ...profile, sessionContext: v })}
-                  />
-                </label>
-              </div>
-              <p className="pt-1 text-xs text-muted-foreground">{t("advancedNote")}</p>
-            </div>
-          )}
-        </div>
       )}
     </div>
   );

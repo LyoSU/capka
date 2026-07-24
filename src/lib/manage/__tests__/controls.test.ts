@@ -45,7 +45,7 @@ describe("manage/controls", () => {
   });
 
   it("boolean controls render true/false as human words (English is the in-code default)", () => {
-    const b = reg.get("org.sandbox_enabled")!;
+    const b = reg.get("org.agent_sandbox")!;
     expect(b.format?.("true")).toBe("Enabled");
     expect(b.format?.("false")).toBe("Disabled");
   });

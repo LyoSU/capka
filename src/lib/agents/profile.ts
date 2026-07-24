@@ -96,18 +96,39 @@ export function parseAgentProfile(stored: unknown): AgentProfile {
 }
 
 /**
- * Fold the layers into the profile a run actually uses.
+ * Take the more RESTRICTIVE of two profiles, field by field.
  *
- * Precedence, in one place rather than re-derived per call site: the project's
- * profile is the base, and org policy only ever REMOVES. A kill switch a project
- * could re-enable would not be a kill switch, so the restrictive side always
- * wins. A future user- or chat-level layer is one more argument to this same
- * fold, not a restructuring.
+ * "More restrictive" is well defined for every field, which is what lets one fold
+ * cover all of them: a capability is on only if both say on; `replace` is more
+ * minimal than `append` (it strips the built-in persona); no session context is
+ * more minimal than some. Associative and commutative, so layers can be folded in
+ * any order and a third layer is one more `cap()` call.
  */
-export function resolveAgentProfile(project: unknown, org: { memory: boolean }): AgentProfile {
-  const base = parseAgentProfile(project);
-  if (org.memory) return base;
-  return { ...base, capabilities: { ...base.capabilities, memory: false } };
+export function capProfile(a: AgentProfile, b: AgentProfile): AgentProfile {
+  return {
+    capabilities: Object.fromEntries(
+      CAPABILITY_GROUPS.map((g) => [g, a.capabilities[g] && b.capabilities[g]]),
+    ) as AgentProfile["capabilities"],
+    persona: a.persona === "replace" || b.persona === "replace" ? "replace" : "append",
+    sessionContext: a.sessionContext && b.sessionContext,
+  };
+}
+
+/**
+ * The profile a run actually uses: the project's, clamped by the org ceiling.
+ *
+ * The org layer is a CEILING, never a default — and that is sufficient for
+ * complete global control precisely because the built-in default
+ * (ASSISTANT_PROFILE) is already maximal: there is nothing above "everything on"
+ * left to grant. One semantic instead of two, so nobody has to remember whether a
+ * given org knob sets a baseline or an upper bound.
+ *
+ * It also reaches chats with no project at all — they resolve `null` to the
+ * assistant default and then get clamped, which is the only way an admin can make
+ * project-less chats raw.
+ */
+export function resolveAgentProfile(project: unknown, org: AgentProfile): AgentProfile {
+  return capProfile(parseAgentProfile(project), org);
 }
 
 export type AgentPreset = "assistant" | "raw" | "custom";

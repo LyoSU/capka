@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { projects, users } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { parseAgentProfile } from "@/lib/agents/profile";
+import { getOrgAgentProfile } from "@/lib/settings";
 import { ProjectHub, type HubTab } from "@/components/projects/project-hub";
 
 export default async function ProjectHubPage({
@@ -31,12 +32,16 @@ export default async function ProjectHubPage({
     .limit(1);
   if (!project) notFound();
 
-  const [userRow] = await db.select({ role: users.role }).from(users).where(eq(users.id, session.user.id)).limit(1);
+  const [userRow, orgCeiling] = await Promise.all([
+    db.select({ role: users.role }).from(users).where(eq(users.id, session.user.id)).limit(1).then((r) => r[0]),
+    getOrgAgentProfile(),
+  ]);
 
   return (
     <ProjectHub
       isAdmin={userRow?.role === "admin"}
       initialTab={initialTab}
+      orgCeiling={orgCeiling}
       project={{
         id: project.id,
         name: project.name,

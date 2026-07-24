@@ -9,21 +9,52 @@ import { Switch } from "@/components/ui/switch";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useSetting } from "@/hooks/use-setting";
 import { MasterKeyBanner } from "@/components/settings/master-key-banner";
+import { AgentModeSection } from "@/components/settings/agent-mode";
+import { parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
 
 export default function SecuritySettingsPage() {
   const isAdmin = useIsAdmin();
   const t = useTranslations("settings.security");
 
-  const sandbox = useSetting("sandbox_enabled", "false");
+  // NOTE: no `useSetting("sandbox_enabled")` any more. That key shipped as a
+  // no-op — nothing outside this page ever read it — and is now the `sandbox` bit
+  // of the org agent ceiling below, so the toggle projects onto that single source
+  // of truth instead of writing a second key that could disagree with it.
   const sandboxNet = useSetting("sandbox_network", "none");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
   const autonomy = useSetting("agent_autonomy", "supervised");
   const hostFolders = useSetting("host_folder_access", "false");
   const pcFolders = useSetting("pc_folder_access", "off");
-  // Default "true" must match getMemoryEnabled() (`!== "false"`) — a fallback of
-  // "false" here would render the switch off on a fresh instance where memory is
-  // in fact on, i.e. the UI lying about persisted state.
-  const memory = useSetting("memory_enabled", "true");
+
+  // The org-wide agent ceiling. Not a `useSetting` key — it's one validated object
+  // behind its own endpoint (see /api/settings/agent-profile). null = still loading.
+  const [orgProfile, setOrgProfile] = useState<AgentProfile | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    fetch("/api/settings/agent-profile", { signal: ac.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setOrgProfile(parseAgentProfile(d)); })
+      .catch(() => {});
+    return () => ac.abort();
+  }, []);
+
+  // Optimistic with rollback, like the toggles above: apply immediately, restore
+  // the previous ceiling if the save fails so the UI never claims a clamp that
+  // isn't in force.
+  const saveOrgProfile = (next: AgentProfile) => {
+    const prev = orgProfile;
+    setOrgProfile(next);
+    fetch("/api/settings/agent-profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    })
+      .then((r) => {
+        if (r.ok) toast.success(t("updated"));
+        else { setOrgProfile(prev); toast.error(t("updateFailed")); }
+      })
+      .catch(() => { setOrgProfile(prev); toast.error(t("updateFailed")); });
+  };
 
   // Deployment-level egress kill-switch, read from the controller. When false,
   // the in-app toggle has no effect (the controller downgrades bridge→none), so
@@ -38,7 +69,7 @@ export default function SecuritySettingsPage() {
   }, []);
   const netBlocked = allowNetwork === false;
 
-  const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading || autonomy.loading || hostFolders.loading || pcFolders.loading || memory.loading;
+  const loading = sandboxNet.loading || blockPrivate.loading || autonomy.loading || hostFolders.loading || pcFolders.loading || orgProfile === null;
 
   // Tri-state personal-folder access (off / admins / everyone) — optimistic w/ rollback.
   const setPcFolders = (next: string) => {
@@ -130,14 +161,20 @@ export default function SecuritySettingsPage() {
         <h3 className="text-sm font-medium">{t("sandbox")}</h3>
         <p className="text-sm text-muted-foreground">{t("sandboxDesc")}</p>
       </div>
+      {/* Projects the ceiling's `sandbox` bit — the same value the "Files and code"
+          switch in Agent mode shows. Kept as its own top-level control because this
+          is where an admin looks for "may the agent run code", and burying a
+          security switch in an expander would be worse than showing it twice. */}
       <div className="flex items-center justify-between rounded-lg border p-4">
         <div className="pr-4">
           <p className="text-sm font-medium">{t("enableSandbox")}</p>
           <p className="text-xs text-muted-foreground">{t("enableSandboxHint")}</p>
         </div>
         <Switch
-          checked={sandbox.value === "true"}
-          onCheckedChange={(checked) => toggle(sandbox, "sandbox_enabled", checked, t("sandboxEnabled"), t("sandboxDisabled"))}
+          checked={orgProfile.capabilities.sandbox}
+          onCheckedChange={(checked) =>
+            saveOrgProfile({ ...orgProfile, capabilities: { ...orgProfile.capabilities, sandbox: checked } })
+          }
         />
       </div>
       <div className="flex items-center justify-between rounded-lg border p-4">
@@ -198,19 +235,18 @@ export default function SecuritySettingsPage() {
         <Switch checked={autonomy.value === "autonomous"} onCheckedChange={toggleAutonomy} />
       </div>
 
-      {/* Long-term memory — instance-wide. Only ever RESTRICTS: a project that
-          wants memory still loses it while this is off (see resolveAgentProfile),
-          which is what makes it a kill switch rather than a default. */}
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div className="pr-4">
-          <p className="text-sm font-medium">{t("memory")}</p>
-          <p className="text-xs text-muted-foreground">{t("memoryHint")}</p>
-        </div>
-        <Switch
-          checked={memory.value !== "false"}
-          onCheckedChange={(checked) => toggle(memory, "memory_enabled", checked, t("memoryEnabled"), t("memoryDisabled"))}
-        />
-      </div>
+      {/* The instance-wide agent ceiling — the SAME component a project's settings
+          tab uses, one level up. Only ever RESTRICTS: a project that asks for more
+          still gets clamped here (resolveAgentProfile), which is what makes this a
+          ceiling rather than a default, and is why it also reaches chats that belong
+          to no project at all. */}
+      <AgentModeSection
+        scope="org"
+        profile={orgProfile}
+        onChange={saveOrgProfile}
+        isAdmin
+        hasInstructions={false}
+      />
 
       <Separator />
 

@@ -6,6 +6,20 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+> **⚠ Breaking — `sandbox_enabled` is now enforced.** It previously saved but did nothing (no code read it). If you ever turned "Sandbox execution" off on Settings → Security, the agent will now really lose file and code access: turn it back on there.
+
+### Added
+
+- Agent mode is now also an instance-wide ceiling on Settings → Security — the same preset + capability switches a project has, one level up. It only ever restricts: a project asking for more is clamped, and it is the only way to change agent behaviour for chats that belong to no project. Exposed to chat as `org.agent_*` controls.
+
+### Fixed
+
+- The `memory_enabled` toggle added in 0.13.1 never worked: the key was missing from the settings API allow-list, so it read as 403 and every save failed. It is now part of the agent ceiling, and a test asserts every key a settings page reads is allow-listed.
+
+### Changed
+
+- The org agent ceiling is stored as one validated `agent_profile` setting. The former `sandbox_enabled` and `memory_enabled` keys are read once to seed it, then ignored, so the same fact is no longer stored in two places.
+
 ## [0.13.1] - 2026-07-24
 
 ### Fixed

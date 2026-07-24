@@ -19,7 +19,7 @@ import { makeMemoryTools } from "@/lib/memory/tool";
 import { readMemoryDocs } from "@/lib/memory/store";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { resolveAgentProfile } from "@/lib/agents/profile";
-import { getSandboxNetworkDefault, getMaxContextTokens, getMemoryEnabled, getSetting, setSetting } from "@/lib/settings";
+import { getSandboxNetworkDefault, getMaxContextTokens, getOrgAgentProfile, getSetting, setSetting } from "@/lib/settings";
 import { getModelContextLength } from "@/lib/models/catalog";
 import { contextBudget } from "@/lib/chat/context/budget";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
@@ -38,7 +38,7 @@ import type { TaskPayload } from "./runner";
 export async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string, messageId: string) {
   // A project chat sees its project memory doc + the user-global doc. A
   // standalone chat sees only the user-global doc, so projects don't leak.
-  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, memoryDocs, user, chat, orgMemory] = await Promise.all([
+  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, memoryDocs, user, chat, orgProfile] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1).then((r) => r[0])
@@ -47,7 +47,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     db.select({ name: users.name, timezone: users.timezone, locale: users.locale, role: users.role })
       .from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]),
     db.select({ createdAt: chats.createdAt }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
-    getMemoryEnabled(),
+    getOrgAgentProfile(),
   ]);
 
   // The task was enqueued for a project that has since been deleted (a worker retry
@@ -57,11 +57,12 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     throw new Error("This project was deleted, so this chat can no longer run here. Start a new chat to continue.");
   }
 
-  // What this project lets its agent be. Each capability group below gates BOTH
-  // its tools (here) and its prompt block (in buildSystemPrompt) — see
-  // agents/profile.ts for why those two must move together. The org layer can only
-  // ever remove, never grant.
-  const profile = resolveAgentProfile(project?.agentProfile, { memory: orgMemory });
+  // What this project lets its agent be, clamped by the org ceiling. Each
+  // capability group below gates BOTH its tools (here) and its prompt block (in
+  // buildSystemPrompt) — see agents/profile.ts for why those two must move
+  // together. A chat with no project resolves to the assistant default and is then
+  // clamped just the same, so an org ceiling reaches project-less chats too.
+  const profile = resolveAgentProfile(project?.agentProfile, orgProfile);
   const caps = profile.capabilities;
 
   // Sandbox tools (execute_bash, read_file, …) + MCP connector tools (sub-project

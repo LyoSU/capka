@@ -1,7 +1,26 @@
 import { z } from "zod";
-import { getSetting, setSetting } from "@/lib/settings";
+import { getSetting, setSetting, getOrgAgentProfile, setOrgAgentProfile } from "@/lib/settings";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
+import { CAPABILITY_GROUPS, type CapabilityGroup } from "@/lib/agents/profile";
 import type { Control, ManageContext } from "../types";
+
+// English is the source of truth for control copy (see manage/i18n.ts), so these
+// live here beside the controls rather than in a message catalog.
+const AGENT_CEILING_TITLES: Record<CapabilityGroup, string> = {
+  sandbox: "Agent: files and code",
+  connectors: "Agent: connectors and web data",
+  skills: "Agent: skills",
+  manage: "Agent: managing settings from chat",
+  memory: "Agent: long-term memory",
+};
+const AGENT_CEILING_DESCRIPTIONS: Record<CapabilityGroup, string> = {
+  sandbox: "Whether the agent may open files and run code in its sandbox.",
+  connectors: "Whether the agent may call MCP connectors and provider web-search tools.",
+  skills: "Whether the agent may load skills.",
+  manage: "Whether the agent may change settings and ask clarifying questions through the manage tool.",
+  memory:
+    "Whether the agent may remember durable facts about people and their projects between conversations. Off stops all memory reading AND writing; already-saved memories are kept, just unused, so turning it back on restores them.",
+};
 
 /** Build an org-wide setting control over the existing key/value settings store.
  *  Every org control is admin-only and confirm-risk by construction, so a
@@ -47,6 +66,68 @@ const boundedInt = (max: number) =>
   int.refine((v) => Number(v) <= max, `Must be at most ${max.toLocaleString("en-US")}.`);
 const TOKENS_CEILING = 10_000_000;
 
+/**
+ * The org agent ceiling, exposed to chat one bit at a time.
+ *
+ * These do NOT get their own settings keys: each projects into and out of the
+ * single `agent_profile` object (see getOrgAgentProfile), so a change made in chat
+ * and one made on the Security page are the same write. A key per bit would be the
+ * obvious shape and the wrong one — two stores for one fact drift, which is exactly
+ * how `sandbox_enabled` ended up a switch that saved and did nothing.
+ *
+ * Admin-only and confirm-risk like every org control, so clamping the whole
+ * instance always shows a preview first.
+ */
+const agentCeilingControls: Control[] = [
+  ...CAPABILITY_GROUPS.map((group) => ({
+    id: `org.agent_${group}`,
+    title: AGENT_CEILING_TITLES[group],
+    description: `${AGENT_CEILING_DESCRIPTIONS[group]} This is an instance-wide ceiling: switching it off removes the capability from every chat, whatever an individual project is set to.`,
+    scope: "org" as const,
+    requiredRole: "admin" as const,
+    risk: "confirm" as const,
+    schema: bool,
+    format: boolFmt,
+    read: async () => String((await getOrgAgentProfile()).capabilities[group]),
+    apply: async (_ctx: ManageContext, v: string) => {
+      const current = await getOrgAgentProfile();
+      await setOrgAgentProfile({ ...current, capabilities: { ...current.capabilities, [group]: v === "true" } });
+    },
+  })),
+  {
+    id: "org.agent_persona",
+    title: "Built-in persona",
+    description:
+      'Whether the agent keeps Capka\'s built-in persona and working style. Off ("replace") makes a project\'s own instructions the ENTIRE system prompt, instance-wide: a chat with no project instructions then gets no system prompt at all.',
+    scope: "org",
+    requiredRole: "admin",
+    risk: "confirm",
+    schema: bool,
+    format: boolFmt,
+    read: async () => String((await getOrgAgentProfile()).persona === "append"),
+    apply: async (_ctx, v) => {
+      const current = await getOrgAgentProfile();
+      await setOrgAgentProfile({ ...current, persona: v === "true" ? "append" : "replace" });
+    },
+  },
+  {
+    id: "org.agent_session_context",
+    title: "Tell the agent who and when",
+    description:
+      "Whether each conversation tells the agent the user's name, the conversation's date, and their language. Off removes that instance-wide, so the agent has no idea what today is unless someone says so.",
+    scope: "org",
+    requiredRole: "admin",
+    risk: "confirm",
+    schema: bool,
+    format: boolFmt,
+    read: async () => String((await getOrgAgentProfile()).sessionContext),
+    apply: async (_ctx, v) => {
+      const current = await getOrgAgentProfile();
+      await setOrgAgentProfile({ ...current, sessionContext: v === "true" });
+    },
+  },
+];
+
 export const orgControls: Control[] = [
   orgSetting({
     key: "agent_autonomy",
@@ -72,14 +153,9 @@ export const orgControls: Control[] = [
     schema: z.string().min(1, "Name can't be empty.").max(60, "Name too long (max 60)."),
     def: "Capka",
   }),
-  orgSetting({
-    key: "sandbox_enabled",
-    title: "Sandbox execution",
-    description: "Whether the agent may run code in its Docker sandbox.",
-    schema: bool,
-    def: "true",
-    format: boolFmt,
-  }),
+  // NOTE: no `sandbox_enabled` control any more. That key was never read outside
+  // the settings UI, so setting it from chat reported success and changed nothing;
+  // `org.agent_sandbox` (in agentCeilingControls) is the enforced replacement.
   orgSetting({
     key: "sandbox_network",
     title: "Sandbox network",
@@ -168,19 +244,7 @@ export const orgControls: Control[] = [
     def: "off",
     format: (v) => ({ off: "Off", admins: "Admins only", everyone: "Everyone" })[v] ?? v,
   }),
-  orgSetting({
-    key: "memory_enabled",
-    title: "Long-term memory",
-    description:
-      "Whether the agent may remember durable facts about people and their projects between conversations. Off stops all memory reading AND writing across the instance, whatever an individual project is set to; already-saved memories are kept, just unused, so turning it back on restores them.",
-    schema: bool,
-    def: "true",
-    format: boolFmt,
-    impact: async (_ctx, next) =>
-      next === "false"
-        ? "Nobody's agent will recall anything from earlier conversations, and it will stop learning new facts. Saved memories are kept and become usable again if you turn this back on."
-        : undefined,
-  }),
+  ...agentCeilingControls,
   orgSetting({
     key: "automations_enabled",
     title: "Automations",
