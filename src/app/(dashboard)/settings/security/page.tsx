@@ -20,6 +20,10 @@ export default function SecuritySettingsPage() {
   const autonomy = useSetting("agent_autonomy", "supervised");
   const hostFolders = useSetting("host_folder_access", "false");
   const pcFolders = useSetting("pc_folder_access", "off");
+  // Default "true" must match getMemoryEnabled() (`!== "false"`) — a fallback of
+  // "false" here would render the switch off on a fresh instance where memory is
+  // in fact on, i.e. the UI lying about persisted state.
+  const memory = useSetting("memory_enabled", "true");
 
   // Deployment-level egress kill-switch, read from the controller. When false,
   // the in-app toggle has no effect (the controller downgrades bridge→none), so
@@ -34,7 +38,7 @@ export default function SecuritySettingsPage() {
   }, []);
   const netBlocked = allowNetwork === false;
 
-  const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading || autonomy.loading || hostFolders.loading || pcFolders.loading;
+  const loading = sandbox.loading || sandboxNet.loading || blockPrivate.loading || autonomy.loading || hostFolders.loading || pcFolders.loading || memory.loading;
 
   // Tri-state personal-folder access (off / admins / everyone) — optimistic w/ rollback.
   const setPcFolders = (next: string) => {
@@ -192,6 +196,20 @@ export default function SecuritySettingsPage() {
           <p className="text-xs text-muted-foreground">{t("autonomousModeHint")}</p>
         </div>
         <Switch checked={autonomy.value === "autonomous"} onCheckedChange={toggleAutonomy} />
+      </div>
+
+      {/* Long-term memory — instance-wide. Only ever RESTRICTS: a project that
+          wants memory still loses it while this is off (see resolveAgentProfile),
+          which is what makes it a kill switch rather than a default. */}
+      <div className="flex items-center justify-between rounded-lg border p-4">
+        <div className="pr-4">
+          <p className="text-sm font-medium">{t("memory")}</p>
+          <p className="text-xs text-muted-foreground">{t("memoryHint")}</p>
+        </div>
+        <Switch
+          checked={memory.value !== "false"}
+          onCheckedChange={(checked) => toggle(memory, "memory_enabled", checked, t("memoryEnabled"), t("memoryDisabled"))}
+        />
       </div>
 
       <Separator />

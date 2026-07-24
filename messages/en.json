@@ -1461,7 +1461,11 @@
       "autonomousMode": "Autonomous mode",
       "autonomousModeHint": "When on, the agent applies settings changes and installs skills directly, without a confirmation each time — it still asks before installing a connector that runs third-party code. When off, it asks you to confirm each risky change.",
       "autonomousEnabled": "Autonomous mode on — the agent acts without asking.",
-      "autonomousDisabled": "Autonomous mode off — the agent confirms risky changes."
+      "autonomousDisabled": "Autonomous mode off — the agent confirms risky changes.",
+      "memory": "Long-term memory",
+      "memoryHint": "Let the assistant remember durable facts about people and their projects between conversations. Turning this off stops all memory use instance-wide, whatever an individual project is set to; saved memories are kept.",
+      "memoryEnabled": "Long-term memory enabled",
+      "memoryDisabled": "Long-term memory disabled"
     },
     "updates": {
       "title": "Updates",
