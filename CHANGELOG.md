@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-24
+
 ### Added
 
 - Agent run limits are now operator-tunable: `TASK_TIMEOUT_MINUTES` (default 10), `MAX_AGENT_STEPS` (25), `STREAM_IDLE_SECONDS` (60), and `MAX_STREAM_RECOVERIES` (3). Raise `TASK_TIMEOUT_MINUTES` for turns doing heavy sandbox work — the ceiling covers the whole turn, tool calls included. A non-positive or non-numeric value warns at boot and falls back to the default.
