@@ -77,7 +77,14 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
 
   // Numeric knobs this process reads via `Number(env.X) || default`: a non-positive
   // or non-numeric value is silently swallowed, so surface the typo at boot.
-  for (const key of ["PG_POOL_MAX", "WORKER_MAX_CONCURRENCY"] as const) {
+  for (const key of [
+    "PG_POOL_MAX",
+    "WORKER_MAX_CONCURRENCY",
+    "TASK_TIMEOUT_MINUTES",
+    "STREAM_IDLE_SECONDS",
+    "MAX_STREAM_RECOVERIES",
+    "MAX_AGENT_STEPS",
+  ] as const) {
     const raw = env[key]?.trim();
     if (raw === undefined || raw === "") continue;
     const n = Number(raw);

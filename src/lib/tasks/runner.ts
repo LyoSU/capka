@@ -21,7 +21,7 @@ import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions } from "@/lib/chat/context/provider-edits";
-import { stepSettings, foldReasoningIntoText } from "@/lib/chat/context/step-control";
+import { stepSettings, foldReasoningIntoText, MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
@@ -29,7 +29,6 @@ import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { maintainMemoryDoc } from "@/lib/memory/store";
 import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
-import { delay } from "@ai-sdk/provider-utils";
 import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
 import { errorText } from "@/lib/errors/message";
@@ -148,8 +147,13 @@ const MAX_REALTIME_RESULT_BYTES = 6000;
  * DEAD worker; a LIVE worker stuck on a hung tool or LLM call keeps renewing its
  * lease forever and would hold a concurrency slot indefinitely. This deadline
  * aborts such a run so the slot frees and the user gets a clear failure.
+ *
+ * Operator knob: the 10-minute default covers ordinary turns, but it bounds the
+ * WHOLE turn including every tool call, so heavy sandbox work (a batch document
+ * conversion, a long Playwright scrape, video transcoding) can legitimately need
+ * more. Raise TASK_TIMEOUT_MINUTES rather than letting such turns fail as timeouts.
  */
-const MAX_TASK_MS = 10 * 60_000;
+const MAX_TASK_MS = (Number(process.env.TASK_TIMEOUT_MINUTES) || 10) * 60_000;
 
 /**
  * Stream stall ceiling. A provider can accept the request and then go silent —
@@ -160,11 +164,11 @@ const MAX_TASK_MS = 10 * 60_000;
  * legitimately quiet — see StallWatchdog). 60s is comfortably longer than any
  * real time-to-first-token, short enough that a hung gateway fails fast.
  */
-const STREAM_IDLE_MS = 60_000;
+const STREAM_IDLE_MS = (Number(process.env.STREAM_IDLE_SECONDS) || 60) * 1000;
 /** Max recovery attempts (stall + transient) per turn before giving up with a
  *  clear "provider didn't respond" message. A transient gateway hiccup usually
  *  clears on the first retry; past 3 the model/provider is genuinely unhealthy. */
-const MAX_RECOVERIES = 3;
+const MAX_RECOVERIES = Number(process.env.MAX_STREAM_RECOVERIES) || 3;
 
 /** Reactive context-overflow fallback: how many of the most recent conversation
  *  messages to keep when mechanically trimming a prompt the model rejected as too
@@ -576,7 +580,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               // re-exposes whatever the model has discovered. `undefined` when not
               // deferring = all tools active (the SDK default).
               ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
-              stopWhen: stepCountIs(25),
+              stopWhen: stepCountIs(MAX_STEPS),
               prepareStep: async ({ stepNumber, messages }) => {
                 const base = reasoningStripped ? foldReasoningIntoText(messages) : messages;
                 // BRIDGE: on a chat-completions transport the image can't ride the
@@ -1144,7 +1148,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // finalize as a failure.
       if (transient !== undefined) {
         streamError = undefined;
-        await delay(1000);
+        await new Promise((r) => setTimeout(r, 1000));
         if (ac.signal.aborted) break;
       }
       tlog.info("provider recovery — re-streaming", { attempt: recoveries, max: MAX_RECOVERIES, kind: transient !== undefined ? "transient" : "stall" });

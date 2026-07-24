@@ -10,6 +10,7 @@ import { OrgChangeBanner } from "@/components/layout/org-change-banner";
 import { TimezoneSync } from "@/components/layout/timezone-sync";
 import { isSetupComplete } from "@/lib/settings";
 import { getAuth } from "@/lib/auth";
+import { IsAdminProvider } from "@/hooks/use-is-admin";
 import { headers } from "next/headers";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -25,6 +26,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
   const status = session ? (session.user as Record<string, unknown>).status : null;
+  // Same session read, so role-gated UI costs nothing extra here — and arrives in
+  // the first HTML instead of popping in after a client probe (see useIsAdmin).
+  const isAdmin = (session?.user as Record<string, unknown> | undefined)?.role === "admin";
   if (status === "pending") {
     redirect("/pending");
   }
@@ -37,27 +41,29 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const t = await getTranslations("common");
 
   return (
-    <SidebarProvider>
-      {/* Keyboard users would otherwise have to tab through the entire chat
-          list before reaching the page content on every navigation. */}
-      <a
-        href="#main-content"
-        className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:left-4 focus-visible:top-4 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-primary focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {t("skipToContent")}
-      </a>
-      <AppSidebar />
-      <SidebarInset id="main-content" tabIndex={-1} className="focus-visible:outline-none">
-        <ProviderStatusBanner />
-        <UpdateBanner />
-        <OrgChangeBanner />
-        {/* Crossfade the main pane on navigation so moving between chats /
-            settings feels like an app (desktop only — see RouteTransition). The
-            sidebar + banner sit outside it, staying anchored as content swaps. */}
-        <RouteTransition>{children}</RouteTransition>
-      </SidebarInset>
-      <CommandPalette />
-      <TimezoneSync />
-    </SidebarProvider>
+    <IsAdminProvider value={isAdmin}>
+      <SidebarProvider>
+        {/* Keyboard users would otherwise have to tab through the entire chat
+            list before reaching the page content on every navigation. */}
+        <a
+          href="#main-content"
+          className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:left-4 focus-visible:top-4 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-primary focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {t("skipToContent")}
+        </a>
+        <AppSidebar />
+        <SidebarInset id="main-content" tabIndex={-1} className="focus-visible:outline-none">
+          <ProviderStatusBanner />
+          <UpdateBanner />
+          <OrgChangeBanner />
+          {/* Crossfade the main pane on navigation so moving between chats /
+              settings feels like an app (desktop only — see RouteTransition). The
+              sidebar + banner sit outside it, staying anchored as content swaps. */}
+          <RouteTransition>{children}</RouteTransition>
+        </SidebarInset>
+        <CommandPalette />
+        <TimezoneSync />
+      </SidebarProvider>
+    </IsAdminProvider>
   );
 }

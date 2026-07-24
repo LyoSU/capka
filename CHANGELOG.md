@@ -6,6 +6,24 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Agent run limits are now operator-tunable: `TASK_TIMEOUT_MINUTES` (default 10), `MAX_AGENT_STEPS` (25), `STREAM_IDLE_SECONDS` (60), and `MAX_STREAM_RECOVERIES` (3). Raise `TASK_TIMEOUT_MINUTES` for turns doing heavy sandbox work — the ceiling covers the whole turn, tool calls included. A non-positive or non-numeric value warns at boot and falls back to the default.
+
+### Changed
+
+- `adm-zip` upgraded to 0.6.0, closing a crafted-ZIP memory-exhaustion advisory (GHSA-xcpc-8h2w-3j85). Skill-zip uploads were already guarded by the app's own size/entry/inflate caps.
+- Dependencies refreshed to their current patch/minor releases (`next` 16.2.11, `ai` 6.0.235, `better-auth`, `pg`, `zod`, `drizzle-orm`, `vitest`).
+- `shiki`, `katex`, `unist-util-visit`, and `@types/mdast` are now declared dependencies. They were imported but resolved only as transitive dependencies of `streamdown`/`ai`, so an unrelated upstream bump could break the build.
+
+### Fixed
+
+- Admin-only UI no longer flashes in after page load: the role now comes from the session rendered server-side instead of being probed over HTTP, which also drops a full user-listing query on first mount and fixes admin controls disappearing when that probe hit a transient 5xx. A role change now takes effect on next navigation rather than persisting stale for the tab's lifetime.
+
+### Removed
+
+- Unused `@ai-sdk/react` dependency and the unreferenced `scripts/seed-skills.mts` skill-seeding script.
+
 ## [0.11.0] - 2026-07-19
 
 ### Added

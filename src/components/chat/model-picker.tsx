@@ -1062,7 +1062,7 @@ export function ModelPicker({
   // positive here (there's no external system to read this from during render).
   useLayoutEffect(() => {
     if (!open || isMobile || variant !== "pill") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears measured position on close; measurement must live in useLayoutEffect
+      // Clears measured position on close; measurement must live in useLayoutEffect.
       setPos(null);
       return;
     }
@@ -1103,7 +1103,7 @@ export function ModelPicker({
   const [fieldPos, setFieldPos] = useState<{ up: boolean; maxH: number; maxW: number } | null>(null);
   useLayoutEffect(() => {
     if (!open || isMobile || variant !== "field") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears measured placement on close; measurement must live in useLayoutEffect
+      // Clears measured placement on close; measurement must live in useLayoutEffect.
       setFieldPos(null);
       return;
     }

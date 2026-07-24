@@ -14,13 +14,22 @@ export function useSetting(key: string, fallback: string) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`/api/settings?key=${key}`)
+    // Abort on unmount/key change: without it a slow response for the PREVIOUS key
+    // could land after the new one and overwrite it, showing a value that belongs to
+    // a setting the component is no longer reading.
+    const ac = new AbortController();
+    fetch(`/api/settings?key=${key}`, { signal: ac.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.value != null) setValue(data.value);
+        setLoading(false);
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // An abort is not a load failure — leave `loading` alone so the replacing
+        // effect owns the state, and never surface it as an error.
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
   }, [key]);
 
   const update = useCallback((v: string) => {

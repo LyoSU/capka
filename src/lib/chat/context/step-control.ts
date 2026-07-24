@@ -1,11 +1,23 @@
 import type { ModelMessage } from "ai";
 
 /**
- * After this many tool steps WITHIN a single turn, force the model to answer in
- * text. Below the hard `stepCountIs(25)` cap, so a long tool loop produces a real
- * reply instead of being cut off mid-tool at the ceiling.
+ * Hard cap on tool-calling steps in one turn (streamText's `stopWhen`). Prevents a
+ * model that keeps calling tools from looping forever. Raise MAX_AGENT_STEPS for
+ * workflows that legitimately chain many tool calls.
  */
-export const FORCE_TEXT_AFTER_STEPS = 20;
+export const MAX_STEPS = Number(process.env.MAX_AGENT_STEPS) || 25;
+
+/**
+ * After this many tool steps WITHIN a single turn, force the model to answer in
+ * text. Kept a few steps BELOW the hard cap, so a long tool loop produces a real
+ * reply instead of being cut off mid-tool at the ceiling.
+ *
+ * Derived, not fixed: a hardcoded threshold above a lowered MAX_AGENT_STEPS would
+ * never fire, and the turn would hit the ceiling mid-tool — the very failure this
+ * exists to prevent. The floor of 1 keeps the wrap-up step meaningful even at a
+ * cap of 1 or 2.
+ */
+export const FORCE_TEXT_AFTER_STEPS = Math.max(1, MAX_STEPS - 5);
 
 /**
  * Fold `reasoning` parts of assistant messages INTO their text (returns a fresh

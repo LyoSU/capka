@@ -24,7 +24,6 @@ export default function CustomizePage() {
     const q = new URLSearchParams(window.location.search).get("tab");
     // Reading the URL must happen post-mount (no window on the server); an effect
     // is the right tool here and avoids a hydration mismatch on the default tab.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (q === "connectors") setTab("connectors");
     else if (q === "installed" || q === "plugins") setTab("plugins");
     else if (q === "marketplace") {
