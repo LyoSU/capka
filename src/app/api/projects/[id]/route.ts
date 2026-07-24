@@ -45,6 +45,7 @@ export const PUT = apiHandler(async (req, { params }) => {
   if (body.systemPrompt !== undefined) updates.systemPrompt = body.systemPrompt?.trim() || null;
   if (body.defaultModel !== undefined) updates.defaultModel = body.defaultModel?.trim() || null;
   if (body.sandboxNetwork !== undefined) updates.sandboxNetwork = body.sandboxNetwork;
+  if (body.agentProfile !== undefined) updates.agentProfile = body.agentProfile;
 
   const [updated] = await db
     .update(projects)

@@ -169,6 +169,19 @@ export const orgControls: Control[] = [
     format: (v) => ({ off: "Off", admins: "Admins only", everyone: "Everyone" })[v] ?? v,
   }),
   orgSetting({
+    key: "memory_enabled",
+    title: "Long-term memory",
+    description:
+      "Whether the agent may remember durable facts about people and their projects between conversations. Off stops all memory reading AND writing across the instance, whatever an individual project is set to; already-saved memories are kept, just unused, so turning it back on restores them.",
+    schema: bool,
+    def: "true",
+    format: boolFmt,
+    impact: async (_ctx, next) =>
+      next === "false"
+        ? "Nobody's agent will recall anything from earlier conversations, and it will stop learning new facts. Saved memories are kept and become usable again if you turn this back on."
+        : undefined,
+  }),
+  orgSetting({
     key: "automations_enabled",
     title: "Automations",
     description: "Whether users may create scheduled automations (recurring agent runs).",

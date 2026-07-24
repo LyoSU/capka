@@ -37,7 +37,7 @@ export const GET = apiHandler(async () => {
 
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireRole("admin", "user");
-  const { name, description, systemPrompt, defaultModel, sandboxNetwork } = projectCreateSchema.parse(await req.json());
+  const { name, description, systemPrompt, defaultModel, sandboxNetwork, agentProfile } = projectCreateSchema.parse(await req.json());
 
   const id = nanoid();
   const [project] = await db
@@ -50,6 +50,8 @@ export const POST = apiHandler(async (req: Request) => {
       systemPrompt: systemPrompt?.trim() || null,
       defaultModel: defaultModel?.trim() || null,
       sandboxNetwork,
+      // Omitted by the create dialog; null reads back as the assistant default.
+      agentProfile: agentProfile ?? null,
     })
     .returning();
 

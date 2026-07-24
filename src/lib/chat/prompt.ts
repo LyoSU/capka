@@ -1,4 +1,5 @@
 import { SYSTEM_PROMPT, buildSandboxPrompt } from "@/lib/agents/chat-agent";
+import { ASSISTANT_PROFILE, type AgentProfile } from "@/lib/agents/profile";
 import { type FileRef } from "@/lib/constants";
 import { acceptsNativeFile, modelSupportsModality, mimeToModality, type Modality } from "@/lib/providers/registry";
 import { formatAvailableSkills } from "@/lib/skills/fmt";
@@ -105,80 +106,100 @@ export function buildSystemPrompt(opts: {
    *  can reach the internet. Conversation-stable, so it stays in the cached
    *  prefix. Defaults to "none" — the safe assumption when egress is unknown. */
   networkMode?: "none" | "bridge";
+  /** The project's capability allow-list + prompt composition (see
+   *  agents/profile.ts). Defaults to Capka's normal assistant behaviour, so every
+   *  existing caller and test keeps its exact output. */
+  profile?: AgentProfile;
 }): BuiltPrompt {
-  // ── Stable prefix (cacheable) ───────────────────────────────────────────
-  let stable = `${SYSTEM_PROMPT}\n\n${buildSandboxPrompt(opts.networkMode ?? "none")}`;
-  if (opts.project?.systemPrompt) {
-    stable += `\n\n--- Project Instructions ---\n${opts.project.systemPrompt}`;
-  }
-  // Skills are deterministic (sorted, no timestamps) and change only on
-  // install/toggle, so they belong in the cached prefix, not the volatile tail.
-  const skillsBlock = formatAvailableSkills(opts.skills ?? []);
-  if (skillsBlock) {
-    stable += `\n\n${skillsBlock}`;
-  }
-  // Deferred-connector index (progressive tool disclosure). Deterministic like
-  // skills, so it sits in the cached prefix rather than the volatile tail.
-  if (opts.connectorIndex) {
-    stable += `\n\n${opts.connectorIndex}`;
-  }
-  stable += `\n\n${MANAGE_PROMPT}`;
+  const profile = opts.profile ?? ASSISTANT_PROFILE;
+  const caps = profile.capabilities;
 
-  // ── Session tier (cacheable, conversation-stable) ───────────────────────
-  const session = buildSessionContext({
-    user: opts.user,
-    startedAt: opts.conversationStartedAt,
-    locale: opts.locale,
-  });
-
-  // ── Volatile suffix (not cached) ────────────────────────────────────────
-  let volatile = "";
-  const userDoc = opts.memoryDocs?.user?.trim();
-  const projectDoc = opts.memoryDocs?.project?.trim();
-  if (userDoc) {
-    volatile += `## What you remember about the user:\n${userDoc}`;
-  }
-  if (projectDoc) {
-    volatile += `${volatile ? "\n\n" : ""}## What you remember about this project:\n${projectDoc}`;
-  }
-
-  // Workspace snapshot changes every run — must stay out of the cached prefix.
-  if (opts.workspaceSnapshot) {
-    volatile += `${volatile ? "\n\n" : ""}## Current workspace files:\n\`\`\`\n${opts.workspaceSnapshot}\n\`\`\``;
-  }
-
-  // Server folders bind-mounted outside /workspace. Volatile: the set can change
-  // between turns (attach/detach recreates the sandbox). They belong to the
-  // operator, not the workspace — hence the explicit warning.
-  if (opts.attachedFolders?.length) {
-    const lines = opts.attachedFolders
-      .map((f) => `  - /folders/${f.name} (${f.readOnly ? "read-only" : "read-write"})`)
-      .join("\n");
-    volatile += `${volatile ? "\n\n" : ""}## Attached server folders:\n${lines}\nThese files belong to the operator — treat them carefully.`;
-  }
+  // Server folders bind-mounted outside /workspace. They belong to the operator,
+  // not the workspace — hence the explicit warning.
+  const attachedBlock = opts.attachedFolders?.length
+    ? `## Attached server folders:\n${opts.attachedFolders
+        .map((f) => `  - /folders/${f.name} (${f.readOnly ? "read-only" : "read-write"})`)
+        .join("\n")}\nThese files belong to the operator — treat them carefully.`
+    : undefined;
 
   // PC folders live at /workspace/<name> and sync back to the user's computer after
   // the turn — so deliverables MUST go inside that folder, not elsewhere in the
   // workspace, or the user never receives them.
-  if (opts.syncedFolders?.length) {
-    const lines = opts.syncedFolders.map((f) => `  - /workspace/${f.name}`).join("\n");
-    volatile += `${volatile ? "\n\n" : ""}## Folders synced to the user's computer:\n${lines}\nFiles you create or edit INSIDE these folders are copied back to the user's computer after you reply. To give the user a file, write it there (e.g. /workspace/${opts.syncedFolders[0].name}/result.xlsx) — files elsewhere in /workspace are NOT synced.`;
-  }
+  const syncedBlock = opts.syncedFolders?.length
+    ? `## Folders synced to the user's computer:\n${opts.syncedFolders
+        .map((f) => `  - /workspace/${f.name}`)
+        .join("\n")}\nFiles you create or edit INSIDE these folders are copied back to the user's computer after you reply. To give the user a file, write it there (e.g. /workspace/${opts.syncedFolders[0].name}/result.xlsx) — files elsewhere in /workspace are NOT synced.`
+    : undefined;
 
-  // The "## User just attached these files" block lives in the task runner, not
-  // here: whether a file is inline-readable is only known AFTER injection (a
-  // download can fail or an oversize file can't be delivered), so building it
-  // from a capability prediction here would promise files the model never got.
+  // The project's own instructions. In "append" they sit under the base persona as
+  // a labelled section (today's behaviour); in "replace" they ARE the persona, so
+  // the label goes too — "here are instructions" and "you are X" put the model in
+  // different postures, and the latter is the point of replacing.
+  const projectPrompt = opts.project?.systemPrompt;
+  const projectBlock = !projectPrompt
+    ? undefined
+    : profile.persona === "replace"
+      ? projectPrompt.trim()
+      : `--- Project Instructions ---\n${projectPrompt}`;
 
-  // One-time, first-message-after-setup concierge. In the volatile tier (never
-  // cached) since it fires exactly once. English — the model relays in the user's
-  // language, like the rest of the prompt.
-  if (opts.concierge) {
-    volatile += `${volatile ? "\n\n" : ""}## First run
-This is the operator's FIRST message right after finishing setup. Warmly welcome them in one or two sentences, then offer to help set up the optional things you can do via the \`manage\` tool: their interface language, Telegram delivery, and adding a first connector or skill. Keep it brief — don't dump a list or a wall of options. If they already asked a real question, answer it first and add the offer at the end.`;
-  }
+  const userDoc = opts.memoryDocs?.user?.trim();
+  const projectDoc = opts.memoryDocs?.project?.trim();
 
-  return { stable, session, volatile };
+  // Each tier is its non-empty layers joined by a blank line — which is exactly
+  // what the hand-rolled `+=` chain this replaced produced, byte for byte (a
+  // golden test in __tests__/prompt.test.ts pins that, because `prompt.stable`
+  // carries the first Anthropic cache breakpoint and a one-character shift would
+  // invalidate every existing user's cached prefix once).
+  //
+  // A PROTOCOL layer is gated by the same capability group as the tools it
+  // describes, never by anything else — that's the invariant that makes "no tools"
+  // coherent instead of leaving instructions for tools that aren't there.
+  const tier = (layers: (string | undefined)[]) => layers.filter((t): t is string => !!t).join("\n\n");
+
+  return {
+    // ── Stable prefix (cacheable) ─────────────────────────────────────────
+    stable: tier([
+      profile.persona === "append" ? SYSTEM_PROMPT : undefined,
+      caps.sandbox ? buildSandboxPrompt(opts.networkMode ?? "none") : undefined,
+      projectBlock,
+      // Skills are deterministic (sorted, no timestamps) and change only on
+      // install/toggle, so they belong in the cached prefix, not the volatile tail.
+      caps.skills ? formatAvailableSkills(opts.skills ?? []) || undefined : undefined,
+      // Deferred-connector index (progressive tool disclosure). Deterministic like
+      // skills, so it sits in the cached prefix rather than the volatile tail.
+      caps.connectors ? opts.connectorIndex || undefined : undefined,
+      caps.manage ? MANAGE_PROMPT : undefined,
+    ]),
+
+    // ── Session tier (cacheable, conversation-stable) ─────────────────────
+    session: profile.sessionContext
+      ? buildSessionContext({ user: opts.user, startedAt: opts.conversationStartedAt, locale: opts.locale })
+      : "",
+
+    // ── Volatile suffix (not cached) ──────────────────────────────────────
+    // The "## User just attached these files" block lives in the task runner, not
+    // here: whether a file is inline-readable is only known AFTER injection (a
+    // download can fail or an oversize file can't be delivered), so building it
+    // from a capability prediction here would promise files the model never got.
+    volatile: tier([
+      caps.memory && userDoc ? `## What you remember about the user:\n${userDoc}` : undefined,
+      caps.memory && projectDoc ? `## What you remember about this project:\n${projectDoc}` : undefined,
+      // Workspace snapshot changes every run — must stay out of the cached prefix.
+      caps.sandbox && opts.workspaceSnapshot
+        ? `## Current workspace files:\n\`\`\`\n${opts.workspaceSnapshot}\n\`\`\``
+        : undefined,
+      caps.sandbox ? attachedBlock : undefined,
+      caps.sandbox ? syncedBlock : undefined,
+      // One-time, first-message-after-setup concierge. In the volatile tier (never
+      // cached) since it fires exactly once. English — the model relays in the user's
+      // language, like the rest of the prompt. Gated with `manage` because it exists
+      // purely to offer configuration through that tool.
+      caps.manage && opts.concierge
+        ? `## First run
+This is the operator's FIRST message right after finishing setup. Warmly welcome them in one or two sentences, then offer to help set up the optional things you can do via the \`manage\` tool: their interface language, Telegram delivery, and adding a first connector or skill. Keep it brief — don't dump a list or a wall of options. If they already asked a real question, answer it first and add the offer at the end.`
+        : undefined,
+    ]),
+  };
 }
 
 /**

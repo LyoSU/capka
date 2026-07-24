@@ -188,6 +188,16 @@ export async function getSandboxNetworkDefault(): Promise<"none" | "bridge"> {
 }
 
 /**
+ * Org-wide kill switch for long-term memory. On by default. When off, no run on
+ * the instance reads or writes a memory doc, whatever an individual project's
+ * profile says — the restrictive side always wins (see resolveAgentProfile).
+ * Saved memories are kept, merely unused, so flipping it back restores them.
+ */
+export async function getMemoryEnabled(): Promise<boolean> {
+  return (await getSetting("memory_enabled")) !== "false";
+}
+
+/**
  * How provider keys are sourced across the instance (admin-chosen):
  *  - shared_plus_own: admin's key is the shared default; users MAY add their own
  *  - shared_only:     everyone uses the admin's key; users cannot add their own

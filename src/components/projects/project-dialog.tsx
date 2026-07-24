@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import type { AgentProfile } from "@/lib/agents/profile";
 
 export type Project = {
   id: string;
@@ -23,6 +24,10 @@ export type Project = {
   systemPrompt: string | null;
   defaultModel: string | null;
   sandboxNetwork: string | null;
+  /** Resolved server-side (see projects/[id]/page.tsx), so this is always a
+   *  COMPLETE profile — never null, never partial. Optional only because callers
+   *  that don't render the settings form (the create dialog, the list) omit it. */
+  agentProfile?: AgentProfile;
   createdAt: string | null;
   updatedAt: string | null;
   // Aggregates from GET /api/projects (non-archived chats). Optional — not every

@@ -322,6 +322,12 @@ export const projects = pgTable("projects", {
   systemPrompt: text("system_prompt"),
   defaultModel: text("default_model"),
   sandboxNetwork: text("sandbox_network").default("none"), // "none" | "bridge"
+  // The project's agent profile: which capability groups its agent may use, and
+  // how the system prompt is composed around `systemPrompt` above. null = Capka's
+  // normal assistant behaviour. One jsonb column rather than a boolean per knob
+  // deliberately — see src/lib/agents/profile.ts: every field is defaulted, so a
+  // new capability group parses forward on old rows and ships without a migration.
+  agentProfile: jsonb("agent_profile"),
   // Tombstone for durable deletion. A non-null value hides the project from every
   // query (all reads filter `deleted_at is null`) the instant the delete transaction
   // commits, while the physical row + its cascades survive until post-commit teardown

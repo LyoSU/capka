@@ -18,7 +18,8 @@ import { makeAskTool } from "@/lib/ask/tool";
 import { makeMemoryTools } from "@/lib/memory/tool";
 import { readMemoryDocs } from "@/lib/memory/store";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
-import { getSandboxNetworkDefault, getMaxContextTokens, getSetting, setSetting } from "@/lib/settings";
+import { resolveAgentProfile } from "@/lib/agents/profile";
+import { getSandboxNetworkDefault, getMaxContextTokens, getMemoryEnabled, getSetting, setSetting } from "@/lib/settings";
 import { getModelContextLength } from "@/lib/models/catalog";
 import { contextBudget } from "@/lib/chat/context/budget";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
@@ -37,7 +38,7 @@ import type { TaskPayload } from "./runner";
 export async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string, messageId: string) {
   // A project chat sees its project memory doc + the user-global doc. A
   // standalone chat sees only the user-global doc, so projects don't leak.
-  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, memoryDocs, user, chat] = await Promise.all([
+  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, memoryDocs, user, chat, orgMemory] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1).then((r) => r[0])
@@ -46,6 +47,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     db.select({ name: users.name, timezone: users.timezone, locale: users.locale, role: users.role })
       .from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]),
     db.select({ createdAt: chats.createdAt }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
+    getMemoryEnabled(),
   ]);
 
   // The task was enqueued for a project that has since been deleted (a worker retry
@@ -54,6 +56,13 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   if (payload.projectId && !project) {
     throw new Error("This project was deleted, so this chat can no longer run here. Start a new chat to continue.");
   }
+
+  // What this project lets its agent be. Each capability group below gates BOTH
+  // its tools (here) and its prompt block (in buildSystemPrompt) — see
+  // agents/profile.ts for why those two must move together. The org layer can only
+  // ever remove, never grant.
+  const profile = resolveAgentProfile(project?.agentProfile, { memory: orgMemory });
+  const caps = profile.capabilities;
 
   // Sandbox tools (execute_bash, read_file, …) + MCP connector tools (sub-project
   // B, namespaced mcp__<server>__<tool>) + the skill tool. Each piece has a stable
@@ -68,11 +77,15 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // become bind-mounts the controller mounts at /folders/<name>. PC folders aren't
   // mounts — the browser bridge syncs them into /workspace/<name>. Both are listed
   // in the prompt so the model knows where they are (esp. that files it puts under
-  // a PC folder's /workspace/<name> flow back to the user's computer).
-  const [folderRows, hostEnabled] = await Promise.all([
-    db.select().from(attachedFolders).where(eq(attachedFolders.sessionKey, sessionKey)),
-    hostFolderEnabled(),
-  ]);
+  // a PC folder's /workspace/<name> flow back to the user's computer) — which is
+  // why a sandbox-less project skips the lookup outright: without the file tools
+  // that read them, listing mounts would only describe places it can't reach.
+  const [folderRows, hostEnabled] = caps.sandbox
+    ? await Promise.all([
+        db.select().from(attachedFolders).where(eq(attachedFolders.sessionKey, sessionKey)),
+        hostFolderEnabled(),
+      ])
+    : [[] as (typeof attachedFolders.$inferSelect)[], false];
   // Host folders are only real when the admin gate is on — otherwise don't tell
   // the model /folders/<name> exists (it won't be mounted; see ensureSession).
   const hostFolders = hostEnabled ? folderRows.filter((f) => f.kind === "host") : [];
@@ -101,16 +114,22 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     }
     return sessionEnsured;
   };
-  const sandbox = await loadSandboxTools(sessionKey, userId, ensureSession, networkMode);
-  const mcp = await loadMcpTools({
-    userId,
-    projectId: payload.projectId ?? null,
-    sessionKey,
-    ensureSession,
-    isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
-    // Lets a connector elicit input from the user mid-tool-call (block-and-poll).
-    elicitContext: { userId, chatId, messageId, origin: payload.origin },
-  });
+  // A group that's off is never LOADED, not merely filtered out afterwards: that's
+  // what makes a tool-less project genuinely cheap — no container is ever created
+  // (nothing reaches `ensureSession`) and no stdio connector child process spawns.
+  const empty = { tools: {}, close: async () => {} };
+  const sandbox = caps.sandbox ? await loadSandboxTools(sessionKey, userId, ensureSession, networkMode) : empty;
+  const mcp = caps.connectors
+    ? await loadMcpTools({
+        userId,
+        projectId: payload.projectId ?? null,
+        sessionKey,
+        ensureSession,
+        isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
+        // Lets a connector elicit input from the user mid-tool-call (block-and-poll).
+        elicitContext: { userId, chatId, messageId, origin: payload.origin },
+      })
+    : empty;
   // The sandbox + MCP clients are now LIVE (stdio MCP servers may hold child
   // processes). Define their disposer immediately so any throw in the rest of
   // prepareRun — listAvailableSkills, buildSystemPrompt, getModelContextLength —
@@ -118,29 +137,9 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // from a successful return, so it can't clean up after a mid-function throw.
   const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
   try {
-    const availableSkills = (await listAvailableSkills(userId, payload.projectId ?? null))
-      .filter((s) => isUsable(policy.effect("skill", s.name)));
-    const skillTool = makeSkillTool({ userId, sessionKey, projectId: payload.projectId ?? null, ensureSession });
-    // Provider-executed tools (e.g. Gemini's Google Search grounding) join the
-    // sandbox/MCP/skill + memory tools; empty for providers without any.
-    // Conversational control plane: lets the user manage their own preferences,
-    // and admins manage platform-wide config, all in chat. Role is fixed here
-    // from the session identity (not the model's arguments), and risky org-wide
-    // changes are STAGED — applied only by the user's own click (web/Telegram),
-    // never by the model, so this tool can't self-confirm a change.
-    const manage = makeManageTool({
-      userId,
-      isAdmin: user?.role === "admin",
-      projectId: payload.projectId ?? null,
-      sessionKey,
-      locale: user?.locale ?? payload.origin?.locale ?? undefined,
-      // A created automation inherits the model this turn runs on (the chat's ref).
-      model: payload.requestModel ?? null,
-    });
-    // The `ask` tool has NO execute: when the model calls it, the AI SDK tool-loop
-    // stops the run, which the runner turns into a durable "awaiting_answer"
-    // suspend resolved by the user's answer (see the tool-call handler below).
-    const ask = makeAskTool();
+    const availableSkills = caps.skills
+      ? (await listAvailableSkills(userId, payload.projectId ?? null)).filter((s) => isUsable(policy.effect("skill", s.name)))
+      : [];
     // `view_file` (render a workspace file to image so the model can SEE it) is
     // offered only to a model that takes images at all. HOW the image reaches the
     // model splits by transport: capable adapters carry it in the tool result
@@ -153,38 +152,80 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     const viewFileBridge = visionOk && !emitImageToolResult;
     const tools = {
       ...sandbox.tools,
-      ...(visionOk ? makeViewFileTool({ sessionKey, userId, ensureSession, emitImageToolResult }) : {}),
+      ...(caps.sandbox && visionOk ? makeViewFileTool({ sessionKey, userId, ensureSession, emitImageToolResult }) : {}),
       ...mcp.tools,
-      skill: skillTool,
-      ...manage,
-      ...ask,
-      ...makeMemoryTools({ userId, projectId: payload.projectId ?? null }),
-      ...providerNativeTools(provider),
+      // Skills without the sandbox still deliver their instructions: `ensureSession`
+      // is documented as optional precisely for that body-only path, so withholding
+      // it keeps a skill useful without spinning a container to materialize files
+      // the model would then have no tools to read.
+      ...(caps.skills
+        ? {
+            skill: makeSkillTool({
+              userId,
+              sessionKey,
+              projectId: payload.projectId ?? null,
+              ensureSession: caps.sandbox ? ensureSession : undefined,
+            }),
+          }
+        : {}),
+      // Conversational control plane: lets the user manage their own preferences,
+      // and admins manage platform-wide config, all in chat. Role is fixed here
+      // from the session identity (not the model's arguments), and risky org-wide
+      // changes are STAGED — applied only by the user's own click (web/Telegram),
+      // never by the model, so this tool can't self-confirm a change.
+      //
+      // `ask` (NO execute: when the model calls it the AI SDK tool-loop stops, which
+      // the runner turns into a durable "awaiting_answer" suspend resolved by the
+      // user's reply) rides the same group — both are the agent coordinating with
+      // the human, and without either the model just asks in prose.
+      ...(caps.manage
+        ? {
+            ...makeManageTool({
+              userId,
+              isAdmin: user?.role === "admin",
+              projectId: payload.projectId ?? null,
+              sessionKey,
+              locale: user?.locale ?? payload.origin?.locale ?? undefined,
+              // A created automation inherits the model this turn runs on (the chat's ref).
+              model: payload.requestModel ?? null,
+            }),
+            ...makeAskTool(),
+          }
+        : {}),
+      ...(caps.memory ? makeMemoryTools({ userId, projectId: payload.projectId ?? null }) : {}),
+      // Provider-executed tools (e.g. Gemini's Google Search grounding); empty for
+      // providers without any. Grouped with connectors — from the model's side both
+      // are "reach outside Capka for data".
+      ...(caps.connectors ? providerNativeTools(provider) : {}),
     };
 
     // Workspace snapshot — read straight off disk via the controller's file API
     // (HMAC-token, no live container). This keeps the sandbox lazy: a chat that
     // never runs code stays container-free, yet the model still sees existing files.
     let workspaceSnapshot: string | undefined;
-    try {
-      const { listFiles } = await import("@/lib/sandbox/client");
-      // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no container).
-      const { entries } = await listFiles(sessionKey, ".", userId, 3);
-      if (entries?.length) {
-        workspaceSnapshot = entries
-          .slice(0, 50)
-          .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
-          .join("\n");
-      }
-    } catch { /* no workspace yet */ }
+    if (caps.sandbox) {
+      try {
+        const { listFiles } = await import("@/lib/sandbox/client");
+        // depth 3 mirrors the old `find -maxdepth 3` snapshot, but off disk (no container).
+        const { entries } = await listFiles(sessionKey, ".", userId, 3);
+        if (entries?.length) {
+          workspaceSnapshot = entries
+            .slice(0, 50)
+            .map((e) => (e.isDirectory ? `${e.path}/` : e.path))
+            .join("\n");
+        }
+      } catch { /* no workspace yet */ }
+    }
 
     // One-time first-run concierge: on the admin's very first chat turn after
     // setup, arm a prompt nudge to welcome them and offer to configure optional
     // things via `manage`. The flag (set at setup completion) is consumed here so
     // it fires exactly once. The getSetting only runs on a chat's first turn by an
-    // admin, so it costs nothing on the steady-state path.
+    // admin, so it costs nothing on the steady-state path. Skipped without the
+    // `manage` group — the nudge's entire content is an offer to use that tool, and
+    // consuming the one-shot flag there would burn it on a chat that can't act.
     let concierge = false;
-    if (user?.role === "admin" && (payload.uiMessages?.length ?? 0) <= 1) {
+    if (caps.manage && user?.role === "admin" && (payload.uiMessages?.length ?? 0) <= 1) {
       if ((await getSetting("concierge_pending")) === userId) {
         concierge = true;
         await setSetting("concierge_pending", ""); // consume — never nudge twice
@@ -209,6 +250,9 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
 
     const prompt = buildSystemPrompt({
       project,
+      // Passed unconditionally; the profile decides whether the blocks are rendered.
+      // The read itself rode the opening parallel wave (one indexed select) — gating
+      // it there would have cost a serial round-trip on every turn to save nothing.
       memoryDocs,
       skills: availableSkills.map((s) => ({ name: s.name, description: s.description, body: s.body })),
       workspaceSnapshot,
@@ -220,9 +264,10 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       concierge,
       connectorIndex: toolSearch.indexText,
       networkMode,
+      profile,
     });
 
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch };
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile };
   } catch (e) {
     await closeAll();
     throw e;

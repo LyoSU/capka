@@ -6,6 +6,7 @@ import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, users } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
+import { parseAgentProfile } from "@/lib/agents/profile";
 import { ProjectHub, type HubTab } from "@/components/projects/project-hub";
 
 export default async function ProjectHubPage({
@@ -43,6 +44,10 @@ export default async function ProjectHubPage({
         systemPrompt: project.systemPrompt,
         defaultModel: project.defaultModel,
         sandboxNetwork: project.sandboxNetwork,
+        // Normalized here, not in the component: the client then always holds a
+        // COMPLETE profile (null and partial rows resolve to defaults server-side),
+        // so the settings form has no shape to guess at.
+        agentProfile: parseAgentProfile(project.agentProfile),
         createdAt: project.createdAt ? project.createdAt.toISOString() : null,
         updatedAt: project.updatedAt ? project.updatedAt.toISOString() : null,
       }}

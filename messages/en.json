@@ -575,7 +575,32 @@
       "useGlobalDefault": "Use global default",
       "defaultModelHint": "Overrides the global default for chats in this project.",
       "internet": "Internet access",
-      "internetHint": "Let the assistant download files and reach the internet while working on this project."
+      "internetHint": "Let the assistant download files and reach the internet while working on this project.",
+      "agent": {
+        "label": "Agent mode",
+        "preset": {
+          "assistant": "Assistant",
+          "raw": "Raw prompt",
+          "custom": "Custom"
+        },
+        "hint": {
+          "assistant": "Full access: files and code, connectors, skills, memory.",
+          "raw": "Nothing but your instructions — no tools, no memory, no built-in persona.",
+          "custom": "Your own combination of capabilities."
+        },
+        "rawEmpty": "System instructions are empty, so the model will receive no system prompt at all.",
+        "advanced": "Advanced",
+        "advancedNote": "Turning a capability off also removes the instructions that describe it, so the model is never told about a tool it doesn't have.",
+        "cap": {
+          "sandbox": "Files and code",
+          "connectors": "Connectors and web data",
+          "skills": "Skills",
+          "manage": "Managing settings from chat",
+          "memory": "Long-term memory"
+        },
+        "persona": "Instructions replace the built-in persona",
+        "sessionContext": "Pass your name, the date, and your language"
+      }
     },
     "chatCount": "{n, plural, one {# chat} other {# chats}}",
     "lastChat": "Last chat: {date}",

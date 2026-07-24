@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agentProfileSchema } from "@/lib/agents/profile";
 
 /** The single create/update contract for projects, shared by POST and PUT so the
  *  API validation can't drift below the UI's. Trims the name (a whitespace-only
@@ -11,6 +12,10 @@ export const projectCreateSchema = z.object({
   systemPrompt: z.string().max(20000).optional(),
   defaultModel: z.string().optional(),
   sandboxNetwork: z.enum(["none", "bridge"]).default("none"),
+  // Validated (not stored as raw client JSON) so the jsonb column can only ever
+  // hold a shape `parseAgentProfile` recognizes. Every field is defaulted, so a
+  // partial object from the UI normalizes to a complete profile on the way in.
+  agentProfile: agentProfileSchema.optional(),
 });
 
 export const projectUpdateSchema = projectCreateSchema.partial();

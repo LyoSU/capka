@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Projects now have an **Agent mode**: a preset ("Assistant" or "Raw prompt") anyone can pick, plus an admin-only allow-list of capability groups (files and code, connectors, skills, managing settings from chat, long-term memory) and two prompt switches (project instructions replace the built-in persona; pass name/date/language). Turning a group off removes its tools *and* the prompt text describing them, so the model is never told about a tool it doesn't have. A tool-less project never starts a sandbox container or a connector process.
+- New org setting `memory_enabled` (default on) — an instance-wide kill switch for long-term memory, settable from chat via `manage`. Off stops all memory reading and writing regardless of a project's own setting; saved memories are kept and become usable again when it's turned back on.
+
 ## [0.12.1] - 2026-07-24
 
 ### Fixed

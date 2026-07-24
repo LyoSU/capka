@@ -317,7 +317,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
@@ -344,9 +344,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     //     churn never invalidates the cached prefixes.
     // `providerOptions.anthropic` is namespaced — non-Anthropic providers ignore it.
     const ephemeral = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
-    const systemMessages: ModelMessage[] = [
-      { role: "system", content: prompt.stable, providerOptions: ephemeral },
-    ];
+    // Every tier is conditional, INCLUDING stable: a project in raw-prompt mode with
+    // no instructions of its own legitimately produces nothing here, and shipping
+    // `content: ""` would have Anthropic reject the whole request for an empty text
+    // block. No stable tier simply means no breakpoint — there is nothing to cache.
+    const systemMessages: ModelMessage[] = [];
+    if (prompt.stable) {
+      systemMessages.push({ role: "system", content: prompt.stable, providerOptions: ephemeral });
+    }
     if (prompt.session) {
       systemMessages.push({ role: "system", content: prompt.session, providerOptions: ephemeral });
     }
@@ -495,7 +500,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         block += `\nFor files marked "attached", analyze the inline content you can already see directly — do NOT run sandbox tools to read, convert, or transcode them unless the user explicitly asks you to manipulate the file or your direct analysis fails.`;
       }
       if (turnFiles.some((f) => !injectedNames.has(f.name))) {
-        block += `\nOpen the files without that note using tools as needed (e.g. view_file for images and PDFs).`;
+        // Without the sandbox group there are no file tools, so the usual "open it
+        // with a tool" line would be an instruction the model cannot follow — it
+        // would either apologize cryptically or invent the contents. Tell it the
+        // truth instead and let it say so plainly, in the user's own language.
+        // (Native attachments still arrive normally: handing the model bytes isn't
+        // a tool call, so images and PDFs work in a tool-less project.)
+        block += profile.capabilities.sandbox
+          ? `\nOpen the files without that note using tools as needed (e.g. view_file for images and PDFs).`
+          : `\nYou have NO file tools in this chat, so you cannot open the files without that note at all. Say so plainly — this project is set up without file access — instead of guessing at their contents.`;
       }
       systemMessages.push({ role: "system", content: block });
     }
@@ -1403,7 +1416,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .map((p) => p.text)
         .join("\n");
     })();
-    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && lastUserText.trim()) {
+    if (profile.capabilities.memory && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && lastUserText.trim()) {
       // trackAux: keep the worker's shutdown drain waiting on this fire-and-forget
       // call so a deploy doesn't kill it mid-flight (lost spend / dropped facts).
       void trackAux(maintainMemoryDoc({
