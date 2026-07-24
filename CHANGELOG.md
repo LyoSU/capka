@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-07-24
+
 ### Fixed
 
 - The `memory_enabled` kill switch now has a toggle on Settings → Security, next to agent autonomy. It shipped in 0.13.0 reachable only from chat via `manage`, unlike every other org setting.
