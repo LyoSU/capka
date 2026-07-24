@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-24
+
 ### Added
 
 - Projects now have an **Agent mode**: a preset ("Assistant" or "Raw prompt") anyone can pick, plus an admin-only allow-list of capability groups (files and code, connectors, skills, managing settings from chat, long-term memory) and two prompt switches (project instructions replace the built-in persona; pass name/date/language). Turning a group off removes its tools *and* the prompt text describing them, so the model is never told about a tool it doesn't have. A tool-less project never starts a sandbox container or a connector process.
