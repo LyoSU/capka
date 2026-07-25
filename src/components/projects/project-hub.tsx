@@ -5,15 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import {
-  Plus, Settings, Trash2, FolderKanban, FolderOpen, Cpu, Globe, FileText, MessageSquare, Loader2, RefreshCw, Check,
+  Plus, Settings2, Trash2, FolderKanban, Cpu, Globe, FileText, MessageSquare, Loader2, RefreshCw, Check, ChevronLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { SettingsSection, SettingsGroup, SettingsRow } from "@/components/settings/shell";
 import { PreviewProvider } from "@/components/chat/file-preview";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspaceBrowser, type FileEntry } from "@/components/chat/workspace-browser";
@@ -31,10 +31,16 @@ export type HubTab = "overview" | "files" | "chats" | "settings";
 
 const noop = async () => {};
 
-/** One chat row link — shared by the overview's recent list and the Chats tab. */
+/**
+ * One chat row link — shared by the overview's recent list and the Chats tab.
+ *
+ * No border of its own: the rows live inside `ChatList`'s single card, hairline-
+ * separated. Six individually bordered rows read as six unrelated objects, and it
+ * was a third card style on a page that already had two.
+ */
 function ChatRowLink({ chat, locale, fallback }: { chat: ChatRow; locale: string; fallback: string }) {
   return (
-    <Link href={`/chat/${chat.id}`} className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm transition-colors hover:bg-accent/40">
+    <Link href={`/chat/${chat.id}`} className="flex items-center gap-2 px-4 py-2.5 text-sm transition-colors hover:bg-muted/30">
       <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate">{chat.title || fallback}</span>
       <span className="shrink-0 text-xs text-muted-foreground">
@@ -59,6 +65,7 @@ export function ProjectHub({
   orgCeiling: AgentProfile;
 }) {
   const t = useTranslations("projects.hub");
+  const tp = useTranslations("projects");
   const router = useRouter();
   const locale = useLocale();
   const [project, setProject] = useState<Project>(initial);
@@ -107,27 +114,62 @@ export function ProjectHub({
           disables its cross-axis stretch — without an explicit width the hub
           collapses to the header's max-content (~420px). */}
       <div className="animate-fade-in mx-auto flex h-full w-full max-w-4xl flex-col px-4 py-6">
-        {/* Header */}
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-2">
-            <SidebarTrigger className="-ml-1 size-9 shrink-0 md:hidden" />
+        {/* Header. The way back to the project list lives here, not only in the
+            sidebar: the sidebar's Projects section shows five, so on an instance
+            with fewer there used to be no link to the full list at all, and from
+            inside a project nothing said where you were. */}
+        <div className="mb-4">
+          <div className="flex items-center gap-1">
+            <SidebarTrigger className="-ml-1 size-8 shrink-0 md:hidden" />
+            <Link
+              href="/projects"
+              className="-ml-1 inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ChevronLeft className="size-3.5" />
+              {tp("title")}
+            </Link>
+          </div>
+
+          <div className="mt-1 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h1 className="truncate text-xl font-semibold">{project.name}</h1>
               {project.description && (
                 <p className="mt-0.5 text-sm text-muted-foreground text-pretty">{project.description}</p>
               )}
             </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button size="sm" nativeButton={false} render={<Link href={newChatHref} />}>
+            <Button size="sm" className="shrink-0" nativeButton={false} render={<Link href={newChatHref} />}>
               <Plus className="h-4 w-4" />
               {t("newChat")}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setTab("settings")}>
-              <Settings className="h-4 w-4" />
-              {t("settings")}
-            </Button>
           </div>
+
+          {/* How this project is set up, as one quiet line under its name — this
+              was a bordered "Context" card on the overview, which gave three
+              read-only facts the same visual weight as the workspace. It reads as
+              identity here, and clicking it goes to the tab that changes it, so
+              the header no longer needs a Settings button next to a Settings tab. */}
+          <button
+            type="button"
+            onClick={() => setTab("settings")}
+            aria-label={t("settings")}
+            className="group mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <FileText className="size-3.5" />
+              {project.systemPrompt ? t("hasInstructions") : t("noInstructions")}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Cpu className="size-3.5" />
+              <span className="max-w-40 truncate">
+                {project.defaultModel ? displayModelName(project.defaultModel) : t("defaultModel")}
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Globe className="size-3.5" />
+              {project.sandboxNetwork === "bridge" ? t("internetOn") : t("internetOff")}
+            </span>
+            <Settings2 className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100" />
+          </button>
         </div>
 
         {/* Tabs */}
@@ -219,9 +261,9 @@ function OverviewTab({
   const empty = chats !== null && chats.length === 0;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8 pb-6">
       {empty && (
-        <div className="rounded-xl border bg-muted/20 px-4 py-6 text-center">
+        <div className="rounded-xl border border-dashed px-4 py-8 text-center">
           <FolderKanban className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
           <p className="mx-auto max-w-md text-sm text-muted-foreground text-pretty">{t("emptyExplainer")}</p>
           <Button size="sm" className="mt-4" nativeButton={false} render={<Link href={`/chat?projectId=${project.id}`} />}>
@@ -231,60 +273,50 @@ function OverviewTab({
         </div>
       )}
 
-      {/* Recent chats */}
       {!empty && (
-        <section>
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">{t("recentChats")}</h2>
-            <button onClick={onAllChats} className="text-xs text-muted-foreground hover:text-foreground">{t("allChats")}</button>
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium">{t("recentChats")}</h2>
+            <button onClick={onAllChats} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+              {t("allChats")}
+            </button>
           </div>
-          <div className="grid gap-1.5">
+          <ChatList>
             {recent.map((c) => (
               <ChatRowLink key={c.id} chat={c} locale={locale} fallback={t("untitledChat")} />
             ))}
-          </div>
+          </ChatList>
         </section>
       )}
 
-      {/* Workspace */}
-      <section className="rounded-xl border p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <FolderOpen className="h-4 w-4 text-muted-foreground" />
-            {t("workspace")}
-          </h2>
-          <Button variant="outline" size="sm" onClick={onOpenFiles}>{t("openFiles")}</Button>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-          <span>{fileCount === null ? "…" : t("fileCount", { n: fileCount })}</span>
-          {folderCount > 0 && (
-            <span className="inline-flex items-center gap-1">
-              {syncing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-500" />}
-              {t("folderCount", { n: folderCount })}
+      {/* One row, not a card with a heading and two lines of nothing: on a fresh
+          project the whole section used to be a big box reading "0 files". */}
+      <SettingsGroup>
+        <SettingsRow
+          title={t("workspace")}
+          hint={
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>{fileCount === null ? "…" : t("fileCount", { n: fileCount })}</span>
+              {folderCount > 0 && (
+                <span className="inline-flex items-center gap-1">
+                  {syncing
+                    ? <RefreshCw className="h-3 w-3 animate-spin" />
+                    : <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-500" />}
+                  {t("folderCount", { n: folderCount })}
+                </span>
+              )}
             </span>
-          )}
-        </div>
-      </section>
+          }
+          control={<Button variant="outline" size="sm" onClick={onOpenFiles}>{t("openFiles")}</Button>}
+        />
+      </SettingsGroup>
 
-      {/* Context */}
-      <section className="rounded-xl border p-4">
-        <h2 className="mb-2 text-sm font-semibold">{t("context")}</h2>
-        <div className="grid gap-2 text-sm sm:grid-cols-3">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <FileText className="h-3.5 w-3.5" />
-            {project.systemPrompt ? t("hasInstructions") : t("noInstructions")}
-          </div>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Cpu className="h-3.5 w-3.5" />
-            <span className="truncate">{project.defaultModel ? displayModelName(project.defaultModel) : t("defaultModel")}</span>
-          </div>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Globe className="h-3.5 w-3.5" />
-            {project.sandboxNetwork === "bridge" ? t("internetOn") : t("internetOff")}
-          </div>
-        </div>
+      {/* Memory gets its own heading. It was nested inside the "Context" card,
+          under a label, which made the one editable thing on the overview look
+          like a footnote to three read-only facts. */}
+      <SettingsSection title={t("memoryLabel")} description={t("memoryHint")}>
         <MemoryEditor projectId={project.id} />
-      </section>
+      </SettingsSection>
     </div>
   );
 }
@@ -356,92 +388,107 @@ function SettingsTab({
     }
   }
 
+  function reset() {
+    setName(project.name);
+    setDescription(project.description ?? "");
+    setSystemPrompt(project.systemPrompt ?? "");
+    setDefaultModel(project.defaultModel ?? "");
+    setInternetAccess(project.sandboxNetwork === "bridge");
+    setProfile(savedProfile);
+  }
+
   return (
-    <div className="max-w-2xl space-y-4 pb-6">
-      <div className="space-y-1.5">
-        <Label htmlFor="project-name">{t("form.name")}</Label>
-        <Input
-          id="project-name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t("form.namePlaceholder")}
-        />
-      </div>
+    <div className="max-w-2xl space-y-8 pb-4">
+      <SettingsSection title={th("basics")}>
+        <SettingsGroup>
+          <SettingsRow title={t("form.name")} labelFor="project-name">
+            <Input
+              id="project-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t("form.namePlaceholder")}
+            />
+          </SettingsRow>
+          <SettingsRow title={t("form.description")} labelFor="project-description">
+            <Textarea
+              id="project-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t("form.descriptionPlaceholder")}
+              className="max-h-40 min-h-16"
+            />
+          </SettingsRow>
+        </SettingsGroup>
+      </SettingsSection>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="project-description">{t("form.description")}</Label>
-        <Textarea
-          id="project-description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder={t("form.descriptionPlaceholder")}
-          className="max-h-40 min-h-16"
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="project-system-prompt">{t("form.systemPrompt")}</Label>
+      {/* Not monospaced any more. It's prose a colleague writes about how the
+          assistant should behave, and a 12px mono box told them it was code. */}
+      <SettingsSection title={t("form.systemPrompt")} footnote={t("form.systemPromptHint")}>
         <Textarea
           id="project-system-prompt"
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
           placeholder={t("form.systemPromptPlaceholder")}
-          className="max-h-[50vh] min-h-28 font-mono text-xs"
+          className="max-h-[50vh] min-h-32 text-sm leading-relaxed"
         />
-      </div>
+      </SettingsSection>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="project-default-model">{t("form.defaultModel")}</Label>
-        <ModelPicker
-          variant="field"
-          value={defaultModel}
-          onChange={setDefaultModel}
-          placeholder={t("form.useGlobalDefault")}
-          clearable
+      <SettingsSection title={th("howItWorks")}>
+        <SettingsGroup>
+          <SettingsRow title={t("form.defaultModel")} hint={t("form.defaultModelHint")}>
+            <ModelPicker
+              variant="field"
+              value={defaultModel}
+              onChange={setDefaultModel}
+              placeholder={t("form.useGlobalDefault")}
+              clearable
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={t("form.internet")}
+            hint={t("form.internetHint")}
+            disabled={!profile.capabilities.sandbox}
+            onLabelClick={() => setInternetAccess((v) => !v)}
+            control={
+              <Switch
+                checked={internetAccess}
+                onCheckedChange={setInternetAccess}
+                disabled={!profile.capabilities.sandbox}
+              />
+            }
+          />
+        </SettingsGroup>
+
+        <AgentModeSection
+          profile={profile}
+          onChange={setProfile}
+          isAdmin={isAdmin}
+          hasInstructions={!!systemPrompt.trim()}
+          ceiling={orgCeiling}
         />
-        <p className="text-xs text-muted-foreground">{t("form.defaultModelHint")}</p>
-      </div>
-
-      <div className="flex items-center justify-between rounded-lg border p-3">
-        <div className="space-y-0.5">
-          <Label htmlFor="sandbox-internet">{t("form.internet")}</Label>
-          <p className="text-xs text-muted-foreground">{t("form.internetHint")}</p>
-        </div>
-        <Switch
-          id="sandbox-internet"
-          checked={internetAccess}
-          onCheckedChange={setInternetAccess}
-          disabled={!profile.capabilities.sandbox}
-        />
-      </div>
-
-      <AgentModeSection
-        profile={profile}
-        onChange={setProfile}
-        isAdmin={isAdmin}
-        hasInstructions={!!systemPrompt.trim()}
-        ceiling={orgCeiling}
-      />
-
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={!dirty || saving}>
-          {saving ? tc("saving") : tc("save")}
-        </Button>
-      </div>
+      </SettingsSection>
 
       {isAdmin && (
-        <section className="rounded-xl border border-destructive/30 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold">{th("dangerTitle")}</h2>
-              <p className="text-xs text-muted-foreground">{th("dangerHint")}</p>
-            </div>
-            <Button variant="outline" size="sm" className="shrink-0 text-destructive hover:text-destructive" onClick={onDelete}>
-              <Trash2 className="h-4 w-4" />
-              {th("delete")}
-            </Button>
-          </div>
-        </section>
+        <SettingsSection title={th("dangerTitle")} description={th("dangerHint")}>
+          <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={onDelete}>
+            <Trash2 className="h-4 w-4" />
+            {th("delete")}
+          </Button>
+        </SettingsSection>
+      )}
+
+      {/* Sticky, because the form is taller than the pane: the Save button used to
+          sit below the fold, so the way to keep an edit was to scroll for it. It
+          appears only once there's something to save, and Discard is next to it —
+          the honest pair, since leaving the tab does not warn. */}
+      {dirty && (
+        <div className="sticky bottom-0 flex items-center gap-3 border-t bg-background/85 py-3 backdrop-blur">
+          <span className="mr-auto text-xs text-muted-foreground">{th("unsaved")}</span>
+          <Button variant="ghost" size="sm" onClick={reset} disabled={saving}>{tc("cancel")}</Button>
+          <Button size="sm" onClick={save} disabled={saving}>
+            {saving ? tc("saving") : tc("save")}
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -488,10 +535,9 @@ function MemoryEditor({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="mt-4">
-      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">{t("memoryLabel")}</label>
+    <div>
       {content === null ? (
-        <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground/40" /></div>
+        <div className="h-20 animate-pulse rounded-md border bg-muted/40" aria-hidden />
       ) : (
         <>
           <Textarea
@@ -522,10 +568,15 @@ function ChatsList({ chats, locale, emptyLabel }: { chats: ChatRow[] | null; loc
     return <p className="py-10 text-center text-sm text-muted-foreground">{emptyLabel}</p>;
   }
   return (
-    <div className="grid gap-1.5">
+    <ChatList>
       {chats.map((c) => (
         <ChatRowLink key={c.id} chat={c} locale={locale} fallback={t("untitledChat")} />
       ))}
-    </div>
+    </ChatList>
   );
+}
+
+/** The card the chat rows sit in — same shape as SettingsGroup. */
+function ChatList({ children }: { children: React.ReactNode }) {
+  return <div className="divide-y overflow-hidden rounded-xl border bg-card">{children}</div>;
 }

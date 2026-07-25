@@ -144,6 +144,7 @@ export function SettingsGroup({ children, className }: { children: React.ReactNo
 export function SettingsRow({
   id,
   title,
+  labelFor,
   hint,
   warning,
   disabled,
@@ -153,6 +154,11 @@ export function SettingsRow({
 }: {
   id?: string;
   title: string;
+  /** Renders the title as a real `<label for>` — for rows whose control is a
+   *  native input/textarea passed as `children`. Without it the title is a
+   *  paragraph, which is correct for Switches (see `onLabelClick`) but would
+   *  leave a text field unlabelled for a screen reader. */
+  labelFor?: string;
   hint?: React.ReactNode;
   /** Amber note under the hint — a blocked/needs-attention state. */
   warning?: React.ReactNode;
@@ -192,7 +198,11 @@ export function SettingsRow({
           className={cn("min-w-0 space-y-0.5", onLabelClick && !disabled && "cursor-pointer select-none")}
           onClick={onLabelClick && !disabled ? onLabelClick : undefined}
         >
-          <p className="text-sm font-medium">{title}</p>
+          {labelFor ? (
+            <label htmlFor={labelFor} className="block text-sm font-medium">{title}</label>
+          ) : (
+            <p className="text-sm font-medium">{title}</p>
+          )}
           {hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}
           {warning && <p className="text-xs font-medium text-amber-600 dark:text-amber-500">{warning}</p>}
         </div>

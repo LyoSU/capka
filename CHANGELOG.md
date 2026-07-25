@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Members on the shared key with no spend limit now see their own recent usage on Settings → General. The budget widget previously rendered nothing whenever the tier was uncapped — which is the default — so most people saw no usage at all.
+- The project list is reachable again from inside a project and from the sidebar heading; it previously had no link at all on instances with five or fewer projects.
 
 ### Added
 
@@ -28,6 +29,7 @@ All notable changes to Capka are documented here. Format follows
 - Creating a project now asks for its instructions too, and opens on its Settings tab instead of an empty overview.
 - Sandbox-only controls (code egress, attachable folders) are hidden rather than disabled when the sandbox capability is off.
 - Settings pages share one content width and one row layout; nav labels now match page titles ("Providers", "Keys and limits", "Sign-in").
+- The project page uses the same sections and rows as Settings: its settings tab groups name/instructions/behaviour and keeps Save pinned while unsaved, the read-only "Context" card became one line under the project name, and the project list is a list instead of a card grid.
 
 ## [0.14.0] - 2026-07-24
 

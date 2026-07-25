@@ -150,7 +150,16 @@ export function ProjectsNav() {
 
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>{t("title")}</SidebarGroupLabel>
+      {/* The section heading IS the link to the full list. The list page used to be
+          reachable only from an overflow row that appeared once you had more than
+          five projects — so with four you could not get to it at all, and the one
+          affordance that looked like it should take you there did nothing. */}
+      <SidebarGroupLabel
+        render={<Link href="/projects" />}
+        className="w-fit underline-offset-2 transition-colors hover:text-sidebar-foreground hover:underline"
+      >
+        {t("title")}
+      </SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu className="gap-1">
           {shown.map((p) => (

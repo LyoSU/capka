@@ -3,15 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
-import { Plus, Pencil, Trash2, FolderKanban, MessageSquare } from "lucide-react";
+import { Plus, Pencil, Trash2, FolderKanban, MessageSquare, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardFooter,
-} from "@/components/ui/card";
 import { ProjectDialog, type Project } from "@/components/projects/project-dialog";
 import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -76,44 +69,43 @@ export default function ProjectsPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        /* A list, not a two-column card grid. Projects differ by one line of text,
+           so cards spent a lot of border and whitespace making eight of them look
+           like eight unrelated things — and the row actions sat in a footer that
+           was visible whether you wanted them or not. */
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
           {projects.map((project) => (
-            <Card key={project.id} size="sm">
-              <CardHeader>
-                <CardTitle>
-                  <Link href={`/projects/${project.id}`} className="hover:underline underline-offset-2">
-                    {project.name}
-                  </Link>
-                </CardTitle>
+            <div key={project.id} className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30">
+              <Link href={`/projects/${project.id}`} className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{project.name}</p>
                 {project.description && (
-                  <CardDescription className="line-clamp-2">
-                    {project.description}
-                  </CardDescription>
+                  <p className="truncate text-xs text-muted-foreground">{project.description}</p>
                 )}
-              </CardHeader>
-              <CardFooter className="mt-auto justify-between">
-                <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                <p className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground/80">
                   <span className="inline-flex items-center gap-1">
                     <MessageSquare className="h-3 w-3" />
                     {t("chatCount", { n: project.chatCount ?? 0 })}
                   </span>
-                  <span>{t("lastChat", { date: formatDate(project.lastChatAt) })}</span>
-                </span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    render={<Link href={`/projects/${project.id}?tab=settings`} />}
-                    aria-label={tc("edit")}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="icon-xs" onClick={() => setDeleteTarget(project)} aria-label={tc("delete")}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </CardFooter>
-            </Card>
+                  <span className="truncate">{t("lastChat", { date: formatDate(project.lastChatAt) })}</span>
+                </p>
+              </Link>
+              {/* Revealed on hover, always present for keyboard and touch. */}
+              <div className="flex shrink-0 items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  nativeButton={false}
+                  render={<Link href={`/projects/${project.id}?tab=settings`} />}
+                  aria-label={tc("edit")}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon-xs" onClick={() => setDeleteTarget(project)} aria-label={tc("delete")}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground/40" />
+            </div>
           ))}
         </div>
       )}
