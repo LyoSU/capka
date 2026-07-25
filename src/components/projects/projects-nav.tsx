@@ -14,6 +14,7 @@ import {
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
 import { ActionMenu } from "@/components/ui/action-menu";
+import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useLongPress } from "@/hooks/use-long-press";
 import { haptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,18 @@ function ProjectRow({ project, active }: { project: Project; active: boolean }) 
           },
         ]}
       >
+        {/* Invisible zero-size anchor. The popup positions against a trigger inside
+            the menu root, and the visible ⋮ below is a plain button (so it can sit
+            beside the anchor and drive the controlled `open`) — leaving this out is
+            what made the ⋮ silently do nothing. pointer-events-none so no tap can
+            land on it. */}
+        <DropdownMenuTrigger
+          aria-hidden
+          tabIndex={-1}
+          nativeButton={false}
+          render={<span />}
+          className="pointer-events-none absolute right-1 top-1/2 z-10 h-0 w-0 -translate-y-1/2"
+        />
         <SidebarMenuButton render={<Link href={`/projects/${project.id}`} />} data-active={active || undefined}>
           <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{project.name}</span>

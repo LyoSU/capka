@@ -119,7 +119,7 @@ export function ProjectHub({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button size="sm" render={<Link href={newChatHref} />}>
+            <Button size="sm" nativeButton={false} render={<Link href={newChatHref} />}>
               <Plus className="h-4 w-4" />
               {t("newChat")}
             </Button>
@@ -224,7 +224,7 @@ function OverviewTab({
         <div className="rounded-xl border bg-muted/20 px-4 py-6 text-center">
           <FolderKanban className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
           <p className="mx-auto max-w-md text-sm text-muted-foreground text-pretty">{t("emptyExplainer")}</p>
-          <Button size="sm" className="mt-4" render={<Link href={`/chat?projectId=${project.id}`} />}>
+          <Button size="sm" className="mt-4" nativeButton={false} render={<Link href={`/chat?projectId=${project.id}`} />}>
             <Plus className="h-4 w-4" />
             {t("newChat")}
           </Button>
