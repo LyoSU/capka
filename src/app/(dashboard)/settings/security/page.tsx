@@ -72,8 +72,10 @@ export default function SecuritySettingsPage() {
     s.update(next);
     s.persist(next)
       .then((ok) => {
-        if (ok) toast.success(t("updated"));
-        else {
+        // Silent on success on purpose: the control already shows the new state, so
+        // a toast per flip is one more thing to read and dismiss. Failures still
+        // speak up, because that IS news.
+        if (!ok) {
           s.setValue(prev);
           toast.error(t("updateFailed"));
         }
@@ -109,6 +111,7 @@ export default function SecuritySettingsPage() {
               hint={t("sandboxNetHint")}
               warning={netBlocked ? t("sandboxNetBlocked") : undefined}
               disabled={netBlocked}
+              onLabelClick={() => save(sandboxNet, sandboxNet.value === "bridge" ? "none" : "bridge")}
               control={
                 <Switch
                   checked={sandboxNet.value === "bridge"}
@@ -122,6 +125,7 @@ export default function SecuritySettingsPage() {
             id="block-private-urls"
             title={t("blockPrivate")}
             hint={t("blockPrivateHint")}
+            onLabelClick={() => save(blockPrivate, String(blockPrivate.value !== "true"))}
             control={
               <Switch
                 checked={blockPrivate.value === "true"}
@@ -139,6 +143,7 @@ export default function SecuritySettingsPage() {
             id="host-folders"
             title={t("hostFolders")}
             hint={t("hostFoldersHint")}
+            onLabelClick={() => save(hostFolders, String(hostFolders.value !== "true"))}
             control={
               <Switch
                 checked={hostFolders.value === "true"}

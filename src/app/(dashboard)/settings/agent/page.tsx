@@ -52,8 +52,9 @@ export default function AgentSettingsPage() {
       body: JSON.stringify(next),
     })
       .then((r) => {
-        if (r.ok) toast.success(t("saved"));
-        else {
+        // Success is silent — the switch itself is the receipt. See the same choice
+        // on the Security page.
+        if (!r.ok) {
           setProfile(prev);
           toast.error(t("saveFailed"));
         }
@@ -71,8 +72,7 @@ export default function AgentSettingsPage() {
     autonomy
       .persist(next)
       .then((ok) => {
-        if (ok) toast.success(t("saved"));
-        else {
+        if (!ok) {
           autonomy.setValue(prev);
           toast.error(t("saveFailed"));
         }
@@ -82,6 +82,17 @@ export default function AgentSettingsPage() {
         toast.error(t("saveFailed"));
       });
   };
+
+  // Instructions are the one field here with an explicit Save, so it is the one
+  // place a half-written change can be lost. Guard the browser-level exits; an
+  // in-app route change still loses it, which is why the Save button stays
+  // prominent rather than hiding until hover.
+  useEffect(() => {
+    if (!instructions.dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [instructions.dirty]);
 
   const saveInstructions = async () => {
     const ok = await instructions.persist(instructions.value);
@@ -125,6 +136,9 @@ export default function AgentSettingsPage() {
             id="sandbox-enabled"
             title={t("abilities.sandbox")}
             hint={t("abilities.sandboxHint")}
+            onLabelClick={() =>
+              saveProfile({ ...profile, capabilities: { ...profile.capabilities, sandbox: !profile.capabilities.sandbox } })
+            }
             control={
               <Switch
                 checked={profile.capabilities.sandbox}
@@ -138,6 +152,7 @@ export default function AgentSettingsPage() {
             id="agent-autonomy"
             title={t("autonomy.title")}
             hint={t("autonomy.hint")}
+            onLabelClick={() => toggleAutonomy(autonomy.value !== "autonomous")}
             control={<Switch checked={autonomy.value === "autonomous"} onCheckedChange={toggleAutonomy} />}
           />
         </SettingsGroup>

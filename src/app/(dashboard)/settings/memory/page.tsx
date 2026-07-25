@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow } from "@/components/settings/shell";
+import { parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
 import {
   Select,
   SelectTrigger,
@@ -90,7 +91,11 @@ export default function MemoryPage() {
   // The user's own memory switch, plus the org ceiling that can override it. The
   // docs below stay visible and editable either way: turning memory off leaves
   // saved notes alone (merely unused), so hiding them would suggest they were lost.
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  // The WHOLE profile is held, not just the one bit shown. The endpoint replaces
+  // the stored object, so posting `{capabilities:{memory}}` would let the schema
+  // defaults quietly reset every other field — invisible today, when memory is the
+  // only user-level switch, and a silent data loss the day a second one ships.
+  const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [lockedOff, setLockedOff] = useState(false);
   useEffect(() => {
     const ac = new AbortController();
@@ -98,7 +103,7 @@ export default function MemoryPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!d) return;
-        setEnabled(d.profile?.capabilities?.memory ?? true);
+        setProfile(parseAgentProfile(d.profile));
         setLockedOff(d.ceiling?.capabilities?.memory === false);
       })
       .catch(() => {});
@@ -106,24 +111,23 @@ export default function MemoryPage() {
   }, []);
 
   const toggleMemory = (checked: boolean) => {
-    const prev = enabled;
-    setEnabled(checked);
+    if (!profile) return;
+    const prev = profile;
+    const next: AgentProfile = { ...profile, capabilities: { ...profile.capabilities, memory: checked } };
+    setProfile(next);
     fetch("/api/me/agent-profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      // The endpoint validates a whole profile, and only this bit is exposed, so
-      // send the shape rather than a patch the schema would reject.
-      body: JSON.stringify({ capabilities: { memory: checked } }),
+      body: JSON.stringify(next),
     })
       .then((r) => {
-        if (r.ok) toast.success(t("saved"));
-        else {
-          setEnabled(prev);
+        if (!r.ok) {
+          setProfile(prev);
           toast.error(t("saveFailed"));
         }
       })
       .catch(() => {
-        setEnabled(prev);
+        setProfile(prev);
         toast.error(t("saveFailed"));
       });
   };
@@ -171,10 +175,11 @@ export default function MemoryPage() {
           title={t("enabled")}
           hint={lockedOff ? t("enabledLocked") : t("enabledHint")}
           disabled={lockedOff}
+          onLabelClick={() => toggleMemory(!profile?.capabilities.memory)}
           control={
             <Switch
-              checked={!!enabled && !lockedOff}
-              disabled={lockedOff || enabled === null}
+              checked={!!profile?.capabilities.memory && !lockedOff}
+              disabled={lockedOff || profile === null}
               onCheckedChange={toggleMemory}
             />
           }

@@ -1600,7 +1600,8 @@
       }
     },
     "searchPlaceholder": "Пошук налаштувань",
-    "searchEmpty": "Нічого не знайдено"
+    "searchEmpty": "Нічого не знайдено",
+    "searchHint": "⌘K — пошук"
   },
   "setup": {
     "back": "Назад",

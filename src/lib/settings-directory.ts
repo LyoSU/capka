@@ -6,7 +6,7 @@
  * a client component whose text only exists once React has run it, and half the
  * pages are admin-only, so there is nothing to scrape from the sidebar's point of
  * view. The cost of declaring is that a new setting has to be added here too —
- * which is exactly what `__tests__/directory.test.ts` checks, by requiring every
+ * which is exactly what `__tests__/settings-directory.test.ts` checks, by requiring every
  * entry to name a page that exists and a translation key that resolves.
  *
  * `label` and `hint` are i18n key paths resolved by the caller against the root
@@ -33,26 +33,26 @@ export const SETTINGS_DIRECTORY: SettingsEntry[] = [
   { href: "/settings", label: "settings.general.theme", page: "settings.nav.general", keywords: "тема dark light темна світла appearance вигляд" },
   { href: "/settings", label: "language.label", page: "settings.nav.general", keywords: "мова language локаль locale" },
   { href: "/settings", label: "settings.integrations.link.title", page: "settings.nav.general", keywords: "telegram телеграм акаунт account" },
-  { href: "/settings/memory#memory-enabled", label: "settings.memory.enabled", page: "settings.nav.memory", keywords: "пам'ять memory забути forget нотатки notes" },
+  { href: "/settings/memory#memory-enabled", label: "settings.memory.enabled", page: "settings.nav.memory", keywords: "пам'ять memory забути forget нотатки notes вимкнути disable off вивчати" },
   { href: "/settings/memory", label: "settings.memory.userTitle", page: "settings.nav.memory", keywords: "про мене about me факти facts" },
   { href: "/settings/connections", label: "settings.connections.title", page: "settings.nav.connections", keywords: "ключ key api openai anthropic gpt claude модель model провайдер" },
   { href: "/settings/skills", label: "settings.skills.title", page: "settings.nav.skills", keywords: "навички skills конектори connectors mcp плагіни plugins маркетплейс" },
   { href: "/settings/automations", label: "settings.automations.title", page: "settings.nav.automations", keywords: "розклад schedule cron автоматизації нагадування" },
 
   // ── Organization ──────────────────────────────────────────────────────────
-  { href: "/settings/agent#agent-instructions", label: "settings.agent.instructions.title", page: "settings.nav.agent", keywords: "промпт prompt system системний інструкції instructions персона persona тон tone", adminOnly: true },
-  { href: "/settings/agent#sandbox-enabled", label: "settings.agent.abilities.sandbox", page: "settings.nav.agent", keywords: "пісочниця sandbox код code файли files виконувати run", adminOnly: true },
+  { href: "/settings/agent#agent-instructions", label: "settings.agent.instructions.title", page: "settings.nav.agent", keywords: "промпт prompt system системний інструкції instructions персона persona тон tone змінити change замінити replace", adminOnly: true },
+  { href: "/settings/agent#sandbox-enabled", label: "settings.agent.abilities.sandbox", page: "settings.nav.agent", keywords: "пісочниця sandbox код code файли files виконувати run вимкнути disable off", adminOnly: true },
   { href: "/settings/agent#agent-autonomy", label: "settings.agent.autonomy.title", page: "settings.nav.agent", keywords: "автономний autonomous підтвердження confirm дозвіл", adminOnly: true },
   { href: "/settings/agent#agent-mode", label: "settings.agent.mode.title", page: "settings.nav.agent", keywords: "режим mode raw чистий промпт пам'ять memory можливості capabilities", adminOnly: true },
-  { href: "/settings/users", label: "settings.usersPage.title", page: "settings.nav.users", keywords: "користувачі users роль role admin адмін доступ approve схвалити", adminOnly: true },
+  { href: "/settings/users", label: "settings.usersPage.title", page: "settings.nav.users", keywords: "користувачі users роль role admin адмін доступ approve схвалити видалити remove запросити invite", adminOnly: true },
   { href: "/settings/authentication", label: "settings.authentication.mode.title", page: "settings.nav.authentication", keywords: "реєстрація registration signup вхід login закрити", adminOnly: true },
   { href: "/settings/authentication", label: "settings.authentication.telegram.title", page: "settings.nav.authentication", keywords: "telegram телеграм oidc вхід login", adminOnly: true },
   { href: "/settings/permissions", label: "settings.permissions.title", page: "settings.nav.permissions", keywords: "дозволи permissions заборонити deny allow політика policy", adminOnly: true },
   { href: "/settings/billing", label: "settings.billing.mode.title", page: "settings.nav.billing", keywords: "спільний ключ shared key власний own", adminOnly: true },
-  { href: "/settings/billing", label: "settings.billing.limits.title", page: "settings.nav.billing", keywords: "ліміт limit бюджет budget витрати spend гроші", adminOnly: true },
+  { href: "/settings/billing", label: "settings.billing.limits.title", page: "settings.nav.billing", keywords: "ліміт limit бюджет budget витрати spend гроші вимкнути змінити", adminOnly: true },
   { href: "/settings/integrations", label: "settings.integrations.telegram.title", page: "settings.nav.integrations", keywords: "telegram телеграм бот bot токен token botfather", adminOnly: true },
   { href: "/settings/security", label: "settings.security.encryptionKey", page: "settings.nav.security", keywords: "шифрування encryption master key ключ", adminOnly: true },
-  { href: "/settings/security#sandbox-network", label: "settings.security.sandboxNet", page: "settings.nav.security", keywords: "інтернет internet мережа network egress", adminOnly: true },
+  { href: "/settings/security#sandbox-network", label: "settings.security.sandboxNet", page: "settings.nav.security", keywords: "інтернет internet мережа network egress дозволити allow вимкнути off", adminOnly: true },
   { href: "/settings/security#block-private-urls", label: "settings.security.blockPrivate", page: "settings.nav.security", keywords: "ssrf приватні private localhost внутрішні", adminOnly: true },
   { href: "/settings/security#host-folders", label: "settings.security.hostFolders", page: "settings.nav.security", keywords: "теки folders сервер server монтувати mount", adminOnly: true },
   { href: "/settings/security#pc-folders", label: "settings.security.pcFolders", page: "settings.nav.security", keywords: "теки folders комп'ютер computer синхронізація sync", adminOnly: true },
@@ -76,8 +76,12 @@ export function searchSettings(
   query: string,
   resolve: (key: string) => string,
 ): SettingsEntry[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
+  // Every word must match SOMETHING, and each word is scored where it landed. This
+  // is what makes a typed phrase work: "вимкнути пам'ять" finds the memory switch
+  // (one word in its label, the other in its keywords), where matching the phrase
+  // as one string would find nothing and look broken.
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
 
   const scored: { entry: SettingsEntry; score: number }[] = [];
   for (const entry of entries) {
@@ -86,11 +90,20 @@ export function searchSettings(
     const keywords = (entry.keywords ?? "").toLowerCase();
 
     let score = 0;
-    if (label.startsWith(q)) score = 100;
-    else if (label.includes(q)) score = 80;
-    else if (page.startsWith(q)) score = 60;
-    else if (keywords.split(/\s+/).some((w) => w.startsWith(q))) score = 40;
-    else if (page.includes(q) || keywords.includes(q)) score = 20;
+    for (const q of words) {
+      let word = 0;
+      if (label.startsWith(q)) word = 100;
+      else if (label.includes(q)) word = 80;
+      else if (page.startsWith(q)) word = 60;
+      else if (keywords.split(/\s+/).some((w) => w.startsWith(q))) word = 40;
+      else if (page.includes(q) || keywords.includes(q)) word = 20;
+
+      if (word === 0) {
+        score = 0;
+        break;
+      }
+      score += word;
+    }
 
     if (score > 0) scored.push({ entry, score });
   }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, ShieldCheck, Wallet, KeyRound, Lock, Download, CalendarClock, ScrollText, Bot, Search } from "lucide-react";
 import { Header } from "@/components/layout/header";
@@ -53,8 +53,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   // result reads the same words as the page it links to, wherever that page's
   // messages happen to live.
   const tRoot = useTranslations();
+  const router = useRouter();
   const isAdmin = useIsAdmin();
   const [query, setQuery] = useState("");
+  // Which result Enter would open. Reset whenever the query changes, so a
+  // half-typed word can never fire off the previous query's top hit.
+  const [active, setActive] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
   const { billing } = useBilling();
   // Non-admins see Connections only when the instance lets them bring their own
   // key; admins always need it (they configure the shared key there).
@@ -89,18 +94,65 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       )
     : [];
 
-  const searchBox = (
+  // ⌘K / Ctrl+K from anywhere in settings. Deliberately NOT bare "/" — these pages
+  // are full of text fields, and a shortcut that steals a keystroke mid-sentence is
+  // worse than no shortcut.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Keyboard is the whole point of a search box: reaching for the mouse to pick a
+  // result costs exactly what the search was meant to save.
+  const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") return setQuery("");
+    if (results.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((i) => (i + 1) % results.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => (i - 1 + results.length) % results.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      router.push(results[Math.min(active, results.length - 1)].href);
+      setQuery("");
+      searchRef.current?.blur();
+    }
+  };
+
+  const renderSearch = (attachRef: boolean) => (
     <div className="relative">
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
       <input
+        // Only the desktop copy holds the ref: both are always in the DOM (one is
+        // hidden by CSS), and Cmd+K focusing a display:none input does nothing.
+        ref={attachRef ? searchRef : undefined}
         type="search"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setActive(0);
+        }}
+        onKeyDown={onSearchKey}
         placeholder={t("searchPlaceholder")}
         aria-label={t("searchPlaceholder")}
-        className="w-full rounded-md border bg-transparent py-1.5 pl-8 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-search-cancel-button]:hidden"
+        className="w-full rounded-md border bg-transparent py-1.5 pl-8 pr-12 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-search-cancel-button]:hidden"
       />
+      {/* A shortcut nobody is told about is a shortcut nobody uses. Hidden while
+          typing, where it would just be in the way, and on touch, where there is no
+          ⌘ key to press. */}
+      {!query && (
+        <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 text-[10px] text-muted-foreground/60 md:block">
+          ⌘K
+        </kbd>
+      )}
     </div>
   );
 
@@ -109,12 +161,16 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       {results.length === 0 ? (
         <p className="px-2.5 py-2 text-sm text-muted-foreground">{t("searchEmpty")}</p>
       ) : (
-        results.map((entry) => (
+        results.map((entry, i) => (
           <Link
             key={`${entry.href}-${entry.label}`}
             href={entry.href}
             onClick={() => setQuery("")}
-            className="flex flex-col rounded-md px-2.5 py-1.5 transition-colors hover:bg-accent/50"
+            onMouseEnter={() => setActive(i)}
+            className={cn(
+              "flex flex-col rounded-md px-2.5 py-1.5 transition-colors",
+              i === active ? "bg-accent" : "hover:bg-accent/50",
+            )}
           >
             <span className="text-sm">{tRoot(entry.label)}</span>
             <span className="text-xs text-muted-foreground">{tRoot(entry.page)}</span>
@@ -131,7 +187,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         {/* Mobile: search above flat horizontal scroll tabs (headers don't fit a
             single row); results take the tabs' place as a vertical list. */}
         <div className="border-b px-3 py-2 md:hidden">
-          {searchBox}
+          {renderSearch(false)}
           {searching && <div className="pt-2">{resultList}</div>}
         </div>
         <nav className={cn("flex gap-1 overflow-x-auto border-b px-3 py-2 md:hidden", searching && "hidden")}>
@@ -153,7 +209,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         </nav>
         {/* Desktop: vertical sidebar, grouped by section */}
         <nav className="hidden w-56 flex-col gap-4 border-r p-3 md:flex">
-          {searchBox}
+          {renderSearch(true)}
           {searching && resultList}
           {!searching && visibleSections.map((section) => (
             <div key={section.titleKey} className="flex flex-col gap-1">

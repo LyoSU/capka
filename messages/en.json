@@ -1600,7 +1600,8 @@
       }
     },
     "searchPlaceholder": "Search settings",
-    "searchEmpty": "Nothing found"
+    "searchEmpty": "Nothing found",
+    "searchHint": "⌘K to search"
   },
   "setup": {
     "back": "Back",

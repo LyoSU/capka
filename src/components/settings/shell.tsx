@@ -89,6 +89,7 @@ export function SettingsRow({
   warning,
   disabled,
   control,
+  onLabelClick,
   children,
 }: {
   id?: string;
@@ -102,6 +103,16 @@ export function SettingsRow({
   /** The switch/select/button. Omit and pass `children` for a control that
    *  needs the full row width (a segmented picker, a textarea). */
   control?: React.ReactNode;
+  /**
+   * Makes the label text a click target for the control, so the row behaves the
+   * way every OS settings list does instead of demanding a hit on a 36px switch.
+   *
+   * Not done with a native `<label>`: the Switch renders a `role="switch"` button,
+   * and label-for association only activates real form inputs — it would look
+   * clickable and do nothing. Bound to the text block rather than the whole row so
+   * a click on the switch itself can't fire this too and cancel its own change.
+   */
+  onLabelClick?: () => void;
   children?: React.ReactNode;
 }) {
   const highlighted = useAnchorHighlight(id);
@@ -117,7 +128,10 @@ export function SettingsRow({
       )}
     >
       <div className={cn("flex items-center justify-between gap-4", disabled && "opacity-60")}>
-        <div className="min-w-0 space-y-0.5">
+        <div
+          className={cn("min-w-0 space-y-0.5", onLabelClick && !disabled && "cursor-pointer select-none")}
+          onClick={onLabelClick && !disabled ? onLabelClick : undefined}
+        >
           <p className="text-sm font-medium">{title}</p>
           {hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}
           {warning && <p className="text-xs font-medium text-amber-600 dark:text-amber-500">{warning}</p>}

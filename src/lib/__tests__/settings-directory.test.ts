@@ -67,6 +67,20 @@ describe("searchSettings", () => {
     expect(hits[0].href).toBe("/settings/memory#memory-enabled");
   });
 
+  it("matches a typed phrase across the label and the keywords together", () => {
+    // Someone describing what they want ("вимкнути пам'ять") types words that live
+    // in different fields. Matching the phrase as one string would find nothing.
+    const hits = searchSettings(SETTINGS_DIRECTORY, "вимкнути пам'ять", resolve);
+    expect(hits.map((h) => h.href)).toContain("/settings/memory#memory-enabled");
+  });
+
+  it("requires every word to match something, so extra words narrow rather than widen", () => {
+    // "пам'ять" alone hits several rows; adding a word that matches none of them
+    // must return nothing rather than falling back to the loosest match.
+    expect(searchSettings(SETTINGS_DIRECTORY, "пам'ять zzzz", resolve)).toEqual([]);
+    expect(searchSettings(SETTINGS_DIRECTORY, "пам'ять", resolve).length).toBeGreaterThan(1);
+  });
+
   it("respects the caller's filtering, so a member never sees admin-only rows", () => {
     const memberOnly = SETTINGS_DIRECTORY.filter((e) => !e.adminOnly);
     const hits = searchSettings(memberOnly, "промпт", resolve);
