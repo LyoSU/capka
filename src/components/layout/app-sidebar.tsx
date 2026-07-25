@@ -7,7 +7,6 @@ import { useTranslations } from "next-intl";
 import {
   Plus,
   Settings,
-  FolderKanban,
   FolderOpen,
   Archive,
   Send,
@@ -610,9 +609,12 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <ProjectsNav />
-
+        {/* Search before Projects: finding an existing chat is the most frequent
+            thing anyone does here, and the field used to sit below Projects, in the
+            middle of the panel, where it read as belonging to neither. */}
         <ChatSearch value={search} onChange={setSearch} />
+
+        <ProjectsNav />
 
         {/* First-load placeholder: skeleton rows hold the list's shape until the
             fetch resolves, so the panel never flashes the empty state and the
@@ -766,10 +768,8 @@ export function AppSidebar() {
                 {typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘K" : "Ctrl+K"}
               </DropdownMenuShortcut>
             </DropdownMenuItem>
-            <DropdownMenuItem render={<Link href="/projects" />}>
-              <FolderKanban className="size-4" />
-              {t("projects")}
-            </DropdownMenuItem>
+            {/* No Projects link here: the sidebar has a Projects section two
+                inches up, with the same "all projects" link inside it. */}
             <DropdownMenuItem render={<Link href="/chat/archived" />}>
               <Archive className="size-4" />
               {t("archived")}

@@ -604,7 +604,8 @@
         "advancedNoteOrg": "Switching a capability off here removes it from every chat, whatever an individual project is set to.",
         "cappedByAdmin": "Some capabilities are limited instance-wide by an administrator and can't be enabled here.",
         "rawEmptyOrg": "Chats with no instructions of their own will get no instructions at all."
-      }
+      },
+      "systemPromptHint": "How the assistant should work in this project: tone, what to always include, what to avoid."
     },
     "chatCount": "{n, plural, one {# chat} other {# chats}}",
     "lastChat": "Last chat: {date}",

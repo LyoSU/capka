@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { FolderKanban, Plus, FolderOpen } from "lucide-react";
+import { FolderKanban, Plus, FolderOpen, MoreVertical, Settings2, MessageSquarePlus } from "lucide-react";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -13,6 +13,10 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
+import { ActionMenu } from "@/components/ui/action-menu";
+import { useLongPress } from "@/hooks/use-long-press";
+import { haptic } from "@/lib/haptics";
+import { cn } from "@/lib/utils";
 import { ProjectDialog, type Project } from "@/components/projects/project-dialog";
 
 // The sidebar's "Projects" section: a flat list of the few most-recently-active
@@ -21,6 +25,89 @@ import { ProjectDialog, type Project } from "@/components/projects/project-dialo
 // below is NEVER filtered by it — the route + DB are the single source of truth
 // for which workspace a chat uses, so there is no client "selected project" state.
 const MAX_SHOWN = 5;
+
+/**
+ * One project row, with the same affordances a chat row has: ⋮ on hover, long-press
+ * on touch, both opening the same action list.
+ *
+ * They were plain links before, which made the section read as decoration — a list
+ * you could look at and enter, but not act on, while every neighbouring row in the
+ * sidebar had a menu. Settings deep-links straight to the hub's Settings tab rather
+ * than its overview, so "rename this" is one click instead of three.
+ *
+ * Deletion is deliberately NOT here. The hub's Settings tab already confirms it with
+ * the actual consequences spelled out (which memory is wiped, which connectors get
+ * detached); a shorter confirmation in the sidebar would be the easier of two paths
+ * to the same irreversible act.
+ */
+function ProjectRow({ project, active }: { project: Project; active: boolean }) {
+  const t = useTranslations("projects.hub");
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Long-press opens the menu on touch; the click the finger-lift fires on the
+  // underlying Link is swallowed so the row doesn't navigate at the same time.
+  const firedRef = useRef(false);
+  const longPress = useLongPress(() => {
+    firedRef.current = true;
+    setMenuOpen(true);
+    haptic("tap");
+  });
+
+  return (
+    <SidebarMenuItem
+      className="pointer-coarse:select-none [-webkit-touch-callout:none]"
+      {...longPress}
+      onTouchStart={(e) => { firedRef.current = false; longPress.onTouchStart(e); }}
+      onClickCapture={(e) => {
+        if (firedRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          firedRef.current = false;
+        }
+      }}
+    >
+      <ActionMenu
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        title={project.name}
+        ariaLabel={t("settings")}
+        contentProps={{ align: "start", className: "w-48" }}
+        items={[
+          {
+            key: "new-chat",
+            icon: <MessageSquarePlus className="size-4" />,
+            label: t("newChat"),
+            onSelect: () => router.push(`/chat?projectId=${project.id}`),
+          },
+          {
+            key: "settings",
+            icon: <Settings2 className="size-4" />,
+            label: t("settings"),
+            onSelect: () => router.push(`/projects/${project.id}?tab=settings`),
+          },
+        ]}
+      >
+        <SidebarMenuButton render={<Link href={`/projects/${project.id}`} />} data-active={active || undefined}>
+          <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{project.name}</span>
+        </SidebarMenuButton>
+        <button
+          type="button"
+          data-sidebar="menu-action"
+          aria-label={t("settings")}
+          onClick={() => setMenuOpen(true)}
+          className={cn(
+            "absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 pointer-coarse:hidden sm:opacity-0 sm:group-hover/menu-item:opacity-100",
+            menuOpen && "bg-sidebar-accent text-sidebar-accent-foreground opacity-100",
+          )}
+        >
+          <MoreVertical className="size-4" />
+        </button>
+      </ActionMenu>
+    </SidebarMenuItem>
+  );
+}
 
 export function ProjectsNav() {
   const t = useTranslations("projects");
@@ -54,12 +141,7 @@ export function ProjectsNav() {
       <SidebarGroupContent>
         <SidebarMenu className="gap-1">
           {shown.map((p) => (
-            <SidebarMenuItem key={p.id}>
-              <SidebarMenuButton render={<Link href={`/projects/${p.id}`} />} data-active={activeId === p.id || undefined}>
-                <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="truncate">{p.name}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            <ProjectRow key={p.id} project={p} active={activeId === p.id} />
           ))}
           <SidebarMenuItem>
             <SidebarMenuButton onClick={() => setDialogOpen(true)} className="text-muted-foreground">
@@ -81,7 +163,13 @@ export function ProjectsNav() {
       <ProjectDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        onSaved={(p) => { fetchProjects(); router.push(`/projects/${p.id}`); }}
+        onSaved={(p) => {
+          fetchProjects();
+          // Straight to Settings, not the empty overview: someone who just named a
+          // project is still describing it, and everything else about it lives
+          // there. The overview has nothing to show yet anyway.
+          router.push(`/projects/${p.id}?tab=settings`);
+        }}
       />
     </SidebarGroup>
   );

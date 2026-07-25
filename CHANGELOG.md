@@ -24,6 +24,8 @@ All notable changes to Capka are documented here. Format follows
 - The global command palette (⌘K) lists every individual setting, replacing its three hardcoded links to settings pages.
 - Turning an agent capability off instance-wide now asks for confirmation, matching the confirm the same change already required from chat.
 - Settings pages show skeleton rows while loading instead of a centred spinner, and switch rows toggle from their label.
+- Sidebar: projects have a ⋮ menu (new chat in the project, its settings), chat search moved above the projects list, and the duplicate Projects link left the account menu.
+- Creating a project now asks for its instructions too, and opens on its Settings tab instead of an empty overview.
 - Sandbox-only controls (code egress, attachable folders) are hidden rather than disabled when the sandbox capability is off.
 - Settings pages share one content width and one row layout; nav labels now match page titles ("Providers", "Keys and limits", "Sign-in").
 

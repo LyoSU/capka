@@ -42,21 +42,30 @@ interface ProjectDialogProps {
   onSaved?: (project: Project) => void;
 }
 
-/** Create-a-project dialog — deliberately just name + description. Everything
- *  else (instructions, model, internet, deletion) lives in the hub's Settings
- *  tab, where a full page gives the model picker room a modal can't (the
- *  dialog's centering transform + overflow clipping used to cut it off). */
+/**
+ * Create-a-project dialog: name, description, and the instructions that make it a
+ * project rather than a folder.
+ *
+ * Instructions used to be hub-only, so creating a project answered "what is it
+ * called" and left "how should it behave" for a second visit to another screen —
+ * which read as the form being unfinished. What stays out: the model picker (its
+ * popover was clipped by the dialog's centering transform) and Agent mode (it needs
+ * the org ceiling, resolved server-side on the hub page). The dialog opens straight
+ * onto Settings after saving, so both are one glance away.
+ */
 export function ProjectDialog({ open, onOpenChange, onSaved }: ProjectDialogProps) {
   const t = useTranslations("projects");
   const tc = useTranslations("common");
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
 
   useEffect(() => {
     if (open) {
       setName("");
       setDescription("");
+      setSystemPrompt("");
     }
   }, [open]);
 
@@ -72,7 +81,7 @@ export function ProjectDialog({ open, onOpenChange, onSaved }: ProjectDialogProp
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description }),
+        body: JSON.stringify({ name, description, systemPrompt }),
       });
 
       if (!res.ok) {
@@ -124,8 +133,20 @@ export function ProjectDialog({ open, onOpenChange, onSaved }: ProjectDialogProp
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder={t("form.descriptionPlaceholder")}
-                className="max-h-40 min-h-16"
+                className="max-h-32 min-h-16"
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="project-instructions">{t("form.systemPrompt")}</Label>
+              <Textarea
+                id="project-instructions"
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                placeholder={t("form.systemPromptPlaceholder")}
+                className="max-h-40 min-h-20"
+              />
+              <p className="text-xs text-muted-foreground">{t("form.systemPromptHint")}</p>
             </div>
           </div>
 
