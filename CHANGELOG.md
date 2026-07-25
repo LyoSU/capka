@@ -6,6 +6,19 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- New Settings → Agent page holds everything about what the assistant is: instance-wide instructions, the capability ceiling, autonomy, and the sandbox switch. Exposed to chat as `org.agent_instructions`.
+- Instance-wide agent instructions (`agent_instructions`) are prepended to every chat's system prompt, above any project's own instructions. Empty by default, leaving the prompt byte-identical.
+- Users can turn their own long-term memory off on Settings → Memory. Stored in `user.agent_profile` and folded under the org ceiling, so it can only restrict; exposed to chat as `user.memory`.
+- Search over every setting in the settings sidebar, linking straight to the individual row.
+
+### Changed
+
+- Settings → Security now covers the perimeter only: encryption key, network, folders. Agent capabilities, autonomy, and the sandbox switch moved to Settings → Agent.
+- Sandbox-only controls (code egress, attachable folders) are hidden rather than disabled when the sandbox capability is off.
+- Settings pages share one content width and one row layout; nav labels now match page titles ("Providers", "Keys and limits", "Sign-in").
+
 ## [0.14.0] - 2026-07-24
 
 > **⚠ Breaking — `sandbox_enabled` is now enforced.** It previously saved but did nothing (no code read it). If you ever turned "Sandbox execution" off on Settings → Security, the agent will now really lose file and code access: turn it back on there.

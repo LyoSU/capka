@@ -602,7 +602,8 @@
         "sessionContext": "Pass your name, the date, and your language",
         "hintOrg": "The instance-wide ceiling. A project can ask for less, never more — and this also covers chats that belong to no project.",
         "advancedNoteOrg": "Switching a capability off here removes it from every chat, whatever an individual project is set to.",
-        "cappedByAdmin": "Some capabilities are limited instance-wide by an administrator and can't be enabled here."
+        "cappedByAdmin": "Some capabilities are limited instance-wide by an administrator and can't be enabled here.",
+        "rawEmptyOrg": "Chats with no instructions of their own will get no instructions at all."
       }
     },
     "chatCount": "{n, plural, one {# chat} other {# chats}}",
@@ -673,9 +674,9 @@
     "title": "Settings",
     "nav": {
       "general": "General",
-      "connections": "Connections",
+      "connections": "Providers",
       "integrations": "Integrations",
-      "billing": "Keys & limits",
+      "billing": "Keys and limits",
       "memory": "Memory",
       "usage": "Analytics",
       "users": "Users",
@@ -684,14 +685,15 @@
       "connectors": "Connectors",
       "marketplace": "Marketplace",
       "permissions": "Permissions",
-      "authentication": "Authentication",
+      "authentication": "Sign-in",
       "security": "Security",
       "sections": {
         "personal": "Personal",
         "admin": "Administration"
       },
       "updates": "Updates",
-      "activity": "Activity"
+      "activity": "Activity",
+      "agent": "Agent"
     },
     "usersPage": {
       "title": "Users",
@@ -837,7 +839,10 @@
       "placeholder": "The AI fills this in as you chat. You can add or edit notes here too — one per line.",
       "saved": "Memory saved",
       "saveFailed": "Failed to save memory",
-      "loadError": "Could not load memory. Please refresh the page."
+      "loadError": "Could not load memory. Please refresh the page.",
+      "enabled": "Remember things about me",
+      "enabledHint": "Off, the assistant starts every chat fresh. Your notes below are kept.",
+      "enabledLocked": "Memory is turned off for everyone right now."
     },
     "integrations": {
       "title": "Integrations",
@@ -937,7 +942,7 @@
       }
     },
     "connections": {
-      "title": "AI providers",
+      "title": "Providers",
       "subtitle": "Manage AI provider connections and API keys",
       "empty": "No providers connected",
       "emptyHint": "Add an API key to start using AI models",
@@ -1368,7 +1373,7 @@
       "saveFailed": "Couldn't save that change"
     },
     "authentication": {
-      "title": "Authentication",
+      "title": "Sign-in",
       "subtitle": "How people sign in, and who is allowed to create an account",
       "save": "Save changes",
       "saved": "Saved",
@@ -1417,10 +1422,10 @@
     },
     "security": {
       "title": "Security",
-      "subtitle": "Protect provider keys, isolate code execution, and restrict outbound connections.",
+      "subtitle": "Where the assistant's code may connect, and which folders it may see.",
       "adminOnly": "Only admins can manage security settings",
       "encryptionKey": "Encryption key",
-      "encryptionKeyDesc": "Protects the AI provider API keys stored in your database.",
+      "encryptionKeyDesc": "Keeps your saved provider keys unreadable in the database.",
       "masterKey": {
         "insecureTitle": "Protect your provider keys",
         "insecureBody": "The key that encrypts your AI provider keys is stored in the database. Anyone who can read the database can read those keys. Copy this line into your server's environment file, then restart Capka:",
@@ -1431,40 +1436,25 @@
         "removeFailed": "Couldn't remove the database copy",
         "secureClean": "Provider keys are protected by an environment key"
       },
-      "sandbox": "Sandbox",
-      "sandboxDesc": "Give AI full access to a sandboxed Linux environment with Python, Node.js, and dev tools.",
-      "enableSandbox": "Enable sandbox",
-      "enableSandboxHint": "AI can execute commands, read/write files, and run code in an isolated container per chat.",
-      "sandboxEnabled": "Sandbox enabled",
-      "sandboxDisabled": "Sandbox disabled",
       "network": "Network",
-      "networkDesc": "Control how strictly provider connections are restricted.",
-      "blockPrivate": "Block internal network addresses",
-      "blockPrivateHint": "Prevents provider URLs (LiteLLM, Ollama) from pointing at private or loopback addresses. Turn this off if you self-host a gateway on your local network. Cloud metadata addresses are always blocked.",
-      "strictEnabled": "Strict mode enabled",
-      "strictDisabled": "Strict mode disabled",
+      "networkDesc": "What the sandbox and your AI providers are allowed to reach.",
+      "blockPrivate": "Block internal addresses for providers",
+      "blockPrivateHint": "Turn off only if your AI provider runs on your own network.",
       "updateFailed": "Failed to update",
-      "sandboxNet": "Internet access",
-      "sandboxNetHint": "Let sandboxed code and local (stdio) connectors reach the public internet. Tools that self-install on first use (e.g. npx) need this. Private/internal ranges and cloud metadata stay blocked.",
-      "netEnabled": "Internet access on for the sandbox",
-      "netDisabled": "Internet access off for the sandbox",
-      "sandboxNetBlocked": "Blocked at the deployment level — set SANDBOX_ALLOW_NETWORK=true and restart the sandbox controller to enable this.",
+      "sandboxNet": "Let code reach the internet",
+      "sandboxNetHint": "Needed for tools that download something when first used.",
+      "sandboxNetBlocked": "Blocked on the server — ask whoever runs it to allow sandbox network access.",
       "updated": "Setting updated",
-      "hostFolders": "Server folders",
-      "hostFoldersHint": "Let admins attach a folder from the server (the machine running Capka) into a chat's sandbox at /folders/[name], read-only by default. Off by default.",
-      "hostFoldersEnabled": "Server folders on — admins can attach host folders.",
-      "hostFoldersDisabled": "Server folders off",
-      "pcFolders": "Personal folders",
-      "pcFoldersHint": "Let users connect a folder from their own computer (synced into the chat workspace via the browser). Chrome or Edge only for live sync.",
+      "hostFolders": "Folders from the server",
+      "hostFoldersHint": "Admins can attach a folder from the machine running Capka.",
+      "pcFolders": "Folders from a computer",
+      "pcFoldersHint": "People can attach a folder from their own computer through the browser.",
       "folder_off": "Off",
       "folder_admins": "Admins only",
       "folder_everyone": "Everyone",
-      "agent": "Agent",
-      "agentDesc": "How much the assistant may change on its own from chat.",
-      "autonomousMode": "Autonomous mode",
-      "autonomousModeHint": "When on, the agent applies settings changes and installs skills directly, without a confirmation each time — it still asks before installing a connector that runs third-party code. When off, it asks you to confirm each risky change.",
-      "autonomousEnabled": "Autonomous mode on — the agent acts without asking.",
-      "autonomousDisabled": "Autonomous mode off — the agent confirms risky changes."
+      "networkNote": "Private and internal addresses stay blocked either way.",
+      "folders": "Folders",
+      "foldersDesc": "Real folders the assistant may read, beyond each chat's own workspace."
     },
     "updates": {
       "title": "Updates",
@@ -1581,7 +1571,36 @@
           "update": "Updated billing"
         }
       }
-    }
+    },
+    "agent": {
+      "title": "Agent",
+      "subtitle": "Who the assistant is and what it may do, across the whole workspace.",
+      "adminOnly": "Only admins can change this",
+      "saved": "Saved",
+      "saveFailed": "Could not save",
+      "instructions": {
+        "title": "Instructions for everyone",
+        "desc": "Added to the start of every chat, before anything a project adds.",
+        "placeholder": "For example: we are Acme. Reply briefly, in plain language, and use metric units.",
+        "note": "Good for house rules: tone, your company name, what to avoid. Leave empty and the assistant behaves normally."
+      },
+      "abilities": {
+        "title": "What the assistant can do",
+        "desc": "Turning something off here turns it off in every chat, whatever a project asks for.",
+        "sandbox": "Work with files and code",
+        "sandboxHint": "Open documents, run code, convert files."
+      },
+      "autonomy": {
+        "title": "Change settings without asking",
+        "hint": "Off, the assistant shows what it wants to change and waits for a click."
+      },
+      "mode": {
+        "title": "Style of instructions",
+        "desc": "Whether the assistant keeps its built-in character, and what it is told about you."
+      }
+    },
+    "searchPlaceholder": "Search settings",
+    "searchEmpty": "Nothing found"
   },
   "setup": {
     "back": "Back",

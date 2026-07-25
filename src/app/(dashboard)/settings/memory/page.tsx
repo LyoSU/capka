@@ -6,7 +6,8 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow } from "@/components/settings/shell";
 import {
   Select,
   SelectTrigger,
@@ -86,6 +87,47 @@ export default function MemoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // The user's own memory switch, plus the org ceiling that can override it. The
+  // docs below stay visible and editable either way: turning memory off leaves
+  // saved notes alone (merely unused), so hiding them would suggest they were lost.
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [lockedOff, setLockedOff] = useState(false);
+  useEffect(() => {
+    const ac = new AbortController();
+    fetch("/api/me/agent-profile", { signal: ac.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setEnabled(d.profile?.capabilities?.memory ?? true);
+        setLockedOff(d.ceiling?.capabilities?.memory === false);
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, []);
+
+  const toggleMemory = (checked: boolean) => {
+    const prev = enabled;
+    setEnabled(checked);
+    fetch("/api/me/agent-profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      // The endpoint validates a whole profile, and only this bit is exposed, so
+      // send the shape rather than a patch the schema would reject.
+      body: JSON.stringify({ capabilities: { memory: checked } }),
+    })
+      .then((r) => {
+        if (r.ok) toast.success(t("saved"));
+        else {
+          setEnabled(prev);
+          toast.error(t("saveFailed"));
+        }
+      })
+      .catch(() => {
+        setEnabled(prev);
+        toast.error(t("saveFailed"));
+      });
+  };
+
   const load = useCallback(async () => {
     try {
       setError("");
@@ -116,33 +158,35 @@ export default function MemoryPage() {
   }
 
   return (
-    <div className="max-w-lg space-y-6">
-      <div>
-        <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
-      <Separator />
-
+    <SettingsPage title={t("title")} description={t("subtitle")}>
       {error && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <section className="space-y-2">
-        <div>
-          <h3 className="text-sm font-medium">{t("userTitle")}</h3>
-          <p className="text-xs text-muted-foreground">{t("userDesc")}</p>
-        </div>
+      <SettingsGroup>
+        <SettingsRow
+          id="memory-enabled"
+          title={t("enabled")}
+          hint={lockedOff ? t("enabledLocked") : t("enabledHint")}
+          disabled={lockedOff}
+          control={
+            <Switch
+              checked={!!enabled && !lockedOff}
+              disabled={lockedOff || enabled === null}
+              onCheckedChange={toggleMemory}
+            />
+          }
+        />
+      </SettingsGroup>
+
+      <SettingsSection title={t("userTitle")} description={t("userDesc")}>
         <DocEditor value={userDoc} projectId={null} onSaved={setUserDoc} />
-      </section>
+      </SettingsSection>
 
       {projectDocs.length > 0 && (
-        <section className="space-y-2">
-          <div>
-            <h3 className="text-sm font-medium">{t("projectTitle")}</h3>
-            <p className="text-xs text-muted-foreground">{t("projectDesc")}</p>
-          </div>
+        <SettingsSection title={t("projectTitle")} description={t("projectDesc")}>
           <Select
             value={selectedProject ?? ""}
             onValueChange={(v) => setSelectedProject(v || null)}
@@ -169,8 +213,8 @@ export default function MemoryPage() {
               }
             />
           )}
-        </section>
+        </SettingsSection>
       )}
-    </div>
+    </SettingsPage>
   );
 }

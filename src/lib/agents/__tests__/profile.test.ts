@@ -143,3 +143,35 @@ describe("presets", () => {
     expect(RAW_PROFILE.sessionContext).toBe(false);
   });
 });
+
+describe("three layers: user, org, project", () => {
+  const full = (over: Partial<AgentProfile["capabilities"]>): AgentProfile =>
+    agentProfileSchema.parse({ capabilities: over });
+
+  it("lets a user switch their own memory off even though the org allows it", () => {
+    const resolved = resolveAgentProfile(null, capProfile(full({ memory: false }), ASSISTANT_PROFILE));
+    expect(resolved.capabilities.memory).toBe(false);
+    // Nothing else moves — one user's preference is not a policy change.
+    expect(resolved.capabilities.sandbox).toBe(true);
+    expect(resolved.capabilities.connectors).toBe(true);
+  });
+
+  it("does not let a user hand themselves back what the admin turned off", () => {
+    // The whole point of folding by minimum: the user layer is a request to
+    // restrict, never a grant. A UI bug or a hand-crafted PUT can't widen access.
+    const org = full({ sandbox: false });
+    const user = agentProfileSchema.parse({});
+    expect(resolveAgentProfile(null, capProfile(user, org)).capabilities.sandbox).toBe(false);
+  });
+
+  it("gives the same answer whichever order the layers fold in", () => {
+    // Order-independence is what makes adding a fourth layer a one-line change
+    // rather than a decision about precedence.
+    const user = full({ memory: false });
+    const org = full({ sandbox: false });
+    const project = { capabilities: { connectors: false } };
+    expect(resolveAgentProfile(project, capProfile(user, org))).toEqual(
+      resolveAgentProfile(project, capProfile(org, user)),
+    );
+  });
+});

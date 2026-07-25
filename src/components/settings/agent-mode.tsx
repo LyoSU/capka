@@ -31,9 +31,8 @@ export function AgentModeSection({
   profile: AgentProfile;
   onChange: (p: AgentProfile) => void;
   isAdmin?: boolean;
-  /** Whether the project has system instructions of its own — drives the "you'll
-   *  get no system prompt at all" warning. Always false at org scope, where the
-   *  instructions belong to each project rather than to this setting. */
+  /** Whether instructions exist at this level — the project's own, or the org-wide
+   *  ones. Drives the "you'll get no system prompt at all" warning. */
   hasInstructions: boolean;
   /** The org ceiling this level is clamped by (`resolveAgentProfile`). Anything it
    *  forbids is shown locked rather than as a switch that saves and does nothing —
@@ -84,9 +83,11 @@ export function AgentModeSection({
       </div>
 
       {/* The honest consequence of a raw prompt with nothing written in it: the
-          model gets no system message at all. Better seen now than inferred later. */}
-      {scope === "project" && profile.persona === "replace" && !hasInstructions && (
-        <p className="text-xs text-amber-600 dark:text-amber-500">{t("rawEmpty")}</p>
+          model gets no system message at all. Better seen now than inferred later.
+          At org scope it's a narrower claim — a project can still supply its own
+          text — so it speaks only about chats that have none. */}
+      {profile.persona === "replace" && !hasInstructions && (
+        <p className="text-xs text-amber-600 dark:text-amber-500">{t(scope === "org" ? "rawEmptyOrg" : "rawEmpty")}</p>
       )}
 
       {/* Says WHY a switch below is immovable, so a capped project doesn't read as

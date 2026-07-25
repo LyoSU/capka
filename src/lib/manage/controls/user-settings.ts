@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { locales } from "@/i18n/config";
 import { isValidTimezone } from "@/lib/timezone";
+import { parseAgentProfile } from "@/lib/agents/profile";
+import { getOrgAgentProfile } from "@/lib/settings";
 import type { Control } from "../types";
 
 const LOCALE_NAMES: Record<string, string> = { en: "English", uk: "Ukrainian" };
@@ -45,4 +47,45 @@ const timezone: Control = {
   },
 };
 
-export const userControls: Control[] = [locale, timezone];
+/**
+ * The user's own memory switch — the only bit of their agent profile exposed for
+ * now (see users.agentProfile in db/schema.ts).
+ *
+ * Turning it off is always effective; turning it ON is only a request, because the
+ * three profile layers fold by minimum and the org ceiling wins. Rather than
+ * pretend otherwise, `impact` says so out loud when the admin has memory off
+ * instance-wide — a switch that reports success and changes nothing is the exact
+ * failure mode `sandbox_enabled` shipped with.
+ */
+const memory: Control = {
+  id: "user.memory",
+  title: "Remember things about me",
+  description:
+    "Whether the assistant keeps notes about you and your projects between conversations. Off means it neither reads nor writes them; existing notes are kept, just unused.",
+  scope: "user",
+  requiredRole: "user",
+  risk: "safe",
+  schema: z.enum(["true", "false"]),
+  format: (v) => (v === "true" ? "On" : "Off"),
+  read: async (ctx) => {
+    const [row] = await db.select({ agentProfile: users.agentProfile }).from(users).where(eq(users.id, ctx.userId)).limit(1);
+    return String(parseAgentProfile(row?.agentProfile).capabilities.memory);
+  },
+  impact: async (_ctx, next) => {
+    if (next !== "true") return undefined;
+    const org = await getOrgAgentProfile();
+    return org.capabilities.memory
+      ? undefined
+      : "Memory is currently off for the whole instance, so this will not take effect until an admin turns it back on.";
+  },
+  apply: async (ctx, v) => {
+    const [row] = await db.select({ agentProfile: users.agentProfile }).from(users).where(eq(users.id, ctx.userId)).limit(1);
+    const current = parseAgentProfile(row?.agentProfile);
+    await db
+      .update(users)
+      .set({ agentProfile: { ...current, capabilities: { ...current.capabilities, memory: v === "true" } } })
+      .where(eq(users.id, ctx.userId));
+  },
+};
+
+export const userControls: Control[] = [locale, timezone, memory];

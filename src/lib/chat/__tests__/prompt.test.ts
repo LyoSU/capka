@@ -151,3 +151,45 @@ describe("buildSystemPrompt — capability gating", () => {
     expect(p.volatile).toContain("likes tea");
   });
 });
+
+describe("buildSystemPrompt — org instructions", () => {
+  it("changes nothing at all when there are none", () => {
+    // `prompt.stable` carries Anthropic's first cache breakpoint, so an unused
+    // feature that shifts the prefix by one byte would invalidate every existing
+    // user's cached prompt once. Absent, empty and whitespace must all be inert.
+    const base = buildSystemPrompt(FULL);
+    for (const value of [undefined, "", "   \n  "]) {
+      expect(buildSystemPrompt({ ...FULL, orgInstructions: value })).toEqual(base);
+    }
+  });
+
+  it("sits directly under the base persona, above the tool protocol", () => {
+    // Position is the point: it answers "who are you", so it belongs in the persona
+    // slot rather than after the sandbox contract.
+    const p = buildSystemPrompt({ ...FULL, orgInstructions: "We are Acme." });
+    expect(p.stable.startsWith(`${SYSTEM_PROMPT}\n\n--- Organization Instructions ---\nWe are Acme.\n\n${buildSandboxPrompt("bridge")}`)).toBe(true);
+  });
+
+  it("becomes the whole persona under a raw profile", () => {
+    const p = buildSystemPrompt({ project: null, profile: RAW_PROFILE, orgInstructions: "You are a translator." });
+    expect(p.stable).toBe("You are a translator.");
+    expect(p.stable).not.toContain(SYSTEM_PROMPT);
+  });
+
+  it("keeps a project's instructions labelled when org instructions also exist", () => {
+    // Two unlabelled blocks glued together read as one contradictory voice; the
+    // label restores "general rule, then local refinement".
+    const p = buildSystemPrompt({
+      project: { systemPrompt: "Be terse." },
+      profile: RAW_PROFILE,
+      orgInstructions: "You are a translator.",
+    });
+    expect(p.stable).toBe("You are a translator.\n\n--- Project Instructions ---\nBe terse.");
+  });
+
+  it("still gives a project's instructions the persona slot when there are no org ones", () => {
+    // The pre-existing raw-mode contract, unchanged.
+    const p = buildSystemPrompt({ project: { systemPrompt: "Be terse." }, profile: RAW_PROFILE });
+    expect(p.stable).toBe("Be terse.");
+  });
+});

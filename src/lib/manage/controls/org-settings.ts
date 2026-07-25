@@ -130,6 +130,21 @@ const agentCeilingControls: Control[] = [
 
 export const orgControls: Control[] = [
   orgSetting({
+    key: "agent_instructions",
+    title: "Instructions for everyone",
+    description:
+      "Standing instructions added to the top of every chat on this instance, above anything an individual project says. Use it for house rules: tone, the company's name, what to avoid. Leave empty for none.",
+    schema: z.string().max(20000, "Instructions are too long (20000 characters max)."),
+    def: "",
+    // A long free text is useless in a confirmation card, so show its shape rather
+    // than its content: enough to tell "still empty" from "someone wrote a page".
+    format: (v) =>
+      v.trim() ? `${v.trim().split(/\s+/).length} words, starting "${v.trim().slice(0, 48)}"` : "None",
+    // Rewrites the opening of every prompt for every user, so it never applies
+    // silently — not even for an admin who turned autonomy on.
+    alwaysConfirm: true,
+  }),
+  orgSetting({
     key: "agent_autonomy",
     title: "Agent autonomy",
     description:

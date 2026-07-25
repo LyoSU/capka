@@ -229,6 +229,21 @@ export async function getOrgAgentProfile(): Promise<AgentProfile> {
   };
 }
 
+/**
+ * Instance-wide agent instructions — the admin's own system prompt, prepended to
+ * every chat's stable prefix.
+ *
+ * Deliberately NOT part of `agent_profile`: that object is a ceiling, folded by
+ * taking the minimum of each field, and text has no minimum. Keeping the two
+ * apart is what stops "fold the ceiling" from having to special-case one field
+ * that doesn't fold. Empty/whitespace reads as absent, so the prompt is byte-
+ * identical to before the setting existed (see prompt.ts on why that matters
+ * for Anthropic's cache breakpoint).
+ */
+export async function getOrgInstructions(): Promise<string | null> {
+  return (await getSetting("agent_instructions"))?.trim() || null;
+}
+
 /** Persist the org ceiling. Validated through the schema first, so the stored
  *  JSON is always a shape `getOrgAgentProfile` can read back. */
 export async function setOrgAgentProfile(profile: unknown): Promise<AgentProfile> {

@@ -4,57 +4,32 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useSetting } from "@/hooks/use-setting";
 import { MasterKeyBanner } from "@/components/settings/master-key-banner";
-import { AgentModeSection } from "@/components/settings/agent-mode";
-import { parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
+import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow } from "@/components/settings/shell";
+import { cn } from "@/lib/utils";
 
+/**
+ * Settings → Security: the PERIMETER only — the stored-key encryption, what the
+ * sandbox may reach on the network, and which folders may be handed to it.
+ *
+ * What the agent is allowed to BE (capabilities, persona, autonomy, the org-wide
+ * instructions) moved to Settings → Agent. Keeping both here meant one page
+ * answered two unrelated questions, and the sandbox capability had to appear
+ * twice to serve both readings.
+ */
 export default function SecuritySettingsPage() {
   const isAdmin = useIsAdmin();
   const t = useTranslations("settings.security");
 
-  // NOTE: no `useSetting("sandbox_enabled")` any more. That key shipped as a
-  // no-op — nothing outside this page ever read it — and is now the `sandbox` bit
-  // of the org agent ceiling below, so the toggle projects onto that single source
-  // of truth instead of writing a second key that could disagree with it.
+  // NOTE: the agent capability switches are NOT here any more (see Settings →
+  // Agent). This page reads only perimeter keys.
   const sandboxNet = useSetting("sandbox_network", "none");
   const blockPrivate = useSetting("block_private_provider_urls", "false");
-  const autonomy = useSetting("agent_autonomy", "supervised");
   const hostFolders = useSetting("host_folder_access", "false");
   const pcFolders = useSetting("pc_folder_access", "off");
-
-  // The org-wide agent ceiling. Not a `useSetting` key — it's one validated object
-  // behind its own endpoint (see /api/settings/agent-profile). null = still loading.
-  const [orgProfile, setOrgProfile] = useState<AgentProfile | null>(null);
-  useEffect(() => {
-    const ac = new AbortController();
-    fetch("/api/settings/agent-profile", { signal: ac.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d) setOrgProfile(parseAgentProfile(d)); })
-      .catch(() => {});
-    return () => ac.abort();
-  }, []);
-
-  // Optimistic with rollback, like the toggles above: apply immediately, restore
-  // the previous ceiling if the save fails so the UI never claims a clamp that
-  // isn't in force.
-  const saveOrgProfile = (next: AgentProfile) => {
-    const prev = orgProfile;
-    setOrgProfile(next);
-    fetch("/api/settings/agent-profile", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
-    })
-      .then((r) => {
-        if (r.ok) toast.success(t("updated"));
-        else { setOrgProfile(prev); toast.error(t("updateFailed")); }
-      })
-      .catch(() => { setOrgProfile(prev); toast.error(t("updateFailed")); });
-  };
 
   // Deployment-level egress kill-switch, read from the controller. When false,
   // the in-app toggle has no effect (the controller downgrades bridge→none), so
@@ -69,67 +44,47 @@ export default function SecuritySettingsPage() {
   }, []);
   const netBlocked = allowNetwork === false;
 
-  const loading = sandboxNet.loading || blockPrivate.loading || autonomy.loading || hostFolders.loading || pcFolders.loading || orgProfile === null;
+  // Everything on this page except the encryption key and the provider-URL rule
+  // exists to fence in the SANDBOX. With the sandbox off there is nothing to fence,
+  // so those controls are not disabled here — they're absent. A switch that can't
+  // matter is still something to read, decide about, and be unsure of; the place it
+  // comes back from is one click away under Settings → Agent.
+  const [sandboxOn, setSandboxOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    fetch("/api/settings/agent-profile", { signal: ac.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      // Unknown (request failed) shows the controls rather than hiding them: a
+      // blank page is a worse answer than one extra row.
+      .then((d) => setSandboxOn(d?.capabilities?.sandbox ?? true))
+      .catch(() => setSandboxOn(true));
+    return () => ac.abort();
+  }, []);
 
-  // Tri-state personal-folder access (off / admins / everyone) — optimistic w/ rollback.
-  const setPcFolders = (next: string) => {
-    const prev = pcFolders.value;
-    if (next === prev) return;
-    pcFolders.update(next);
-    pcFolders.persist(next)
-      .then((ok) => { if (ok) toast.success(t("updated")); else { pcFolders.setValue(prev); toast.error(t("updateFailed")); } })
-      .catch(() => { pcFolders.setValue(prev); toast.error(t("updateFailed")); });
-  };
+  const loading = sandboxNet.loading || blockPrivate.loading || hostFolders.loading || pcFolders.loading || sandboxOn === null;
 
-  // Agent autonomy stores "supervised"/"autonomous", not a bool — map the switch.
-  const toggleAutonomy = (checked: boolean) => {
-    const prev = autonomy.value;
-    const next = checked ? "autonomous" : "supervised";
-    autonomy.update(next);
-    autonomy.persist(next)
-      .then((ok) => {
-        if (ok) toast.success(checked ? t("autonomousEnabled") : t("autonomousDisabled"));
-        else { autonomy.setValue(prev); toast.error(t("updateFailed")); }
-      })
-      .catch(() => { autonomy.setValue(prev); toast.error(t("updateFailed")); });
-  };
-
-  // The network setting stores "bridge"/"none", not "true"/"false".
-  const toggleNet = (checked: boolean) => {
-    const prev = sandboxNet.value;
-    const next = checked ? "bridge" : "none";
-    sandboxNet.update(next);
-    sandboxNet.persist(next)
-      .then((ok) => {
-        if (ok) toast.success(checked ? t("netEnabled") : t("netDisabled"));
-        else { sandboxNet.setValue(prev); toast.error(t("updateFailed")); }
-      })
-      .catch(() => { sandboxNet.setValue(prev); toast.error(t("updateFailed")); });
-  };
-
-  // Optimistic toggle with rollback — flip immediately, but restore the previous
-  // value if the save fails so the UI never lies about persisted state.
-  const toggle = (
-    s: ReturnType<typeof useSetting>,
-    key: string,
-    checked: boolean,
-    onMsg: string,
-    offMsg: string,
-  ) => {
+  // Optimistic with rollback — flip immediately, but restore the previous value if
+  // the save fails so the UI never lies about persisted state. Shared by every
+  // control here, including the tri-state one, which is why it takes the raw value.
+  const save = (s: ReturnType<typeof useSetting>, next: string) => {
     const prev = s.value;
-    const next = checked ? "true" : "false";
+    if (next === prev) return;
     s.update(next);
     s.persist(next)
       .then((ok) => {
-        if (ok) toast.success(checked ? onMsg : offMsg);
-        else { s.setValue(prev); toast.error(t("updateFailed")); }
+        if (ok) toast.success(t("updated"));
+        else {
+          s.setValue(prev);
+          toast.error(t("updateFailed"));
+        }
       })
-      .catch(() => { s.setValue(prev); toast.error(t("updateFailed")); });
+      .catch(() => {
+        s.setValue(prev);
+        toast.error(t("updateFailed"));
+      });
   };
 
-  if (!isAdmin) {
-    return <p className="text-sm text-muted-foreground">{t("adminOnly")}</p>;
-  }
+  if (!isAdmin) return <p className="text-sm text-muted-foreground">{t("adminOnly")}</p>;
 
   if (loading) {
     return (
@@ -140,131 +95,79 @@ export default function SecuritySettingsPage() {
   }
 
   return (
-    <div className="max-w-lg space-y-6">
-      <div>
-        <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
-      <Separator />
+    <SettingsPage title={t("title")} description={t("subtitle")}>
+      <SettingsSection title={t("encryptionKey")} description={t("encryptionKeyDesc")}>
+        <MasterKeyBanner />
+      </SettingsSection>
 
-      {/* Encryption key — protects stored provider API keys */}
-      <div>
-        <h3 className="text-sm font-medium">{t("encryptionKey")}</h3>
-        <p className="text-sm text-muted-foreground">{t("encryptionKeyDesc")}</p>
-      </div>
-      <MasterKeyBanner />
-
-      <Separator />
-
-      {/* Sandbox — isolated code execution */}
-      <div>
-        <h3 className="text-sm font-medium">{t("sandbox")}</h3>
-        <p className="text-sm text-muted-foreground">{t("sandboxDesc")}</p>
-      </div>
-      {/* Projects the ceiling's `sandbox` bit — the same value the "Files and code"
-          switch in Agent mode shows. Kept as its own top-level control because this
-          is where an admin looks for "may the agent run code", and burying a
-          security switch in an expander would be worse than showing it twice. */}
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div className="pr-4">
-          <p className="text-sm font-medium">{t("enableSandbox")}</p>
-          <p className="text-xs text-muted-foreground">{t("enableSandboxHint")}</p>
-        </div>
-        <Switch
-          checked={orgProfile.capabilities.sandbox}
-          onCheckedChange={(checked) =>
-            saveOrgProfile({ ...orgProfile, capabilities: { ...orgProfile.capabilities, sandbox: checked } })
-          }
-        />
-      </div>
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div className="pr-4">
-          <p className="text-sm font-medium">{t("sandboxNet")}</p>
-          <p className="text-xs text-muted-foreground">{t("sandboxNetHint")}</p>
-          {netBlocked && (
-            <p className="mt-1.5 text-xs font-medium text-amber-600 dark:text-amber-500">{t("sandboxNetBlocked")}</p>
+      <SettingsSection title={t("network")} description={t("networkDesc")} footnote={t("networkNote")}>
+        <SettingsGroup>
+          {sandboxOn && (
+            <SettingsRow
+              id="sandbox-network"
+              title={t("sandboxNet")}
+              hint={t("sandboxNetHint")}
+              warning={netBlocked ? t("sandboxNetBlocked") : undefined}
+              disabled={netBlocked}
+              control={
+                <Switch
+                  checked={sandboxNet.value === "bridge"}
+                  disabled={netBlocked}
+                  onCheckedChange={(checked) => save(sandboxNet, checked ? "bridge" : "none")}
+                />
+              }
+            />
           )}
-        </div>
-        <Switch checked={sandboxNet.value === "bridge"} onCheckedChange={toggleNet} disabled={netBlocked} />
-      </div>
+          <SettingsRow
+            id="block-private-urls"
+            title={t("blockPrivate")}
+            hint={t("blockPrivateHint")}
+            control={
+              <Switch
+                checked={blockPrivate.value === "true"}
+                onCheckedChange={(checked) => save(blockPrivate, String(checked))}
+              />
+            }
+          />
+        </SettingsGroup>
+      </SettingsSection>
 
-      {/* Server folders — admin bind-mounts from the host into the sandbox */}
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div className="pr-4">
-          <p className="text-sm font-medium">{t("hostFolders")}</p>
-          <p className="text-xs text-muted-foreground">{t("hostFoldersHint")}</p>
-        </div>
-        <Switch
-          checked={hostFolders.value === "true"}
-          onCheckedChange={(checked) => toggle(hostFolders, "host_folder_access", checked, t("hostFoldersEnabled"), t("hostFoldersDisabled"))}
-        />
-      </div>
-
-      {/* Personal folders — users sync a folder from their own computer */}
-      <div className="rounded-lg border p-4">
-        <p className="text-sm font-medium">{t("pcFolders")}</p>
-        <p className="text-xs text-muted-foreground">{t("pcFoldersHint")}</p>
-        <div className="mt-3 inline-flex rounded-lg border p-0.5">
-          {(["off", "admins", "everyone"] as const).map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => setPcFolders(opt)}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                pcFolders.value === opt ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t(`folder_${opt}`)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Agent — how much the assistant may change without asking */}
-      <div>
-        <h3 className="text-sm font-medium">{t("agent")}</h3>
-        <p className="text-sm text-muted-foreground">{t("agentDesc")}</p>
-      </div>
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div className="pr-4">
-          <p className="text-sm font-medium">{t("autonomousMode")}</p>
-          <p className="text-xs text-muted-foreground">{t("autonomousModeHint")}</p>
-        </div>
-        <Switch checked={autonomy.value === "autonomous"} onCheckedChange={toggleAutonomy} />
-      </div>
-
-      {/* The instance-wide agent ceiling — the SAME component a project's settings
-          tab uses, one level up. Only ever RESTRICTS: a project that asks for more
-          still gets clamped here (resolveAgentProfile), which is what makes this a
-          ceiling rather than a default, and is why it also reaches chats that belong
-          to no project at all. */}
-      <AgentModeSection
-        scope="org"
-        profile={orgProfile}
-        onChange={saveOrgProfile}
-        isAdmin
-        hasInstructions={false}
-      />
-
-      <Separator />
-
-      {/* Network — restrict outbound provider connections */}
-      <div>
-        <h3 className="text-sm font-medium">{t("network")}</h3>
-        <p className="text-sm text-muted-foreground">{t("networkDesc")}</p>
-      </div>
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div className="pr-4">
-          <p className="text-sm font-medium">{t("blockPrivate")}</p>
-          <p className="text-xs text-muted-foreground">{t("blockPrivateHint")}</p>
-        </div>
-        <Switch
-          checked={blockPrivate.value === "true"}
-          onCheckedChange={(checked) => toggle(blockPrivate, "block_private_provider_urls", checked, t("strictEnabled"), t("strictDisabled"))}
-        />
-      </div>
-    </div>
+      {sandboxOn && (
+      <SettingsSection title={t("folders")} description={t("foldersDesc")}>
+        <SettingsGroup>
+          <SettingsRow
+            id="host-folders"
+            title={t("hostFolders")}
+            hint={t("hostFoldersHint")}
+            control={
+              <Switch
+                checked={hostFolders.value === "true"}
+                onCheckedChange={(checked) => save(hostFolders, String(checked))}
+              />
+            }
+          />
+          <SettingsRow id="pc-folders" title={t("pcFolders")} hint={t("pcFoldersHint")}>
+            <div className="inline-flex rounded-lg border bg-muted/40 p-0.5">
+              {(["off", "admins", "everyone"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => save(pcFolders, opt)}
+                  className={cn(
+                    "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                    pcFolders.value === opt
+                      ? "bg-card shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t(`folder_${opt}`)}
+                </button>
+              ))}
+            </div>
+          </SettingsRow>
+        </SettingsGroup>
+      </SettingsSection>
+      )}
+    </SettingsPage>
   );
 }

@@ -24,6 +24,13 @@ export const users = pgTable("user", {
   // "rejected" was denied. Non-active statuses are all fail-closed server-side.
   status: text("status").notNull().default("active"), // "active" | "pending" | "suspended" | "rejected"
   locale: text("locale"), // "en" | "uk" | null (null = follow browser/default)
+  // The user's own agent profile, folded over the org ceiling the same way a
+  // project's is (capProfile is a commutative minimum, so the order of the three
+  // layers doesn't matter — see agents/profile.ts). Because the fold only ever
+  // RESTRICTS, this can express "I don't want memory" but never "give me back what
+  // the admin turned off". Only the `memory` bit is exposed in the UI today; the
+  // rest of the shape is stored so a later per-user switch needs no migration.
+  agentProfile: jsonb("agent_profile"),
   // IANA tz (e.g. "Europe/Kyiv"), auto-detected from the browser. null → UTC.
   // Fed into the agent's volatile prompt so it knows the user's local date/time.
   timezone: text("timezone"),

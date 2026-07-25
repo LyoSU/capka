@@ -28,6 +28,14 @@ export const PUT = apiHandler(async (req: Request) => {
     return Response.json({ error: "Access denied" }, { status: 403 });
   }
 
+  // The org agent instructions are the one free-text key here, and they go into
+  // EVERY request's system prompt — so an accidental paste of a whole document
+  // would be billed on every turn for every user. Same cap a project's own
+  // instructions get (see projects/schema.ts).
+  if (key === "agent_instructions" && typeof value === "string" && value.length > 20000) {
+    return Response.json({ error: "Too long" }, { status: 400 });
+  }
+
   const ENCRYPT_KEYS = ["telegram_bot_token"];
   await setSetting(key, value, ENCRYPT_KEYS.includes(key) || (encrypted ?? false));
   return Response.json({ ok: true });

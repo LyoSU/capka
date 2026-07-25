@@ -330,6 +330,13 @@
       "when": 1784918086432,
       "tag": "0046_lovely_sally_floyd",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1784966182014,
+      "tag": "0047_parallel_galactus",
+      "breakpoints": true
     }
   ]
 }

@@ -110,6 +110,10 @@ export function buildSystemPrompt(opts: {
    *  agents/profile.ts). Defaults to Capka's normal assistant behaviour, so every
    *  existing caller and test keeps its exact output. */
   profile?: AgentProfile;
+  /** Instance-wide instructions an admin wrote (settings → Agent). Occupies the
+   *  persona slot together with SYSTEM_PROMPT, ABOVE anything a project says, so
+   *  a project refines the org's voice rather than competing with it. */
+  orgInstructions?: string | null;
 }): BuiltPrompt {
   const profile = opts.profile ?? ASSISTANT_PROFILE;
   const caps = profile.capabilities;
@@ -131,14 +135,29 @@ export function buildSystemPrompt(opts: {
         .join("\n")}\nFiles you create or edit INSIDE these folders are copied back to the user's computer after you reply. To give the user a file, write it there (e.g. /workspace/${opts.syncedFolders[0].name}/result.xlsx) — files elsewhere in /workspace are NOT synced.`
     : undefined;
 
+  // The admin's instance-wide instructions. Under "replace" they ARE the persona,
+  // so they go in verbatim, exactly as a project's do — same reasoning about
+  // posture, one level up.
+  const orgPrompt = opts.orgInstructions?.trim();
+  const orgBlock = !orgPrompt
+    ? undefined
+    : profile.persona === "replace"
+      ? orgPrompt
+      : `--- Organization Instructions ---\n${orgPrompt}`;
+
   // The project's own instructions. In "append" they sit under the base persona as
   // a labelled section (today's behaviour); in "replace" they ARE the persona, so
   // the label goes too — "here are instructions" and "you are X" put the model in
   // different postures, and the latter is the point of replacing.
+  //
+  // The label comes BACK when org instructions are also present: something else
+  // already claimed the persona slot, and two unlabelled blocks glued together
+  // read as one contradictory voice rather than a general rule plus a local
+  // refinement.
   const projectPrompt = opts.project?.systemPrompt;
   const projectBlock = !projectPrompt
     ? undefined
-    : profile.persona === "replace"
+    : profile.persona === "replace" && !orgBlock
       ? projectPrompt.trim()
       : `--- Project Instructions ---\n${projectPrompt}`;
 
@@ -160,6 +179,10 @@ export function buildSystemPrompt(opts: {
     // ── Stable prefix (cacheable) ─────────────────────────────────────────
     stable: tier([
       profile.persona === "append" ? SYSTEM_PROMPT : undefined,
+      // Above the tool protocol, because it answers "who are you" — the same slot
+      // SYSTEM_PROMPT occupies. Absent by default, so a build with no org
+      // instructions produces the byte-identical prefix it always did.
+      orgBlock,
       caps.sandbox ? buildSandboxPrompt(opts.networkMode ?? "none") : undefined,
       projectBlock,
       // Skills are deterministic (sorted, no timestamps) and change only on
