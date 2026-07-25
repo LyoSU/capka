@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow } from "@/components/settings/shell";
+import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow, SettingsSkeleton } from "@/components/settings/shell";
 import { parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
 import {
   Select,
@@ -154,11 +154,7 @@ export default function MemoryPage() {
   const selected = projectDocs.find((p) => p.id === selectedProject) ?? null;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <SettingsSkeleton rows={1} />;
   }
 
   return (

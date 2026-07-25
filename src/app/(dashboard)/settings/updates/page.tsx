@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { SettingsPage } from "@/components/settings/shell";
 import { ArrowUpCircle, Check, CheckCircle2, Copy, ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Markdown } from "@/components/chat/markdown";
@@ -87,11 +88,7 @@ export default function UpdatesSettingsPage() {
     iso ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : null;
 
   return (
-    <div className="max-w-lg space-y-6">
-      <div>
-        <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
+    <SettingsPage title={t("title")} description={t("subtitle")}>
       <Separator />
 
       {/* Version state */}
@@ -177,6 +174,6 @@ export default function UpdatesSettingsPage() {
         </div>
         <Switch checked={check.value !== "false"} onCheckedChange={toggleCheck} />
       </div>
-    </div>
+    </SettingsPage>
   );
 }

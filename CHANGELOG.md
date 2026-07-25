@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Members on the shared key with no spend limit now see their own recent usage on Settings → General. The budget widget previously rendered nothing whenever the tier was uncapped — which is the default — so most people saw no usage at all.
+
 ### Added
 
 - New Settings → Agent page holds everything about what the assistant is: instance-wide instructions, the capability ceiling, autonomy, and the sandbox switch. Exposed to chat as `org.agent_instructions`.
@@ -16,6 +20,10 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Settings → Security now covers the perimeter only: encryption key, network, folders. Agent capabilities, autonomy, and the sandbox switch moved to Settings → Agent.
+- Settings → Authentication is now the Sign-in tab of Settings → People, and Settings → Permissions is now a tab of Settings → Extensions. Both old paths redirect.
+- The global command palette (⌘K) lists every individual setting, replacing its three hardcoded links to settings pages.
+- Turning an agent capability off instance-wide now asks for confirmation, matching the confirm the same change already required from chat.
+- Settings pages show skeleton rows while loading instead of a centred spinner, and switch rows toggle from their label.
 - Sandbox-only controls (code egress, attachable folders) are hidden rather than disabled when the sandbox capability is off.
 - Settings pages share one content width and one row layout; nav labels now match page titles ("Providers", "Keys and limits", "Sign-in").
 

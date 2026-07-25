@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { SettingsPage } from "@/components/settings/shell";
 import { Loader2, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -93,11 +94,7 @@ export default function BillingPage() {
   }
 
   return (
-    <div className="max-w-lg space-y-6">
-      <div>
-        <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
+    <SettingsPage title={t("title")} description={t("subtitle")}>
       <Separator />
 
       {/* Provider key mode */}
@@ -212,6 +209,6 @@ export default function BillingPage() {
           {t("tiers.soon")}
         </p>
       </div>
-    </div>
+    </SettingsPage>
   );
 }

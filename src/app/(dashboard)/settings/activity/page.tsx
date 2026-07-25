@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import {
-  Loader2, ScrollText, UserCog, Puzzle, SlidersHorizontal, ShieldAlert, Dot,
+  Loader2, UserCog, Puzzle, SlidersHorizontal, ShieldAlert, Dot,
 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { SettingsPage, SettingsEmpty } from "@/components/settings/shell";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
@@ -140,11 +141,7 @@ export default function ActivityPage() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <div>
-        <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
+    <SettingsPage title={t("title")} description={t("subtitle")} wide>
 
       <ToggleGroup
         value={[category]}
@@ -161,10 +158,7 @@ export default function ActivityPage() {
       {loading ? (
         <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
       ) : entries.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-center">
-          <ScrollText className="h-5 w-5 text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">{t("empty")}</p>
-        </div>
+        <SettingsEmpty title={t("empty")} hint={t("emptyHint")} />
       ) : (
         <div className="space-y-5">
           {groups.map((g) => (
@@ -212,6 +206,6 @@ export default function ActivityPage() {
           )}
         </div>
       )}
-    </div>
+    </SettingsPage>
   );
 }

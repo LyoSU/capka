@@ -679,13 +679,10 @@
       "billing": "Keys and limits",
       "memory": "Memory",
       "usage": "Analytics",
-      "users": "Users",
       "skills": "Extensions",
       "automations": "Automations",
       "connectors": "Connectors",
       "marketplace": "Marketplace",
-      "permissions": "Permissions",
-      "authentication": "Sign-in",
       "security": "Security",
       "sections": {
         "personal": "Personal",
@@ -693,7 +690,8 @@
       },
       "updates": "Updates",
       "activity": "Activity",
-      "agent": "Agent"
+      "agent": "Agent",
+      "people": "People"
     },
     "usersPage": {
       "title": "Users",
@@ -826,7 +824,9 @@
       "sourceCode": "Source on GitHub",
       "version": "Version {version}",
       "author": "Built by <author>@LyoSU</author>",
-      "openSourceShort": "Open source · AGPL-3.0"
+      "openSourceShort": "Open source · AGPL-3.0",
+      "title": "General",
+      "subtitle": "Your account and how the app looks."
     },
     "memory": {
       "title": "Agent memory",
@@ -898,7 +898,8 @@
         "h5": "Last 5 hours",
         "d7": "Last 7 days",
         "d30": "Last 30 days"
-      }
+      },
+      "turns30d": "You've had {turns, plural, one {# exchange} other {# exchanges}} with the assistant in the last 30 days."
     },
     "billing": {
       "title": "Keys & limits",
@@ -1097,7 +1098,8 @@
         "library": "Skills",
         "marketplace": "Marketplace",
         "connectors": "Connectors",
-        "installed": "Plugins"
+        "installed": "Plugins",
+        "permissions": "Permissions"
       },
       "loadError": "Couldn't load skills",
       "toggleFailed": "Couldn't update the skill",
@@ -1370,7 +1372,8 @@
       "histSet": "Set to {effect} for {scope}",
       "histClear": "Removed the {effect} rule for {scope}",
       "add": "Add",
-      "saveFailed": "Couldn't save that change"
+      "saveFailed": "Couldn't save that change",
+      "emptyHint": "Install a skill or a connector and it will appear here, ready to allow or deny."
     },
     "authentication": {
       "title": "Sign-in",
@@ -1570,7 +1573,8 @@
         "billing": {
           "update": "Updated billing"
         }
-      }
+      },
+      "emptyHint": "Changes an admin makes to settings will show up here."
     },
     "agent": {
       "title": "Agent",
@@ -1597,11 +1601,23 @@
       "mode": {
         "title": "Style of instructions",
         "desc": "Whether the assistant keeps its built-in character, and what it is told about you."
+      },
+      "confirmOff": {
+        "title": "Turn this off for everyone?",
+        "body": "Every chat loses it right away, including chats other people are in the middle of. You can turn it back on here at any time.",
+        "confirm": "Turn off"
       }
     },
-    "searchPlaceholder": "Search settings",
+    "searchPlaceholder": "Search",
     "searchEmpty": "Nothing found",
-    "searchHint": "⌘K to search"
+    "people": {
+      "title": "People",
+      "subtitle": "Who uses this Capka, and how they get in.",
+      "tab": {
+        "people": "People",
+        "signin": "Sign-in"
+      }
+    }
   },
   "setup": {
     "back": "Back",
@@ -1682,7 +1698,8 @@
       "chat": "Chat",
       "navigation": "Navigation",
       "preferences": "Preferences",
-      "shortcuts": "Keyboard shortcuts"
+      "shortcuts": "Keyboard shortcuts",
+      "settings": "Settings"
     },
     "newChat": "New chat",
     "projects": "Projects",

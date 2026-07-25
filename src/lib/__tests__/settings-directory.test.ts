@@ -16,7 +16,9 @@ const lookup = (catalog: unknown, path: string): unknown =>
 describe("settings directory", () => {
   it("points every entry at a page that exists", () => {
     const missing = SETTINGS_DIRECTORY.filter((e) => {
-      const route = e.href.split("#")[0].replace(/^\/settings\/?/, "");
+      // An entry can carry a row anchor (#id) or a tab (?tab=…) — both merged pages
+      // are reached that way — so strip either before looking for the file.
+      const route = e.href.split(/[#?]/)[0].replace(/^\/settings\/?/, "");
       const dir = route ? `src/app/(dashboard)/settings/${route}` : "src/app/(dashboard)/settings";
       return !existsSync(`${dir}/page.tsx`);
     });

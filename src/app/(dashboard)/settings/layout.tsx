@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, ShieldCheck, Wallet, KeyRound, Lock, Download, CalendarClock, ScrollText, Bot, Search } from "lucide-react";
+import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, Wallet, Lock, Download, CalendarClock, ScrollText, Bot, Search } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { SETTINGS_DIRECTORY, searchSettings } from "@/lib/settings-directory";
 import { cn } from "@/lib/utils";
@@ -33,9 +33,9 @@ const navSections: NavSection[] = [
       // Ordered by how often an admin actually goes there: what the agent is, who
       // may use it, what it costs — then the perimeter and the read-only views.
       { key: "agent", href: "/settings/agent", icon: Bot, adminOnly: true },
-      { key: "users", href: "/settings/users", icon: Users, adminOnly: true },
-      { key: "authentication", href: "/settings/authentication", icon: KeyRound, adminOnly: true },
-      { key: "permissions", href: "/settings/permissions", icon: ShieldCheck, adminOnly: true },
+      // People absorbed the old Authentication page as a tab; Permissions became a
+      // tab of Extensions. Both old paths still resolve, as redirects.
+      { key: "people", href: "/settings/users", icon: Users, adminOnly: true },
       { key: "billing", href: "/settings/billing", icon: Wallet, adminOnly: true },
       { key: "integrations", href: "/settings/integrations", icon: Puzzle, adminOnly: true },
       { key: "security", href: "/settings/security", icon: Lock, adminOnly: true },
@@ -94,19 +94,11 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       )
     : [];
 
-  // ⌘K / Ctrl+K from anywhere in settings. Deliberately NOT bare "/" — these pages
-  // are full of text fields, and a shortcut that steals a keystroke mid-sentence is
-  // worse than no shortcut.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey)) return;
-      e.preventDefault();
-      searchRef.current?.focus();
-      searchRef.current?.select();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // No keyboard shortcut here on purpose. ⌘K already belongs to the global command
+  // palette, which now lists every setting itself (see command-palette.tsx) — a
+  // second handler on the same chord inside settings would shadow it, and two
+  // search surfaces for one list is one too many. This box is the filter you reach
+  // for once you are already on the page.
 
   // Keyboard is the whole point of a search box: reaching for the mouse to pick a
   // result costs exactly what the search was meant to save.
@@ -143,16 +135,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         onKeyDown={onSearchKey}
         placeholder={t("searchPlaceholder")}
         aria-label={t("searchPlaceholder")}
-        className="w-full rounded-md border bg-transparent py-1.5 pl-8 pr-12 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-search-cancel-button]:hidden"
+        className="w-full rounded-md border bg-transparent py-1.5 pl-8 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-search-cancel-button]:hidden"
       />
-      {/* A shortcut nobody is told about is a shortcut nobody uses. Hidden while
-          typing, where it would just be in the way, and on touch, where there is no
-          ⌘ key to press. */}
-      {!query && (
-        <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 text-[10px] text-muted-foreground/60 md:block">
-          ⌘K
-        </kbd>
-      )}
     </div>
   );
 

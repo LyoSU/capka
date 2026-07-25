@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { TrendingDown, TrendingUp, Search, X, SlidersHorizontal, AlertTriangle } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { SettingsPage } from "@/components/settings/shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -194,12 +195,12 @@ export default function UsagePage() {
   };
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-base font-medium">{t("title")}</h2>
-          <p className="text-sm text-muted-foreground">{t(scope === "own" ? "subtitleOwn" : "subtitleShared")}</p>
-        </div>
+    <SettingsPage
+      title={t("title")}
+      description={t(scope === "own" ? "subtitleOwn" : "subtitleShared")}
+      wide
+    >
+      <div className="flex items-start justify-end gap-4">
         <ToggleGroup
           value={[String(days)]}
           onValueChange={(v) => {
@@ -471,7 +472,7 @@ export default function UsagePage() {
           )}
         </>
       )}
-    </div>
+    </SettingsPage>
   );
 }
 

@@ -2,16 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow } from "@/components/settings/shell";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow, SettingsSkeleton } from "@/components/settings/shell";
 import { AgentModeSection } from "@/components/settings/agent-mode";
 import { useSetting } from "@/hooks/use-setting";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
+import { CAPABILITY_GROUPS, parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
 
 /**
  * Settings → Agent: what the assistant IS, instance-wide.
@@ -40,6 +43,17 @@ export default function AgentSettingsPage() {
       .catch(() => {});
     return () => ac.abort();
   }, []);
+
+  // A capability the admin is about to REMOVE from everyone waits for a yes. Held
+  // as the pending profile rather than a boolean so the dialog's confirm applies
+  // exactly the change that was described, with no second derivation of it.
+  const [pending, setPending] = useState<AgentProfile | null>(null);
+
+  const requestProfile = (next: AgentProfile) => {
+    const removes = CAPABILITY_GROUPS.some((g) => profile?.capabilities[g] && !next.capabilities[g]);
+    if (removes) setPending(next);
+    else saveProfile(next);
+  };
 
   // Optimistic with rollback: a switch that waits for a round-trip before moving
   // reads as broken, and a switch that moves and silently fails is worse.
@@ -103,11 +117,7 @@ export default function AgentSettingsPage() {
   if (!isAdmin) return <p className="text-sm text-muted-foreground">{t("adminOnly")}</p>;
 
   if (profile === null || autonomy.loading || instructions.loading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <SettingsSkeleton rows={2} />;
   }
 
   return (
@@ -137,13 +147,13 @@ export default function AgentSettingsPage() {
             title={t("abilities.sandbox")}
             hint={t("abilities.sandboxHint")}
             onLabelClick={() =>
-              saveProfile({ ...profile, capabilities: { ...profile.capabilities, sandbox: !profile.capabilities.sandbox } })
+              requestProfile({ ...profile, capabilities: { ...profile.capabilities, sandbox: !profile.capabilities.sandbox } })
             }
             control={
               <Switch
                 checked={profile.capabilities.sandbox}
                 onCheckedChange={(checked) =>
-                  saveProfile({ ...profile, capabilities: { ...profile.capabilities, sandbox: checked } })
+                  requestProfile({ ...profile, capabilities: { ...profile.capabilities, sandbox: checked } })
                 }
               />
             }
@@ -163,12 +173,32 @@ export default function AgentSettingsPage() {
           <AgentModeSection
             scope="org"
             profile={profile}
-            onChange={saveProfile}
+            onChange={requestProfile}
             isAdmin
             hasInstructions={!!instructions.value.trim()}
           />
         </div>
       </SettingsSection>
+
+      <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("confirmOff.title")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("confirmOff.body")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tc("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pending) saveProfile(pending);
+                setPending(null);
+              }}
+            >
+              {t("confirmOff.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsPage>
   );
 }

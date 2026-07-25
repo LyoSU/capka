@@ -29,17 +29,34 @@ function Bar({ committedPct, reservedPct }: { committedPct: number; reservedPct:
 /**
  * The user-facing budget widget. Shows spend as a PERCENTAGE only (never raw $),
  * listing every capped window at once — there are at most three short rows, so
- * hiding them behind a toggle costs more than it saves. Renders nothing when the
- * user isn't on the shared key or has no capped window — no limit to report.
+ * hiding them behind a toggle costs more than it saves.
+ *
+ * With no capped window it used to render nothing, which is where "I have no usage"
+ * reports came from: the default tier is unlimited, so on a normal instance NOBODY
+ * saw this, and Analytics is admin-only. It now falls back to a plain count of
+ * turns — true, useful, and still no money, which stays an admin number.
+ *
+ * Own-key users still see nothing, and that is correct: they pay their provider
+ * directly, so there is nothing here that would be about them.
  */
 export function UsageLimitCard() {
   const t = useTranslations("settings.limits");
   const { billing, loading } = useBilling();
 
-  if (loading || !billing?.onSharedKey || !billing.limits) return null;
+  if (loading || !billing?.onSharedKey) return null;
 
-  const capped = billing.limits.windows.filter((w) => w.limit !== null);
-  if (capped.length === 0) return null; // unlimited tier → nothing to show
+  const capped = billing.limits?.windows.filter((w) => w.limit !== null) ?? [];
+  if (capped.length === 0) {
+    if (!billing.turns30d) return null; // nothing used yet, nothing to report
+    return (
+      <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3">
+        <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">
+          {t("turns30d", { turns: billing.turns30d })}
+        </p>
+      </div>
+    );
+  }
 
   const label = (w: WindowStatus) => t(`window.${w.window}`);
 
@@ -48,7 +65,7 @@ export function UsageLimitCard() {
       <div className="flex items-center gap-2">
         <Gauge className="h-4 w-4 text-muted-foreground" />
         <h3 className="text-sm font-medium">{t("title")}</h3>
-        {billing.limits.blocked && (
+        {billing.limits?.blocked && (
           <span className="ml-auto rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
             {t("reached")}
           </span>

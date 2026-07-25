@@ -23,6 +23,9 @@ export interface BillingInfo {
     blocked: boolean;
     blockedWindow: WindowKey | null;
   } | null;
+  /** Turns run in the last 30 days. Shown when no window is capped, so the widget
+   *  has something true to say instead of disappearing. */
+  turns30d: number;
 }
 
 // Cached across remounts (the dashboard's keyed <ViewTransition> remounts the

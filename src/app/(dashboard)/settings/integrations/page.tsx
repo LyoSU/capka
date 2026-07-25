@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { SettingsPage } from "@/components/settings/shell";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -59,11 +60,7 @@ export default function IntegrationsPage() {
   };
 
   return (
-    <div className="max-w-lg space-y-6">
-      <div>
-        <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
+    <SettingsPage title={t("title")} description={t("subtitle")}>
       <Separator />
 
       {/* Telegram Bot Token */}
@@ -105,6 +102,6 @@ export default function IntegrationsPage() {
 
         <p className="text-xs text-muted-foreground">{t("linkMovedHint")}</p>
       </div>
-    </div>
+    </SettingsPage>
   );
 }

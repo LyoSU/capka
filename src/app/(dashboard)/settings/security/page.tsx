@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useSetting } from "@/hooks/use-setting";
 import { MasterKeyBanner } from "@/components/settings/master-key-banner";
-import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow } from "@/components/settings/shell";
+import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow, SettingsSkeleton } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
 
 /**
@@ -89,11 +88,7 @@ export default function SecuritySettingsPage() {
   if (!isAdmin) return <p className="text-sm text-muted-foreground">{t("adminOnly")}</p>;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <SettingsSkeleton rows={3} />;
   }
 
   return (

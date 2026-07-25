@@ -3,14 +3,16 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Library, Plug, Package, MessageSquare } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Library, Plug, Package, MessageSquare, ShieldCheck } from "lucide-react";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import SkillLibrary from "@/components/settings/skill-library";
 import ConnectorList from "@/components/settings/connector-list";
 import PluginsPanel, { type PluginsView } from "@/components/settings/plugins-panel";
+import { SettingsPage } from "@/components/settings/shell";
+import { SettingsTabs } from "@/components/settings/tabs";
+import { PermissionsTab } from "./permissions-tab";
 
-type Tab = "library" | "connectors" | "plugins";
+type Tab = "library" | "connectors" | "plugins" | "permissions";
 
 export default function CustomizePage() {
   const t = useTranslations("settings.skills");
@@ -31,6 +33,7 @@ export default function CustomizePage() {
   useEffect(() => {
     if (tabParam === "connectors") setTab("connectors");
     else if (tabParam === "installed" || tabParam === "plugins") setTab("plugins");
+    else if (tabParam === "permissions") setTab("permissions");
     else if (tabParam === "marketplace") {
       setTab("plugins");
       setPluginsView("browse");
@@ -43,41 +46,26 @@ export default function CustomizePage() {
     // Plugins is visible to everyone (read-only + per-user OAuth sign-in); only
     // admins get the management actions + the Browse/marketplace view inside it.
     { key: "plugins", label: t("tab.installed"), icon: Package },
+    // Governance sits beside the things it governs — /settings/permissions
+    // redirects here. Admin-only, unlike the tabs above it.
+    { key: "permissions", label: t("tab.permissions"), icon: ShieldCheck, adminOnly: true },
   ];
   const visibleTabs = tabs.filter((tb) => !tb.adminOnly || isAdmin);
   const active = visibleTabs.some((tb) => tb.key === tab) ? tab : "library";
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <div>
-        <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/80">
-          <MessageSquare className="h-3 w-3" />
-          {t("chatHint")}
-        </p>
-      </div>
+    <SettingsPage title={t("title")} description={t("subtitle")}>
+      <p className="-mt-6 flex items-center gap-1.5 text-xs text-muted-foreground/80">
+        <MessageSquare className="h-3 w-3" />
+        {t("chatHint")}
+      </p>
 
-      {/* Segmented control */}
-      <div className="inline-flex rounded-lg border bg-muted/40 p-1">
-        {visibleTabs.map((tb) => (
-          <button
-            key={tb.key}
-            onClick={() => setTab(tb.key)}
-            className={cn(
-              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
-              active === tb.key ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <tb.icon className="h-4 w-4" />
-            {tb.label}
-          </button>
-        ))}
-      </div>
+      <SettingsTabs value={active} onChange={setTab} tabs={visibleTabs} />
 
       {active === "library" && <SkillLibrary chrome={false} />}
       {active === "connectors" && <ConnectorList chrome={false} />}
       {active === "plugins" && <PluginsPanel view={pluginsView} onView={setPluginsView} />}
-    </div>
+      {active === "permissions" && <PermissionsTab />}
+    </SettingsPage>
   );
 }

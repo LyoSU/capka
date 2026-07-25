@@ -7,12 +7,9 @@ import { nanoid } from "nanoid";
 import {
   MessageSquarePlus,
   Settings,
-  Plug,
-  Bot,
   PanelLeft,
   Moon,
   FolderKanban,
-  Brain,
   Keyboard,
   Search,
 } from "lucide-react";
@@ -28,9 +25,15 @@ import {
 } from "@/components/ui/command";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useTheme } from "@/components/providers";
+import { useIsAdmin } from "@/hooks/use-is-admin";
+import { SETTINGS_DIRECTORY } from "@/lib/settings-directory";
 
 export function CommandPalette() {
   const t = useTranslations("commandPalette");
+  // Root-namespaced: directory entries carry full key paths so a palette row reads
+  // the same words as the settings row it opens.
+  const tRoot = useTranslations();
+  const isAdmin = useIsAdmin();
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const { toggleSidebar } = useSidebar();
@@ -98,18 +101,27 @@ export function CommandPalette() {
             <Settings className="mr-2 h-4 w-4" />
             {t("settings")}
           </CommandItem>
-          <CommandItem onSelect={() => run(() => router.push("/settings/memory"))}>
-            <Brain className="mr-2 h-4 w-4" />
-            {t("memory")}
-          </CommandItem>
-          <CommandItem onSelect={() => run(() => router.push("/settings/connections"))}>
-            <Plug className="mr-2 h-4 w-4" />
-            {t("connections")}
-          </CommandItem>
-          <CommandItem onSelect={() => run(() => router.push("/settings/integrations"))}>
-            <Bot className="mr-2 h-4 w-4" />
-            {t("integrations")}
-          </CommandItem>
+        </CommandGroup>
+
+        {/* Every individual setting, from the same declared index the settings
+            sidebar filters — so ⌘K reaches a single switch, not just the page it
+            sits on. This replaced three hardcoded links to Memory, Providers and
+            Integrations: a second, shorter list of the same places, which could
+            only ever fall behind the first. */}
+        <CommandGroup heading={t("groups.settings")}>
+          {SETTINGS_DIRECTORY.filter((e) => !e.adminOnly || isAdmin).map((entry) => (
+            <CommandItem
+              key={`${entry.href}-${entry.label}`}
+              // cmdk matches on the item's own text; the synonyms someone actually
+              // types ("промпт", "gpt") live in the index, so hand them over too.
+              keywords={entry.keywords?.split(/\s+/)}
+              onSelect={() => run(() => router.push(entry.href))}
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              {tRoot(entry.label)}
+              <span className="ml-auto text-xs text-muted-foreground">{tRoot(entry.page)}</span>
+            </CommandItem>
+          ))}
         </CommandGroup>
 
         <CommandGroup heading={t("groups.preferences")}>

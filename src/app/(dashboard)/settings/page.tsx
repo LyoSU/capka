@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Github } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
+import { SettingsPage, SettingsSection } from "@/components/settings/shell";
 
 const REPO_URL = "https://github.com/LyoSU/capka";
 import { Input } from "@/components/ui/input";
@@ -48,12 +48,7 @@ function AccountSection() {
   };
 
   return (
-    <>
-      <div>
-        <h2 className="text-base font-medium">{t("account")}</h2>
-        <p className="text-sm text-muted-foreground">{t("accountDesc")}</p>
-      </div>
-      <Separator />
+    <SettingsSection title={t("account")} description={t("accountDesc")}>
       <div className="space-y-1.5">
         <label className="text-sm font-medium">{t("name")}</label>
         <div className="flex items-center gap-2">
@@ -75,7 +70,7 @@ function AccountSection() {
           <Input value={user.email} disabled className="max-w-xs" />
         </div>
       )}
-    </>
+    </SettingsSection>
   );
 }
 
@@ -94,41 +89,32 @@ export default function GeneralSettingsPage() {
   }, []);
 
   return (
-    <div className="max-w-lg space-y-6">
+    <SettingsPage title={t("title")} description={t("subtitle")}>
       {/* Account — personal identity, every role */}
       <AccountSection />
 
-      {/* Appearance — personal, every role */}
-      <Separator />
-      <div>
-        <h2 className="text-base font-medium">{t("appearance")}</h2>
-        <p className="text-sm text-muted-foreground">{t("appearanceDesc")}</p>
-      </div>
-      <div className="space-y-1.5">
-        <label className="text-sm font-medium">{t("theme")}</label>
-        <ThemeSwitcher />
-      </div>
-      <div className="space-y-1.5">
-        <label className="text-sm font-medium">{tLang("label")}</label>
-        <LanguageSwitcher />
-      </div>
+      <SettingsSection title={t("appearance")} description={t("appearanceDesc")}>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">{t("theme")}</label>
+          <ThemeSwitcher />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">{tLang("label")}</label>
+          <LanguageSwitcher />
+        </div>
+      </SettingsSection>
 
-      {/* Personal budget status (% only) — renders itself away when there's no
-          shared-key limit to show. Visible to every role. */}
+      {/* Personal budget status — renders itself away when there is nothing to
+          report. Visible to every role. */}
       <UsageLimitCard />
 
       {/* Personal Telegram linking — open to every role; the bot token itself is
           configured by an admin in Settings → Integrations. */}
-      <Separator />
       <TelegramLinkCard />
 
       {/* About — open-source attribution. Every role sees it; the source link
           and license are public anyway. */}
-      <Separator />
-      <div>
-        <h2 className="text-base font-medium">{t("about")}</h2>
-        <p className="text-sm text-muted-foreground">{t("aboutDesc")}</p>
-      </div>
+      <SettingsSection title={t("about")} description={t("aboutDesc")}>
       <div className="space-y-1.5 text-sm">
         <p className="text-muted-foreground">
           {t.rich("openSource", {
@@ -169,6 +155,7 @@ export default function GeneralSettingsPage() {
         </a>
         {version && <p className="text-xs text-muted-foreground">{t("version", { version })}</p>}
       </div>
-    </div>
+      </SettingsSection>
+    </SettingsPage>
   );
 }

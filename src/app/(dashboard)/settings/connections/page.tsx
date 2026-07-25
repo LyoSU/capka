@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { PointerEvent, KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
+import { SettingsPage } from "@/components/settings/shell";
 import { Loader2, Unplug } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -267,11 +268,7 @@ export default function ConnectionsPage() {
   };
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <div>
-        <h2 className="text-base font-medium">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
+    <SettingsPage title={t("title")} description={t("subtitle")}>
       <Separator />
 
       {error && (
@@ -418,6 +415,6 @@ export default function ConnectionsPage() {
         title={t("confirmRemoveTitle")}
         description={t("confirmRemoveDesc")}
       />
-    </div>
+    </SettingsPage>
   );
 }
