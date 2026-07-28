@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-28
+
 ### Added
 
 - Images in the file viewer zoom and pan (wheel, double-click, +/-/0, on-screen controls).
