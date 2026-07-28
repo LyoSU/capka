@@ -1,15 +1,19 @@
 "use client";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, ShieldCheck, Sparkles, Plug, X } from "lucide-react";
+import { ShieldCheck, Sparkles, Plug, X } from "lucide-react";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { SettingsEmpty } from "@/components/settings/shell";
+import { SettingsEmpty, SettingsSkeleton } from "@/components/settings/shell";
 import { authClient } from "@/lib/auth-client";
 import { explainPolicy } from "@/lib/governance/matcher";
 import type { PolicyScope } from "@/lib/governance/types";
@@ -135,10 +139,10 @@ export function PermissionsTab() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      {loading && <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
+      {loading && <SettingsSkeleton rows={4} header={false} />}
 
       {!loading && inventory.length === 0 && (
-        <SettingsEmpty title={t("empty")} hint={t("emptyHint")} />
+        <SettingsEmpty icon={ShieldCheck} title={t("empty")} hint={t("emptyHint")} />
       )}
 
       {!loading && inventory.length > 0 && (
@@ -325,9 +329,27 @@ function ExceptionSection({
             <li key={r.id} className="flex items-center gap-2 rounded-md border p-2">
               <span className="min-w-0 flex-1 truncate text-sm">{r.label}</span>
               <EffectBadge effect={r.effect} t={t} />
-              <Button variant="ghost" size="icon-sm" aria-label={t("removeException")} onClick={() => onRemove(r.id)}>
-                <X className="h-3.5 w-3.5" />
-              </Button>
+              {/* Dropping an exception widens or narrows who may use the capability,
+                  so the X asks first instead of taking effect on the click. */}
+              <AlertDialog>
+                <AlertDialogTrigger
+                  render={
+                    <Button variant="ghost" size="icon-sm" aria-label={t("removeException")}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("removeExceptionTitle", { name: r.label })}</AlertDialogTitle>
+                    <AlertDialogDescription>{t("removeExceptionWarn")}</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => onRemove(r.id)}>{t("removeException")}</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </li>
           ))}
         </ul>

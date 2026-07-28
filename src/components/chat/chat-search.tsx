@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { useSidebar } from "@/components/ui/sidebar";
 
 export function ChatSearch({
   value,
@@ -15,16 +16,27 @@ export function ChatSearch({
   const t = useTranslations("chat");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const { setOpen, setOpenMobile, isMobile } = useSidebar();
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "f") {
+      // `e.code`, not `e.key`: with Shift held the key IS "F", so the old
+      // lowercase comparison meant the shortcut the command palette advertises
+      // could never fire. `code` is also layout-independent.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === "KeyF") {
         e.preventDefault();
-        inputRef.current?.focus();
+        // The field lives inside the sidebar, and a collapsed rail (or a closed
+        // mobile sheet) hides it — focus() on a hidden input is a silent no-op,
+        // so the advertised shortcut looked broken. Open the sidebar first and
+        // focus once it has painted.
+        if (isMobile) setOpenMobile(true);
+        else setOpen(true);
+        requestAnimationFrame(() => inputRef.current?.focus());
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [isMobile, setOpen, setOpenMobile]);
 
   return (
     <div className="px-3 pb-1">

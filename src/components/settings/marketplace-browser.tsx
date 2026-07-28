@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Plus, Trash2, RefreshCw, Download, Check, Search } from "lucide-react";
+import { Loader2, Plus, Trash2, RefreshCw, Download, Check, Search, Store } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import {
 import { PluginIcon } from "@/components/plugin-icon";
 import MembersInstallToggle from "@/components/settings/members-install-toggle";
 import GithubTokenField from "@/components/settings/github-token-field";
+import { SettingsEmpty } from "@/components/settings/shell";
 
 interface Marketplace {
   id: string;
@@ -87,7 +88,7 @@ export function MarketplaceBrowser() {
         setAddUrl("");
         await loadMarkets();
         setSelected(data.id);
-      } else toast.error(data.error || t("addFailed"));
+      } else toast.error(t("addFailed"));
     } finally {
       setAdding(false);
     }
@@ -130,7 +131,7 @@ export function MarketplaceBrowser() {
         toast.success(t("installed", { skills: (m.skills ?? []).length, connectors: (m.connectors ?? []).length }));
         for (const note of m.notes ?? []) toast.message(note);
         await loadCatalog(selected);
-      } else toast.error(data.error || t("installFailed"));
+      } else toast.error(t("installFailed"));
     } finally {
       setBusy(null);
     }
@@ -201,9 +202,7 @@ export function MarketplaceBrowser() {
       )}
 
       {!loading && markets.length === 0 && (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-center">
-          <p className="text-sm text-muted-foreground">{t("empty")}</p>
-        </div>
+        <SettingsEmpty icon={Store} title={t("empty")} hint={t("emptyHint")} />
       )}
 
       {/* Marketplace selector */}

@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { SettingsEmpty, SettingsError } from "@/components/settings/shell";
 import type { AutomationTrigger } from "@/lib/automations/schedule";
 
 interface Automation {
@@ -127,22 +128,10 @@ export default function AutomationsList() {
     );
   }
 
-  if (error) {
-    return <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</div>;
-  }
+  if (error) return <SettingsError message={error} />;
 
   if (automations.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed py-12 text-center">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
-          <CalendarClock className="h-5 w-5 text-muted-foreground" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-sm font-medium">{t("emptyTitle")}</p>
-          <p className="mx-auto max-w-xs text-sm text-muted-foreground">{t("emptyHint")}</p>
-        </div>
-      </div>
-    );
+    return <SettingsEmpty icon={CalendarClock} title={t("emptyTitle")} hint={t("emptyHint")} />;
   }
 
   return (

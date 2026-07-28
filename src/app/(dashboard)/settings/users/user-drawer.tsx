@@ -108,8 +108,7 @@ export function UserDrawer({
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, ...body }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(data.error || t("actionFailed")); return false; }
+      if (!res.ok) { toast.error(t("actionFailed")); return false; }
       onPatch(userId, patch);
       toast.success(okMsg);
       return true;

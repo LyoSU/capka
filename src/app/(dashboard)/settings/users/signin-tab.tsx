@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { SettingsSkeleton } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
 
 type Mode = "open" | "approval" | "closed";
@@ -31,6 +32,8 @@ export function SignInTab() {
   const [emailSignup, setEmailSignup] = useState(true);
   const [redirectUri, setRedirectUri] = useState("");
   const [copied, setCopied] = useState(false);
+  // The stored client id, so Save can tell "edited" from "just loaded".
+  const [savedClientId, setSavedClientId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -39,6 +42,7 @@ export function SignInTab() {
         const data: Config = await res.json();
         setEnabled(data.telegram.enabledToggle);
         setClientId(data.telegram.clientId);
+        setSavedClientId(data.telegram.clientId);
         setHasSecret(data.telegram.hasClientSecret);
         setRedirectUri(data.telegram.redirectUri);
         setMode(data.registrationMode);
@@ -50,10 +54,36 @@ export function SignInTab() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  /**
+   * Persist one field and undo the optimistic UI if the server refuses.
+   *
+   * Every field on POST /api/admin/auth-config is optional and applied only when
+   * present, so a switch can commit itself without dragging a half-typed client
+   * id along. That is what makes save-on-toggle safe here — and these switches
+   * look exactly like the instantly-saved ones on Security and Agent, so
+   * deferring them behind Save is how a flipped toggle used to vanish on
+   * navigation.
+   */
+  const persist = async (patch: Record<string, unknown>, rollback: () => void) => {
+    const res = await fetch("/api/admin/auth-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      rollback();
+      toast.error(t("saveFailed"));
+    }
+  };
+
+  // Credentials stay deferred: a client id/secret is only meaningful once typed
+  // in full, so those two fields keep the explicit Save.
+  const credentialsDirty = clientId.trim() !== savedClientId || !!clientSecret.trim();
+
   const save = async () => {
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { enabled, registrationMode: mode, emailSignupEnabled: emailSignup, clientId: clientId.trim() };
+      const body: Record<string, unknown> = { clientId: clientId.trim() };
       if (clientSecret.trim()) body.clientSecret = clientSecret.trim();
       const res = await fetch("/api/admin/auth-config", {
         method: "POST",
@@ -83,9 +113,7 @@ export function SignInTab() {
   // "Active" = toggle on AND credentials present (stored secret or a fresh one).
   const ready = enabled && !!clientId.trim() && (hasSecret || !!clientSecret.trim());
 
-  if (loading) {
-    return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
-  }
+  if (loading) return <SettingsSkeleton rows={3} header={false} />;
 
   return (
     <div className="space-y-6">
@@ -108,7 +136,11 @@ export function SignInTab() {
               <p className="text-sm text-muted-foreground">{t("telegram.desc")}</p>
             </div>
           </div>
-          <Switch checked={enabled} onCheckedChange={setEnabled} aria-label={t("telegram.toggleAria")} />
+          <Switch
+            checked={enabled}
+            onCheckedChange={(v) => { setEnabled(v); persist({ enabled: v }, () => setEnabled(!v)); }}
+            aria-label={t("telegram.toggleAria")}
+          />
         </div>
 
         {enabled && (
@@ -145,6 +177,16 @@ export function SignInTab() {
               </div>
               <p className="text-xs text-muted-foreground">{t("telegram.redirectHint")}</p>
             </div>
+            {/* Sits with the two fields it saves, and only once they differ from
+                what's stored — so nothing on this tab is silently unsaved. */}
+            {credentialsDirty && (
+              <div className="flex items-center justify-end gap-3">
+                <p className="text-xs text-warning-text">{t("unsavedCredentials")}</p>
+                <Button size="sm" onClick={save} disabled={saving}>
+                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{t("save")}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -165,7 +207,7 @@ export function SignInTab() {
               type="button"
               role="radio"
               aria-checked={mode === key}
-              onClick={() => setMode(key)}
+              onClick={() => { const prev = mode; setMode(key); persist({ registrationMode: key }, () => setMode(prev)); }}
               className={cn(
                 "flex items-start gap-3 rounded-md border p-3 text-left transition-colors",
                 mode === key ? "border-foreground/40 bg-accent" : "hover:bg-accent/40",
@@ -190,19 +232,17 @@ export function SignInTab() {
             <h3 className="text-sm font-medium">{t("email.title")}</h3>
             <p className="text-sm text-muted-foreground">{t("email.desc")}</p>
           </div>
-          <Switch checked={emailSignup} onCheckedChange={setEmailSignup} aria-label={t("email.toggleAria")} />
+          <Switch
+            checked={emailSignup}
+            onCheckedChange={(v) => { setEmailSignup(v); persist({ emailSignupEnabled: v }, () => setEmailSignup(!v)); }}
+            aria-label={t("email.toggleAria")}
+          />
         </div>
         {!emailSignup && !ready && (
           <p className="rounded-md border border-warning-border bg-warning-surface px-3 py-2 text-xs text-foreground">
             {t("email.deadEndWarning")}
           </p>
         )}
-      </div>
-
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{t("save")}
-        </Button>
       </div>
 
       {/* Approvals are the sibling tab now, not another page — say where, don't

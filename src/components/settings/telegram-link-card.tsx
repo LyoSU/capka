@@ -113,10 +113,13 @@ export function TelegramLinkCard() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
+    // Heading outside the card, card at SettingsGroup geometry (see shell.tsx).
+    // The heading stays in this component rather than moving to the consumer's
+    // SettingsSection, because that page doesn't wrap this card in one.
+    <section className="space-y-3">
+      <div className="space-y-1">
         <h3 className="text-sm font-medium">{t("link.title")}</h3>
-        <p className="text-sm text-muted-foreground">{t("link.desc")}</p>
+        <p className="text-sm leading-relaxed text-muted-foreground">{t("link.desc")}</p>
       </div>
 
       {linkLoading ? (
@@ -126,7 +129,7 @@ export function TelegramLinkCard() {
         </div>
       ) : linked ? (
         <div className="space-y-3">
-          <div className="flex items-center gap-2 rounded-md border p-3">
+          <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3.5">
             <Link2 className="h-4 w-4 text-success" />
             <span className="text-sm">
               {linkUsername ? t("link.linkedAs", { username: linkUsername }) : t("link.linked")}
@@ -153,7 +156,7 @@ export function TelegramLinkCard() {
             </div>
           )}
           {linkCode ? (
-            <div className="space-y-3 rounded-md border p-4">
+            <div className="space-y-3 rounded-xl border bg-card p-4">
               {botUsername ? (
                 <>
                   <p className="text-sm text-muted-foreground">{t("link.openBotHint")}</p>
@@ -186,9 +189,16 @@ export function TelegramLinkCard() {
                 <code className="flex-1 rounded-md bg-muted px-3 py-2 text-sm font-mono">
                   /link {linkCode}
                 </code>
-                <Button variant="outline" size="icon" className="h-9 w-9" onClick={handleCopyCode}>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={handleCopyCode}
+                  aria-label={copied ? t("copied") : t("link.copyCommand")}
+                >
                   {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </Button>
+                <span role="status" aria-live="polite" className="sr-only">{copied ? t("copied") : ""}</span>
               </div>
               {codeExpiry && (
                 <p className="text-xs text-muted-foreground">{t("link.codeExpires")}</p>
@@ -231,6 +241,6 @@ export function TelegramLinkCard() {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

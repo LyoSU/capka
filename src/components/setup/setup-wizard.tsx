@@ -29,15 +29,20 @@ const INPUT_CLASS =
   "h-11 rounded-xl border-transparent bg-muted/60 px-3.5 text-[15px] focus-visible:border-ring focus-visible:bg-card";
 
 /** Minimal 2-step progress: a pair of bars that fill as the admin advances. */
-function StepBars({ current }: { current: number }) {
+function StepBars({ current, label }: { current: number; label: string }) {
   return (
-    <div className="flex items-center gap-1.5" aria-hidden>
+    // The bars are decoration; the sentence is the actual progress report. Without
+    // it a screen-reader user got no step count at all, visible or spoken.
+    <div className="flex items-center gap-1.5">
+      <span className="sr-only">{label}</span>
+      <span className="flex flex-1 items-center gap-1.5" aria-hidden>
       {STEPS.map((label, i) => (
         <span
           key={label}
           className={`h-1 flex-1 rounded-full transition-colors duration-500 ${i <= current ? "bg-primary" : "bg-border"}`}
         />
       ))}
+      </span>
     </div>
   );
 }
@@ -153,8 +158,7 @@ export function SetupWizard({
         body: JSON.stringify({ step: "account", setupToken: setupToken.trim() || undefined }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || t("account.error"));
+        toast.error(t("account.error"));
         return;
       }
 
@@ -199,7 +203,10 @@ export function SetupWizard({
       });
       const testData = await testRes.json();
       if (!testData.success) {
-        toast.error(testData.error || t("provider.testError"));
+        // Friendly sentence first; the provider's own wording goes underneath it
+        // rather than instead of it. This screen only ever has an admin on it, and
+        // a rejected key is the one failure where the detail is the whole point.
+        toast.error(t("provider.testError"), { description: testData.error });
         return;
       }
 
@@ -217,8 +224,7 @@ export function SetupWizard({
         }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || t("provider.saveError"));
+        toast.error(t("provider.saveError"));
         return;
       }
 
@@ -228,8 +234,7 @@ export function SetupWizard({
         body: JSON.stringify({ step: "complete" }),
       });
       if (!done.ok) {
-        const data = await done.json();
-        toast.error(data.error || t("provider.saveError"));
+        toast.error(t("provider.saveError"));
         return;
       }
 
@@ -259,7 +264,7 @@ export function SetupWizard({
           </div>
 
           <div className="mt-7">
-            <StepBars current={step} />
+            <StepBars current={step} label={t("stepOf", { current: step + 1, total: STEPS.length })} />
           </div>
 
             <div key={step} className="animate-blur-rise mt-6 space-y-6">
@@ -272,8 +277,10 @@ export function SetupWizard({
                 </p>
               </div>
 
+              {/* A form, not a div: these are three text fields and a button, and
+                  pressing Enter in any of them used to do nothing at all. */}
               {step === 0 && (
-                <div className="space-y-4">
+                <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleAccount(); }}>
                   {!signedIn && (
                     <>
                       <div className="space-y-1.5">
@@ -283,6 +290,8 @@ export function SetupWizard({
                           value={name}
                           onChange={(e) => setName(e.target.value)}
                           placeholder={t("account.namePlaceholder")}
+                          autoComplete="name"
+                          required
                           className={INPUT_CLASS}
                         />
                       </div>
@@ -294,6 +303,8 @@ export function SetupWizard({
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           placeholder={t("account.emailPlaceholder")}
+                          autoComplete="email"
+                          required
                           className={INPUT_CLASS}
                         />
                       </div>
@@ -305,6 +316,9 @@ export function SetupWizard({
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           placeholder={t("account.passwordPlaceholder")}
+                          autoComplete="new-password"
+                          required
+                          minLength={8}
                           className={INPUT_CLASS}
                         />
                       </div>
@@ -325,16 +339,16 @@ export function SetupWizard({
                       <p className="text-xs leading-snug text-muted-foreground">{t("account.setupTokenHint")}</p>
                     </div>
                   )}
-                  <Button className="h-11 w-full rounded-xl text-[15px]" onClick={handleAccount} disabled={loading}>
+                  <Button type="submit" className="h-11 w-full rounded-xl text-[15px]" disabled={loading}>
                     {loading ? t("account.submitting") : t("account.submit")}
                   </Button>
-                </div>
+                </form>
               )}
 
               {step === 1 && (
-                <div className="space-y-4">
+                <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleProvider(); }}>
                   <div className="space-y-1.5">
-                    <Label>{t("provider.field")}</Label>
+                    <Label htmlFor="provider">{t("provider.field")}</Label>
                     <Select
                       value={provider}
                       onValueChange={(v) => changeProvider(v as ProviderName)}
@@ -351,7 +365,7 @@ export function SetupWizard({
                         })
                       )}
                     >
-                      <SelectTrigger className="h-auto w-full rounded-xl border-transparent bg-muted/60 py-2.5">
+                      <SelectTrigger id="provider" className="h-auto w-full rounded-xl border-transparent bg-muted/60 py-2.5">
                         <SelectValue />
                       </SelectTrigger>
               <SelectContent>
@@ -387,7 +401,7 @@ export function SetupWizard({
                           type={showApiKey ? "text" : "password"}
                           value={apiKey}
                           onChange={(e) => setApiKey(e.target.value)}
-                          placeholder="sk-..."
+                          placeholder={t("provider.apiKeyPlaceholder")}
                           className={`${INPUT_CLASS} pr-10`}
                         />
                         <button
@@ -435,11 +449,11 @@ export function SetupWizard({
                         {t("back")}
                       </Button>
                     )}
-                    <Button className="h-11 flex-1 rounded-xl text-[15px]" onClick={handleProvider} disabled={loading}>
+                    <Button type="submit" className="h-11 flex-1 rounded-xl text-[15px]" disabled={loading}>
                       {loading ? t("provider.submitting") : t("provider.submit")}
                     </Button>
                   </div>
-                </div>
+                </form>
               )}
             </div>
 

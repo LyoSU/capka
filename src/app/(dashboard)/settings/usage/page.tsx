@@ -2,9 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { TrendingDown, TrendingUp, Search, X, SlidersHorizontal, AlertTriangle } from "lucide-react";
+import {
+  TrendingDown, TrendingUp, Search, X, SlidersHorizontal, AlertTriangle,
+  BarChart3, SearchX, Clock,
+} from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { SettingsPage } from "@/components/settings/shell";
+import { SettingsPage, SettingsEmpty } from "@/components/settings/shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -247,14 +250,14 @@ export default function UsagePage() {
       {activeFilterCount > 0 && data && (
         <div className="flex flex-wrap items-center gap-1.5">
           {filters.userId && (
-            <Chip label={labelForMember(data, filters.userId)} onClear={() => setFilter({ userId: null })} />
+            <Chip label={labelForMember(data, filters.userId)} onClear={() => setFilter({ userId: null })} t={t} />
           )}
-          {filters.model && <Chip label={filters.model} onClear={() => setFilter({ model: null })} />}
+          {filters.model && <Chip label={filters.model} onClear={() => setFilter({ model: null })} t={t} />}
           {filters.projectId && (
-            <Chip label={labelForProject(data, filters.projectId)} onClear={() => setFilter({ projectId: null })} />
+            <Chip label={labelForProject(data, filters.projectId)} onClear={() => setFilter({ projectId: null })} t={t} />
           )}
           {filters.channel && (
-            <Chip label={t(`channel.${filters.channel}`)} onClear={() => setFilter({ channel: null })} />
+            <Chip label={t(`channel.${filters.channel}`)} onClear={() => setFilter({ channel: null })} t={t} />
           )}
           <button
             onClick={() => setFilter(EMPTY_FILTERS)}
@@ -268,9 +271,11 @@ export default function UsagePage() {
       {loading ? (
         <UsageSkeleton />
       ) : !hasActivity ? (
-        <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
-          {activeFilterCount > 0 ? t("emptyFiltered") : t("empty")}
-        </div>
+        activeFilterCount > 0 ? (
+          <SettingsEmpty icon={SearchX} title={t("emptyFiltered")} hint={t("emptyFilteredHint")} />
+        ) : (
+          <SettingsEmpty icon={BarChart3} title={t("empty")} hint={t("emptyHint")} />
+        )
       ) : (
         <>
           {/* Needs attention — only when at least one trigger fires. */}
@@ -456,7 +461,7 @@ export default function UsagePage() {
                   {(() => {
                     const rows = selectedUser ? data.recent.filter((r) => r.userId === selectedUser.id) : data.recent;
                     if (rows.length === 0) {
-                      return <p className="rounded-lg border border-dashed py-6 text-center text-xs text-muted-foreground">{t("noRecentForUser")}</p>;
+                      return <SettingsEmpty icon={Clock} title={t("noRecentForUser")} hint={t("noRecentForUserHint")} />;
                     }
                     return (
                       <div className="overflow-hidden rounded-lg border">
@@ -596,11 +601,11 @@ function FilterSelect({
 }
 
 /** A removable active-filter chip. */
-function Chip({ label, onClear }: { label: string; onClear: () => void }) {
+function Chip({ label, onClear, t }: { label: string; onClear: () => void; t: T }) {
   return (
     <span className="flex items-center gap-1 rounded-full border bg-accent/40 py-0.5 pl-2.5 pr-1 text-xs">
       <span className="max-w-[12rem] truncate">{label}</span>
-      <button onClick={onClear} className="rounded-full p-0.5 text-muted-foreground transition-colors hover:text-foreground" aria-label="Remove filter">
+      <button onClick={onClear} className="rounded-full p-0.5 text-muted-foreground transition-colors hover:text-foreground" aria-label={t("removeFilter")}>
         <X className="h-3 w-3" />
       </button>
     </span>
@@ -704,8 +709,8 @@ function Trend({
   if (Math.abs(change) < 0.005) return null;
   const up = change > 0;
   const Icon = up ? TrendingUp : TrendingDown;
-  // For cost, more spend is "bad" (rose); for neutral counts, just hint direction.
-  const color = tone === "cost" ? (up ? "text-rose-500" : "text-emerald-500") : "text-muted-foreground";
+  // For cost, more spend is "bad"; for neutral counts, just hint direction.
+  const color = tone === "cost" ? (up ? "text-destructive-text" : "text-success") : "text-muted-foreground";
   return (
     <span className={cn("flex items-center gap-0.5 text-[11px] font-medium tabular-nums", color)} title={t("vsPrevious")}>
       <Icon className="h-3 w-3" />
@@ -734,7 +739,7 @@ function Breakdown({
 }) {
   const max = Math.max(...rows.map((r) => r.cost), 0);
   if (rows.length === 0) {
-    return <p className="rounded-lg border border-dashed py-6 text-center text-xs text-muted-foreground">{t("noMatches")}</p>;
+    return <SettingsEmpty icon={SearchX} title={t("noMatches")} hint={t("noMatchesHint")} />;
   }
   return (
     <div className="overflow-hidden rounded-lg border">

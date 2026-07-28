@@ -22,6 +22,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { formatSize } from "@/lib/constants";
 import { fileCategory, fileKind, previewKind, type FileCategory } from "@/lib/file-kinds";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/shared/empty-state";
 import { type WorkspaceTarget, targetQuery } from "@/lib/workspace-target";
 import { canDownloadAll } from "./workspace-paths";
 import { FileThumb, FileTile, SandboxFileTile, usePreview, type PreviewFile } from "./file-preview";
@@ -667,23 +668,23 @@ export function WorkspaceBrowser({
             calmest moment in the panel looked like the broken one. */}
         {error ? (
           error.includes("Session not found") || error.includes("not found") ? (
-            <PanelNotice icon={Folder} title={t("notReadyTitle")} hint={t("createHint")} />
+            <EmptyState icon={Folder} title={t("notReadyTitle")} hint={t("createHint")} />
           ) : (
             // The raw controller string stays in `title`, not on screen: this panel is
             // read by people who did not ask for a stack trace, and a friendly
             // sentence is the house rule for every failure they can see.
-            <PanelNotice icon={FileWarning} title={t("loadError")} hint={t("loadErrorHint")} detail={error} />
+            <EmptyState icon={FileWarning} title={t("loadError")} hint={t("loadErrorHint")} detail={error} />
           )
         ) : isEmpty && !loading ? (
-          <PanelNotice icon={Folder} title={t("emptyTitle")} hint={t("emptyHint")}>
+          <EmptyState icon={Folder} title={t("emptyTitle")} hint={t("emptyHint")}>
             {/* sr-only rather than hidden so the input stays keyboard-reachable and
                 the label names it — a display:none input can't be tabbed to. */}
-            <label className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2 cursor-pointer focus-within:ring-2 focus-within:ring-ring")}>
+            <label className={cn(buttonVariants({ variant: "outline", size: "sm" }), "cursor-pointer focus-within:ring-2 focus-within:ring-ring")}>
               <input type="file" multiple className="sr-only" onChange={(e) => e.target.files && upload(e.target.files)} />
               <Upload className="h-3.5 w-3.5" aria-hidden />
               {t("upload")}
             </label>
-          </PanelNotice>
+          </EmptyState>
         ) : null}
 
         {!isEmpty && (view === "grid" ? gridBody : listBody)}
@@ -708,30 +709,3 @@ export function WorkspaceBrowser({
   );
 }
 
-/**
- * The panel's one full-height message: a muted glyph, a plain sentence, an optional
- * hint, and room for a single action.
- *
- * One shape for "nothing here yet", "no workspace yet" and "couldn't load", because
- * a user cannot tell those three apart by severity and shouldn't have to — what they
- * need is the same each time: what this space is for, and what to do next. `detail`
- * carries an operator-facing string into the DOM without putting it on screen.
- */
-function PanelNotice({
-  icon: Icon, title, hint, detail, children,
-}: {
-  icon: typeof Folder;
-  title: string;
-  hint?: string;
-  detail?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col items-center gap-2 px-6 py-10 text-center" title={detail}>
-      <Icon className="h-8 w-8 text-muted-foreground/30" aria-hidden />
-      <p className="text-sm font-medium">{title}</p>
-      {hint && <p className="max-w-[16rem] text-xs text-muted-foreground">{hint}</p>}
-      {children}
-    </div>
-  );
-}

@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { SettingsSection, SettingsGroup, SettingsRow } from "@/components/settings/shell";
+import { EmptyState } from "@/components/shared/empty-state";
 import { PreviewProvider } from "@/components/chat/file-preview";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspaceBrowser, type FileEntry } from "@/components/chat/workspace-browser";
@@ -294,14 +295,17 @@ function OverviewTab({
   return (
     <div className="space-y-8 pb-6">
       {empty && (
-        <div className="rounded-xl border border-dashed px-4 py-8 text-center">
-          <FolderKanban className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-          <p className="mx-auto max-w-md text-sm text-muted-foreground text-pretty">{t("emptyExplainer")}</p>
-          <Button size="sm" className="mt-4" nativeButton={false} render={<Link href={`/chat?projectId=${project.id}`} />}>
+        <EmptyState
+          icon={FolderKanban}
+          title={t("empty")}
+          hint={t("emptyExplainer")}
+          className="rounded-xl border border-dashed"
+        >
+          <Button size="sm" nativeButton={false} render={<Link href={`/chat?projectId=${project.id}`} />}>
             <Plus className="h-4 w-4" />
             {t("newChat")}
           </Button>
-        </div>
+        </EmptyState>
       )}
 
       {!empty && (
@@ -622,7 +626,7 @@ function ChatsList({ chats, locale, emptyLabel }: { chats: ChatRow[] | null; loc
     return <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" /></div>;
   }
   if (chats.length === 0) {
-    return <p className="py-10 text-center text-sm text-muted-foreground">{emptyLabel}</p>;
+    return <EmptyState icon={MessageSquare} title={emptyLabel} />;
   }
   return (
     <ChatList>

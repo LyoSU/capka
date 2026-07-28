@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, RefreshCw, Trash2, Sparkles, Plug, AlertTriangle, CheckCircle2, Power, PowerOff, LogIn } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Sparkles, Plug, Package, AlertTriangle, CheckCircle2, Power, PowerOff, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { SettingsEmpty } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
 
 interface Item { id: string; name: string; enabled: boolean }
@@ -100,9 +101,8 @@ export default function InstalledPlugins() {
     setBusy(id);
     try {
       const r = await req();
-      const d = await r.json().catch(() => ({}));
       if (r.ok) { if (okMsg) toast.success(okMsg); await load(); }
-      else toast.error(d.error || t("actionFailed"));
+      else toast.error(t("actionFailed"));
     } catch {
       toast.error(t("actionFailed"));
     } finally {
@@ -123,7 +123,7 @@ export default function InstalledPlugins() {
     try {
       const r = await fetch(`/api/extensions/preview?installId=${encodeURIComponent(p.id)}`);
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { toast.error(d.error || t("previewFailed")); return; }
+      if (!r.ok) { toast.error(t("previewFailed")); return; }
       const preview = d as UpgradePreview;
       if (!preview.changed) { toast.success(t("upToDate")); return; }
       setReview({ plugin: p, preview });
@@ -161,11 +161,7 @@ export default function InstalledPlugins() {
     return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
   }
   if (!plugins.length) {
-    return (
-      <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-center">
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      </div>
-    );
+    return <SettingsEmpty icon={Package} title={t("empty")} hint={t("emptyHint")} />;
   }
 
   const stateVariant = (s: InstalledPlugin["enabledState"]) =>

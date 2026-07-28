@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import {
-  Loader2, UserCog, Puzzle, SlidersHorizontal, ShieldAlert, Dot,
+  Loader2, UserCog, Puzzle, SlidersHorizontal, ShieldAlert, Dot, History, Lock,
 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { SettingsPage, SettingsEmpty } from "@/components/settings/shell";
+import { SettingsPage, SettingsEmpty, SettingsGroup } from "@/components/settings/shell";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
@@ -88,7 +88,13 @@ export default function ActivityPage() {
     setLoadingMore(false);
   };
 
-  if (!isAdmin) return <p className="text-sm text-muted-foreground">{t("adminOnly")}</p>;
+  if (!isAdmin) {
+    return (
+      <SettingsPage title={t("title")} description={t("subtitle")} wide>
+        <SettingsEmpty icon={Lock} title={t("adminOnly")} hint={t("adminOnlyHint")} />
+      </SettingsPage>
+    );
+  }
 
   // ── Human phrasing helpers ──
   const actionLabel = (action: string) =>
@@ -158,13 +164,13 @@ export default function ActivityPage() {
       {loading ? (
         <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
       ) : entries.length === 0 ? (
-        <SettingsEmpty title={t("empty")} hint={t("emptyHint")} />
+        <SettingsEmpty icon={History} title={t("empty")} hint={t("emptyHint")} />
       ) : (
         <div className="space-y-5">
           {groups.map((g) => (
             <div key={g.day} className="space-y-1.5">
               <p className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">{g.label}</p>
-              <div className="overflow-hidden rounded-lg border divide-y">
+              <SettingsGroup>
                 {g.items.map((e) => {
                   const grp = groupOf(e.action);
                   const Icon = GROUP_ICON[grp];
@@ -193,7 +199,7 @@ export default function ActivityPage() {
                     </div>
                   );
                 })}
-              </div>
+              </SettingsGroup>
             </div>
           ))}
 

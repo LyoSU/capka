@@ -2,12 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { SettingsPage } from "@/components/settings/shell";
-import { Loader2, Check } from "lucide-react";
+import {
+  SettingsPage,
+  SettingsSection,
+  SettingsSkeleton,
+  SettingsEmpty,
+  SettingsError,
+} from "@/components/settings/shell";
+import { Loader2, Check, KeyRound, Layers } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 type KeyMode = "shared_plus_own" | "shared_only" | "own_only";
@@ -24,6 +29,7 @@ export default function BillingPage() {
   const tc = useTranslations("common");
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [keyMode, setKeyMode] = useState<KeyMode>("shared_plus_own");
   const [savingMode, setSavingMode] = useState(false);
 
@@ -37,7 +43,10 @@ export default function BillingPage() {
     fetch("/api/admin/billing")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!d) return;
+        if (!d) {
+          setLoadError(true);
+          return;
+        }
         setKeyMode(d.keyMode);
         const dt: DefaultTier = d.defaultTier ?? {};
         setLimit5h(dt.limit5h ?? "");
@@ -45,6 +54,7 @@ export default function BillingPage() {
         setLimitMonth(dt.limitMonth ?? "");
         setBudgetMonthly(d.monthlyBudget ?? "");
       })
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, []);
 
@@ -85,24 +95,20 @@ export default function BillingPage() {
     }
   };
 
-  if (loading) {
+  if (loading) return <SettingsSkeleton />;
+
+  if (loadError) {
     return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
+      <SettingsPage title={t("title")} description={t("subtitle")}>
+        <SettingsError message={t("loadError")} />
+      </SettingsPage>
     );
   }
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      <Separator />
-
       {/* Provider key mode */}
-      <div className="space-y-3">
-        <div>
-          <h3 className="text-sm font-medium">{t("mode.title")}</h3>
-          <p className="text-sm text-muted-foreground">{t("mode.desc")}</p>
-        </div>
+      <SettingsSection title={t("mode.title")} description={t("mode.desc")}>
         <div className="space-y-2">
           {MODES.map((m) => {
             const active = keyMode === m;
@@ -133,21 +139,12 @@ export default function BillingPage() {
             );
           })}
         </div>
-      </div>
-
-      <Separator />
+      </SettingsSection>
 
       {/* Default spend limits (shared key only) */}
-      <div className="space-y-3">
-        <div>
-          <h3 className="text-sm font-medium">{t("limits.title")}</h3>
-          <p className="text-sm text-muted-foreground">{t("limits.desc")}</p>
-        </div>
-
+      <SettingsSection title={t("limits.title")} description={t("limits.desc")}>
         {keyMode === "own_only" ? (
-          <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-            {t("limits.ownOnlyNote")}
-          </p>
+          <SettingsEmpty icon={KeyRound} title={t("limits.ownOnlyTitle")} hint={t("limits.ownOnlyNote")} />
         ) : (
           <>
             {/* Instance-wide monthly budget — the org's whole shared-key bill.
@@ -198,17 +195,12 @@ export default function BillingPage() {
             </Button>
           </>
         )}
-      </div>
-
-      <Separator />
+      </SettingsSection>
 
       {/* Per-user tiers — scaffolded for a later iteration. */}
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium">{t("tiers.title")}</h3>
-        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-          {t("tiers.soon")}
-        </p>
-      </div>
+      <SettingsSection title={t("tiers.title")}>
+        <SettingsEmpty icon={Layers} title={t("tiers.emptyTitle")} hint={t("tiers.soon")} />
+      </SettingsSection>
     </SettingsPage>
   );
 }

@@ -15,12 +15,36 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Every "nothing here yet" and "this didn't load" screen now uses one shape (icon, title, one sentence, a way forward), replacing six different geometries across settings, projects, the archive and the workspace panel.
+- Settings pages share one layout again: sections, cards, skeletons and inline load errors come from the shared shell on every page, and the stray `Separator` rules and rogue heading sizes are gone.
+- Empty settings lists carry an icon and a hint saying what would fill them; six of them were a bare grey sentence in a dashed box.
+- Settings pages that load a list show skeleton rows instead of a centred spinner, so the content no longer lands at a different height.
+- The non-admin notice on admin-only settings pages keeps the page title and width instead of one grey line in the corner.
+- Sign-in and sign-up report a rejected attempt inline next to the fields (wired with `aria-describedby`) instead of only in a toast that fades.
+- The context ring in the composer says how full the conversation is and what happens next; the exact token counts are now admin-only, matching the (i) popover.
+- Keyboard shortcuts in the command palette and account menu render as `Ctrl+…` off Apple hardware; they were hardcoded Mac glyphs.
+- Sign-in switches under Settings → Users save on toggle, like the ones on Security and Agent. Credential fields stay a deferred form with a Save that appears when dirty.
+- The archived-chats list uses the same grouped card as the projects list, and both format dates through the active locale.
 - The file browser shows a breadcrumb trail instead of a lone Back link, skeleton rows instead of a spinner, and a real empty state; its grid lines tiles up evenly at both panel and full width.
 - File type names in the viewer are localized; they were always English.
 - The people and permissions drawers keep their title and close button in place while the body scrolls, and the role/tier selects no longer clip their own value.
 
 ### Fixed
 
+- Rejecting a pending person under Settings → Users asked for no confirmation and deleted the account on one click; removing a permission exception was likewise unconfirmed.
+- A failed `/api/projects` or archived-chats request rendered as "you have no projects" / "the archive is empty"; both now say the load failed and offer a retry.
+- The projects list no longer flashes its empty state before the first response arrives.
+- Restore, delete, rename, pin and archive report failures instead of silently doing nothing.
+- Keyboard users can reach the restore and delete buttons in the archived list; they were invisible until hover, with no `focus-within` escape.
+- `⌘⇧F` / `Ctrl+Shift+F` focuses chat search, and expands a collapsed sidebar first. The handler compared against a lowercase `"f"`, which Shift never produces.
+- The conversation minimap: opening it with the keyboard moves focus into the list, arrow keys walk it, and its position pills meet the 3:1 contrast minimum.
+- The first-run wizard submits on Enter, marks its fields for password managers, names the provider select, and announces "Step 1 of 2".
+- Provider and setup failures no longer surface raw English server text or an HTTP status code to a localized UI; the connection test keeps its provider detail as a secondary line.
+- The sidebar toggle announced "Toggle Sidebar" in English in every locale.
+- The sign-up link disappeared for good on `/login` if the registration-status request failed, and the Telegram button shifted the email field down after mount.
+- The "check again" button on the pending and suspended screens gave no sign it had run.
+- Sharing a chat is announced as a radio group, the inline rename and share-URL fields have names, and a denied clipboard permission no longer reports a successful copy.
+- The open-source link on sign-in and a project's "last chat" line met neither the contrast minimum nor plain-language rule (`—` for "no chats yet").
 - File type icons and extension badges are legible in the light theme; every accent was a single dark-theme palette step, leaving white-on-colour badges at ~1.6:1.
 - File tiles report their filename to screen readers. They previously announced as unlabelled buttons, or read out the first 600 characters of a text file.
 - A file with no viewer behaves the same in list and grid view; the list did nothing at all when clicked.

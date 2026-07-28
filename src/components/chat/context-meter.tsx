@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 /** Compact token count: 1240 → "1k", 124000 → "124k", 1200000 → "1.2M". */
 function fmtTokens(n: number): string {
@@ -20,6 +21,7 @@ function fmtTokens(n: number): string {
  */
 export function ContextMeter({ used, window: limit }: { used: number; window: number }) {
   const t = useTranslations("chat.panel");
+  const isAdmin = useIsAdmin();
   const [open, setOpen] = useState(false);
   const fraction = limit > 0 ? used / limit : 0;
   if (fraction < 0.5) return null;
@@ -56,11 +58,18 @@ export function ContextMeter({ used, window: limit }: { used: number; window: nu
           />
         </svg>
       </PopoverTrigger>
-      <PopoverContent side="top" align="end" sideOffset={8} className="p-2.5 text-xs">
+      <PopoverContent side="top" align="end" sideOffset={8} className="max-w-56 p-2.5 text-xs">
         <div className="font-medium text-popover-foreground">{t("contextFull", { pct })}</div>
-        <div className="mt-0.5 whitespace-nowrap text-muted-foreground">
-          {t("contextTokens", { used: fmtTokens(used), total: fmtTokens(limit) })}
-        </div>
+        {/* What this means for the reader, not the number behind it. The exact
+            token pair is telemetry: useful to whoever pays for the key, noise to
+            someone who just wants to know whether the conversation is too long.
+            It follows the same admin split as the (i) popover on a message. */}
+        <div className="mt-0.5 text-muted-foreground">{t("contextHint")}</div>
+        {isAdmin && (
+          <div className="mt-1 whitespace-nowrap text-muted-foreground/80 tabular-nums">
+            {t("contextTokens", { used: fmtTokens(used), total: fmtTokens(limit) })}
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

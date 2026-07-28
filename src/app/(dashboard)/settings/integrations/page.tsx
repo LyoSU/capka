@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { SettingsPage } from "@/components/settings/shell";
+import { SettingsPage, SettingsSection } from "@/components/settings/shell";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 
 /**
  * Admin-only org integration config. The bot *token* (one per instance) lives
@@ -48,11 +47,13 @@ export default function IntegrationsPage() {
       const data = await res.json();
       if (res.ok) {
         toast.success(t("botConnected", { username: data.botUsername }));
-        if (data.warning) toast.warning(data.warning);
+        // The API's own `warning`/`error` strings are hardcoded English operator
+        // prose; only their presence is used here, never their text.
+        if (data.warning) toast.warning(t("botStartWarning"));
         setHasToken(true);
         setBotToken("");
       } else {
-        toast.error(data.error || t("saveTokenFailed"));
+        toast.error(t("saveTokenFailed"));
       }
     } finally {
       setTokenSaving(false);
@@ -61,15 +62,12 @@ export default function IntegrationsPage() {
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      <Separator />
-
       {/* Telegram Bot Token */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-sm font-medium">{t("telegram.title")}</h3>
-          <p className="text-sm text-muted-foreground">{t("telegram.desc")}</p>
-        </div>
-
+      <SettingsSection
+        title={t("telegram.title")}
+        description={t("telegram.desc")}
+        footnote={t("linkMovedHint")}
+      >
         <div className="flex items-center gap-2">
           {!tokenLoaded ? (
             <Badge variant="secondary" className="text-xs text-muted-foreground">
@@ -99,9 +97,7 @@ export default function IntegrationsPage() {
             {tc("save")}
           </Button>
         </div>
-
-        <p className="text-xs text-muted-foreground">{t("linkMovedHint")}</p>
-      </div>
+      </SettingsSection>
     </SettingsPage>
   );
 }

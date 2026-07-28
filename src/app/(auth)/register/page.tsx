@@ -12,7 +12,6 @@ import { AuthShell, AUTH_FIELD } from "@/components/auth/auth-shell";
 import { TelegramSignIn, AuthDivider } from "@/components/auth/telegram-sign-in";
 import { authErrorKey } from "@/lib/auth/client-error";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -21,6 +20,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [registrationEnabled, setRegistrationEnabled] = useState<boolean | null>(null);
   const [telegramEnabled, setTelegramEnabled] = useState<boolean | null>(null);
 
@@ -37,18 +37,22 @@ export default function RegisterPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) { toast.error(t("register.nameRequired")); return; }
+    if (!name.trim()) { setError(t("register.nameRequired")); return; }
     setLoading(true);
+    setError(null);
 
-    const { error } = await authClient.signUp.email({
+    const { error: signUpError } = await authClient.signUp.email({
       name,
       email,
       password,
     });
 
-    if (error) {
-      const key = authErrorKey(error);
-      toast.error(key ? t(`errors.${key}`) : t("register.failed"));
+    if (signUpError) {
+      const key = authErrorKey(signUpError);
+      // Inline rather than a toast, for the same reason as sign-in: "this email
+      // is already taken" has to still be on screen when the user looks back at
+      // the field it is about.
+      setError(key ? t(`errors.${key}`) : t("register.failed"));
       setLoading(false);
       return;
     }
@@ -77,7 +81,15 @@ export default function RegisterPage() {
           </Link>
         }
       >
-        {telegramEnabled ? <TelegramSignIn enabled={telegramEnabled} /> : <></>}
+        {/* No Telegram either: the card would otherwise be a title, a sentence and
+            a dangling gap. Say who can let them in instead of dead-ending. */}
+        {telegramEnabled ? (
+          <TelegramSignIn enabled={telegramEnabled} />
+        ) : (
+          <p className="rounded-xl bg-muted/60 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+            {t("register.disabledAskAdmin")}
+          </p>
+        )}
       </AuthShell>
     );
   }
@@ -121,12 +133,14 @@ export default function RegisterPage() {
           <Input
             id="email"
             type="email"
-            placeholder="you@example.com"
+            placeholder={t("emailPlaceholder")}
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             disabled={loading}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? "signup-error" : undefined}
             className={AUTH_FIELD}
           />
         </div>
@@ -141,9 +155,16 @@ export default function RegisterPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={8}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? "signup-error" : undefined}
             className={AUTH_FIELD}
           />
         </div>
+        {error && (
+          <p id="signup-error" role="alert" className="text-sm text-destructive-text">
+            {error}
+          </p>
+        )}
         <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl text-[15px]">
           {loading ? t("register.submitting") : t("register.submit")}
         </Button>

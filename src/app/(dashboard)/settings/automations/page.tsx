@@ -10,7 +10,7 @@ export default function AutomationsPage() {
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      <p className="-mt-6 flex items-center gap-1.5 text-xs text-muted-foreground/80">
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground/80">
         <MessageSquare className="h-3 w-3" />
         {t("chatHint")}
       </p>

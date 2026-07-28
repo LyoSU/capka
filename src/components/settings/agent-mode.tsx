@@ -90,7 +90,7 @@ export function AgentModeSection({
           At org scope it's a narrower claim — a project can still supply its own
           text — so it speaks only about chats that have none. */}
       {profile.persona === "replace" && !hasInstructions && (
-        <p className="text-xs text-amber-600 dark:text-amber-500">{t(scope === "org" ? "rawEmptyOrg" : "rawEmpty")}</p>
+        <p className="text-xs text-warning-text">{t(scope === "org" ? "rawEmptyOrg" : "rawEmpty")}</p>
       )}
 
       {/* Says WHY a switch below is immovable, so a capped project doesn't read as

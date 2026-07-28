@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Ban } from "lucide-react";
+import { Ban, Loader2, RotateCw } from "lucide-react";
+import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,17 @@ export default function SuspendedPage() {
     router.push("/login");
   };
 
+  // Same reason as the pending screen: the refresh used to produce an identical
+  // page, which reads as a dead button to someone waiting to be let back in.
+  const [checking, startCheck] = useTransition();
+  const asked = useRef(false);
+
+  useEffect(() => {
+    if (checking || !asked.current) return;
+    asked.current = false;
+    toast.info(t("stillWaiting"));
+  }, [checking, t]);
+
   return (
     <AuthShell
       title={t("title")}
@@ -37,7 +50,16 @@ export default function SuspendedPage() {
           <Ban className="h-6 w-6 text-warning-text" />
         </div>
         <p className="text-sm text-muted-foreground">{t("hint")}</p>
-        <Button variant="outline" size="sm" onClick={() => router.refresh()}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={checking}
+          onClick={() => {
+            asked.current = true;
+            startCheck(() => router.refresh());
+          }}
+        >
+          {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
           {t("recheck")}
         </Button>
       </div>

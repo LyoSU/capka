@@ -4,9 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { MessagesSquare } from "lucide-react";
 import { toast } from "sonner";
 
 import { ChatMessage } from "@/components/chat/message";
+import { EmptyState } from "@/components/shared/empty-state";
 import { ClawMark } from "@/components/brand/claw-mark";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -75,6 +77,9 @@ export function SharedChatView({
 
       <main className="flex-1 overflow-y-auto pb-24 pt-6 [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto max-w-3xl px-2 md:px-4 lg:max-w-4xl">
+          {/* A conversation can be published before anything is said in it, and
+              the header alone over blank space reads as a page that failed. */}
+          {messages.length === 0 && <EmptyState icon={MessagesSquare} title={t("noMessages")} />}
           {messages.map((m) => {
             const msg = m as { id: string; role: string };
             return (

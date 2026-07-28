@@ -42,6 +42,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { PluginIcon } from "@/components/plugin-icon";
+import { SettingsEmpty, SettingsError } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 
@@ -143,7 +144,7 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
         toast.success(t("addSuccess", { name: data.name ?? "" }));
         await fetchSkills();
       } else {
-        toast.error(data.error || t("addFailed"));
+        toast.error(t("addFailed"));
       }
     } catch {
       toast.error(t("addFailed"));
@@ -282,9 +283,7 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
         </div>
       )}
 
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</div>
-      )}
+      {error && <SettingsError message={error} />}
 
       {loading && (
         <div className="space-y-2">
@@ -296,20 +295,16 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
 
       {/* Empty state — teaches what skills are + where they come from */}
       {!loading && total === 0 && (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed py-12 text-center">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
-            <Sparkles className="h-5 w-5 text-muted-foreground" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">{t("emptyTitle")}</p>
-            <p className="mx-auto max-w-xs text-sm text-muted-foreground">{t("emptyHint")}</p>
-          </div>
-          {isAdmin && (
+        <SettingsEmpty
+          icon={Sparkles}
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
+          action={isAdmin ? (
             <Link href="/settings/skills?tab=marketplace" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
               <Store className="mr-1.5 h-4 w-4" /> {t("browseMarketplace")}
             </Link>
-          )}
-        </div>
+          ) : undefined}
+        />
       )}
 
       {!loading && total > 0 && groups.length === 0 && (

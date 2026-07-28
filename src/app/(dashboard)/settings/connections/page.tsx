@@ -3,13 +3,18 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { PointerEvent, KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
-import { SettingsPage } from "@/components/settings/shell";
+import {
+  SettingsPage,
+  SettingsSection,
+  SettingsGroup,
+  SettingsEmpty,
+  SettingsError,
+} from "@/components/settings/shell";
 import { Loader2, Unplug } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ConnectionRow, type ProviderConfig } from "@/components/settings/connection-row";
 import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
@@ -269,13 +274,7 @@ export default function ConnectionsPage() {
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      <Separator />
-
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
+      {error && <SettingsError message={error} />}
 
       {/* Provider list — compact, draggable rows that expand to full settings. */}
       <div className="space-y-2">
@@ -289,13 +288,7 @@ export default function ConnectionsPage() {
           ))}
 
         {!loading && configs.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-3 rounded-xl bg-muted/50 p-3">
-              <Unplug className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <p className="text-sm text-muted-foreground">{t("empty")}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{t("emptyHint")}</p>
-          </div>
+          <SettingsEmpty icon={Unplug} title={t("empty")} hint={t("emptyHint")} />
         )}
 
         {!loading &&
@@ -335,13 +328,8 @@ export default function ConnectionsPage() {
       {/* Model filter — global governance, admin only. Lives here because it
           shapes which models the picker offers across every connection. */}
       {isAdmin && !minCtx.loading && (
-        <>
-          <Separator />
-          <div>
-            <h2 className="text-base font-medium">{t("modelFilter")}</h2>
-            <p className="text-sm text-muted-foreground">{t("modelFilterDesc")}</p>
-          </div>
-          <div className="divide-y overflow-hidden rounded-lg border">
+        <SettingsSection title={t("modelFilter")} description={t("modelFilterDesc")}>
+          <SettingsGroup>
             <div className="space-y-2 p-3.5">
               <label className="text-sm font-medium">{t("minContext")}</label>
               <div className="flex items-center gap-2">
@@ -404,8 +392,8 @@ export default function ConnectionsPage() {
                 {t("resyncModelsButton")}
               </Button>
             </div>
-          </div>
-        </>
+          </SettingsGroup>
+        </SettingsSection>
       )}
 
       <ConfirmDialog

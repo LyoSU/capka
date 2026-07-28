@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { SettingsEmpty, SettingsSkeleton } from "@/components/settings/shell";
 
 interface Server { id: string; name: string; url: string | null; scope: "system" | "user" | "project"; enabled: boolean; authKind: "token" | "oauth"; transport: "http" | "sse" | "stdio" }
 type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
@@ -285,7 +286,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
         await load();
         // OAuth connector → walk the user straight into sign-in.
         if (data.authKind === "oauth" && data.id) window.location.href = `/api/mcp/oauth/start?serverId=${encodeURIComponent(data.id)}`;
-      } else toast.error(data.error || t("addFailed"));
+      } else toast.error(t("addFailed"));
     } finally { setSaving(false); }
   };
 
@@ -490,12 +491,9 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
         </div>
       )}
 
-      {loading && <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
+      {loading && <SettingsSkeleton rows={3} header={false} />}
       {!loading && servers.length === 0 && (
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
-          <Plug className="h-5 w-5 text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">{t("empty")}</p>
-        </div>
+        <SettingsEmpty icon={Plug} title={t("empty")} hint={t("emptyHint")} />
       )}
       {!loading && servers.map((s) => {
         const h = health[s.id];

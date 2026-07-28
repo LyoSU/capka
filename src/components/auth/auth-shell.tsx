@@ -60,7 +60,10 @@ export function AuthShell({
             href={REPO_URL}
             target="_blank"
             rel="noreferrer"
-            className="mt-7 inline-flex w-full items-center justify-center gap-1.5 text-xs text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+            // Full-strength muted, not /70: at 12px the dimmed variant composited
+            // to roughly 3:1 on the card in both themes, under the 4.5:1 that text
+            // this small needs. Hover already carries the emphasis.
+            className="mt-7 inline-flex w-full items-center justify-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <Github className="size-3.5" />
             {t("openSourceShort")}

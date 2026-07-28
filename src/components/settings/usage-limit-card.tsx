@@ -61,18 +61,22 @@ export function UsageLimitCard() {
   const label = (w: WindowStatus) => t(`window.${w.window}`);
 
   return (
-    <div className="space-y-3 rounded-lg border p-4">
+    // Heading OUTSIDE the card, card geometry matching SettingsGroup — the house
+    // rule (see shell.tsx). The heading can't move to the consumer page's
+    // SettingsSection: this widget renders itself away when there's nothing to
+    // report, and a section title left behind would head an empty gap.
+    <section className="space-y-3">
       <div className="flex items-center gap-2">
         <Gauge className="h-4 w-4 text-muted-foreground" />
         <h3 className="text-sm font-medium">{t("title")}</h3>
         {billing.limits?.blocked && (
-          <span className="ml-auto rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+          <span className="ml-auto rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive-text">
             {t("reached")}
           </span>
         )}
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-3 rounded-xl border bg-card px-4 py-3.5">
         {capped.map((w) => {
           const committedPct = w.limit ? Math.min(999, Math.round((w.committed / w.limit) * 100)) : 0;
           const reservedPct = w.limit ? Math.round((w.reserved / w.limit) * 100) : 0;
@@ -93,7 +97,7 @@ export function UsageLimitCard() {
         })}
       </div>
 
-      <p className="text-xs text-muted-foreground">{t("hint")}</p>
-    </div>
+      <p className="text-xs leading-relaxed text-muted-foreground">{t("hint")}</p>
+    </section>
   );
 }

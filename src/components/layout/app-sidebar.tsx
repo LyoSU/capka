@@ -55,6 +55,7 @@ import { ChatSearch } from "@/components/chat/chat-search";
 import { ChatContextMenu } from "@/components/chat/chat-context-menu";
 import { cn } from "@/lib/utils";
 import { useLongPress } from "@/hooks/use-long-press";
+import { useShortcutLabel } from "@/hooks/use-shortcut-label";
 import { haptic } from "@/lib/haptics";
 
 type ChatItem = {
@@ -251,6 +252,7 @@ export function AppSidebar() {
   const tTheme = useTranslations("theme");
   const { toggleSidebar, state: sidebarState, setOpenMobile, openMobile, isMobile } = useSidebar();
   const { theme, setTheme } = useTheme();
+  const shortcut = useShortcutLabel();
   const { data: session } = authClient.useSession();
   const signOut = useCallback(async () => {
     await authClient.signOut();
@@ -764,9 +766,7 @@ export function AppSidebar() {
             >
               <Search className="size-4" />
               {t("search")}
-              <DropdownMenuShortcut>
-                {typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘K" : "Ctrl+K"}
-              </DropdownMenuShortcut>
+              <DropdownMenuShortcut>{shortcut("K")}</DropdownMenuShortcut>
             </DropdownMenuItem>
             {/* No Projects link here: the sidebar has a Projects section two
                 inches up, with the same "all projects" link inside it. */}

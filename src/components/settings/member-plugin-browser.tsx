@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, Download, Check, Search } from "lucide-react";
+import { Loader2, Download, Check, Search, Store } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PluginIcon } from "@/components/plugin-icon";
+import { SettingsEmpty } from "@/components/settings/shell";
 
 interface Marketplace { id: string; name: string; owner: string | null }
 interface CatalogItem {
@@ -66,7 +67,7 @@ export default function MemberPluginBrowser() {
         toast.success(t("installed", { skills: (m.skills ?? []).length, connectors: (m.connectors ?? []).length }));
         for (const note of m.notes ?? []) toast.message(note);
         await loadCatalog(selected);
-      } else toast.error(d.error || t("installFailed"));
+      } else toast.error(t("installFailed"));
     } catch {
       toast.error(t("installFailed"));
     } finally {
@@ -76,11 +77,7 @@ export default function MemberPluginBrowser() {
 
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
   if (!markets.length) {
-    return (
-      <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-center">
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      </div>
-    );
+    return <SettingsEmpty icon={Store} title={t("empty")} hint={t("emptyHint")} />;
   }
 
   const filtered = items.filter((c) => {

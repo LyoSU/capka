@@ -29,7 +29,9 @@ export default function PeoplePage() {
   }, [tabParam]);
 
   return (
-    <SettingsPage title={t("title")} description={t("subtitle")} wide={tab === "people"}>
+    // `wide` unconditionally: it is a property of the page, not of the tab —
+    // deriving it from `tab` snapped the column 672px→1024px on every switch.
+    <SettingsPage title={t("title")} description={t("subtitle")} wide>
       <SettingsTabs
         value={tab}
         onChange={setTab}

@@ -4,8 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
-import { Plus, Pencil, Trash2, FolderKanban, MessageSquare, ChevronRight } from "lucide-react";
+import { Plus, Pencil, Trash2, FolderKanban, MessageSquare, ChevronRight, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/shared/empty-state";
 import { ProjectDialog, type Project } from "@/components/projects/project-dialog";
 import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -16,14 +18,25 @@ export default function ProjectsPage() {
   const locale = useLocale();
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
+  // Three outcomes, not two. The list used to start as `[]`, so everyone saw
+  // "you have no projects yet" for one round-trip — and a failed request left
+  // that same sentence on screen permanently, telling people with eight
+  // projects that they had none.
+  const [state, setState] = useState<"loading" | "error" | "ready">("loading");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   const fetchProjects = useCallback(() => {
     fetch("/api/projects")
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setProjects)
-      .catch(() => {});
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
+      .then((rows) => {
+        setProjects(rows);
+        setState("ready");
+      })
+      .catch(() => setState("error"));
   }, []);
 
   useEffect(() => {
@@ -34,8 +47,7 @@ export default function ProjectsPage() {
     setDialogOpen(true);
   }
 
-  function formatDate(d: string | null | undefined) {
-    if (!d) return "—";
+  function formatDate(d: string) {
     return new Date(d).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" });
   }
 
@@ -57,19 +69,37 @@ export default function ProjectsPage() {
         </Button>
       </div>
 
-      {projects.length === 0 ? (
-        <div className="animate-blur-rise flex flex-col items-center justify-center py-20 text-center">
-          <div className="mb-4 grid h-14 w-14 place-items-center rounded-2xl border bg-card shadow-sm">
-            <FolderKanban className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <p className="mb-5 max-w-sm text-sm text-muted-foreground text-pretty">
-            {t("empty")}
-          </p>
+      {state === "loading" ? (
+        // Rows in the shape of the real ones, inside the real container: the list
+        // lands in place instead of replacing a centred spinner from a different
+        // height.
+        <div className="divide-y overflow-hidden rounded-xl border bg-card" aria-hidden>
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="space-y-2 px-4 py-3.5">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+          ))}
+        </div>
+      ) : state === "error" ? (
+        <EmptyState icon={FolderKanban} title={t("loadError")} hint={t("loadErrorHint")} className="py-16">
+          <Button variant="outline" size="sm" onClick={() => { setState("loading"); fetchProjects(); }}>
+            <RotateCw className="h-4 w-4" />
+            {tc("retry")}
+          </Button>
+        </EmptyState>
+      ) : projects.length === 0 ? (
+        <EmptyState
+          icon={FolderKanban}
+          title={t("empty")}
+          hint={t("emptyHint")}
+          className="animate-blur-rise py-16"
+        >
           <Button size="sm" onClick={handleCreate}>
             <Plus className="h-4 w-4" />
             {t("create")}
           </Button>
-        </div>
+        </EmptyState>
       ) : (
         /* A list, not a two-column card grid. Projects differ by one line of text,
            so cards spent a lot of border and whitespace making eight of them look
@@ -90,7 +120,11 @@ export default function ProjectsPage() {
                     <MessageSquare className="h-3 w-3" />
                     {t("chatCount", { n: project.chatCount ?? 0 })}
                   </span>
-                  <span className="truncate">{t("lastChat", { date: formatDate(project.lastChatAt) })}</span>
+                  {/* A bare em dash is developer shorthand; "no chats yet" is the
+                      sentence the reader is actually owed. */}
+                  <span className="truncate">
+                    {project.lastChatAt ? t("lastChat", { date: formatDate(project.lastChatAt) }) : t("noChatsYet")}
+                  </span>
                 </p>
               </Link>
               {/* Revealed on hover, always present for keyboard and touch. */}

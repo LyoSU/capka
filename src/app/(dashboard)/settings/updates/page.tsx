@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { SettingsPage } from "@/components/settings/shell";
-import { ArrowUpCircle, Check, CheckCircle2, Copy, ExternalLink, Loader2 } from "lucide-react";
+import {
+  SettingsPage,
+  SettingsSection,
+  SettingsGroup,
+  SettingsRow,
+  SettingsSkeleton,
+  SettingsEmpty,
+} from "@/components/settings/shell";
+import { ArrowUpCircle, Check, CheckCircle2, Copy, ExternalLink, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Markdown } from "@/components/chat/markdown";
-import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useSetting } from "@/hooks/use-setting";
@@ -49,16 +56,14 @@ export default function UpdatesSettingsPage() {
   }, [isAdmin]);
 
   if (!isAdmin) {
-    return <p className="text-sm text-muted-foreground">{t("adminOnly")}</p>;
-  }
-
-  if (loading) {
     return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
+      <SettingsPage title={t("title")} description={t("subtitle")}>
+        <SettingsEmpty icon={Lock} title={t("adminOnly")} hint={t("adminOnlyHint")} />
+      </SettingsPage>
     );
   }
+
+  if (loading) return <SettingsSkeleton />;
 
   const copy = async () => {
     try {
@@ -89,8 +94,6 @@ export default function UpdatesSettingsPage() {
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      <Separator />
-
       {/* Version state */}
       <div className="rounded-lg border p-4">
         <div className="flex items-center justify-between">
@@ -148,32 +151,25 @@ export default function UpdatesSettingsPage() {
       </div>
 
       {/* How to update */}
-      <div>
-        <h3 className="text-sm font-medium">{t("howTo")}</h3>
-        <p className="text-sm text-muted-foreground">{t("howToHint")}</p>
-        <div className="mt-2 flex items-center gap-2 rounded-lg border bg-muted/30 p-2 pl-3">
+      <SettingsSection title={t("howTo")} description={t("howToHint")}>
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-2 pl-3">
           <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs">{UPDATE_CMD}</code>
-          <button
-            type="button"
-            onClick={copy}
-            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
+          <Button variant="ghost" size="sm" onClick={copy} className="shrink-0 text-muted-foreground">
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? t("copied") : t("copy")}
-          </button>
+          </Button>
         </div>
-      </div>
-
-      <Separator />
+      </SettingsSection>
 
       {/* Auto-check toggle */}
-      <div className="flex items-center justify-between rounded-lg border p-4">
-        <div className="pr-4">
-          <p className="text-sm font-medium">{t("autoCheck")}</p>
-          <p className="text-xs text-muted-foreground">{t("autoCheckHint")}</p>
-        </div>
-        <Switch checked={check.value !== "false"} onCheckedChange={toggleCheck} />
-      </div>
+      <SettingsGroup>
+        <SettingsRow
+          title={t("autoCheck")}
+          hint={t("autoCheckHint")}
+          control={<Switch checked={check.value !== "false"} onCheckedChange={toggleCheck} />}
+          onLabelClick={() => toggleCheck(check.value === "false")}
+        />
+      </SettingsGroup>
     </SettingsPage>
   );
 }

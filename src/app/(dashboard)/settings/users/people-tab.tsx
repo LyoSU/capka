@@ -3,11 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
-import { Shield, ShieldCheck, Eye, Loader2, Users, Search, UserCheck, UserX, Clock } from "lucide-react";
+import { Shield, ShieldCheck, Eye, Users, Search, UserCheck, UserX, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { SettingsEmpty, SettingsError, SettingsSkeleton } from "@/components/settings/shell";
 import { UserDrawer, type AdminUser, type Tier } from "./user-drawer";
 import { money, relTime } from "./format";
 
@@ -37,11 +42,9 @@ export function PeopleTab() {
         return r.json();
       })
       .then((data) => { setUsers(data.users ?? []); setTiers(data.tiers ?? []); })
-      .catch((e) => {
-        const forbidden = e.message === "forbidden";
-        setError(forbidden ? t("adminRequired") : t("loadError"));
-        toast.error(forbidden ? t("adminRequired") : t("loadFailed"));
-      })
+      // Inline only: a load failure has to keep saying so, and a toast that says
+      // the same thing three seconds longer just reports one fault twice.
+      .catch((e) => setError(e.message === "forbidden" ? t("adminRequired") : t("loadError")))
       .finally(() => setLoading(false)), [t]);
 
   useEffect(() => { load(); }, [load]);
@@ -90,9 +93,7 @@ export function PeopleTab() {
     return Number.isFinite(n) && n >= 0 ? n : null;
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
-  }
+  if (loading) return <SettingsSkeleton rows={4} wide header={false} />;
 
   const openUser = users.find((u) => u.id === openId) ?? null;
 
@@ -124,9 +125,7 @@ export function PeopleTab() {
         </ToggleGroup>
       )}
 
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</div>
-      )}
+      {error && <SettingsError message={error} />}
 
       {/* Awaiting approval — the thing that needs an admin's action, up top. */}
       {pending.length > 0 && (
@@ -147,9 +146,30 @@ export function PeopleTab() {
                   <Button size="sm" onClick={() => approve(u.id)} disabled={updating === u.id}>
                     <UserCheck className="mr-1 h-3.5 w-3.5" />{t("approve")}
                   </Button>
-                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => reject(u.id)} disabled={updating === u.id}>
-                    <UserX className="mr-1 h-3.5 w-3.5" />{t("reject")}
-                  </Button>
+                  {/* Reject deletes the account outright (same endpoint as Remove in
+                      the drawer), so it asks first — a misplaced click here used to
+                      be unrecoverable. */}
+                  <AlertDialog>
+                    <AlertDialogTrigger
+                      render={
+                        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={updating === u.id}>
+                          <UserX className="mr-1 h-3.5 w-3.5" />{t("reject")}
+                        </Button>
+                      }
+                    />
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t("rejectTitle", { name: u.name || u.email })}</AlertDialogTitle>
+                        <AlertDialogDescription>{t("rejectWarn")}</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => reject(u.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          {t("reject")}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </div>
             ))}
@@ -157,7 +177,14 @@ export function PeopleTab() {
         </div>
       )}
 
-      {/* Active members — five zones: person · access · usage · budget · status. */}
+      {/* Active members — five zones: person · access · usage · budget · status.
+          An empty list replaces the table rather than sitting inside it: a header
+          row over nothing reads as "the data failed to load". */}
+      {active.length === 0 ? (
+        query
+          ? <SettingsEmpty icon={Search} title={t("noMatches")} hint={t("noMatchesHint")} />
+          : <SettingsEmpty icon={Users} title={t("empty")} hint={t("emptyHint")} />
+      ) : (
       <div className="overflow-hidden rounded-lg border">
         <div className="hidden grid-cols-[1fr_9rem_5rem_9rem_6rem] items-center gap-4 border-b px-4 py-2.5 text-xs font-medium text-muted-foreground sm:grid">
           <span>{t("colUser")}</span>
@@ -228,13 +255,8 @@ export function PeopleTab() {
             </div>
           );
         })}
-        {active.length === 0 && (
-          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-            <Users className="h-5 w-5 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">{query ? t("noMatches") : t("empty")}</p>
-          </div>
-        )}
       </div>
+      )}
 
       <p className="text-xs text-muted-foreground/80">{t("spendHint")}</p>
 

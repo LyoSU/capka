@@ -27,6 +27,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { useTheme } from "@/components/providers";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useBilling } from "@/hooks/use-billing";
+import { useShortcutLabel } from "@/hooks/use-shortcut-label";
 import { SETTINGS_DIRECTORY, visibleSettings } from "@/lib/settings-directory";
 
 export function CommandPalette() {
@@ -42,6 +43,7 @@ export function CommandPalette() {
   const router = useRouter();
   const { toggleSidebar } = useSidebar();
   const { theme, setTheme } = useTheme();
+  const key = useShortcutLabel();
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -92,7 +94,7 @@ export function CommandPalette() {
           <CommandItem onSelect={() => run(() => router.push(`/chat/${nanoid()}`))}>
             <MessageSquarePlus className="mr-2 h-4 w-4" />
             {t("newChat")}
-            <CommandShortcut>⌘N</CommandShortcut>
+            <CommandShortcut>{key("N")}</CommandShortcut>
           </CommandItem>
         </CommandGroup>
 
@@ -132,7 +134,7 @@ export function CommandPalette() {
           <CommandItem onSelect={() => run(toggleSidebar)}>
             <PanelLeft className="mr-2 h-4 w-4" />
             {t("toggleSidebar")}
-            <CommandShortcut>⌘B</CommandShortcut>
+            <CommandShortcut>{key("B")}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => run(cycleTheme)}>
             <Moon className="mr-2 h-4 w-4" />
@@ -146,22 +148,22 @@ export function CommandPalette() {
           <CommandItem disabled>
             <Keyboard className="mr-2 h-4 w-4" />
             {t("commandPalette")}
-            <CommandShortcut>⌘K</CommandShortcut>
+            <CommandShortcut>{key("K")}</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
             <MessageSquarePlus className="mr-2 h-4 w-4" />
             {t("newChat")}
-            <CommandShortcut>⌘N</CommandShortcut>
+            <CommandShortcut>{key("N")}</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
             <PanelLeft className="mr-2 h-4 w-4" />
             {t("toggleSidebar")}
-            <CommandShortcut>⌘B</CommandShortcut>
+            <CommandShortcut>{key("B")}</CommandShortcut>
           </CommandItem>
           <CommandItem disabled>
             <Search className="mr-2 h-4 w-4" />
             {t("searchChats")}
-            <CommandShortcut>⌘⇧F</CommandShortcut>
+            <CommandShortcut>{key("F", true)}</CommandShortcut>
           </CommandItem>
         </CommandGroup>
       </CommandList>

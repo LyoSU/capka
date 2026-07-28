@@ -85,13 +85,21 @@ export function ChatContextMenu({
       ? `${window.location.origin}/share/${shareToken}`
       : "";
 
+  // Rename, pin and archive all land here. The response used to go unchecked, so
+  // a rejected rename looked exactly like a successful one: the menu closed, the
+  // old title stayed, and nothing said why.
   async function patchChat(data: Record<string, unknown>) {
-    await fetch(`/api/chats/${chat.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    onUpdate();
+    try {
+      const res = await fetch(`/api/chats/${chat.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      onUpdate();
+    } catch {
+      toast.error(t("menu.updateFailed"));
+    }
   }
 
   // Publish/unpublish. The PATCH mints (and returns) a stable share token the
@@ -122,14 +130,27 @@ export function ChatContextMenu({
 
   async function copyShareUrl() {
     if (!shareUrl) return;
-    await navigator.clipboard.writeText(shareUrl);
+    // A denied clipboard permission rejects here; unguarded it was an uncaught
+    // rejection plus a "Copied" toast for something that wasn't copied.
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+    } catch {
+      toast.error(t("share.copyFailed"));
+      return;
+    }
     setCopied(true);
     toast.success(t("share.copied"));
     setTimeout(() => setCopied(false), 2000);
   }
 
   async function deleteChat() {
-    await fetch(`/api/chats/${chat.id}`, { method: "DELETE" });
+    try {
+      const res = await fetch(`/api/chats/${chat.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(String(res.status));
+    } catch {
+      toast.error(t("menu.deleteFailed"));
+      return;
+    }
     setDeleteOpen(false);
     onUpdate();
     router.push("/chat");
@@ -158,6 +179,9 @@ export function ChatContextMenu({
         className="w-full px-1"
       >
         <Input
+          // The field replaces the chat row entirely, so without a name a screen
+          // reader announces the old title as a value with no idea what it is.
+          aria-label={t("menu.rename")}
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           onBlur={submitRename}
@@ -277,7 +301,10 @@ export function ChatContextMenu({
             <DialogDescription>{t("share.description")}</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-2">
+          {/* A radiogroup, not three loose buttons: this is the control that
+              decides whether an internal conversation becomes publicly linkable,
+              and selection was conveyed only by a tint and a check glyph. */}
+          <div className="space-y-2" role="radiogroup" aria-label={t("share.title")}>
             {([
               { value: "private", icon: Lock, label: t("share.private"), hint: t("share.privateHint") },
               { value: "link", icon: Globe, label: t("share.link"), hint: t("share.linkHint") },
@@ -289,6 +316,8 @@ export function ChatContextMenu({
                 <button
                   key={opt.value}
                   type="button"
+                  role="radio"
+                  aria-checked={active}
                   disabled={savingVisibility}
                   onClick={() => changeVisibility(opt.value)}
                   className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-60 ${
@@ -308,7 +337,7 @@ export function ChatContextMenu({
 
           {visibility !== "private" && shareUrl && (
             <div className="flex items-center gap-2">
-              <Input readOnly value={shareUrl} onFocus={(e) => e.target.select()} className="text-xs" />
+              <Input aria-label={t("share.title")} readOnly value={shareUrl} onFocus={(e) => e.target.select()} className="text-xs" />
               <Button type="button" variant="outline" size="icon" onClick={copyShareUrl} aria-label={t("share.copy")}>
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>

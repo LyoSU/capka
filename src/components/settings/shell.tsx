@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AlertCircle, Inbox, type LucideIcon } from "lucide-react";
+import { EmptyState } from "@/components/shared/empty-state";
 import { cn } from "@/lib/utils";
 
 /**
@@ -77,13 +79,31 @@ export function SettingsSection({
  * then appeared at a different height, so every settings page visibly jumped
  * once. A skeleton that matches the final layout has nowhere to jump to.
  */
-export function SettingsSkeleton({ rows = 3 }: { rows?: number }) {
+export function SettingsSkeleton({
+  rows = 3,
+  wide,
+  header = true,
+}: {
+  rows?: number;
+  wide?: boolean;
+  /**
+   * Whether to include the ghost title. Off for a skeleton rendered *inside* a
+   * `SettingsPage`, where the real title is already on screen — a grey heading
+   * placeholder directly under it reads as a rendering fault, not as loading.
+   */
+  header?: boolean;
+}) {
   return (
-    <div className="max-w-2xl space-y-10" aria-hidden>
-      <div className="space-y-2">
-        <div className="h-6 w-40 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-72 animate-pulse rounded bg-muted/60" />
-      </div>
+    // `wide` has to mirror SettingsPage: a skeleton fixed at max-w-2xl in front of
+    // a max-w-5xl page snaps sideways the moment the real content lands, which is
+    // the same jump this component exists to prevent — just on the other axis.
+    <div className={cn("space-y-10", wide ? "max-w-5xl" : "max-w-2xl")} aria-hidden>
+      {header && (
+        <div className="space-y-2">
+          <div className="h-6 w-40 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-72 animate-pulse rounded bg-muted/60" />
+        </div>
+      )}
       <div className="space-y-3">
         <div className="h-4 w-24 animate-pulse rounded bg-muted/60" />
         <SettingsGroup>
@@ -111,19 +131,38 @@ export function SettingsSkeleton({ rows = 3 }: { rows?: number }) {
  * for a good reason and nothing needs doing about it.
  */
 export function SettingsEmpty({
+  icon = Inbox,
   title,
   hint,
   action,
 }: {
+  /** Defaults to a neutral tray, so an empty list is never a bare sentence. */
+  icon?: LucideIcon;
   title: string;
   hint?: string;
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center">
-      <p className="text-sm font-medium">{title}</p>
-      {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
-      {action && <div className="mt-2">{action}</div>}
+    <EmptyState icon={icon} title={title} hint={hint} className="rounded-xl border border-dashed">
+      {action}
+    </EmptyState>
+  );
+}
+
+/**
+ * What a section says when its data would not load.
+ *
+ * Sits where the content would have been, rather than in a toast that is gone
+ * three seconds later — a page that failed to load has to keep saying so. Save
+ * failures are the opposite case and stay toasts: the page is still right, one
+ * action wasn't.
+ */
+export function SettingsError({ message, action }: { message: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border border-destructive-border bg-destructive-surface px-4 py-3 text-sm text-destructive-text">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      <p className="min-w-0 flex-1 leading-relaxed">{message}</p>
+      {action}
     </div>
   );
 }

@@ -28,7 +28,13 @@ export function TopBanner({
   dismissLabel?: string;
 }) {
   return (
-    <div className="relative flex items-center justify-center gap-2 border-b border-border bg-muted/40 px-10 py-2 text-sm text-foreground">
+    // role="status": every caller renders this only after an async check resolves,
+    // so the bar appears some seconds into the session. Sighted users see the app
+    // shift; without a live region a screen-reader user was never told at all.
+    <div
+      role="status"
+      className="relative flex items-center justify-center gap-2 border-b border-border bg-muted/40 px-10 py-2 text-sm text-foreground"
+    >
       {icon}
       <span>{children}</span>
       {action && (

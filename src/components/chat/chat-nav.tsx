@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // A right-edge "minimap" of the conversation: one pill per user turn, collapsed
 // to a thin rail and expanding into a jump list. Lets you skim a long chat and
@@ -28,6 +28,17 @@ export function ChatNav({
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Opening with Enter used to leave focus on the trigger, which the same click
+  // turns `opacity-0 pointer-events-none` — the focus ring simply vanished and
+  // the user had to Tab blindly through the list. Keyed on `open` alone, so a
+  // mouse hover (which never sets it) can't steal focus from what you're typing.
+  useEffect(() => {
+    if (!open) return;
+    const at = items.findIndex((it) => it.id === activeId);
+    itemRefs.current[at >= 0 ? at : 0]?.focus();
+  }, [open, items, activeId]);
 
   // Not worth the clutter for a single turn.
   if (items.length < 2) return null;
@@ -40,7 +51,16 @@ export function ChatNav({
           e.stopPropagation();
           setOpen(false);
           triggerRef.current?.focus();
+          return;
         }
+        // A jump list is navigated with arrows, not by tabbing through every
+        // turn of a long conversation.
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        const at = itemRefs.current.indexOf(document.activeElement as HTMLButtonElement);
+        if (at < 0) return;
+        e.preventDefault();
+        const next = e.key === "ArrowDown" ? at + 1 : at - 1;
+        itemRefs.current[(next + items.length) % items.length]?.focus();
       }}
       // Close once focus leaves the whole nav (keyboard tab-out); staying within
       // it (rail → list items) keeps it open.
@@ -64,8 +84,11 @@ export function ChatNav({
         {items.map((it) => (
           <span
             key={it.id}
+            // /25 put these 6px indicators far below the 3:1 that non-text UI
+            // needs, so the collapsed rail's only "where am I" cue was invisible
+            // to low-vision users. Position now reads from width AND weight.
             className={`h-1.5 rounded-full transition-[width,background-color] duration-150 ${
-              it.id === activeId ? "w-6 bg-foreground/70" : "w-3 bg-foreground/25"
+              it.id === activeId ? "w-6 bg-foreground" : "w-3 bg-foreground/45"
             }`}
           />
         ))}
@@ -80,11 +103,12 @@ export function ChatNav({
           open ? "visible opacity-100" : "invisible opacity-0 group-hover:visible group-hover:opacity-100"
         }`}
       >
-        {items.map((it) => {
+        {items.map((it, i) => {
           const active = it.id === activeId;
           return (
             <button
               key={it.id}
+              ref={(el) => { itemRefs.current[i] = el; }}
               type="button"
               onClick={() => {
                 onJump(it.id);
@@ -96,7 +120,7 @@ export function ChatNav({
             >
               <span
                 className={`h-1.5 shrink-0 rounded-full transition-[width,background-color] ${
-                  active ? "w-5 bg-foreground/70" : "w-3 bg-foreground/30"
+                  active ? "w-5 bg-foreground" : "w-3 bg-foreground/45"
                 }`}
               />
               <span className={`truncate text-sm ${active ? "text-foreground" : "text-muted-foreground"}`}>

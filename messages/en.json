@@ -40,7 +40,7 @@
     },
     "llm": {
       "out_of_credits": "The assistant is paused: the AI account is out of credit. Ask your administrator to top it up.",
-      "invalid_key": "The assistant isn't connected right now. Your administrator needs to check the AI provider settings.",
+      "invalid_key": "The assistant isn't connected right now. Your administrator needs to check the connection.",
       "rate_limited": "The assistant is busy right now. Please try again in a few moments.",
       "model_unavailable": "The selected AI model isn't available right now. Try a different model, or ask your administrator.",
       "context_too_long": "This conversation got too long for the model. Start a new chat or shorten your message and try again.",
@@ -90,7 +90,8 @@
     "signOut": "Sign out",
     "search": "Search",
     "theme": "Theme",
-    "account": "Account"
+    "account": "Account",
+    "toggleSidebar": "Show or hide the sidebar"
   },
   "steps": {
     "createdFile": "Created {file}",
@@ -231,10 +232,11 @@
       "importedFrom": "Imported from {service}",
       "queuedFiles": "{count, plural, one {# file} other {# files}}",
       "cancelQueued": "Remove from queue",
-      "contextFull": "Context: {pct}%",
+      "contextFull": "Conversation is {pct}% full",
       "contextTokens": "{used} / {total} tokens",
       "modelGoneBody": "This model isn't available anymore — pick another model to keep chatting",
-      "modelGoneNew": "New chat"
+      "modelGoneNew": "New chat",
+      "contextHint": "When it fills up, I'll summarize the earlier part so we can keep going."
     },
     "menu": {
       "rename": "Rename",
@@ -247,7 +249,9 @@
       "deleteDescription": "This will permanently delete “{title}” and all its messages.",
       "options": "Chat actions",
       "share": "Share",
-      "moveToProject": "Move to project"
+      "moveToProject": "Move to project",
+      "updateFailed": "Couldn't save that change",
+      "deleteFailed": "Couldn't delete the chat"
     },
     "share": {
       "title": "Share chat",
@@ -269,7 +273,9 @@
       "signInToClone": "Sign in to make a copy",
       "gateTitle": "This chat is for signed-in users only",
       "gateDescription": "Sign in to your account to view this conversation",
-      "signIn": "Sign in"
+      "signIn": "Sign in",
+      "noMessages": "Nothing in this conversation yet",
+      "copyFailed": "Couldn't copy the link"
     },
     "taskStatus": {
       "thinking": "Thinking…",
@@ -349,7 +355,7 @@
       "cancel": "Cancel",
       "retry": "Try again",
       "error": {
-        "NETWORK_DISABLED": "Importing from {service} needs sandbox network access, which is turned off on this instance. Ask your admin, or paste the conversation text instead.",
+        "NETWORK_DISABLED": "Importing from {service} needs internet access, which is turned off on this instance. Ask your administrator, or paste the conversation text instead.",
         "PLAYWRIGHT_MISSING": "This instance can't open external pages to import them. Ask your admin, or paste the conversation text instead.",
         "BLOCKED": "{service} blocked the import. Try again in a moment, or paste the conversation text instead.",
         "NOT_FOUND": "That share link didn't load — check that it's public and correct.",
@@ -516,7 +522,12 @@
       "restore": "Restore chat",
       "delete": "Delete permanently",
       "confirmTitle": "Delete chat permanently?",
-      "confirmDescription": "This action cannot be undone. The chat and all its messages will be permanently deleted."
+      "confirmDescription": "This action cannot be undone. The chat and all its messages will be permanently deleted.",
+      "emptyHint": "Chats you move out of the sidebar end up here.",
+      "loadError": "Couldn't load the archive",
+      "loadErrorHint": "Check your connection and try again.",
+      "restoreFailed": "Couldn't restore the chat",
+      "deleteFailed": "Couldn't delete the chat"
     },
     "hook": {
       "loadFailed": "Failed to load messages",
@@ -588,7 +599,7 @@
     "subtitle": "Organize your chats with custom instructions and models.",
     "new": "New project",
     "create": "Create project",
-    "empty": "No projects yet. Create one to organize your chats.",
+    "empty": "No projects yet",
     "selector": {
       "manage": "Manage projects"
     },
@@ -678,7 +689,8 @@
       "dangerHint": "Workspace files will be deleted. Chats will be kept.",
       "delete": "Delete project",
       "menuOptions": "Project options",
-      "openSettings": "Open settings"
+      "openSettings": "Open settings",
+      "empty": "No chats here yet"
     },
     "delete": {
       "title": "Delete “{name}”?",
@@ -708,7 +720,11 @@
       "error": "Could not move the chat.",
       "moved": "Chat moved",
       "moveButton": "Move"
-    }
+    },
+    "emptyHint": "Create one to keep the chats and files of a topic together.",
+    "loadError": "Couldn't load your projects",
+    "loadErrorHint": "Check your connection and try again.",
+    "noChatsYet": "No chats yet"
   },
   "settings": {
     "title": "Settings",
@@ -740,7 +756,9 @@
       "colSpend": "30-day spend",
       "colActions": "",
       "empty": "No users yet",
+      "emptyHint": "People appear here once they sign in, or after you approve their request to join.",
       "noMatches": "No one matches your search",
+      "noMatchesHint": "Try a different name or email address.",
       "adminRequired": "Admin access required",
       "loadFailed": "Failed to load users",
       "loadError": "Could not load users. Please refresh the page.",
@@ -763,6 +781,8 @@
       "remove": "Remove",
       "removeTitle": "Remove {name}?",
       "removeWarn": "This permanently deletes their account, chats, and files. This can't be undone.",
+      "rejectTitle": "Reject {name}?",
+      "rejectWarn": "Their request is declined and the account is deleted. They can sign up again, but nothing is kept. This can't be undone.",
       "cancel": "Cancel",
       "spendHint": "Spend is this person's usage on the organization's shared key over the last 30 days. Own-key usage isn't counted.",
       "filterAll": "All",
@@ -891,6 +911,7 @@
       "enterToken": "Enter a bot token",
       "botConnected": "Bot @{username} connected!",
       "saveTokenFailed": "Failed to save token",
+      "botStartWarning": "Token saved, but the bot didn't start. Restart Capka to try again.",
       "generateFailed": "Failed to generate link code",
       "copied": "Copied to clipboard",
       "telegram": {
@@ -913,6 +934,7 @@
         "scanQr": "…or scan this from another device",
         "orManually": "Not working? Send this to the bot by hand:",
         "sendCommand": "Send this command to the bot in Telegram:",
+        "copyCommand": "Copy the link command",
         "codeExpires": "Code expires in 5 minutes",
         "doneRefresh": "Done / Refresh status",
         "generateCode": "Generate link code",
@@ -943,6 +965,7 @@
       "title": "Keys & limits",
       "subtitle": "Control where provider keys come from and how much users may spend on the shared key.",
       "saveFailed": "Couldn't save",
+      "loadError": "Couldn't load these settings. Please refresh the page.",
       "mode": {
         "title": "Provider key mode",
         "desc": "Decides whether users run on the admin's shared key, their own, or both",
@@ -963,7 +986,8 @@
         "title": "Shared-key spending limits",
         "desc": "Per-user budget across three windows. Leave a field empty for no limit. Own keys are never limited.",
         "hint": "Amounts in $. When a window is exhausted, new requests are blocked while running ones finish.",
-        "ownOnlyNote": "In own-only mode there's no shared key, so limits don't apply.",
+        "ownOnlyTitle": "Nothing to limit here",
+        "ownOnlyNote": "In own-only mode there's no shared key, so limits don't apply. Switch the key mode above to set them.",
         "window": {
           "h5": "Last 5 hours",
           "d7": "Last 7 days",
@@ -977,7 +1001,8 @@
       },
       "tiers": {
         "title": "User tiers",
-        "soon": "Limits are the same for everyone for now (the default tier). Per-user tiers are coming later."
+        "emptyTitle": "Everyone is on the default tier",
+        "soon": "Limits are the same for everyone for now. Per-user tiers are coming in a later release."
       }
     },
     "connections": {
@@ -1101,7 +1126,10 @@
       "lastActive": "last active {ago}",
       "unknownUser": "Unknown user",
       "empty": "No usage recorded yet",
+      "emptyHint": "Once people start chatting, spend and activity for this period show up here.",
       "emptyFiltered": "No activity matches these filters",
+      "emptyFilteredHint": "Remove a filter or pick a longer period.",
+      "removeFilter": "Remove filter",
       "totalTokens": "Total tokens",
       "tokenSplit": "{input} in · {output} out",
       "cacheRate": "Cache hit rate",
@@ -1120,7 +1148,9 @@
       "tokensSummary": "{tokens} tokens",
       "searchUser": "Search member",
       "noRecentForUser": "No recent activity for this member",
+      "noRecentForUserHint": "They spent nothing in this period. Pick someone else, or a longer period.",
       "noMatches": "No one matches your search",
+      "noMatchesHint": "Try a different name, or clear the search.",
       "attn": {
         "title": "Needs attention",
         "budgetOverrun": "At the current pace, monthly spend is projected at {projected}, over the {budget} budget.",
@@ -1181,7 +1211,8 @@
       "installed": {
         "loadError": "Couldn't load installed plugins",
         "actionFailed": "Something went wrong. Try again.",
-        "empty": "No plugins installed yet. Open Marketplace to add one.",
+        "empty": "No plugins installed yet",
+        "emptyHint": "A plugin bundles skills and connectors together. Browse the marketplace to add one.",
         "counts": "{skills, plural, one {# skill} other {# skills}} · {connectors, plural, one {# connector} other {# connectors}}",
         "by": "by {author}",
         "enable": "Enable",
@@ -1294,6 +1325,7 @@
       "deleted": "Connector removed",
       "deleteFailed": "Couldn't remove the connector",
       "empty": "No connectors yet",
+      "emptyHint": "A connector lets the assistant reach another tool — add one above to get started.",
       "toggleAria": "Toggle {name}",
       "delete": "Remove connector",
       "health": {
@@ -1328,7 +1360,8 @@
       "add": "Add",
       "added": "Marketplace added",
       "addFailed": "Couldn't add that marketplace",
-      "empty": "No marketplaces yet. Add one above to browse plugins.",
+      "empty": "No marketplaces yet",
+      "emptyHint": "Paste a marketplace URL above to browse the plugins it offers.",
       "refresh": "Refresh",
       "refreshed": "Marketplace refreshed",
       "refreshFailed": "Couldn't refresh",
@@ -1399,6 +1432,9 @@
       "pickProject": "Choose a project",
       "pickProjectOptional": "Any project (optional)",
       "removeException": "Remove exception",
+      "removeExceptionTitle": "Remove the exception for {name}?",
+      "removeExceptionWarn": "The global rule takes over, which may allow or block this capability for them. You can add the exception again later.",
+      "cancel": "Cancel",
       "checkAccess": "Check access",
       "checkAccessHint": "See what a specific person would be allowed to use.",
       "checkDefault": "Allowed by default — no rule applies.",
@@ -1417,6 +1453,7 @@
       "save": "Save changes",
       "saved": "Saved",
       "saveFailed": "Couldn't save. Please try again.",
+      "unsavedCredentials": "Not saved yet",
       "copied": "Copied",
       "copyRedirect": "Copy redirect URI",
       "telegram": {
@@ -1501,6 +1538,7 @@
       "title": "Updates",
       "subtitle": "Keep Capka up to date with the latest release.",
       "adminOnly": "Only admins can manage updates",
+      "adminOnlyHint": "Ask an administrator of this instance if an update is needed.",
       "running": "Running version",
       "devBuild": "development build",
       "updateAvailable": "{version} available",
@@ -1523,6 +1561,7 @@
       "title": "Activity",
       "subtitle": "A record of admin and configuration changes across the organization.",
       "adminOnly": "Only admins can view activity",
+      "adminOnlyHint": "Ask an administrator of this instance if you need this record.",
       "empty": "Nothing has happened yet",
       "systemActor": "System",
       "today": "Today",
@@ -1714,7 +1753,8 @@
       "saveError": "Could not save provider settings. Please try again.",
       "verifyError": "Could not verify API key. Please check the key and try again.",
       "submit": "Test & save",
-      "submitting": "Testing…"
+      "submitting": "Testing…",
+      "apiKeyPlaceholder": "sk-…"
     },
     "telegram": {
       "title": "Telegram integration",
@@ -1727,7 +1767,8 @@
       "skip": "Skip",
       "submit": "Save & finish",
       "submitting": "Saving…"
-    }
+    },
+    "stepOf": "Step {current} of {total}"
   },
   "commandPalette": {
     "search": "Type a command or search…",
@@ -1775,7 +1816,8 @@
       "signIn": "Sign in",
       "disabledTitle": "Registration disabled",
       "disabledDescription": "New account registration is currently disabled by the administrator.",
-      "backToSignIn": "Back to sign in"
+      "backToSignIn": "Back to sign in",
+      "disabledAskAdmin": "Ask your administrator to create an account for you."
     },
     "orContinueWithEmail": "or continue with email",
     "telegram": {
@@ -1796,15 +1838,18 @@
       "description": "Your account was created and is waiting for approval",
       "hint": "An administrator needs to approve your account before you can start. You'll be able to sign in as soon as they do.",
       "recheck": "Check again",
-      "signOut": "Sign out"
+      "signOut": "Sign out",
+      "stillWaiting": "Not approved yet. The app opens as soon as your administrator adds you."
     },
     "suspended": {
       "title": "Your access is suspended",
       "description": "An administrator has paused your access to this workspace",
       "hint": "Your chats and files are kept. Contact your administrator to have your access restored — you'll be able to sign in again as soon as they do.",
       "recheck": "Check again",
-      "signOut": "Sign out"
-    }
+      "signOut": "Sign out",
+      "stillWaiting": "Access hasn't been restored yet."
+    },
+    "emailPlaceholder": "you@example.com"
   },
   "telegram": {
     "start": "👋 **Welcome to Capka!**\n\nI'm your AI assistant right here in Telegram — I answer questions and work with text, photos and files.\n\nJust send me a message and I'll get going. /new starts a fresh chat.\n\nAlready have a Capka account? Open Capka and connect Telegram in Settings.",
