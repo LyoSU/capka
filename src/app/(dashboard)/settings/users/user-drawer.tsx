@@ -141,13 +141,19 @@ export function UserDrawer({
 
   return (
     <Sheet open={!!user} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-md" side="right">
-        <SheetHeader className="gap-1">
+      <SheetContent className="w-full gap-0 sm:max-w-md" side="right">
+        {/* Only the body scrolls. When the panel itself was the scroll container,
+            everything anchored to it went with the content — the person's name and
+            the sheet's own close button both scrolled out of reach on an account
+            with a few sessions. `pr-12` keeps a long name clear of that button. */}
+        <SheetHeader className="gap-1 border-b pr-12">
           <SheetTitle className="truncate">{shown.name || shown.email}</SheetTitle>
           <SheetDescription className="truncate">{shown.email}</SheetDescription>
         </SheetHeader>
 
-        <div className="flex flex-col gap-6 px-4 pb-8">
+        {/* scrollbar-gutter keeps the reserved track out of the numbers on the
+            right edge instead of overlapping them once the panel overflows. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 [scrollbar-gutter:stable]">
           {/* Overview */}
           <section className="space-y-3">
             <Field label={t("drawerStatus")}>
@@ -160,7 +166,7 @@ export function UserDrawer({
                 disabled={busy}
                 items={{ admin: t("roles.admin"), user: t("roles.user"), viewer: t("roles.viewer") }}
               >
-                <SelectTrigger className="h-8 w-40 text-xs" aria-label={t("changeRole")}>
+                <SelectTrigger className="h-8 max-w-52 text-xs" aria-label={t("changeRole")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -218,7 +224,7 @@ export function UserDrawer({
                 disabled={busy}
                 items={Object.fromEntries([[DEFAULT_TIER, t("defaultTier")], ...tiers.map((x) => [x.id, x.name])])}
               >
-                <SelectTrigger className="h-8 w-40 text-xs" aria-label={t("tierLabel")}>
+                <SelectTrigger className="h-8 max-w-52 text-xs" aria-label={t("tierLabel")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -252,9 +258,18 @@ export function UserDrawer({
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-4 text-sm">
-                  <span>{t("turnsCompleted")}: <span className="font-medium tabular-nums">{detail.completed}</span></span>
-                  <span>{t("turnsFailed")}: <span className="font-medium tabular-nums">{detail.failed}</span></span>
+                {/* Two counts as a pair of tiles rather than one "label: 607  label: 92"
+                    line: the numbers are what an admin scans for, and inline they sat
+                    at whatever x the labels happened to end. */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border px-3 py-2">
+                    <p className="truncate text-xs text-muted-foreground">{t("turnsCompleted")}</p>
+                    <p className="text-sm font-medium tabular-nums">{detail.completed}</p>
+                  </div>
+                  <div className="rounded-lg border px-3 py-2">
+                    <p className="truncate text-xs text-muted-foreground">{t("turnsFailed")}</p>
+                    <p className={`text-sm font-medium tabular-nums ${detail.failed > 0 ? "text-warning-text" : ""}`}>{detail.failed}</p>
+                  </div>
                 </div>
                 {detail.topModels.length > 0 && (
                   <div className="space-y-1">
@@ -357,11 +372,15 @@ export function UserDrawer({
   );
 }
 
+// A label/value row. `min-h-8` holds one rhythm whether the value is plain text,
+// a badge or a select, and the label is the part that gives way when space runs
+// short — a clipped control (the tier name losing its last letters) reads as a
+// rendering bug, a shortened label doesn't.
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      {children}
+    <div className="flex min-h-8 items-center justify-between gap-3">
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{label}</span>
+      <div className="flex shrink-0 items-center">{children}</div>
     </div>
   );
 }

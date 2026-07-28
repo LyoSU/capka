@@ -177,7 +177,7 @@ export function PermissionsTab() {
       )}
 
       <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
-        <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-md">
+        <SheetContent className="w-full gap-0 sm:max-w-md">
           {open && (
             <CapabilityDrawer
               key={`${open.capabilityType}:${open.capabilityKey}`}
@@ -239,12 +239,15 @@ function CapabilityDrawer({
 
   return (
     <>
-      <SheetHeader className="pr-10">
-        <SheetTitle>{item.capabilityKey}</SheetTitle>
+      {/* Header pinned, body scrolled — same split as the people drawer, so the
+          capability's name and the close button stay reachable down a long
+          exception list. */}
+      <SheetHeader className="border-b pr-10">
+        <SheetTitle className="truncate">{item.capabilityKey}</SheetTitle>
         <SheetDescription>{t(item.capabilityType === "skill" ? "typeSkill" : "typeConnector")}</SheetDescription>
       </SheetHeader>
 
-      <div className="space-y-6 p-4 pt-0">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]">
         {/* Global rule */}
         <section className="space-y-2">
           <h3 className="text-sm font-medium">{t("globalRule")}</h3>

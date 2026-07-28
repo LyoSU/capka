@@ -6,6 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The people and permissions drawers keep their title and close button in place while the body scrolls, and the role/tier selects no longer clip their own value.
+
+### Fixed
+
+- Alert dialogs, menus, selects, popovers and tooltips no longer flash back to full opacity for a frame while closing.
+
 ## [0.15.0] - 2026-07-28
 
 ### Added
