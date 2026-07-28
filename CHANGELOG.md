@@ -6,13 +6,26 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Images in the file viewer zoom and pan (wheel, double-click, +/-/0, on-screen controls).
+- Files with no in-app viewer (docx, xlsx, zip, media) now open a pane naming the type and size, offering download or asking the assistant to convert the file into something previewable — clicking them no longer starts an unannounced download.
+- The file browser accepts dragged-and-dropped files, shows each file's modification date, and can delete a file (behind a confirmation).
+- "Copy" in the file viewer's code pane, which previously only existed for code blocks inside a rendered document.
+
 ### Changed
 
+- The file browser shows a breadcrumb trail instead of a lone Back link, skeleton rows instead of a spinner, and a real empty state; its grid lines tiles up evenly at both panel and full width.
+- File type names in the viewer are localized; they were always English.
 - The people and permissions drawers keep their title and close button in place while the body scrolls, and the role/tier selects no longer clip their own value.
 
 ### Fixed
 
+- File type icons and extension badges are legible in the light theme; every accent was a single dark-theme palette step, leaving white-on-colour badges at ~1.6:1.
+- File tiles report their filename to screen readers. They previously announced as unlabelled buttons, or read out the first 600 characters of a text file.
+- A file with no viewer behaves the same in list and grid view; the list did nothing at all when clicked.
 - Alert dialogs, menus, selects, popovers and tooltips no longer flash back to full opacity for a frame while closing.
+- `src/components/chat/file-preview.tsx` is text to git again — a literal NUL byte in a template string had it classified as binary, suppressing its diffs.
 
 ## [0.15.0] - 2026-07-28
 

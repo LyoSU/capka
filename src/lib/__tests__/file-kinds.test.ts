@@ -45,14 +45,31 @@ describe("previewKind", () => {
 
 describe("fileKind", () => {
   it("flags directories as folders", () => {
-    expect(fileKind("src", true).label).toBe("Folder");
+    expect(fileKind("src", true).labelKey).toBe("folder");
   });
   it("broadens icons via MIME for unlisted types", () => {
-    expect(fileKind("clip.mp4").label).toBe("Video");
-    expect(fileKind("song.mp3").label).toBe("Audio");
-    expect(fileKind("bundle.zip").label).toBe("Archive");
+    expect(fileKind("clip.mp4").labelKey).toBe("video");
+    expect(fileKind("song.mp3").labelKey).toBe("audio");
+    expect(fileKind("bundle.zip").labelKey).toBe("archive");
   });
-  it("falls back to the uppercased extension for unknown types", () => {
-    expect(fileKind("data.xyz").label).toBe("XYZ");
+  it("falls back to the generic file label for unknown types", () => {
+    // Deliberately NOT the uppercased extension any more: the chip on the
+    // thumbnail and the filename itself both already show it.
+    expect(fileKind("data.xyz").labelKey).toBe("file");
+  });
+
+  it("pairs every glyph accent per theme but keeps badge fills fixed", () => {
+    // The two fields contrast against different things, so they follow different
+    // rules — and a single-step `color` is exactly the regression that made a code
+    // file's amber icon invisible on the light theme. A badge carries white text,
+    // so a `dark:` variant there would be the bug instead.
+    for (const name of ["a.png", "a.xlsx", "a.pdf", "a.ts", "a.mp4", "a.mp3", "a.zip", "a.xyz"]) {
+      const k = fileKind(name);
+      // Only a numbered palette step needs the pairing; theme tokens
+      // (`text-muted-foreground`, `text-primary/70`) already adapt on their own.
+      if (/-\d00\b/.test(k.color)) expect(k.color).toContain("dark:");
+      expect(k.badge).not.toContain("dark:");
+      expect(k.badge.startsWith("fill-")).toBe(true);
+    }
   });
 });
