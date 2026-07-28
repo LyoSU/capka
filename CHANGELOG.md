@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-28
+
 ### Added
 
 - New Settings → Agent page holds everything about what the assistant is: instance-wide instructions, the capability ceiling, autonomy, and the sandbox switch. Exposed to chat as `org.agent_instructions`.
