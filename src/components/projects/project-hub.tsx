@@ -69,7 +69,34 @@ export function ProjectHub({
   const router = useRouter();
   const locale = useLocale();
   const [project, setProject] = useState<Project>(initial);
-  const [tab, setTab] = useState<HubTab>(initialTab ?? "overview");
+  const [tab, setTabState] = useState<HubTab>(initialTab ?? "overview");
+
+  /**
+   * The URL is the authority on which tab is open; local state only mirrors it so a
+   * click responds without waiting for a server round-trip.
+   *
+   * Reading `initialTab` once into `useState` was not enough. The sidebar's ⋮ →
+   * Settings pushes `?tab=settings` for a project that is often the one already on
+   * screen: the pathname doesn't change, so the hub is re-rendered with a new
+   * `initialTab` but never remounted, and `useState` ignores an initial value on
+   * re-render — the menu item did nothing whatsoever. Syncing from the prop is also
+   * what makes the tab survive a reload and a shared link.
+   */
+  useEffect(() => {
+    setTabState(initialTab ?? "overview");
+  }, [initialTab]);
+
+  const setTab = useCallback(
+    (next: HubTab) => {
+      setTabState(next);
+      // `replace`, not `push`: switching tabs inside one page isn't a place in
+      // history you want the Back button to walk through one by one. Overview is
+      // the bare URL so the default carries no query string.
+      router.replace(`/projects/${project.id}${next === "overview" ? "" : `?tab=${next}`}`, { scroll: false });
+    },
+    [router, project.id],
+  );
+
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [chats, setChats] = useState<ChatRow[] | null>(null);
   // Root workspace entries — fetched ONCE here (for the overview file count) and
@@ -148,10 +175,13 @@ export function ProjectHub({
               read-only facts the same visual weight as the workspace. It reads as
               identity here, and clicking it goes to the tab that changes it, so
               the header no longer needs a Settings button next to a Settings tab. */}
+          {/* No aria-label here: it would REPLACE the three facts below as the
+              accessible name, so a screen reader heard "Settings" and none of the
+              instructions/model/internet state everyone else can read. The purpose
+              is appended as a visually-hidden span instead. */}
           <button
             type="button"
             onClick={() => setTab("settings")}
-            aria-label={t("settings")}
             className="group mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <span className="inline-flex items-center gap-1.5">
@@ -169,6 +199,7 @@ export function ProjectHub({
               {project.sandboxNetwork === "bridge" ? t("internetOn") : t("internetOff")}
             </span>
             <Settings2 className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100" />
+            <span className="sr-only">{t("openSettings")}</span>
           </button>
         </div>
 
@@ -365,8 +396,16 @@ function SettingsTab({
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        // Trimmed here, because the server trims too (api/projects/[id]) and
+        // `dirty` compares local state against the row it sends back. Posting
+        // "text\n" stored "text", so the comparison stayed unequal and the
+        // "unsaved changes" bar reappeared under its own success toast — saving
+        // again changed nothing, and only Discard could clear it.
         body: JSON.stringify({
-          name, description, systemPrompt, defaultModel,
+          name: name.trim(),
+          description: description.trim(),
+          systemPrompt: systemPrompt.trim(),
+          defaultModel: defaultModel.trim(),
           sandboxNetwork: internetAccess ? "bridge" : "none",
           agentProfile: profile,
         }),
@@ -376,10 +415,14 @@ function SettingsTab({
         toast.error(data.error || t("updateError"));
         return;
       }
-      const saved = await res.json();
+      const saved: Project = await res.json();
       toast.success(t("updated"));
       // Rename shows in the sidebar's Projects section — nudge it to refresh.
       window.dispatchEvent(new Event("projects:changed"));
+      // Re-seed from the row the server actually stored, not from what was typed:
+      // it has been trimmed and empty strings became null, so anything else leaves
+      // `dirty` true against the value now on disk.
+      seed(saved);
       onSaved(saved);
     } catch {
       toast.error(t("updateError"));
@@ -388,13 +431,19 @@ function SettingsTab({
     }
   }
 
+  /** Point every field at one project row — used both to discard edits and to
+   *  adopt the saved row after a successful write. */
+  function seed(from: Project) {
+    setName(from.name);
+    setDescription(from.description ?? "");
+    setSystemPrompt(from.systemPrompt ?? "");
+    setDefaultModel(from.defaultModel ?? "");
+    setInternetAccess(from.sandboxNetwork === "bridge");
+    setProfile(from.agentProfile ?? ASSISTANT_PROFILE);
+  }
+
   function reset() {
-    setName(project.name);
-    setDescription(project.description ?? "");
-    setSystemPrompt(project.systemPrompt ?? "");
-    setDefaultModel(project.defaultModel ?? "");
-    setInternetAccess(project.sandboxNetwork === "bridge");
-    setProfile(savedProfile);
+    seed(project);
   }
 
   return (
@@ -407,6 +456,10 @@ function SettingsTab({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t("form.namePlaceholder")}
+              // Mirrors lib/projects/schema.ts: over the bound, the API answers
+              // with a raw English Zod sentence, which is not something to show
+              // someone who pasted a long document by accident.
+              maxLength={200}
             />
           </SettingsRow>
           <SettingsRow title={t("form.description")} labelFor="project-description">
@@ -415,6 +468,7 @@ function SettingsTab({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("form.descriptionPlaceholder")}
+              maxLength={2000}
               className="max-h-40 min-h-16"
             />
           </SettingsRow>
@@ -429,6 +483,7 @@ function SettingsTab({
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
           placeholder={t("form.systemPromptPlaceholder")}
+          maxLength={20000}
           className="max-h-[50vh] min-h-32 text-sm leading-relaxed"
         />
       </SettingsSection>
@@ -484,7 +539,9 @@ function SettingsTab({
       {dirty && (
         <div className="sticky bottom-0 flex items-center gap-3 border-t bg-background/85 py-3 backdrop-blur">
           <span className="mr-auto text-xs text-muted-foreground">{th("unsaved")}</span>
-          <Button variant="ghost" size="sm" onClick={reset} disabled={saving}>{tc("cancel")}</Button>
+          {/* "Discard", not "Cancel": next to Save, "Cancel" reads as cancelling
+              the save rather than throwing the edits away. */}
+          <Button variant="ghost" size="sm" onClick={reset} disabled={saving}>{tc("discard")}</Button>
           <Button size="sm" onClick={save} disabled={saving}>
             {saving ? tc("saving") : tc("save")}
           </Button>

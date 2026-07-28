@@ -91,10 +91,10 @@ export default function MemoryPage() {
   // The user's own memory switch, plus the org ceiling that can override it. The
   // docs below stay visible and editable either way: turning memory off leaves
   // saved notes alone (merely unused), so hiding them would suggest they were lost.
-  // The WHOLE profile is held, not just the one bit shown. The endpoint replaces
-  // the stored object, so posting `{capabilities:{memory}}` would let the schema
-  // defaults quietly reset every other field — invisible today, when memory is the
-  // only user-level switch, and a silent data loss the day a second one ships.
+  // Held as a whole profile because that's what GET returns, but only the memory
+  // bit is ever POSTed: the endpoint merges the patch over the stored row, so it —
+  // not every caller — is what keeps the other fields from being reset by schema
+  // defaults. It also refuses to write them at all (see api/me/agent-profile).
   const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [lockedOff, setLockedOff] = useState(false);
   useEffect(() => {
@@ -118,7 +118,7 @@ export default function MemoryPage() {
     fetch("/api/me/agent-profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
+      body: JSON.stringify({ capabilities: { memory: checked } }),
     })
       .then((r) => {
         if (!r.ok) {

@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, Wallet, Lock, Download, CalendarClock, ScrollText, Bot, Search } from "lucide-react";
 import { Header } from "@/components/layout/header";
-import { SETTINGS_DIRECTORY, searchSettings } from "@/lib/settings-directory";
+import { SETTINGS_DIRECTORY, searchSettings, visibleSettings } from "@/lib/settings-directory";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useBilling } from "@/hooks/use-billing";
@@ -88,7 +88,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const searching = query.trim().length > 0;
   const results = searching
     ? searchSettings(
-        SETTINGS_DIRECTORY.filter((e) => (!e.adminOnly || isAdmin) && (e.href !== "/settings/connections" || showConnections)),
+        visibleSettings(SETTINGS_DIRECTORY, { isAdmin, ownKeysAllowed: billing?.ownKeysAllowed ?? false }),
         query,
         tRoot,
       )
@@ -100,21 +100,32 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   // search surfaces for one list is one too many. This box is the filter you reach
   // for once you are already on the page.
 
+  // Only the desktop list carries the option ids that `aria-activedescendant`
+  // points at, because only the desktop input carries the ref — two copies of the
+  // same id would make the reference ambiguous.
+  const optionId = (i: number) => `settings-result-${i}`;
+
   // Keyboard is the whole point of a search box: reaching for the mouse to pick a
   // result costs exactly what the search was meant to save.
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape") return setQuery("");
     if (results.length === 0) return;
-    if (e.key === "ArrowDown") {
+    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (step !== 0) {
       e.preventDefault();
-      setActive((i) => (i + 1) % results.length);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActive((i) => (i - 1 + results.length) % results.length);
+      const next = (Math.min(active, results.length - 1) + step + results.length) % results.length;
+      setActive(next);
+      // Outside the state updater on purpose: an updater must stay pure, and
+      // StrictMode invokes it twice. The list scrolls now, so a short query fills
+      // the sidebar several screens deep and the selection would otherwise walk
+      // straight out of view.
+      document.getElementById(optionId(next))?.scrollIntoView({ block: "nearest" });
     } else if (e.key === "Enter") {
       e.preventDefault();
       router.push(results[Math.min(active, results.length - 1)].href);
       setQuery("");
+      // Safe to drop focus: an anchored result takes focus itself once its row
+      // mounts (see SettingsRow), so the next Tab continues from the setting.
       searchRef.current?.blur();
     }
   };
@@ -135,19 +146,37 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         onKeyDown={onSearchKey}
         placeholder={t("searchPlaceholder")}
         aria-label={t("searchPlaceholder")}
+        // Combobox semantics, so the arrow keys below are not a sighted-only
+        // feature: without aria-activedescendant a screen reader announces
+        // nothing at all as the visual selection moves.
+        role="combobox"
+        aria-expanded={searching}
+        aria-controls={attachRef ? "settings-results" : undefined}
+        aria-activedescendant={
+          attachRef && searching && results.length > 0 ? optionId(Math.min(active, results.length - 1)) : undefined
+        }
+        aria-autocomplete="list"
         className="w-full rounded-md border bg-transparent py-1.5 pl-8 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-search-cancel-button]:hidden"
       />
     </div>
   );
 
-  const resultList = (
-    <div className="flex flex-col gap-0.5">
+  const renderResults = (withIds: boolean) => (
+    <div
+      id={withIds ? "settings-results" : undefined}
+      role="listbox"
+      aria-label={t("searchPlaceholder")}
+      className="flex flex-col gap-0.5"
+    >
       {results.length === 0 ? (
         <p className="px-2.5 py-2 text-sm text-muted-foreground">{t("searchEmpty")}</p>
       ) : (
         results.map((entry, i) => (
           <Link
             key={`${entry.href}-${entry.label}`}
+            id={withIds ? optionId(i) : undefined}
+            role="option"
+            aria-selected={i === active}
             href={entry.href}
             onClick={() => setQuery("")}
             onMouseEnter={() => setActive(i)}
@@ -172,7 +201,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             single row); results take the tabs' place as a vertical list. */}
         <div className="border-b px-3 py-2 md:hidden">
           {renderSearch(false)}
-          {searching && <div className="pt-2">{resultList}</div>}
+          {/* Capped and scrollable: a one-letter query matches nearly the whole
+              directory, which would otherwise push the page content off screen. */}
+          {searching && <div className="max-h-[50vh] overflow-y-auto pt-2">{renderResults(false)}</div>}
         </div>
         <nav className={cn("flex gap-1 overflow-x-auto border-b px-3 py-2 md:hidden", searching && "hidden")}>
           {flatItems.map((item) => (
@@ -191,10 +222,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             </Link>
           ))}
         </nav>
-        {/* Desktop: vertical sidebar, grouped by section */}
-        <nav className="hidden w-56 flex-col gap-4 border-r p-3 md:flex">
+        {/* Desktop: vertical sidebar, grouped by section. Scrolls on its own: the
+            flex parent is overflow-hidden, and a short query matches almost every
+            entry in the directory — without this the tail of the result list is
+            simply unreachable, with no scrollbar to hint that it exists. */}
+        <nav className="hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-r p-3 md:flex">
           {renderSearch(true)}
-          {searching && resultList}
+          {searching && renderResults(true)}
           {!searching && visibleSections.map((section) => (
             <div key={section.titleKey} className="flex flex-col gap-1">
               <p className="px-2.5 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">

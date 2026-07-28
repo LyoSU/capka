@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -180,17 +180,22 @@ export function SettingsRow({
   onLabelClick?: () => void;
   children?: React.ReactNode;
 }) {
-  const highlighted = useAnchorHighlight(id);
+  const { ref, highlighted } = useAnchorTarget(id);
 
   return (
     <div
       id={id}
+      ref={ref}
+      // Focusable only as a jump target, never in the tab order: after search
+      // sends you here, the next Tab has to continue from the row rather than
+      // from the top of the document.
+      tabIndex={id ? -1 : undefined}
       className={cn(
-        "px-4 py-3.5 transition-colors",
+        "px-4 py-3.5 outline-none transition-colors",
         onLabelClick && !disabled && "hover:bg-muted/30",
         // scroll-mt clears the sticky page header when jumped to from search.
         id && "scroll-mt-24",
-        highlighted && "bg-primary/5",
+        highlighted && "bg-primary/5 ring-1 ring-inset ring-primary/40",
       )}
     >
       <div className={cn("flex items-center justify-between gap-4", disabled && "opacity-60")}>
@@ -214,16 +219,24 @@ export function SettingsRow({
 }
 
 /**
- * True for ~1.6s after this row's id lands in the URL hash.
+ * Brings this row into view, focuses it, and tints it for ~1.6s whenever its id
+ * is the URL hash.
  *
- * Scrolling is left to the browser (the `id` attribute is enough) — this only
- * adds the tint, because landing mid-page with no visual answer to "which one
- * did I search for" is the part scrolling alone doesn't solve. `hashchange` is
- * the load-bearing listener: a second search hit on the SAME page changes only
- * the hash, which Next's router does not report as navigation, so an effect
- * keyed on the pathname would flash once and then go quiet.
+ * The scroll cannot be left to the browser, which is the obvious thing to try:
+ * Next applies a hash exactly once, in a layout effect right after the
+ * navigation commits, and at that moment every page with anchored rows is still
+ * showing `SettingsSkeleton` while its settings load. `getElementById` finds
+ * nothing, the hash is discarded, and the row later appears wherever it happens
+ * to sit — often below the fold, tinted where nobody is looking. Scrolling from
+ * the row's OWN mount effect is what fixes that: it runs when the element
+ * demonstrably exists.
+ *
+ * `hashchange` is the second load-bearing listener: a further search hit on the
+ * SAME page changes only the hash, which Next's router does not report as a
+ * navigation, so an effect keyed on the pathname would fire once and go quiet.
  */
-function useAnchorHighlight(id?: string) {
+function useAnchorTarget(id?: string) {
+  const ref = useRef<HTMLDivElement>(null);
   const [on, setOn] = useState(false);
 
   useEffect(() => {
@@ -231,6 +244,11 @@ function useAnchorHighlight(id?: string) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const check = () => {
       if (window.location.hash.slice(1) !== id) return;
+      const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      ref.current?.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
+      // preventScroll: scrollIntoView above already chose the position, and
+      // focus() would otherwise re-scroll to its own idea of "visible".
+      ref.current?.focus({ preventScroll: true });
       setOn(true);
       clearTimeout(timer);
       timer = setTimeout(() => setOn(false), 1600);
@@ -243,5 +261,5 @@ function useAnchorHighlight(id?: string) {
     };
   }, [id]);
 
-  return on;
+  return { ref, highlighted: on };
 }

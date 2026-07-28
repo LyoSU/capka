@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { Plus, Pencil, Trash2, FolderKanban, MessageSquare, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ export default function ProjectsPage() {
   const t = useTranslations("projects");
   const tc = useTranslations("common");
   const locale = useLocale();
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
@@ -81,7 +83,9 @@ export default function ProjectsPage() {
                 {project.description && (
                   <p className="truncate text-xs text-muted-foreground">{project.description}</p>
                 )}
-                <p className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground/80">
+                {/* Full muted-foreground, not /80: at 12px the dimmed variant
+                    measures ~4.0:1 on this card and misses WCAG AA. */}
+                <p className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
                   <span className="inline-flex items-center gap-1">
                     <MessageSquare className="h-3 w-3" />
                     {t("chatCount", { n: project.chatCount ?? 0 })}
@@ -110,10 +114,15 @@ export default function ProjectsPage() {
         </div>
       )}
 
+      {/* Straight into the new project's settings, the same as creating one from
+          the sidebar — the list behind it is refreshed on the way out. */}
       <ProjectDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        onSaved={fetchProjects}
+        onSaved={(project) => {
+          fetchProjects();
+          router.push(`/projects/${project.id}?tab=settings`);
+        }}
       />
 
       {deleteTarget && (

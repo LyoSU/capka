@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
@@ -147,11 +148,14 @@ export default function SecuritySettingsPage() {
             }
           />
           <SettingsRow id="pc-folders" title={t("pcFolders")} hint={t("pcFoldersHint")}>
-            <div className="inline-flex rounded-lg border bg-muted/40 p-0.5">
+            {/* group + aria-pressed: which option is chosen was carried only by a
+                background colour, so this announced as three unlabelled buttons. */}
+            <div role="group" aria-label={t("pcFolders")} className="inline-flex rounded-lg border bg-muted/40 p-0.5">
               {(["off", "admins", "everyone"] as const).map((opt) => (
                 <button
                   key={opt}
                   type="button"
+                  aria-pressed={pcFolders.value === opt}
                   onClick={() => save(pcFolders, opt)}
                   className={cn(
                     "rounded-md px-3 py-1 text-xs font-medium transition-colors",
@@ -167,6 +171,18 @@ export default function SecuritySettingsPage() {
           </SettingsRow>
         </SettingsGroup>
       </SettingsSection>
+      )}
+
+      {/* Hiding the sandbox-only controls is deliberate, but hiding them silently
+          left a dead end: settings search still offers "attachable folders", and
+          landing on a page with no such row reads as broken rather than as off. */}
+      {!sandboxOn && (
+        <p className="text-sm text-muted-foreground">
+          {t("sandboxOffNote")}{" "}
+          <Link href="/settings/agent" className="underline underline-offset-2 hover:text-foreground">
+            {t("sandboxOffLink")}
+          </Link>
+        </p>
       )}
     </SettingsPage>
   );

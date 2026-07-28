@@ -25,6 +25,26 @@ export interface SettingsEntry {
   /** Extra search terms, space-separated, in both locales. Never displayed. */
   keywords?: string;
   adminOnly?: boolean;
+  /** Visible to a non-admin only while the instance lets them bring their own key.
+   *  Distinct from `adminOnly`, which hides a row from non-admins outright. */
+  needsOwnKeys?: boolean;
+}
+
+/**
+ * The entries a given viewer may see.
+ *
+ * Shared rather than re-derived per surface: the settings sidebar and the ⌘K
+ * palette list the same directory, and when only one of them applied the own-keys
+ * rule a member on a shared-key instance could reach the provider-key page through
+ * the palette — the one thing this product keeps admin-only on purpose.
+ */
+export function visibleSettings(
+  entries: SettingsEntry[],
+  { isAdmin, ownKeysAllowed }: { isAdmin: boolean; ownKeysAllowed: boolean },
+): SettingsEntry[] {
+  return entries.filter(
+    (e) => (!e.adminOnly || isAdmin) && (!e.needsOwnKeys || isAdmin || ownKeysAllowed),
+  );
 }
 
 export const SETTINGS_DIRECTORY: SettingsEntry[] = [
@@ -35,7 +55,7 @@ export const SETTINGS_DIRECTORY: SettingsEntry[] = [
   { href: "/settings", label: "settings.integrations.link.title", page: "settings.nav.general", keywords: "telegram телеграм акаунт account" },
   { href: "/settings/memory#memory-enabled", label: "settings.memory.enabled", page: "settings.nav.memory", keywords: "пам'ять memory забути forget нотатки notes вимкнути disable off вивчати" },
   { href: "/settings/memory", label: "settings.memory.userTitle", page: "settings.nav.memory", keywords: "про мене about me факти facts" },
-  { href: "/settings/connections", label: "settings.connections.title", page: "settings.nav.connections", keywords: "ключ key api openai anthropic gpt claude модель model провайдер" },
+  { href: "/settings/connections", label: "settings.connections.title", page: "settings.nav.connections", keywords: "ключ key api openai anthropic gpt claude модель model провайдер", needsOwnKeys: true },
   { href: "/settings/skills", label: "settings.skills.title", page: "settings.nav.skills", keywords: "навички skills конектори connectors mcp плагіни plugins маркетплейс" },
   { href: "/settings/automations", label: "settings.automations.title", page: "settings.nav.automations", keywords: "розклад schedule cron автоматизації нагадування" },
 

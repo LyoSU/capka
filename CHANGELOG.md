@@ -6,16 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
-### Fixed
-
-- Members on the shared key with no spend limit now see their own recent usage on Settings → General. The budget widget previously rendered nothing whenever the tier was uncapped — which is the default — so most people saw no usage at all.
-- The project list is reachable again from inside a project and from the sidebar heading; it previously had no link at all on instances with five or fewer projects.
-
 ### Added
 
 - New Settings → Agent page holds everything about what the assistant is: instance-wide instructions, the capability ceiling, autonomy, and the sandbox switch. Exposed to chat as `org.agent_instructions`.
 - Instance-wide agent instructions (`agent_instructions`) are prepended to every chat's system prompt, above any project's own instructions. Empty by default, leaving the prompt byte-identical.
-- Users can turn their own long-term memory off on Settings → Memory. Stored in `user.agent_profile` and folded under the org ceiling, so it can only restrict; exposed to chat as `user.memory`.
+- Any user can turn their own long-term memory off on Settings → Memory without an admin. Stored in `user.agent_profile` and folded under the org ceiling, so it can only restrict; exposed to chat as `user.memory`.
 - Search over every setting in the settings sidebar, linking straight to the individual row.
 
 ### Changed
@@ -26,10 +21,18 @@ All notable changes to Capka are documented here. Format follows
 - Turning an agent capability off instance-wide now asks for confirmation, matching the confirm the same change already required from chat.
 - Settings pages show skeleton rows while loading instead of a centred spinner, and switch rows toggle from their label.
 - Sidebar: projects have a ⋮ menu (new chat in the project, its settings), chat search moved above the projects list, and the duplicate Projects link left the account menu.
-- Creating a project now asks for its instructions too, and opens on its Settings tab instead of an empty overview.
-- Sandbox-only controls (code egress, attachable folders) are hidden rather than disabled when the sandbox capability is off.
+- Creating a project now asks for its instructions too, and opens on its Settings tab.
+- Sandbox-only controls (code egress, attachable folders) are hidden rather than disabled when the sandbox capability is off, with a line pointing at Settings → Agent to turn it back on.
 - Settings pages share one content width and one row layout; nav labels now match page titles ("Providers", "Keys and limits", "Sign-in").
-- The project page uses the same sections and rows as Settings: its settings tab groups name/instructions/behaviour and keeps Save pinned while unsaved, the read-only "Context" card became one line under the project name, and the project list is a list instead of a card grid.
+- The project page uses the same sections and rows as Settings, keeps its open tab in the URL, and the project list is a list instead of a card grid.
+- `agent_instructions` rejects a non-string value or anything over 20000 characters.
+
+### Fixed
+
+- Members on the shared key with no spend limit now see their own recent usage on Settings → General.
+- The project list is reachable from inside a project and from the sidebar heading; instances with five or fewer projects had no link to it at all.
+- Creating a project no longer creates two when Enter is held, and an over-long name or instructions no longer surfaces a raw English validation error.
+- Hand-drawn radio and segmented controls on Settings → Security and Sign-in now report the selected option to a screen reader.
 
 ## [0.14.0] - 2026-07-24
 

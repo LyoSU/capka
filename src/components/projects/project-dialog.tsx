@@ -71,6 +71,9 @@ export function ProjectDialog({ open, onOpenChange, onSaved }: ProjectDialogProp
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Held Enter in the name field fires submit repeatedly, and `disabled` on the
+    // button doesn't cover that path — two projects would be created.
+    if (saving) return;
     if (!name.trim()) {
       toast.error(t("nameRequired"));
       return;
@@ -81,7 +84,7 @@ export function ProjectDialog({ open, onOpenChange, onSaved }: ProjectDialogProp
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description, systemPrompt }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim(), systemPrompt: systemPrompt.trim() }),
       });
 
       if (!res.ok) {
@@ -116,34 +119,44 @@ export function ProjectDialog({ open, onOpenChange, onSaved }: ProjectDialogProp
 
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="project-name">{t("form.name")}</Label>
+              {/* `new-project-*` ids, not `project-*`: the hub's settings tab uses
+                  those, and both are in the DOM together when this dialog opens
+                  over a project page — the label would point at the input behind
+                  the modal. */}
+              <Label htmlFor="new-project-name">{t("form.name")}</Label>
               <Input
-                id="project-name"
+                id="new-project-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t("form.namePlaceholder")}
+                // Matches the server's bounds (lib/projects/schema.ts) so an over-
+                // long paste is stopped here instead of coming back as a raw Zod
+                // sentence in English.
+                maxLength={200}
                 autoFocus
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="project-description">{t("form.description")}</Label>
+              <Label htmlFor="new-project-description">{t("form.description")}</Label>
               <Textarea
-                id="project-description"
+                id="new-project-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder={t("form.descriptionPlaceholder")}
+                maxLength={2000}
                 className="max-h-32 min-h-16"
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="project-instructions">{t("form.systemPrompt")}</Label>
+              <Label htmlFor="new-project-instructions">{t("form.systemPrompt")}</Label>
               <Textarea
-                id="project-instructions"
+                id="new-project-instructions"
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 placeholder={t("form.systemPromptPlaceholder")}
+                maxLength={20000}
                 className="max-h-40 min-h-20"
               />
               <p className="text-xs text-muted-foreground">{t("form.systemPromptHint")}</p>

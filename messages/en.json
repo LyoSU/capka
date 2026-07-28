@@ -22,7 +22,8 @@
     "optional": "Optional",
     "required": "Required",
     "error": "Something went wrong",
-    "saved": "Saved"
+    "saved": "Saved",
+    "discard": "Discard"
   },
   "errors": {
     "page": {
@@ -642,7 +643,9 @@
       "unsaved": "You have unsaved changes",
       "dangerTitle": "Delete project",
       "dangerHint": "Workspace files will be deleted. Chats will be kept.",
-      "delete": "Delete project"
+      "delete": "Delete project",
+      "menuOptions": "Project options",
+      "openSettings": "Open settings"
     },
     "delete": {
       "title": "Delete “{name}”?",
@@ -685,8 +688,6 @@
       "usage": "Analytics",
       "skills": "Extensions",
       "automations": "Automations",
-      "connectors": "Connectors",
-      "marketplace": "Marketplace",
       "security": "Security",
       "sections": {
         "personal": "Personal",
@@ -1380,8 +1381,6 @@
       "emptyHint": "Install a skill or a connector and it will appear here, ready to allow or deny."
     },
     "authentication": {
-      "title": "Sign-in",
-      "subtitle": "How people sign in, and who is allowed to create an account",
       "save": "Save changes",
       "saved": "Saved",
       "saveFailed": "Couldn't save. Please try again.",
@@ -1424,7 +1423,7 @@
         "deadEndWarning": "Email sign-up is off and Telegram login isn't configured — new users won't be able to register at all."
       },
       "pending": {
-        "moved": "Approve or remove people on the Users page →"
+        "moved": "Approve or remove people on the People tab."
       }
     },
     "security": {
@@ -1461,7 +1460,9 @@
       "folder_everyone": "Everyone",
       "networkNote": "Private and internal addresses stay blocked either way.",
       "folders": "Folders",
-      "foldersDesc": "Real folders the assistant may read, beyond each chat's own workspace."
+      "foldersDesc": "Real folders the assistant may read, beyond each chat's own workspace.",
+      "sandboxOffNote": "Folder access lives in the sandbox, which is currently off for this instance.",
+      "sandboxOffLink": "Turn it on in Settings → Agent"
     },
     "updates": {
       "title": "Updates",

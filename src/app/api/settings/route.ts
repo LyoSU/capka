@@ -32,7 +32,10 @@ export const PUT = apiHandler(async (req: Request) => {
   // EVERY request's system prompt — so an accidental paste of a whole document
   // would be billed on every turn for every user. Same cap a project's own
   // instructions get (see projects/schema.ts).
-  if (key === "agent_instructions" && typeof value === "string" && value.length > 20000) {
+  // Rejects a non-string too: `value` is untyped from the body, and an object here
+  // would skip a length check and be serialized into the text column anyway — a
+  // 50KB blob in every user's cached prefix, on every turn.
+  if (key === "agent_instructions" && (typeof value !== "string" || value.length > 20000)) {
     return Response.json({ error: "Too long" }, { status: 400 });
   }
 

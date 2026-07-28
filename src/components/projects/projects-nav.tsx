@@ -72,7 +72,7 @@ function ProjectRow({ project, active }: { project: Project; active: boolean }) 
         open={menuOpen}
         onOpenChange={setMenuOpen}
         title={project.name}
-        ariaLabel={t("settings")}
+        ariaLabel={t("menuOptions")}
         contentProps={{ align: "start", className: "w-48" }}
         items={[
           {
@@ -108,10 +108,18 @@ function ProjectRow({ project, active }: { project: Project; active: boolean }) 
         <button
           type="button"
           data-sidebar="menu-action"
-          aria-label={t("settings")}
+          // Not "Settings": this opens a menu of several actions, and the real
+          // trigger beside it is aria-hidden, so this button has to carry the
+          // menu's semantics itself.
+          aria-label={t("menuOptions")}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
           onClick={() => setMenuOpen(true)}
           className={cn(
-            "absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 pointer-coarse:hidden sm:opacity-0 sm:group-hover/menu-item:opacity-100",
+            // sm:focus-visible, not bare focus-visible: Tailwind orders breakpoint
+            // variants after pseudo-class ones, so `sm:opacity-0` would otherwise
+            // win and keep the button invisible while it holds keyboard focus.
+            "absolute right-1 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground pointer-coarse:hidden sm:opacity-0 sm:group-hover/menu-item:opacity-100 sm:focus-visible:opacity-100",
             menuOpen && "bg-sidebar-accent text-sidebar-accent-foreground opacity-100",
           )}
         >

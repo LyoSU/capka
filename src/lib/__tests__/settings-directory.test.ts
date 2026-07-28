@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import en from "../../../messages/en.json";
 import uk from "../../../messages/uk.json";
 import { SETTINGS_DIRECTORY, searchSettings } from "../settings-directory";
@@ -33,6 +33,25 @@ describe("settings directory", () => {
           if (typeof lookup(catalog, key) !== "string") broken.push(`${name}: ${key}`);
         }
       }
+    }
+    expect(broken).toEqual([]);
+  });
+
+  it("points every row anchor at an id that the target page really renders", () => {
+    // The half of an href after `#` was unverified, so the guard above was green by
+    // luck: renaming `id="host-folders"` on the page passes types, lint and the
+    // file-exists check, and only shows up as a search result that lands nowhere.
+    const broken: string[] = [];
+    for (const entry of SETTINGS_DIRECTORY) {
+      const [path, anchor] = entry.href.split("#");
+      if (!anchor) continue;
+      const route = path.replace(/^\/settings\/?/, "");
+      const dir = route ? `src/app/(dashboard)/settings/${route}` : "src/app/(dashboard)/settings";
+      // Tabs live in sibling files, so a row can be rendered by any of them.
+      const sources = readdirSync(dir)
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => readFileSync(`${dir}/${f}`, "utf8"));
+      if (!sources.some((src) => src.includes(`id="${anchor}"`))) broken.push(entry.href);
     }
     expect(broken).toEqual([]);
   });

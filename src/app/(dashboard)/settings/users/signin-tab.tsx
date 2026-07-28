@@ -155,18 +155,23 @@ export function SignInTab() {
           <h3 className="text-sm font-medium">{t("mode.title")}</h3>
           <p className="text-sm text-muted-foreground">{t("mode.desc")}</p>
         </div>
-        <div className="grid gap-2">
+        {/* radiogroup + aria-checked: these are radio buttons drawn by hand, and
+            without the roles the chosen one was signalled only by a filled circle
+            and a background — nothing a screen reader can report. */}
+        <div role="radiogroup" aria-label={t("mode.title")} className="grid gap-2">
           {modes.map(({ key }) => (
             <button
               key={key}
               type="button"
+              role="radio"
+              aria-checked={mode === key}
               onClick={() => setMode(key)}
               className={cn(
                 "flex items-start gap-3 rounded-md border p-3 text-left transition-colors",
                 mode === key ? "border-foreground/40 bg-accent" : "hover:bg-accent/40",
               )}
             >
-              <div className={cn("mt-0.5 h-4 w-4 shrink-0 rounded-full border-2", mode === key ? "border-foreground bg-foreground" : "border-muted-foreground/40")} />
+              <div aria-hidden className={cn("mt-0.5 h-4 w-4 shrink-0 rounded-full border-2", mode === key ? "border-foreground bg-foreground" : "border-muted-foreground/40")} />
               <div>
                 <p className="text-sm font-medium">{t(`mode.${key}.label`)}</p>
                 <p className="text-xs text-muted-foreground">{t(`mode.${key}.desc`)}</p>

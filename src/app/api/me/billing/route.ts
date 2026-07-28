@@ -1,4 +1,4 @@
-import { and, eq, sql, count } from "drizzle-orm";
+import { and, eq, sql, countDistinct } from "drizzle-orm";
 import { requireSession, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { usage } from "@/lib/db/schema";
@@ -30,10 +30,23 @@ export const GET = apiHandler(async () => {
   // budget widget rendered nothing at all — people reasonably read that as "my
   // usage is missing". A count answers "am I being counted?" without showing an
   // ordinary user raw money, which is an admin-only number by design.
+  //
+  // DISTINCT on taskId, not a row count: a turn writes one row for itself, plus one
+  // more per auxiliary LLM call sharing the same taskId (memory reconcile, chat
+  // title, compaction — see recordAuxUsage in tasks/runner.ts). Counting rows
+  // roughly doubled the figure on the one widget whose entire job is to answer "am
+  // I being counted correctly?". `pending` holds are excluded so a turn still in
+  // flight isn't counted before it has happened.
   const [turns] = await db
-    .select({ n: count() })
+    .select({ n: countDistinct(usage.taskId) })
     .from(usage)
-    .where(and(eq(usage.userId, userId), sql`${usage.createdAt} >= now() - interval '30 days'`));
+    .where(
+      and(
+        eq(usage.userId, userId),
+        eq(usage.pending, false),
+        sql`${usage.createdAt} >= now() - interval '30 days'`,
+      ),
+    );
 
   return Response.json({ keyMode, ownKeysAllowed: canAddOwn, onSharedKey, limits, turns30d: Number(turns?.n ?? 0) });
 });

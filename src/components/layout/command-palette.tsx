@@ -26,7 +26,8 @@ import {
 import { useSidebar } from "@/components/ui/sidebar";
 import { useTheme } from "@/components/providers";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { SETTINGS_DIRECTORY } from "@/lib/settings-directory";
+import { useBilling } from "@/hooks/use-billing";
+import { SETTINGS_DIRECTORY, visibleSettings } from "@/lib/settings-directory";
 
 export function CommandPalette() {
   const t = useTranslations("commandPalette");
@@ -34,6 +35,9 @@ export function CommandPalette() {
   // the same words as the settings row it opens.
   const tRoot = useTranslations();
   const isAdmin = useIsAdmin();
+  // Same gate the settings sidebar applies: on a shared-key instance the provider
+  // page is not a place a member should be sent.
+  const { billing } = useBilling();
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const { toggleSidebar } = useSidebar();
@@ -109,7 +113,7 @@ export function CommandPalette() {
             Integrations: a second, shorter list of the same places, which could
             only ever fall behind the first. */}
         <CommandGroup heading={t("groups.settings")}>
-          {SETTINGS_DIRECTORY.filter((e) => !e.adminOnly || isAdmin).map((entry) => (
+          {visibleSettings(SETTINGS_DIRECTORY, { isAdmin, ownKeysAllowed: billing?.ownKeysAllowed ?? false }).map((entry) => (
             <CommandItem
               key={`${entry.href}-${entry.label}`}
               // cmdk matches on the item's own text; the synonyms someone actually
