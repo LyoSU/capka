@@ -28,7 +28,9 @@ import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { maintainMemoryDoc } from "@/lib/memory/store";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
+import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
+import { rememberModelEfforts } from "@/lib/models/catalog";
 import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
 import { errorText } from "@/lib/errors/message";
@@ -39,67 +41,6 @@ import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 import { prepareRun } from "./run-context";
 
 const errMsg = (e: unknown) => errorText(e);
-
-/**
- * Per-provider knobs that surface the model's reasoning ("thinking") in the
- * stream. WITHOUT these the provider reasons silently — or not at all — so the
- * SDK never emits `reasoning-delta` and the UI's thinking block stays empty.
- * Returns undefined for providers with no standard knob (e.g. Ollama).
- *
- * Applied optimistically: a model that can't reason rejects the request and the
- * runner retries once without this (see isReasoningUnsupportedError), so turning
- * it on "always" never breaks non-reasoning models like gpt-4o / claude-3.5.
- *
- * Visibility caveat: OpenAI only returns a reasoning *summary* over the
- * Responses API ("openai" provider). Through an OpenAI-compatible gateway
- * ("litellm", Chat Completions) the summary is visible only if the upstream
- * model echoes `reasoning_content` (Anthropic/DeepSeek do; OpenAI hides it).
- */
-function reasoningOptions(provider: string): Record<string, Record<string, unknown>> | undefined {
-  switch (provider) {
-    case "anthropic":
-      // The SDK sets max_tokens to fit the budget — don't cap it ourselves.
-      return { anthropic: { thinking: { type: "enabled", budgetTokens: 4000 } } };
-    case "openrouter":
-      return { openrouter: { reasoning: { enabled: true, effort: "medium" } } };
-    case "openai":
-      // Responses API returns a visible reasoning summary.
-      return { openai: { reasoningSummary: "auto" } };
-    case "azure":
-      // Same Responses-API summary knob — the azure adapter reads the "azure"
-      // namespace (falling back to "openai"); the chat path ignores it.
-      return { azure: { reasoningSummary: "auto" } };
-    case "google":
-    case "vertex":
-      // Gemini (direct or via Vertex — same model class, same "google"
-      // namespace): includeThoughts streams a thought summary into
-      // reasoning-delta. (Google Search grounding is a provider-executed TOOL
-      // in this SDK, not a providerOption, so it's wired into the tool set via
-      // providerNativeTools(), not here.)
-      return { google: { thinkingConfig: { includeThoughts: true } } };
-    case "bedrock":
-      // Converse reasoningConfig — Claude/Nova reasoning models stream
-      // reasoningContent; non-reasoning models trip the retry-without path.
-      return { bedrock: { reasoningConfig: { type: "enabled", budgetTokens: 4000 } } };
-    case "litellm":
-      // Namespace matches the provider `name` in getModel. reasoningEffort asks
-      // the gateway's reasoning model to think; openai-compatible then parses the
-      // streamed reasoning_content into reasoning-delta parts.
-      return { litellm: { reasoningEffort: "medium" } };
-    case "deepseek":
-    case "mistral":
-    case "xai":
-    case "groq":
-    case "zhipu":
-      // First-party OpenAI-compatible presets ride the same mechanism as litellm:
-      // the namespace matches the provider `name` in getModel. A non-reasoning
-      // model that rejects `reasoning_effort` trips the runner's
-      // retry-without-reasoning path, so sending it unconditionally is safe.
-      return { [provider]: { reasoningEffort: "medium" } };
-    default:
-      return undefined;
-  }
-}
 
 /** Everything persisted on the task so any worker can run it without the
  *  originating request's memory. Model/tools/prompt are re-resolved here. */
@@ -317,7 +258,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
-    const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
@@ -528,9 +469,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // retry) adds to this set.
     let blindModalities = findBlindModalities(turnFiles, provider, modelInput);
 
-    // Reasoning is enabled optimistically; the fallback below clears this flag
-    // and re-streams without it if the model rejects thinking/reasoning.
-    const reasoning = reasoningOptions(provider);
+    // How hard to think, as the user set it for this chat, translated to this
+    // provider's wire format (an effort enum or a token budget — see
+    // models/thinking.ts). `modelEfforts` is the enum this model has previously
+    // told us it accepts; null until the negotiation below learns it.
+    //
+    // Still applied optimistically: a model that can't reason at all rejects the
+    // request and we re-stream without it, and a model that only accepts OTHER
+    // effort values teaches us its enum on the way (retryOnCapabilityError).
+    let reasoning = reasoningParams(provider, thinkAmount, modelEfforts);
     let useReasoning = reasoning !== undefined;
     // Effective window (model ∩ admin cap) drives the provider-native edit's
     // trigger. Reused from the budget logic so the cap is honored here too.
@@ -562,6 +509,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // retryOnCapabilityError). Hoisted above makeStream because prepareStep reads
     // it on the very first step — declaring it later would TDZ-throw.
     let reasoningStripped = false;
+    // One effort re-map per turn: the model's own enum is authoritative, so if a
+    // value taken FROM it is rejected too, stop negotiating and fall through to
+    // the plain drop-reasoning path instead of ping-ponging.
+    let effortNegotiated = false;
     const makeStream = () => {
       // reasoning + context-management + caching may all target the same provider
       // namespace (e.g. anthropic) — merge so none clobbers the others.
@@ -1036,6 +987,36 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // The provider rejected what the catalog claimed it took — fold those
         // modalities into the notice so the user is told to switch models.
         blindModalities = Array.from(new Set([...blindModalities, ...nativeModalities]));
+        foldDiscarded();
+        result = makeStream();
+        await consume();
+        return true;
+      }
+      // MUST be tested before isReasoningUnsupportedError: some backends phrase an
+      // out-of-range effort with words that classifier also matches ("Invalid
+      // value: 'medium'. Supported values are …"), and dropping reasoning there
+      // would silently take away the thinking the user asked for when a legal
+      // value was available all along.
+      const allowed = useReasoning && !effortNegotiated ? parseAllowedEfforts(err) : null;
+      if (allowed) {
+        // The model accepts reasoning, just not at this level, and it listed what
+        // it does accept. Re-map the SAME intent onto its enum and re-stream —
+        // then remember the enum so no later turn (for anyone) pays this retry.
+        effortNegotiated = true;
+        // Clamp the intent onto the enum first: a model with a single "on" level
+        // (Groq's Qwen: none|default) has no value for "deep", and snapping to the
+        // nearest level it DOES have keeps the thinking the user asked for instead
+        // of dropping it. The UI narrows to these same stops from the next turn.
+        const snapped = clampAmount(thinkAmount, availableAmounts(provider, allowed));
+        const retryParams = reasoningParams(provider, snapped, allowed);
+        tlog.info("reasoning effort rejected — retrying with the model's own enum", { allowed, thinkAmount, snapped });
+        void rememberModelEfforts(modelId, provider, allowed).catch((e) =>
+          tlog.warn("could not persist learned reasoning efforts", { error: errMsg(e) }),
+        );
+        reasoning = retryParams;
+        useReasoning = retryParams !== undefined; // no legal value for this stop → think silently
+        streamError = undefined;
+        await discardPartial();
         foldDiscarded();
         result = makeStream();
         await consume();

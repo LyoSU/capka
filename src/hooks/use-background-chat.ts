@@ -542,7 +542,11 @@ export function useBackgroundChat({
   // Attachments arrive already uploaded (the composer uploads eagerly on attach,
   // so the bytes are in the sandbox before send) — we only carry their refs here.
   const sendMessage = useCallback(
-    async (text: string, model: string, attachedFiles?: FileRef[], messageId?: string) => {
+    // `thinkAmount` rides along on the SEND only. Every other path (rerun, edit,
+    // regenerate) acts on a chat that already exists, whose row the composer has
+    // already PATCHed; a first send is the one case where there is no row yet, so
+    // the value has to travel with the request that creates it.
+    async (text: string, model: string, attachedFiles?: FileRef[], messageId?: string, thinkAmount?: string) => {
       const files = attachedFiles ?? [];
       if (!text.trim() && files.length === 0) return;
 
@@ -589,6 +593,7 @@ export function useBackgroundChat({
             chatId,
             projectId,
             model,
+            thinkAmount,
             userMessage: displayText,
             userMessageId: userMsg.id,
             attachedFiles: files.length > 0 ? files : undefined,

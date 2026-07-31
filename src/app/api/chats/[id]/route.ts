@@ -8,6 +8,7 @@ import { isShared, generateShareToken } from "@/lib/chat/sharing";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { listFiles, copyWorkspace } from "@/lib/sandbox/client";
 import { isLiveProject } from "@/lib/projects/live";
+import { THINK_AMOUNTS } from "@/lib/models/thinking";
 import { log } from "@/lib/log";
 
 export const PATCH = apiHandler(async (req, { params }) => {
@@ -69,6 +70,17 @@ export const PATCH = apiHandler(async (req, { params }) => {
   // jump the chat into the "today" group, remounting its sidebar row and slamming
   // the still-open share dialog shut. So only touch `updatedAt` for real edits.
   if (Object.keys(updates).length > 0) updates.updatedAt = new Date();
+
+  // Thinking depth. Validated against the canonical scale — never trust a free
+  // string here, it ends up shaping a provider request. Like visibility, it does
+  // NOT bump `updatedAt`: changing how hard the model thinks isn't chat activity
+  // and must not reorder the sidebar under the user.
+  if ("thinkAmount" in body) {
+    if (!(THINK_AMOUNTS as readonly unknown[]).includes(body.thinkAmount)) {
+      return Response.json({ error: "Invalid thinking depth" }, { status: 400 });
+    }
+    updates.thinkAmount = body.thinkAmount;
+  }
 
   // Publish / unpublish. Validate the visibility, and mint a stable share token
   // the first time the chat is ever shared — unpublishing keeps it so the same

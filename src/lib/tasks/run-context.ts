@@ -20,7 +20,8 @@ import { readMemoryDocs } from "@/lib/memory/store";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { resolveAgentProfile, capProfile, parseAgentProfile } from "@/lib/agents/profile";
 import { getSandboxNetworkDefault, getMaxContextTokens, getOrgAgentProfile, getOrgInstructions, getSetting, setSetting } from "@/lib/settings";
-import { getModelContextLength } from "@/lib/models/catalog";
+import { getModelContextLength, getModelEfforts } from "@/lib/models/catalog";
+import { availableAmounts, clampAmount, parseThinkAmount } from "@/lib/models/thinking";
 import { contextBudget } from "@/lib/chat/context/budget";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
 import type { TaskPayload } from "./runner";
@@ -46,7 +47,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     readMemoryDocs(userId, payload.projectId ?? null),
     db.select({ name: users.name, timezone: users.timezone, locale: users.locale, role: users.role, agentProfile: users.agentProfile })
       .from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]),
-    db.select({ createdAt: chats.createdAt }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
+    db.select({ createdAt: chats.createdAt, thinkAmount: chats.thinkAmount }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
     getOrgAgentProfile(),
     getOrgInstructions(),
   ]);
@@ -245,9 +246,12 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // admin cap (which only ever tightens it). Fetched up front — the effective
     // window drives both the deferral decision below and the NEXT-turn compaction
     // check (which reuses contextLength/adminCap after the turn).
-    const [contextLength, adminCap] = await Promise.all([
+    const [contextLength, adminCap, modelEfforts] = await Promise.all([
       getModelContextLength(modelId),
       getMaxContextTokens(),
+      // The `reasoning_effort` enum this model has taught us, so the very first
+      // request of this turn already carries a value it accepts.
+      getModelEfforts(modelId),
     ]);
     const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
     // Progressive tool disclosure: when the connector tools would tax the window,
@@ -277,7 +281,15 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       orgInstructions,
     });
 
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile };
+    // Thinking depth is the CHAT's setting, read here rather than carried on the
+    // payload: a queued turn must reflect the depth the chat has now, and two
+    // devices editing the same chat can't drift.
+    const thinkAmount = clampAmount(
+      parseThinkAmount(chat?.thinkAmount),
+      availableAmounts(provider, modelEfforts),
+    );
+
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts };
   } catch (e) {
     await closeAll();
     throw e;

@@ -326,6 +326,23 @@
         "io": "in {in} / out {out} per 1M tokens"
       }
     },
+    "thinking": {
+      "label": "Thinking depth",
+      "faster": "Faster",
+      "smarter": "Smarter",
+      "amount": {
+        "off": "No thinking",
+        "brief": "Brief",
+        "balanced": "Balanced",
+        "deep": "Deep"
+      },
+      "hint": {
+        "off": "Answers straight away, without thinking.",
+        "brief": "Thinks a little before answering.",
+        "balanced": "Enough thinking for most work.",
+        "deep": "Thinks hard on difficult work. Slower replies."
+      }
+    },
     "input": {
       "placeholder": "Assign a task or ask anything",
       "placeholderFiles": "Add a message about the files…",

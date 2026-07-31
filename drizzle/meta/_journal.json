@@ -337,6 +337,13 @@
       "when": 1784966182014,
       "tag": "0047_parallel_galactus",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785503422368,
+      "tag": "0048_giant_eddie_brock",
+      "breakpoints": true
     }
   ]
 }

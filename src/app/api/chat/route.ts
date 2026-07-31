@@ -37,7 +37,7 @@ export const POST = apiHandler(async (req: Request) => {
   }
 
   const body = chatRequestSchema.parse(await req.json());
-  const { chatId: requestChatId, model: requestModel, projectId, userMessage, userMessageId, attachedFiles } = body;
+  const { chatId: requestChatId, model: requestModel, thinkAmount, projectId, userMessage, userMessageId, attachedFiles } = body;
   const chatId = requestChatId || nanoid();
 
   const [chatRow, project] = await Promise.all([
@@ -48,6 +48,7 @@ export const POST = apiHandler(async (req: Request) => {
             userId: chats.userId,
             title: chats.title,
             model: chats.model,
+            thinkAmount: chats.thinkAmount,
             projectId: chats.projectId,
             projectDeletedAt: projects.deletedAt,
             source: chats.source,
@@ -125,6 +126,7 @@ export const POST = apiHandler(async (req: Request) => {
       userId,
       title: "New Chat",
       model: effectiveModel ?? null,
+      thinkAmount: thinkAmount ?? null,
       projectId: effectiveProjectId ?? null,
     });
   }
@@ -175,6 +177,9 @@ export const POST = apiHandler(async (req: Request) => {
       ...(isNewChat ? { title: text.slice(0, 100) } : {}),
       // Persist an explicit model switch so it sticks to this chat.
       ...(requestModel && requestModel !== existingChat?.model ? { model: requestModel } : {}),
+      // Same for thinking depth — the worker reads it off the chat row, not the
+      // payload, so it must land before the task is enqueued below.
+      ...(thinkAmount && thinkAmount !== existingChat?.thinkAmount ? { thinkAmount } : {}),
       // Point the chat at the new message so a reload mid-flight shows this
       // branch; the worker then advances it to the assistant reply.
       activeLeafId: newUserId,

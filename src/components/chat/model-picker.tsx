@@ -962,12 +962,18 @@ interface ModelPickerProps {
    *  a model whose provider was disconnected or whose entry was removed. While
    *  the list is still loading `settled` is false — callers must not block yet.
    *  Also carries the resolved model's provider and native input modalities, so
-   *  the composer can warn when a staged attachment won't be read natively. */
+   *  the composer can warn when a staged attachment won't be read natively, plus
+   *  what it knows about the model's reasoning — whether it thinks at all and, once
+   *  learned, which effort levels it accepts — which is what the thinking control
+   *  needs to offer exactly the real levels and nothing else. */
   onResolved?: (status: {
     settled: boolean;
     available: boolean;
     provider?: string;
     inputModalities?: Modality[] | null;
+    /** null = unknown (an off-catalog id whose caps are assumed, not known). */
+    reasoning?: boolean | null;
+    efforts?: string[] | null;
   }) => void;
 }
 
@@ -1226,9 +1232,24 @@ export function ModelPicker({
 
   const resolvedProvider = currentModel?.configProvider;
   const resolvedInput = currentModel?.capabilities?.input ?? null;
+  // `assumed` caps are a placeholder for a model we have no metadata for, so
+  // report reasoning as UNKNOWN (null) rather than false — the difference decides
+  // whether the thinking control hides itself or offers its safe defaults.
+  const caps = currentModel?.capabilities;
+  const resolvedReasoning = !caps || caps.assumed ? null : caps.reasoning;
+  // Referentially stable across renders so the effect below doesn't re-fire on
+  // every parent render (the array identity would otherwise change each time).
+  const resolvedEfforts = useMemo(() => caps?.efforts ?? null, [caps?.efforts]);
   useEffect(() => {
-    onResolved?.({ settled, available: !modelMissing, provider: resolvedProvider, inputModalities: resolvedInput });
-  }, [settled, modelMissing, resolvedProvider, resolvedInput, onResolved]);
+    onResolved?.({
+      settled,
+      available: !modelMissing,
+      provider: resolvedProvider,
+      inputModalities: resolvedInput,
+      reasoning: resolvedReasoning,
+      efforts: resolvedEfforts,
+    });
+  }, [settled, modelMissing, resolvedProvider, resolvedInput, resolvedReasoning, resolvedEfforts, onResolved]);
 
   const renderList = (orientation: "vertical" | "horizontal") => (
     <ModelList

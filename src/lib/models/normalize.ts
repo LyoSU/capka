@@ -14,6 +14,14 @@ export interface Capabilities {
    *  OpenRouter's `architecture.input_modalities`). Absent when the source
    *  doesn't report it — callers then fall back to the provider's static caps. */
   input?: Modality[];
+  /** `reasoning_effort` values this model accepts, LEARNED from a rejection
+   *  rather than reported by any source (see rememberModelEfforts). Absent until
+   *  the first negotiation; the thinking control then offers exactly these. */
+  efforts?: string[];
+  /** True when nothing is actually known about this model (an off-catalog id from
+   *  a custom endpoint) and these values are the optimistic default. Lets the UI
+   *  distinguish "cannot reason" from "we have no idea". */
+  assumed?: boolean;
 }
 
 // Map a company/group name to a brand-icon slug the UI can render. Keyword

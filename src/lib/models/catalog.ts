@@ -220,6 +220,7 @@ export async function syncModelCatalog(): Promise<{ openrouter: number; litellm:
   livePriceCache.clear();
   livePriceBook = null; // fresh catalog supersedes the live-fetched fallback book
   contextCache.clear(); // was never cleared on sync — context windows could go stale
+  effortsCache.clear(); // the merge above keeps them, but re-read rather than trust
   console.log(`[catalog] synced ${or} OpenRouter + ${ll} LiteLLM models, enriched ${md} from Models.dev`);
   return { openrouter: or, litellm: ll, modelsdev: md };
 }
@@ -256,7 +257,13 @@ async function upsertModels(list: CatalogModel[], opts?: { deferToOtherSources?:
     inputPrice: sql`excluded.input_price`,
     outputPrice: sql`excluded.output_price`,
     cacheReadPrice: sql`excluded.cache_read_price`,
-    capabilities: sql`excluded.capabilities`,
+    // Refresh the synced capabilities but PRESERVE `efforts` — the reasoning-effort
+    // enum we learned from a provider rejection (rememberModelEfforts). No source
+    // reports it, so a plain `excluded.capabilities` would wipe it on every sync
+    // and make every model pay the negotiation retry again.
+    capabilities: sql`case when ${models.capabilities} ? 'efforts'
+      then coalesce(excluded.capabilities, '{}'::jsonb) || jsonb_build_object('efforts', ${models.capabilities} -> 'efforts')
+      else excluded.capabilities end`,
     updatedAt: sql`excluded.updated_at`,
   };
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -433,4 +440,70 @@ export async function getModelContextLength(modelId: string): Promise<number | n
   const ctx = exact?.contextLength ?? null;
   cacheSet(contextCache, modelId, ctx, ctx === null);
   return ctx;
+}
+
+// ── Learned reasoning-effort enums ───────────────────────────
+
+const effortsCache = new Map<string, CacheEntry<string[] | null>>();
+
+/** Same fuzzy id match as getModelPrice: exact, then provider-stripped, then any
+ *  row whose id ends in `/<stripped>` (a bare "glm-5.2" from a custom endpoint
+ *  against OpenRouter's "z-ai/glm-5.2"). */
+const idMatch = (modelId: string) => {
+  const stripped = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
+  return or(eq(models.id, modelId), eq(models.id, stripped), like(models.id, `%/${stripped}`));
+};
+
+/**
+ * The `reasoning_effort` values this model is known to accept, learned from a
+ * previous rejection (see parseAllowedEfforts). Null = not known yet, in which
+ * case the adapter sends its best guess and the runner negotiates on the 400.
+ */
+export async function getModelEfforts(modelId: string): Promise<string[] | null> {
+  const cached = cacheGet(effortsCache, modelId);
+  if (cached.hit) return cached.v;
+  const rows = await db
+    .select({ id: models.id, capabilities: models.capabilities })
+    .from(models)
+    .where(idMatch(modelId))
+    .limit(5);
+  const withEfforts = rows.filter((r) => Array.isArray((r.capabilities as { efforts?: unknown })?.efforts));
+  const row = withEfforts.find((r) => r.id === modelId) ?? withEfforts[0];
+  const efforts = (row?.capabilities as { efforts?: string[] })?.efforts ?? null;
+  cacheSet(effortsCache, modelId, efforts, efforts === null);
+  return efforts;
+}
+
+/**
+ * Remember what a model told us it accepts, so the negotiation costs ONE request
+ * per model rather than one per turn — and so the picker can offer exactly the
+ * levels that model really has.
+ *
+ * Stored inside the existing `capabilities` jsonb (no migration) and merged, not
+ * replaced, so a catalog re-sync can't wipe it (see the `set` in upsertModels).
+ * A model served by a custom gateway may not be in the catalog at all; rather
+ * than re-learning forever, we insert a minimal row for it — `enabled: false`, so
+ * it stays out of the curated picker list and only enriches metadata.
+ */
+export async function rememberModelEfforts(modelId: string, source: string, efforts: string[]): Promise<void> {
+  const merge = sql`coalesce(${models.capabilities}, '{}'::jsonb) || ${JSON.stringify({ efforts })}::jsonb`;
+  const updated = await db
+    .update(models)
+    .set({ capabilities: merge, updatedAt: new Date() })
+    .where(idMatch(modelId))
+    .returning({ id: models.id });
+  if (!updated.length) {
+    await db
+      .insert(models)
+      .values({
+        id: modelId,
+        source,
+        displayName: modelId,
+        // It just reasoned for us, so `reasoning` is a fact here, not a guess.
+        capabilities: { vision: false, tools: true, reasoning: true, efforts },
+        enabled: false,
+      })
+      .onConflictDoNothing();
+  }
+  effortsCache.delete(modelId);
 }

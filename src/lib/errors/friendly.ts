@@ -138,6 +138,53 @@ export function isReasoningUnsupportedError(raw: unknown): boolean {
   );
 }
 
+/** Every effort token we recognize; anything else in an error message is noise. */
+const EFFORT_TOKEN = /\b(none|default|minimal|low|medium|high|xhigh|max)\b/gi;
+
+/**
+ * The model DOES reason, but not at the level we asked for — it rejects the
+ * VALUE of `reasoning_effort`, and helpfully enumerates what it would accept:
+ *
+ *   Kimi K3:  "reasoning_effort must be low, high, or max"
+ *   Groq:     "reasoning_effort must be one of none or default"
+ *   OpenAI:   "Invalid value: 'medium'. Supported values are: 'low', 'high'"
+ *
+ * There is no portable enum (see models/thinking.ts), and the wire error carries
+ * no machine-readable field — Moonshot returns `invalid_request_error` with an
+ * EMPTY `param` — so the accepted set has to be read out of the prose. On a hit
+ * the runner retries once with a legal value and remembers the enum on the model
+ * row, so the negotiation costs one request per model, ever.
+ *
+ * Returns the accepted values, or null when this isn't that error. Deliberately
+ * narrow on two axes so it can't fire on the wrong thing:
+ *   - the message must name the `reasoning_effort` field itself, and
+ *   - only the enumerating phrasings count ("must be", "one of", "expected",
+ *     "supported/allowed/valid values"), never a bare rejection.
+ * That's what keeps it off DeepSeek's opposite demand ("reasoning_content must
+ * be passed back"), where retrying with a different effort would loop the turn.
+ */
+export function parseAllowedEfforts(raw: unknown): string[] | null {
+  const detail = errorText(raw);
+  if (!/reasoning[_ ]?effort/i.test(detail)) return null;
+  // Take the text AFTER the enumerating phrase — otherwise the rejected value
+  // ("Invalid value: 'medium'") would be collected as an accepted one.
+  // The leading \b matters more than it looks: without it, "Invalid value:
+  // 'medium'" matches the `valid values?` alternative *inside* "Invalid", and the
+  // REJECTED value gets collected as an accepted one.
+  const enumeration =
+    /\b(?:must be(?:\s+(?:one|any)\s+of)?|can(?:\s+only)?\s+be|one of|expected|(?:supported|allowed|valid|accepted|permitted)\s+values?(?:\s+are)?)\s*:?\s*(.{0,120})/i.exec(
+      detail,
+    );
+  if (!enumeration) return null;
+  const found = enumeration[1].match(EFFORT_TOKEN);
+  if (!found) return null;
+  const values = Array.from(new Set(found.map((v) => v.toLowerCase())));
+  // A single value is usually the REJECTED one quoted back at us rather than an
+  // enumeration ("reasoning_effort medium is invalid"), and acting on it would
+  // pin the model to a value it just refused. Needs at least a real list.
+  return values.length > 1 ? values : null;
+}
+
 /**
  * A DIFFERENT failure from `isReasoningUnsupportedError`: here the model DID
  * reason, but the backend rejects the model's OWN prior `reasoning_content` when

@@ -22,7 +22,16 @@ export interface ModelInfo {
   cutoff?: string | null;
   group?: string | null;
   icon?: string | null;
-  capabilities?: { vision: boolean; tools: boolean; reasoning: boolean; input?: Modality[] } | null;
+  capabilities?: {
+    vision: boolean;
+    tools: boolean;
+    reasoning: boolean;
+    input?: Modality[];
+    /** Learned `reasoning_effort` enum — the thinking control's stops. */
+    efforts?: string[];
+    /** These caps are an optimistic guess for an off-catalog id, not knowledge. */
+    assumed?: boolean;
+  } | null;
   featured?: boolean;
   // When the picker aggregates several enabled provider configs, each model is
   // tagged with the config it came from: `configId` routes the selection (the
@@ -172,7 +181,7 @@ async function catalogLookup(
 // its capabilities. The picker hides tool-incapable models, so defaulting to
 // "unknown" would silently drop the admin's own custom models. Assume usable
 // instead — surfacing a reachable model beats hiding it over missing metadata.
-const ASSUMED_CAPS: ModelInfo["capabilities"] = { vision: false, tools: true, reasoning: false };
+const ASSUMED_CAPS: ModelInfo["capabilities"] = { vision: false, tools: true, reasoning: false, assumed: true };
 
 function toModelInfo(
   id: string,

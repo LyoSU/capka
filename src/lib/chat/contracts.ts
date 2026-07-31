@@ -1,10 +1,15 @@
 import { z } from "zod";
 import { askFormSchema, askAnswerSchema } from "@/lib/ask/types";
+import { THINK_AMOUNTS } from "@/lib/models/thinking";
 
 // Inbound POST /api/chat body
 export const chatRequestSchema = z.object({
   chatId: z.string().optional(),
   model: z.string().optional(),
+  // Thinking depth for this chat, in the app's canonical vocabulary (never a
+  // provider value — see models/thinking.ts). Sent alongside the message exactly
+  // like `model`, and persisted on the chat the same way, so the setting sticks.
+  thinkAmount: z.enum(THINK_AMOUNTS).optional(),
   projectId: z.string().optional(),
   userMessage: z.string().default(""),
   // The client's optimistic user-message id. Persisting the row under this id

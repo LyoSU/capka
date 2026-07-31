@@ -6,6 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Thinking depth is now a per-chat control next to the model picker (off / brief / balanced / deep), stored on the chat. It only appears for models that reason, and only offers the levels the chosen model actually accepts.
+
+### Fixed
+
+- A model that accepts only some `reasoning_effort` values (Kimi K3: `low|high|max`, Groq's Qwen: `none|default`) no longer fails the whole turn with "an error occurred". The rejected level is re-mapped onto the enum the provider names in its own error, the turn is retried once, and the enum is remembered on the model so later turns send a valid value first time.
+- `reasoning_effort` is no longer hardcoded to `medium` — no such value is portable across providers, and it 400s on several current models.
+
 ## [0.16.0] - 2026-07-28
 
 ### Added

@@ -6,6 +6,7 @@ import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, chats, users } from "@/lib/db/schema";
 import { resolveInitialModel } from "@/lib/providers/default-model";
+import { parseThinkAmount } from "@/lib/models/thinking";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { isShareImportEnabled } from "@/lib/import/flag";
 import { ChatPanel } from "@/components/chat/chat-panel";
@@ -29,7 +30,7 @@ export default async function ChatIdPage({
   // uses it to render the right shell on first paint instead of flashing the
   // new-chat greeting while history is still being fetched.
   const [existingChat] = await db
-    .select({ projectId: chats.projectId, model: chats.model, source: chats.source, activeLeafId: chats.activeLeafId })
+    .select({ projectId: chats.projectId, model: chats.model, thinkAmount: chats.thinkAmount, source: chats.source, activeLeafId: chats.activeLeafId })
     .from(chats)
     .where(and(eq(chats.id, chatId), eq(chats.userId, session.user.id)))
     .limit(1);
@@ -72,6 +73,7 @@ export default async function ChatIdPage({
       key={chatId}
       chatId={chatId}
       defaultModel={defaultModel}
+      initialThinkAmount={parseThinkAmount(existingChat?.thinkAmount)}
       projectId={projectId ?? undefined}
       isAdmin={userRow?.role === "admin"}
       projectName={project?.name}

@@ -44,6 +44,8 @@ import type { FileRef } from "@/lib/constants";
 import { modelSupportsModality, mimeToModality, type Modality } from "@/lib/providers/registry";
 import { FileDropZone } from "@/components/chat/file-drop-zone";
 import { ModelPicker } from "@/components/chat/model-picker";
+import { ThinkingPicker } from "@/components/chat/thinking-picker";
+import { DEFAULT_THINK_AMOUNT, type ThinkAmount } from "@/lib/models/thinking";
 import { WorkspacePanel } from "@/components/chat/workspace-panel";
 import { PreviewProvider } from "@/components/chat/file-preview";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
@@ -60,6 +62,8 @@ import { chatTarget } from "@/lib/workspace-target";
 interface ChatPanelProps {
   chatId: string;
   defaultModel: string;
+  /** Thinking depth saved on this chat (server-resolved, "balanced" when unset). */
+  initialThinkAmount?: ThinkAmount;
   projectId?: string;
   /** The owning project's name (when the chat belongs to one) — drives the calm
    *  read-only breadcrumb linking back to the project hub. */
@@ -82,10 +86,36 @@ interface ChatPanelProps {
   shareImportEnabled?: boolean;
 }
 
-export function ChatPanel({ chatId, defaultModel, projectId, projectName, isAdmin, readOnly, initialHasHistory, recentChats, userName, shareImportEnabled }: ChatPanelProps) {
+export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, recentChats, userName, shareImportEnabled }: ChatPanelProps) {
   const t = useTranslations("chat");
   const locale = useLocale();
   const [model, setModel] = useState(defaultModel);
+
+  // How hard the model should think in this chat. Persisted immediately (not only
+  // on the next send) so the choice survives a reload of a chat the user hasn't
+  // written to yet; a chat with no row yet has nothing to PATCH, and the send
+  // carries the value along to create the row with it.
+  const [thinkAmount, setThinkAmount] = useState<ThinkAmount>(initialThinkAmount ?? DEFAULT_THINK_AMOUNT);
+  const thinkSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleThinkAmount = useCallback(
+    (next: ThinkAmount) => {
+      setThinkAmount(next); // local state stays instant — the slider must not lag
+      // Dragging across the track fires one change per stop, so only the value the
+      // user settles on is written. Trailing-only: nothing here is time-critical,
+      // and a send would carry the value along regardless.
+      if (thinkSaveRef.current) clearTimeout(thinkSaveRef.current);
+      thinkSaveRef.current = setTimeout(() => {
+        void fetch(`/api/chats/${chatId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ thinkAmount: next }),
+        }).catch(() => {
+          /* the next send carries it anyway — don't nag over a failed preference write */
+        });
+      }, 350);
+    },
+    [chatId],
+  );
 
   // Whether the chat's selected model is still serveable. The model picker
   // resolves this against the live model list (provider disconnected, or the
@@ -103,10 +133,18 @@ export function ChatPanel({ chatId, defaultModel, projectId, projectName, isAdmi
     available: boolean;
     provider?: string;
     inputModalities?: Modality[] | null;
+    reasoning?: boolean | null;
+    efforts?: string[] | null;
   }>({ settled: false, available: true });
   const handleModelResolved = useCallback(
-    (s: { settled: boolean; available: boolean; provider?: string; inputModalities?: Modality[] | null }) =>
-      setModelStatus(s),
+    (s: {
+      settled: boolean;
+      available: boolean;
+      provider?: string;
+      inputModalities?: Modality[] | null;
+      reasoning?: boolean | null;
+      efforts?: string[] | null;
+    }) => setModelStatus(s),
     [],
   );
 
@@ -481,7 +519,7 @@ export function ChatPanel({ chatId, defaultModel, projectId, projectName, isAdmi
       // block the send on it — a sync hiccup surfaces in the attach menu, not a
       // failed turn.
       await folderSync.pushAll().catch(() => {});
-      await sendMessage(text, model, refs.length > 0 ? refs : undefined, id);
+      await sendMessage(text, model, refs.length > 0 ? refs : undefined, id, thinkAmount);
       return true;
     } catch (e) {
       // The send failed and the hook already rolled back its optimistic bubble —
@@ -634,6 +672,20 @@ export function ChatPanel({ chatId, defaultModel, projectId, projectName, isAdmi
   // running so the composer keeps its stop button.
   const modelGone = !readOnly && !isLoading && modelStatus.settled && !modelStatus.available;
 
+  // Rides in the same pill shell as the model picker, and renders itself away
+  // when the resolved model has no reasoning levels worth offering. Hidden on a
+  // read-only (Telegram) chat, where nothing is sendable from here anyway.
+  const thinkingEl = readOnly ? null : (
+    <ThinkingPicker
+      value={thinkAmount}
+      onChange={handleThinkAmount}
+      provider={modelStatus.provider}
+      reasoning={modelStatus.reasoning}
+      efforts={modelStatus.efforts}
+      disabled={modelGone}
+    />
+  );
+
   const inputEl = readOnly ? (
     <div className="mx-auto max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 lg:max-w-4xl">
       <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card/50 px-4 py-5 text-center">
@@ -777,8 +829,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, projectName, isAdmi
                   stacking context above the starters block below — otherwise the
                   later sibling paints over the open dropdown. */}
               <div className="animate-blur-rise relative z-20 -mt-3 flex justify-center [animation-delay:140ms]">
-                <div className="inline-flex rounded-full border bg-card px-1 shadow-sm">
+                <div className="inline-flex items-center rounded-full border bg-card px-1 shadow-sm">
                   <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
+                  {thinkingEl}
                 </div>
               </div>
               {/* Hint + recent + starters collapse away the moment the user starts
@@ -886,8 +939,9 @@ export function ChatPanel({ chatId, defaultModel, projectId, projectName, isAdmi
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 bg-gradient-to-b from-background via-background to-transparent px-4 pb-8 pt-3 md:px-6">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full border bg-card shadow-sm md:hidden" />
-              <div className="pointer-events-auto inline-flex rounded-full border bg-card px-1 shadow-sm">
+              <div className="pointer-events-auto inline-flex items-center rounded-full border bg-card px-1 shadow-sm">
                 <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
+                {thinkingEl}
               </div>
               {projectId && projectName && (
                 <Link

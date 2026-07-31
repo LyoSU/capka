@@ -120,6 +120,11 @@ export const chats = pgTable("chats", {
   projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
   title: text("title"),
   model: text("model"),
+  // How hard the model should think in this chat: "off" | "brief" | "balanced" |
+  // "deep" (see models/thinking.ts). Canonical intent, NOT a provider value —
+  // each provider's legal wire value is derived per model at run time. Null =
+  // never set, which reads as "balanced" (the historical hardcoded behaviour).
+  thinkAmount: text("think_amount"),
   // Where the conversation originates. "web" chats are fully interactive; a
   // "telegram" chat is owned by the bot channel and is read-only in the web UI
   // (you reply from Telegram, or fork it into a fresh web chat to take over).
