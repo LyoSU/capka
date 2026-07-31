@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-31
+
 ### Added
 
 - Thinking depth is now a per-chat control next to the model picker (off / brief / balanced / deep), stored on the chat. It only appears for models that reason, and only offers the levels the chosen model actually accepts.
