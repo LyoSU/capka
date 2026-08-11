@@ -4,7 +4,7 @@ import { connectMcpServer, disconnectMcp, type ConnectedMcp } from "./client";
 import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
 import { recordConnectError, clearConnectError, recentlyFailed } from "./connect-errors";
-import { getCachedTools, setCachedTools } from "./tool-cache";
+import { getCachedTools, setCachedTools, cachedToolsAreStale } from "./tool-cache";
 import { hasUserTokens } from "./oauth/store";
 import { McpOAuthProvider } from "./oauth/provider";
 import { needsPluginRoot, resolvePluginRoot } from "./plugin-runtime";
@@ -163,6 +163,16 @@ export async function loadMcpTools(opts: {
       const caller = lazyCaller(c);
       for (const mt of [...cached].sort((a, b) => a.name.localeCompare(b.name))) {
         tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(caller, c.name, mt, spillCtx);
+      }
+      // Stale-while-revalidate, remote only: a server can gain or lose tools without
+      // telling us, and if the model never calls one nothing else re-reads its
+      // schemas. The refresh is a background dial-and-hang-up, so this turn keeps
+      // the tools it already knows about and the next turn gets the true set.
+      // Deliberately NOT done for stdio: refreshing there means spinning the
+      // sandbox and an `npx` install — far too expensive to do on a timer. A stdio
+      // connector refreshes when the model actually calls one of its tools.
+      if (c.transport !== "stdio" && cachedToolsAreStale(cacheKey(c))) {
+        warmups.push(warmRemoteSchema(c));
       }
       continue;
     }

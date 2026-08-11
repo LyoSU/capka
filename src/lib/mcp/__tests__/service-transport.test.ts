@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * The storage + runtime gates for remote transports. A connector saved from an
@@ -42,7 +42,8 @@ vi.mock("@/lib/settings", () => ({
 vi.mock("@/lib/net/ssrf", () => ({ assertSafeUrl: vi.fn(async () => {}) }));
 vi.mock("@/lib/muted-resources", () => ({ mutedIds: async () => new Set<string>(), setMuted: vi.fn() }));
 
-import { listEnabledServerConfigs, upsertServer } from "../service";
+import { listEnabledServerConfigs, upsertServer, deleteServer } from "../service";
+import { getCachedTools, setCachedTools, clearCachedTools } from "../tool-cache";
 
 const row = (over: Record<string, unknown> = {}) => ({
   id: "s1", scope: "user", userId: "u1", projectId: null, name: "notion",
@@ -87,5 +88,28 @@ describe("upsertServer", () => {
       url: "https://host.example/sse", transport: "http",
     });
     expect(writes.values[0]).toMatchObject({ transport: "http" });
+  });
+});
+
+describe("cached schemas follow the connector's config", () => {
+  // Tools are declared to the model FROM the cache. An entry that survives a config
+  // change describes a server we may no longer be talking to — the model would be
+  // offered tools that no longer exist, and only find out by calling one.
+  afterEach(() => clearCachedTools("s1"));
+
+  it("drops the cached schemas when the connector is edited", async () => {
+    rows.mcp = [row()]; // the row being edited must be findable, or upsert writes a NEW id
+    setCachedTools("s1", [{ name: "old-tool" }]);
+    await upsertServer({
+      id: "s1", scope: "user", userId: "u1", projectId: null,
+      name: "notion", url: "https://elsewhere.example/mcp",
+    });
+    expect(getCachedTools("s1")).toBeUndefined();
+  });
+
+  it("drops the cached schemas when the connector is deleted", async () => {
+    setCachedTools("s1", [{ name: "old-tool" }]);
+    await deleteServer("s1");
+    expect(getCachedTools("s1")).toBeUndefined();
   });
 });

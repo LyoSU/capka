@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { getCachedTools, setCachedTools, clearCachedTools } from "../tool-cache";
+import {
+  getCachedTools,
+  setCachedTools,
+  clearCachedTools,
+  cachedToolsAreStale,
+  SCHEMA_TTL_MS,
+} from "../tool-cache";
 
 const tools = [{ name: "scan", description: "scan", inputSchema: { type: "object", properties: {} } }];
 
@@ -24,6 +30,37 @@ describe("mcp tool-cache — one cache per process", () => {
 
     expect(second).not.toBe(first); // a genuinely re-evaluated module
     expect(second.getCachedTools("dup")).toEqual(tools);
+  });
+});
+
+describe("mcp tool-cache staleness", () => {
+  beforeEach(() => clearCachedTools("srv"));
+  afterEach(() => vi.useRealTimers());
+
+  it("reports a fresh entry as not stale", () => {
+    setCachedTools("srv", tools);
+    expect(cachedToolsAreStale("srv")).toBe(false);
+  });
+
+  it("reports an entry past the TTL as stale", () => {
+    vi.useFakeTimers();
+    setCachedTools("srv", tools);
+    vi.advanceTimersByTime(SCHEMA_TTL_MS + 1);
+    expect(cachedToolsAreStale("srv")).toBe(true);
+  });
+
+  it("still serves a stale entry — staleness triggers a refresh, it does not hide tools", () => {
+    // Dropping the entry at the TTL would cost one whole turn without that
+    // connector's tools, at a random moment in a conversation. Stale-while-
+    // revalidate keeps them declared and refreshes behind the turn.
+    vi.useFakeTimers();
+    setCachedTools("srv", tools);
+    vi.advanceTimersByTime(SCHEMA_TTL_MS + 1);
+    expect(getCachedTools("srv")).toEqual(tools);
+  });
+
+  it("treats an unknown server as not stale (there is nothing to revalidate)", () => {
+    expect(cachedToolsAreStale("srv")).toBe(false);
   });
 });
 

@@ -37,7 +37,17 @@ vi.mock("../plugin-runtime", () => ({ needsPluginRoot: () => false, resolvePlugi
 vi.mock("@/lib/settings", () => ({ getBlockPrivateProviderUrls: async () => false }));
 
 import { loadMcpTools } from "../load";
-import { getCachedTools, setCachedTools, clearCachedTools } from "../tool-cache";
+import { getCachedTools, setCachedTools, clearCachedTools, SCHEMA_TTL_MS, type CachedTool } from "../tool-cache";
+
+/** Write a cache entry stamped before the TTL, so it reads as stale under the real
+ *  clock. Setting the system time BACK for the write (rather than advancing it
+ *  after) keeps the rest of the test on real timers, which the async paths need. */
+function stampCacheInThePast(serverId: string, tools: CachedTool[]) {
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.now() - (SCHEMA_TTL_MS + 60_000));
+  setCachedTools(serverId, tools);
+  vi.useRealTimers();
+}
 
 const cfg = (name: string, transport: "stdio" | "http") => ({
   id: name, name, transport, enabled: true, authKind: "token",
@@ -113,6 +123,34 @@ describe("loadMcpTools — remote connectors are lazy too", () => {
       res.close().then(() => "closed"),
       new Promise((r) => setTimeout(() => r("blocked"), 50)),
     ])).resolves.toBe("closed");
+  });
+
+  it("refreshes a stale remote entry behind the turn, while still offering its tools", async () => {
+    // A server can gain or lose tools without telling us. Refresh in the
+    // background rather than at the TTL boundary — expiring the entry outright
+    // would cost one arbitrary turn with the connector missing.
+    stampCacheInThePast("api", [{ name: "q", inputSchema: { type: "object", properties: {} } }]);
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    connectMcpServer.mockResolvedValue({ tools: [{ name: "q2" }], client: { callTool: vi.fn() } });
+
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+
+    expect(Object.keys(res.tools)).toEqual(["mcp__api__q"]); // this turn: the known set
+    await res.warming;
+    expect(getCachedTools("api")).toEqual([{ name: "q2" }]); // next turn: the fresh one
+  });
+
+  it("does not dial a stale stdio entry — that would spin the sandbox", async () => {
+    stampCacheInThePast("plug", [{ name: "scan", inputSchema: { type: "object", properties: {} } }]);
+    listEnabledServerConfigs.mockResolvedValue([cfg("plug", "stdio")]);
+    connectMcpServer.mockReturnValue(new Promise(() => {})); // would hang if called
+    const ensureSession = vi.fn();
+
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession });
+
+    expect(Object.keys(res.tools)).toEqual(["mcp__plug__scan"]);
+    expect(connectMcpServer).not.toHaveBeenCalled();
+    expect(ensureSession).not.toHaveBeenCalled();
   });
 
   it("connects on the first tool call, without a session", async () => {

@@ -8,6 +8,7 @@ import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import { ValidationError } from "@/lib/errors";
 import { mutedIds } from "@/lib/muted-resources";
+import { clearCachedTools } from "./tool-cache";
 import { inferRemoteTransport, type McpAuthKind, type McpScope, type McpSecrets, type McpServerConfig, type McpServerInfo } from "./types";
 
 const SCOPE_RANK: Record<McpScope, number> = { system: 0, user: 1, project: 2 };
@@ -174,6 +175,7 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
   };
   if (matchedId) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
   else await db.insert(mcpServers).values(values);
+  clearCachedTools(id);
   return id;
 }
 
@@ -213,6 +215,7 @@ export async function upsertStdioServer(input: UpsertStdioInput): Promise<string
   };
   if (matchedId) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
   else await db.insert(mcpServers).values(values);
+  clearCachedTools(id);
   return id;
 }
 
@@ -238,6 +241,9 @@ export async function setEnabled(id: string, enabled: boolean): Promise<void> {
 
 export async function deleteServer(id: string): Promise<void> {
   await db.delete(mcpServers).where(eq(mcpServers.id, id));
+  // Also what bounds the schema cache: it holds an entry per EXISTING connector,
+  // rather than one per connector the instance has ever had.
+  clearCachedTools(id);
 }
 
 /** Scope + display name of a connector by id, or null if it doesn't exist. Lets
