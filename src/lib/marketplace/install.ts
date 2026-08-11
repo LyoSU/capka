@@ -2,15 +2,13 @@ import { nanoid } from "nanoid";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } from "@/lib/db/schema";
-import { createGuardedFetch } from "@/lib/net/ssrf";
-import { getBlockPrivateProviderUrls, getSetting } from "@/lib/settings";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
 import { ingestSkill } from "@/lib/skills/service";
 import { upsertServer, upsertStdioServer, setEnabled } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl, resolveGitHub } from "./source";
-import { ghTree, ghRaw, resolveCommit, diffTrees, type TreeEntry, type TreeDiff } from "./fetch";
+import { ghFetch, ghTree, ghRaw, resolveCommit, diffTrees, type TreeEntry, type TreeDiff } from "./fetch";
 import { extractServers, parseManifestMcp, type ServerDef } from "./manifest";
 import { refsPluginRoot, hasUnresolvedPlaceholder, serverDefParts, selectPluginFiles } from "./plugin-root";
 import type { CatalogItem, CommitInfo, GitHubRef, InstallManifest } from "./types";
@@ -57,14 +55,6 @@ async function persistPluginFiles(installId: string, files: { path: string; cont
   if (files.length) {
     await db.insert(pluginFiles).values(files.map((f) => ({ id: nanoid(), installId, path: f.path, content: f.content })));
   }
-}
-
-/** Guarded GitHub fetch with API headers + optional token (rate limits). */
-async function ghFetch(): Promise<typeof fetch> {
-  const token = await getSetting("github_token");
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "capka" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), headers, timeoutMs: 15_000 });
 }
 
 /** Resolve a (marketplace, plugin) to its GitHub location + catalog entry. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   ArrowDownUp, ChevronRight, Cloud, Check, Download, FileWarning, Folder, LayoutGrid, List, Loader2, RefreshCw, Trash2, Upload, X,
@@ -112,6 +112,11 @@ export function WorkspaceBrowser({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // The upload input needs a real id to pair with its label; `useId` keeps it
+  // unique because this browser renders in two places (the chat panel and the
+  // project hub's Files tab) and a duplicate id would silently steer one label at
+  // the other component's input.
+  const uploadId = useId();
   const [pendingDelete, setPendingDelete] = useState<FileEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [dropping, setDropping] = useState(false);
@@ -260,7 +265,7 @@ export function WorkspaceBrowser({
     const s = fileStatus(entry);
     if (!s) return null;
     if (s === "syncing") return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" aria-label={t("statusSyncing")} />;
-    if (s === "synced") return <Check className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-500" aria-label={t("statusSynced")} />;
+    if (s === "synced") return <Check className="h-3 w-3 shrink-0 text-success" aria-label={t("statusSynced")} />;
     return <Cloud className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-label={t("statusPending")} />;
   };
 
@@ -420,7 +425,7 @@ export function WorkspaceBrowser({
           ? tileBadge(
             s === "syncing" ? t("statusSyncing") : s === "synced" ? t("statusSynced") : t("statusPending"),
             s === "syncing" ? <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />
-              : s === "synced" ? <Check className="h-2.5 w-2.5 text-emerald-600 dark:text-emerald-500" />
+              : s === "synced" ? <Check className="h-2.5 w-2.5 text-success" />
                 : <Cloud className="h-2.5 w-2.5 text-muted-foreground/70" />,
           )
           : undefined}
@@ -532,11 +537,32 @@ export function WorkspaceBrowser({
             <span className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground">{entryCount}</span>
           )}
         </h3>
-        <label title={t("upload")} aria-label={t("upload")}>
-          <input type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
-          <div className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
-            <Upload className={`h-3.5 w-3.5 ${uploading ? "animate-pulse" : ""}`} />
-          </div>
+        {/* `sr-only`, not `hidden`, and a real `htmlFor` pairing. A `<label>` is
+            never in the tab order and `hidden` takes the input out of it too, so
+            this control — the only way to add a file here — was unreachable by
+            keyboard entirely, while the download button beside it (a real
+            `<button>`) worked fine. `sr-only` keeps the input focusable and
+            `peer-focus-visible` puts the ring on the visible box.
+            The icon becomes a spinner while uploading rather than pulsing: fading
+            an icon in and out reads as "disabled", not as "in progress". */}
+        <input
+          id={uploadId}
+          type="file"
+          multiple
+          className="peer sr-only"
+          onChange={(e) => e.target.files && upload(e.target.files)}
+        />
+        <label
+          htmlFor={uploadId}
+          title={t("upload")}
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring/50"
+        >
+          {uploading ? (
+            <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" aria-hidden="true" />
+          ) : (
+            <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          <span className="sr-only">{t("upload")}</span>
         </label>
         {canDownloadAll(folders.length, fileCount) && (
           <button onClick={downloadAll} title={t("downloadAll")} aria-label={t("downloadAll")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">

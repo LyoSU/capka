@@ -26,6 +26,7 @@ import { ASSISTANT_PROFILE, profilesEqual, type AgentProfile } from "@/lib/agent
 import { projectTarget, targetQuery } from "@/lib/workspace-target";
 import { displayModelName } from "@/lib/providers/registry";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type ChatRow = { id: string; title: string | null; updatedAt: string | null };
 export type HubTab = "overview" | "files" | "chats" | "settings";
@@ -336,7 +337,7 @@ function OverviewTab({
                 <span className="inline-flex items-center gap-1">
                   {syncing
                     ? <RefreshCw className="h-3 w-3 animate-spin" />
-                    : <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-500" />}
+                    : <Check className="h-3 w-3 text-success" />}
                   {t("folderCount", { n: folderCount })}
                 </span>
               )}
@@ -598,7 +599,7 @@ function MemoryEditor({ projectId }: { projectId: string }) {
   return (
     <div>
       {content === null ? (
-        <div className="h-20 animate-pulse rounded-md border bg-muted/40" aria-hidden />
+        <Skeleton className="h-20" aria-hidden />
       ) : (
         <>
           <Textarea

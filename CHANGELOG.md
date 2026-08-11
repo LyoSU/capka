@@ -27,6 +27,9 @@ All notable changes to Capka are documented here. Format follows
 - Dialogs, sheets, menus, the model picker and the floating chat controls take their edge from the elevation tokens instead of a `border` plus a generic Tailwind shadow.
 - The workspace panel reads as an overlay on phones and keeps a `--border-strong` seam when docked on desktop, where it previously drew no shadow or emphasis at all.
 - `--field` is alpha-based in dark mode, so a sunken input is recessed against every surface — including the sidebar, where the old fixed value came out slightly raised.
+- Loading placeholders in settings, the model picker, the sidebar, project hub and automations use the shared `Skeleton` instead of hand-rolled `animate-pulse` divs, which had opted back into Tailwind's slower default cadence.
+- Success and warning states use `--success` and `--warning-surface`/`-border`/`-text` instead of raw `emerald`/`amber` palette values with hand-written dark-mode variants. Remaining palette colours are categorical (file type, price tier, audit groups), not states.
+- A governance decision (allow / ask / deny) looks the same on every admin screen; in a person's drawer `allow` had been rendering as the least emphasized of the three.
 
 ### Fixed
 
@@ -35,6 +38,12 @@ All notable changes to Capka are documented here. Format follows
 - The context-window ring is legible again: it drew at half-strength `--primary`, under the 3:1 contrast floor for non-text UI.
 - `automations-collection` tests no longer fail once the clock passes a hardcoded date; the one-off trigger case now derives its `once_at` from the current time.
 - Recent-chat rows no longer paint a hover shadow that their `overflow-hidden` container clipped into a dark smear along one edge.
+- The workspace panel's upload control is reachable by keyboard. It was a `<label>` wrapping a `<div>`, with the file input `hidden`, so nothing in it could take focus — the only way to add a file to a workspace was the mouse. It also shows a spinner while uploading instead of a pulsing icon.
+- `manage` impact warnings for agent autonomy, sandbox network and private-provider-URL blocking are localized. The translations already existed and nothing read them, so a non-English admin was asked to confirm a security warning written in English.
+
+### Removed
+
+- 31 message keys nothing referenced, a dead `resolveUserModel` wrapper, a `.scrollbar-none` duplicate (shadcn's `no-scrollbar` already provides it), an `animate-step-badge-in` alias identical to `animate-step-in`, and a second byte-for-byte copy of the SSRF-guarded GitHub fetch.
 
 ## [0.17.0] - 2026-07-31
 

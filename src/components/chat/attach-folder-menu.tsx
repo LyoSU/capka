@@ -101,7 +101,7 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
                 ) : folders.phase === "error" ? (
                   <span className="text-destructive">{t("syncFailed")}</span>
                 ) : folders.lastSyncedAt ? t("syncedAgo", { ago: rel(folders.lastSyncedAt, locale, t) }) : ""}
-                {folders.conflicts > 0 && <span className="text-amber-600 dark:text-amber-500"> · {t("conflicts", { n: folders.conflicts })}</span>}
+                {folders.conflicts > 0 && <span className="text-warning-text"> · {t("conflicts", { n: folders.conflicts })}</span>}
                 {folders.phase !== "syncing" && folders.skipped > 0 && <span className="block text-muted-foreground/70">{t("skipped", { n: folders.skipped })}</span>}
               </div>
             )}

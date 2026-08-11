@@ -640,10 +640,10 @@ function AttentionBlock({
   };
   return (
     <section
-      className="space-y-1.5 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3.5"
+      className="space-y-1.5 rounded-lg border border-warning-border bg-warning-surface p-3.5"
       role="status"
     >
-      <div className="flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-500">
+      <div className="flex items-center gap-1.5 text-sm font-medium text-warning-text">
         <AlertTriangle className="h-3.5 w-3.5" />
         {t("attn.title")}
       </div>

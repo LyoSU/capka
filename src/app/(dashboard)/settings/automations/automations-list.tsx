@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { SettingsEmpty, SettingsError } from "@/components/settings/shell";
 import type { AutomationTrigger } from "@/lib/automations/schedule";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface Automation {
   id: string;
@@ -122,7 +123,7 @@ export default function AutomationsList() {
     return (
       <div className="space-y-2">
         {[0, 1].map((i) => (
-          <div key={i} className="h-[4.5rem] animate-pulse rounded-lg border bg-muted/40" />
+          <Skeleton key={i} className="h-[4.5rem] rounded-lg" />
         ))}
       </div>
     );

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getSetting, setSetting, getOrgAgentProfile, setOrgAgentProfile } from "@/lib/settings";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "@/lib/constants";
 import { CAPABILITY_GROUPS, type CapabilityGroup } from "@/lib/agents/profile";
+import { loc, manageT } from "../i18n";
 import type { Control, ManageContext } from "../types";
 
 // English is the source of truth for control copy (see manage/i18n.ts), so these
@@ -156,9 +157,17 @@ export const orgControls: Control[] = [
     // so a prompt-injected agent can't quietly disable its own supervision. (Being
     // org-scoped now also guarantees this, but the flag documents the intent.)
     alwaysConfirm: true,
-    impact: async (_ctx, next) =>
+    // Localized, like every other control's impact text. Translations for all three
+    // of these already existed under `manage.impact.org_*` and nothing read them —
+    // so a Ukrainian admin was being asked to confirm a security-relevant warning
+    // written in English. English stays the inline fallback (see manage/i18n.ts).
+    impact: async (ctx, next) =>
       next === "autonomous"
-        ? "The agent will apply personal preferences and install skills directly, without asking each time. Platform-wide settings and connectors that run third-party code still require your confirmation. Undo and the audit log still apply."
+        ? loc(
+            manageT(ctx.locale),
+            "impact.org_agent_autonomy",
+            "The agent will apply personal preferences and install skills directly, without asking each time. Platform-wide settings and connectors that run third-party code still require your confirmation. Undo and the audit log still apply.",
+          )
         : undefined,
   }),
   orgSetting({
@@ -178,9 +187,13 @@ export const orgControls: Control[] = [
     schema: z.enum(["none", "bridge"]),
     def: "none",
     format: (v) => (v === "bridge" ? "Network access" : "Isolated (no network)"),
-    impact: async (_ctx, next) =>
+    impact: async (ctx, next) =>
       next === "bridge"
-        ? "Sandboxes gain outbound network access — and only if SANDBOX_ALLOW_NETWORK=true is set on the server."
+        ? loc(
+            manageT(ctx.locale),
+            "impact.org_sandbox_network",
+            "Sandboxes gain outbound network access — and only if SANDBOX_ALLOW_NETWORK=true is set on the server.",
+          )
         : undefined,
   }),
   orgSetting({
@@ -190,8 +203,14 @@ export const orgControls: Control[] = [
     schema: bool,
     def: "true",
     format: boolFmt,
-    impact: async (_ctx, next) =>
-      next === "false" ? "Turning this off weakens SSRF protection — only do so deliberately." : undefined,
+    impact: async (ctx, next) =>
+      next === "false"
+        ? loc(
+            manageT(ctx.locale),
+            "impact.org_block_private_provider_urls",
+            "Turning this off weakens SSRF protection — only do so deliberately.",
+          )
+        : undefined,
   }),
   orgSetting({
     key: "share_admin_providers",

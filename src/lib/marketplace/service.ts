@@ -2,21 +2,12 @@ import { nanoid } from "nanoid";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginMarketplaces, pluginInstalls, skills, mcpServers } from "@/lib/db/schema";
-import { createGuardedFetch } from "@/lib/net/ssrf";
 import { mutedIds, setMuted } from "@/lib/muted-resources";
-import { getBlockPrivateProviderUrls, getSetting } from "@/lib/settings";
 import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl } from "./source";
-import { ghRaw, parseMarketplace } from "./fetch";
+import { ghFetch, ghRaw, parseMarketplace } from "./fetch";
 import { discoverSkills } from "./discover";
 import type { CatalogItem } from "./types";
-
-async function ghFetch(): Promise<typeof fetch> {
-  const token = await getSetting("github_token");
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "capka" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), headers, timeoutMs: 15_000 });
-}
 
 /** Fetch + normalize a marketplace's plugin catalog from its GitHub repo. */
 async function fetchCatalog(url: string): Promise<{ name: string; owner: string | null; items: CatalogItem[] }> {

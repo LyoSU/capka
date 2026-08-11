@@ -17,6 +17,7 @@ import { SettingsEmpty, SettingsSkeleton } from "@/components/settings/shell";
 import { authClient } from "@/lib/auth-client";
 import { explainPolicy } from "@/lib/governance/matcher";
 import type { PolicyScope } from "@/lib/governance/types";
+import { EffectBadge } from "@/components/shared/effect-badge";
 
 type Effect = "allow" | "deny" | "ask";
 type CapabilityType = "skill" | "connector";
@@ -172,7 +173,7 @@ export function PermissionsTab() {
                   {nExceptions > 0 && (
                     <span className="shrink-0 text-xs text-muted-foreground">{t("exceptions", { count: nExceptions })}</span>
                   )}
-                  <EffectBadge effect={effect} t={t} />
+                  <EffectBadge effect={effect} label={t(`effect.${effect}`)} />
                 </button>
               );
             })}
@@ -200,15 +201,6 @@ export function PermissionsTab() {
       </Sheet>
     </div>
   );
-}
-
-function EffectBadge({ effect, t }: { effect: Effect; t: T }) {
-  const color: Record<Effect, string> = {
-    allow: "text-success",
-    ask: "text-warning-text",
-    deny: "text-destructive",
-  };
-  return <span className={cn("shrink-0 text-xs font-medium", color[effect])}>{t(`effect.${effect}`)}</span>;
 }
 
 function CapabilityDrawer({
@@ -328,7 +320,7 @@ function ExceptionSection({
           {rows.map((r) => (
             <li key={r.id} className="flex items-center gap-2 rounded-md border p-2">
               <span className="min-w-0 flex-1 truncate text-sm">{r.label}</span>
-              <EffectBadge effect={r.effect} t={t} />
+              <EffectBadge effect={r.effect} label={t(`effect.${r.effect}`)} />
               {/* Dropping an exception widens or narrows who may use the capability,
                   so the X asks first instead of taking effect on the click. */}
               <AlertDialog>

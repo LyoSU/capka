@@ -221,8 +221,3 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
   // the very same key this turn ran on, without re-deriving it from the chat model.
   return { model, provider: config.provider, modelId, modelInput, apiStyle, isShared: config.isShared, configId: config.id };
 }
-
-export async function resolveUserModel(userId: string, requestModel?: string) {
-  const { model } = await resolveUserModelInfo(userId, requestModel);
-  return model;
-}

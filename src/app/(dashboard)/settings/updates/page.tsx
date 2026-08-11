@@ -114,7 +114,7 @@ export default function UpdatesSettingsPage() {
           ) : status?.error ? (
             <span className="shrink-0 text-xs text-muted-foreground">{t("checkFailed")}</span>
           ) : status?.latest ? (
-            <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-500">
+            <span className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-success">
               <CheckCircle2 className="h-3.5 w-3.5" />
               {t("upToDate")}
             </span>

@@ -331,8 +331,10 @@
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+/* One class, not two. `.animate-step-badge-in` was a byte-identical second name for
+   this — the badge and its row deliberately share the single fade, so a separate
+   name only invited them to drift apart. */
 .animate-step-in { animation: step-in 0.18s var(--ease-out) both; }
-.animate-step-badge-in { animation: step-in 0.18s var(--ease-out) both; }
 
 /* Claw reveal: each tapered blade wipes in from its top to its tip via
    clip-path, staggered left to right, then settles with one delicate flash.
@@ -745,13 +747,9 @@
   background: oklch(0.5 0 0 / 0.3);
 }
 
-/* Hide scrollbar completely (still scrollable) */
-.scrollbar-none {
-  scrollbar-width: none;
-}
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
-}
+/* NB: no `.scrollbar-none` here. `shadcn/tailwind.css` (imported at the top of this
+   file) already ships `no-scrollbar`, which is what the two call sites actually use;
+   ours was a second name for the same behaviour that nothing referenced. */
 
 /* Streamdown — flatten code block: remove outer card wrapper. Keep the wrapper's
    gap so the copy button lands correctly: Streamdown floats the actions pill up

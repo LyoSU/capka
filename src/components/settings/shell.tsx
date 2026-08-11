@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Inbox, type LucideIcon } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 /**
@@ -98,22 +99,28 @@ export function SettingsSkeleton({
     // a max-w-5xl page snaps sideways the moment the real content lands, which is
     // the same jump this component exists to prevent — just on the other axis.
     <div className={cn("space-y-10", wide ? "max-w-5xl" : "max-w-2xl")} aria-hidden>
+      {/* `Skeleton`, not hand-rolled `animate-pulse` divs. Tailwind's default pulse
+          is a 2s ease-in-out that globals.css already calls out as reading sluggish
+          for a loading state — the whole reason `animate-pulse-fast` exists — and
+          these were quietly opting back into it. The two grey levels are gone too:
+          bar WIDTH already says title-over-subtitle, so a second opacity was
+          carrying no information a shape wasn't. */}
       {header && (
         <div className="space-y-2">
-          <div className="h-6 w-40 animate-pulse rounded bg-muted" />
-          <div className="h-4 w-72 animate-pulse rounded bg-muted/60" />
+          <Skeleton className="h-6 w-40 rounded" />
+          <Skeleton className="h-4 w-72 rounded" />
         </div>
       )}
       <div className="space-y-3">
-        <div className="h-4 w-24 animate-pulse rounded bg-muted/60" />
+        <Skeleton className="h-4 w-24 rounded" />
         <SettingsGroup>
           {Array.from({ length: rows }, (_, i) => (
             <div key={i} className="flex items-center justify-between gap-4 px-4 py-3.5">
               <div className="min-w-0 flex-1 space-y-1.5">
-                <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
-                <div className="h-3 w-2/3 animate-pulse rounded bg-muted/60" />
+                <Skeleton className="h-4 w-1/3 rounded" />
+                <Skeleton className="h-3 w-2/3 rounded" />
               </div>
-              <div className="h-5 w-9 shrink-0 animate-pulse rounded-full bg-muted" />
+              <Skeleton className="h-5 w-9 shrink-0 rounded-full" />
             </div>
           ))}
         </SettingsGroup>
@@ -248,7 +255,7 @@ export function SettingsRow({
             <p className="text-sm font-medium">{title}</p>
           )}
           {hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}
-          {warning && <p className="text-xs font-medium text-amber-600 dark:text-amber-500">{warning}</p>}
+          {warning && <p className="text-xs font-medium text-warning-text">{warning}</p>}
         </div>
         {control && <div className="shrink-0">{control}</div>}
       </div>

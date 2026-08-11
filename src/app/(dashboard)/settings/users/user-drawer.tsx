@@ -18,6 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { money, shortDate, relTime } from "./format";
+import { EffectBadge } from "@/components/shared/effect-badge";
 
 export type Tier = {
   id: string;
@@ -208,7 +209,7 @@ export function UserDrawer({
                         {ex.capabilityKey}
                       </span>
                       <span className="flex shrink-0 items-center gap-1.5">
-                        <EffectBadge effect={effect} t={t} />
+                        <EffectBadge effect={effect} label={t(`effects.${effect}`)} />
                         <span className="text-xs text-muted-foreground">{t(`scopeWon.${win?.scope ?? "user"}`)}</span>
                       </span>
                     </li>
@@ -409,12 +410,6 @@ function StatusBadge({ status, t }: { status: string; t: ReturnType<typeof useTr
   const known = status === "active" || status === "pending" || status === "suspended" || status === "rejected";
   const variant = status === "active" ? "outline" : status === "suspended" ? "destructive" : "secondary";
   return <Badge variant={variant} className="text-[11px]">{known ? t(`statuses.${status}`) : status}</Badge>;
-}
-
-function EffectBadge({ effect, t }: { effect: string; t: ReturnType<typeof useTranslations> }) {
-  const known = effect === "allow" || effect === "deny" || effect === "ask";
-  const variant = effect === "allow" ? "outline" : effect === "deny" ? "destructive" : "secondary";
-  return <Badge variant={variant} className="text-[10px]">{known ? t(`effects.${effect}`) : effect}</Badge>;
 }
 
 // A calm, localized one-liner for an audit row, derived from the action + detail.

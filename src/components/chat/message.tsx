@@ -353,7 +353,7 @@ function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boole
           shows a live spinner on the running step. Three motions for one fact
           reads as a busy interface, not an informative one. */}
       <span className="absolute left-0 top-1 grid h-[27px] w-[27px] place-items-center rounded-full border border-border bg-card text-muted-foreground">
-        <Lightbulb className="animate-step-badge-in h-3.5 w-3.5" />
+        <Lightbulb className="animate-step-in h-3.5 w-3.5" />
       </span>
       {/* Not italic: Onest ships no true italic, so Cyrillic reasoning came out
           mechanically slanted — the same reason blockquotes dropped italic in
@@ -383,7 +383,7 @@ function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error"
     return (
       <span className={`${base} ${state === "error" ? "border-destructive/45" : "border-border"}`}>
         <span
-          className="animate-step-badge-in grid h-full w-full place-items-center text-[11px] font-bold text-white"
+          className="animate-step-in grid h-full w-full place-items-center text-[11px] font-bold text-white"
           style={{ backgroundColor: d.brand.color }}
         >
           {d.brand.letter}
@@ -395,7 +395,7 @@ function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error"
   const tone = state === "error" ? "border-destructive/45 text-destructive" : "border-border text-muted-foreground";
   return (
     <span className={`${base} ${tone}`}>
-      <Icon className="animate-step-badge-in h-3.5 w-3.5" />
+      <Icon className="animate-step-in h-3.5 w-3.5" />
     </span>
   );
 }
@@ -478,7 +478,7 @@ function DoneRow() {
   return (
     <div className="animate-step-in relative flex min-h-[34px] items-center gap-3 py-1 pl-10 text-muted-foreground">
       <span className="absolute left-0 top-1/2 grid h-[27px] w-[27px] -translate-y-1/2 place-items-center rounded-full border border-border bg-card text-muted-foreground">
-        <Check className="animate-step-badge-in h-3.5 w-3.5" />
+        <Check className="animate-step-in h-3.5 w-3.5" />
       </span>
       <span className="text-sm">{t("done")}</span>
     </div>

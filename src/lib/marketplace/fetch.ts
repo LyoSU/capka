@@ -1,5 +1,20 @@
+import { createGuardedFetch } from "@/lib/net/ssrf";
+import { getBlockPrivateProviderUrls, getSetting } from "@/lib/settings";
 import { resolveGitHub } from "./source";
 import type { CatalogItem, CommitInfo, PluginSource } from "./types";
+/** Guarded GitHub fetch with API headers + optional token (rate limits).
+ *
+ *  Lives here, beside `ghRaw`/`ghTree`, because it was written out twice — in
+ *  `install.ts` and `service.ts` — byte for byte. This is the function that decides
+ *  the SSRF guard and the timeout for every GitHub call we make, so two copies meant
+ *  a future tightening could land in one and silently miss the other. */
+export async function ghFetch(): Promise<typeof fetch> {
+  const token = await getSetting("github_token");
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "capka" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return createGuardedFetch({ blockPrivate: await getBlockPrivateProviderUrls(), headers, timeoutMs: 15_000 });
+}
+
 
 /** One entry of a recursive git tree. `sha` is the git blob/tree object id — a
  *  content hash, so two trees can be diffed precisely by comparing it per path. */

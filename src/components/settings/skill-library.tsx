@@ -45,6 +45,7 @@ import { PluginIcon } from "@/components/plugin-icon";
 import { SettingsEmpty, SettingsError } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface Skill {
   id: string;
@@ -288,7 +289,7 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
       {loading && (
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[4.25rem] animate-pulse rounded-lg border bg-muted/40" />
+            <Skeleton key={i} className="h-[4.25rem] rounded-lg" />
           ))}
         </div>
       )}

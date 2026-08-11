@@ -626,7 +626,7 @@ export function AppSidebar() {
             {[88, 72, 80, 64, 84, 70, 58].map((w, i) => (
               <div
                 key={i}
-                className="h-8 animate-pulse rounded-md bg-sidebar-accent/70"
+                className="h-8 animate-pulse-fast rounded-md bg-sidebar-accent"
                 style={{ width: `${w}%` }}
               />
             ))}

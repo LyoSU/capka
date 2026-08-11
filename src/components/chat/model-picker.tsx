@@ -10,6 +10,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/comp
 import { parseModelId, splitModelRef, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
 import { customModelOption } from "@/lib/providers/custom-model";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /** Brand glyph — resolves a slug to a stable icon component (dynamic select). */
 function BrandIcon({ slug, size, className }: { slug?: string | null; size?: number; className?: string }) {
@@ -1287,7 +1288,7 @@ export function ModelPicker({
               than the raw model id — it would otherwise flash "glm-5.2" before
               snapping to "GLM 5.2". */}
           {state.loading && !currentModel ? (
-            <span className="h-4 w-28 animate-pulse rounded-md bg-muted" />
+            <Skeleton className="h-4 w-28" />
           ) : (
             <span className="flex items-baseline gap-1.5 min-w-0">
               <span className={`truncate max-w-52 font-medium ${modelMissing ? "text-muted-foreground" : "text-foreground"}`}>{displayName || placeholderText}</span>
@@ -1324,7 +1325,7 @@ export function ModelPicker({
         >
           <BrandIcon slug={currentModel?.icon} size={15} className="shrink-0 text-muted-foreground" />
           {state.loading && !currentModel ? (
-            <span className="h-4 flex-1 animate-pulse rounded-md bg-muted" />
+            <Skeleton className="h-4 flex-1" />
           ) : (
             <span className={`flex-1 truncate text-left ${displayName ? "" : "text-muted-foreground"}`}>
               {displayName || placeholderText}

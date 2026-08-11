@@ -49,8 +49,11 @@ const clip = (s: unknown, n = 48): string => {
   return str.length > n ? str.slice(0, n) + "…" : str;
 };
 
-/** snake_case / kebab → "Title Case" words. */
-function titleCase(name: string): string {
+/** snake_case / kebab → "Title Case" words. Named for the SLUG it takes:
+ *  `models/normalize.ts` exports a different `titleCase` that splits on
+ *  whitespace only and leaves already-capitalised words ("GPT", "AI") alone, so
+ *  one bare name for two behaviours was an invitation to grab the wrong one. */
+function titleCaseSlug(name: string): string {
   return name
     .split(/[_\-\s]+/)
     .filter(Boolean)
@@ -96,7 +99,7 @@ const BRANDS: Record<string, { label: string; color: string }> = {
 function resolveBrand(server: string): StepBrand {
   const norm = server.toLowerCase().replace(/[_\-\s]+/g, "");
   const known = BRANDS[norm];
-  const label = known?.label ?? titleCase(server);
+  const label = known?.label ?? titleCaseSlug(server);
   return { label, letter: (label[0] || "?").toUpperCase(), color: known?.color ?? "" };
 }
 

@@ -211,7 +211,7 @@ type T = ReturnType<typeof useTranslations>;
  *  the confirm & setting cards collapse to after the user acts. */
 function Outcome({ kind, text }: { kind: "done" | "expired" | "cancelled" | "error"; text: string }) {
   const tone =
-    kind === "done" ? "text-emerald-600 dark:text-emerald-500"
+    kind === "done" ? "text-success"
     : kind === "error" ? "text-destructive"
     : "text-muted-foreground";
   const Icon = kind === "done" ? Check : kind === "error" ? AlertTriangle : Undo2;
@@ -312,7 +312,7 @@ function ConfirmCard({ o, t, onSend, chatId }: { o: ManageOutput; t: T; onSend?:
         </details>
       )}
       {impact && (
-        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:text-amber-400">
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-warning-border bg-warning-surface p-2.5 text-xs text-warning-text">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>{impact}</span>
         </div>
@@ -448,7 +448,7 @@ export function ApprovalCard({
                 </details>
               )}
               {preview.impact && (
-                <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:text-amber-400">
+                <div className="mt-3 flex items-start gap-2 rounded-lg border border-warning-border bg-warning-surface p-2.5 text-xs text-warning-text">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>{preview.impact}</span>
                 </div>
@@ -528,7 +528,7 @@ function SettingCard({ o, t }: { o: ManageOutput; t: T }) {
   return (
     <CardShell>
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-500" />
+        <Check className="h-4 w-4 text-success" />
         {t("settingTitle")}
       </div>
       <div className="mt-2 text-sm text-muted-foreground">{title}</div>
