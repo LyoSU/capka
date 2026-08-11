@@ -675,6 +675,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // Rides in the same pill shell as the model picker, and renders itself away
   // when the resolved model has no reasoning levels worth offering. Hidden on a
   // read-only (Telegram) chat, where nothing is sendable from here anyway.
+  // The model + thinking pair, built once and placed differently per breakpoint:
+  // inside the composer on phones (where these settings sit next to the message
+  // they govern, and where nothing else fits), in the header / under the greeting on
+  // desktop. `controlsEl` is the phone copy; `md:hidden` / `hidden md:*` on the two
+  // hosts decide which one is live, so only one is ever interactive.
   const thinkingEl = readOnly ? null : (
     <ThinkingPicker
       value={thinkAmount}
@@ -684,6 +689,38 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       efforts={modelStatus.efforts}
       disabled={modelGone}
     />
+  );
+
+  // The phone control — same corner it always lived in, just made to fit.
+  //
+  // ONE trigger, not two. Model and thinking depth are a single decision ("how the
+  // assistant answers"), and the header could not hold two labelled settings beside
+  // the sidebar handle and the files button: the model name alone wanted 128px, so
+  // the row overran the viewport. `compact` (brand icon + chevron) is ~52px, which
+  // leaves the row roomy, and the depth slider rides at the foot of the overlay this
+  // trigger already opens — rendered `inline`, so there's no popover stacked on top
+  // of a full-screen sheet.
+  const compactControlsEl = readOnly ? null : (
+    <div className="pointer-events-auto inline-flex shrink-0 items-center rounded-full bg-card px-0.5 shadow-raised md:hidden">
+      <ModelPicker
+        variant="pill"
+        compact
+        value={model}
+        onChange={setModel}
+        onResolved={handleModelResolved}
+        extra={
+          <ThinkingPicker
+            inline
+            value={thinkAmount}
+            onChange={handleThinkAmount}
+            provider={modelStatus.provider}
+            reasoning={modelStatus.reasoning}
+            efforts={modelStatus.efforts}
+            disabled={modelGone}
+          />
+        }
+      />
+    </div>
   );
 
   const inputEl = readOnly ? (
@@ -828,8 +865,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               {/* relative z-20 keeps the picker (and its absolute dropdown) in a
                   stacking context above the starters block below — otherwise the
                   later sibling paints over the open dropdown. */}
+              {/* Stays on both breakpoints. The greeting gives this pill a row of its
+                  own, so the labelled form fits a phone here — the crowding was only
+                  ever in the chat header, where it shared a row with two other
+                  controls. */}
               <div className="animate-blur-rise relative z-20 -mt-3 flex justify-center [animation-delay:140ms]">
-                <div className="inline-flex items-center rounded-full bg-card px-1 shadow-raised">
+                <div className="inline-flex min-w-0 items-center rounded-full bg-card px-1 shadow-raised">
                   <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
                   {thinkingEl}
                 </div>
@@ -937,9 +978,14 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               behind it. pointer-events-none lets scroll-over pass through;
               only the controls themselves are interactive. */}
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 bg-gradient-to-b from-background via-background to-transparent px-4 pb-8 pt-3 md:px-6">
-            <div className="flex items-center gap-2">
+            {/* Same corner on both breakpoints — only the density differs. Desktop
+                gets the labelled pill; a phone gets `compactControlsEl` above, which
+                is the same two settings behind one ~52px trigger. `min-w-0` keeps the
+                desktop row honest under width pressure. */}
+            <div className="flex min-w-0 items-center gap-2">
               <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full bg-card shadow-raised md:hidden" />
-              <div className="pointer-events-auto inline-flex items-center rounded-full bg-card px-1 shadow-raised">
+              {compactControlsEl}
+              <div className="pointer-events-auto hidden min-w-0 items-center rounded-full bg-card px-1 shadow-raised md:inline-flex">
                 <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
                 {thinkingEl}
               </div>
@@ -957,7 +1003,9 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
             <Button
               variant="ghost"
               size="icon"
-              className={`h-8 w-8 transition-[transform,opacity] duration-200 ${
+              // `shrink-0`: a fixed `w-8` is still shrinkable in flex, so under
+              // width pressure this button squashed before the model name gave way.
+              className={`h-8 w-8 shrink-0 transition-[transform,opacity] duration-200 ${
                 filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
               }`}
               onClick={() => setFilesOpen(true)}

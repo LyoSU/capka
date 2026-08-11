@@ -57,6 +57,29 @@ describe("describeStep — MCP connectors", () => {
     expect(describeStep(t, "mcp__gmail__send").brand!.label).toBe("Gmail");
   });
 
+  // MCP servers commonly prefix every tool with their own name, which our branded
+  // prefix then repeats ("Silpo · Silpo get my shopping cart").
+  it("does not say the connector's name twice", () => {
+    expect(describeStep(t, "mcp__silpo__Silpo_get_my_shopping_cart").label).toBe("Silpo · Get my shopping cart");
+    expect(describeStep(t, "mcp__notion__notion-search").label).toBe("Notion · Search");
+  });
+
+  it("matches the prefix regardless of case, separators or a brand alias", () => {
+    // label is "Google Drive"; the tool spells it as one word, and `gdrive` is an
+    // alias for the same connector.
+    expect(describeStep(t, "mcp__google_drive__GoogleDrive_list_files").label).toBe("Google Drive · List files");
+    expect(describeStep(t, "mcp__gdrive__gdrive_list_files").label).toBe("Google Drive · List files");
+  });
+
+  it("keeps a tool that merely starts with the same letters", () => {
+    // "Notes" is not "Notion", so nothing may be stripped.
+    expect(describeStep(t, "mcp__notion__Notes_export").label).toBe("Notion · Notes export");
+  });
+
+  it("shows the connector alone when the tool's whole name is the connector", () => {
+    expect(describeStep(t, "mcp__silpo__silpo").label).toBe("Silpo");
+  });
+
   it("falls back to a title-cased server name for unknown connectors", () => {
     const d = describeStep(t, "mcp__acme_crm__create_lead");
     expect(d.category).toBe("mcp");

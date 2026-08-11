@@ -33,6 +33,9 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- The chat header fits a phone. Model and thinking depth are one control there — a compact trigger whose overlay carries the model list and the depth slider together — so the row no longer overruns the viewport and pushes the files button off the edge. Desktop keeps both labelled pills side by side.
+- A connector's name is no longer said twice in the step rail: MCP servers commonly prefix every tool with their own name, which the branded prefix then repeated ("Silpo · Silpo get my shopping cart").
+- Menus, dialogs and sheets read as floating again. The `overlay` rung had one wide soft shadow and no near "contact" layer, so over a busy surface it looked like a smudge instead of a lifted panel.
 - Sidebar `outline` menu buttons draw their border again: the previous `hsl(var(--sidebar-border))` shadow was invalid CSS (the variable holds `oklch(...)`) and browsers dropped the whole declaration.
 - Right-clicking your own chat message opens the browser's context menu again — the touch long-press handler was suppressing it for mouse input too.
 - The context-window ring is legible again: it drew at half-strength `--primary`, under the 3:1 contrast floor for non-text UI.

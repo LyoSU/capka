@@ -103,6 +103,33 @@ function resolveBrand(server: string): StepBrand {
   return { label, letter: (label[0] || "?").toUpperCase(), color: known?.color ?? "" };
 }
 
+/**
+ * Drop a leading copy of the connector's own name from its tool id.
+ *
+ * MCP servers very commonly prefix every tool with the server name
+ * (`Silpo_get_my_shopping_cart`, `GoogleDrive_list_files`), and our branded prefix
+ * then says it a second time: "Silpo · Silpo get my shopping cart". That's not one
+ * connector's quirk — it's the convention, so it has to be handled here rather than
+ * per-brand.
+ *
+ * Matched on a normalized form (case and separators dropped) so `GoogleDrive_…`,
+ * `google_drive_…` and `gdrive_…` all match the "Google Drive" label. Compared
+ * word by word, longest prefix first, and never allowed to consume the whole name —
+ * a tool that merely *starts* with the same letters keeps its own words, and a tool
+ * called exactly `Silpo` still has something left to show.
+ */
+function stripConnectorPrefix(tool: string, brandLabel: string, server: string): string {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const candidates = [brandLabel, server].map(norm).filter(Boolean);
+  const parts = tool.split(/[_\-\s]+/).filter(Boolean);
+  for (let take = parts.length - 1; take >= 1; take--) {
+    if (candidates.includes(norm(parts.slice(0, take).join("")))) {
+      return parts.slice(take).join(" ");
+    }
+  }
+  return parts.join(" ");
+}
+
 /** Parse a namespaced MCP tool id `mcp__<server>__<tool>` into its parts. */
 function parseMcp(toolName: string): { server: string; tool: string } | null {
   const m = /^mcp__([^_].*?)__(.+)$/.exec(toolName);
@@ -125,8 +152,17 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
   const mcp = parseMcp(toolName);
   if (mcp) {
     const brand = resolveBrand(mcp.server);
-    const action = prettyToolName(mcp.tool);
-    return { iconKey: "plug", label: `${brand.label} · ${action}`, activeLabel: `${brand.label}…`, category: "mcp", brand };
+    const action = prettyToolName(stripConnectorPrefix(mcp.tool, brand.label, mcp.server));
+    // When the tool's whole name IS the connector's name, there is no action left to
+    // add — "Silpo · Silpo" would be the brand twice with a separator between.
+    const same = action.toLowerCase().replace(/[^a-z0-9]/g, "") === brand.label.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return {
+      iconKey: "plug",
+      label: same || !action ? brand.label : `${brand.label} · ${action}`,
+      activeLabel: `${brand.label}…`,
+      category: "mcp",
+      brand,
+    };
   }
 
   const name = toolName.toLowerCase();

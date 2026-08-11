@@ -176,7 +176,13 @@
   --elev-panel: 0 0 0 1px var(--border), 0 1px 2px oklch(0.25 0.012 75 / 0.04),
     0 2px 6px oklch(0.25 0.012 75 / 0.03);
   --elev-raised: 0 0 0 1px var(--border), 0 2px 10px oklch(0.25 0.012 75 / 0.05);
-  --elev-overlay: 0 0 0 1px var(--border), 0 8px 28px oklch(0.25 0.012 75 / 0.07);
+  /* Two shadow layers, and the stronger edge. An overlay is the only rung that
+     covers OTHER CONTENT, so unlike a card it needs a near "contact" shadow: a
+     single wide 28px blur has no dark edge close to the box, and over a busy
+     surface (a menu opened across the chat list) it reads as a smudge instead of a
+     lifted panel. The tight layer says "off the page", the wide one keeps it soft. */
+  --elev-overlay: 0 0 0 1px var(--border-strong), 0 2px 6px oklch(0.25 0.012 75 / 0.06),
+    0 12px 32px oklch(0.25 0.012 75 / 0.10);
   /* 0.12, not the 0.07 this started at: at 0.07 a sunken well was invisible
      against warm paper greys only ~1.5% apart in lightness, so the "you may skip
      this" container it's supposed to draw never appeared. The well's edge, not its
@@ -266,7 +272,10 @@
   --elev-panel: 0 0 0 1px oklch(1 0 0 / 0.13), 0 1px 2px oklch(0 0 0 / 0.22),
     0 2px 6px oklch(0 0 0 / 0.16);
   --elev-raised: 0 0 0 1px oklch(1 0 0 / 0.17), 0 3px 14px oklch(0 0 0 / 0.38);
-  --elev-overlay: 0 0 0 1px oklch(1 0 0 / 0.22), 0 12px 38px oklch(0 0 0 / 0.55);
+  /* Same two-layer treatment as light (see there): the tight layer is what makes an
+     overlay read as covering content rather than blending into it. */
+  --elev-overlay: 0 0 0 1px oklch(1 0 0 / 0.22), 0 2px 8px oklch(0 0 0 / 0.40),
+    0 14px 40px oklch(0 0 0 / 0.55);
   --elev-field: inset 0 1px 2px oklch(0 0 0 / 0.30);
 }
 

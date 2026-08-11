@@ -319,9 +319,9 @@ export function ChatInput({
               </span>
             )}
           </div>
-          <div className="flex items-center justify-between px-3 pb-2.5">
+          <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
             {/* Attach button */}
-            <div>
+            <div className="shrink-0">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -359,9 +359,9 @@ export function ChatInput({
             </div>
 
             {/* Right cluster: context-window ring, then Send/Stop. Grouping them
-                keeps the ring just left of the button (the row is justify-between,
-                so a loose ring would drift to the centre). */}
-            <div className="flex items-center gap-2">
+                keeps the ring just left of the button, so a loose ring can't drift
+                toward the centre. */}
+            <div className="flex shrink-0 items-center gap-2">
               {contextUsage && <ContextMeter used={contextUsage.used} window={contextUsage.window} />}
 
               {/* While a reply streams: Send (queues the next turn) when there's

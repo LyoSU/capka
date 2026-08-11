@@ -946,6 +946,25 @@ interface ModelPickerProps {
   onChange: (modelId: string) => void;
   /** "pill" — the slim chat trigger; "field" — a form input. Default "field". */
   variant?: "pill" | "field";
+  /**
+   * Pill variant, icon + chevron only — no model name.
+   *
+   * For the composer row on a phone, where the name simply cannot be afforded: a
+   * 128px name plus the thinking control plus attach plus send does not fit ~336px,
+   * so something has to give and a name that only truncates to "Gemini 3.1 Flash L…"
+   * was informing nobody. The full list is one tap away in the mobile overlay this
+   * trigger already opens, and per PRODUCT.md which model is running is an admin
+   * concern rather than something a regular user tracks mid-conversation.
+   */
+  compact?: boolean;
+  /**
+   * Extra content for the foot of the MOBILE overlay (desktop ignores it).
+   *
+   * Exists so the phone can present model + thinking depth as one decision behind one
+   * compact trigger. Deliberately not rendered on desktop, where both controls sit
+   * side by side in the header and have room to.
+   */
+  extra?: React.ReactNode;
   /** Configure mode: list models for these unsaved credentials. */
   provider?: ProviderName;
   apiKey?: string;
@@ -982,6 +1001,8 @@ export function ModelPicker({
   value,
   onChange,
   variant = "field",
+  compact = false,
+  extra,
   provider,
   apiKey,
   baseUrl,
@@ -1278,20 +1299,43 @@ export function ModelPicker({
           onClick={toggleOpen}
           aria-haspopup="listbox"
           aria-expanded={open}
-          title={modelMissing ? t("unavailable") : undefined}
-          className="flex h-9 items-center gap-2.5 px-3 text-sm hover:text-foreground transition-colors"
+          // Compact drops the name entirely and tightens the padding, so the trigger
+          // is ~52px and can never contend for the row. `min-w-0` still matters in
+          // the full form: flex lets a child shrink only when EVERY ancestor permits
+          // it, and without it this button held its content width, `truncate` had
+          // nothing to truncate, and the row grew past the viewport.
+          title={modelMissing ? t("unavailable") : displayName || undefined}
+          // Compact hides the name visually, so the button must still SAY it — this
+          // is the only place a screen reader (or a long-press tooltip) can learn
+          // which model is active.
+          aria-label={compact ? `${t("selectModel")}: ${displayName || placeholderText}` : undefined}
+          className={`flex h-9 min-w-0 items-center text-sm transition-colors hover:text-foreground ${
+            compact ? "gap-1 px-1.5" : "gap-2.5 px-3"
+          }`}
         >
-          <span className={`flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0 ${modelMissing ? "opacity-50" : ""}`}>
+          <span className={`relative flex h-6 w-6 items-center justify-center rounded-md bg-muted shrink-0 ${modelMissing ? "opacity-50" : ""}`}>
             <BrandIcon slug={currentModel?.icon} size={14} />
+            {/* Compact has no name for the warning dot to sit beside, but "this
+                model is gone" is exactly the thing that must not be dropped for want
+                of room — so it rides the icon instead. */}
+            {compact && modelMissing && (
+              <span
+                className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-warning-text ring-2 ring-card"
+                aria-label={t("unavailable")}
+              />
+            )}
           </span>
           {/* Until the catalog resolves the friendly name, show a skeleton rather
               than the raw model id — it would otherwise flash "glm-5.2" before
               snapping to "GLM 5.2". */}
-          {state.loading && !currentModel ? (
+          {compact ? null : state.loading && !currentModel ? (
             <Skeleton className="h-4 w-28" />
           ) : (
             <span className="flex items-baseline gap-1.5 min-w-0">
-              <span className={`truncate max-w-52 font-medium ${modelMissing ? "text-muted-foreground" : "text-foreground"}`}>{displayName || placeholderText}</span>
+              {/* The cap is responsive: 208px of model name ("Gemini 3.1 Flash Lite")
+                  leaves no room beside it on a 360px screen. Narrow phones get a
+                  short name and the full one in the panel a tap away. */}
+              <span className={`truncate max-w-32 sm:max-w-52 font-medium ${modelMissing ? "text-muted-foreground" : "text-foreground"}`}>{displayName || placeholderText}</span>
               {/* The model's provider is gone — a warning dot flags it without
                   hiding which model this used to be (the name stays). Uses the
                   semantic warning token so it matches the unavailable banner. */}
@@ -1400,6 +1444,16 @@ export function ModelPicker({
             </button>
           </div>
           <div className="flex flex-1 flex-col min-h-0">{renderList("horizontal")}</div>
+          {/* `extra` — the thinking control, on phones only.
+              Model and thinking depth are one decision ("how the assistant answers"),
+              and on a narrow screen they cannot both sit in the composer row. Putting
+              the depth slider at the foot of this overlay makes the compact trigger
+              open ONE place that holds both, instead of two adjacent 40px targets
+              competing with attach and send. Below the list, not above it: choosing a
+              model is the primary act here and must stay at the top. */}
+          {extra && (
+            <div className="border-t px-4 pb-[max(0.875rem,env(safe-area-inset-bottom))] pt-3.5">{extra}</div>
+          )}
         </div>,
         document.body,
       )}
