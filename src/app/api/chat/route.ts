@@ -60,7 +60,13 @@ export const POST = apiHandler(async (req: Request) => {
           .limit(1)
           .then((r) => r[0])
       : undefined,
-    projectId && !requestChatId
+    // Resolved whenever the body carries one — NOT gated on the absence of
+    // `requestChatId`. A new chat in a project is opened at a client-allocated id
+    // (/chat?projectId=… → /chat/<nanoid>) and writes no row until this very
+    // request, so gating on the id meant the lookup was skipped exactly when it
+    // was needed and every first send 404'd. Retargeting an existing chat is
+    // already refused below, by comparing against the chat's persisted project.
+    projectId
       ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
   ]);
