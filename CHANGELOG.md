@@ -30,9 +30,15 @@ All notable changes to Capka are documented here. Format follows
 - Loading placeholders in settings, the model picker, the sidebar, project hub and automations use the shared `Skeleton` instead of hand-rolled `animate-pulse` divs, which had opted back into Tailwind's slower default cadence.
 - Success and warning states use `--success` and `--warning-surface`/`-border`/`-text` instead of raw `emerald`/`amber` palette values with hand-written dark-mode variants. Remaining palette colours are categorical (file type, price tier, audit groups), not states.
 - A governance decision (allow / ask / deny) looks the same on every admin screen; in a person's drawer `allow` had been rendering as the least emphasized of the three.
+- Expandable sections — activity runs, tool output, technical details, connection and skill rows — grow open and fold shut instead of snapping, in 200ms.
+- A failed turn reads as a calm panel carrying one red mark, in chat and in settings alike, rather than a red-bordered tinted slab.
 
 ### Fixed
 
+- "Reasoned for …" reports the turn's real duration. It was timed from the browser's first paint, so reopening a tab mid-turn restarted the count from zero and froze that wrong number into the transcript for good; the server's own measurement now wins as soon as the turn ends, and a live turn ticks from its true start.
+- A turn that calls a tool after it starts answering no longer prints the same duration on every one of its runs — only the first run owns a measured span.
+- A turn that failed or was still waiting on you records how long it thought, so its header shows a duration instead of a bare "Reasoning".
+- Every expand/collapse chevron in the app turns again. The selector matched Radix's `data-state=open`, which Base UI (in use since the UI rebuild) never sets — it uses `data-panel-open`.
 - The chat header fits a phone. Model and thinking depth are one control there — a compact trigger whose overlay carries the model list and the depth slider together — so the row no longer overruns the viewport and pushes the files button off the edge. Desktop keeps both labelled pills side by side.
 - A connector's name is no longer said twice in the step rail: MCP servers commonly prefix every tool with their own name, which the branded prefix then repeated ("Silpo · Silpo get my shopping cart").
 - Menus, dialogs and sheets read as floating again. The `overlay` rung had one wide soft shadow and no near "contact" layer, so over a busy surface it looked like a smudge instead of a lifted panel.

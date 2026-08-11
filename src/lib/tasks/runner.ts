@@ -1251,13 +1251,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // decides/answers.
         taskId, status: awaitingApproval ? "awaiting_approval" : awaitingAnswer ? "awaiting_answer" : finalStatus, parts: parts.length > 0 ? parts : undefined,
         ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
+        // How long the thinking/tool phase ran, on EVERY outcome — this one is not
+        // a tech detail, it's the activity group's own header. A turn that broke
+        // after three minutes should still say it thought for three minutes;
+        // withholding it left the failed turns in the transcript labelled with a
+        // bare "Reasoning", which reads as if nothing had happened at all.
+        reasoningMs,
         // Tech details for the (i) popover. A manual cancel still did real work
         // (it has a model, elapsed time, and billed tokens), so carry them too —
         // otherwise the stopped turn loses its (i) affordance. A failed turn owns
         // the ErrorNotice instead, so it stays excluded.
         ...(finalStatus === "completed" || finalStatus === "cancelled" ? {
           durationMs: Date.now() - startedAt,
-          reasoningMs,
           model: modelId,
           ...(usageMeta ? { usage: usageMeta } : {}),
           ...(costMeta != null ? { costUsd: costMeta } : {}),

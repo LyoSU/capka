@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Inbox, type LucideIcon } from "lucide-react";
+import { Inbox, X, type LucideIcon } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -166,9 +166,17 @@ export function SettingsEmpty({
  */
 export function SettingsError({ message, action }: { message: string; action?: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-destructive-border bg-destructive-surface px-4 py-3 text-sm text-destructive-text">
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-      <p className="min-w-0 flex-1 leading-relaxed">{message}</p>
+    // Same grammar as the chat's ErrorNotice: a calm panel carrying one saturated
+    // 20px mark, rather than a tinted slab that shouts before it's been read.
+    // Two error looks for one product is one too many.
+    <div role="alert" className="flex items-start gap-2.5 rounded-xl bg-card px-4 py-3 text-sm shadow-panel">
+      <span
+        aria-hidden
+        className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-destructive text-destructive-foreground"
+      >
+        <X className="h-3 w-3" strokeWidth={3.5} />
+      </span>
+      <p className="min-w-0 flex-1 leading-relaxed text-foreground">{message}</p>
       {action}
     </div>
   );

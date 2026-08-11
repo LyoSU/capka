@@ -61,7 +61,7 @@ export function ErrorState({ error, retry }: ErrorStateProps) {
       </div>
       {isAdmin && detail && (
         <Collapsible className="w-full max-w-md text-left">
-          <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground [&[data-state=open]>.chevron]:rotate-90">
+          <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground [&[data-panel-open]>.chevron]:rotate-90">
             <ChevronRight className="chevron h-3 w-3 transition-transform" />
             {t("technicalDetails")}
           </CollapsibleTrigger>

@@ -123,6 +123,15 @@ export function toUIMessages(rows: {
         createdAt: m.createdAt?.toISOString() ?? null,
         platform: m.platform ?? "web",
         taskStatus: meta?.status,
+        // How long this turn had ALREADY been running when this snapshot was
+        // built. Only meaningful while status:"running": it lets a client that
+        // joins a live turn late (tab reopened, reconnect) tick the elapsed clock
+        // from the run's real start instead of from its own first paint, which is
+        // what made a reopened tab report a few seconds for a turn that had been
+        // thinking for a minute. Deliberately a DURATION, not a timestamp: the
+        // client subtracts it from its own clock, so a skewed client clock can't
+        // become a wrong number on screen.
+        runningMs: meta?.status === "running" && m.createdAt ? Date.now() - m.createdAt.getTime() : undefined,
         // Seq the persisted parts cover — lets a client resuming mid-stream
         // reconcile live deltas against this snapshot. See MessageMeta.streamSeq.
         streamSeq: meta?.streamSeq,

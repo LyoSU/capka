@@ -1,7 +1,7 @@
 import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
-  ChevronLeft, ChevronRight, GitBranch, AlertCircle, Lightbulb, Info,
+  ChevronLeft, ChevronRight, GitBranch, X, Lightbulb, Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -455,7 +455,7 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
           faintly present at rest and only firms up under the cursor. Same 40%
           resting value as the group header's chevron — one quiet level for one
           idea, instead of the 35/40/80 mix this rail used to carry. */}
-      <CollapsibleTrigger className="group/step block w-full text-left transition-micro hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
+      <CollapsibleTrigger className="group/step block w-full text-left transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-90">
         {row}
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -512,14 +512,18 @@ function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; i
 }
 
 /** Wraps a run of reasoning + tool calls in a single quiet spoiler whose header
- *  reads, Grok-style, how long the run took — "Reasoned for 58s ›". While it
- *  streams the timer ticks live from first paint; once it stops we freeze the
- *  measured value. Reloaded history (never streamed in this session) falls back
- *  to the stored turn duration so it still shows a number. Auto-opens while live
- *  and auto-collapses when the answer begins, with a manual click taking over. */
-function ActivityGroup({ items, isStreaming, fallbackMs, chatId }: { items: ActivityItem[]; isStreaming?: boolean; fallbackMs?: number; chatId?: string }) {
+ *  reads, Grok-style, how long the run took — "Reasoned for 58s ›". Auto-opens
+ *  while live and auto-collapses when the answer begins, with a manual click
+ *  taking over.
+ *
+ *  `timing` is present on the ONE group that owns the turn's measured span (see
+ *  the call site); every other group shows its action count and no duration,
+ *  because no honest number exists for it. */
+function ActivityGroup({ items, isStreaming, timing, chatId }: { items: ActivityItem[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string }) {
   const t = useTranslations("chat.message");
   const streaming = !!isStreaming;
+  const timed = timing != null;
+  const { measuredMs, startedMsAgo } = timing ?? {};
   const [userToggled, setUserToggled] = useState(false);
   const [open, setOpen] = useState(streaming);
   const [prevStreaming, setPrevStreaming] = useState(streaming);
@@ -528,38 +532,44 @@ function ActivityGroup({ items, isStreaming, fallbackMs, chatId }: { items: Acti
     setOpen(streaming);
   }
 
-  // Live stopwatch: start on first streaming paint, tick each second, freeze the
-  // elapsed value the moment streaming stops (which is when the answer begins —
-  // so this measures reasoning + tools, not the whole turn).
+  // Live stopwatch for the turn in flight. It ticks from the run's REAL start,
+  // not from this component's first paint: `startedMsAgo` says how long the turn
+  // had already been going when the server built the snapshot we mounted from, so
+  // rejoining a live turn (tab reopened, reconnect) reads the true elapsed
+  // instead of restarting at zero.
   const startRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState<number | null>(null);
   useEffect(() => {
-    if (streaming) {
-      if (startRef.current == null) startRef.current = Date.now();
-      setElapsed(Date.now() - startRef.current);
-      const id = setInterval(() => {
-        if (startRef.current != null) setElapsed(Date.now() - startRef.current);
-      }, 1000);
-      return () => clearInterval(id);
-    }
-    if (startRef.current != null) setElapsed(Date.now() - startRef.current);
-  }, [streaming]);
+    if (!timed || !streaming) return;
+    if (startRef.current == null) startRef.current = Date.now() - (startedMsAgo ?? 0);
+    const tick = () => setElapsed(Date.now() - startRef.current!);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [timed, streaming, startedMsAgo]);
 
-  const ms = elapsed ?? fallbackMs ?? null;
+  // The server's own measurement wins the moment it exists — it timed the same
+  // span in the one place that can see the whole run, whatever the client was
+  // doing. The stopwatch above is only an estimate for a turn still in flight;
+  // letting a frozen estimate outlive the real number is what left a wrong
+  // duration sitting in the transcript for good.
+  const ms = timed ? (streaming ? elapsed : measuredMs ?? elapsed) : null;
   const hasReasoning = items.some((it) => it.kind === "reasoning");
   const label =
     ms != null
       ? t(hasReasoning ? "reasonedFor" : "workedFor", { duration: formatShortDuration(ms) })
-      : streaming
+      : streaming && hasReasoning
         ? t("thinking")
         : t(hasReasoning ? "reasoning" : "activity");
   // A bounded count is what makes a collapsed run understandable without opening
   // it: a duration alone says how long you waited, never how much happened. "6s ·
   // 4 actions" reads as complete and finite — the reassurance a user actually
   // needs before deciding NOT to expand. Suppressed while live (the number would
-  // climb under the cursor) and for pure-reasoning runs (nothing to count).
+  // climb under the cursor), for pure-reasoning runs (nothing to count), and at
+  // exactly one: "11s · 1 action" is two numerals fighting over one row to say
+  // that there is nothing to enumerate. A count earns its place from two up.
   const toolCount = items.reduce((n, it) => (it.kind === "tool" ? n + 1 : n), 0);
-  const countLabel = !streaming && toolCount > 0 ? t("stepCount", { count: toolCount }) : null;
+  const countLabel = !streaming && toolCount > 1 ? t("stepCount", { count: toolCount }) : null;
 
   return (
     <Collapsible open={open} onOpenChange={(v) => { setUserToggled(true); setOpen(v); }}>
@@ -567,7 +577,7 @@ function ActivityGroup({ items, isStreaming, fallbackMs, chatId }: { items: Acti
           shows a spinning node on the running step, so a pulsing header is the
           same fact stated a second time. `tabular-nums` keeps the ticking duration
           from reflowing the row a digit at a time. */}
-      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-sm text-muted-foreground transition-micro hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
+      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-sm text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-90">
         <span className="min-w-0 truncate tabular-nums">{label}</span>
         {countLabel && (
           <span className="shrink-0 text-muted-foreground/70 tabular-nums">· {countLabel}</span>
@@ -588,19 +598,34 @@ function ActivityGroup({ items, isStreaming, fallbackMs, chatId }: { items: Acti
 function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean }) {
   const t = useTranslations("chat.tool");
   return (
-    <div role="alert" className="mt-2 rounded-lg border border-destructive-border bg-destructive-surface px-3.5 py-2.5">
-      <div className="flex items-start gap-2 text-sm">
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive-text" />
-        <span className="flex-1 text-foreground">{message}</span>
+    // A failure is a state of the turn, not a hazard sign taped over it. The old
+    // pink slab with a hard red border was the loudest object in the transcript,
+    // and it landed on someone who mostly just needs to press retry — so the panel
+    // is now the same calm shell as everything else here, and ALL the red lives in
+    // one 20px badge. That badge is the mirror of the rail's "Done ✓" node right
+    // above it, which is what makes it legible at a glance rather than alarming.
+    // Colour is never the only channel: role="alert", the mark, and the sentence.
+    <div role="alert" className="mt-2 rounded-2xl bg-card px-3.5 py-3 shadow-panel">
+      <div className="flex items-start gap-2.5 text-sm">
+        <span
+          aria-hidden
+          className="animate-step-in mt-px grid size-5 shrink-0 place-items-center rounded-full bg-destructive text-destructive-foreground"
+        >
+          <X className="h-3 w-3" strokeWidth={3.5} />
+        </span>
+        <span className="flex-1 leading-relaxed text-foreground">{message}</span>
       </div>
       {(isAdmin || ownsResource) && detail && detail !== message && (
         <Collapsible>
-          <CollapsibleTrigger className="mt-1.5 ml-6 flex items-center gap-1 text-xs text-destructive-text/80 hover:text-destructive-text transition-colors [&[data-state=open]>.chevron]:rotate-90">
+          {/* Not red. Opening the raw detail is an ordinary affordance, and
+              painting it with the error colour made the notice read as two
+              alarms — one of which is just a disclosure triangle. */}
+          <CollapsibleTrigger className="mt-2 ml-[30px] flex items-center gap-1 text-xs text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]>.chevron]:rotate-90">
             <ChevronRight className="chevron h-3 w-3 transition-transform" />
             {t("technicalDetails")}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <pre className="mt-1 ml-6 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-destructive-border/60 bg-destructive-surface p-2 font-mono text-[11px] text-foreground/80">
+            <pre className="mt-1.5 ml-[30px] max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-field p-2 font-mono text-[11px] text-muted-foreground inset-shadow-field">
               {detail}
             </pre>
           </CollapsibleContent>
@@ -1123,7 +1148,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -1208,6 +1233,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   }
   const lastTextIdx = groups.reduce((acc, g, i) => g.kind === "text" ? i : acc, -1);
   const lastIdx = groups.length - 1;
+  const firstActivityIdx = groups.findIndex((g) => g.kind === "activity");
 
   // An assistant turn that's still warming up (no parts yet) renders nothing —
   // the single "working…" indicator in the panel owns that state. Rendering an
@@ -1250,7 +1276,18 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             // and on expand each rail row surfaces with .animate-step-in.
             return (
               <div key={gi} className={gi > 0 ? "mt-1.5" : ""}>
-                <ActivityGroup items={g.items} isStreaming={isStreaming && gi === lastIdx} fallbackMs={metadata?.reasoningMs} chatId={chatId} />
+                <ActivityGroup
+                  items={g.items}
+                  isStreaming={isStreaming && gi === lastIdx}
+                  // Only the FIRST run of a turn gets a duration. `reasoningMs`
+                  // measures start → first answer token, a span that is already
+                  // over by the time a later run (a tool call after the answer
+                  // began) starts — so printing it on every group repeated the
+                  // same number down the message. Later runs show their action
+                  // count, which is genuinely theirs.
+                  timing={gi === firstActivityIdx ? { measuredMs: metadata?.reasoningMs, startedMsAgo: metadata?.runningMs } : undefined}
+                  chatId={chatId}
+                />
               </div>
             );
           })

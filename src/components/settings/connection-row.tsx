@@ -86,7 +86,7 @@ export function ConnectionRow({
             <GripVertical className="h-4 w-4" />
           </button>
 
-          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&[data-state=open]_.chevron]:rotate-180">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&[data-panel-open]_.chevron]:rotate-180">
             <ProviderGlyph slug={c.iconSlug || meta?.iconSlug} size={16} className="shrink-0 text-muted-foreground" />
             <span className="truncate text-sm font-medium">{name}</span>
             {c.label?.trim() && (

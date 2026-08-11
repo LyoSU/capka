@@ -345,6 +345,32 @@
    name only invited them to drift apart. */
 .animate-step-in { animation: step-in 0.18s var(--ease-out) both; }
 
+/* Every spoiler in the app opens instead of appearing. This is the one motion in
+   here that is not decoration: a panel that snaps into existence makes the reader
+   re-find their place, because nothing said where the content came from. Growing
+   it out of the trigger row keeps the eye anchored — the same expanding grammar
+   the whole reference leans on, and the reason a "Reasoned for 6s ›" row reads as
+   a lid rather than a link.
+   Base UI does the measuring: it pins `--collapsible-panel-height` to the panel's
+   real pixel height only for the duration of the transition, then hands the var
+   back to `auto`. That last part is load-bearing here — the activity rail streams
+   NEW rows into an already-open panel, and a permanently pinned height would clip
+   every one of them. `overflow: hidden` (not `clip`) is equally deliberate: the
+   measurement reads `scrollHeight`, which only reports content past the box on a
+   scroll container.
+   200ms, not the reference's 300–400: animating height is layout work on every
+   frame, and our panels can hold a whole reasoning dump rather than three demo
+   rows. The global reduced-motion reset collapses this automatically. */
+[data-slot="collapsible-content"] {
+  height: var(--collapsible-panel-height);
+  overflow: hidden;
+  transition: height 0.2s var(--ease-out);
+}
+[data-slot="collapsible-content"][data-starting-style],
+[data-slot="collapsible-content"][data-ending-style] {
+  height: 0;
+}
+
 /* Claw reveal: each tapered blade wipes in from its top to its tip via
    clip-path, staggered left to right, then settles with one delicate flash.
    Unlike scaleY, clip-path doesn't deform the geometry — the sharp tip stays
@@ -673,14 +699,25 @@
   [data-print="hide"] {
     display: none !important;
   }
-  /* A collapsed activity run has to open. On screen, "Reasoned for 6s ›" is an
-     honest offer to show more; on paper there is no chevron to press and nothing
-     hints that anything was left out, so a collapsed section prints as a silent
-     omission. */
+  /* Whatever the reader had OPEN prints in full: un-clip the panel and let its
+     height go back to auto, since on screen it carries the measured pixel height
+     and `overflow: hidden` from the reveal transition.
+     A CLOSED panel can't be forced open from CSS — Base UI unmounts it, so there
+     is no element to un-hide (`keepMounted` would fix that by parking every
+     collapsed rail and every raw tool payload in the DOM forever, which is a bad
+     trade on the longest screen in the app for a page nobody prints twice). What
+     prints instead is the header alone — "Reasoned for 6s · 3 actions" — which
+     states the fact without dumping the machinery. */
   [data-slot="collapsible-content"] {
     display: block !important;
     height: auto !important;
+    overflow: visible !important;
     visibility: visible !important;
+  }
+  /* A chevron is an invitation to press. On paper it's a stray glyph promising
+     something the page can't do, so the label prints as a plain statement. */
+  .chevron {
+    display: none !important;
   }
   /* Keep the atomic blocks whole, and never leave a heading stranded at the foot
      of a page. Deliberately NOT applied to a whole message: one longer than a page

@@ -191,6 +191,24 @@ describe("toUIMessages", () => {
     });
   });
 
+  it("measures how long a running turn has been going, server-side", () => {
+    const [msg] = toUIMessages([
+      row({ metadata: { status: "running" }, createdAt: new Date(Date.now() - 42_000) }),
+    ]);
+    const { runningMs } = msg.metadata as { runningMs?: number };
+    // A duration, not a timestamp — the client subtracts it from its own clock,
+    // so a client whose clock is off can't render a wrong elapsed time.
+    expect(runningMs).toBeGreaterThanOrEqual(42_000);
+    expect(runningMs).toBeLessThan(45_000);
+  });
+
+  it("leaves runningMs off a turn that isn't running", () => {
+    for (const status of ["completed", "failed", "cancelled", "awaiting_answer"]) {
+      const [msg] = toUIMessages([row({ metadata: { status } })]);
+      expect((msg.metadata as { runningMs?: number }).runningMs).toBeUndefined();
+    }
+  });
+
   it("omits tech details when the turn never recorded them", () => {
     const [msg] = toUIMessages([row({ content: "hi", metadata: { status: "completed" } })]);
     const m = msg.metadata as { durationMs?: number; usage?: unknown; costUsd?: number };

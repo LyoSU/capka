@@ -360,7 +360,7 @@ function SkillGroup({
     <Collapsible defaultOpen={defaultOpen} className="space-y-2">
       <CollapsibleTrigger
         render={
-          <button className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left transition-colors hover:bg-hover [&[data-state=open]_.chevron]:rotate-180">
+          <button className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left transition-colors hover:bg-hover [&[data-panel-open]_.chevron]:rotate-180">
             <GroupAvatar group={group} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">

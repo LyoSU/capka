@@ -92,8 +92,20 @@ export function useBackgroundChat({
           // Adopt the running turn's taskId from the message it's attached to.
           // Without this, a reconnect to a live turn shows "running" (and the
           // stop button) but leaves taskId null — so stop() was a dead no-op.
-          const meta = running.metadata as { streamSeq?: number; taskId?: string } | undefined;
+          const meta = running.metadata as { streamSeq?: number; taskId?: string; runningMs?: number } | undefined;
           if (meta?.taskId) setTaskId(meta.taskId);
+          // Anchor the elapsed clock to the turn's REAL start when we join it
+          // late (tab reopened, SSE reconnect): task:start already fired, so
+          // without this the "working…" indicator has no start time at all and
+          // shows no elapsed time for the rest of the turn. `runningMs` is
+          // measured server-side, so subtracting it from our own clock is
+          // skew-free. Seeded only when we aren't already timing this turn, so a
+          // routine reload (a finished turn, a compaction) can't restart the
+          // clock on a live one.
+          const runningMs = meta?.runningMs;
+          if (runningMs != null) {
+            setTaskInfo((prev) => (prev.startedAt ? prev : { ...prev, startedAt: Date.now() - runningMs }));
+          }
           // Seed the applied-seq from the snapshot we just loaded so resumed
           // deltas reconcile against it (this IS the gap-closing step on resume).
           appliedSeqRef.current.set(running.id, meta?.streamSeq ?? 0);
