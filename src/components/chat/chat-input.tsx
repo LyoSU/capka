@@ -202,9 +202,17 @@ export function ChatInput({
   );
 
   return (
-    <div className="px-4 md:px-6 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+    // `data-print="hide"`: an empty input box is the one thing on this screen that
+    // is pure interface — it says nothing on paper and would eat a third of the
+    // last page.
+    <div data-print="hide" className="px-4 md:px-6 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto max-w-3xl lg:max-w-4xl">
-        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm transition-shadow focus-within:shadow-md">
+        {/* The composer is the one place on this screen the user acts, so it sits a
+            rung above the transcript and rises one more on focus — "here is where
+            you type" stated by depth instead of by a label. `border` is gone
+            because `shadow-raised` carries its own hairline as the shadow's first
+            layer; keeping both drew a doubled 2px edge. */}
+        <div className="overflow-hidden rounded-2xl bg-card shadow-raised transition-micro focus-within:shadow-overlay">
           {/* Attached files preview — same square FileTile used in chat history, so
               a staged file looks identical to a sent one. A ready file shows its
               real sandbox thumbnail; one still uploading (or failed) shows its local

@@ -397,7 +397,13 @@ function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(
-        "no-scrollbar flex min-h-0 flex-1 flex-col gap-0 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        // `scroll-fade-b` (from tw-animate-css): this pane hides its scrollbar
+        // (`no-scrollbar`), so a long chat list had NO signal at all that it
+        // continued — it just stopped mid-row at the pane edge. The utility is
+        // scroll-timeline driven, so the fade shows only while there IS more below
+        // and clears at the end; no compensating padding is needed and the last row
+        // never sits permanently dimmed. Off in icon mode, where nothing scrolls.
+        "no-scrollbar scroll-fade-b flex min-h-0 flex-1 flex-col gap-0 overflow-auto group-data-[collapsible=icon]:overflow-hidden group-data-[collapsible=icon]:[mask-image:none]",
         className
       )}
       {...props}
@@ -506,8 +512,12 @@ const sidebarMenuButtonVariants = cva(
     variants: {
       variant: {
         default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        // Was `shadow-[0_0_0_1px_hsl(var(--sidebar-border))]` — a leftover from the
+        // HSL-triplet era of these variables. Our tokens hold full `oklch(...)`
+        // colours, so `hsl(oklch(...))` was invalid and the browser dropped the
+        // whole declaration: this variant has been rendering with no edge at all.
         outline:
-          "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
+          "bg-background shadow-btn hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
       },
       size: {
         default: "h-8 text-sm",

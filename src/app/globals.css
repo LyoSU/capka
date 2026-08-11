@@ -38,6 +38,10 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-field: var(--field);
+  --color-hover: var(--hover);
+  --color-hover-strong: var(--hover-strong);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-surface: var(--destructive-surface);
@@ -61,6 +65,16 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  /* Elevation ladder. Deliberately NOT named `card`/`popover`/etc: in Tailwind v4
+     a `shadow-*` utility resolves against BOTH `--shadow-*` (a box-shadow value)
+     and `--color-*` (a shadow colour), and `--color-card`/`--color-popover`
+     already exist — `shadow-card` would be ambiguous. */
+  --shadow-hairline: var(--elev-hairline);
+  --shadow-btn: var(--elev-btn);
+  --shadow-panel: var(--elev-panel);
+  --shadow-raised: var(--elev-raised);
+  --shadow-overlay: var(--elev-overlay);
+  --inset-shadow-field: var(--elev-field);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -77,6 +91,12 @@
      and there's one place to retune it. Deliberately punchier than CSS's built-in
      `ease-out`, which is too weak to read as intentional. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* The second, tighter curve — for micro-interactions only (hover, press,
+     colour and small transform changes at ~140ms). `--ease-out` above is the
+     *entrance* curve: it overshoots hard, which reads as intentional on a
+     one-shot reveal but as rubbery on a hover that fires hundreds of times.
+     Two curves, split by role — never more. */
+  --ease-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --background: oklch(0.97 0.004 75);
   --foreground: oklch(0.18 0.005 285);
   --card: oklch(0.995 0.002 75);
@@ -114,6 +134,17 @@
   --success-foreground: oklch(0.985 0 0);
   --border: oklch(0.90 0.006 75);
   --input: oklch(0.90 0.006 75);
+  /* A second, more assertive hairline. `--border` is the quiet divider inside a
+     surface; this is the one that has to hold the *outer* edge of a control
+     against the page, where the softer value reads as an unfinished button. */
+  --border-strong: oklch(0.855 0.008 75);
+  /* Recessed surfaces and hover states, as tokens rather than each component
+     inventing its own `hover:bg-muted/50`. `--field` is the sunken input well;
+     `--hover` is the quiet rest-to-hover step, `--hover-strong` the pressed /
+     currently-open step above it. */
+  --field: oklch(0.955 0.004 75);
+  --hover: oklch(0.952 0.005 75);
+  --hover-strong: oklch(0.922 0.007 75);
   --ring: oklch(0.65 0.01 285);
   --sidebar: oklch(0.985 0.003 75);
   --sidebar-foreground: oklch(0.18 0.005 285);
@@ -129,6 +160,28 @@
   --chart-4: oklch(0.828 0.189 84.43);
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.7rem;
+
+  /* --- Elevation ---------------------------------------------------------
+     Each rung carries its own 1px edge as the shadow's first layer, so a
+     surface's height is ONE property instead of a border + box-shadow pair that
+     drift apart (we had four hand-rolled variants of this before). Read the
+     ladder as: hairline (flush divider) < btn (a control on the page) < panel
+     (grouped content) < raised (a floating pane) < overlay (menus, dialogs).
+     `field` is the only one that goes *down* — a sunken input well.
+
+     Shadow colour is a warm near-black on the palette's own hue (75), not pure
+     black: a neutral shadow over warm paper greys reads faintly blue-grey. */
+  --elev-hairline: 0 0 0 1px var(--border);
+  --elev-btn: 0 0 0 1px var(--border-strong), 0 1px 2px oklch(0.25 0.012 75 / 0.05);
+  --elev-panel: 0 0 0 1px var(--border), 0 1px 2px oklch(0.25 0.012 75 / 0.04),
+    0 2px 6px oklch(0.25 0.012 75 / 0.03);
+  --elev-raised: 0 0 0 1px var(--border), 0 2px 10px oklch(0.25 0.012 75 / 0.05);
+  --elev-overlay: 0 0 0 1px var(--border), 0 8px 28px oklch(0.25 0.012 75 / 0.07);
+  /* 0.12, not the 0.07 this started at: at 0.07 a sunken well was invisible
+     against warm paper greys only ~1.5% apart in lightness, so the "you may skip
+     this" container it's supposed to draw never appeared. The well's edge, not its
+     fill, is what does the work here. */
+  --elev-field: inset 0 1px 2px oklch(0.25 0.012 75 / 0.12);
 }
 
 .dark {
@@ -173,6 +226,16 @@
      vanished, so hairlines now read at the same strength they did on black. */
   --border: oklch(1 0 0 / 0.10);
   --input: oklch(1 0 0 / 0.12);
+  --border-strong: oklch(1 0 0 / 0.17);
+  /* Recessed here means DARKER than the surface it sits in (the light theme's
+     `--field` is lighter than its page) — the ladder is "lightness steps up as a
+     surface comes forward", so a sunken well steps down. Hover, by contrast, is
+     white-alpha rather than a fixed grey: it has to land on four different
+     surface lightnesses (sidebar 0.19 < bg 0.22 < card 0.255 < popover 0.285),
+     and any single opaque value would read as wrong on three of them. */
+  --field: oklch(0.20 0.004 75);
+  --hover: oklch(1 0 0 / 0.055);
+  --hover-strong: oklch(1 0 0 / 0.10);
   --ring: oklch(0.56 0.008 75);
   --sidebar: oklch(0.19 0.004 75);
   --sidebar-foreground: oklch(0.95 0.003 80);
@@ -187,6 +250,22 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.44);
+
+  /* Dark elevation. A black drop shadow over graphite is nearly invisible, so the
+     first version of this ladder collapsed: hairline/btn/panel/raised all landed
+     on the same `--border` edge and looked identical on screen. In a dark theme
+     height is carried by the EDGE (and by the surface's own lightness, which the
+     palette above already ladders), so each rung steps its edge alpha up —
+     0.10 → 0.13 → 0.17 → 0.22 — and the shadow only deepens behind the top rungs
+     to seat them off the page. Pure black, not the light theme's warm near-black:
+     over a dark surface a tinted shadow just muddies the hue. */
+  --elev-hairline: 0 0 0 1px var(--border);
+  --elev-btn: 0 0 0 1px oklch(1 0 0 / 0.15), 0 1px 2px oklch(0 0 0 / 0.30);
+  --elev-panel: 0 0 0 1px oklch(1 0 0 / 0.13), 0 1px 2px oklch(0 0 0 / 0.22),
+    0 2px 6px oklch(0 0 0 / 0.16);
+  --elev-raised: 0 0 0 1px oklch(1 0 0 / 0.17), 0 3px 14px oklch(0 0 0 / 0.38);
+  --elev-overlay: 0 0 0 1px oklch(1 0 0 / 0.22), 0 12px 38px oklch(0 0 0 / 0.55);
+  --elev-field: inset 0 1px 2px oklch(0 0 0 / 0.30);
 }
 
 /* Modern "speed morph" reveal: content decelerates out of a soft blur. Used for
@@ -322,12 +401,72 @@
 }
 .text-shimmer {
   background: linear-gradient(100deg,
-    var(--muted-foreground) 30%, var(--foreground) 50%, var(--muted-foreground) 70%);
-  background-size: 220% 100%;
+    var(--muted-foreground) 35%, var(--foreground) 50%, var(--muted-foreground) 65%);
+  background-size: 200% 100%;
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
-  animation: text-shimmer 1.8s linear infinite;
+  animation: text-shimmer 1.4s linear infinite;
+}
+
+/* --- Streaming answer -----------------------------------------------------
+   The newest characters resolve out of a soft blur instead of snapping in, and a
+   block caret marks the write head. The whole effect is TWO static-CSS spans and
+   zero per-token animation, so its cost is flat no matter how fast the provider
+   streams — which is the only reason it's allowed on the hottest surface in the
+   app at all (see the frequency rule on `step-in` above). */
+.stream-tail {
+  /* Alpha ramp, not a colour ramp: a mask reads the alpha channel, so the tail
+     dissolves into whatever surface it sits on, in either theme. */
+  -webkit-mask-image: linear-gradient(90deg, oklch(0 0 0) 20%, oklch(0 0 0 / 0.2));
+          mask-image: linear-gradient(90deg, oklch(0 0 0) 20%, oklch(0 0 0 / 0.2));
+  filter: blur(1.6px);
+}
+/* The write-head caret on a streaming ANSWER — the one surface that can't have a
+   dissolving tail, because Streamdown owns its trailing characters. It exists only
+   while `data-streaming` is set, i.e. only while text is actually arriving, so it
+   does NOT blink: a bar that flickers under text that is already visibly growing
+   reads as a glitch, and the blink would be carrying no information the movement
+   isn't already carrying. It simply marks where the next word lands, then goes.
+
+   Only on a trailing paragraph. When the answer currently ends in a code block,
+   table or list, a caret welded to that block's edge reads as a rendering
+   artefact — and the status line above already says we're working, so nothing is
+   lost by omitting it there. */
+.chat-prose[data-streaming] > p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  translate: 0 -0.5px;
+  border-radius: 1px;
+  vertical-align: text-bottom;
+  background: var(--foreground);
+  opacity: 0.55;
+}
+
+/* NB: `.scroll-fade-b` — "this list continues below" as a soft edge instead of a
+   row chopped in half — is NOT defined here. tw-animate-css already ships it, and
+   its version is better than a static mask: it drives the gradient from
+   `animation-timeline: scroll(self y)`, so the fade appears only while there is
+   something further down and clears once you reach the end. A hand-rolled mask
+   would dim the final row forever and read as disabled. Tune it per element with
+   `--scroll-fade-b-size` if the default (min(12%, 2.5rem)) is wrong. */
+
+/* The micro-interaction transition: hover, press, open/closed. Paired with
+   `--ease-strong` and a ~140ms duration, which is the band where a state change
+   registers as responsive rather than either instant or animated. Anything that
+   *enters* the page uses `--ease-out` and the keyframes above instead. */
+/* In `@layer utilities` on purpose: an unlayered rule would out-specify every
+   Tailwind `transition-*`/`duration-*` utility, so a component could never tune
+   it locally. Inside the layer it behaves like any other utility. */
+@layer utilities {
+  .transition-micro {
+    transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+    transition-duration: 140ms;
+    transition-timing-function: var(--ease-strong);
+  }
 }
 
 @layer base {
@@ -420,6 +559,15 @@
     transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
+  /* The streaming tail is a static blur + mask, not an animation, so the `*`
+     duration reset above cannot reach it — a reduced-motion user would be left
+     permanently reading half-dissolved words. Drop the effect entirely; the caret
+     is already handled by the reset. */
+  .stream-tail {
+    filter: none;
+    -webkit-mask-image: none;
+            mask-image: none;
+  }
   /* View-transition snapshots are pseudo-elements outside the * reset above, so
      the cross-page crossfade needs its own opt-out — content swaps instantly. */
   ::view-transition-old(*),
@@ -446,7 +594,106 @@
   [data-slot="sheet-overlay"] {
     background-color: rgb(0 0 0 / 0.45) !important;
   }
+  /* Both settings ask for text that is fully opaque and fully sharp, which is the
+     exact opposite of a dissolving tail and a faded list edge. Neither carries
+     information that isn't also carried by the caret and the scrollbar. */
+  .stream-tail {
+    filter: none !important;
+    -webkit-mask-image: none !important;
+            mask-image: none !important;
+  }
+  .scroll-fade-b {
+    -webkit-mask-image: none !important;
+            mask-image: none !important;
+  }
 }
+/* --- Text selection ------------------------------------------------------
+   The browser default is a saturated system blue: it fights a warm monochrome
+   palette, and on the dark theme it sinks selected glyphs below legible contrast.
+   A translucent wash in the palette's one accent hue tints the background and
+   leaves the text at full strength. Alpha is higher in dark because the same wash
+   over graphite barely registers.
+
+   Alpha is written into the colour directly rather than mixed with `color-mix`:
+   Lightning CSS emits a fallback for a mix it can't resolve at build time, and for
+   this one the fallback was the FULLY OPAQUE accent — selected text on it is
+   unreadable. A literal `oklch(… / α)` has no such failure mode. */
+::selection {
+  background: oklch(0.50 0.14 250 / 0.22);
+}
+.dark ::selection {
+  background: oklch(0.72 0.12 245 / 0.34);
+}
+
+/* --- Print ---------------------------------------------------------------
+   A transcript is a document — an office user will print an analysis or save it
+   as PDF — and the app shell actively fights that. The shell is `h-dvh` with a
+   scroller per pane, so WITHOUT this a print job emits exactly one screenful and
+   silently drops the rest of the conversation. Everything below turns the app
+   back into a page: let it flow, drop the controls, keep the words. */
+@media print {
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  /* Blunt on purpose. Every pane in the shell is its own scroller with its own
+     max-height, and each one would otherwise print its first viewport and stop. */
+  *,
+  *::before,
+  *::after {
+    overflow: visible !important;
+    max-height: none !important;
+    box-shadow: none !important;
+    filter: none !important;
+    -webkit-mask-image: none !important;
+            mask-image: none !important;
+  }
+  /* Navigation and controls carry nothing onto paper. */
+  [data-slot="sidebar"],
+  [data-slot="sidebar-container"],
+  [data-slot="sidebar-gap"],
+  [data-slot="sidebar-rail"],
+  [data-slot="sidebar-trigger"],
+  [data-print="hide"] {
+    display: none !important;
+  }
+  /* A collapsed activity run has to open. On screen, "Reasoned for 6s ›" is an
+     honest offer to show more; on paper there is no chevron to press and nothing
+     hints that anything was left out, so a collapsed section prints as a silent
+     omission. */
+  [data-slot="collapsible-content"] {
+    display: block !important;
+    height: auto !important;
+    visibility: visible !important;
+  }
+  /* Keep the atomic blocks whole, and never leave a heading stranded at the foot
+     of a page. Deliberately NOT applied to a whole message: one longer than a page
+     cannot avoid breaking anyway, and the browser's fallback is to shove it onto a
+     fresh page, leaving a half-empty sheet behind it. */
+  pre,
+  table,
+  blockquote,
+  figure {
+    break-inside: avoid;
+  }
+  .chat-prose h1,
+  .chat-prose h2,
+  .chat-prose h3,
+  .chat-prose h4 {
+    break-after: avoid;
+  }
+  /* A link is dead on paper unless its destination comes with it. Scoped to answer
+     prose so interface links don't sprout URLs. */
+  .chat-prose a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    word-break: break-all;
+  }
+}
+
 /* App-wide scrollbars — replace the default chunky OS/Chrome bars with a calm,
    unobtrusive floating pill. Theme-aware via --muted-foreground (the .dark class
    already remaps it), so no separate dark rule is needed. Class-based utilities

@@ -383,6 +383,8 @@
     },
     "ask": {
       "title": "A quick question",
+      "waiting": "Waiting on your decision",
+      "needsAnswer": "Pick an option to continue",
       "submit": "Send",
       "skip": "Skip",
       "answered": "Answered",
@@ -525,6 +527,7 @@
       "reasonedFor": "Reasoned for {duration}",
       "workedFor": "Worked for {duration}",
       "activity": "Activity",
+      "stepCount": "{count, plural, one {# action} other {# actions}}",
       "fork": "Fork into a new chat",
       "actions": "Message actions",
       "prevVersion": "Previous version",

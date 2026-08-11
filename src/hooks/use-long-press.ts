@@ -15,6 +15,11 @@ export function useLongPress(onLongPress: () => void, ms = 450) {
       clearTimeout(timer.current);
       timer.current = null;
     }
+    // Also forget the touch origin: it doubles as "a finger is on the glass", which
+    // is what `onContextMenu` below reads to tell a touch callout from a mouse
+    // right-click. Leaving it set would make every later right-click look like a
+    // touch.
+    origin.current = null;
   }, []);
 
   const start = useCallback(
@@ -44,6 +49,13 @@ export function useLongPress(onLongPress: () => void, ms = 450) {
     onTouchStart: start,
     onTouchEnd: clear,
     onTouchMove: move,
-    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+    // Swallow only the OS callout raised by a *touch* long-press — our own menu is
+    // already opening, and two menus fighting is worse than either. A mouse
+    // right-click is left to the browser: suppressing it removes Copy / Search /
+    // Inspect and gives the user nothing back, which reads as a broken element
+    // rather than as a deliberate design.
+    onContextMenu: (e: React.MouseEvent) => {
+      if (origin.current) e.preventDefault();
+    },
   };
 }

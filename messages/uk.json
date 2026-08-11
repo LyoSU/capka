@@ -383,6 +383,8 @@
     },
     "ask": {
       "title": "Невелике запитання",
+      "waiting": "Чекаю на ваше рішення",
+      "needsAnswer": "Виберіть варіант, щоб продовжити",
       "submit": "Надіслати",
       "skip": "Пропустити",
       "answered": "Відповідь надіслано",
@@ -525,6 +527,7 @@
       "reasonedFor": "Міркував {duration}",
       "workedFor": "Працював {duration}",
       "activity": "Дії",
+      "stepCount": "{count, plural, one {# дія} few {# дії} many {# дій} other {# дії}}",
       "fork": "Відгалузити в новий чат",
       "actions": "Дії з повідомленням",
       "prevVersion": "Попередня версія",

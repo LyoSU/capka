@@ -31,7 +31,12 @@ export function ContextMeter({ used, window: limit }: { used: number; window: nu
   const r = 6.5;
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - Math.min(1, fraction));
-  const color = warn ? "stroke-warning-text" : "stroke-primary/50";
+  // `stroke-muted-foreground`, not the old `stroke-primary/50`. A 2px ring is
+  // non-text UI, which WCAG holds to 3:1 — and half-strength primary on the pale
+  // background landed under that, so the only "how full is this" cue was hard to
+  // see for exactly the users who most need it. `--muted-foreground` is already
+  // tuned for contrast in both themes, and semantically it IS a quiet indicator.
+  const color = warn ? "stroke-warning-text" : "stroke-muted-foreground";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

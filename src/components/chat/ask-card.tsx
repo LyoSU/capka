@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2 } from "lucide-react";
+import { CircleQuestionMark, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { haptic } from "@/lib/haptics";
@@ -69,23 +69,66 @@ export function AskCard({
   };
 
   return (
-    // Frameless — no bordered card. The assistant's own prose above already frames
-    // the question; the fields/answers read as part of the conversation, not a boxed
-    // widget (calmer, per PRODUCT.md). A model-set title shows as a quiet heading.
-    <div className="animate-blur-rise my-3 space-y-3">
-      {form.title && <div className="text-sm font-medium text-foreground">{form.title}</div>}
+    // Framing is STATE-DEPENDENT, and that's the whole point. While we're awaiting
+    // an answer the run is suspended and the composer is blocked, so a user who
+    // scrolls past this question is left typing into a dead box wondering why
+    // nothing happens — this is the one moment the interface is obliged to
+    // interrupt. It therefore sits on a raised surface with its state named in
+    // words. Once answered it drops back to frameless prose, which is the calm,
+    // woven-into-the-conversation treatment PRODUCT.md asks for. Calm is about not
+    // shouting; it was never about hiding a question that blocks the work.
+    <div
+      className={
+        awaiting
+          ? "animate-blur-rise my-3 space-y-3 rounded-2xl bg-card p-4 shadow-raised"
+          : "animate-blur-rise my-3 space-y-3"
+      }
+    >
+      {awaiting && (
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <CircleQuestionMark className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          {/* Name the state. "Waiting on your decision" is the fact the user needs
+              and cannot infer: that the agent has stopped, and that it stops until
+              they act. The model's own title, if any, follows as the question. */}
+          {t("waiting")}
+        </div>
+      )}
+      {form.title && (
+        <div className={awaiting ? "text-sm text-foreground" : "text-sm font-medium text-foreground"}>
+          {form.title}
+        </div>
+      )}
 
       {awaiting ? (
         <>
           <div className="space-y-3">
             {form.fields.map((f) => (
-              <Field key={f.id} field={f} value={values[f.id]} onSet={set} onToggle={toggle} />
+              <Field
+                key={f.id}
+                field={f}
+                value={values[f.id]}
+                onSet={set}
+                onToggle={toggle}
+                // Enter in a text/number field submits, the way it does in the
+                // composer right above. Without it the one-question case forces a
+                // reach for the mouse mid-sentence.
+                onEnter={() => { if (complete && !submitting) void send("submit"); }}
+              />
             ))}
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => send("submit")} disabled={submitting || !complete}>{t("submit")}</Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={() => send("submit")} disabled={submitting || !complete}>
+              {/* The spinner lives INSIDE the button that caused it, not beside the
+                  row: one locus of feedback for one action. */}
+              {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+              {t("submit")}
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => send("skip")} disabled={submitting}>{t("skip")}</Button>
-            {submitting && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {/* Never disable a primary action without saying why — a dead button
+                with no explanation reads as a broken interface, not as a rule. */}
+            {!complete && !submitting && (
+              <span className="text-xs text-muted-foreground">{t("needsAnswer")}</span>
+            )}
           </div>
         </>
       ) : (
@@ -98,7 +141,7 @@ export function AskCard({
               <div className="text-sm text-muted-foreground">{f.label}</div>
               {value?.action === "submit" && (
                 <div className="flex justify-end">
-                  <div className="inline-block max-w-[85%] whitespace-pre-wrap break-words rounded-2xl border border-border bg-card px-4 py-2 text-sm text-card-foreground shadow-sm">
+                  <div className="inline-block max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-card px-4 py-2 text-sm text-card-foreground shadow-panel">
                     {display(f, value.values[f.id])}
                   </div>
                 </div>
@@ -112,12 +155,33 @@ export function AskCard({
   );
 }
 
+/**
+ * A chip in the ask form. Two things here are deliberate and shared by both the
+ * choice and yes/no cases:
+ *
+ *  - The selected state is a SOLID fill, not the 10% wash it used to be. This is a
+ *    blocking decision that resumes suspended work, so "did my tap register?" must
+ *    have no ambiguity; a faint tint on a pale surface leaves room for doubt.
+ *  - `min-h-10 sm:min-h-8`: the old `py-1` chip stood ~26px tall. That clears the
+ *    WCAG 2.1 AA floor but is a genuinely uncomfortable target for the single most
+ *    consequential tap in the product, so touch gets a 40px row and the pointer
+ *    case stays compact.
+ */
+const chipClass = (active: boolean) =>
+  [
+    "inline-flex min-h-10 items-center rounded-full px-3.5 text-sm transition-micro sm:min-h-8",
+    active
+      ? "bg-primary font-medium text-primary-foreground"
+      : "bg-background text-muted-foreground shadow-btn hover:bg-hover hover:text-foreground",
+  ].join(" ");
+
 /** One field: a choice (single/multi chips), free text, a number, or a yes/no. */
-function Field({ field, value, onSet, onToggle }: {
+function Field({ field, value, onSet, onToggle, onEnter }: {
   field: AskField;
   value: string | string[] | undefined;
   onSet: (id: string, v: string) => void;
   onToggle: (id: string, v: string) => void;
+  onEnter?: () => void;
 }) {
   const t = useTranslations("chat.ask");
   return (
@@ -133,11 +197,7 @@ function Field({ field, value, onSet, onToggle }: {
                 type="button"
                 aria-pressed={active}
                 onClick={() => { haptic("tap"); if (field.multi) onToggle(field.id, op.value); else onSet(field.id, op.value); }}
-                className={
-                  active
-                    ? "rounded-full border border-primary bg-primary/10 px-3 py-1 text-sm font-medium text-primary"
-                    : "rounded-full border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
-                }
+                className={chipClass(active)}
               >
                 {op.label}
               </button>
@@ -152,11 +212,7 @@ function Field({ field, value, onSet, onToggle }: {
               type="button"
               aria-pressed={value === v}
               onClick={() => { haptic("tap"); onSet(field.id, v); }}
-              className={
-                value === v
-                  ? "rounded-full border border-primary bg-primary/10 px-3 py-1 text-sm font-medium text-primary"
-                  : "rounded-full border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
-              }
+              className={chipClass(value === v)}
             >
               {label}
             </button>
@@ -165,9 +221,14 @@ function Field({ field, value, onSet, onToggle }: {
       ) : (
         <Input
           type={field.kind === "number" ? "number" : "text"}
-          className="mt-2"
+          className="mt-2 h-10 sm:h-8"
           value={typeof value === "string" ? value : ""}
           onChange={(e) => onSet(field.id, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.shiftKey) return;
+            e.preventDefault();
+            onEnter?.();
+          }}
         />
       )}
     </div>

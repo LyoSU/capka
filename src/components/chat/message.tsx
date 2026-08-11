@@ -242,8 +242,14 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   // answers stay in the comfortable reading band; code blocks and tables are
   // exempt and keep the full column width. 16px (text-base) is the readable
   // floor — 15px sat just under it for Cyrillic body with tall diacritics.
+  // `data-streaming` drives a CSS-only caret on the last paragraph (globals.css).
+  // The dissolving tail used for reasoning is deliberately NOT applied here: the
+  // answer goes through Streamdown, so its trailing characters live inside
+  // whatever element the markdown parser just produced and can't be wrapped
+  // without re-implementing the renderer. A caret is the part that carries
+  // information anyway — it marks the write head and blinks when it parks.
   return (
-    <div className="chat-prose text-base leading-relaxed">
+    <div className="chat-prose text-base leading-relaxed" data-streaming={isStreaming ? "" : undefined}>
       <Markdown isStreaming={isStreaming} chatId={chatId}>{text}</Markdown>
       {chatId && <WorkspaceLinks text={text} chatId={chatId} live={isStreaming} />}
     </div>
@@ -303,6 +309,34 @@ function WorkspaceLinks({ text, chatId, live }: { text: string; chatId: string; 
 }
 
 
+/** How many trailing characters dissolve into the blur. */
+const TAIL_CHARS = 18;
+
+/** Plain streamed text whose newest characters resolve out of a soft blur — so
+ *  "these words are still landing, don't read them as final" is visible without
+ *  any label saying so.
+ *
+ *  No caret here, deliberately. The dissolving tail already marks the write head;
+ *  parking a solid bar immediately after blurred text states the same fact a
+ *  second time and reads as a glitch rather than a cursor. One marker per
+ *  surface: prose that we render ourselves gets the tail, and the answer body —
+ *  which goes through Streamdown and so can't have its trailing characters
+ *  wrapped — gets a caret instead (see `TextContent`).
+ *
+ *  Cost is flat in stream speed: one static-CSS span, zero per-token animation,
+ *  no extra state. That's what makes it admissible on the hottest surface in the
+ *  app (see the frequency rule on `step-in` in globals.css). */
+function StreamingText({ text, live }: { text: string; live?: boolean }) {
+  if (!live) return <>{text}</>;
+  const cut = Math.max(0, text.length - TAIL_CHARS);
+  return (
+    <>
+      {text.slice(0, cut)}
+      <span className="stream-tail">{text.slice(cut)}</span>
+    </>
+  );
+}
+
 /** The model's reasoning — a node on the same rail as the tool actions, marked
  *  with a lightbulb. The thought text shows inline: the surrounding ActivityGroup
  *  owns the collapse, so once a run is expanded the user reads the thinking
@@ -314,10 +348,20 @@ function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boole
   const clean = useMemo(() => cleanReasoning(text), [text]);
   return (
     <div className="animate-step-in relative py-1 pl-10 text-muted-foreground">
+      {/* No pulse on the badge while streaming: the text below now carries the
+          "still arriving" signal via its dissolving tail, and the rail already
+          shows a live spinner on the running step. Three motions for one fact
+          reads as a busy interface, not an informative one. */}
       <span className="absolute left-0 top-1 grid h-[27px] w-[27px] place-items-center rounded-full border border-border bg-card text-muted-foreground">
-        <Lightbulb className={`animate-step-badge-in h-3.5 w-3.5 ${isStreaming ? "animate-pulse" : ""}`} />
+        <Lightbulb className="animate-step-badge-in h-3.5 w-3.5" />
       </span>
-      <p className="whitespace-pre-wrap text-sm italic leading-relaxed">{clean}</p>
+      {/* Not italic: Onest ships no true italic, so Cyrillic reasoning came out
+          mechanically slanted — the same reason blockquotes dropped italic in
+          globals.css. Reasoning is already set apart by the rail and the muted
+          colour; it doesn't need a second, worse-legibility signal. */}
+      <p className="whitespace-pre-wrap text-sm leading-relaxed">
+        <StreamingText text={clean} live={isStreaming} />
+      </p>
     </div>
   );
 }
@@ -385,11 +429,19 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
         {isRunning ? d.activeLabel : doneLabel}
         {isError ? ` · ${t("failed")}` : ""}
       </span>
+      {/* The literal thing acted on — a filename, a command — sits in its own
+          sunken well rather than trailing the sentence as dim text. The well is
+          what makes the row LESS technical, not more: it reads as "machine
+          detail, skippable", so the eye can take the sentence in the user's own
+          language and skip the token, instead of having to parse a mono fragment
+          spliced into the middle of a phrase. */}
       {d.detail && (
-        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/80">{d.detail}</span>
+        <span className="min-w-0 truncate rounded-md bg-field px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground inset-shadow-field">
+          {d.detail}
+        </span>
       )}
       {expandable && (
-        <ChevronRight className="chevron ml-auto h-3.5 w-3.5 shrink-0 opacity-35 transition-transform" />
+        <ChevronRight className="chevron ml-auto h-3.5 w-3.5 shrink-0 opacity-40 transition-transform group-hover/step:opacity-100" />
       )}
     </div>
   );
@@ -398,7 +450,12 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
 
   return (
     <Collapsible defaultOpen={false}>
-      <CollapsibleTrigger className="block w-full text-left transition-colors hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
+      {/* `opacity-40 → 100` on hover rather than hide-until-hover: an affordance
+          nobody can see is an affordance nobody finds, so the chevron stays
+          faintly present at rest and only firms up under the cursor. Same 40%
+          resting value as the group header's chevron — one quiet level for one
+          idea, instead of the 35/40/80 mix this rail used to carry. */}
+      <CollapsibleTrigger className="group/step block w-full text-left transition-micro hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
         {row}
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -454,12 +511,6 @@ function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; i
   );
 }
 
-/** The one-line summary shown on a collapsed activity run — the "last action",
- *  Claude-style. While the run is live it names what's happening *now* (the last
- *  item, present tense); once finished it names the last concrete tool step
- *  ("Read SKILL.md") so the header carries information, falling back to a plain
- *  "Reasoning" tag for a pure-thinking run. */
-
 /** Wraps a run of reasoning + tool calls in a single quiet spoiler whose header
  *  reads, Grok-style, how long the run took — "Reasoned for 58s ›". While it
  *  streams the timer ticks live from first paint; once it stops we freeze the
@@ -502,12 +553,26 @@ function ActivityGroup({ items, isStreaming, fallbackMs, chatId }: { items: Acti
       : streaming
         ? t("thinking")
         : t(hasReasoning ? "reasoning" : "activity");
+  // A bounded count is what makes a collapsed run understandable without opening
+  // it: a duration alone says how long you waited, never how much happened. "6s ·
+  // 4 actions" reads as complete and finite — the reassurance a user actually
+  // needs before deciding NOT to expand. Suppressed while live (the number would
+  // climb under the cursor) and for pure-reasoning runs (nothing to count).
+  const toolCount = items.reduce((n, it) => (it.kind === "tool" ? n + 1 : n), 0);
+  const countLabel = !streaming && toolCount > 0 ? t("stepCount", { count: toolCount }) : null;
 
   return (
     <Collapsible open={open} onOpenChange={(v) => { setUserToggled(true); setOpen(v); }}>
-      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
-        <span className={`min-w-0 truncate ${streaming ? "animate-pulse" : ""}`}>{label}</span>
-        <ChevronRight className="chevron h-3.5 w-3.5 shrink-0 opacity-40 transition-transform" />
+      {/* No pulse on the label while live: the rail below is already open and
+          shows a spinning node on the running step, so a pulsing header is the
+          same fact stated a second time. `tabular-nums` keeps the ticking duration
+          from reflowing the row a digit at a time. */}
+      <CollapsibleTrigger className="group/act inline-flex max-w-full items-center gap-1.5 py-1 text-left text-sm text-muted-foreground transition-micro hover:text-foreground [&[data-state=open]_.chevron]:rotate-90">
+        <span className="min-w-0 truncate tabular-nums">{label}</span>
+        {countLabel && (
+          <span className="shrink-0 text-muted-foreground/70 tabular-nums">· {countLabel}</span>
+        )}
+        <ChevronRight className="chevron h-3.5 w-3.5 shrink-0 opacity-40 transition-transform group-hover/act:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">

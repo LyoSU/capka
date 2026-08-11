@@ -6,6 +6,31 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Chats now print (and save to PDF) as a full document: the whole transcript flows instead of one screenful, the sidebar and composer are dropped, collapsed reasoning is expanded, and link targets are printed.
+- Shared elevation tokens — `shadow-hairline`/`btn`/`panel`/`raised`/`overlay` and `inset-shadow-field`, plus `--field`, `--hover`, `--hover-strong` and `--border-strong` in both themes.
+
+### Changed
+
+- Streamed reasoning dissolves at its trailing edge while it arrives; the answer body carries a write-head caret instead. Both are static CSS, with no per-token animation.
+- The running status line no longer sweeps a shimmer across its label — the spinner beside it already reports the same thing.
+- A collapsed activity run reports how many actions it contains, not just how long it took.
+- Reasoning text is no longer italic (Onest has no true italic, so Cyrillic was mechanically slanted).
+- Text selection uses the palette's accent instead of the browser's default blue.
+- The sidebar chat list fades at its bottom edge while more remains scrollable; it previously cut off mid-row with its scrollbar hidden.
+- Buttons, menus, popovers, cards and inputs draw their edge from the elevation tokens rather than hand-rolled `ring`/`shadow` pairs, and share one 140ms micro-interaction curve.
+- A question the agent is blocked on now sits on a raised panel headed "Waiting on your decision" until it's answered, then collapses to the previous quiet inline form. Its choices are solid when selected, are 40px tall on touch, and Enter submits from a text field.
+- "Send" on a blocked question explains why it's unavailable instead of sitting dead.
+- The right-edge turn minimap appears from five turns instead of two, and its inactive marks use `--muted-foreground` so they clear the 3:1 contrast floor for non-text UI.
+
+### Fixed
+
+- Sidebar `outline` menu buttons draw their border again: the previous `hsl(var(--sidebar-border))` shadow was invalid CSS (the variable holds `oklch(...)`) and browsers dropped the whole declaration.
+- Right-clicking your own chat message opens the browser's context menu again — the touch long-press handler was suppressing it for mouse input too.
+- The context-window ring is legible again: it drew at half-strength `--primary`, under the 3:1 contrast floor for non-text UI.
+- `automations-collection` tests no longer fail once the clock passes a hardcoded date; the one-off trigger case now derives its `once_at` from the current time.
+
 ## [0.17.0] - 2026-07-31
 
 ### Added

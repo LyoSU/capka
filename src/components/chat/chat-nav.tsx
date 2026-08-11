@@ -40,8 +40,13 @@ export function ChatNav({
     itemRefs.current[at >= 0 ? at : 0]?.focus();
   }, [open, items, activeId]);
 
-  // Not worth the clutter for a single turn.
-  if (items.length < 2) return null;
+  // A minimap earns its place only once a conversation is long enough to be worth
+  // skimming. At the old threshold of 2 it appeared as two unlabelled marks
+  // floating at the edge of a nearly empty screen: no skimming to do, nothing to
+  // say what they were, and an unexplained mark reads as a rendering glitch rather
+  // than as navigation. Five turns is roughly where scrolling back starts to cost
+  // something.
+  if (items.length < 5) return null;
 
   return (
     <div
@@ -88,7 +93,7 @@ export function ChatNav({
             // needs, so the collapsed rail's only "where am I" cue was invisible
             // to low-vision users. Position now reads from width AND weight.
             className={`h-1.5 rounded-full transition-[width,background-color] duration-150 ${
-              it.id === activeId ? "w-6 bg-foreground" : "w-3 bg-foreground/45"
+              it.id === activeId ? "w-6 bg-foreground" : "w-3 bg-muted-foreground"
             }`}
           />
         ))}
@@ -99,7 +104,7 @@ export function ChatNav({
           buttons stay out of the tab order until the list is actually shown. */}
       <nav
         aria-label={label}
-        className={`absolute right-0 top-1/2 flex max-h-[70vh] w-80 max-w-[60vw] -translate-y-1/2 flex-col gap-0.5 overflow-y-auto rounded-2xl border border-border/60 bg-popover p-2.5 shadow-xl transition-opacity duration-150 ${
+        className={`absolute right-0 top-1/2 flex max-h-[70vh] w-80 max-w-[60vw] -translate-y-1/2 flex-col gap-0.5 overflow-y-auto rounded-2xl bg-popover p-2.5 shadow-overlay transition-opacity duration-150 ${
           open ? "visible opacity-100" : "invisible opacity-0 group-hover:visible group-hover:opacity-100"
         }`}
       >
@@ -114,13 +119,13 @@ export function ChatNav({
                 onJump(it.id);
                 setOpen(false);
               }}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                active ? "bg-muted" : "hover:bg-muted/60"
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-micro ${
+                active ? "bg-hover-strong" : "hover:bg-hover"
               }`}
             >
               <span
                 className={`h-1.5 shrink-0 rounded-full transition-[width,background-color] ${
-                  active ? "w-5 bg-foreground" : "w-3 bg-foreground/45"
+                  active ? "w-5 bg-foreground" : "w-3 bg-muted-foreground"
                 }`}
               />
               <span className={`truncate text-sm ${active ? "text-foreground" : "text-muted-foreground"}`}>

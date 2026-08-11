@@ -53,8 +53,18 @@ export function TaskStatus({
       >
         <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" />
       </span>
-      <span className="text-shimmer font-medium">{label}</span>
-      {time ? <span className="text-muted-foreground">· {time}</span> : null}
+      {/* Plain text, not `text-shimmer`. The spinner to its left is already a
+          motion signal meaning "working"; sweeping a highlight across the label
+          says the identical thing a second time. Icon + words + elapsed time are
+          three complementary channels (that it's running, what it's doing, how
+          long) — a fourth animation adds no channel, only noise. */}
+      <span className="font-medium">{label}</span>
+      {/* Withheld for the first 5s by `formatElapsed`, on purpose: putting a number
+          on a fast operation measures it for the user and thereby makes it feel
+          slow. It appears only once the wait is long enough that not knowing is
+          worse than knowing. `tabular-nums` stops the row twitching as digits
+          change width. */}
+      {time ? <span className="text-muted-foreground tabular-nums">· {time}</span> : null}
     </div>
   );
 }
