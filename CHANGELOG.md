@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Sandboxes with egress on can resolve DNS again on hosts whose resolver is a private address (Docker Desktop `192.168.65.x`, corporate DNS, a home router). The egress firewall was dropping the container's own resolver, which looked like "no internet, host DNS ignored". Existing deployments: rebuild the sandbox image (`npm run sandbox:build`) or pull the new one.
+
 ## [0.19.0] - 2026-08-11
 
 ### Added

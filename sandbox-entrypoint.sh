@@ -37,6 +37,20 @@ if [ "${SANDBOX_EGRESS_FILTER:-0}" = "1" ]; then
   PRIVATE_V4="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 192.0.0.0/24 198.18.0.0/15"
   iptables -F OUTPUT || die "iptables flush failed"
   iptables -A OUTPUT -o lo -j ACCEPT || die "iptables loopback rule failed"
+  # DNS, BEFORE the DROPs (iptables stops at the first match). Docker's *default*
+  # bridge has no embedded resolver at 127.0.0.11 — the container inherits the
+  # host's /etc/resolv.conf verbatim, and that resolver is very often itself
+  # private: 192.168.65.x on Docker Desktop, 10.x on a corporate DNS, 192.168.1.1
+  # on a home router. Without this exception the firewall silently shoots down the
+  # container's own resolver and every lookup times out ("no internet", host DNS
+  # apparently ignored). Public egress is already ACCEPTed below, so allowing port
+  # 53 to exactly the daemon-assigned resolvers adds no exfiltration channel the
+  # agent lacked; it reaches no other LAN port and not the metadata service (:80).
+  # The awk guard keeps anything but a bare IPv4 literal out of the rule.
+  for ns in $(awk '$1 == "nameserver" && $2 ~ /^[0-9.]+$/ { print $2 }' /etc/resolv.conf 2>/dev/null); do
+    iptables -A OUTPUT -d "$ns" -p udp --dport 53 -j ACCEPT || die "iptables DNS rule for $ns failed"
+    iptables -A OUTPUT -d "$ns" -p tcp --dport 53 -j ACCEPT || die "iptables DNS rule for $ns failed"
+  done
   for net in $PRIVATE_V4; do iptables -A OUTPUT -d "$net" -j DROP || die "iptables DROP $net failed"; done
   iptables -A OUTPUT -j ACCEPT || die "iptables accept rule failed"
   # Verify the cloud-metadata block actually took. gVisor's netfilter is partial,
@@ -47,6 +61,11 @@ if [ "${SANDBOX_EGRESS_FILTER:-0}" = "1" ]; then
   if command -v ip6tables >/dev/null 2>&1; then
     ip6tables -F OUTPUT 2>/dev/null || true
     ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+    # Same DNS exception as v4, for hosts whose resolver is an IPv6 ULA/link-local.
+    for ns in $(awk '$1 == "nameserver" && $2 ~ /^[0-9a-fA-F:]+$/ { print $2 }' /etc/resolv.conf 2>/dev/null); do
+      ip6tables -A OUTPUT -d "$ns" -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+      ip6tables -A OUTPUT -d "$ns" -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+    done
     for net in ::1/128 fc00::/7 fe80::/10; do ip6tables -A OUTPUT -d "$net" -j DROP 2>/dev/null || true; done
     ip6tables -A OUTPUT -j ACCEPT 2>/dev/null || true
   fi
