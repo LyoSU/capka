@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Users, KeyRound } from "lucide-react";
 import { SettingsPage } from "@/components/settings/shell";
-import { SettingsTabs } from "@/components/settings/tabs";
+import { Segmented } from "@/components/settings/segmented";
 import { PeopleTab } from "./people-tab";
 import { SignInTab } from "./signin-tab";
 
@@ -32,10 +32,10 @@ export default function PeoplePage() {
     // `wide` unconditionally: it is a property of the page, not of the tab —
     // deriving it from `tab` snapped the column 672px→1024px on every switch.
     <SettingsPage title={t("title")} description={t("subtitle")} wide>
-      <SettingsTabs
+      <Segmented
         value={tab}
         onChange={setTab}
-        tabs={[
+        options={[
           { key: "people", label: t("tab.people"), icon: Users },
           { key: "signin", label: t("tab.signin"), icon: KeyRound },
         ]}

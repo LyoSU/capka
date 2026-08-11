@@ -249,7 +249,7 @@ export function MarketplaceBrowser() {
           <div key={cat} className="space-y-2">
             <p className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">{cat}</p>
             {items.map((c) => (
-              <div key={c.name} className="flex items-start justify-between gap-4 rounded-lg border bg-card p-3">
+              <div key={c.name} className="flex items-start justify-between gap-4 rounded-lg bg-card p-3 shadow-panel">
                 <div className="flex flex-1 items-start gap-3">
                   <PluginIcon name={c.name} homepage={c.homepage} size={40} />
                   <div className="min-w-0 flex-1 space-y-1">

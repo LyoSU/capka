@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { ChevronRight, Lock } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Segmented } from "@/components/settings/segmented";
 import {
   ASSISTANT_PROFILE, RAW_PROFILE, CAPABILITY_GROUPS, presetOf, type AgentProfile,
 } from "@/lib/agents/profile";
@@ -55,35 +56,27 @@ export function AgentModeSection({
     // Same card shape as SettingsGroup (rounded-xl / bg-card): this section sits
     // directly under one on both pages that use it, and a slightly different
     // radius on adjacent cards is the kind of mismatch you feel before you see.
-    <div className="space-y-3 rounded-xl border bg-card p-4">
+    <div className="space-y-3 rounded-xl bg-card p-4 shadow-panel">
       <div className="space-y-0.5">
         <Label>{t("label")}</Label>
         <p className="text-xs text-muted-foreground">{t(scope === "org" ? "hintOrg" : `hint.${preset}`)}</p>
       </div>
 
-      <div className="inline-flex rounded-lg border bg-muted/40 p-1">
-        {([
-          { key: "assistant", value: ASSISTANT_PROFILE },
-          { key: "raw", value: RAW_PROFILE },
-        ] as const).map((p) => (
-          <button
-            key={p.key}
-            type="button"
-            onClick={() => onChange(p.value)}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm transition-colors",
-              preset === p.key ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t(`preset.${p.key}`)}
-          </button>
-        ))}
-        {/* Not selectable — it's a readout of "this profile matches no preset",
-            shown only while that's true, so the control never lies about state. */}
-        {preset === "custom" && (
-          <span className="rounded-md bg-card px-3 py-1.5 text-sm font-medium shadow-btn">{t("preset.custom")}</span>
-        )}
-      </div>
+      {/* The shared segmented skin, declared as a radiogroup: this picks a VALUE,
+          it doesn't switch which view you're looking at. "Custom" rides along as
+          the read-only third state — the profile matches no preset — so the
+          control never has to lie about what's on. */}
+      <Segmented
+        as="radiogroup"
+        label={t("label")}
+        value={preset === "custom" ? null : preset}
+        onChange={(key) => onChange(key === "assistant" ? ASSISTANT_PROFILE : RAW_PROFILE)}
+        options={[
+          { key: "assistant", label: t("preset.assistant") },
+          { key: "raw", label: t("preset.raw") },
+        ]}
+        readout={preset === "custom" ? t("preset.custom") : undefined}
+      />
 
       {/* The honest consequence of a raw prompt with nothing written in it: the
           model gets no system message at all. Better seen now than inferred later.

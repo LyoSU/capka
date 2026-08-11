@@ -640,5 +640,5 @@ function ChatsList({ chats, locale, emptyLabel }: { chats: ChatRow[] | null; loc
 
 /** The card the chat rows sit in — same shape as SettingsGroup. */
 function ChatList({ children }: { children: React.ReactNode }) {
-  return <div className="divide-y overflow-hidden rounded-xl border bg-card">{children}</div>;
+  return <div className="divide-y overflow-hidden rounded-xl bg-card shadow-panel">{children}</div>;
 }

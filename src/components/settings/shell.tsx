@@ -185,7 +185,7 @@ export function SettingsError({ message, action }: { message: string; action?: R
 /** One card holding several rows separated by hairlines, instead of one card
  *  per row. This is what turns a wall of boxes back into a list. */
 export function SettingsGroup({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("divide-y overflow-hidden rounded-xl border bg-card", className)}>{children}</div>;
+  return <div className={cn("divide-y overflow-hidden rounded-xl bg-card shadow-panel", className)}>{children}</div>;
 }
 
 /**

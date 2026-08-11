@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Package, Store } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Segmented } from "@/components/settings/segmented";
 import InstalledPlugins from "@/components/settings/installed-plugins";
 import { MarketplaceBrowser } from "@/components/settings/marketplace-browser";
 import MemberPluginBrowser from "@/components/settings/member-plugin-browser";
@@ -35,21 +35,10 @@ export default function PluginsPanel({ view, onView }: { view: PluginsView; onVi
 
   return (
     <div className="space-y-4">
-      <div className="inline-flex rounded-lg border bg-muted/40 p-1">
-        {views.map((v) => (
-          <button
-            key={v.key}
-            onClick={() => onView(v.key)}
-            className={cn(
-              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
-              view === v.key ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <v.icon className="h-4 w-4" />
-            {v.label}
-          </button>
-        ))}
-      </div>
+      {/* The shared control, not a fourth copy of it. This one had been hand-rolled
+          identically but without `role="tablist"`/`aria-selected`, so a screen
+          reader announced two unrelated buttons instead of a two-tab switcher. */}
+      <Segmented value={view} onChange={onView} options={views} />
 
       {view === "installed" ? <InstalledPlugins /> : cap.isAdmin ? <MarketplaceBrowser /> : <MemberPluginBrowser />}
     </div>

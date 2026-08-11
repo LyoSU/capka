@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { Segmented } from "@/components/settings/segmented";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { SettingsEmpty, SettingsSkeleton } from "@/components/settings/shell";
 
@@ -364,21 +364,17 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
         <div className="space-y-3 rounded-md border p-4">
           {/* Remote (URL) vs Local (sandbox command) — local is admin-only. */}
           {isAdmin && (
-            <div className="inline-flex rounded-md border bg-muted/40 p-0.5 text-sm">
-              {(["remote", "local"] as const).map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => { setKind(k); setTestResult(null); }}
-                  className={cn(
-                    "rounded px-2.5 py-1 transition-colors",
-                    kind === k ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {t(k === "remote" ? "kind.remote" : "kind.local")}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              as="radiogroup"
+              label={t("kind.label")}
+              size="sm"
+              value={kind}
+              onChange={(k) => { setKind(k); setTestResult(null); }}
+              options={[
+                { key: "remote", label: t("kind.remote") },
+                { key: "local", label: t("kind.local") },
+              ]}
+            />
           )}
 
           {isLocal ? (
@@ -412,21 +408,18 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
               {/* Auth method — auto-detected from the URL, user can override. */}
               <div className="space-y-2 pt-1">
                 <label className="block text-xs text-muted-foreground">{t("method.label")}</label>
-                <div className="inline-flex rounded-md border bg-muted/40 p-0.5 text-sm">
-                  {(["none", "token", "oauth"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => { setMethod(m); methodTouched.current = true; setTestResult(null); }}
-                      className={cn(
-                        "rounded px-2.5 py-1 transition-colors",
-                        method === m ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {t(`method.${m}`)}
-                    </button>
-                  ))}
-                </div>
+                <Segmented
+                  as="radiogroup"
+                  label={t("method.label")}
+                  size="sm"
+                  value={method}
+                  onChange={(m) => { setMethod(m); methodTouched.current = true; setTestResult(null); }}
+                  options={[
+                    { key: "none", label: t("method.none") },
+                    { key: "token", label: t("method.token") },
+                    { key: "oauth", label: t("method.oauth") },
+                  ]}
+                />
               </div>
 
               {method === "none" && (

@@ -31,6 +31,8 @@ All notable changes to Capka are documented here. Format follows
 - Success and warning states use `--success` and `--warning-surface`/`-border`/`-text` instead of raw `emerald`/`amber` palette values with hand-written dark-mode variants. Remaining palette colours are categorical (file type, price tier, audit groups), not states.
 - A governance decision (allow / ask / deny) looks the same on every admin screen; in a person's drawer `allow` had been rendering as the least emphasized of the three.
 - Expandable sections — activity runs, tool output, technical details, connection and skill rows — grow open and fold shut instead of snapping, in 200ms.
+- Segmented controls (settings tabs, the plugins hub, agent mode, connector kind and auth method) are one component drawn as a sunken track with a raised knob. Four of the five were hand-rolled copies with no accessible role, so a screen reader met a row of unrelated buttons.
+- Settings and project cards take their edge from `shadow-panel` like every other panel, instead of a hand-drawn border.
 - A failed turn reads as a calm panel carrying one red mark, in chat and in settings alike, rather than a red-bordered tinted slab.
 
 ### Fixed

@@ -49,7 +49,7 @@ export function UsageLimitCard() {
   if (capped.length === 0) {
     if (!billing.turns30d) return null; // nothing used yet, nothing to report
     return (
-      <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3">
+      <div className="flex items-center gap-2 rounded-xl bg-card px-4 py-3 shadow-panel">
         <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           {t("turns30d", { turns: billing.turns30d })}
@@ -76,7 +76,7 @@ export function UsageLimitCard() {
         )}
       </div>
 
-      <div className="space-y-3 rounded-xl border bg-card px-4 py-3.5">
+      <div className="space-y-3 rounded-xl bg-card px-4 py-3.5 shadow-panel">
         {capped.map((w) => {
           const committedPct = w.limit ? Math.min(999, Math.round((w.committed / w.limit) * 100)) : 0;
           const reservedPct = w.limit ? Math.round((w.reserved / w.limit) * 100) : 0;

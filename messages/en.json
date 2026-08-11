@@ -1340,6 +1340,7 @@
         "project": "Project"
       },
       "kind": {
+        "label": "Connector type",
         "remote": "Remote",
         "local": "Local"
       },

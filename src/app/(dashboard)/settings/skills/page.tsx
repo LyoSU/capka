@@ -9,7 +9,7 @@ import SkillLibrary from "@/components/settings/skill-library";
 import ConnectorList from "@/components/settings/connector-list";
 import PluginsPanel, { type PluginsView } from "@/components/settings/plugins-panel";
 import { SettingsPage } from "@/components/settings/shell";
-import { SettingsTabs } from "@/components/settings/tabs";
+import { Segmented } from "@/components/settings/segmented";
 import { PermissionsTab } from "./permissions-tab";
 
 type Tab = "library" | "connectors" | "plugins" | "permissions";
@@ -60,7 +60,7 @@ export default function CustomizePage() {
         {t("chatHint")}
       </p>
 
-      <SettingsTabs value={active} onChange={setTab} tabs={visibleTabs} />
+      <Segmented value={active} onChange={setTab} options={visibleTabs} />
 
       {active === "library" && <SkillLibrary chrome={false} />}
       {active === "connectors" && <ConnectorList chrome={false} />}
