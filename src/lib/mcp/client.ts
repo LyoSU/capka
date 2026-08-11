@@ -1,12 +1,13 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { assertSafeUrl, createGuardedFetch } from "@/lib/net/ssrf";
 import { makeElicitHandler } from "./elicitation";
 import { SandboxStdioTransport } from "./stdio-transport";
-import type { McpServerConfig } from "./types";
+import { inferRemoteTransport, type McpServerConfig } from "./types";
 
 /** Run context a connector needs to elicit input from the user mid-tool-call.
  *  Present only during a live turn (loadMcpTools threads it through). `origin` lets
@@ -90,15 +91,34 @@ export async function connectMcpServer(
     // the guarded fetch re-validate every request + redirect hop. Static auth headers
     // are injected; each request is bounded so a stalled host can't hang the run.
     await assertSafeUrl(cfg.url, blockPrivate);
-    // The handshake is bounded by withTimeout (below); the fetch timeout is the
-    // per-tool-call backstop, so it must be generous — not the connect ceiling.
-    const authedFetch = createGuardedFetch({ blockPrivate, timeoutMs: REQUEST_TIMEOUT_MS, headers });
-    // OAuth connectors attach `authProvider` (per-user tokens + auto-refresh); token
-    // connectors rely on the static headers injected by authedFetch above.
-    transport = new StreamableHTTPClientTransport(new URL(cfg.url), {
-      fetch: authedFetch,
-      ...(opts.authProvider ? { authProvider: opts.authProvider } : {}),
+    // An explicit transport on the row wins; otherwise read it off the URL, since
+    // rows written before this existed say "http" for every remote server.
+    const kind = cfg.transport === "sse" || cfg.transport === "http"
+      ? cfg.transport
+      : inferRemoteTransport(cfg.url);
+    // Legacy SSE holds ONE long-lived GET open for the whole session, so a
+    // per-request deadline would tear the stream down mid-turn. Leave it unbounded:
+    // the handshake is still capped by withTimeout below, and every JSON-RPC call
+    // by the MCP SDK's own request timeout. Streamable HTTP has no such stream —
+    // each request is discrete, so it keeps the generous per-call backstop.
+    const authedFetch = createGuardedFetch({
+      blockPrivate,
+      ...(kind === "sse" ? {} : { timeoutMs: REQUEST_TIMEOUT_MS }),
+      headers,
     });
+    // OAuth connectors attach `authProvider` (per-user tokens + auto-refresh); token
+    // connectors rely on the static headers injected by authedFetch above. Note the
+    // SSE transport deliberately gets no `eventSourceInit`: setting it would stop the
+    // SDK attaching the OAuth Authorization header to the stream request.
+    transport = kind === "sse"
+      ? new SSEClientTransport(new URL(cfg.url), {
+          fetch: authedFetch,
+          ...(opts.authProvider ? { authProvider: opts.authProvider } : {}),
+        })
+      : new StreamableHTTPClientTransport(new URL(cfg.url), {
+          fetch: authedFetch,
+          ...(opts.authProvider ? { authProvider: opts.authProvider } : {}),
+        });
   }
   try {
     await withTimeout(client.connect(transport), timeoutMs, `mcp connect "${cfg.name}"`);

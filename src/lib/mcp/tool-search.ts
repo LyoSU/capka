@@ -33,17 +33,48 @@ import { log } from "@/lib/log";
  * one-off cost `stepSettings` already accepts for a late `toolChoice`), not once
  * per step.
  *
- * Gating: deferral only kicks in when the connector tools' estimated cost exceeds
- * a fraction of the effective context window (`MCP_DEFER_TOKEN_PCT`, default 10%),
- * mirroring Anthropic's `auto:N`. A small chat with a couple of tools behaves
- * exactly as before — no index, no extra round-trip.
+ * Gating: deferral kicks in when the connector tools' estimated cost exceeds
+ * `min(MCP_DEFER_TOKEN_PCT% of the effective context window, MCP_DEFER_TOKEN_MAX)`
+ * — the percentage mirrors Anthropic's `auto:N` (default 10%), the absolute
+ * ceiling (default 8192) keeps it meaningful on very large windows, where 10% is
+ * bigger than any realistic tool block. A small chat with a couple of tools
+ * behaves exactly as before — no index, no extra round-trip.
  */
 
 export const FIND_TOOL_NAME = "find_tool";
 
+/** A non-negative number from the environment, or `fallback` when unset/garbage.
+ *  Written out rather than `Number(x) || fallback` because an intentional `0`
+ *  (always defer / no ceiling) is falsy and would silently read as "unset". */
+function envNumber(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 /** Percentage of the effective context window the connector tool block may occupy
- *  before deferral kicks in. Matches Anthropic's `auto:N` default of ~10%. */
-const DEFER_PCT = Number(process.env.MCP_DEFER_TOKEN_PCT) || 10;
+ *  before deferral kicks in. Matches Anthropic's `auto:N` default of ~10%.
+ *  `0` defers any non-empty connector set. */
+const DEFER_PCT = envNumber(process.env.MCP_DEFER_TOKEN_PCT, 10);
+
+/** Absolute token ceiling on that block, applied on top of the percentage.
+ *  Percentage alone scales with the window, so on a ~1M-token model 10% is ~100k
+ *  and a large connector set never deferred — it just rode along in every prompt.
+ *  `0` disables the ceiling (percentage-only, the pre-ceiling behaviour). */
+const DEFER_MAX = envNumber(process.env.MCP_DEFER_TOKEN_MAX, 8192);
+
+/** Tokens the always-on connector block may occupy this turn: a percentage of the
+ *  window, capped by the absolute ceiling. Exceed it and the set is deferred
+ *  behind `find_tool`. */
+export function deferTokenBudget(
+  effectiveLimit: number,
+  thresholdPct = DEFER_PCT,
+  maxTokens = DEFER_MAX,
+): number {
+  if (thresholdPct <= 0) return 0;
+  const pct = (effectiveLimit * thresholdPct) / 100;
+  return maxTokens > 0 ? Math.min(pct, maxTokens) : pct;
+}
 
 /** How many tools a single `find_tool` call may surface by default. Generous on
  *  purpose: BM25 is lexical, so a synonym gap ("fetch page" vs "scrape") is real —
@@ -230,7 +261,7 @@ export function planToolSearch(opts: {
   if (mcpNames.length === 0) return INERT_PLAN;
 
   const mcpTokens = mcpNames.reduce((s, n) => s + estimateToolTokens(opts.tools[n]!), 0);
-  const budget = (opts.effectiveLimit * (opts.thresholdPct ?? DEFER_PCT)) / 100;
+  const budget = deferTokenBudget(opts.effectiveLimit, opts.thresholdPct);
   if (mcpTokens <= budget) return INERT_PLAN;
 
   // Decision is made ONCE, at the start of the turn, off the connector set as it

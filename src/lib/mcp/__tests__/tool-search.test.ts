@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type { Tool } from "ai";
-import { planToolSearch, FIND_TOOL_NAME } from "../tool-search";
+import { planToolSearch, FIND_TOOL_NAME, deferTokenBudget } from "../tool-search";
 
 /** A structural stand-in for an adapted tool — planToolSearch only reads
  *  `.description` and `.inputSchema.jsonSchema`. */
@@ -46,6 +46,56 @@ describe("planToolSearch — gating", () => {
     expect(plan.defer).toBe(true);
     expect(plan.extraTools[FIND_TOOL_NAME]).toBeDefined();
     expect(plan.indexText).toContain("firecrawl");
+  });
+
+  it("still defers a heavy connector block on a huge context window", () => {
+    // 10% of a 1M-token window is ~100k, so percentage gating alone never fires
+    // there and a Firecrawl-scale block rides along in every prompt.
+    const tools: Record<string, Tool> = { bash: fakeTool("run a command") };
+    for (let i = 0; i < 80; i++) tools[`mcp__firecrawl__firecrawl_tool_${i}`] = fakeTool(bulky(`tool ${i}`));
+    expect(planToolSearch({ tools, effectiveLimit: 1_000_000 }).defer).toBe(true);
+  });
+});
+
+describe("deferTokenBudget", () => {
+  it("clamps the percentage budget with the absolute ceiling", () => {
+    expect(deferTokenBudget(1_000_000, 10, 8192)).toBe(8192);
+    expect(deferTokenBudget(20_000, 10, 8192)).toBe(2000); // percentage still wins when smaller
+  });
+
+  it("treats a zero ceiling as 'no ceiling', and a zero percentage as 'always defer'", () => {
+    expect(deferTokenBudget(1_000_000, 10, 0)).toBe(100_000);
+    expect(deferTokenBudget(1_000_000, 0, 8192)).toBe(0);
+  });
+});
+
+describe("defer thresholds from the environment", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  /** The thresholds are read once at module load, so each case needs a fresh import. */
+  async function freshPlan(env: Record<string, string>, tools: Record<string, Tool>, effectiveLimit: number) {
+    vi.resetModules();
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+    const mod = await import("../tool-search");
+    return mod.planToolSearch({ tools, effectiveLimit });
+  }
+
+  it("honours an explicit MCP_DEFER_TOKEN_PCT=0 as 'always defer'", async () => {
+    const tools: Record<string, Tool> = { mcp__grok__search: fakeTool("search the web") };
+    // A single tiny tool: it only defers if the budget really is 0. Reading `0` as
+    // "unset" (and falling back to 10%) would leave this eager.
+    const plan = await freshPlan({ MCP_DEFER_TOKEN_PCT: "0" }, tools, 1_000_000);
+    expect(plan.defer).toBe(true);
+  });
+
+  it("lets MCP_DEFER_TOKEN_MAX=0 restore percentage-only gating", async () => {
+    const tools: Record<string, Tool> = { bash: fakeTool("run a command") };
+    for (let i = 0; i < 80; i++) tools[`mcp__firecrawl__firecrawl_tool_${i}`] = fakeTool(bulky(`tool ${i}`));
+    const plan = await freshPlan({ MCP_DEFER_TOKEN_MAX: "0" }, tools, 1_000_000);
+    expect(plan.defer).toBe(false);
   });
 });
 

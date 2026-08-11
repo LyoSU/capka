@@ -1,7 +1,25 @@
 import type { SecretDescriptor } from "@/lib/skills/types";
 
 export type McpScope = "system" | "user" | "project";
-export type McpTransport = "http" | "sse" | "stdio"; // B1 implements 'http' only
+export type McpTransport = "http" | "sse" | "stdio";
+
+/** Which protocol a remote MCP endpoint speaks, guessed from its URL.
+ *
+ *  Streamable HTTP superseded the older HTTP+SSE pair, but a lot of deployed
+ *  servers still only offer SSE and publish that endpoint as `…/sse` — the
+ *  convention from the original spec. Guessing keeps adding a connector a
+ *  paste-the-URL affair instead of asking a non-technical admin which MCP
+ *  protocol version their vendor implements. An explicit `transport` on the row
+ *  always wins, so a server that breaks the convention stays reachable. */
+export function inferRemoteTransport(url: string): "http" | "sse" {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, "").toLowerCase();
+    if (path === "/sse" || path.endsWith("/sse")) return "sse";
+  } catch {
+    /* not a parseable URL — upsert's assertSafeUrl is what rejects it */
+  }
+  return "http";
+}
 
 /** Decrypted secrets used at connect time. `env` is for stdio (B2). */
 export interface McpSecrets {

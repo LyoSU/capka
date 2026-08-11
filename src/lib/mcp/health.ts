@@ -7,7 +7,7 @@ import { connectMcpServer, disconnectMcp } from "./client";
 import { getConnectError } from "./connect-errors";
 import { McpOAuthProvider } from "./oauth/provider";
 import { hasUserTokens } from "./oauth/store";
-import type { McpAuthKind, McpSecrets } from "./types";
+import { inferRemoteTransport, type McpAuthKind, type McpSecrets } from "./types";
 
 /** A plain, non-jargon status the UI localizes into a friendly badge. */
 export type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
@@ -43,7 +43,15 @@ function classify(e: unknown): ProbeStatus {
  *  `auth` (userId + serverId) enables OAuth servers to probe with the user's
  *  stored token; without a token an OAuth server reports `needs_login`. */
 export async function probeConfig(
-  cfg: { name: string; url: string; secrets?: McpSecrets; authKind?: McpAuthKind; id?: string },
+  cfg: {
+    name: string;
+    url: string;
+    secrets?: McpSecrets;
+    authKind?: McpAuthKind;
+    id?: string;
+    /** Omit to read the protocol off the URL — the add form probes before a row exists. */
+    transport?: "http" | "sse";
+  },
   blockPrivate: boolean,
   auth?: { userId: string },
 ): Promise<ServerHealth> {
@@ -54,7 +62,10 @@ export async function probeConfig(
   }
   let connected;
   try {
-    connected = await connectMcpServer({ name: cfg.name, transport: "http", url: cfg.url, secrets: cfg.secrets }, { blockPrivate, authProvider });
+    connected = await connectMcpServer(
+      { name: cfg.name, transport: cfg.transport ?? inferRemoteTransport(cfg.url), url: cfg.url, secrets: cfg.secrets },
+      { blockPrivate, authProvider },
+    );
   } catch (e) {
     return { status: classify(e) };
   }
@@ -77,7 +88,8 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
       eq(mcpServers.enabled, true),
       or(and(eq(mcpServers.userId, userId), isNull(mcpServers.projectId)), eq(mcpServers.scope, "system")),
     ));
-  const httpRows = rows.filter((r) => r.transport === "http" && r.url);
+  // Both remote protocols are probeable over the network; only stdio isn't.
+  const remoteRows = rows.filter((r) => (r.transport === "http" || r.transport === "sse") && r.url);
   const key = await getMasterKey();
   const blockPrivate = await getBlockPrivateProviderUrls();
   const now = Date.now();
@@ -91,14 +103,18 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
   }
 
   // Split into cache hits vs rows needing a live probe.
-  const toProbe: { id: string; cacheKey: string; name: string; url: string; secrets?: McpSecrets; authKind: McpAuthKind }[] = [];
-  for (const r of httpRows) {
+  const toProbe: { id: string; cacheKey: string; name: string; url: string; secrets?: McpSecrets; authKind: McpAuthKind; transport: "http" | "sse" }[] = [];
+  for (const r of remoteRows) {
     const cacheKey = `${r.id}:${r.updatedAt?.getTime() ?? 0}`;
     const hit = cache.get(cacheKey);
     if (hit && now - hit.at < CACHE_TTL_MS) { out[r.id] = hit.health; continue; }
     let secrets: McpSecrets | undefined;
     if (r.secrets) { try { secrets = JSON.parse(decrypt(r.secrets, key)) as McpSecrets; } catch { secrets = undefined; } }
-    toProbe.push({ id: r.id, cacheKey, name: r.name, url: r.url!, secrets, authKind: r.authKind as McpAuthKind });
+    toProbe.push({
+      id: r.id, cacheKey, name: r.name, url: r.url!, secrets,
+      authKind: r.authKind as McpAuthKind,
+      transport: r.transport === "sse" ? "sse" : "http",
+    });
   }
 
   for (let i = 0; i < toProbe.length; i += PROBE_CONCURRENCY) {

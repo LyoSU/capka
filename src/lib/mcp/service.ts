@@ -8,7 +8,7 @@ import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import { ValidationError } from "@/lib/errors";
 import { mutedIds } from "@/lib/muted-resources";
-import type { McpAuthKind, McpScope, McpSecrets, McpServerConfig, McpServerInfo } from "./types";
+import { inferRemoteTransport, type McpAuthKind, type McpScope, type McpSecrets, type McpServerConfig, type McpServerInfo } from "./types";
 
 const SCOPE_RANK: Record<McpScope, number> = { system: 0, user: 1, project: 2 };
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -60,9 +60,10 @@ export async function listEnabledServerConfigs(userId: string, projectId?: strin
   const out: McpServerConfig[] = [];
   for (const r of rows) {
     if (!winnerIds.has(r.id)) continue;
-    const isHttp = r.transport === "http" && r.url;
+    // Both remote protocols are served; the client picks the transport per row.
+    const isRemote = (r.transport === "http" || r.transport === "sse") && r.url;
     const isStdio = r.transport === "stdio" && r.command;
-    if (!isHttp && !isStdio) continue; // sse not served yet
+    if (!isRemote && !isStdio) continue;
     let secrets: McpSecrets | undefined;
     if (r.secrets) {
       try { secrets = JSON.parse(decrypt(r.secrets, key)) as McpSecrets; } catch { secrets = undefined; }
@@ -124,6 +125,8 @@ export interface UpsertServerInput {
   projectId: string | null;
   name: string;
   url: string;
+  /** Remote protocol. Omit to read it off the URL (`…/sse` → sse, else http). */
+  transport?: "http" | "sse";
   secrets?: McpSecrets;
   authKind?: McpAuthKind;
   source?: string; // 'manual' | 'catalog:<installId>'
@@ -163,7 +166,7 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
   const id = matchedId ?? nanoid();
   const values = {
     id, scope: input.scope, userId: input.userId, projectId: input.projectId,
-    name, transport: "http" as const, url: input.url,
+    name, transport: input.transport ?? inferRemoteTransport(input.url), url: input.url,
     secrets: input.secrets ? encrypt(JSON.stringify(input.secrets), key) : null,
     ...(input.authKind ? { authKind: input.authKind } : {}),
     ...(input.source ? { source: input.source } : {}),

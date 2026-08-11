@@ -6,6 +6,22 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Remote MCP connectors can speak the legacy HTTP+SSE protocol, not just Streamable HTTP. The transport is inferred from the URL (`…/sse` → SSE); `POST /api/mcp` and `/api/admin/mcp` accept an explicit `transport: "http" | "sse"` for endpoints that don't follow the convention.
+
+### Changed
+
+- MCP progressive disclosure caps the always-on connector block at `MCP_DEFER_TOKEN_MAX` tokens (default 8192) on top of `MCP_DEFER_TOKEN_PCT`, so deferral still engages on very large context windows. Set `MCP_DEFER_TOKEN_MAX=0` for the previous percentage-only behaviour.
+
+### Fixed
+
+- Sending the first message in a new project chat no longer fails with "Project not found".
+- Workspace files named in any script (Chinese, Greek, Georgian, …) become file chips and artifact tiles, and can be included in "Download all" — the path charset was limited to Latin and Ukrainian.
+- Copy buttons work on plain-HTTP deployments, where `navigator.clipboard` does not exist; they also no longer report "Copied" when the copy was refused.
+- Provider content-safety refusals (DeepSeek "Content Exists Risk", Azure content-management policy, OpenAI `content_filter`, Gemini `PROHIBITED_CONTENT`) read as a calm `content_blocked` message instead of the raw provider string.
+- A turn that failed because the model stopped responding is localized instead of falling back to English — `provider_unresponsive` had no translation.
+
 ## [0.18.0] - 2026-08-11
 
 ### Added

@@ -1,6 +1,7 @@
 import { apiHandler, requireAdmin } from "@/lib/auth";
 import { upsertServer, upsertStdioServer, setEnabled, deleteServer, getServerMeta, projectExists } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
+import { inferRemoteTransport } from "@/lib/mcp/types";
 import { saveOAuthClientFromInput } from "@/lib/mcp/oauth/admin-client";
 import { audit } from "@/lib/governance/audit";
 import { take } from "@/lib/rate-limit";
@@ -10,7 +11,7 @@ export const POST = apiHandler(async (req: Request) => {
   const rl = take(`admin-mcp:${userId}`);
   if (!rl.ok) return Response.json({ error: "Too many requests — please slow down." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   const body = await req.json();
-  const { name, url, headers, scope, projectId, oauthClientId, oauthClientSecret, command, args, env, authKind: pick } = body;
+  const { name, url, headers, scope, projectId, oauthClientId, oauthClientSecret, command, args, env, authKind: pick, transport: rawTransport } = body;
   const s = scope === "project" ? "project" : "system";
   // A project-scoped connector carries secret headers/env; never attach it to a
   // projectId the request invented — verify the project exists first.
@@ -36,14 +37,17 @@ export const POST = apiHandler(async (req: Request) => {
     return Response.json({ error: "name and url required" }, { status: 400 });
   }
   const secrets = headers && typeof headers === "object" ? { headers } : undefined;
+  // Escape hatch for a legacy SSE endpoint that isn't published at `…/sse`;
+  // omitted (the normal case, and what the form sends) → inferred from the URL.
+  const transport = rawTransport === "sse" || rawTransport === "http" ? rawTransport : undefined;
   // Explicit method from the form wins; pre-registered client forces OAuth; else probe.
   const authKind =
     oauthClientId ? "oauth" : pick === "oauth" || pick === "token" ? pick : await detectAuthKind(url);
   const id = await upsertServer({
-    scope: s, userId: null, projectId: s === "project" ? (projectId ?? null) : null, name, url, secrets, authKind,
+    scope: s, userId: null, projectId: s === "project" ? (projectId ?? null) : null, name, url, transport, secrets, authKind,
   });
   await saveOAuthClientFromInput(id, oauthClientId, oauthClientSecret);
-  await audit({ actorId: userId, action: "connector.add", targetType: "connector", targetKey: name, detail: { scope: s, authKind } });
+  await audit({ actorId: userId, action: "connector.add", targetType: "connector", targetKey: name, detail: { scope: s, authKind, transport: transport ?? inferRemoteTransport(url) } });
   return Response.json({ ok: true, id, authKind });
 });
 
