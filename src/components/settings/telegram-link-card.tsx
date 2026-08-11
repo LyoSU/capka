@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth-client";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { copyToClipboard } from "@/lib/clipboard";
 
 /**
  * Personal Telegram account linking — visible to every role. The bot *token* is
@@ -103,9 +104,9 @@ export function TelegramLinkCard() {
     }
   };
 
-  const handleCopyCode = () => {
+  const handleCopyCode = async () => {
     if (linkCode) {
-      navigator.clipboard.writeText(`/link ${linkCode}`);
+      if (!(await copyToClipboard(`/link ${linkCode}`))) return;
       setCopied(true);
       toast.success(t("copied"));
       setTimeout(() => setCopied(false), 2000);

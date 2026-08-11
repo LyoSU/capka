@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { SettingsSkeleton } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/clipboard";
 
 type Mode = "open" | "approval" | "closed";
 interface Config {
@@ -102,8 +103,8 @@ export function SignInTab() {
     }
   };
 
-  const copyRedirect = () => {
-    navigator.clipboard.writeText(redirectUri);
+  const copyRedirect = async () => {
+    if (!(await copyToClipboard(redirectUri))) return;
     setCopied(true);
     toast.success(t("copied"));
     setTimeout(() => setCopied(false), 2000);

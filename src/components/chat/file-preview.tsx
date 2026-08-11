@@ -21,6 +21,7 @@ import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
 import { fileStatusFromHttp, type FileStatus } from "@/lib/chat/file-status";
 import { formatSize } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/clipboard";
 
 /** A file the viewer can open. `path` plus its workspace address (a chat's own
  *  workspace via `chatId`, or a project's shared one via `projectId` — exactly one)
@@ -820,7 +821,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       type="button"
-      onClick={() => navigator.clipboard.writeText(text).then(() => setDone(true), () => {})}
+      onClick={() => void copyToClipboard(text).then((ok) => ok && setDone(true))}
       aria-label={done ? t("copied") : t("copy")}
       title={done ? t("copied") : t("copy")}
       className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md border bg-background/90 text-muted-foreground backdrop-blur transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useSetting } from "@/hooks/use-setting";
+import { copyToClipboard } from "@/lib/clipboard";
 
 interface UpdateStatus {
   enabled: boolean;
@@ -66,14 +67,13 @@ export default function UpdatesSettingsPage() {
   if (loading) return <SettingsSkeleton />;
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(UPDATE_CMD);
-      setCopied(true);
-      toast.success(t("copied"));
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
+    if (!(await copyToClipboard(UPDATE_CMD))) {
       toast.error(t("copyFailed"));
+      return;
     }
+    setCopied(true);
+    toast.success(t("copied"));
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const toggleCheck = (checked: boolean) => {

@@ -33,6 +33,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { copyToClipboard } from "@/lib/clipboard";
 
 type ChatItem = {
   id: string;
@@ -130,11 +131,9 @@ export function ChatContextMenu({
 
   async function copyShareUrl() {
     if (!shareUrl) return;
-    // A denied clipboard permission rejects here; unguarded it was an uncaught
-    // rejection plus a "Copied" toast for something that wasn't copied.
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-    } catch {
+    // A denied clipboard permission (or a plain-http origin, where the API isn't
+    // there at all) must not produce a "Copied" toast for something that wasn't.
+    if (!(await copyToClipboard(shareUrl))) {
       toast.error(t("share.copyFailed"));
       return;
     }

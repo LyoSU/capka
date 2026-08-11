@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { ShieldAlert, ShieldCheck, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { copyToClipboard } from "@/lib/clipboard";
 
 interface SecurityStatus {
   source: "env" | "db" | "none";
@@ -37,13 +38,12 @@ export function MasterKeyBanner() {
   const envLine = `CAPKA_MASTER_KEY=${status.key ?? ""}`;
 
   async function copyEnv() {
-    try {
-      await navigator.clipboard.writeText(envLine);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
+    if (!(await copyToClipboard(envLine))) {
       toast.error(tc("error"));
+      return;
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   async function removeDbCopy() {
