@@ -10,13 +10,12 @@ import { McpOAuthProvider } from "./oauth/provider";
 import { needsPluginRoot, resolvePluginRoot } from "./plugin-runtime";
 import type { McpServerConfig } from "./types";
 
-const MAX_CONCURRENT = 4;
 /** Don't re-dial a connector that failed recently — one broken server shouldn't
- *  re-spend its connect cost every turn. Gates the eager http connect and the
- *  background stdio warm; a lazy connect triggered by an actual tool call is never
- *  blocked (the model chose to use it). 10 min matches the connect-error TTL the
- *  UI shows, so a persistently broken connector is retried rarely, not every
- *  minute. A config edit or a successful connect clears it immediately. */
+ *  re-spend its connect cost every turn. Gates the background schema warms; a lazy
+ *  connect triggered by an actual tool call is never blocked (the model chose to
+ *  use it). 10 min matches the connect-error TTL the UI shows, so a persistently
+ *  broken connector is retried rarely, not every minute. A config edit or a
+ *  successful connect clears it immediately. */
 const CONNECT_BACKOFF_MS = 10 * 60_000;
 
 const cacheKey = (c: McpServerConfig) => c.id ?? c.name;
@@ -25,17 +24,26 @@ const cacheKey = (c: McpServerConfig) => c.id ?? c.name;
  * Build the agent's MCP tool set for a run — WITHOUT putting a slow connector on
  * the critical path of time-to-first-token.
  *
- * - **http** connectors connect eagerly (a remote handshake is sub-second) and
- *   expose their tools immediately, as before.
- * - **stdio** connectors are served from an in-process tool-schema cache and
- *   connected LAZILY, only when the model actually calls one of their tools. A
- *   stdio server runs inside the chat's sandbox via `docker exec` and `npx`/`uvx`
- *   self-installs its package on first run — tens of seconds in a fresh per-chat
- *   container (up to the connect timeout when the sandbox has no egress). Doing
- *   that here, eagerly, delayed EVERY turn's first token even when the model never
- *   touched the connector. A cold cache (just-enabled connector, or first turn
- *   after a restart) is warmed in the background, so the connector's tools simply
- *   appear from the next turn — the current turn is never blocked.
+ * EVERY connector — remote and stdio alike — is served from an in-process
+ * tool-schema cache and connected LAZILY, only when the model actually calls one
+ * of its tools. A cold cache (just-enabled connector, or the first turn after a
+ * restart) is warmed in the background, so the connector's tools appear from the
+ * next turn; the current turn is never blocked.
+ *
+ * - **stdio** is the expensive case: the server runs inside the chat's sandbox via
+ *   `docker exec` and `npx`/`uvx` self-installs its package on first run — tens of
+ *   seconds in a fresh per-chat container (up to the connect timeout when the
+ *   sandbox has no egress).
+ * - **remote** used to be dialled eagerly, on the assumption that a handshake is
+ *   sub-second. It isn't: `initialize` + `notifications/initialized` + `tools/list`
+ *   plus TLS measures ~0.9-1.7s against a small public MCP server, and that was
+ *   paid on every turn — even when the model called nothing, and even when
+ *   progressive disclosure then hid those very tools behind `find_tool`.
+ *
+ * A remote warm dials, reads the schemas and HANGS UP: it needs no sandbox (so it
+ * can never resurrect a container after the turn that owned it ended) and holds no
+ * session across the LLM stream. It deliberately bypasses the connection memo
+ * below — a hung-up client must never be handed to a later tool call.
  *
  * Tools are collected in deterministic order (servers by name, tools by name) so
  * the position-0 tool prefix stays cache-stable for prompt caching. A server that
@@ -120,50 +128,62 @@ export async function loadMcpTools(opts: {
     ) => (await connect(c)).client.callTool(params, resultSchema, options),
   });
 
-  const httpConfigs = configs.filter((c) => c.transport !== "stdio");
-  const stdioConfigs = configs.filter((c) => c.transport === "stdio");
+  /** Read a remote server's schemas and hang up. No sandbox, no elicitation (a
+   *  background warm must never surface a question), no entry in the memo. */
+  const warmRemoteSchema = async (c: McpServerConfig): Promise<void> => {
+    try {
+      const authProvider = c.authKind === "oauth" && c.id
+        ? new McpOAuthProvider(opts.userId, c.id, "runtime")
+        : undefined;
+      const conn = await connectMcpServer(c, { blockPrivate, authProvider });
+      setCachedTools(cacheKey(c), conn.tools);
+      clearConnectError(opts.userId, c.id);
+      await disconnectMcp(conn).catch(() => {});
+    } catch (e) {
+      recordConnectError(opts.userId, c.id, e instanceof Error ? e.message : String(e));
+    }
+  };
 
-  // http: eager connect (bounded concurrency), tools exposed now.
-  for (let i = 0; i < httpConfigs.length; i += MAX_CONCURRENT) {
-    const batch = httpConfigs
-      .slice(i, i + MAX_CONCURRENT)
-      .filter((c) => !(c.id && recentlyFailed(opts.userId, c.id, CONNECT_BACKOFF_MS)));
-    await Promise.allSettled(batch.map(async (c) => {
-      // An OAuth connector with no stored token can only 401 — that's "not signed
-      // in yet", not a failure. Skip it (no connect, no recorded error, so no
-      // backoff to later hide it) until the user signs in; its tools then appear
-      // next turn. clearConnectError on the callback covers the revoked-then-
-      // reauthorized case, where a token exists but the server rejected it.
-      if (c.authKind === "oauth" && c.id && !(await hasUserTokens(opts.userId, c.id))) return;
-      const conn = await connect(c);
-      for (const mt of [...conn.tools].sort((a, b) => a.name.localeCompare(b.name))) {
-        tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(conn.client, c.name, mt, spillCtx);
-      }
-    }));
-  }
+  // Warms whose connection is HELD for the run (stdio only) — close() must wait for
+  // those, or a connection resolving after teardown would leak. Remote warms hang up
+  // on their own, so making close() wait on them would just park the worker between
+  // turns on a slow server.
+  const heldWarmups: Promise<unknown>[] = [];
 
-  // stdio: serve from the schema cache + connect lazily; warm a cold cache in the
-  // background so the connector's tools appear next turn (never blocks this one).
-  for (const c of stdioConfigs) {
+  for (const c of configs) {
+    // An OAuth connector with no stored token can only 401 — that's "not signed in
+    // yet", not a failure. Skip it (no connect, no recorded error, so no backoff to
+    // later hide it) until the user signs in; its tools then appear next turn.
+    // clearConnectError on a successful connect covers the revoked-then-reauthorized
+    // case, where a token exists but the server rejected it.
+    if (c.authKind === "oauth" && c.id && !(await hasUserTokens(opts.userId, c.id))) continue;
+
     const cached = getCachedTools(cacheKey(c));
     if (cached) {
       const caller = lazyCaller(c);
       for (const mt of [...cached].sort((a, b) => a.name.localeCompare(b.name))) {
         tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(caller, c.name, mt, spillCtx);
       }
-    } else if (!(c.id && recentlyFailed(opts.userId, c.id, CONNECT_BACKOFF_MS))) {
-      warmups.push(connect(c).catch(() => {})); // failures already recorded above
+      continue;
+    }
+    if (c.id && recentlyFailed(opts.userId, c.id, CONNECT_BACKOFF_MS)) continue;
+    if (c.transport === "stdio") {
+      // Needs the sandbox either way, and the connection is worth keeping once paid
+      // for; failures are already recorded by connect().
+      heldWarmups.push(connect(c).catch(() => {}));
+    } else {
+      warmups.push(warmRemoteSchema(c));
     }
   }
 
-  const warming = Promise.allSettled(warmups);
+  const heldWarming = Promise.allSettled(heldWarmups);
+  // Exposed so tests can observe both kinds of warm deterministically.
+  const warming = Promise.allSettled([...warmups, heldWarming]);
   return {
     tools,
     warming,
     close: async () => {
-      // Wait for any in-flight warm so its connection is tracked before we tear
-      // down — otherwise a connection that resolves after close() would leak.
-      await warming;
+      await heldWarming;
       await Promise.allSettled(connected.map(disconnectMcp));
     },
   };

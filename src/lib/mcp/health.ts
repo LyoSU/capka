@@ -5,6 +5,7 @@ import { decrypt } from "@/lib/crypto";
 import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { connectMcpServer, disconnectMcp } from "./client";
 import { getConnectError } from "./connect-errors";
+import { setCachedTools } from "./tool-cache";
 import { McpOAuthProvider } from "./oauth/provider";
 import { hasUserTokens } from "./oauth/store";
 import { inferRemoteTransport, type McpAuthKind, type McpSecrets } from "./types";
@@ -70,6 +71,13 @@ export async function probeConfig(
     return { status: classify(e) };
   }
   try {
+    // Connectors are declared from the schema cache and dialled lazily, so seed it
+    // here: this probe already paid for the handshake, and it means a connector the
+    // admin just saved contributes its tools to the very first turn instead of
+    // waiting a turn for a background warm. Only for a STORED row — the add form
+    // probes before one exists, under a placeholder name that must not become a
+    // cache key (the runtime looks the cache up by `id ?? name`).
+    if (cfg.id) setCachedTools(cfg.id, connected.tools);
     // The handshake recorded the server's serverInfo; surface its name so the add
     // form can auto-fill the connector name instead of leaving it blank.
     const serverName = connected.client.getServerVersion()?.name;

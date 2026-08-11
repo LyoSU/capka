@@ -12,13 +12,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const listEnabledServerConfigs = vi.fn();
 const connectMcpServer = vi.fn();
+const disconnectMcp = vi.fn(async () => {});
 const recordConnectError = vi.fn();
 const hasUserTokens = vi.fn<(...a: unknown[]) => Promise<boolean>>(() => Promise.resolve(true));
 
 vi.mock("../service", () => ({ listEnabledServerConfigs: (...a: unknown[]) => listEnabledServerConfigs(...a) }));
 vi.mock("../client", () => ({
   connectMcpServer: (...a: unknown[]) => connectMcpServer(...a),
-  disconnectMcp: vi.fn(),
+  disconnectMcp: (...a: unknown[]) => disconnectMcp(...(a as [])),
 }));
 vi.mock("../adapt", () => ({
   // Capture the caller passed in so a test can exercise the lazy-connect path.
@@ -46,18 +47,86 @@ const cfg = (name: string, transport: "stdio" | "http") => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  disconnectMcp.mockResolvedValue(undefined);
   clearCachedTools("plug");
   clearCachedTools("api");
   connectMcpServer.mockResolvedValue({ tools: [], client: { callTool: vi.fn() } });
 });
 
-describe("loadMcpTools — http stays eager", () => {
-  it("connects http connectors at load time and exposes their tools", async () => {
+describe("loadMcpTools — remote connectors are lazy too", () => {
+  // A remote handshake was assumed sub-second, so http connectors were dialled
+  // eagerly before the first token. Measured against a small public MCP server
+  // it is ~0.9-1.7s per connector (initialize + initialized + tools/list, plus
+  // TLS), paid on EVERY turn — even when the model calls nothing, and even when
+  // progressive disclosure then hides those tools behind find_tool.
+  it("serves cached remote tools without dialling at load time", async () => {
+    setCachedTools("api", [{ name: "q", inputSchema: { type: "object", properties: {} } }]);
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    connectMcpServer.mockReturnValue(new Promise(() => {})); // would hang if called
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    expect(Object.keys(res.tools)).toEqual(["mcp__api__q"]);
+    expect(connectMcpServer).not.toHaveBeenCalled();
+  });
+
+  it("does NOT block startup when a remote connector's connect hangs", async () => {
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    connectMcpServer.mockReturnValue(new Promise(() => {})); // never resolves
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    expect(res.tools).toEqual({}); // cold cache → no tools this turn, but it RETURNED
+  });
+
+  it("warms a cold remote connector's cache in the background", async () => {
     listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
     connectMcpServer.mockResolvedValue({ tools: [{ name: "q" }], client: { callTool: vi.fn() } });
     const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    expect(res.tools).toEqual({}); // nothing offered this turn
+    await res.warming;
+    expect(getCachedTools("api")).toEqual([{ name: "q" }]);
+  });
+
+  it("hangs up after a schema warm instead of holding the session through the stream", async () => {
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    connectMcpServer.mockResolvedValue({ tools: [{ name: "q" }], client: { callTool: vi.fn() } });
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    await res.warming;
+    expect(disconnectMcp).toHaveBeenCalledTimes(1);
+  });
+
+  it("never creates a sandbox session for a remote warm", async () => {
+    // A remote server needs no container. A warm that ensured the session would
+    // resurrect a sandbox in the background, after the turn that owned it ended.
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    connectMcpServer.mockResolvedValue({ tools: [{ name: "q" }], client: { callTool: vi.fn() } });
+    const ensureSession = vi.fn().mockResolvedValue(undefined);
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession });
+    await res.warming;
+    expect(ensureSession).not.toHaveBeenCalled();
+  });
+
+  it("close() does not wait on a still-running remote warm", async () => {
+    // The warm hangs up on its own, so there is nothing to tear down — and the
+    // worker must not sit between turns waiting for a slow server.
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    connectMcpServer.mockReturnValue(new Promise(() => {})); // warm never finishes
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    await expect(Promise.race([
+      res.close().then(() => "closed"),
+      new Promise((r) => setTimeout(() => r("blocked"), 50)),
+    ])).resolves.toBe("closed");
+  });
+
+  it("connects on the first tool call, without a session", async () => {
+    setCachedTools("api", [{ name: "q", inputSchema: { type: "object", properties: {} } }]);
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http")]);
+    const callTool = vi.fn().mockResolvedValue({ content: [] });
+    connectMcpServer.mockResolvedValue({ tools: [{ name: "q" }], client: { callTool } });
+    const ensureSession = vi.fn().mockResolvedValue(undefined);
+    const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession });
+    const caller = (res.tools["mcp__api__q"] as unknown as { __caller: { callTool: (...a: unknown[]) => Promise<unknown> } }).__caller;
+    await caller.callTool({ name: "q", arguments: {} }, undefined, {});
     expect(connectMcpServer).toHaveBeenCalledTimes(1);
-    expect(Object.keys(res.tools)).toContain("mcp__api__q");
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(ensureSession).not.toHaveBeenCalled();
   });
 });
 
@@ -75,13 +144,14 @@ describe("loadMcpTools — oauth needs a token", () => {
     expect(res.tools).toEqual({});
   });
 
-  it("eager-connects an oauth http connector once its token exists", async () => {
+  it("warms an oauth http connector once its token exists", async () => {
     listEnabledServerConfigs.mockResolvedValue([{ ...cfg("api", "http"), authKind: "oauth" }]);
     hasUserTokens.mockResolvedValue(true);
     connectMcpServer.mockResolvedValue({ tools: [{ name: "q" }], client: { callTool: vi.fn() } });
     const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
+    await res.warming;
     expect(connectMcpServer).toHaveBeenCalledTimes(1);
-    expect(Object.keys(res.tools)).toContain("mcp__api__q");
+    expect(getCachedTools("api")).toEqual([{ name: "q" }]);
   });
 });
 

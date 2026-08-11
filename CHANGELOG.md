@@ -12,6 +12,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Remote (http/sse) MCP connectors no longer connect before the first token: their tools are declared from the schema cache and dialled on the first actual tool call, as stdio connectors already were. A measured handshake is ~0.9–1.7s per connector, previously paid on every turn even when no tool was called. A newly saved connector is warmed by the Connectors health probe, so its tools are available from the first message.
 - MCP progressive disclosure caps the always-on connector block at `MCP_DEFER_TOKEN_MAX` tokens (default 8192) on top of `MCP_DEFER_TOKEN_PCT`, so deferral still engages on very large context windows. Set `MCP_DEFER_TOKEN_MAX=0` for the previous percentage-only behaviour.
 
 ### Fixed
