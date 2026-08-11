@@ -22,7 +22,7 @@ All notable changes to Capka are documented here. Format follows
 - Buttons, menus, popovers, cards and inputs draw their edge from the elevation tokens rather than hand-rolled `ring`/`shadow` pairs, and share one 140ms micro-interaction curve.
 - A question the agent is blocked on now sits on a raised panel headed "Waiting on your decision" until it's answered, then collapses to the previous quiet inline form. Its choices are solid when selected, are 40px tall on touch, and Enter submits from a text field.
 - "Send" on a blocked question explains why it's unavailable instead of sitting dead.
-- The right-edge turn minimap appears from five turns instead of two, and its inactive marks use `--muted-foreground` so they clear the 3:1 contrast floor for non-text UI.
+- The right-edge turn minimap appears from five turns instead of two, and its inactive marks sit just above the 3:1 contrast floor for non-text UI — legible without reading as nine near-black dashes in an empty margin.
 - Neutral hover and selected states across the app collapse onto `--hover` and `--hover-strong`, replacing eleven ad-hoc `bg-accent`/`bg-muted` alphas over ~60 call sites; four dilutions of `--border` collapse onto the token itself.
 - Dialogs, sheets, menus, the model picker and the floating chat controls take their edge from the elevation tokens instead of a `border` plus a generic Tailwind shadow.
 - The workspace panel reads as an overlay on phones and keeps a `--border-strong` seam when docked on desktop, where it previously drew no shadow or emphasis at all.

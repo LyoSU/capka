@@ -89,11 +89,18 @@ export function ChatNav({
         {items.map((it) => (
           <span
             key={it.id}
-            // /25 put these 6px indicators far below the 3:1 that non-text UI
-            // needs, so the collapsed rail's only "where am I" cue was invisible
-            // to low-vision users. Position now reads from width AND weight.
+            // The inactive marks sit at exactly the floor and no higher. /25 was
+            // far below the 3:1 that non-text UI needs — the rail's only "where am
+            // I" cue was invisible to low-vision users — but the full
+            // `--muted-foreground` that replaced it measures 6.6:1 light / 6.0:1
+            // dark, which is TEXT weight: nine near-black dashes shouting from an
+            // otherwise empty margin for something you read at a glance. /70
+            // measures 3.3:1 light and 3.6:1 dark, so the rail reads as quiet
+            // furniture and still clears the floor. Narrower too, which costs no
+            // contrast and widens the gap against the active mark — position reads
+            // from width first, weight second.
             className={`h-1.5 rounded-full transition-[width,background-color] duration-150 ${
-              it.id === activeId ? "w-6 bg-foreground" : "w-3 bg-muted-foreground"
+              it.id === activeId ? "w-6 bg-foreground" : "w-2.5 bg-muted-foreground/70"
             }`}
           />
         ))}
@@ -123,9 +130,11 @@ export function ChatNav({
                 active ? "bg-hover-strong" : "hover:bg-hover"
               }`}
             >
+              {/* Same weight as the rail's marks — here the row's own text already
+                  says which turn it is, so the bullet is orientation, not label. */}
               <span
                 className={`h-1.5 shrink-0 rounded-full transition-[width,background-color] ${
-                  active ? "w-5 bg-foreground" : "w-3 bg-muted-foreground"
+                  active ? "w-5 bg-foreground" : "w-2.5 bg-muted-foreground/70"
                 }`}
               />
               <span className={`truncate text-sm ${active ? "text-foreground" : "text-muted-foreground"}`}>
