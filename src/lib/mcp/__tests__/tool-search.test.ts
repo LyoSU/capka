@@ -99,6 +99,83 @@ describe("defer thresholds from the environment", () => {
   });
 });
 
+describe("MCP_ALWAYS_LOAD — connectors exempt from deferral", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  /** Read once at module load, so each case needs a fresh import. */
+  async function freshPlan(env: Record<string, string>, tools: Record<string, Tool>, effectiveLimit = 2000) {
+    vi.resetModules();
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+    const mod = await import("../tool-search");
+    return mod.planToolSearch({ tools, effectiveLimit });
+  }
+
+  /** A heavy connector to defer, plus a small one the admin wants always available. */
+  const mixed = () => {
+    const tools: Record<string, Tool> = { bash: fakeTool("run a command") };
+    for (let i = 0; i < 8; i++) tools[`mcp__firecrawl__firecrawl_tool_${i}`] = fakeTool(bulky(`tool ${i}`));
+    tools["mcp__search__web_search"] = fakeTool("search the web");
+    return tools;
+  };
+
+  it("keeps a pinned connector's tools callable while the rest are deferred", async () => {
+    const plan = await freshPlan({ MCP_ALWAYS_LOAD: "search" }, mixed());
+    expect(plan.defer).toBe(true);
+    expect(plan.activeToolNames()).toContain("mcp__search__web_search");
+    expect(plan.activeToolNames()).not.toContain("mcp__firecrawl__firecrawl_tool_0");
+  });
+
+  it("leaves a pinned connector out of the on-demand index", async () => {
+    // The index tells the model what it must call find_tool for. A pinned
+    // connector is already in the tool list, so listing it there invites a
+    // pointless round-trip.
+    const plan = await freshPlan({ MCP_ALWAYS_LOAD: "search" }, mixed());
+    expect(plan.indexText).toContain("**firecrawl**");
+    expect(plan.indexText).not.toContain("**search**");
+  });
+
+  it("does not return pinned tools from find_tool", async () => {
+    const plan = await freshPlan({ MCP_ALWAYS_LOAD: "search" }, mixed());
+    const res = await callFind(plan, "search the web");
+    expect(res.matched.map((m) => m.name)).not.toContain("mcp__search__web_search");
+  });
+
+  it("stays inert when every connector is pinned — there is nothing left to hide", async () => {
+    const tools: Record<string, Tool> = { bash: fakeTool("run a command") };
+    for (let i = 0; i < 8; i++) tools[`mcp__firecrawl__firecrawl_tool_${i}`] = fakeTool(bulky(`tool ${i}`));
+    const plan = await freshPlan({ MCP_ALWAYS_LOAD: "firecrawl" }, tools);
+    expect(plan.defer).toBe(false);
+    expect(plan.activeToolNames()).toBeUndefined();
+  });
+
+  it("does not count pinned tools against the defer budget", async () => {
+    // Pinning is the admin saying "this one always rides along", so its size must
+    // not be what pushes the remaining connectors behind find_tool.
+    const tools: Record<string, Tool> = { bash: fakeTool("run a command") };
+    for (let i = 0; i < 8; i++) tools[`mcp__firecrawl__firecrawl_tool_${i}`] = fakeTool(bulky(`tool ${i}`));
+    tools["mcp__small__ping"] = fakeTool("ping");
+    const plan = await freshPlan({ MCP_ALWAYS_LOAD: "firecrawl" }, tools);
+    expect(plan.defer).toBe(false);
+  });
+
+  it("matches the server name case-insensitively and ignores surrounding spaces", async () => {
+    const plan = await freshPlan({ MCP_ALWAYS_LOAD: " Search , other " }, mixed());
+    expect(plan.activeToolNames()).toContain("mcp__search__web_search");
+  });
+
+  it("pins nothing when unset or empty", async () => {
+    const cases: Record<string, string>[] = [{}, { MCP_ALWAYS_LOAD: "" }];
+    for (const env of cases) {
+      const plan = await freshPlan(env, mixed());
+      expect(plan.defer).toBe(true);
+      expect(plan.activeToolNames()).not.toContain("mcp__search__web_search");
+    }
+  });
+});
+
 describe("planToolSearch — active-tool accounting", () => {
   const build = () => {
     const tools: Record<string, Tool> = { bash: fakeTool("run a command"), skill: fakeTool("load a skill") };

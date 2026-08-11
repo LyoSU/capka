@@ -76,6 +76,31 @@ export function deferTokenBudget(
   return maxTokens > 0 ? Math.min(pct, maxTokens) : pct;
 }
 
+/**
+ * Connector servers whose tools stay in the prompt even when deferral kicks in —
+ * comma-separated server names in `MCP_ALWAYS_LOAD` (e.g. `MCP_ALWAYS_LOAD=tavily`).
+ *
+ * Progressive disclosure trades a round-trip for context: the model calls
+ * `find_tool` before it can use a connector. That is the right default, but an
+ * admin usually knows the one or two connectors their team reaches for constantly
+ * (web search, the company wiki), and paying a discovery hop for those on every
+ * turn is pure overhead. Pinning them is an explicit, per-instance override —
+ * never a built-in list, since which connector matters is entirely local.
+ *
+ * A pinned connector's size does NOT count toward the defer budget: the admin has
+ * already decided it rides along, so it must not be what pushes everything else
+ * behind `find_tool`.
+ */
+export function alwaysLoadServers(raw = process.env.MCP_ALWAYS_LOAD): Set<string> {
+  return new Set(
+    String(raw ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+const ALWAYS_LOAD = alwaysLoadServers();
+
 /** How many tools a single `find_tool` call may surface by default. Generous on
  *  purpose: BM25 is lexical, so a synonym gap ("fetch page" vs "scrape") is real —
  *  recall matters more than precision here since the cost of a miss is a wasted
@@ -257,7 +282,19 @@ export function planToolSearch(opts: {
   effectiveLimit: number;
   thresholdPct?: number;
 }): ToolSearchPlan {
-  const mcpNames = Object.keys(opts.tools).filter(isMcpToolName);
+  const allMcpNames = Object.keys(opts.tools).filter(isMcpToolName);
+  if (allMcpNames.length === 0) return INERT_PLAN;
+
+  // Pinned connectors (MCP_ALWAYS_LOAD) are held out of the whole mechanism: out of
+  // the budget, out of the index, out of the BM25 catalog. They simply stay in the
+  // tool list. If that leaves nothing deferrable, there is no reason to add a
+  // find_tool hop at all.
+  const pinned = ALWAYS_LOAD.size
+    ? allMcpNames.filter((n) => ALWAYS_LOAD.has(splitMcpName(n).server.toLowerCase()))
+    : [];
+  const mcpNames = pinned.length === 0
+    ? allMcpNames
+    : allMcpNames.filter((n) => !ALWAYS_LOAD.has(splitMcpName(n).server.toLowerCase()));
   if (mcpNames.length === 0) return INERT_PLAN;
 
   const mcpTokens = mcpNames.reduce((s, n) => s + estimateToolTokens(opts.tools[n]!), 0);
@@ -267,7 +304,12 @@ export function planToolSearch(opts: {
   // Decision is made ONCE, at the start of the turn, off the connector set as it
   // stands now — it never flips mid-turn. Logged so a chat that silently crosses
   // the threshold (e.g. the user just added a connector via `manage`) is visible.
-  log.info("mcp.defer", { tools: mcpNames.length, estTokens: mcpTokens, budget: Math.round(budget) });
+  log.info("mcp.defer", {
+    tools: mcpNames.length,
+    estTokens: mcpTokens,
+    budget: Math.round(budget),
+    ...(pinned.length ? { pinned: pinned.length } : {}),
+  });
 
   const eagerNames = Object.keys(opts.tools).filter((n) => !isMcpToolName(n));
   const sortedMcp = [...mcpNames].sort();
@@ -340,6 +382,7 @@ export function planToolSearch(opts: {
     defer: true,
     indexText,
     extraTools: { [FIND_TOOL_NAME]: findTool },
-    activeToolNames: () => [...eagerNames, FIND_TOOL_NAME, ...expanded],
+    // Pinned connectors are active from the first step, alongside the core tools.
+    activeToolNames: () => [...eagerNames, ...pinned, FIND_TOOL_NAME, ...expanded],
   };
 }

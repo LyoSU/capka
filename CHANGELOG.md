@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- `MCP_ALWAYS_LOAD` (comma-separated connector names) keeps those connectors' tools in the prompt when progressive disclosure is deferring the rest, so a connector the team uses constantly costs no `find_tool` hop. Pinned connectors don't count toward the defer budget. Unset → nothing pinned.
 - Remote MCP connectors can speak the legacy HTTP+SSE protocol, not just Streamable HTTP. The transport is inferred from the URL (`…/sse` → SSE); `POST /api/mcp` and `/api/admin/mcp` accept an explicit `transport: "http" | "sse"` for endpoints that don't follow the convention.
 
 ### Changed
@@ -17,6 +18,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Editing or deleting an MCP connector now drops its cached tool schemas, instead of leaving the model with the tool list from before the change. Cached schemas are also refreshed in the background every 30 minutes for remote connectors.
 - Sending the first message in a new project chat no longer fails with "Project not found".
 - Workspace files named in any script (Chinese, Greek, Georgian, …) become file chips and artifact tiles, and can be included in "Download all" — the path charset was limited to Latin and Ukrainian.
 - Copy buttons work on plain-HTTP deployments, where `navigator.clipboard` does not exist; they also no longer report "Copied" when the copy was refused.
