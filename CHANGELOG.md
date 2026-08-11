@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-11
+
 ### Added
 
 - Chats now print (and save to PDF) as a full document: the whole transcript flows instead of one screenful, the sidebar and composer are dropped, collapsed reasoning is expanded, and link targets are printed.
