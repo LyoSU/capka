@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-11
+
 ### Added
 
 - `MCP_ALWAYS_LOAD` (comma-separated connector names) keeps those connectors' tools in the prompt when progressive disclosure is deferring the rest, so a connector the team uses constantly costs no `find_tool` hop. Pinned connectors don't count toward the defer budget. Unset → nothing pinned.
