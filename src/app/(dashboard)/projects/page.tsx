@@ -107,7 +107,7 @@ export default function ProjectsPage() {
            was visible whether you wanted them or not. */
         <div className="divide-y overflow-hidden rounded-xl border bg-card">
           {projects.map((project) => (
-            <div key={project.id} className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30">
+            <div key={project.id} className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-hover">
               <Link href={`/projects/${project.id}`} className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{project.name}</p>
                 {project.description && (

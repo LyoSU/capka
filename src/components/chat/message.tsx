@@ -631,7 +631,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={onCopy}
       title={copied ? t("copied") : t("copy")}
       aria-label={copied ? t("copied") : t("copy")}
-      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
     >
       {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
@@ -659,7 +659,7 @@ function BranchSwitcher({
         disabled={disabled || index <= 0}
         title={t("prevVersion")}
         aria-label={t("prevVersion")}
-        className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+        className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <ChevronLeft className="h-3.5 w-3.5" />
       </button>
@@ -670,7 +670,7 @@ function BranchSwitcher({
         disabled={disabled || index >= count - 1}
         title={t("nextVersion")}
         aria-label={t("nextVersion")}
-        className="rounded-md p-0.5 transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+        className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <ChevronRight className="h-3.5 w-3.5" />
       </button>
@@ -689,7 +689,7 @@ function ForkButton({ messageId, onFork, disabled }: { messageId: string; onFork
       disabled={disabled}
       title={t("fork")}
       aria-label={t("fork")}
-      className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+      className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
     >
       <GitBranch className="h-3.5 w-3.5" />
     </button>
@@ -785,7 +785,7 @@ function UserBubble({
               if (e.key === "Escape") { e.preventDefault(); cancel(); }
             }}
             rows={1}
-            className="w-full resize-none overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40 md:text-[15px]"
+            className="w-full resize-none overflow-hidden rounded-2xl bg-card px-4 py-3 text-base shadow-panel focus:outline-none focus:ring-2 focus:ring-primary/40 md:text-[15px]"
           />
           <div className="mt-2 flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={cancel}>{tCommon("cancel")}</Button>
@@ -851,7 +851,7 @@ function UserBubble({
           {/* When the turn is files-only, the thumbnails are the content — skip the
               empty "…" bubble. */}
           {(text || !hasFiles) && (
-            <div className="inline-block whitespace-pre-wrap break-words rounded-2xl border border-border bg-card text-card-foreground px-5 py-3 text-[15px] shadow-sm">
+            <div className="inline-block whitespace-pre-wrap break-words rounded-2xl bg-card text-card-foreground px-5 py-3 text-[15px] shadow-panel">
               {text || "…"}
             </div>
           )}
@@ -874,7 +874,7 @@ function UserBubble({
                   disabled={actionsDisabled}
                   title={tMsg("edit")}
                   aria-label={tMsg("edit")}
-                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -1009,7 +1009,7 @@ function MessageDetails({
   return (
     <Popover onOpenChange={(open) => open && loadGen()}>
       <PopoverTrigger
-        className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground"
+        className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground"
         aria-label={t("show")}
         title={t("show")}
       >
@@ -1103,7 +1103,7 @@ function CompactionDivider({ summary }: { summary: string }) {
     <Collapsible className="my-4 px-2">
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <div className="h-px flex-1 bg-border" />
-        <CollapsibleTrigger className="flex items-center gap-1.5 rounded-full border px-3 py-1 transition-colors hover:bg-accent">
+        <CollapsibleTrigger className="flex items-center gap-1.5 rounded-full border px-3 py-1 transition-colors hover:bg-hover">
           <span aria-hidden>📋</span>
           <span>{t("compacted")}</span>
         </CollapsibleTrigger>
@@ -1229,7 +1229,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             if (g.kind === "text") {
               const afterActivity = gi > 0 && groups[gi - 1].kind !== "text";
               return (
-                <div key={gi} className={`animate-message-in ${afterActivity ? "mt-3 border-t border-border/30 pt-3" : gi > 0 ? "mt-3" : ""}`}>
+                <div key={gi} className={`animate-message-in ${afterActivity ? "mt-3 border-t border-border pt-3" : gi > 0 ? "mt-3" : ""}`}>
                   <TextContent text={g.text} isStreaming={isStreaming && gi === lastTextIdx} chatId={chatId} />
                 </div>
               );
@@ -1286,7 +1286,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
                   disabled={actionsDisabled}
                   title={t("regenerate")}
                   aria-label={t("regenerate")}
-                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                 </button>

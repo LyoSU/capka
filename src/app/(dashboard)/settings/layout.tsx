@@ -182,7 +182,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             onMouseEnter={() => setActive(i)}
             className={cn(
               "flex flex-col rounded-md px-2.5 py-1.5 transition-colors",
-              i === active ? "bg-accent" : "hover:bg-accent/50",
+              i === active ? "bg-hover-strong" : "hover:bg-hover",
             )}
           >
             <span className="text-sm">{tRoot(entry.label)}</span>
@@ -213,8 +213,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
               className={cn(
                 "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
                 isActiveItem(item.href)
-                  ? "bg-accent font-medium"
-                  : "text-muted-foreground hover:bg-accent/50"
+                  ? "bg-hover-strong font-medium"
+                  : "text-muted-foreground hover:bg-hover"
               )}
             >
               <item.icon className="h-3.5 w-3.5" />
@@ -241,8 +241,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                   className={cn(
                     "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors",
                     isActiveItem(item.href)
-                      ? "bg-accent font-medium"
-                      : "text-muted-foreground hover:bg-accent/50"
+                      ? "bg-hover-strong font-medium"
+                      : "text-muted-foreground hover:bg-hover"
                   )}
                 >
                   <item.icon className="h-4 w-4" />

@@ -41,7 +41,7 @@ const noop = async () => {};
  */
 function ChatRowLink({ chat, locale, fallback }: { chat: ChatRow; locale: string; fallback: string }) {
   return (
-    <Link href={`/chat/${chat.id}`} className="flex items-center gap-2 px-4 py-2.5 text-sm transition-colors hover:bg-muted/30">
+    <Link href={`/chat/${chat.id}`} className="flex items-center gap-2 px-4 py-2.5 text-sm transition-colors hover:bg-hover">
       <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate">{chat.title || fallback}</span>
       <span className="shrink-0 text-xs text-muted-foreground">

@@ -66,7 +66,7 @@ function WorkspacePathChip({ rel, chatId, live }: { rel: string; chatId: string;
   // Verify once the reply is final (live=false); while streaming stay optimistic.
   const missing = useFileStatus(file, !live) === "gone";
   const cls =
-    "mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-border/60 bg-muted/50 px-1.5 py-px align-baseline text-[0.85em] font-medium leading-tight text-foreground no-underline transition-colors hover:border-primary/40 hover:bg-accent";
+    "mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-px align-baseline text-[0.85em] font-medium leading-tight text-foreground no-underline transition-colors hover:border-primary/40 hover:bg-hover";
   const inner = (
     <>
       <Icon className={`h-3.5 w-3.5 shrink-0 ${color}`} />
@@ -77,7 +77,7 @@ function WorkspacePathChip({ rel, chatId, live }: { rel: string; chatId: string;
     return (
       <span
         title={tw("notCreated")}
-        className={cn(cls, "cursor-default border-dashed text-muted-foreground/70 line-through opacity-70 hover:border-border/60 hover:bg-muted/50")}
+        className={cn(cls, "cursor-default border-dashed text-muted-foreground/70 line-through opacity-70 hover:border-border hover:bg-hover")}
       >
         {inner}
       </span>

@@ -120,7 +120,7 @@ export default function ArchivedChatsPage() {
               {chats.map((chat) => (
                 <div
                   key={chat.id}
-                  className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
+                  className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-hover"
                 >
                   <Link href={`/chat/${chat.id}`} className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">

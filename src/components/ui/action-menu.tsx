@@ -205,7 +205,7 @@ function ActionSheet({
                     it.onSelect();
                   }}
                   className={cn(
-                    "flex min-h-[3rem] items-center gap-3 rounded-xl px-4 text-[15px] outline-none transition-colors focus-visible:bg-accent active:bg-accent disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-5 [&_svg]:shrink-0",
+                    "flex min-h-[3rem] items-center gap-3 rounded-xl px-4 text-[15px] outline-none transition-colors focus-visible:bg-hover active:bg-accent disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-5 [&_svg]:shrink-0",
                     it.variant === "destructive"
                       ? "text-destructive [&_svg]:text-destructive"
                       : "text-foreground [&_svg]:text-muted-foreground",

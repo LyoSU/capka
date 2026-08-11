@@ -212,7 +212,7 @@ export function MarketplaceBrowser() {
             <div
               key={m.id}
               className={`flex items-center gap-1 rounded-md border px-2 py-1 text-sm ${
-                selected === m.id ? "bg-accent font-medium" : "text-muted-foreground"
+                selected === m.id ? "bg-hover-strong font-medium" : "text-muted-foreground"
               }`}
             >
               <button onClick={() => setSelected(m.id)} className="flex items-center gap-1.5">

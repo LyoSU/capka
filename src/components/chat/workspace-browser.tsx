@@ -317,7 +317,7 @@ export function WorkspaceBrowser({
   const folderRow = (entry: FileEntry) => {
     const { Icon, color, bg } = fileKind(entry.name, true);
     return (
-      <div key={entry.path} className="group flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-accent/40">
+      <div key={entry.path} className="group flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-hover">
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${bg}`}>
           <Icon className={`h-4 w-4 ${color}`} />
         </div>
@@ -340,7 +340,7 @@ export function WorkspaceBrowser({
     const file = fileFor(entry.path, entry.name);
     const canView = previewKind(entry.name) !== null;
     return (
-      <div key={entry.path} className="group flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-accent/40">
+      <div key={entry.path} className="group flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-hover">
         <button
           type="button"
           disabled={!canView}
@@ -362,7 +362,7 @@ export function WorkspaceBrowser({
           </span>
         </button>
         <a href={downloadUrl(entry.path)} download={entry.name} aria-label={t("download", { name: entry.name })}
-          className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100">
+          className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-[opacity,color,background-color] hover:bg-hover hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100">
           <Download className="h-3.5 w-3.5" />
         </a>
         <button
@@ -524,7 +524,7 @@ export function WorkspaceBrowser({
         </div>
       )}
 
-      <div className="flex items-center gap-2 border-b border-border/50 bg-muted/20 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:pt-3">
+      <div className="flex items-center gap-2 border-b border-border bg-muted/20 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:pt-3">
         <h3 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold tracking-tight">
           <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{t("title")}</span>
@@ -534,12 +534,12 @@ export function WorkspaceBrowser({
         </h3>
         <label title={t("upload")} aria-label={t("upload")}>
           <input type="file" multiple className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
-          <div className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+          <div className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
             <Upload className={`h-3.5 w-3.5 ${uploading ? "animate-pulse" : ""}`} />
           </div>
         </label>
         {canDownloadAll(folders.length, fileCount) && (
-          <button onClick={downloadAll} title={t("downloadAll")} aria-label={t("downloadAll")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+          <button onClick={downloadAll} title={t("downloadAll")} aria-label={t("downloadAll")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
             <Download className="h-3.5 w-3.5" />
           </button>
         )}
@@ -553,11 +553,11 @@ export function WorkspaceBrowser({
       {/* Always mounted: gating this bar on "has files" made it pop in the moment
           the first file landed and shove the list down. With nothing to sort the
           sort menu is simply disabled. */}
-      <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-1.5">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger
             disabled={fileCount === 0}
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[popup-open]:bg-accent data-[popup-open]:text-foreground"
+            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[popup-open]:bg-accent data-[popup-open]:text-foreground"
           >
             <ArrowDownUp className="h-3.5 w-3.5" />
             {sortLabel}
@@ -601,7 +601,7 @@ export function WorkspaceBrowser({
           // to see where they are and jump out in one step. A named <nav>, so the
           // row announces as a path rather than as a handful of loose buttons.
           <nav aria-label={t("breadcrumb")} className="mx-3 mb-1 flex min-w-0 items-center gap-0.5 overflow-hidden text-[11px] text-muted-foreground">
-            <button type="button" onClick={() => setPath(".")} className="shrink-0 rounded px-1 py-0.5 hover:bg-accent hover:text-foreground">
+            <button type="button" onClick={() => setPath(".")} className="shrink-0 rounded px-1 py-0.5 hover:bg-hover hover:text-foreground">
               {t("root")}
             </button>
             {crumbs.length < segments.length && (
@@ -622,7 +622,7 @@ export function WorkspaceBrowser({
                     <button
                       type="button"
                       onClick={() => setPath(segments.slice(0, depth + 1).join("/"))}
-                      className="truncate rounded px-1 py-0.5 hover:bg-accent hover:text-foreground"
+                      className="truncate rounded px-1 py-0.5 hover:bg-hover hover:text-foreground"
                     >
                       {seg}
                     </button>

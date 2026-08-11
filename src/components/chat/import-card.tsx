@@ -47,7 +47,7 @@ export function ImportCard({
 
   return (
     <div className="mx-auto mb-2 max-w-3xl px-4 md:px-6 lg:max-w-4xl">
-      <div className="rounded-2xl border bg-card/70 px-4 py-3 shadow-sm">
+      <div className="rounded-2xl bg-card/70 px-4 py-3 shadow-panel">
         {state.phase === "idle" && (
           <div className="flex flex-col gap-2.5">
             <div className="flex items-start gap-3">

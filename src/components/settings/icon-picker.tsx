@@ -25,7 +25,7 @@ export function IconPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label={t("changeIcon")}
-        className="flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         <ProviderGlyph slug={value ?? fallback} size={16} />
       </PopoverTrigger>
@@ -45,7 +45,7 @@ export function IconPicker({
                 className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${
                   active
                     ? "border-primary bg-primary/10 text-foreground"
-                    : "border-transparent text-muted-foreground hover:bg-accent"
+                    : "border-transparent text-muted-foreground hover:bg-hover"
                 }`}
               >
                 <ProviderGlyph slug={slug ?? fallback} size={16} />

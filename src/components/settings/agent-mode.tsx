@@ -72,7 +72,7 @@ export function AgentModeSection({
             onClick={() => onChange(p.value)}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm transition-colors",
-              preset === p.key ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+              preset === p.key ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
             )}
           >
             {t(`preset.${p.key}`)}
@@ -81,7 +81,7 @@ export function AgentModeSection({
         {/* Not selectable — it's a readout of "this profile matches no preset",
             shown only while that's true, so the control never lies about state. */}
         {preset === "custom" && (
-          <span className="rounded-md bg-card px-3 py-1.5 text-sm font-medium shadow-sm">{t("preset.custom")}</span>
+          <span className="rounded-md bg-card px-3 py-1.5 text-sm font-medium shadow-btn">{t("preset.custom")}</span>
         )}
       </div>
 

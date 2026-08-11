@@ -372,7 +372,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                   onClick={() => { setKind(k); setTestResult(null); }}
                   className={cn(
                     "rounded px-2.5 py-1 transition-colors",
-                    kind === k ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                    kind === k ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {t(k === "remote" ? "kind.remote" : "kind.local")}
@@ -420,7 +420,7 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                       onClick={() => { setMethod(m); methodTouched.current = true; setTestResult(null); }}
                       className={cn(
                         "rounded px-2.5 py-1 transition-colors",
-                        method === m ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                        method === m ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
                       )}
                     >
                       {t(`method.${m}`)}

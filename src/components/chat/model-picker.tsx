@@ -241,7 +241,7 @@ function FilterBar({
             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
               on
                 ? "border-primary/40 bg-primary/10 text-primary"
-                : "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                : "border-border text-muted-foreground hover:bg-hover hover:text-foreground"
             }`}
           >
             <Icon className="h-3.5 w-3.5" />
@@ -504,8 +504,8 @@ function ProviderRail({
   const item = (key: string, title: string, glyph: React.ReactNode) => {
     const isActive = active === key;
     const activeCls = isActive
-      ? "bg-background text-foreground ring-1 ring-border shadow-sm"
-      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground";
+      ? "bg-background text-foreground shadow-btn"
+      : "text-muted-foreground hover:bg-hover hover:text-foreground";
     const btn = labeled ? (
       <button
         type="button"
@@ -787,7 +787,7 @@ function ModelList({
           aria-label={t("filter.title")}
           title={t("filter.title")}
           className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
-            filtersOpen || filters.size > 0 ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+            filtersOpen || filters.size > 0 ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-hover hover:text-foreground"
           }`}
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -833,7 +833,7 @@ function ModelList({
         {sections.map(({ key, group, icon, models: groupModels }) => (
           <div key={key}>
             {showHeaders && (
-              <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border/50">
+              <div className="sticky top-0 z-10 flex items-center gap-2 bg-popover/95 backdrop-blur-sm px-3 py-1.5 border-b border-border">
                 <BrandIcon slug={icon} size={12} />
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{group}</span>
                 <span className="text-[10px] text-muted-foreground tabular-nums">{groupModels.length}</span>
@@ -854,7 +854,7 @@ function ModelList({
                   data-index={globalIdx}
                   onClick={() => onSelect(model)}
                   onMouseEnter={() => onActiveIndex(globalIdx)}
-                  className={`group/row flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent [content-visibility:auto] [contain-intrinsic-size:auto_44px] ${isActive ? "bg-accent" : ""} ${isCurrent ? "bg-accent/50" : ""}`}
+                  className={`group/row flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors active:bg-accent [content-visibility:auto] [contain-intrinsic-size:auto_44px] ${isActive ? "bg-hover-strong" : ""} ${isCurrent ? "bg-hover" : ""}`}
                 >
                   {searching ? (
                     <BrandIcon slug={model.icon} size={14} className="shrink-0 text-muted-foreground" />
@@ -1318,7 +1318,7 @@ export function ModelPicker({
           disabled={disabled}
           aria-haspopup="listbox"
           aria-expanded={open}
-          className={`flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50 ${
             clearable && value && !state.loading ? "pr-9" : ""
           }`}
         >
@@ -1348,7 +1348,7 @@ export function ModelPicker({
           onClick={(e) => { e.stopPropagation(); onChange(""); }}
           aria-label={t("clearSelection")}
           title={t("clearSelection")}
-          className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -1360,7 +1360,7 @@ export function ModelPicker({
         <div
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
           style={{ height: fieldPos.maxH, maxWidth: fieldPos.maxW }}
-          className={`absolute left-0 z-50 flex w-[34rem] min-w-full overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150 ${
+          className={`absolute left-0 z-50 flex w-[34rem] min-w-full overflow-hidden rounded-xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150 ${
             fieldPos.up ? "bottom-full mb-1" : "top-full mt-1"
           }`}
         >
@@ -1375,7 +1375,7 @@ export function ModelPicker({
           ref={popoverRef}
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
-          className="z-50 flex h-[30rem] overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
+          className="z-50 flex h-[30rem] overflow-hidden rounded-xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150"
         >
           {renderList("vertical")}
         </div>,
@@ -1394,7 +1394,7 @@ export function ModelPicker({
         >
           <div className="flex items-center justify-between border-b px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <span className="text-sm font-medium">{t("selectModel")}</span>
-            <button onClick={close} aria-label={t("close")} className="rounded-md p-1 hover:bg-muted">
+            <button onClick={close} aria-label={t("close")} className="rounded-md p-1 hover:bg-hover">
               <X className="h-4 w-4" />
             </button>
           </div>

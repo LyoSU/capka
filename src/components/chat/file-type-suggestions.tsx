@@ -55,7 +55,7 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
             className={`rounded-full border px-3 py-1 text-xs transition-colors ${
               ty === type
                 ? "border-foreground/20 bg-muted text-foreground"
-                : "border-transparent text-muted-foreground hover:bg-muted/60"
+                : "border-transparent text-muted-foreground hover:bg-hover"
             }`}
           >
             {t(`types.${ty}`)}
@@ -72,7 +72,7 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
             type="button"
             onClick={() => onPick(t(`${type}.${a}.prompt`))}
             style={{ animationDelay: `${i * 55}ms` }}
-            className={`group/sg animate-step-in flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/60 ${
+            className={`group/sg animate-step-in flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-hover ${
               i > 0 ? "border-t" : ""
             }`}
           >

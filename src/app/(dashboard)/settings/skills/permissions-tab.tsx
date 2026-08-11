@@ -50,7 +50,7 @@ function EffectControl({ value, onChange, t, size = "default" }: { value: Effect
           type="button"
           onClick={() => onChange(e)}
           aria-pressed={value === e}
-          className={cn(size === "sm" ? "px-2 py-0.5" : "px-2.5 py-1", "transition-colors", value === e ? color[e] : "text-muted-foreground hover:bg-accent/50")}
+          className={cn(size === "sm" ? "px-2 py-0.5" : "px-2.5 py-1", "transition-colors", value === e ? color[e] : "text-muted-foreground hover:bg-hover")}
         >
           {t(`effect.${e}`)}
         </button>
@@ -165,7 +165,7 @@ export function PermissionsTab() {
                   key={`${i.capabilityType}:${i.capabilityKey}`}
                   type="button"
                   onClick={() => setOpen(i)}
-                  className="flex w-full items-center gap-3 rounded-md border p-2.5 text-left transition-colors hover:bg-accent/40"
+                  className="flex w-full items-center gap-3 rounded-md border p-2.5 text-left transition-colors hover:bg-hover"
                 >
                   <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t(i.capabilityType === "skill" ? "skills" : "connectors")} />
                   <span className="min-w-0 flex-1 truncate text-sm">{i.capabilityKey}</span>

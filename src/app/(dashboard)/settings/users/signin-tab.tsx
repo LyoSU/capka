@@ -210,7 +210,7 @@ export function SignInTab() {
               onClick={() => { const prev = mode; setMode(key); persist({ registrationMode: key }, () => setMode(prev)); }}
               className={cn(
                 "flex items-start gap-3 rounded-md border p-3 text-left transition-colors",
-                mode === key ? "border-foreground/40 bg-accent" : "hover:bg-accent/40",
+                mode === key ? "border-foreground/40 bg-hover-strong" : "hover:bg-hover",
               )}
             >
               <div aria-hidden className={cn("mt-0.5 h-4 w-4 shrink-0 rounded-full border-2", mode === key ? "border-foreground bg-foreground" : "border-muted-foreground/40")} />

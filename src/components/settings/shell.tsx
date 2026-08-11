@@ -231,7 +231,7 @@ export function SettingsRow({
       tabIndex={id ? -1 : undefined}
       className={cn(
         "px-4 py-3.5 outline-none transition-colors",
-        onLabelClick && !disabled && "hover:bg-muted/30",
+        onLabelClick && !disabled && "hover:bg-hover",
         // scroll-mt clears the sticky page header when jumped to from search.
         id && "scroll-mt-24",
         highlighted && "bg-primary/5 ring-1 ring-inset ring-primary/40",

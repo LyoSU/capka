@@ -48,7 +48,7 @@ export function AttachFolderMenu({ folders, onUpload, children }: { folders: Fol
     setBusy(false);
   };
 
-  const item = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted disabled:opacity-60";
+  const item = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-hover disabled:opacity-60";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

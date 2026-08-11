@@ -42,8 +42,15 @@ export function WorkspacePanel({
       aria-hidden={!open}
       inert={!open}
       className={cn(
-        "z-40 flex h-full shrink-0 justify-end overflow-hidden border-l bg-card shadow-lg transition-[width,transform] duration-300 ease-out",
-        "fixed inset-y-0 right-0 w-full md:static md:z-auto md:w-80 md:shadow-none",
+        // Two different things wear one component. On a phone it's a sheet that
+        // covers the chat, so it takes the `overlay` rung and has to read as ON TOP.
+        // On desktop it docks and PUSHES the chat aside, sharing the plane — a
+        // shadow there would claim a depth it doesn't have, so the seam is a
+        // hairline instead. But it was `--border`, the quiet in-surface divider,
+        // which left the pane looking like nothing had opened; `--border-strong` is
+        // the token for an edge that has to hold against the page.
+        "z-40 flex h-full shrink-0 justify-end overflow-hidden border-l bg-card shadow-overlay transition-[width,transform] duration-300 ease-out",
+        "fixed inset-y-0 right-0 w-full md:static md:z-auto md:w-80 md:border-l-border-strong md:shadow-none",
         open
           ? "translate-x-0 md:w-80"
           : "pointer-events-none translate-x-full md:w-0 md:translate-x-0 md:border-l-0",

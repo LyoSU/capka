@@ -321,7 +321,7 @@ export function ChatContextMenu({
                   disabled={savingVisibility}
                   onClick={() => changeVisibility(opt.value)}
                   className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-60 ${
-                    active ? "border-primary bg-accent" : "border-border hover:bg-accent/50"
+                    active ? "border-primary bg-hover-strong" : "border-border hover:bg-hover"
                   }`}
                 >
                   <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />

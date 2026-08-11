@@ -42,7 +42,7 @@ export default function PluginsPanel({ view, onView }: { view: PluginsView; onVi
             onClick={() => onView(v.key)}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
-              view === v.key ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+              view === v.key ? "bg-card font-medium shadow-btn" : "text-muted-foreground hover:text-foreground",
             )}
           >
             <v.icon className="h-4 w-4" />

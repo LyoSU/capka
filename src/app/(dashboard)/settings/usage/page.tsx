@@ -517,8 +517,8 @@ function FiltersControl({
     <Popover>
       <PopoverTrigger
         className={cn(
-          "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition-colors hover:bg-accent/50 disabled:opacity-50",
-          activeCount > 0 && "border-primary/50 bg-accent/40",
+          "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm transition-colors hover:bg-hover disabled:opacity-50",
+          activeCount > 0 && "border-primary/50 bg-hover-strong",
         )}
         disabled={!opts}
       >
@@ -754,8 +754,8 @@ function Breakdown({
             className={cn(
               "relative block w-full px-3.5 py-2.5 text-left",
               i > 0 && "border-t",
-              onSelect && "transition-colors hover:bg-accent/40",
-              selected && "bg-accent/60",
+              onSelect && "transition-colors hover:bg-hover",
+              selected && "bg-hover-strong",
             )}
           >
             {/* Proportional fill behind the row, scaled to the largest spender. */}

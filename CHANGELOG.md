@@ -23,6 +23,10 @@ All notable changes to Capka are documented here. Format follows
 - A question the agent is blocked on now sits on a raised panel headed "Waiting on your decision" until it's answered, then collapses to the previous quiet inline form. Its choices are solid when selected, are 40px tall on touch, and Enter submits from a text field.
 - "Send" on a blocked question explains why it's unavailable instead of sitting dead.
 - The right-edge turn minimap appears from five turns instead of two, and its inactive marks use `--muted-foreground` so they clear the 3:1 contrast floor for non-text UI.
+- Neutral hover and selected states across the app collapse onto `--hover` and `--hover-strong`, replacing eleven ad-hoc `bg-accent`/`bg-muted` alphas over ~60 call sites; four dilutions of `--border` collapse onto the token itself.
+- Dialogs, sheets, menus, the model picker and the floating chat controls take their edge from the elevation tokens instead of a `border` plus a generic Tailwind shadow.
+- The workspace panel reads as an overlay on phones and keeps a `--border-strong` seam when docked on desktop, where it previously drew no shadow or emphasis at all.
+- `--field` is alpha-based in dark mode, so a sunken input is recessed against every surface — including the sidebar, where the old fixed value came out slightly raised.
 
 ### Fixed
 
@@ -30,6 +34,7 @@ All notable changes to Capka are documented here. Format follows
 - Right-clicking your own chat message opens the browser's context menu again — the touch long-press handler was suppressing it for mouse input too.
 - The context-window ring is legible again: it drew at half-strength `--primary`, under the 3:1 contrast floor for non-text UI.
 - `automations-collection` tests no longer fail once the clock passes a hardcoded date; the one-off trigger case now derives its `once_at` from the current time.
+- Recent-chat rows no longer paint a hover shadow that their `overflow-hidden` container clipped into a dark smear along one edge.
 
 ## [0.17.0] - 2026-07-31
 

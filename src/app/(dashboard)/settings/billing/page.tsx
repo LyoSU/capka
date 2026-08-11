@@ -120,7 +120,7 @@ export default function BillingPage() {
                 onClick={() => saveMode(m)}
                 className={cn(
                   "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-                  active ? "border-primary bg-accent/40" : "hover:bg-accent/30",
+                  active ? "border-primary bg-hover-strong" : "hover:bg-hover",
                 )}
               >
                 <span

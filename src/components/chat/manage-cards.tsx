@@ -202,7 +202,7 @@ function Diff({ before, after }: { before: string; after: string }) {
 }
 
 function CardShell({ children }: { children: React.ReactNode }) {
-  return <div className="animate-blur-rise my-3 rounded-xl border border-border bg-card p-4 shadow-sm">{children}</div>;
+  return <div className="animate-blur-rise my-3 rounded-xl bg-card p-4 shadow-panel">{children}</div>;
 }
 
 type T = ReturnType<typeof useTranslations>;

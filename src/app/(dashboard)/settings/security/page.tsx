@@ -160,7 +160,7 @@ export default function SecuritySettingsPage() {
                   className={cn(
                     "rounded-md px-3 py-1 text-xs font-medium transition-colors",
                     pcFolders.value === opt
-                      ? "bg-card shadow-sm"
+                      ? "bg-card shadow-btn"
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >

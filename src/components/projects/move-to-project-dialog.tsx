@@ -102,7 +102,7 @@ export function MoveToProjectDialog({
               onClick={() => setChoice(null)}
               className={cn(
                 "flex w-full items-center gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors",
-                choice === null ? "border-primary bg-accent" : "border-border hover:bg-accent/50",
+                choice === null ? "border-primary bg-hover-strong" : "border-border hover:bg-hover",
               )}
             >
               <MinusCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -122,7 +122,7 @@ export function MoveToProjectDialog({
                 onClick={() => setChoice(p.id)}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors",
-                  choice === p.id ? "border-primary bg-accent" : "border-border hover:bg-accent/50",
+                  choice === p.id ? "border-primary bg-hover-strong" : "border-border hover:bg-hover",
                 )}
               >
                 <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />

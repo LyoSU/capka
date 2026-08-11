@@ -216,7 +216,7 @@ function FilePreview({
             </p>
           </div>
           {many && (
-            <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+            <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
               <HeaderButton onClick={() => go(-1)} label={t("prev")}><ChevronLeft className="h-4 w-4" /></HeaderButton>
               <HeaderButton onClick={() => go(1)} label={t("next")}><ChevronRight className="h-4 w-4" /></HeaderButton>
             </div>
@@ -258,7 +258,7 @@ function HeaderButton({
   download?: string;
 }) {
   const cls =
-    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
+    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
   return href ? (
     <a href={href} download={download} aria-label={label} title={label} className={cls}>{children}</a>
   ) : (
@@ -534,7 +534,7 @@ function ImageViewer({ file }: { file: PreviewFile }) {
           onClick={() => zoom(() => 1)}
           aria-label={t("zoomReset")}
           title={t("zoomReset")}
-          className="min-w-11 rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="min-w-11 rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
         >
           {Math.round(view.scale * 100)}%
         </button>
@@ -823,7 +823,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={() => navigator.clipboard.writeText(text).then(() => setDone(true), () => {})}
       aria-label={done ? t("copied") : t("copy")}
       title={done ? t("copied") : t("copy")}
-      className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md border bg-background/90 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md border bg-background/90 text-muted-foreground backdrop-blur transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       {done ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
     </button>

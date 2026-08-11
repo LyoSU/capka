@@ -227,13 +227,15 @@
   --border: oklch(1 0 0 / 0.10);
   --input: oklch(1 0 0 / 0.12);
   --border-strong: oklch(1 0 0 / 0.17);
-  /* Recessed here means DARKER than the surface it sits in (the light theme's
-     `--field` is lighter than its page) — the ladder is "lightness steps up as a
-     surface comes forward", so a sunken well steps down. Hover, by contrast, is
-     white-alpha rather than a fixed grey: it has to land on four different
-     surface lightnesses (sidebar 0.19 < bg 0.22 < card 0.255 < popover 0.285),
-     and any single opaque value would read as wrong on three of them. */
-  --field: oklch(0.20 0.004 75);
+  /* Both of these are ALPHA, not fixed greys, and for the same reason: they have
+     to land on four different surface lightnesses (sidebar 0.19 < bg 0.22 <
+     card 0.255 < popover 0.285), so any single opaque value is wrong on three of
+     them. `--field` was opaque 0.20 at first, chosen to sit under card and
+     background — but that is LIGHTER than the sidebar, so a "sunken" search box
+     there came out faintly raised instead. Black alpha darkens whatever it lands
+     on; white alpha lightens it. The light theme keeps opaque values because its
+     surfaces are clustered within 0.97–0.995, where one value serves all. */
+  --field: oklch(0 0 0 / 0.18);
   --hover: oklch(1 0 0 / 0.055);
   --hover-strong: oklch(1 0 0 / 0.10);
   --ring: oklch(0.56 0.008 75);

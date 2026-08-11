@@ -762,7 +762,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       {queued.map((q) => (
         <div
           key={q.id}
-          className="flex items-center gap-2 rounded-xl border bg-card px-3 py-1.5 text-sm shadow-sm"
+          className="flex items-center gap-2 rounded-xl bg-card px-3 py-1.5 text-sm shadow-raised"
         >
           <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="flex-1 truncate text-foreground/90">
@@ -772,7 +772,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
             type="button"
             onClick={() => setQueued((qq) => qq.filter((x) => x.id !== q.id))}
             aria-label={t("panel.cancelQueued")}
-            className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -792,7 +792,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
           {/* No header in the greeting state, so the sidebar handle lives in the
               top-left corner on mobile. Pinned outside the scroll area so it
               stays put while the greeting scrolls under it on short screens. */}
-          <SidebarTrigger className="absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20 size-9 rounded-full border bg-card shadow-sm md:hidden" />
+          <SidebarTrigger className="absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20 size-9 rounded-full bg-card shadow-raised md:hidden" />
           {/* Scroll wrapper: the inner block centers when it fits (min-h-full +
               justify-center) and scrolls when the greeting is taller than the
               viewport — otherwise centering clips the logo off the top with no
@@ -829,7 +829,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   stacking context above the starters block below — otherwise the
                   later sibling paints over the open dropdown. */}
               <div className="animate-blur-rise relative z-20 -mt-3 flex justify-center [animation-delay:140ms]">
-                <div className="inline-flex items-center rounded-full border bg-card px-1 shadow-sm">
+                <div className="inline-flex items-center rounded-full bg-card px-1 shadow-raised">
                   <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
                   {thinkingEl}
                 </div>
@@ -938,15 +938,15 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               only the controls themselves are interactive. */}
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 bg-gradient-to-b from-background via-background to-transparent px-4 pb-8 pt-3 md:px-6">
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full border bg-card shadow-sm md:hidden" />
-              <div className="pointer-events-auto inline-flex items-center rounded-full border bg-card px-1 shadow-sm">
+              <SidebarTrigger className="pointer-events-auto size-9 shrink-0 rounded-full bg-card shadow-raised md:hidden" />
+              <div className="pointer-events-auto inline-flex items-center rounded-full bg-card px-1 shadow-raised">
                 <ModelPicker variant="pill" value={model} onChange={setModel} onResolved={handleModelResolved} />
                 {thinkingEl}
               </div>
               {projectId && projectName && (
                 <Link
                   href={`/projects/${projectId}`}
-                  className="pointer-events-auto inline-flex max-w-[40vw] items-center gap-1 truncate rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+                  className="pointer-events-auto inline-flex max-w-[40vw] items-center gap-1 truncate rounded-full bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-raised transition-colors hover:text-foreground"
                   title={projectName}
                 >
                   <FolderOpen className="h-3 w-3 shrink-0" />
@@ -997,7 +997,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 size="icon"
                 tabIndex={showScrollDown ? 0 : -1}
                 aria-hidden={!showScrollDown}
-                className={`h-9 w-9 rounded-full shadow-md transition-transform [@media(hover:hover)]:hover:scale-105 ${
+                className={`h-9 w-9 rounded-full shadow-raised transition-transform [@media(hover:hover)]:hover:scale-105 ${
                   showScrollDown ? "pointer-events-auto" : "pointer-events-none"
                 }`}
                 onClick={scrollToLatest}
