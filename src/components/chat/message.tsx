@@ -17,20 +17,21 @@ import { previewKind } from "@/lib/file-kinds";
 import { extractWorkspacePaths } from "@/lib/chat/artifacts";
 import { cleanReasoning } from "@/lib/chat/reasoning";
 import { formatShortDuration } from "@/lib/chat/duration";
+import { LLM_ERROR_CATEGORIES } from "@/lib/errors/friendly";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { describeStep, type StepDescriptor } from "./steps";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
+import { copyToClipboard } from "@/lib/clipboard";
 
 // --- Helpers ---
 
-// LLM error categories that have an errors.llm.<category> translation. The
-// server stores the category in message metadata; the user-facing text is
-// rendered here (localized) instead of the English string baked in at runtime.
-const LLM_ERROR_CATEGORIES = new Set([
-  "out_of_credits", "invalid_key", "rate_limited", "model_unavailable",
-  "context_too_long", "network", "timed_out", "interrupted", "unknown",
-]);
+// The server stores the failure category in message metadata; the user-facing
+// text is rendered here (localized) instead of the English string baked in at
+// runtime. Read off the shared list rather than re-typed, so a new category
+// can't quietly lose its localized copy — the catalog parity test guards the
+// other half.
+const LOCALIZED_ERROR_CATEGORIES = new Set<string>(LLM_ERROR_CATEGORIES);
 
 type TimeTranslator = (key: string, values?: Record<string, string | number>) => string;
 
@@ -641,14 +642,12 @@ function CopyButton({ text }: { text: string }) {
   const t = useTranslations("chat.message");
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      haptic("tap");
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked (insecure context / permissions) — fail quietly */
-    }
+    // Blocked outright (permissions policy in an embed) — fail quietly rather
+    // than claim a copy that didn't happen.
+    if (!(await copyToClipboard(text))) return;
+    setCopied(true);
+    haptic("tap");
+    setTimeout(() => setCopied(false), 1500);
   };
   return (
     <button
@@ -829,7 +828,7 @@ function UserBubble({
       icon: <Copy />,
       label: tMsg("copy"),
       hidden: !text,
-      onSelect: () => navigator.clipboard?.writeText(text).catch(() => {}),
+      onSelect: () => void copyToClipboard(text),
     },
     {
       key: "edit",
@@ -1299,7 +1298,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
         {metadata?.taskStatus === "failed" && (
           <ErrorNotice
             message={
-              metadata.errorCategory && LLM_ERROR_CATEGORIES.has(metadata.errorCategory)
+              metadata.errorCategory && LOCALIZED_ERROR_CATEGORIES.has(metadata.errorCategory)
                 ? tErr(metadata.errorCategory)
                 : metadata.error || t("genericError")
             }

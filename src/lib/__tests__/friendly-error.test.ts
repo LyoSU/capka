@@ -1,5 +1,57 @@
 import { describe, it, expect } from "vitest";
-import { classifyLLMError, isVisionUnsupportedError, PROVIDER_UNRESPONSIVE_ERROR } from "@/lib/errors/friendly";
+import {
+  classifyLLMError,
+  isVisionUnsupportedError,
+  PROVIDER_UNRESPONSIVE_ERROR,
+  LLM_ERROR_CATEGORIES,
+} from "@/lib/errors/friendly";
+import en from "../../../messages/en.json";
+import uk from "../../../messages/uk.json";
+
+describe("content-safety refusals", () => {
+  it("maps a provider content-filter refusal to a calm message, not the raw string", () => {
+    const r = classifyLLMError("400 Content Exists Risk");
+    expect(r.category).toBe("content_blocked");
+    expect(r.userMessage).toMatch(/rephras|different model/i);
+    expect(r.userMessage).not.toMatch(/Content Exists Risk|400/); // no provider jargon
+    expect(r.adminDetail).toContain("Content Exists Risk"); // admins still get it
+  });
+
+  it("recognizes the other providers' phrasings", () => {
+    for (const raw of [
+      "The response was filtered due to the prompt triggering Azure OpenAI's content management policy",
+      "ResponsibleAIPolicyViolation",
+      "finish_reason: content_filter",
+      "Your request was rejected as a result of our safety system",
+      "blocked: PROHIBITED_CONTENT",
+      "该内容存在违规风险",
+    ]) {
+      expect(classifyLLMError(raw).category, raw).toBe("content_blocked");
+    }
+  });
+
+  it("does not steal errors that belong to an actionable category", () => {
+    // A quota or auth failure is the admin's to fix and must not be softened into
+    // "rephrase your prompt", even when the provider mentions its policy engine.
+    expect(classifyLLMError("402 insufficient credits (content policy engine)").category).toBe("out_of_credits");
+    expect(classifyLLMError("429 too many requests from the moderation endpoint").category).toBe("rate_limited");
+  });
+});
+
+describe("errors.llm translations", () => {
+  // The chat bubble and the Telegram sink both render a failure through
+  // `errors.llm.<category>`; a category shipped without a string renders as a
+  // raw key or silently falls back to the English baked into the row.
+  it.each([
+    ["en", en],
+    ["uk", uk],
+  ])("covers every LLM error category in %s", (_locale, catalog) => {
+    const llm = (catalog as { errors: { llm: Record<string, string> } }).errors.llm;
+    for (const category of LLM_ERROR_CATEGORIES) {
+      expect(llm[category], category).toBeTruthy();
+    }
+  });
+});
 
 describe("PROVIDER_UNRESPONSIVE_ERROR", () => {
   it("is a distinct category with a calm, model-switch-pointing message and no jargon", () => {

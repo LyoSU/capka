@@ -44,8 +44,10 @@
       "rate_limited": "The assistant is busy right now. Please try again in a few moments.",
       "model_unavailable": "The selected AI model isn't available right now. Try a different model, or ask your administrator.",
       "context_too_long": "This conversation got too long for the model. Start a new chat or shorten your message and try again.",
+      "content_blocked": "The AI provider wouldn't answer this one for content-safety reasons. Try rephrasing it, or switch to a different model.",
       "network": "Couldn't reach the AI service. Please try again in a moment.",
       "timed_out": "This task took too long and was stopped. Please try again, or break it into smaller steps.",
+      "provider_unresponsive": "The model stopped responding partway through. Please try again, or switch to a different model.",
       "interrupted": "The task was interrupted before it finished. Please try again.",
       "unknown": "Something went wrong while generating a response. Please try again. If it keeps happening, let your administrator know."
     }

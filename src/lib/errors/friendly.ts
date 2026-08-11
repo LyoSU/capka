@@ -9,17 +9,28 @@
 import { errorText } from "./message";
 import { stripNul } from "@/lib/tasks/sanitize";
 
-export type LLMErrorCategory =
-  | "out_of_credits"
-  | "invalid_key"
-  | "rate_limited"
-  | "model_unavailable"
-  | "context_too_long"
-  | "network"
-  | "timed_out"
-  | "provider_unresponsive"
-  | "interrupted"
-  | "unknown";
+/**
+ * Every failure bucket a turn can end in. Exported as a VALUE (not just a union)
+ * because two other places have to enumerate it: the chat bubble's localized
+ * rendering and the `errors.llm.*` catalog parity test. Both used to keep their
+ * own hand-written copy, which is how `provider_unresponsive` ended up with no
+ * translation at all.
+ */
+export const LLM_ERROR_CATEGORIES = [
+  "out_of_credits",
+  "invalid_key",
+  "rate_limited",
+  "model_unavailable",
+  "context_too_long",
+  "content_blocked",
+  "network",
+  "timed_out",
+  "provider_unresponsive",
+  "interrupted",
+  "unknown",
+] as const;
+
+export type LLMErrorCategory = (typeof LLM_ERROR_CATEGORIES)[number];
 
 export interface FriendlyError {
   category: LLMErrorCategory;
@@ -67,6 +78,22 @@ const RULES: Rule[] = [
     test: /\b(context[_\s-]?length|maximum context|context window|too many tokens|reduce the length|prompt is too long)\b/i,
     userMessage:
       "This conversation got too long for the model. Start a new chat or shorten your message and try again.",
+  },
+  {
+    category: "content_blocked",
+    // A provider's content-safety engine refusing outright — DeepSeek's "Content
+    // Exists Risk", Azure's content-management policy / ResponsibleAIPolicyViolation,
+    // OpenAI's content_filter + safety system, Gemini's PROHIBITED_CONTENT. Placed
+    // AFTER credits/auth/rate-limit so an admin-actionable or transient failure
+    // that happens to name a policy engine still wins. Not transient: retrying the
+    // same prompt fails the same way, so the message asks for a rephrase instead
+    // of "try again in a moment".
+    // The second group has no trailing \b on purpose: Azure ships these as one
+    // camelCase token ("ResponsibleAIPolicyViolation"), where a word boundary
+    // after "ai" can never match.
+    test: /\b(content[_\s-]?(filter|policy|management)|content exists risk|prohibited[_\s-]?content|safety (system|filter|settings)|unsafe content|jailbreak|flagged (by|as)|moderation)\b|\b(responsible[_\s-]?ai|policy[_\s-]?violation)|内容[^。]{0,12}(违规|风险|审核)|敏感内容/i,
+    userMessage:
+      "The AI provider wouldn't answer this one for content-safety reasons. Try rephrasing it, or switch to a different model.",
   },
   {
     category: "model_unavailable",
