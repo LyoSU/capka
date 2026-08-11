@@ -6,7 +6,7 @@ import { visit, SKIP } from "unist-util-visit";
 import type { Root, RootContent } from "mdast";
 import { usePreview, useFileStatus, type PreviewFile } from "./file-preview";
 import { fileKind, previewKind } from "@/lib/file-kinds";
-import { WORKSPACE_PATH_RE, isSafeWorkspaceRel, workspaceRelFromHref } from "@/lib/chat/artifacts";
+import { freshWorkspacePathRe, isSafeWorkspaceRel, workspaceRelFromHref } from "@/lib/chat/artifacts";
 import { cn } from "@/lib/utils";
 
 /** An mdast link to a workspace file, captioned with just the file name. */
@@ -35,8 +35,8 @@ export function remarkWorkspacePaths() {
 
       if (node.type === "text") {
         const value = node.value;
-        // Fresh regex — WORKSPACE_PATH_RE is global and carries lastIndex state.
-        const re = new RegExp(WORKSPACE_PATH_RE.source, "g");
+        // Fresh regex — the exported one is global and carries lastIndex state.
+        const re = freshWorkspacePathRe();
         const out: RootContent[] = [];
         let last = 0;
         for (let m = re.exec(value); m; m = re.exec(value)) {

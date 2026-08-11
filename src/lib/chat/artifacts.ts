@@ -9,12 +9,34 @@
  * surfaced.
  */
 
-// Matches `/workspace/<relative path>.<ext>`, capturing the relative path. The
-// character class allows nested dirs, spaces, parens and Ukrainian letters in
-// file names, but stops before a second `/workspace/` so adjacent references
-// don't merge into one.
-export const WORKSPACE_PATH_RE =
-  /\/workspace\/((?:(?!\/workspace\/)[\w/.А-Яа-яІіЇїЄєҐґ_\- ()])+\.\w+)/g;
+// What a workspace-relative path may be made of: letters, digits and combining
+// marks in ANY script, plus the separators and punctuation a file name uses.
+// Unicode properties rather than an explicit alphabet — the class used to spell
+// out Latin + Ukrainian, so a file the agent named in Chinese, Greek or Georgian
+// silently stopped being an artifact. Deliberately excludes every shell
+// metacharacter, because the archive route below feeds these paths to a command.
+const PATH_CHARS = String.raw`\p{L}\p{N}\p{M}/._\- ()`;
+
+// Matches `/workspace/<relative path>.<ext>`, capturing the relative path. Stops
+// before a second `/workspace/` so adjacent references don't merge into one.
+// Global + unicode: build clones with `freshWorkspacePathRe()`, never by copying
+// `.source` alone (dropping `u` turns `\p{L}` into a literal and quietly breaks
+// every non-Latin name).
+export const WORKSPACE_PATH_RE = new RegExp(
+  String.raw`/workspace/((?:(?!/workspace/)[${PATH_CHARS}])+\.\w+)`,
+  "gu",
+);
+
+/** A stateless copy of {@link WORKSPACE_PATH_RE} for callers that `exec` in a
+ *  loop — the exported one is global, so its `lastIndex` is shared state. */
+export function freshWorkspacePathRe(): RegExp {
+  return new RegExp(WORKSPACE_PATH_RE.source, WORKSPACE_PATH_RE.flags);
+}
+
+/** Whole-string charset check for a workspace-relative path supplied by a client
+ *  (the archive endpoint shell-quotes these). Charset only: it says nothing about
+ *  traversal — callers must reject `..` themselves, since `.` is a legal char. */
+export const SAFE_WORKSPACE_PATH_RE = new RegExp(`^[${PATH_CHARS}]+$`, "u");
 
 /**
  * A captured path is safe only if it stays inside the workspace: relative, with

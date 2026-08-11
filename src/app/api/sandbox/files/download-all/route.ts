@@ -3,9 +3,7 @@ import { createSession, execCommand, downloadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
 import { sessionMounts, resolveNetwork } from "@/lib/manage/controls/folders";
 import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
-
-// Only allow safe characters in file paths (matches client-side WORKSPACE_PATH_RE)
-const SAFE_PATH_RE = /^[\w/.А-Яа-яІіЇїЄєҐґ_\- ()]+$/;
+import { SAFE_WORKSPACE_PATH_RE } from "@/lib/chat/artifacts";
 
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
@@ -21,7 +19,10 @@ export const GET = apiHandler(async (req: Request) => {
   if (paths.length === 0) {
     return Response.json({ error: "Missing paths" }, { status: 400 });
   }
-  if (paths.some((p) => !SAFE_PATH_RE.test(p) || p.includes(".."))) {
+  // Charset from the one shared source (so a file the agent named in Chinese is
+  // archivable, like it is clickable), plus the traversal check the charset
+  // deliberately doesn't do — `.` is a legal file-name character.
+  if (paths.some((p) => !SAFE_WORKSPACE_PATH_RE.test(p) || p.includes(".."))) {
     return Response.json({ error: "Invalid path" }, { status: 400 });
   }
 
