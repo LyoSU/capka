@@ -31,13 +31,15 @@ function Bar({ committedPct, reservedPct }: { committedPct: number; reservedPct:
  * listing every capped window at once — there are at most three short rows, so
  * hiding them behind a toggle costs more than it saves.
  *
- * With no capped window it used to render nothing, which is where "I have no usage"
- * reports came from: the default tier is unlimited, so on a normal instance NOBODY
- * saw this, and Analytics is admin-only. It now falls back to a plain count of
- * turns — true, useful, and still no money, which stays an admin number.
+ * With no capped window it falls back to a plain count of turns — true, useful,
+ * and still no money, which stays an admin number. The count shows even at zero:
+ * the default tier is unlimited, so on a normal instance the bars never appear,
+ * and rendering nothing is exactly what people report as "my limits are missing".
+ * A visible "0 exchanges" answers "am I being counted?"; an empty page doesn't.
  *
- * Own-key users still see nothing, and that is correct: they pay their provider
- * directly, so there is nothing here that would be about them.
+ * The ONE case that renders nothing is a user who cannot reach the shared key at
+ * all (own_only, or an admin) — no cap applies to them, so there is no budget
+ * here that would be about them.
  */
 export function UsageLimitCard() {
   const t = useTranslations("settings.limits");
@@ -47,7 +49,6 @@ export function UsageLimitCard() {
 
   const capped = billing.limits?.windows.filter((w) => w.limit !== null) ?? [];
   if (capped.length === 0) {
-    if (!billing.turns30d) return null; // nothing used yet, nothing to report
     return (
       <div className="flex items-center gap-2 rounded-xl bg-card px-4 py-3 shadow-panel">
         <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" />

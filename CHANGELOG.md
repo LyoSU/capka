@@ -18,6 +18,9 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Settings → General shows the budget block to everyone the shared-key cap actually applies to. A user with a provider key of their own saw nothing, while their turns on the admin's shared models stayed capped and could still be refused.
+- The budget block reports "0 exchanges" instead of rendering nothing for a user who hasn't run a turn in the last 30 days.
+- A failed `/api/me/billing` request no longer hides the budget block until a full page reload.
 - Editing or deleting an MCP connector now drops its cached tool schemas, instead of leaving the model with the tool list from before the change. Cached schemas are also refreshed in the background every 30 minutes for remote connectors.
 - Sending the first message in a new project chat no longer fails with "Project not found".
 - Workspace files named in any script (Chinese, Greek, Georgian, …) become file chips and artifact tiles, and can be included in "Download all" — the path charset was limited to Latin and Ukrainian.

@@ -31,8 +31,8 @@ export interface BillingInfo {
 // Cached across remounts (the dashboard's keyed <ViewTransition> remounts the
 // route subtree on every navigation). `undefined` = not yet loaded, distinct
 // from a valid `null` result; `inflight` dedups concurrent first-mount fetches.
-let cached: BillingInfo | null | undefined;
-let inflight: Promise<BillingInfo | null> | undefined;
+let cached: BillingInfo | undefined;
+let inflight: Promise<BillingInfo> | undefined;
 
 /**
  * Per-user billing context (key mode, own-key permission, budget status). Loads
@@ -45,14 +45,23 @@ export function useBilling() {
 
   useEffect(() => {
     if (cached !== undefined) return;
+    // A FAILED fetch must not be cached: `null` is a legitimate answer ("no
+    // billing context"), so storing it on a 500/offline hid the budget widget
+    // for the whole tab with no way back short of a hard reload. Failures clear
+    // `inflight` instead, so the next mount (any settings navigation) retries.
     inflight ??= fetch("/api/me/billing")
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null);
-    inflight.then((d) => {
-      cached = d;
-      setData(d);
-      setLoading(false);
-    });
+      .then((r) => (r.ok ? (r.json() as Promise<BillingInfo>) : Promise.reject(new Error(String(r.status)))));
+    inflight.then(
+      (d) => {
+        cached = d;
+        setData(d);
+        setLoading(false);
+      },
+      () => {
+        inflight = undefined;
+        setLoading(false);
+      },
+    );
   }, []);
 
   return { billing: data, loading };

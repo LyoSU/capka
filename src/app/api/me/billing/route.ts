@@ -3,7 +3,7 @@ import { requireSession, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { usage } from "@/lib/db/schema";
 import { getProviderKeyMode, ownKeysAllowed } from "@/lib/settings";
-import { resolveProviderConfig } from "@/lib/providers/resolve";
+import { resolveEnabledConfigs } from "@/lib/providers/resolve";
 import { getLimitStatus } from "@/lib/billing/limits";
 
 /**
@@ -15,13 +15,20 @@ import { getLimitStatus } from "@/lib/billing/limits";
 export const GET = apiHandler(async () => {
   const { userId } = await requireSession();
 
-  const [keyMode, canAddOwn, config] = await Promise.all([
+  const [keyMode, canAddOwn, configs] = await Promise.all([
     getProviderKeyMode(),
     ownKeysAllowed(),
-    resolveProviderConfig(userId),
+    resolveEnabledConfigs(userId),
   ]);
 
-  const onSharedKey = config?.isShared ?? false;
+  // "Can this person spend on the shared key AT ALL" — not "is it their default
+  // config". Own configs always sort first (resolveEnabledConfigs), so reading
+  // isShared off the default meant one personal key hid the budget widget
+  // entirely, even though the admin's shared models stay in the picker and every
+  // turn on them is held and capped by reserveBudget. This is the same question
+  // the enforcement gate asks per turn, so the meter can't go missing on someone
+  // the cap still applies to.
+  const onSharedKey = configs.some((c) => c.isShared);
   // Limits only apply to shared-key spend; skip the (cheap) query otherwise.
   const limits = onSharedKey ? await getLimitStatus(userId) : null;
 
