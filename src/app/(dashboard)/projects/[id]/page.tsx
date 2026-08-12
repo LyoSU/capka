@@ -1,10 +1,11 @@
 import { redirect, notFound } from "next/navigation";
 import { headers } from "next/headers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, like, or } from "drizzle-orm";
 
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { projects, users } from "@/lib/db/schema";
+import { models, projects, users } from "@/lib/db/schema";
+import { splitModelRef } from "@/lib/providers/registry";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { parseAgentProfile } from "@/lib/agents/profile";
 import { getOrgAgentProfile } from "@/lib/settings";
@@ -32,16 +33,41 @@ export default async function ProjectHubPage({
     .limit(1);
   if (!project) notFound();
 
-  const [userRow, orgCeiling] = await Promise.all([
+  // The readable name of the project's default model, read from the synced
+  // catalog rather than guessed from its id. `defaultModel` is stored as a
+  // config-scoped ref, and the catalog keys on the canonical `vendor/model` id —
+  // hence matching the bare id both ways, since a ref may or may not carry the
+  // vendor prefix. A custom model nobody's catalog knows about simply has no row,
+  // and the hub falls back to showing the id as typed.
+  const bareModelId = project.defaultModel ? splitModelRef(project.defaultModel).modelId : null;
+  const [userRow, orgCeiling, modelRow] = await Promise.all([
     db.select({ role: users.role }).from(users).where(eq(users.id, session.user.id)).limit(1).then((r) => r[0]),
     getOrgAgentProfile(),
+    bareModelId
+      ? db
+          .select({ displayName: models.displayName, group: models.group })
+          .from(models)
+          .where(or(eq(models.id, bareModelId), like(models.id, `%/${bareModelId}`)))
+          .limit(1)
+          .then((r) => r[0])
+      : undefined,
   ]);
+
+  // Drop the "Vendor:" the catalog bakes into display names, the same way the
+  // model picker's own trigger does — otherwise the identical model reads as
+  // "Anthropic: Claude …" in the header and "Claude …" in the field below it.
+  const defaultModelName = modelRow?.displayName
+    ? modelRow.group && modelRow.displayName.toLowerCase().startsWith(`${modelRow.group.toLowerCase()}:`)
+      ? modelRow.displayName.slice(modelRow.group.length + 1).trim()
+      : modelRow.displayName
+    : null;
 
   return (
     <ProjectHub
       isAdmin={userRow?.role === "admin"}
       initialTab={initialTab}
       orgCeiling={orgCeiling}
+      defaultModelName={defaultModelName}
       project={{
         id: project.id,
         name: project.name,

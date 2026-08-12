@@ -17,9 +17,18 @@ All notable changes to Capka are documented here. Format follows
 - Form fields are flat — tone plus a 1px border, no inset shadow — and multi-line fields now share the single-line surface instead of being transparent.
 - Tool steps in the activity rail put the filename, search pattern or skill name in the same sunken well the shell command already used, instead of splicing it into the sentence; Telegram step lines carry it too.
 - Chats that belong to a project are grouped under a single project header in the sidebar instead of each row carrying a project badge, so chat titles are no longer truncated to make room for a repeated name.
+- A project page shows its default model's readable name from the synced model catalog (`models.display_name`) instead of the raw model id. A custom model absent from every catalog still shows the id as entered.
+- A project page scrolls as one page: the header and tabs used to be pinned with only the tab's content scrolling, which put a scrollbar in the middle of the page and sliced content along the pane's top edge. Every tab now shares one column width, where Overview was 896px and Settings 672px.
+- A project page's tabs are a proper keyboard widget: arrow keys move between them, the strip is one stop in the tab order, and each tab points a screen reader at the panel it controls.
+- Project rows in `/projects` are clickable across their full width, and the setup line under a project's name (instructions/model/internet) is plain status text rather than a hidden link to Settings.
+- A project's memory box appears once the project has at least one chat, instead of asking for "what the assistant remembered" on a project that has never run.
+- Deleting a project is available on its Settings tab to any owner, not just admins — it was already available to them on the `/projects` row, and `DELETE /api/projects/[id]` already allowed it.
 
 ### Fixed
 
+- The model picker on a project's Settings tab opens fully instead of being clipped to an unusable sliver, which made picking a project's default model impossible. The same fix covers the picker in Connections, Add provider, and the setup wizard.
+- Cards on a project page keep their left and right borders; the tab pane was clipping them off at both edges.
+- The Files tab no longer runs past the bottom of the window when a provider-status, update, or org-change banner is on screen.
 - Sandboxes with egress on can resolve DNS again on hosts whose resolver is a private address (Docker Desktop `192.168.65.x`, corporate DNS, a home router). The egress firewall was dropping the container's own resolver, which looked like "no internet, host DNS ignored". Existing deployments: rebuild the sandbox image (`npm run sandbox:build`) or pull the new one.
 
 ## [0.19.0] - 2026-08-11

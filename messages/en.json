@@ -698,7 +698,6 @@
       "dangerHint": "Workspace files will be deleted. Chats will be kept.",
       "delete": "Delete project",
       "menuOptions": "Project options",
-      "openSettings": "Open settings",
       "empty": "No chats here yet"
     },
     "delete": {

@@ -1021,13 +1021,23 @@ export function ModelPicker({
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // The desktop pill panel is portaled to <body> with position:fixed and
-  // measured coords. It can't be `absolute`: the greeting wraps the trigger in
-  // `animate-blur-rise`, whose transform makes it the visual containing block
-  // and drags/clips any descendant — including absolutely-positioned ones. As a
-  // body child with fixed coords it escapes that subtree and clamps to the
-  // viewport cleanly (same reason the mobile overlay is portaled below).
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  // BOTH desktop panels are portaled to <body> with position:fixed and measured
+  // coords. Neither can be `absolute`: an absolutely-positioned panel is still
+  // clipped by the nearest ancestor whose overflow isn't `visible`, and dragged
+  // by any ancestor transform (only `fixed` — with a containing block outside
+  // that subtree — escapes both). The pill hit the transform half: the greeting
+  // wraps its trigger in `animate-blur-rise`. The field hit the overflow half:
+  // it sits in a `SettingsGroup`, whose `overflow-hidden` chopped a 480px panel
+  // down to whatever was left of a 66px card row, so the project's Settings tab
+  // showed a sliver you couldn't pick a model from. Measuring ancestor clip
+  // rects and shrinking the panel to fit (what this used to do) can narrow it
+  // inside a scroller but is powerless against `overflow: hidden`.
+  //
+  // Portaling to <body> is also safe inside a base-ui Dialog: its outside-press
+  // detection skips targets whose top-level ancestor holds no
+  // `[data-base-ui-inert]` marker, i.e. anything mounted after the dialog —
+  // clicking a model there picks it instead of dismissing the dialog.
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const close = useCallback(() => {
@@ -1089,7 +1099,7 @@ export function ModelPicker({
   // exactly what useLayoutEffect is for — the set-state-in-effect rule is a false
   // positive here (there's no external system to read this from during render).
   useLayoutEffect(() => {
-    if (!open || isMobile || variant !== "pill") {
+    if (!open || isMobile) {
       // Clears measured position on close; measurement must live in useLayoutEffect.
       setPos(null);
       return;
@@ -1098,70 +1108,23 @@ export function ModelPicker({
       const trigger = triggerRef.current;
       if (!trigger) return;
       const margin = 8;
-      const gap = 4; // matches the old mt-1
-      const panelH = 480; // h-[30rem]
+      const gap = 4; // matches the old mt-1/mb-1
+      const panelH = 480; // the preferred h-[30rem]
       const vw = document.documentElement.clientWidth;
       const vh = document.documentElement.clientHeight;
-      const width = Math.min(576 /* 36rem */, vw - margin * 2);
       const r = trigger.getBoundingClientRect();
+      // The pill is a ~200px control, so it names its own width; the field is a
+      // full-width input the panel should never look narrower than.
+      const width = Math.min(variant === "pill" ? 576 /* 36rem */ : Math.max(544 /* 34rem */, r.width), vw - margin * 2);
       const left = Math.max(margin, Math.min(r.left, vw - width - margin));
-      // Open downward; flip above the trigger if it would run off the bottom.
-      const top = r.bottom + gap + panelH <= vh - margin
-        ? r.bottom + gap
-        : Math.max(margin, r.top - gap - panelH);
-      setPos({ top, left, width });
-    };
-    compute();
-    window.addEventListener("resize", compute);
-    window.addEventListener("scroll", compute, true);
-    return () => {
-      window.removeEventListener("resize", compute);
-      window.removeEventListener("scroll", compute, true);
-    };
-  }, [open, isMobile, variant]);
-
-  // Field panel placement — measured on open (and on resize/scroll while open).
-  // The panel prefers opening downward; when the space below the trigger can't
-  // fit it and above is roomier, it flips up. Either way its height is capped
-  // to the space actually visible: not just the viewport, but the tightest
-  // overflow ancestor (a settings pane's scroller, a dialog body) — an
-  // absolutely-positioned panel poking above a scroller's top edge is clipped
-  // with no way to scroll to it, so viewport-only math rendered a decapitated
-  // panel whose search bar and list head were cut off.
-  const [fieldPos, setFieldPos] = useState<{ up: boolean; maxH: number; maxW: number } | null>(null);
-  useLayoutEffect(() => {
-    if (!open || isMobile || variant !== "field") {
-      // Clears measured placement on close; measurement must live in useLayoutEffect.
-      setFieldPos(null);
-      return;
-    }
-    const compute = () => {
-      const trigger = triggerRef.current;
-      if (!trigger) return;
-      const margin = 8;
-      const gap = 4; // matches mt-1/mb-1
-      const panelH = 480; // the preferred h-[30rem]
-      let clipTop = 0;
-      let clipBottom = document.documentElement.clientHeight;
-      let clipRight = document.documentElement.clientWidth;
-      for (let el = trigger.parentElement; el; el = el.parentElement) {
-        const st = getComputedStyle(el);
-        const cr = el.getBoundingClientRect();
-        if (st.overflowY !== "visible") {
-          clipTop = Math.max(clipTop, cr.top);
-          clipBottom = Math.min(clipBottom, cr.bottom);
-        }
-        if (st.overflowX !== "visible") clipRight = Math.min(clipRight, cr.right);
-      }
-      const r = trigger.getBoundingClientRect();
-      const below = clipBottom - r.bottom - gap - margin;
-      const above = r.top - clipTop - gap - margin;
+      // Open downward; flip above the trigger when the space below can't fit the
+      // panel and above is roomier. Height follows the side actually chosen, so a
+      // trigger near either edge gets a short panel instead of a clipped one.
+      const below = vh - r.bottom - gap - margin;
+      const above = r.top - gap - margin;
       const up = below < panelH && above > below;
-      setFieldPos({
-        up,
-        maxH: Math.round(Math.min(panelH, Math.max(240, up ? above : below))),
-        maxW: Math.round(Math.max(240, clipRight - r.left - margin)),
-      });
+      const height = Math.round(Math.min(panelH, Math.max(240, up ? above : below)));
+      setPos({ top: up ? Math.max(margin, r.top - gap - height) : r.bottom + gap, left, width, height });
     };
     compute();
     window.addEventListener("resize", compute);
@@ -1399,28 +1362,17 @@ export function ModelPicker({
         </button>
       )}
 
-      {/* Field variant: anchored to its full-width trigger, flipping above it
-          when the viewport has more room there (see the fieldPos measurement). */}
-      {open && !isMobile && variant === "field" && fieldPos && (
-        <div
-          onKeyDown={(e) => { if (e.key === "Escape") close(); }}
-          style={{ height: fieldPos.maxH, maxWidth: fieldPos.maxW }}
-          className={`absolute left-0 z-50 flex w-[34rem] min-w-full overflow-hidden rounded-xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150 ${
-            fieldPos.up ? "bottom-full mb-1" : "top-full mt-1"
-          }`}
-        >
-          {renderList("vertical")}
-        </div>
-      )}
-
-      {/* Pill variant: portaled to <body> with fixed coords so the greeting's
-          animate-blur-rise transform can't drag or clip it. */}
-      {open && !isMobile && variant === "pill" && pos && typeof document !== "undefined" && createPortal(
+      {/* Desktop panel — portaled to <body> with fixed, viewport-clamped coords so
+          no ancestor's overflow or transform can clip it (see the `pos` comment).
+          popoverRef is load-bearing: the panel is no longer a DOM descendant of
+          containerRef, so without it the outside-click handler would count a click
+          on a model row as "outside" and close the panel before onClick fires. */}
+      {open && !isMobile && pos && typeof document !== "undefined" && createPortal(
         <div
           ref={popoverRef}
           onKeyDown={(e) => { if (e.key === "Escape") close(); }}
-          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
-          className="z-50 flex h-[30rem] overflow-hidden rounded-xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150"
+          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, height: pos.height }}
+          className="z-50 flex overflow-hidden rounded-xl bg-popover shadow-overlay animate-in fade-in-0 zoom-in-95 duration-150"
         >
           {renderList("vertical")}
         </div>,

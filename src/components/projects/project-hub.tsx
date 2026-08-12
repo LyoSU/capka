@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import {
-  Plus, Settings2, Trash2, FolderKanban, Cpu, Globe, FileText, MessageSquare, Loader2, RefreshCw, Check, ChevronLeft,
+  Plus, Trash2, FolderKanban, Cpu, Globe, FileText, MessageSquare, Loader2, RefreshCw, Check, ChevronLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 type ChatRow = { id: string; title: string | null; updatedAt: string | null };
 export type HubTab = "overview" | "files" | "chats" | "settings";
+
+/** One panel swapped between four tabs, so one id — every tab's `aria-controls`
+ *  points here and the panel names itself after whichever tab is selected. */
+const HUB_PANEL_ID = "hub-tabpanel";
 
 const noop = async () => {};
 
@@ -57,10 +61,15 @@ export function ProjectHub({
   isAdmin,
   initialTab,
   orgCeiling,
+  defaultModelName,
 }: {
   project: Project;
   isAdmin?: boolean;
   initialTab?: HubTab;
+  /** The default model's readable name from the synced catalog, resolved
+   *  server-side. Null for a custom model no catalog lists — the header then
+   *  shows the id as typed, which is all anyone can honestly say about it. */
+  defaultModelName?: string | null;
   /** The instance-wide ceiling this project's profile is clamped by. Resolved
    *  server-side so the settings tab can show a capped switch as locked instead of
    *  letting it save a value the run would then ignore. */
@@ -72,6 +81,7 @@ export function ProjectHub({
   const locale = useLocale();
   const [project, setProject] = useState<Project>(initial);
   const [tab, setTabState] = useState<HubTab>(initialTab ?? "overview");
+  const tablistRef = useRef<HTMLDivElement>(null);
 
   /**
    * The URL is the authority on which tab is open; local state only mirrors it so a
@@ -139,15 +149,33 @@ export function ProjectHub({
 
   return (
     <PreviewProvider>
-      {/* w-full is load-bearing: the dashboard main is a flex column, and mx-auto
-          disables its cross-axis stretch — without an explicit width the hub
-          collapses to the header's max-content (~420px). */}
-      <div className="animate-fade-in mx-auto flex h-full w-full max-w-4xl flex-col px-4 py-6">
+      {/* ONE scroll region, and it spans the full pane rather than sitting inside
+          the centred column.
+          It used to be the other way round: the header and tabs were pinned and
+          only the tab's content scrolled, inside `mx-auto max-w-4xl`. That put the
+          scrollbar on the right edge of an 864px column — floating in open space
+          ~350px from the content it scrolled, reading as an artefact rather than a
+          control — and it sliced text along an invisible line under the tabs,
+          because a scrollport edge cuts mid-glyph with nothing to say it meant to.
+          The whole page scrolling is also what every other dashboard page does
+          (see settings/layout.tsx), so the scrollbar lands at the window edge
+          where people already look for it.
+          scrollbar-gutter:stable reserves that lane, so content doesn't shift
+          sideways the moment a tab becomes tall enough to scroll. */}
+      <div className="animate-fade-in h-full overflow-y-auto [scrollbar-gutter:stable]">
+        {/* max-w-3xl, one measure for every tab. Overview used to be 896px wide and
+            Settings 672px, so switching tabs visibly changed the page's width —
+            and a 900px card holding one short chat title is what made the overview
+            read as empty. 768px is wide enough for the file browser and still a
+            comfortable measure for a column of form rows. */}
+        <div className="mx-auto w-full max-w-3xl px-4 py-6">
         {/* Header. The way back to the project list lives here, not only in the
             sidebar: the sidebar's Projects section shows five, so on an instance
             with fewer there used to be no link to the full list at all, and from
             inside a project nothing said where you were. */}
-        <div className="mb-4">
+        {/* mb-6: the header used to end 16px above the tab rail, so the project's
+            identity and the page's navigation ran together as one dense block. */}
+        <div className="mb-6">
           <div className="flex items-center gap-1">
             <SidebarTrigger className="-ml-1 size-8 shrink-0 md:hidden" />
             <Link
@@ -159,11 +187,16 @@ export function ProjectHub({
             </Link>
           </div>
 
-          <div className="mt-1 flex items-start justify-between gap-3">
+          <div className="mt-1.5 flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="truncate text-xl font-semibold">{project.name}</h1>
+              {/* text-2xl, not text-xl: at 20px the project's name measured the same
+                  as the section headings below it, so the page had no subject — just
+                  five things at one level. A settings page can sit at 20px because
+                  its title is a category; this one names the object everything else
+                  on the page is about. */}
+              <h1 className="truncate text-2xl font-semibold tracking-tight">{project.name}</h1>
               {project.description && (
-                <p className="mt-0.5 text-sm text-muted-foreground text-pretty">{project.description}</p>
+                <p className="mt-1 text-sm text-muted-foreground text-pretty">{project.description}</p>
               )}
             </div>
             <Button size="sm" className="shrink-0" nativeButton={false} render={<Link href={newChatHref} />}>
@@ -175,17 +208,15 @@ export function ProjectHub({
           {/* How this project is set up, as one quiet line under its name — this
               was a bordered "Context" card on the overview, which gave three
               read-only facts the same visual weight as the workspace. It reads as
-              identity here, and clicking it goes to the tab that changes it, so
-              the header no longer needs a Settings button next to a Settings tab. */}
-          {/* No aria-label here: it would REPLACE the three facts below as the
-              accessible name, so a screen reader heard "Settings" and none of the
-              instructions/model/internet state everyone else can read. The purpose
-              is appended as a visually-hidden span instead. */}
-          <button
-            type="button"
-            onClick={() => setTab("settings")}
-            className="group mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
+              identity here.
+              Text, not a button. It used to be one big clickable line jumping to
+              Settings, with a gear that faded in on hover — so the only hint that
+              a line of status was a control appeared once you had already pointed
+              at it, and a click meant to select the model's name navigated away
+              instead. "Click the status to change it" also isn't a metaphor office
+              staff bring with them. The Settings tab is labelled and sits 40px
+              below, so the shortcut cost more confusion than it saved clicks. */}
+          <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <FileText className="size-3.5" />
               {project.systemPrompt ? t("hasInstructions") : t("noInstructions")}
@@ -193,25 +224,57 @@ export function ProjectHub({
             <span className="inline-flex items-center gap-1.5">
               <Cpu className="size-3.5" />
               <span className="max-w-40 truncate">
-                {project.defaultModel ? displayModelName(project.defaultModel) : t("defaultModel")}
+                {project.defaultModel
+                  ? defaultModelName ?? displayModelName(project.defaultModel)
+                  : t("defaultModel")}
               </span>
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Globe className="size-3.5" />
               {project.sandboxNetwork === "bridge" ? t("internetOn") : t("internetOff")}
             </span>
-            <Settings2 className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100" />
-            <span className="sr-only">{t("openSettings")}</span>
-          </button>
+          </p>
         </div>
 
-        {/* Tabs */}
-        <div role="tablist" aria-label={t("tabsLabel")} className="mb-4 flex gap-1 border-b">
+        {/* Tabs. A `role="tablist"` announces a widget with rules attached, and
+            this one kept none of them: no tab pointed at its panel, every tab was
+            its own stop in the tab order, and the arrow keys did nothing. A screen
+            reader heard "tab, 1 of 4" and had no panel to follow, while a keyboard
+            user paid four Tab presses to walk past a control they weren't using —
+            worse than plain buttons would have been. */}
+        <div
+          ref={tablistRef}
+          role="tablist"
+          aria-label={t("tabsLabel")}
+          className="mb-4 flex gap-1 border-b"
+          onKeyDown={(e) => {
+            const i = tabs.findIndex((x) => x.key === tab);
+            const next =
+              e.key === "ArrowRight" ? (i + 1) % tabs.length
+              : e.key === "ArrowLeft" ? (i - 1 + tabs.length) % tabs.length
+              : e.key === "Home" ? 0
+              : e.key === "End" ? tabs.length - 1
+              : -1;
+            if (next < 0) return;
+            // Arrows own horizontal movement inside a tablist, so stop the page
+            // from also scrolling sideways under it.
+            e.preventDefault();
+            setTab(tabs[next].key);
+            // Focus has to travel with the selection, or the next arrow press is
+            // read from a tab that is no longer the current one.
+            tablistRef.current?.querySelector<HTMLButtonElement>(`#hub-tab-${tabs[next].key}`)?.focus();
+          }}
+        >
           {tabs.map((tb) => (
             <button
               key={tb.key}
+              id={`hub-tab-${tb.key}`}
               role="tab"
               aria-selected={tab === tb.key}
+              aria-controls={HUB_PANEL_ID}
+              // Roving tabindex: the whole strip is ONE stop in the tab order and
+              // the arrows move within it — that's the contract role="tab" implies.
+              tabIndex={tab === tb.key ? 0 : -1}
               onClick={() => setTab(tb.key)}
               className={cn(
                 "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
@@ -225,10 +288,15 @@ export function ProjectHub({
           ))}
         </div>
 
-        {/* The tab pane is the scroll container (the dashboard main is
-            overflow-hidden), so long content scrolls under the pinned header +
-            tabs instead of being clipped. */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Plain content, no overflow of its own — the page above is the one and
+            only scroller. This box used to be `overflow-y-auto`, which also turned
+            the computed `overflow-x` into `auto` (per the CSS overflow spec,
+            `visible` on one axis can't survive a non-visible other axis) and so
+            clipped sideways at exactly the card edges — and `--elev-panel` draws a
+            card's visible border as an OUTSET 1px ring, so every card lost its left
+            and right border. With no clipping box here, there is nothing to bleed
+            out of. */}
+        <div id={HUB_PANEL_ID} role="tabpanel" aria-labelledby={`hub-tab-${tab}`}>
           {tab === "overview" && (
             <OverviewTab
               project={project}
@@ -243,7 +311,15 @@ export function ProjectHub({
           )}
 
           {tab === "files" && (
-            <div className="h-[calc(100dvh-14rem)] overflow-hidden rounded-xl border">
+            /* The file browser scrolls internally, so it needs a height of its own.
+               It was `calc(100dvh - 14rem)`, where 14rem stood for "header + tabs" —
+               but the dashboard stacks up to three banners (provider status, update,
+               org change) above all this, and each one pushed the browser that much
+               further past the bottom of the window, cut off exactly when there was
+               something to tell the user. A plain fraction of the viewport subtracts
+               no chrome it has to keep guessing at, and the page scrolls to reveal
+               the rest. min-h keeps it usable on a short laptop window. */
+            <div className="h-[60vh] min-h-80 overflow-hidden rounded-xl bg-card shadow-hairline">
               <WorkspaceBrowser
                 target={target}
                 folderSync={folderSync}
@@ -260,10 +336,15 @@ export function ProjectHub({
               project={project}
               isAdmin={isAdmin}
               orgCeiling={orgCeiling}
-              onSaved={setProject}
+              // refresh() re-runs the server component so the header picks up the
+              // new model's catalog name. Without it, saving a different model left
+              // the old name in the identity line until a full reload — the local
+              // row updates, but the resolved name is a server prop.
+              onSaved={(p) => { setProject(p); router.refresh(); }}
               onDelete={() => setDeleteOpen(true)}
             />
           )}
+        </div>
         </div>
       </div>
 
@@ -325,34 +406,57 @@ function OverviewTab({
         </section>
       )}
 
-      {/* One row, not a card with a heading and two lines of nothing: on a fresh
-          project the whole section used to be a big box reading "0 files". */}
-      <SettingsGroup>
-        <SettingsRow
-          title={t("workspace")}
-          hint={
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>{fileCount === null ? "…" : t("fileCount", { n: fileCount })}</span>
-              {folderCount > 0 && (
-                <span className="inline-flex items-center gap-1">
-                  {syncing
-                    ? <RefreshCw className="h-3 w-3 animate-spin" />
-                    : <Check className="h-3 w-3 text-success" />}
-                  {t("folderCount", { n: folderCount })}
-                </span>
-              )}
+      {/* Same shape as the chats block above: a heading with one quiet action on
+          the right, then a card. This was the only block on the overview with no
+          heading at all — a card floating between two titled sections, which is
+          what made the page read as assembled rather than laid out. Its "Open
+          files" was also the page's only outline Button, competing with the one
+          primary action in the header; as a text action beside the heading it
+          matches "All chats" and the row it opens. */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-medium">{t("workspace")}</h2>
+          <button onClick={onOpenFiles} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+            {t("openFiles")}
+          </button>
+        </div>
+        {/* Deliberately the same row geometry as ChatRowLink — icon, text, meta
+            right — so the overview is two instances of one card, not two designs. */}
+        <div className="flex items-center gap-2 rounded-xl bg-card px-4 py-2.5 text-sm shadow-hairline">
+          <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">{fileCount === null ? "…" : t("fileCount", { n: fileCount })}</span>
+          {folderCount > 0 && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+              {syncing
+                ? <RefreshCw className="h-3 w-3 animate-spin" />
+                : <Check className="h-3 w-3 text-success" />}
+              {t("folderCount", { n: folderCount })}
             </span>
-          }
-          control={<Button variant="outline" size="sm" onClick={onOpenFiles}>{t("openFiles")}</Button>}
-        />
-      </SettingsGroup>
+          )}
+        </div>
+      </section>
 
       {/* Memory gets its own heading. It was nested inside the "Context" card,
           under a label, which made the one editable thing on the overview look
-          like a footnote to three read-only facts. */}
-      <SettingsSection title={t("memoryLabel")} description={t("memoryHint")}>
-        <MemoryEditor projectId={project.id} />
-      </SettingsSection>
+          like a footnote to three read-only facts.
+          Hidden until the project has been used at all: "what the assistant
+          remembered" is an odd thing to hand someone as a blank box on a project
+          that has never run once, and it competed with the one action a fresh
+          project actually wants — start the first chat. Files stay available above
+          it, because dropping documents in before the first chat is a real way to
+          begin. */}
+      {/* An h2 like its two neighbours, not SettingsSection's h3: as an h3 the
+          markup said memory was a SUBSECTION of the recent chats above it, which
+          is what a screen reader read out. */}
+      {!empty && (
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-sm font-medium">{t("memoryLabel")}</h2>
+            <p className="text-sm leading-relaxed text-muted-foreground">{t("memoryHint")}</p>
+          </div>
+          <MemoryEditor projectId={project.id} />
+        </section>
+      )}
     </div>
   );
 }
@@ -452,7 +556,9 @@ function SettingsTab({
   }
 
   return (
-    <div className="max-w-2xl space-y-8 pb-4">
+    /* No max-width of its own: the hub gives every tab one column, so Settings
+       no longer narrows the page to 672px while Overview stayed at 896px. */
+    <div className="space-y-8 pb-4">
       <SettingsSection title={th("basics")}>
         <SettingsGroup>
           <SettingsRow title={t("form.name")} labelFor="project-name">
@@ -528,22 +634,32 @@ function SettingsTab({
         />
       </SettingsSection>
 
-      {isAdmin && (
-        <SettingsSection title={th("dangerTitle")} description={th("dangerHint")}>
-          <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={onDelete}>
-            <Trash2 className="h-4 w-4" />
-            {th("delete")}
-          </Button>
-        </SettingsSection>
-      )}
+      {/* Not admin-gated. `DELETE /api/projects/[id]` is `requireRole("admin",
+          "user")` scoped to the owner, and /projects already gives every owner a
+          trash button on the row — so gating it here only meant a regular user
+          could delete their project from the list but not from the project's own
+          settings, which is the first place anyone looks. The confirmation dialog,
+          not a hidden button, is what protects this. */}
+      <SettingsSection title={th("dangerTitle")} description={th("dangerHint")}>
+        <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={onDelete}>
+          <Trash2 className="h-4 w-4" />
+          {th("delete")}
+        </Button>
+      </SettingsSection>
 
       {/* Sticky, because the form is taller than the pane: the Save button used to
           sit below the fold, so the way to keep an edit was to scroll for it. It
           appears only once there's something to save, and Discard is next to it —
           the honest pair, since leaving the tab does not warn. */}
       {dirty && (
-        <div className="sticky bottom-0 flex items-center gap-3 border-t bg-background/85 py-3 backdrop-blur">
-          <span className="mr-auto text-xs text-muted-foreground">{th("unsaved")}</span>
+        /* It slides in rather than appearing: this bar arrives on the first
+           keystroke, and a bar that materialises under your hands reads as the
+           page glitching. 150ms is under the reduced-motion global kill switch in
+           globals.css, so it simply appears for anyone who asked for that. */
+        <div className="sticky bottom-0 flex items-center gap-3 border-t bg-background/85 py-3 backdrop-blur animate-in fade-in-0 slide-in-from-bottom-2 duration-150">
+          {/* role="status" on the sentence, NOT the bar: a live region containing
+              Save and Discard would re-announce the buttons on every change. */}
+          <span role="status" className="mr-auto text-xs text-muted-foreground">{th("unsaved")}</span>
           {/* "Discard", not "Cancel": next to Save, "Cancel" reads as cancelling
               the save rather than throwing the edits away. */}
           <Button variant="ghost" size="sm" onClick={reset} disabled={saving}>{tc("discard")}</Button>
@@ -638,7 +754,15 @@ function ChatsList({ chats, locale, emptyLabel }: { chats: ChatRow[] | null; loc
   );
 }
 
-/** The card the chat rows sit in — same shape as SettingsGroup. */
+/** The card the chat rows sit in.
+ *
+ *  shadow-hairline, not shadow-panel: a card that groups rows sits IN the page, it
+ *  doesn't float above it, and `--elev-panel` adds two soft drop-shadow layers on
+ *  top of the ring for a lift this container hasn't earned — three of them stacked
+ *  down the overview read as a card grid. The ring is what was doing the work
+ *  anyway: `--card` measures 1.07:1 against the page, so the boundary is the
+ *  hairline, not the shadow. Depth stays reserved for things that genuinely cover
+ *  other content (`--elev-overlay`). */
 function ChatList({ children }: { children: React.ReactNode }) {
-  return <div className="divide-y overflow-hidden rounded-xl bg-card shadow-panel">{children}</div>;
+  return <div className="divide-y overflow-hidden rounded-xl bg-card shadow-hairline">{children}</div>;
 }

@@ -556,7 +556,18 @@ export function splitModelRef(value: string): { configId: string | null; modelId
   return { configId: value.slice(0, idx), modelId: value.slice(idx + 1) };
 }
 
-/** Short, human-friendly model name from any encoded or bare value. */
+/**
+ * Last-resort label for a model value: the bare id, vendor prefix removed.
+ *
+ * Deliberately NOT a prettifier. The readable name lives in the `models` table's
+ * `display_name`, synced from OpenRouter / LiteLLM / Models.dev — so any caller
+ * that can reach the catalog must read it from there (the picker does; the
+ * project hub resolves it server-side). Guessing here would mean a hardcoded
+ * list of model and brand spellings in the registry, which is stale the week
+ * after it's written. A model that reaches this function has no catalog row at
+ * all — it's a custom id somebody typed in themselves, and echoing exactly what
+ * they typed is more honest than dressing it up.
+ */
 export function displayModelName(value: string): string {
   if (!value) return "select model";
   const { modelId } = parseModelId(value);
