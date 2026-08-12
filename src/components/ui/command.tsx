@@ -74,7 +74,9 @@ function CommandInput({
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
     <div data-slot="command-input-wrapper" className="p-1 pb-0">
-      <InputGroup className="h-8! rounded-lg! border-input bg-field shadow-none! *:data-[slot=input-group-addon]:pl-2!">
+      {/* No `shadow-none!` any more: it existed to cancel the inset well the
+          shared field style used to carry, and fields are flat now. */}
+      <InputGroup className="h-8! rounded-lg! border-input bg-field *:data-[slot=input-group-addon]:pl-2!">
         <CommandPrimitive.Input
           data-slot="command-input"
           className={cn(

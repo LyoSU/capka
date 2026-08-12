@@ -74,7 +74,6 @@
   --shadow-panel: var(--elev-panel);
   --shadow-raised: var(--elev-raised);
   --shadow-overlay: var(--elev-overlay);
-  --inset-shadow-field: var(--elev-field);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -167,7 +166,7 @@
      drift apart (we had four hand-rolled variants of this before). Read the
      ladder as: hairline (flush divider) < btn (a control on the page) < panel
      (grouped content) < raised (a floating pane) < overlay (menus, dialogs).
-     `field` is the only one that goes *down* — a sunken input well.
+     Every rung goes UP. There is no sunken one — see the note below the ladder.
 
      Shadow colour is a warm near-black on the palette's own hue (75), not pure
      black: a neutral shadow over warm paper greys reads faintly blue-grey. */
@@ -183,11 +182,13 @@
      lifted panel. The tight layer says "off the page", the wide one keeps it soft. */
   --elev-overlay: 0 0 0 1px var(--border-strong), 0 2px 6px oklch(0.25 0.012 75 / 0.06),
     0 12px 32px oklch(0.25 0.012 75 / 0.10);
-  /* 0.12, not the 0.07 this started at: at 0.07 a sunken well was invisible
-     against warm paper greys only ~1.5% apart in lightness, so the "you may skip
-     this" container it's supposed to draw never appeared. The well's edge, not its
-     fill, is what does the work here. */
-  --elev-field: inset 0 1px 2px oklch(0.25 0.012 75 / 0.12);
+  /* There is no downward rung. A field used to carry an inset shadow, and it was
+     a third statement of something the 1px border and the focus ring already
+     said — while its sunken look meant "editable", which then leaked onto
+     read-only chips and made a filename look like an input. Fields are flat now:
+     `--field` for tone, `--input` for the border, the ring for focus. Read-only
+     machine text (filenames, commands, tool output) is CODE and takes the
+     inline-code chip further down this file. */
 }
 
 .dark {
@@ -276,7 +277,6 @@
      overlay read as covering content rather than blending into it. */
   --elev-overlay: 0 0 0 1px oklch(1 0 0 / 0.22), 0 2px 8px oklch(0 0 0 / 0.40),
     0 14px 40px oklch(0 0 0 / 0.55);
-  --elev-field: inset 0 1px 2px oklch(0 0 0 / 0.30);
 }
 
 /* Modern "speed morph" reveal: content decelerates out of a soft blur. Used for

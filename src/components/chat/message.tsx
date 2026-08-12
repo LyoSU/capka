@@ -496,14 +496,19 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
         {isRunning ? d.activeLabel : doneLabel}
         {isError ? ` · ${t("failed")}` : ""}
       </span>
-      {/* The literal thing acted on — a filename, a command — sits in its own
-          sunken well rather than trailing the sentence as dim text. The well is
-          what makes the row LESS technical, not more: it reads as "machine
-          detail, skippable", so the eye can take the sentence in the user's own
-          language and skip the token, instead of having to parse a mono fragment
-          spliced into the middle of a phrase. */}
+      {/* The literal thing acted on — a filename, a command — gets its own chip
+          rather than trailing the sentence as dim text. The chip is what makes
+          the row LESS technical, not more: it reads as "machine detail,
+          skippable", so the eye can take the sentence in the user's own language
+          and skip the token, instead of having to parse a mono fragment spliced
+          into the middle of a phrase.
+          Styled as INLINE CODE (globals.css `[data-streamdown="inline-code"]`).
+          A filename is the same kind of thing here as it is in the answer's
+          prose, so it looks the same in both. It used to wear the sunken field
+          treatment, which read as an input you could type into — the observation
+          that eventually flattened fields across the app. */}
       {d.detail && (
-        <span className="min-w-0 truncate rounded-md bg-field px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground inset-shadow-field">
+        <span className="min-w-0 truncate rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
           {d.detail}
         </span>
       )}
@@ -692,7 +697,10 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: stri
             {t("technicalDetails")}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <pre className="mt-1.5 ml-[30px] max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-field p-2 font-mono text-[11px] text-muted-foreground inset-shadow-field">
+            {/* Same code treatment as the step chip and the answer's inline code
+                — read-only machine text is one thing throughout, and none of it
+                is a field to type in. */}
+            <pre className="mt-1.5 ml-[30px] max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-[11px] text-muted-foreground">
               {detail}
             </pre>
           </CollapsibleContent>

@@ -350,8 +350,8 @@ function SidebarInput({
       data-slot="sidebar-input"
       data-sidebar="input"
       // `bg-field` rather than overriding back to `bg-background`: the search box
-      // is a sunken well like every other input, and the sidebar sits on its own
-      // (recessed) surface, so `--background` read as an arbitrary third grey here.
+      // takes the same surface as every other input, and the sidebar sits on its
+      // own (recessed) surface, so `--background` read as an arbitrary third grey.
       className={cn("h-8 w-full bg-field", className)}
       {...props}
     />
