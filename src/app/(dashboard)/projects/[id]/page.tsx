@@ -1,11 +1,12 @@
 import { redirect, notFound } from "next/navigation";
 import { headers } from "next/headers";
-import { and, eq, like, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { getAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { models, projects, users } from "@/lib/db/schema";
 import { splitModelRef } from "@/lib/providers/registry";
+import { idMatch } from "@/lib/models/catalog";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { parseAgentProfile } from "@/lib/agents/profile";
 import { getOrgAgentProfile } from "@/lib/settings";
@@ -47,7 +48,7 @@ export default async function ProjectHubPage({
       ? db
           .select({ displayName: models.displayName, group: models.group })
           .from(models)
-          .where(or(eq(models.id, bareModelId), like(models.id, `%/${bareModelId}`)))
+          .where(idMatch(bareModelId))
           .limit(1)
           .then((r) => r[0])
       : undefined,

@@ -446,10 +446,19 @@ export async function getModelContextLength(modelId: string): Promise<number | n
 
 const effortsCache = new Map<string, CacheEntry<string[] | null>>();
 
-/** Same fuzzy id match as getModelPrice: exact, then provider-stripped, then any
- *  row whose id ends in `/<stripped>` (a bare "glm-5.2" from a custom endpoint
- *  against OpenRouter's "z-ai/glm-5.2"). */
-const idMatch = (modelId: string) => {
+/**
+ * Fuzzy id match against the catalog: exact, then provider-stripped, then any
+ * row whose id ends in `/<stripped>` (a bare "glm-5.2" from a custom endpoint
+ * against OpenRouter's "z-ai/glm-5.2").
+ *
+ * Exported because a stored model ref and a catalog row disagree about the
+ * vendor prefix in BOTH directions — a ref can carry one the row lacks and vice
+ * versa — so all three clauses are needed, and a caller that writes only the two
+ * obvious ones silently fails to resolve exactly the models this exists for.
+ * Anyone looking a model id up in `models` should call this rather than rebuild
+ * it; there were five hand-rolled copies before it had a name worth importing.
+ */
+export const idMatch = (modelId: string) => {
   const stripped = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
   return or(eq(models.id, modelId), eq(models.id, stripped), like(models.id, `%/${stripped}`));
 };
