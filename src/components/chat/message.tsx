@@ -376,49 +376,33 @@ function WorkspaceLinks({ text, chatId, live, touched }: { text: string; chatId:
 }
 
 
-/** How many trailing characters dissolve into the blur. */
-const TAIL_CHARS = 18;
-
-/** Plain streamed text whose newest characters resolve out of a soft blur — so
- *  "these words are still landing, don't read them as final" is visible without
- *  any label saying so.
- *
- *  No caret here, deliberately. The dissolving tail already marks the write head;
- *  parking a solid bar immediately after blurred text states the same fact a
- *  second time and reads as a glitch rather than a cursor. One marker per
- *  surface: prose that we render ourselves gets the tail, and the answer body —
- *  which goes through Streamdown and so can't have its trailing characters
- *  wrapped — gets a caret instead (see `TextContent`).
- *
- *  Cost is flat in stream speed: one static-CSS span, zero per-token animation,
- *  no extra state. That's what makes it admissible on the hottest surface in the
- *  app (see the frequency rule on `step-in` in globals.css). */
-function StreamingText({ text, live }: { text: string; live?: boolean }) {
-  if (!live) return <>{text}</>;
-  const cut = Math.max(0, text.length - TAIL_CHARS);
-  return (
-    <>
-      {text.slice(0, cut)}
-      <span className="stream-tail">{text.slice(cut)}</span>
-    </>
-  );
-}
-
 /** The model's reasoning — a node on the same rail as the tool actions, marked
  *  with a lightbulb. The thought text shows inline: the surrounding ActivityGroup
  *  owns the collapse, so once a run is expanded the user reads the thinking
  *  directly (no second click). The badge tops-aligns to the first line so it
- *  reads as a paragraph annotation rather than a centred single-line row. */
-function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
+ *  reads as a paragraph annotation rather than a centred single-line row.
+ *
+ *  The thought text renders plainly, with NO "still arriving" treatment of its own.
+ *  It used to end in a dissolving tail (the last ~18 characters blurred behind an
+ *  alpha mask), and that failed twice over. It made text unreadable rather than
+ *  provisional — reasoning is `whitespace-pre-wrap`, so a newline inside the tail
+ *  spread one horizontal mask across a whole extra line. And it could not tell
+ *  "this thought is still being written" from "this thought is finished, the model
+ *  is now busy elsewhere": a reasoning part carries no streaming/done state (see
+ *  `contracts.ts`), so the tail was driven by position in the rail, and it sat
+ *  frozen over final text for as long as the model paused before its first answer
+ *  token. The live signal a run genuinely needs is already carried once, in the
+ *  group header's ticking "Thinking 12s" and the running step's spinner. */
+function ReasoningRow({ text }: { text: string }) {
   // Strip leaked chain-of-thought wrapper tags and the extra leading break some
   // models open a thought with — recomputed only when the streamed text grows.
   const clean = useMemo(() => cleanReasoning(text), [text]);
   return (
     <div className="animate-step-in relative py-1 pl-10 text-muted-foreground">
-      {/* No pulse on the badge while streaming: the text below now carries the
-          "still arriving" signal via its dissolving tail, and the rail already
-          shows a live spinner on the running step. Three motions for one fact
-          reads as a busy interface, not an informative one. */}
+      {/* No pulse on the badge while streaming: the group header above already
+          ticks a live duration and the rail shows a spinner on the running step.
+          Three motions for one fact reads as a busy interface, not an
+          informative one. */}
       <span className="absolute left-0 top-1 grid h-[27px] w-[27px] place-items-center rounded-full border border-border bg-card text-muted-foreground">
         <Lightbulb className="animate-step-in h-3.5 w-3.5" />
       </span>
@@ -426,9 +410,7 @@ function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boole
           mechanically slanted — the same reason blockquotes dropped italic in
           globals.css. Reasoning is already set apart by the rail and the muted
           colour; it doesn't need a second, worse-legibility signal. */}
-      <p className="whitespace-pre-wrap text-sm leading-relaxed">
-        <StreamingText text={clean} live={isStreaming} />
-      </p>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed">{clean}</p>
     </div>
   );
 }
@@ -562,13 +544,11 @@ function DoneRow() {
  *  as one quiet "here's what I did" timeline rather than two different styles.
  *  A finished run is capped with a terminal "Done ✓" node. */
 function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string }) {
-  const lastIdx = items.length - 1;
-  const rows = items.map((it, i) => {
-    const streaming = isStreaming && i === lastIdx;
-    return it.kind === "reasoning"
-      ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={streaming} />
-      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} />;
-  });
+  const rows = items.map((it, i) =>
+    it.kind === "reasoning"
+      ? <ReasoningRow key={`r${i}`} text={it.text} />
+      : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} />,
+  );
   if (!isStreaming) rows.push(<DoneRow key="done" />);
 
   // A lone node needs no connecting line.

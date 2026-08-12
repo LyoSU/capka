@@ -354,6 +354,19 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     if (spacer.style.height !== h) spacer.style.height = h;
   };
 
+  // Put the latest question back on the header line. Used by every path that can
+  // change layout under a held pin — content growing/shrinking, and the composer
+  // changing height — so all of them land the turn in the same place instead of
+  // each nudging scrollTop by its own delta.
+  const reseatPinned = () => {
+    const el = scrollRef.current;
+    const userEl = lastUserMsgRef.current;
+    if (!el || !userEl) return false;
+    const top = el.scrollTop + (userEl.getBoundingClientRect().top - el.getBoundingClientRect().top) - TOP_INSET;
+    if (Math.abs(top - el.scrollTop) > 1) el.scrollTop = top; // instant re-seat, no animation
+    return true;
+  };
+
   // Pin the latest turn to the top. When a new user message appears we grow the
   // bottom spacer (so a short reply can still be scrolled up), then bring the
   // message to the top. The reply streams downward into the space below — we
@@ -400,13 +413,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
 
     const ro = new ResizeObserver(() => {
       resizeSpacer(); // grow the spacer first so re-seating has room to scroll into
-      if (pinnedRef.current) {
-        const userEl = lastUserMsgRef.current;
-        if (userEl) {
-          const top = el.scrollTop + (userEl.getBoundingClientRect().top - el.getBoundingClientRect().top) - TOP_INSET;
-          if (Math.abs(top - el.scrollTop) > 1) el.scrollTop = top; // instant re-seat, no animation
-        }
-      }
+      if (pinnedRef.current) reseatPinned();
       updateScrollDown();
     });
     ro.observe(content);
@@ -637,16 +644,29 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     return () => ro.disconnect();
   }, [showGreeting]);
 
-  // Once the padding (driven by composerH) has committed, apply the queued
-  // scroll delta: the content shifts by exactly the composer's growth, so the
-  // last line you were reading stays glued to the composer's top edge instead
-  // of being swallowed by it.
+  // Once the padding (driven by composerH) has committed, settle the scroll for
+  // the composer's new height.
+  //
+  // While the pin is held, that means re-seating the question on the header line —
+  // NOT nudging by the delta. Sending a message with attachments shrinks the
+  // composer by a whole row of preview tiles (~110px) right as the pin-to-top
+  // effect places the new question, and a blind `scrollTop += -110` then dropped
+  // the question that far down the page. Plain one-line text has a zero delta, so
+  // the bug only showed when you attached something — most visibly on mobile,
+  // where the tile row is a larger share of the viewport.
+  //
+  // Otherwise (reading history, pin released) keep the delta: the content shifts
+  // by exactly the composer's growth, so the last line you were reading stays
+  // glued to the composer's top edge instead of being swallowed by it.
   useIsomorphicLayoutEffect(() => {
     const d = pendingShift.current;
     if (!d) return;
     pendingShift.current = 0;
     const el = scrollRef.current;
-    if (el) el.scrollTop += d;
+    if (!el) return;
+    resizeSpacer(); // the composer's height is part of the spacer's budget
+    if (pinnedRef.current && reseatPinned()) return;
+    el.scrollTop += d;
   }, [composerH]);
 
   // A monotonically-rising count of completed tool calls across the whole thread.

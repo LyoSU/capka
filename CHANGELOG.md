@@ -6,6 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Streamed thinking text is no longer blurred at its tail: the effect made words unreadable, and it stayed frozen over finished text whenever the model paused before answering. The caret, the group's ticking duration and the step spinner remain as "still working" signals.
+
+### Fixed
+
+- Sending a message with attachments no longer drops the question down the page: the composer losing its preview tiles shifted the scroll position out from under the pinned turn. Most visible on mobile; plain one-line text was unaffected.
+
 ## [0.20.0] - 2026-08-12
 
 ### Added

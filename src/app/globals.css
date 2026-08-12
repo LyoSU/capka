@@ -488,24 +488,17 @@
 }
 
 /* --- Streaming answer -----------------------------------------------------
-   The newest characters resolve out of a soft blur instead of snapping in, and a
-   block caret marks the write head. The whole effect is TWO static-CSS spans and
-   zero per-token animation, so its cost is flat no matter how fast the provider
-   streams — which is the only reason it's allowed on the hottest surface in the
-   app at all (see the frequency rule on `step-in` above). */
-.stream-tail {
-  /* Alpha ramp, not a colour ramp: a mask reads the alpha channel, so the tail
-     dissolves into whatever surface it sits on, in either theme. */
-  -webkit-mask-image: linear-gradient(90deg, oklch(0 0 0) 20%, oklch(0 0 0 / 0.2));
-          mask-image: linear-gradient(90deg, oklch(0 0 0) 20%, oklch(0 0 0 / 0.2));
-  filter: blur(1.6px);
-}
-/* The write-head caret on a streaming ANSWER — the one surface that can't have a
-   dissolving tail, because Streamdown owns its trailing characters. It exists only
-   while `data-streaming` is set, i.e. only while text is actually arriving, so it
-   does NOT blink: a bar that flickers under text that is already visibly growing
-   reads as a glitch, and the blink would be carrying no information the movement
-   isn't already carrying. It simply marks where the next word lands, then goes.
+   A block caret marks the write head, and that is the ONLY treatment streamed
+   text gets. Streamed characters are never dimmed, masked or blurred: text the
+   user cannot read yet is worse than text that simply appears, and "still
+   arriving" is already stated by the caret here, by the ticking duration in an
+   activity group's header, and by the spinner on a running step.
+
+   The caret exists only while `data-streaming` is set, i.e. only while text is
+   actually arriving, so it does NOT blink: a bar that flickers under text that is
+   already visibly growing reads as a glitch, and the blink would be carrying no
+   information the movement isn't already carrying. It simply marks where the next
+   word lands, then goes.
 
    Only on a trailing paragraph. When the answer currently ends in a code block,
    table or list, a caret welded to that block's edge reads as a rendering
@@ -637,15 +630,6 @@
     transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
-  /* The streaming tail is a static blur + mask, not an animation, so the `*`
-     duration reset above cannot reach it — a reduced-motion user would be left
-     permanently reading half-dissolved words. Drop the effect entirely; the caret
-     is already handled by the reset. */
-  .stream-tail {
-    filter: none;
-    -webkit-mask-image: none;
-            mask-image: none;
-  }
   /* View-transition snapshots are pseudo-elements outside the * reset above, so
      the cross-page crossfade needs its own opt-out — content swaps instantly. */
   ::view-transition-old(*),
@@ -673,13 +657,8 @@
     background-color: rgb(0 0 0 / 0.45) !important;
   }
   /* Both settings ask for text that is fully opaque and fully sharp, which is the
-     exact opposite of a dissolving tail and a faded list edge. Neither carries
-     information that isn't also carried by the caret and the scrollbar. */
-  .stream-tail {
-    filter: none !important;
-    -webkit-mask-image: none !important;
-            mask-image: none !important;
-  }
+     exact opposite of a faded list edge — and that edge carries nothing the
+     scrollbar isn't already carrying. */
   .scroll-fade-b {
     -webkit-mask-image: none !important;
             mask-image: none !important;
