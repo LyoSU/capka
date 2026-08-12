@@ -15,7 +15,7 @@ All notable changes to Capka are documented here. Format follows
 
 - Focus rings meet the 3:1 contrast floor (they measured 2.99:1 in the light theme) and form-field borders are stronger, so a field is findable now that it carries no inset shadow.
 - Form fields are flat — tone plus a 1px border, no inset shadow — and multi-line fields now share the single-line surface instead of being transparent.
-- Tool steps in the activity rail put the filename, search pattern or skill name in the same sunken well the shell command already used, instead of splicing it into the sentence; Telegram step lines carry it too.
+- Tool steps in the activity rail show the filename, search pattern or skill name as a code chip beside the action rather than spliced into the sentence, matching how the same token looks in an answer; Telegram step lines carry it too.
 - Chats that belong to a project are grouped under a single project header in the sidebar instead of each row carrying a project badge, so chat titles are no longer truncated to make room for a repeated name.
 - A project page shows its default model's readable name from the synced model catalog (`models.display_name`) instead of the raw model id. A custom model absent from every catalog still shows the id as entered.
 - A project page scrolls as one page: the header and tabs used to be pinned with only the tab's content scrolling, which put a scrollbar in the middle of the page and sliced content along the pane's top edge. Every tab now shares one column width, where Overview was 896px and Settings 672px.
