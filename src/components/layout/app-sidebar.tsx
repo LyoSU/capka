@@ -106,6 +106,51 @@ function mergeChats(prev: ChatItem[], incoming: ChatItem[]): ChatItem[] {
   return sortChats([...map.values()]);
 }
 
+type ChatEntry =
+  | { kind: "chat"; chat: ChatItem }
+  | { kind: "cluster"; projectId: string; projectName: string; chats: ChatItem[] };
+
+/**
+ * Collapse an already-sorted slice of chats into per-project clusters.
+ *
+ * A chat's project used to be an inline badge on its own row, which scales
+ * badly in a 250px panel: every chat in a project spends ~a third of the row
+ * repeating the same name, and the title is truncated to pay for it. Hoisting
+ * the name onto one header per project makes that cost constant instead of
+ * per-chat, and hands the full width back to the titles.
+ *
+ * A cluster is anchored where its most recent chat would have been, so the
+ * slice stays in recency order at the top level — nothing sinks below a chat
+ * that is genuinely older. Only the ordering *within* a date group changes:
+ * a project's chats are pulled up to sit under their header.
+ */
+function clusterByProject(chats: ChatItem[]): ChatEntry[] {
+  const entries: ChatEntry[] = [];
+  const open = new Map<string, Extract<ChatEntry, { kind: "cluster" }>>();
+
+  for (const chat of chats) {
+    if (!chat.projectId || !chat.projectName) {
+      entries.push({ kind: "chat", chat });
+      continue;
+    }
+    const cluster = open.get(chat.projectId);
+    if (cluster) {
+      cluster.chats.push(chat);
+      continue;
+    }
+    const created = {
+      kind: "cluster" as const,
+      projectId: chat.projectId,
+      projectName: chat.projectName,
+      chats: [chat],
+    };
+    open.set(chat.projectId, created);
+    entries.push(created);
+  }
+
+  return entries;
+}
+
 type DateGroupKey = "today" | "yesterday" | "thisWeek" | "older";
 
 function groupByDate(chats: ChatItem[]) {
@@ -226,22 +271,111 @@ function ChatRow({
             running={chat.running}
             labels={statusLabels}
           />
-          {/* Single line: the badge sits inline at the right edge so project rows
-              stay the same height as plain ones (a second line read as a nested
-              sub-item). The badge is capped so a long project name can't starve
-              the title, which keeps flex-1 priority. */}
-          <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <ChatTitle title={chat.title} fallback={fallback} />
-            {chat.projectName && (
-              <span className="flex max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-muted-foreground/70">
-                <FolderOpen className="h-3 w-3 shrink-0" />
-                <span className="truncate">{chat.projectName}</span>
-              </span>
-            )}
-          </span>
+          {/* No project marker on the row itself — a chat that belongs to one is
+              rendered inside its ProjectCluster, which carries the name once for
+              the whole group. The row therefore always gets the full width. */}
+          <ChatTitle title={chat.title} fallback={fallback} />
         </SidebarMenuButton>
       </ChatContextMenu>
     </SidebarMenuItem>
+  );
+}
+
+/** The chats of one project, under a single quiet header that doubles as a link
+ *  to the project's hub. The hairline + indent are what say "these live in a
+ *  folder" — cheaper in a narrow panel than repeating the name on every row,
+ *  and the only per-cluster cost is one 24px header line. */
+function ProjectCluster({
+  projectId,
+  projectName,
+  children,
+}: {
+  projectId: string;
+  projectName: string;
+  children: React.ReactNode;
+}) {
+  return (
+    // A plain <li>, deliberately NOT SidebarMenuItem: that carries
+    // `group/menu-item`, and Tailwind's group-hover matches *any* ancestor with
+    // the class — so hovering the header would reveal the ⋮ on every row inside.
+    <li className="mt-2 first:mt-0">
+      <Link
+        href={`/projects/${projectId}`}
+        title={projectName}
+        // /70 matches the date-group label, not a dimmer shade: at 11px anything
+        // lighter drops under the 4.5:1 AA floor (/55 measures 4.11:1 on the
+        // light sidebar). The hierarchy comes from size and indentation instead.
+        className={cn(
+          "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium",
+          "text-sidebar-foreground/70 transition-colors hover:text-sidebar-foreground",
+          "focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+        )}
+      >
+        <FolderOpen className="size-3 shrink-0" />
+        <span className="truncate">{projectName}</span>
+      </Link>
+      {/* Labelled with the project name: the hairline and indent that carry the
+          "inside a folder" meaning visually are invisible to a screen reader,
+          which would otherwise announce a bare nested list. */}
+      <ul
+        aria-label={projectName}
+        className="ml-2 flex min-w-0 flex-col gap-1 border-l border-sidebar-border pl-1.5"
+      >
+        {children}
+      </ul>
+    </li>
+  );
+}
+
+/** One chat list — flat rows for loose chats, clustered rows for project ones.
+ *  Every section (pinned, Telegram, each date group) renders through this, so
+ *  there is a single answer to "how does a project chat look in the sidebar". */
+function ChatList({
+  chats,
+  activeChatId,
+  enteringIds,
+  statusLabels,
+  fallback,
+  onUpdate,
+  children,
+}: {
+  chats: ChatItem[];
+  activeChatId: string | null;
+  enteringIds: Set<string>;
+  statusLabels: { unread: string; working: string };
+  fallback: string;
+  onUpdate: () => void;
+  children?: React.ReactNode;
+}) {
+  const row = (chat: ChatItem) => (
+    <ChatRow
+      key={chat.id}
+      chat={chat}
+      active={activeChatId === chat.id}
+      entering={enteringIds.has(chat.id)}
+      statusLabels={statusLabels}
+      fallback={fallback}
+      onUpdate={onUpdate}
+    />
+  );
+
+  return (
+    <SidebarMenu className="gap-1">
+      {clusterByProject(chats).map((entry) =>
+        entry.kind === "chat" ? (
+          row(entry.chat)
+        ) : (
+          <ProjectCluster
+            key={entry.projectId}
+            projectId={entry.projectId}
+            projectName={entry.projectName}
+          >
+            {entry.chats.map(row)}
+          </ProjectCluster>
+        )
+      )}
+      {children}
+    </SidebarMenu>
   );
 }
 
@@ -640,18 +774,14 @@ export function AppSidebar() {
               {t("telegram")}
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
-                {visibleTelegramChats.map((chat) => (
-                  <ChatRow
-                    key={chat.id}
-                    chat={chat}
-                    active={activeChatId === chat.id}
-                    entering={enteringIds.has(chat.id)}
-                    statusLabels={statusLabels}
-                    fallback={t("newChat")}
-                    onUpdate={fetchReset}
-                  />
-                ))}
+              <ChatList
+                chats={visibleTelegramChats}
+                activeChatId={activeChatId}
+                enteringIds={enteringIds}
+                statusLabels={statusLabels}
+                fallback={t("newChat")}
+                onUpdate={fetchReset}
+              >
                 {(hiddenTelegramCount > 0 || showAllTelegram) && (
                   <SidebarMenuItem>
                     <SidebarMenuButton
@@ -664,7 +794,7 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 )}
-              </SidebarMenu>
+              </ChatList>
             </SidebarGroupContent>
           </SidebarGroup>
         )}
@@ -673,19 +803,14 @@ export function AppSidebar() {
           <SidebarGroup>
             <SidebarGroupLabel>{t("pinned")}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
-                {pinnedChats.map((chat) => (
-                  <ChatRow
-                    key={chat.id}
-                    chat={chat}
-                    active={activeChatId === chat.id}
-                    entering={enteringIds.has(chat.id)}
-                    statusLabels={statusLabels}
-                    fallback={t("newChat")}
-                    onUpdate={fetchReset}
-                  />
-                ))}
-              </SidebarMenu>
+              <ChatList
+                chats={pinnedChats}
+                activeChatId={activeChatId}
+                enteringIds={enteringIds}
+                statusLabels={statusLabels}
+                fallback={t("newChat")}
+                onUpdate={fetchReset}
+              />
             </SidebarGroupContent>
           </SidebarGroup>
         )}
@@ -694,19 +819,14 @@ export function AppSidebar() {
           <SidebarGroup key={group.key}>
             <SidebarGroupLabel>{t(`groups.${group.key}`)}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
-                {group.chats.map((chat) => (
-                  <ChatRow
-                    key={chat.id}
-                    chat={chat}
-                    active={activeChatId === chat.id}
-                    entering={enteringIds.has(chat.id)}
-                    statusLabels={statusLabels}
-                    fallback={t("newChat")}
-                    onUpdate={fetchReset}
-                  />
-                ))}
-              </SidebarMenu>
+              <ChatList
+                chats={group.chats}
+                activeChatId={activeChatId}
+                enteringIds={enteringIds}
+                statusLabels={statusLabels}
+                fallback={t("newChat")}
+                onUpdate={fetchReset}
+              />
             </SidebarGroupContent>
           </SidebarGroup>
         ))}

@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Chats that belong to a project are grouped under a single project header in the sidebar instead of each row carrying a project badge, so chat titles are no longer truncated to make room for a repeated name.
+
 ### Fixed
 
 - Sandboxes with egress on can resolve DNS again on hosts whose resolver is a private address (Docker Desktop `192.168.65.x`, corporate DNS, a home router). The egress firewall was dropping the container's own resolver, which looked like "no internet, host DNS ignored". Existing deployments: rebuild the sandbox image (`npm run sandbox:build`) or pull the new one.
