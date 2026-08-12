@@ -4,20 +4,13 @@ import { readFileSync } from "node:fs";
 /**
  * Streamed text is never made unreadable to signal that it is still streaming.
  *
- * Reasoning rows used to end in a "dissolving tail": the last ~18 characters wrapped
- * in a span carrying `filter: blur()` + an alpha mask. It failed on both counts it
- * was meant to serve. Reasoning is `whitespace-pre-wrap`, so a newline inside the
- * tail put the single horizontal mask across a whole extra line and swallowed far
- * more than a tail. And a reasoning part carries no streaming/done state
- * (`contracts.ts`), so "is this still arriving?" was inferred from position in the
- * rail — leaving the blur frozen over final text for as long as the model paused
- * before its first answer token.
- *
- * Both failures are invisible to types, lint and unit tests, and the tempting
- * partial fix (shorten the tail, soften the blur) keeps a mask over text the user
- * is trying to read. So the invariant is checked here: liveness is signalled by
- * the caret, the group header's ticking duration and the step spinner — never by
- * degrading the text itself.
+ * Reasoning rows used to blur their last ~18 characters behind an alpha mask. That
+ * swallowed a whole extra line whenever the tail contained a newline (reasoning is
+ * `whitespace-pre-wrap`), and since a reasoning part carries no streaming/done
+ * state (`contracts.ts`) the blur was driven by position in the rail and sat frozen
+ * over final text. Liveness belongs to the caret, the ticking duration and the step
+ * spinner — never to degrading the text. Invisible to types and lint, so checked
+ * here.
  */
 const CSS = "src/app/globals.css";
 const MESSAGE = "src/components/chat/message.tsx";

@@ -31,15 +31,10 @@ export function TopBanner({
     // role="status": every caller renders this only after an async check resolves,
     // so the bar appears some seconds into the session. Sighted users see the app
     // shift; without a live region a screen-reader user was never told at all.
-    // flex-wrap is load-bearing, not tidiness. Without it the row had to fit on one
-    // line: the action link is shrink-0, so the only item that could give was the
-    // message — and a flex item shrinks down to its min-content, i.e. its longest
-    // word. On a phone that turned a one-sentence notice into a ~80px column of
-    // single words beside an untouched link. Wrapping lets the message keep the
-    // line and pushes the action underneath when it no longer fits.
-    // Asymmetric padding: the close button is absolutely positioned at the right
-    // edge, so only that side needs clearance. Reserving it on BOTH sides (px-10)
-    // spent 40px of a 390px screen on nothing.
+    // flex-wrap is load-bearing: the action is shrink-0, so on one line the message
+    // was the only item that could give — and a flex item bottoms out at its
+    // min-content, i.e. one word per line. Padding is asymmetric because only the
+    // right edge holds the close button.
     <div
       role="status"
       className="relative flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-b border-border bg-muted/40 py-2 pl-4 pr-10 text-sm text-foreground sm:pl-10"

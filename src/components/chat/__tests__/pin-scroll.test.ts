@@ -2,21 +2,15 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
 /**
- * Every layout change under a held pin re-seats the turn; none of them nudges
- * scrollTop by its own delta.
+ * Every layout change under a held pin re-seats the turn; none nudges scrollTop by
+ * its own delta.
  *
  * The composer's height feeds the scroll area's bottom padding, and a queued
- * `scrollTop += delta` keeps the line you were reading glued above it. That is
- * right while you're reading history — and wrong the instant the pin is holding
- * the newest question on the header line. Sending a message with attachments drops
- * a whole row of preview tiles (~110px) out of the composer exactly as the
- * pin-to-top effect places the question, so the blind delta pushed the question
- * that far down the page. One-line text has a zero delta, which is why the bug
- * read as "attachments scroll differently from text" and showed up on mobile,
- * where the tile row is a bigger share of the viewport.
- *
- * There is no DOM in this suite (vitest runs `environment: node`), so the
- * invariant is checked structurally.
+ * `scrollTop += delta` keeps the line you were reading glued above it — right while
+ * reading history, wrong while the pin holds the newest question. Sending with
+ * attachments drops a ~110px row of preview tiles out of the composer just as the
+ * pin seats the question, so the blind delta pushed it that far down the page.
+ * Checked structurally: this suite has no DOM (`environment: node`).
  */
 const SRC = "src/components/chat/chat-panel.tsx";
 

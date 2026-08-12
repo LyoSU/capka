@@ -3,19 +3,13 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Two invariants the phone depends on, both invisible on a desktop browser.
+ * Invariants the phone depends on and a desktop browser never shows.
  *
- * 1. Heights are `dvh`, never `vh` / `h-screen`. Mobile Safari's `vh` measures the
- *    viewport as if the browser chrome weren't there, so a 100vh overlay runs off
- *    the bottom of the screen and an 85vh one hides its own footer behind the
- *    toolbar — with nothing to scroll, since the overlay is exactly as tall as it
- *    thinks the screen is. `dvh` tracks the real, visible viewport.
- *
- * 2. Every dashboard page owns its scrolling. The shell (`SidebarInset`) is
- *    `overflow-hidden` and the document itself never scrolls, so a page with no
- *    scroller of its own is not "a bit tall" — everything past the fold is
- *    unreachable. /projects shipped that way: on a phone the header plus three rows
- *    filled the screen and the rest of the list could not be reached at all.
+ * Heights are `dvh`: mobile Safari's `vh` ignores browser chrome, so a `vh` overlay
+ * extends past the bottom of the screen with nothing to scroll. And every dashboard
+ * page owns its scrolling — the shell (`SidebarInset`) is `overflow-hidden` and the
+ * document never scrolls, so a page without a scroller isn't "a bit tall": whatever
+ * is past the fold is unreachable, which is how /projects shipped.
  */
 const SRC = "src";
 const DASHBOARD = "src/app/(dashboard)";

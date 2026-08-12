@@ -644,20 +644,13 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     return () => ro.disconnect();
   }, [showGreeting]);
 
-  // Once the padding (driven by composerH) has committed, settle the scroll for
-  // the composer's new height.
-  //
-  // While the pin is held, that means re-seating the question on the header line —
-  // NOT nudging by the delta. Sending a message with attachments shrinks the
-  // composer by a whole row of preview tiles (~110px) right as the pin-to-top
-  // effect places the new question, and a blind `scrollTop += -110` then dropped
-  // the question that far down the page. Plain one-line text has a zero delta, so
-  // the bug only showed when you attached something — most visibly on mobile,
-  // where the tile row is a larger share of the viewport.
-  //
-  // Otherwise (reading history, pin released) keep the delta: the content shifts
-  // by exactly the composer's growth, so the last line you were reading stays
-  // glued to the composer's top edge instead of being swallowed by it.
+  // Once the padding (driven by composerH) has committed, settle the scroll for the
+  // composer's new height. Under a held pin that means re-seating the question, not
+  // nudging by the delta: sending with attachments drops a ~110px row of preview
+  // tiles just as the pin seats the question, and the blind shift pushed it that far
+  // down the page (one-line text has a zero delta, hence "only with attachments").
+  // With the pin released the delta is the point — it keeps the line you were
+  // reading glued above the composer instead of being swallowed by it.
   useIsomorphicLayoutEffect(() => {
     const d = pendingShift.current;
     if (!d) return;

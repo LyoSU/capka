@@ -52,152 +52,149 @@ export default function ProjectsPage() {
   }
 
   return (
-    /* This page owns its scrolling. `SidebarInset` is `overflow-hidden` — the app
-       shell never scrolls the document — so a page that doesn't scroll itself is
-       simply CUT OFF at the fold, with no way to reach what's below it. That's what
-       happened here: on a phone the header plus three rows fill the viewport and
-       every project after them was unreachable. The hub this navigates to
-       (`project-hub.tsx`) and /chat/archived already scroll this way. */
+    /* This page owns its scrolling: `SidebarInset` is overflow-hidden and the
+       document never scrolls, so a page without its own scroller is cut off at the
+       fold with no way to reach the rest. */
     <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-    {/* py-6 matches the project hub: these two pages are one back-and-forth, and
-        an 8px difference made the heading hop on every navigation. */}
-    <div className="animate-fade-in mx-auto max-w-4xl px-4 py-6">
-      <div className="flex items-center justify-between gap-3 mb-6">
-        <div className="flex min-w-0 items-center gap-2">
-          <SidebarTrigger className="-ml-1 size-9 shrink-0 md:hidden" />
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold">{t("title")}</h1>
-            <p className="text-sm text-muted-foreground">
-              {t("subtitle")}
-            </p>
+      {/* py-6 matches the project hub: these two pages are one back-and-forth, and
+          an 8px difference made the heading hop on every navigation. */}
+      <div className="animate-fade-in mx-auto max-w-4xl px-4 py-6">
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <div className="flex min-w-0 items-center gap-2">
+            <SidebarTrigger className="-ml-1 size-9 shrink-0 md:hidden" />
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold">{t("title")}</h1>
+              <p className="text-sm text-muted-foreground">
+                {t("subtitle")}
+              </p>
+            </div>
           </div>
-        </div>
-        <Button size="sm" className="shrink-0" onClick={handleCreate}>
-          <Plus className="h-4 w-4" />
-          {t("new")}
-        </Button>
-      </div>
-
-      {state === "loading" ? (
-        // Rows in the shape of the real ones, inside the real container: the list
-        // lands in place instead of replacing a centred spinner from a different
-        // height.
-        <div className="divide-y overflow-hidden rounded-xl bg-card shadow-hairline" aria-hidden>
-          {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="space-y-2 px-4 py-3.5">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-3 w-24" />
-            </div>
-          ))}
-        </div>
-      ) : state === "error" ? (
-        <EmptyState icon={FolderKanban} title={t("loadError")} hint={t("loadErrorHint")} className="py-16">
-          <Button variant="outline" size="sm" onClick={() => { setState("loading"); fetchProjects(); }}>
-            <RotateCw className="h-4 w-4" />
-            {tc("retry")}
-          </Button>
-        </EmptyState>
-      ) : projects.length === 0 ? (
-        <EmptyState
-          icon={FolderKanban}
-          title={t("empty")}
-          hint={t("emptyHint")}
-          className="animate-blur-rise py-16"
-        >
-          <Button size="sm" onClick={handleCreate}>
+          <Button size="sm" className="shrink-0" onClick={handleCreate}>
             <Plus className="h-4 w-4" />
-            {t("create")}
+            {t("new")}
           </Button>
-        </EmptyState>
-      ) : (
-        /* A list, not a two-column card grid. Projects differ by one line of text,
-           so cards spent a lot of border and whitespace making eight of them look
-           like eight unrelated things — and the row actions sat in a footer that
-           was visible whether you wanted them or not.
-           shadow-hairline, not `border`: the ring draws the same 1px edge without
-           adding to the box, and it's the treatment the hub this navigates to uses
-           — the same object rendered in two materials made the two pages read as
-           two different apps. Not shadow-panel: that adds two soft drop-shadow
-           layers, and a list of rows sits IN the page rather than floating over it. */
-        <div className="divide-y overflow-hidden rounded-xl bg-card shadow-hairline">
-          {projects.map((project) => (
-            <div
-              key={project.id}
-              /* focus-within, not just hover: tabbing to a row's actions should
-                 light the row the same way pointing at it does. */
-              className="group relative flex items-center gap-3 px-4 py-3 transition-colors hover:bg-hover focus-within:bg-hover"
-            >
-              {/* The pseudo-element stretches the link over the WHOLE row. The row
-                  already highlighted edge to edge on hover, but only this text
-                  column was clickable — the promise the highlight makes was false
-                  everywhere else, and a click in the gap did nothing. */}
-              <Link href={`/projects/${project.id}`} className="min-w-0 flex-1 after:absolute after:inset-0 after:content-['']">
-                <p className="truncate text-sm font-medium">{project.name}</p>
-                {project.description && (
-                  <p className="truncate text-xs text-muted-foreground">{project.description}</p>
-                )}
-                {/* Full muted-foreground, not /80: at 12px the dimmed variant
-                    measures ~4.0:1 on this card and misses WCAG AA. */}
-                <p className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    <MessageSquare className="h-3 w-3" />
-                    {t("chatCount", { n: project.chatCount ?? 0 })}
-                  </span>
-                  {/* A bare em dash is developer shorthand; "no chats yet" is the
-                      sentence the reader is actually owed. */}
-                  <span className="truncate">
-                    {project.lastChatAt ? t("lastChat", { date: formatDate(project.lastChatAt) }) : t("noChatsYet")}
-                  </span>
-                </p>
-              </Link>
-              {/* Revealed on hover, always present for keyboard and touch.
-                  `relative` lifts these above the stretched link's pseudo-element —
-                  without it the link would swallow Edit and Delete. icon-sm (28px),
-                  not icon-xs (24px): these are the only two controls on the row and
-                  on a phone they are permanently visible, so they get a target a
-                  thumb can actually land on. */}
-              <div className="relative flex shrink-0 items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-within:opacity-100">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  nativeButton={false}
-                  render={<Link href={`/projects/${project.id}?tab=settings`} />}
-                  aria-label={tc("edit")}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => setDeleteTarget(project)} aria-label={tc("delete")}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              {/* Darkens with the row: the one mark that says "this row goes
-                  somewhere" shouldn't stay a ghost while everything else responds. */}
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
-            </div>
-          ))}
         </div>
-      )}
 
-      {/* Straight into the new project's settings, the same as creating one from
-          the sidebar — the list behind it is refreshed on the way out. */}
-      <ProjectDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSaved={(project) => {
-          fetchProjects();
-          router.push(`/projects/${project.id}?tab=settings`);
-        }}
-      />
+        {state === "loading" ? (
+          // Rows in the shape of the real ones, inside the real container: the list
+          // lands in place instead of replacing a centred spinner from a different
+          // height.
+          <div className="divide-y overflow-hidden rounded-xl bg-card shadow-hairline" aria-hidden>
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="space-y-2 px-4 py-3.5">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            ))}
+          </div>
+        ) : state === "error" ? (
+          <EmptyState icon={FolderKanban} title={t("loadError")} hint={t("loadErrorHint")} className="py-16">
+            <Button variant="outline" size="sm" onClick={() => { setState("loading"); fetchProjects(); }}>
+              <RotateCw className="h-4 w-4" />
+              {tc("retry")}
+            </Button>
+          </EmptyState>
+        ) : projects.length === 0 ? (
+          <EmptyState
+            icon={FolderKanban}
+            title={t("empty")}
+            hint={t("emptyHint")}
+            className="animate-blur-rise py-16"
+          >
+            <Button size="sm" onClick={handleCreate}>
+              <Plus className="h-4 w-4" />
+              {t("create")}
+            </Button>
+          </EmptyState>
+        ) : (
+          /* A list, not a two-column card grid. Projects differ by one line of text,
+             so cards spent a lot of border and whitespace making eight of them look
+             like eight unrelated things — and the row actions sat in a footer that
+             was visible whether you wanted them or not.
+             shadow-hairline, not `border`: the ring draws the same 1px edge without
+             adding to the box, and it's the treatment the hub this navigates to uses
+             — the same object rendered in two materials made the two pages read as
+             two different apps. Not shadow-panel: that adds two soft drop-shadow
+             layers, and a list of rows sits IN the page rather than floating over it. */
+          <div className="divide-y overflow-hidden rounded-xl bg-card shadow-hairline">
+            {projects.map((project) => (
+              <div
+                key={project.id}
+                /* focus-within, not just hover: tabbing to a row's actions should
+                   light the row the same way pointing at it does. */
+                className="group relative flex items-center gap-3 px-4 py-3 transition-colors hover:bg-hover focus-within:bg-hover"
+              >
+                {/* The pseudo-element stretches the link over the WHOLE row. The row
+                    already highlighted edge to edge on hover, but only this text
+                    column was clickable — the promise the highlight makes was false
+                    everywhere else, and a click in the gap did nothing. */}
+                <Link href={`/projects/${project.id}`} className="min-w-0 flex-1 after:absolute after:inset-0 after:content-['']">
+                  <p className="truncate text-sm font-medium">{project.name}</p>
+                  {project.description && (
+                    <p className="truncate text-xs text-muted-foreground">{project.description}</p>
+                  )}
+                  {/* Full muted-foreground, not /80: at 12px the dimmed variant
+                      measures ~4.0:1 on this card and misses WCAG AA. */}
+                  <p className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <MessageSquare className="h-3 w-3" />
+                      {t("chatCount", { n: project.chatCount ?? 0 })}
+                    </span>
+                    {/* A bare em dash is developer shorthand; "no chats yet" is the
+                        sentence the reader is actually owed. */}
+                    <span className="truncate">
+                      {project.lastChatAt ? t("lastChat", { date: formatDate(project.lastChatAt) }) : t("noChatsYet")}
+                    </span>
+                  </p>
+                </Link>
+                {/* Revealed on hover, always present for keyboard and touch.
+                    `relative` lifts these above the stretched link's pseudo-element —
+                    without it the link would swallow Edit and Delete. icon-sm (28px),
+                    not icon-xs (24px): these are the only two controls on the row and
+                    on a phone they are permanently visible, so they get a target a
+                    thumb can actually land on. */}
+                <div className="relative flex shrink-0 items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    nativeButton={false}
+                    render={<Link href={`/projects/${project.id}?tab=settings`} />}
+                    aria-label={tc("edit")}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" onClick={() => setDeleteTarget(project)} aria-label={tc("delete")}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                {/* Darkens with the row: the one mark that says "this row goes
+                    somewhere" shouldn't stay a ghost while everything else responds. */}
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
+              </div>
+            ))}
+          </div>
+        )}
 
-      {deleteTarget && (
-        <DeleteProjectDialog
-          open={!!deleteTarget}
-          onOpenChange={(open) => !open && setDeleteTarget(null)}
-          project={{ id: deleteTarget.id, name: deleteTarget.name }}
-          onDeleted={() => { setDeleteTarget(null); fetchProjects(); }}
+        {/* Straight into the new project's settings, the same as creating one from
+            the sidebar — the list behind it is refreshed on the way out. */}
+        <ProjectDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          onSaved={(project) => {
+            fetchProjects();
+            router.push(`/projects/${project.id}?tab=settings`);
+          }}
         />
-      )}
-    </div>
+
+        {deleteTarget && (
+          <DeleteProjectDialog
+            open={!!deleteTarget}
+            onOpenChange={(open) => !open && setDeleteTarget(null)}
+            project={{ id: deleteTarget.id, name: deleteTarget.name }}
+            onDeleted={() => { setDeleteTarget(null); fetchProjects(); }}
+          />
+        )}
+      </div>
     </div>
   );
 }

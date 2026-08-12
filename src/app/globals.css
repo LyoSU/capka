@@ -488,15 +488,13 @@
 }
 
 /* --- Streaming answer -----------------------------------------------------
-   A block caret marks the write head, and that is the ONLY treatment streamed
-   text gets. Streamed characters are never dimmed, masked or blurred: text the
-   user cannot read yet is worse than text that simply appears, and "still
-   arriving" is already stated by the caret here, by the ticking duration in an
-   activity group's header, and by the spinner on a running step.
+   A block caret is the ONLY treatment streamed text gets — never a dim, mask or
+   blur, because text the reader can't read yet is worse than text that simply
+   appears (the ticking duration and the step spinner already say "working").
 
-   The caret exists only while `data-streaming` is set, i.e. only while text is
-   actually arriving, so it does NOT blink: a bar that flickers under text that is
-   already visibly growing reads as a glitch, and the blink would be carrying no
+   It exists only while `data-streaming` is set, i.e. only while text is actually
+   arriving, so it does NOT blink: a bar that flickers under text that is already
+   visibly growing reads as a glitch, and the blink would be carrying no
    information the movement isn't already carrying. It simply marks where the next
    word lands, then goes.
 

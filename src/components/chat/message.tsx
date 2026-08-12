@@ -382,17 +382,11 @@ function WorkspaceLinks({ text, chatId, live, touched }: { text: string; chatId:
  *  directly (no second click). The badge tops-aligns to the first line so it
  *  reads as a paragraph annotation rather than a centred single-line row.
  *
- *  The thought text renders plainly, with NO "still arriving" treatment of its own.
- *  It used to end in a dissolving tail (the last ~18 characters blurred behind an
- *  alpha mask), and that failed twice over. It made text unreadable rather than
- *  provisional — reasoning is `whitespace-pre-wrap`, so a newline inside the tail
- *  spread one horizontal mask across a whole extra line. And it could not tell
- *  "this thought is still being written" from "this thought is finished, the model
- *  is now busy elsewhere": a reasoning part carries no streaming/done state (see
- *  `contracts.ts`), so the tail was driven by position in the rail, and it sat
- *  frozen over final text for as long as the model paused before its first answer
- *  token. The live signal a run genuinely needs is already carried once, in the
- *  group header's ticking "Thinking 12s" and the running step's spinner. */
+ *  The text renders plainly, with no "still arriving" treatment: a reasoning part
+ *  carries no streaming/done state (`contracts.ts`), so the dissolving tail this
+ *  used to have was driven by position in the rail and sat frozen over final text
+ *  whenever the model paused before answering. Liveness is already carried by the
+ *  group header's ticking duration and the running step's spinner. */
 function ReasoningRow({ text }: { text: string }) {
   // Strip leaked chain-of-thought wrapper tags and the extra leading break some
   // models open a thought with — recomputed only when the streamed text grows.
