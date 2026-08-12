@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-08-12
+
 ### Changed
 
 - Streamed thinking text is no longer blurred at its tail: the effect made words unreadable, and it stayed frozen over finished text whenever the model paused before answering. The caret, the group's ticking duration and the step spinner remain as "still working" signals.
