@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Files a turn changed but never named in its reply appear under the answer, folded behind "Also changed" — or as the main tiles when the reply named nothing at all.
+
 ### Changed
 
 - Tool steps in the activity rail put the filename, search pattern or skill name in the same sunken well the shell command already used, instead of splicing it into the sentence; Telegram step lines carry it too.

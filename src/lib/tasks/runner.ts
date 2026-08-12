@@ -14,6 +14,8 @@ import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { heartbeat, isCancelRequested, finalizeTask, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
+import { listFiles } from "@/lib/sandbox/client";
+import { extractWorkspacePaths, selectTouchedFiles, type ToolWindow } from "@/lib/chat/artifacts";
 import { classifyFiles, findBlindModalities } from "@/lib/chat/prompt";
 import { mimeToModality, type Modality } from "@/lib/providers/registry";
 import { buildViewFileInjection } from "@/lib/sandbox/view-file";
@@ -115,6 +117,14 @@ const MAX_RECOVERIES = Number(process.env.MAX_STREAM_RECOVERIES) || 3;
  *  messages to keep when mechanically trimming a prompt the model rejected as too
  *  long. Generous enough to preserve the live exchange, small enough to fit. */
 const EMERGENCY_KEEP_RECENT = 10;
+
+/** How far the end-of-turn scan looks for files the turn changed but the reply
+ *  never named. Three levels covers the way agents actually organise output (a
+ *  folder or two deep) without walking a checked-out repo or a node_modules an
+ *  agent installed; the cap then bounds the response for a workspace that is a
+ *  build tree regardless. Both are ceilings on ONE listing per finished turn. */
+const WORKSPACE_SCAN_DEPTH = 3;
+const WORKSPACE_SCAN_LIMIT = 2000;
 
 /**
  * Run an agent task to completion. Invoked by the worker for a claimed task
@@ -238,6 +248,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   let firstTextAt: number | null = null;
   let toolCount = 0;
   let currentStatus: StreamStatus;
+  // When each tool call ran, so the finalize path can tell which workspace files
+  // THIS turn touched. Chats in a project share one folder, so "changed since the
+  // turn began" would credit us with a parallel chat's output; only the moments we
+  // were actually executing a tool can belong to us. Open calls live in the map,
+  // completed ones move to the list — a call still open at finish (cancel, crash)
+  // simply contributes no window, which errs toward showing less.
+  const toolStartedAt = new Map<string, number>();
+  let toolWindows: ToolWindow[] = [];
+  const closeToolWindow = (toolCallId: string) => {
+    const start = toolStartedAt.get(toolCallId);
+    if (start === undefined) return;
+    toolStartedAt.delete(toolCallId);
+    toolWindows.push({ start, end: Date.now() });
+  };
 
   // Renew lease + poll for cooperative cancellation cross-process.
   const monitor = setInterval(() => {
@@ -731,6 +755,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the "N tools" footer over-counts tools the user never saw land.
       firstTextAt = null;
       toolCount = 0;
+      // Same reasoning as the tool count: windows from a thrown-away attempt would
+      // credit this turn with files the user never saw it produce.
+      toolStartedAt.clear();
+      toolWindows = [];
       currentStatus = { kind: "thinking" };
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       await publishTaskEvent(userId, { type: "task:reset", taskId, chatId, messageId: msgId, seq: ++seq });
@@ -805,6 +833,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // is valid JSON but breaks the jsonb write). Completes the "parts never
             // carry NUL" invariant across every source.
             const input = stripNul(event.input);
+            toolStartedAt.set(event.toolCallId, Date.now());
             const step = describeStep(stepsT, event.toolName, input);
             currentStatus = { kind: "tool", label: step.activeLabel, detail: step.detail };
             await flushBuffers();
@@ -870,6 +899,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           }
           case "tool-result": {
             watchdog.exitTool(); // tool returned — back to waiting on the model
+            closeToolWindow(event.toolCallId);
             await flushBuffers();
             // Trust boundary: a tool can return raw binary (e.g. a PNG dumped as
             // `output.content`) whose NUL bytes Postgres rejects in both `jsonb`
@@ -891,6 +921,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           }
           case "tool-error":
             watchdog.exitTool(); // tool failed — back to waiting on the model
+            // A failed tool still had its hands on the workspace (a script can
+            // write three files and then throw), so its window counts.
+            closeToolWindow(event.toolCallId);
             await flushBuffers();
             // Strip NUL like every other string entering `parts`: a tool can throw
             // an error whose message embeds raw binary, which would otherwise break
@@ -1242,6 +1275,26 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the real "reasoned for …" time, not the full turn duration.
     const reasoningMs = (firstTextAt ?? Date.now()) - startedAt;
 
+    // Files this turn changed that the reply never names. Tier one (the paths the
+    // model wrote out) is derived client-side from the same text, so only the
+    // remainder is persisted — the transcript folds it behind "Also changed".
+    //
+    // Deliberately fail-soft and last-thing-before-the-write: the workspace may be
+    // gone (idle-evicted), the controller may be down, or the listing may time
+    // out. None of that is worth failing a finished turn over — the user still
+    // gets their answer, just without the secondary file list.
+    let touchedFiles: string[] | undefined;
+    if (toolWindows.length > 0) {
+      try {
+        const named = extractWorkspacePaths(getFullText());
+        const { entries } = await listFiles(sessionKey, ".", userId, WORKSPACE_SCAN_DEPTH, WORKSPACE_SCAN_LIMIT);
+        const touched = selectTouchedFiles(entries ?? [], toolWindows, named);
+        if (touched.length > 0) touchedFiles = touched;
+      } catch (e) {
+        tlog.debug("artifacts.scan_skipped", { err: errMsg(e) });
+      }
+    }
+
     await db.update(messages).set({
       content: getFullText(),
       metadata: {
@@ -1257,6 +1310,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // withholding it left the failed turns in the transcript labelled with a
         // bare "Reasoning", which reads as if nothing had happened at all.
         reasoningMs,
+        ...(touchedFiles ? { touchedFiles } : {}),
         // Tech details for the (i) popover. A manual cancel still did real work
         // (it has a model, elapsed time, and billed tokens), so carry them too —
         // otherwise the stopped turn loses its (i) affordance. A failed turn owns

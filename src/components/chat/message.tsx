@@ -14,7 +14,7 @@ import { useState, useMemo, useEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
-import { extractWorkspacePaths } from "@/lib/chat/artifacts";
+import { extractWorkspacePaths, splitTouchedByMention } from "@/lib/chat/artifacts";
 import { cleanReasoning } from "@/lib/chat/reasoning";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { LLM_ERROR_CATEGORIES } from "@/lib/errors/friendly";
@@ -238,7 +238,7 @@ function ToolDetails({ toolName, output, errorText, chatId }: { toolName: string
 
 
 
-function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?: boolean; chatId?: string }) {
+function TextContent({ text, isStreaming, chatId, touched }: { text: string; isStreaming?: boolean; chatId?: string; touched?: string[] }) {
   // `chat-prose` caps flowing text to a ~70ch measure (see globals.css) so long
   // answers stay in the comfortable reading band; code blocks and tables are
   // exempt and keep the full column width. 16px (text-base) is the readable
@@ -252,18 +252,77 @@ function TextContent({ text, isStreaming, chatId }: { text: string; isStreaming?
   return (
     <div className="chat-prose text-base leading-relaxed" data-streaming={isStreaming ? "" : undefined}>
       <Markdown isStreaming={isStreaming} chatId={chatId}>{text}</Markdown>
-      {chatId && <WorkspaceLinks text={text} chatId={chatId} live={isStreaming} />}
+      {chatId && <WorkspaceLinks text={text} chatId={chatId} live={isStreaming} touched={touched} />}
     </div>
   );
 }
 
-function WorkspaceLinks({ text, chatId, live }: { text: string; chatId: string; live?: boolean }) {
+/** Tier two: everything the turn changed that its reply never mentioned, behind
+ *  one quiet row. Collapsed by default and deliberately understated — this tier
+ *  answers "what else did it touch?", a question nobody asks on a good turn. It
+ *  gets no count badge, no download-all and no thumbnails grid until opened, so a
+ *  message that produced one result still LOOKS like it produced one result. */
+function AlsoChanged({ paths, chatId }: { paths: string[]; chatId: string }) {
+  const tw = useTranslations("chat.workspace");
+  const viewable: PreviewFile[] = useMemo(
+    () =>
+      paths
+        .filter((p) => previewKind(p.split("/").pop() || p) !== null)
+        .map((p) => ({ path: p, name: p.split("/").pop() || p, chatId })),
+    [paths, chatId],
+  );
+  return (
+    <Collapsible defaultOpen={false}>
+      {/* Same 40% resting chevron as the activity group and the step rows — one
+          quiet level for "there is more here", not a third opacity in the mix. */}
+      <CollapsibleTrigger className="group/also mt-2 inline-flex items-center gap-1.5 rounded-md py-1 text-xs text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-90">
+        <ChevronRight className="chevron h-3.5 w-3.5 shrink-0 opacity-40 transition-transform group-hover/also:opacity-100" />
+        <span>{tw("alsoChanged", { count: paths.length })}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-1.5 flex flex-wrap gap-3">
+          {paths.map((p) => (
+            <SandboxFileTile key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/**
+ * The files a turn produced, in the two tiers `lib/chat/artifacts.ts` defines.
+ *
+ * Tier one is what the reply NAMES — tiles, a count, "download all". Tier two is
+ * what the turn also changed on disk (`touchedFiles`), folded behind one quiet
+ * row, because a directory listing cannot tell a result from a scratch file and
+ * putting the two in one grid would make the "Files · N" heading a lie.
+ *
+ * When the reply names nothing at all, tier two is PROMOTED to tier one. That is
+ * the case this whole mechanism exists for: an agent whose python script wrote
+ * the .xlsx and whose reply is "Done!" used to leave the user with no file in
+ * sight. A folded row would technically fix it while still hiding the answer, so
+ * the rule is "show the best evidence available", not "only ever show named".
+ */
+function WorkspaceLinks({ text, chatId, live, touched }: { text: string; chatId: string; live?: boolean; touched?: string[] }) {
   const t = useTranslations("chat.tool");
   const tw = useTranslations("chat.workspace");
   // Re-scanning the message text on every render is wasteful; the artifact
   // paths only change when the text does. Shared with the Telegram channel so
   // both surface the same referenced files.
-  const paths = useMemo(() => extractWorkspacePaths(text), [text]);
+  const { paths, folded } = useMemo(() => {
+    const named = extractWorkspacePaths(text);
+    // A file the reply mentions by bare name is just as named as one written as a
+    // full /workspace/ path — see splitTouchedByMention for why that matters more
+    // the weaker the model is.
+    const { mentioned, rest } = splitTouchedByMention(touched ?? [], text);
+    const tierOne = [...named, ...mentioned.filter((p) => !named.includes(p))];
+    // Nothing named at all: showing the fold alone would still hide the answer,
+    // so the uncertain list becomes the primary one. Less good than a real result
+    // list, strictly better than the empty space this used to leave.
+    if (tierOne.length === 0) return { paths: rest, folded: [] as string[] };
+    return { paths: tierOne, folded: rest };
+  }, [text, touched]);
   // Artifacts that open in Quick Look, in listed order, for ←/→ navigation.
   const viewable: PreviewFile[] = useMemo(
     () =>
@@ -301,10 +360,17 @@ function WorkspaceLinks({ text, chatId, live }: { text: string; chatId: string; 
         )}
       </div>
       <div className="flex flex-wrap gap-3">
-        {paths.map((p) => (
-          <SandboxFileTile key={p} file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} verify live={live} />
+        {paths.map((p, i) => (
+          // Staggered pop, capped at four steps: the delay exists to make the row
+          // read as arriving rather than blinking, and past ~240ms the last tile
+          // is just late. A turn that produced twelve files should not make the
+          // twelfth wait most of a second.
+          <div key={p} className="animate-pop-in" style={{ animationDelay: `${Math.min(i, 4) * 60}ms` }}>
+            <SandboxFileTile file={{ path: p, name: p.split("/").pop() || p, chatId }} viewable={viewable} verify live={live} />
+          </div>
         ))}
       </div>
+      {folded.length > 0 && <AlsoChanged paths={folded} chatId={chatId} />}
     </div>
   );
 }
@@ -1147,7 +1213,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -1255,7 +1321,15 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
               const afterActivity = gi > 0 && groups[gi - 1].kind !== "text";
               return (
                 <div key={gi} className={`animate-message-in ${afterActivity ? "mt-3 border-t border-border pt-3" : gi > 0 ? "mt-3" : ""}`}>
-                  <TextContent text={g.text} isStreaming={isStreaming && gi === lastTextIdx} chatId={chatId} />
+                  {/* `touchedFiles` belongs to the whole turn, not to one text
+                      block, so it hangs off the LAST one — where the eye already
+                      is when the answer ends. */}
+                  <TextContent
+                    text={g.text}
+                    isStreaming={isStreaming && gi === lastTextIdx}
+                    chatId={chatId}
+                    touched={gi === lastTextIdx ? metadata?.touchedFiles : undefined}
+                  />
                 </div>
               );
             }

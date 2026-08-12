@@ -414,6 +414,22 @@
 }
 .animate-fade-in { animation: fade-in 0.3s var(--ease-out) both; }
 
+/* Artifact tiles landing at the end of a turn. This is the one entrance in the
+   transcript allowed a scale, and the frequency rule is exactly why: unlike a
+   step row (dozens per turn, hence opacity-only `step-in`) or a message block,
+   files arrive ONCE, at the end, and they are the thing the user actually came
+   for. A short pop reads as an object materialising rather than a panel sliding,
+   which is the difference between "here is your file" and "more UI appeared".
+   Starts at 0.96 and 4px, not lower/further: past that it stops being an arrival
+   and becomes a bounce, which is not this product's register. Call sites stagger
+   it ~60ms per tile; the reduced-motion block above zeroes both duration and
+   delay, so a reduced-motion user gets the finished row at once. */
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-pop-in { animation: pop-in 0.28s var(--ease-out) both; }
+
 /* Skeleton pulse: Tailwind's default `animate-pulse` runs a slow 2s ease-in-out,
    which reads as sluggish for a loading state. This is the same opacity pulse at
    a livelier ~1.5s cadence. The global reduced-motion block freezes it. */

@@ -146,6 +146,10 @@ export function toUIMessages(rows: {
         siblingCount: m.siblingCount ?? 1,
         // Surfaced so the user bubble can render attachment thumbnails.
         attachedFiles: meta?.attachedFiles,
+        // Files the turn changed but never named — the folded second tier under
+        // the artifact tiles. The NAMED tier isn't forwarded: it's re-derived from
+        // the reply text on render, so it stays correct if the text is edited.
+        touchedFiles: meta?.touchedFiles,
         // Compaction checkpoint — the transcript renders a divider (not an empty
         // bubble) and lets the user expand the summary it stands in for.
         compaction: meta?.compaction,

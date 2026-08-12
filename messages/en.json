@@ -390,6 +390,7 @@
       "upload": "Upload files",
       "download": "Download {name}",
       "downloadAll": "Download all",
+      "alsoChanged": "Also changed · {count}",
       "notCreated": "File wasn't created",
       "createHint": "Send a message to create the workspace",
       "loadError": "Failed to load files",

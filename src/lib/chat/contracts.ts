@@ -110,6 +110,13 @@ export type MessageMeta = {
   // Lets the chat history show what was attached; the bytes live in the sandbox
   // workspace and are fetched lazily by the client (never re-sent to the model).
   attachedFiles?: { name: string; type: string }[];
+  // Workspace files this turn changed that its reply never names — the folded
+  // "Also changed" tier under the file tiles. Kept separate from the named ones
+  // (which are re-derived from the text, not stored) precisely because a listing
+  // has no sense of relevance: it cannot tell `Звіт.xlsx` from `~$Звіт.xlsx`.
+  // See `selectTouchedFiles` for how a turn's own writes are told apart from a
+  // parallel chat's in a shared project workspace.
+  touchedFiles?: string[];
   // Marks this row as a COMPACTION CHECKPOINT — a summary that stands in for
   // every turn up to `summarizedUpTo` when building context for the model. The
   // full history stays in the DB and in the UI transcript (rendered as a
