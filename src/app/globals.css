@@ -132,7 +132,19 @@
   --success: oklch(0.52 0.15 150);
   --success-foreground: oklch(0.985 0 0);
   --border: oklch(0.90 0.006 75);
-  --input: oklch(0.90 0.006 75);
+  /* Darker than `--border`, on purpose. A field's edge is the only thing telling
+     you where it starts once the inset shadow is gone, and at `--border` (1.24:1
+     against the page, measured) it was a suggestion rather than an edge. 0.80
+     reads as 1.60:1 — still quiet, but a form now scans as a stack of fields
+     instead of a stack of faint rectangles.
+     It stops there rather than continuing to the 3:1 of WCAG 1.4.11, which on a
+     near-white page lands at L≈0.62 — a mid-grey slab that would fight the calm
+     this palette is built around. That is a deliberate, permitted stop: 1.4.11's
+     own Understanding text exempts a control whose visible text (a value or a
+     placeholder, and ours always has one) identifies it without relying on a
+     boundary. The part the exemption does NOT cover is the focus indicator — see
+     `--ring`, which does meet 3:1. */
+  --input: oklch(0.80 0.007 75);
   /* A second, more assertive hairline. `--border` is the quiet divider inside a
      surface; this is the one that has to hold the *outer* edge of a control
      against the page, where the softer value reads as an unfinished button. */
@@ -144,7 +156,12 @@
   --field: oklch(0.955 0.004 75);
   --hover: oklch(0.952 0.005 75);
   --hover-strong: oklch(0.922 0.007 75);
-  --ring: oklch(0.65 0.01 285);
+  /* 0.62, not the 0.65 this sat at. A focus indicator is the one piece of
+     non-text contrast WCAG grants no exemption for — a keyboard user has nothing
+     else telling them where they are — and 0.65 measured 2.99:1 against the page,
+     failing 1.4.11 by a hair. 0.62 measures 3.37:1. The change is invisible as
+     colour and decisive as compliance. */
+  --ring: oklch(0.62 0.01 285);
   --sidebar: oklch(0.985 0.003 75);
   --sidebar-foreground: oklch(0.18 0.005 285);
   --sidebar-primary: oklch(0.22 0.008 285);
@@ -232,7 +249,13 @@
   /* White-alpha borders nudged up: on a lighter bg the old 0.08/0.10 nearly
      vanished, so hairlines now read at the same strength they did on black. */
   --border: oklch(1 0 0 / 0.10);
-  --input: oklch(1 0 0 / 0.12);
+  /* 0.12 → 0.18, the dark-theme counterpart of the light theme's 0.90 → 0.80.
+     Measured against `--background` this moves 1.42:1 → ~1.78:1, matching the
+     light theme's 1.60:1 closely enough that a form has the same presence in both
+     — and alpha means it holds up on the sidebar too, which is the darkest
+     surface a field ever lands on. Same deliberate stop short of 3:1 as the light
+     theme; the reasoning is written out there. */
+  --input: oklch(1 0 0 / 0.18);
   --border-strong: oklch(1 0 0 / 0.17);
   /* Both of these are ALPHA, not fixed greys, and for the same reason: they have
      to land on four different surface lightnesses (sidebar 0.19 < bg 0.22 <

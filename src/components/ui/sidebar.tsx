@@ -349,10 +349,10 @@ function SidebarInput({
     <Input
       data-slot="sidebar-input"
       data-sidebar="input"
-      // `bg-field` rather than overriding back to `bg-background`: the search box
-      // takes the same surface as every other input, and the sidebar sits on its
-      // own (recessed) surface, so `--background` read as an arbitrary third grey.
-      className={cn("h-8 w-full bg-field", className)}
+      // No surface override: this used to re-state `bg-field`, which is already
+      // what Input applies. One place decides the field tone (see input.tsx), and
+      // a duplicate here only invited the two to drift apart.
+      className={cn("h-8 w-full", className)}
       {...props}
     />
   )
