@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-12
+
 ### Added
 
 - Files a turn changed but never named in its reply appear under the answer, folded behind "Also changed" — or as the main tiles when the reply named nothing at all.
