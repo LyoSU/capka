@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { CircleQuestionMark, Loader2 } from "lucide-react";
+import { CircleQuestionMark, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { haptic } from "@/lib/haptics";
@@ -27,6 +27,7 @@ export function AskCard({
 }) {
   const t = useTranslations("chat.ask");
   const [values, setValues] = useState<Record<string, string | string[]>>({});
+  const [page, setPage] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const awaiting = state === "input-available" && !value;
 
@@ -46,6 +47,15 @@ export function AskCard({
     const cur = Array.isArray(values[id]) ? (values[id] as string[]) : [];
     set(id, cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]);
   };
+
+  // One question per screen, but only once a form is big enough for the wall of
+  // fields to be the problem. At one or two, a pager is pure ceremony: it hides
+  // half of a form the user could have read at a glance and charges a click for
+  // it. Three is where "how much more of this is there?" starts being asked, and
+  // where the dots start answering it.
+  const paged = form.fields.length >= PAGER_MIN_FIELDS;
+  const shown = paged ? [form.fields[Math.min(page, form.fields.length - 1)]] : form.fields;
+  const onLastPage = !paged || page >= form.fields.length - 1;
 
   const complete = form.fields.filter((f) => !f.optional).every((f) => {
     const v = values[f.id];
@@ -102,31 +112,44 @@ export function AskCard({
       {awaiting ? (
         <>
           <div className="space-y-3">
-            {form.fields.map((f) => (
+            {shown.map((f) => (
               <Field
                 key={f.id}
                 field={f}
                 value={values[f.id]}
                 onSet={set}
                 onToggle={toggle}
-                // Enter in a text/number field submits, the way it does in the
-                // composer right above. Without it the one-question case forces a
-                // reach for the mouse mid-sentence.
-                onEnter={() => { if (complete && !submitting) void send("submit"); }}
+                // Enter in a text/number field moves the form forward the way it
+                // does in the composer right above — to the next question while
+                // there is one, and to submit on the last. Without it the
+                // one-question case forces a reach for the mouse mid-sentence.
+                onEnter={() => {
+                  if (submitting) return;
+                  if (!onLastPage) setPage((p) => p + 1);
+                  else if (complete) void send("submit");
+                }}
               />
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={() => send("submit")} disabled={submitting || !complete}>
-              {/* The spinner lives INSIDE the button that caused it, not beside the
-                  row: one locus of feedback for one action. */}
-              {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-              {t("submit")}
-            </Button>
+            {paged && <Pager page={page} total={form.fields.length} onGo={setPage} disabled={submitting} />}
+            {onLastPage ? (
+              <Button size="sm" onClick={() => send("submit")} disabled={submitting || !complete}>
+                {/* The spinner lives INSIDE the button that caused it, not beside the
+                    row: one locus of feedback for one action. */}
+                {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                {t("submit")}
+              </Button>
+            ) : (
+              // Paging is not committing, so this is never disabled: a user is
+              // allowed to read ahead, and an optional question they skipped past
+              // is still answerable on the way back.
+              <Button size="sm" onClick={() => setPage((p) => p + 1)} disabled={submitting}>{t("next")}</Button>
+            )}
             <Button size="sm" variant="ghost" onClick={() => send("skip")} disabled={submitting}>{t("skip")}</Button>
             {/* Never disable a primary action without saying why — a dead button
                 with no explanation reads as a broken interface, not as a rule. */}
-            {!complete && !submitting && (
+            {onLastPage && !complete && !submitting && (
               <span className="text-xs text-muted-foreground">{t("needsAnswer")}</span>
             )}
           </div>
@@ -151,6 +174,68 @@ export function AskCard({
           {value?.action === "skip" && <div className="text-sm text-muted-foreground">{t("skipped")}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Below this a pager costs more than it saves — see the note at its call site. */
+const PAGER_MIN_FIELDS = 3;
+
+/**
+ * Progress through a multi-question ask: how many are left, which one you're on,
+ * and a way back.
+ *
+ * The dots are the load-bearing part. A six-field form used to arrive as a wall
+ * with no indication of its size; one question at a time is only an improvement
+ * if the user can see the end of it, otherwise it just trades a visible wall for
+ * an invisible one. Filled = answered-and-passed, ringed = here, hollow = ahead.
+ *
+ * There is deliberately no auto-advance on single-choice, which is where the
+ * reference this borrows from goes next. A screen that moves on its own 480ms
+ * after a tap gives a mis-tap no chance to be corrected, and for a screen reader
+ * it relocates focus with no user action behind it — on the one interaction in
+ * the product that has stopped an agent mid-run and is waiting on a decision.
+ */
+function Pager({ page, total, onGo, disabled }: {
+  page: number; total: number; onGo: (i: number) => void; disabled?: boolean;
+}) {
+  const t = useTranslations("chat.ask");
+  const arrow = "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-micro enabled:hover:bg-hover enabled:hover:text-foreground disabled:opacity-35";
+  return (
+    <div className="flex items-center gap-1.5" role="group" aria-label={t("progress", { current: page + 1, total })}>
+      <button type="button" aria-label={t("prev")} disabled={disabled || page === 0} onClick={() => onGo(page - 1)} className={arrow}>
+        <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+      <span className="flex items-center gap-1">
+        {Array.from({ length: total }, (_, i) => (
+          <button
+            key={i}
+            type="button"
+            aria-label={t("goTo", { number: i + 1 })}
+            aria-current={i === page ? "step" : undefined}
+            disabled={disabled}
+            onClick={() => onGo(i)}
+            // Size and fill carry the state, not colour alone — the three states
+            // must stay distinguishable without relying on hue.
+            //
+            // /70, not the /50–/60 this started at. These dots are the only thing
+            // saying how much of the form is left, which makes them a UI component
+            // conveying state, not decoration — so WCAG 1.4.11 wants 3:1 against
+            // the page. Measured on the real tokens: /50 gives 2.23:1 light and
+            // 2.49:1 dark (fails both), /70 gives 3.32:1 and 3.34:1.
+            className={`rounded-full transition-all duration-300 ${
+              i === page
+                ? "size-[9px] ring-[2.5px] ring-foreground ring-inset"
+                : i < page
+                  ? "size-[7px] bg-muted-foreground/70"
+                  : "size-[7px] ring-[1.5px] ring-muted-foreground/70 ring-inset"
+            }`}
+          />
+        ))}
+      </span>
+      <button type="button" aria-label={t("next")} disabled={disabled || page >= total - 1} onClick={() => onGo(page + 1)} className={arrow}>
+        <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
     </div>
   );
 }

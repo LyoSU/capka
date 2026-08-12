@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Added
 
 - Files a turn changed but never named in its reply appear under the answer, folded behind "Also changed" — or as the main tiles when the reply named nothing at all.
+- A question the agent asks with three or more fields is now paged one field at a time, with a pager showing how many are left.
 
 ### Changed
 
