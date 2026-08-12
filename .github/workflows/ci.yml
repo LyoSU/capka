@@ -64,6 +64,12 @@ jobs:
     env:
       DATABASE_URL: postgresql://Capka:Capka@localhost:5432/Capka
       RUN_INTEGRATION: "1"
+      # Deliberately NOT UTC. Every timestamp column is `timestamp without time
+      # zone`, so a client that encodes dates in the process timezone silently
+      # shifts them — invisible on a UTC runner, and it shipped a scheduler that
+      # fired automations hours early on self-hosted boxes with a local TZ. A
+      # negative offset keeps that class of bug failing here instead of in prod.
+      TZ: America/Los_Angeles
     steps:
       - uses: actions/checkout@v5
 

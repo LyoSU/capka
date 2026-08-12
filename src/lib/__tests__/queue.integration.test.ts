@@ -11,6 +11,12 @@ import {
 } from "../tasks/queue";
 
 // Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run queue.integration
+//
+// `claimNextTask` takes the oldest queued row in the WHOLE table — it's a worker,
+// not a per-user query — so these assertions hold only while nothing else has a
+// task queued. That's why `test:integration:db` runs with --no-file-parallelism:
+// scheduler.integration fires a real automation, and its nanoid task sat in the
+// queue long enough for this file's claims to pick it up instead.
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
 const U = "qtest-user";

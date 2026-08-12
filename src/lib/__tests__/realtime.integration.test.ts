@@ -17,6 +17,9 @@ vi.mock("pg", async (importOriginal) => {
   return {
     // db/index.ts opens a Pool at import; a no-op stand-in keeps it lazy.
     Pool: class {},
+    // It also pins pg's date encoding to UTC at import — see db/index.ts.
+    defaults: {},
+    types: { builtins: { TIMESTAMP: 1114 }, setTypeParser: () => {} },
     Client: class {
       constructor() {
         opened.count++;

@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Automations fire at their scheduled time on hosts whose `TZ` isn't UTC — raw queries encoded dates in the process timezone against timezone-less columns, so a `TZ=Europe/Kyiv` box fired them three hours early.
+
 ## [0.20.1] - 2026-08-12
 
 ### Changed
