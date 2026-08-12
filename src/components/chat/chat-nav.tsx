@@ -82,7 +82,7 @@ export function ChatNav({
         aria-label={label}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className={`flex max-h-[70vh] flex-col items-end gap-2 overflow-hidden rounded-lg py-2 outline-none transition-opacity duration-150 focus-visible:ring-2 focus-visible:ring-ring ${
+        className={`flex max-h-[70dvh] flex-col items-end gap-2 overflow-hidden rounded-lg py-2 outline-none transition-opacity duration-150 focus-visible:ring-2 focus-visible:ring-ring ${
           open ? "pointer-events-none opacity-0" : "group-hover:pointer-events-none group-hover:opacity-0"
         }`}
       >
@@ -111,7 +111,7 @@ export function ChatNav({
           buttons stay out of the tab order until the list is actually shown. */}
       <nav
         aria-label={label}
-        className={`absolute right-0 top-1/2 flex max-h-[70vh] w-80 max-w-[60vw] -translate-y-1/2 flex-col gap-0.5 overflow-y-auto rounded-2xl bg-popover p-2.5 shadow-overlay transition-opacity duration-150 ${
+        className={`absolute right-0 top-1/2 flex max-h-[70dvh] w-80 max-w-[60vw] -translate-y-1/2 flex-col gap-0.5 overflow-y-auto rounded-2xl bg-popover p-2.5 shadow-overlay transition-opacity duration-150 ${
           open ? "visible opacity-100" : "invisible opacity-0 group-hover:visible group-hover:opacity-100"
         }`}
       >

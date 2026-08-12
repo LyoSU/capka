@@ -202,9 +202,14 @@ function FilePreview({
           // two states. It used to name `width`, which neither state sets, while
           // the real switch happens on max-width — so the resize simply jumped.
           "flex flex-col gap-0 overflow-hidden p-0 transition-[height,max-width] duration-200 motion-reduce:transition-none",
+          // dvh, not vh: on mobile Safari `vh` measures the viewport WITHOUT the
+          // browser chrome, so a 100vh dialog runs off the bottom of the screen and
+          // an 85vh one sits lower than it should — the toolbar covers the footer
+          // row (page controls, zoom) with no way to scroll to it. The rest of the
+          // app is already on dvh (the shell, auth, setup).
           fullscreen
-            ? "h-screen w-screen max-w-none rounded-none ring-0 sm:max-w-none"
-            : "h-[85vh] max-w-5xl sm:max-w-5xl",
+            ? "h-dvh w-screen max-w-none rounded-none ring-0 sm:max-w-none"
+            : "h-[85dvh] max-w-5xl sm:max-w-5xl",
         )}
       >
         {/* Header */}

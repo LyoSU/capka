@@ -13,6 +13,9 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Sending a message with attachments no longer drops the question down the page: the composer losing its preview tiles shifted the scroll position out from under the pinned turn. Most visible on mobile; plain one-line text was unaffected.
+- `/projects` scrolls, so projects past the first screenful are reachable on a phone.
+- Admin banners (provider health, updates, org changes) wrap their message on a narrow screen instead of squeezing it into a one-word-per-line column beside the action link.
+- Overlays are sized in `dvh`: the file viewer, the settings search results, the add-provider dialog and the chat jump list no longer extend under mobile Safari's toolbar.
 
 ## [0.20.0] - 2026-08-12
 

@@ -52,8 +52,15 @@ export default function ProjectsPage() {
   }
 
   return (
-    /* py-6 matches the project hub: these two pages are one back-and-forth, and
-       an 8px difference made the heading hop on every navigation. */
+    /* This page owns its scrolling. `SidebarInset` is `overflow-hidden` — the app
+       shell never scrolls the document — so a page that doesn't scroll itself is
+       simply CUT OFF at the fold, with no way to reach what's below it. That's what
+       happened here: on a phone the header plus three rows fill the viewport and
+       every project after them was unreachable. The hub this navigates to
+       (`project-hub.tsx`) and /chat/archived already scroll this way. */
+    <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+    {/* py-6 matches the project hub: these two pages are one back-and-forth, and
+        an 8px difference made the heading hop on every navigation. */}
     <div className="animate-fade-in mx-auto max-w-4xl px-4 py-6">
       <div className="flex items-center justify-between gap-3 mb-6">
         <div className="flex min-w-0 items-center gap-2">
@@ -190,6 +197,7 @@ export default function ProjectsPage() {
           onDeleted={() => { setDeleteTarget(null); fetchProjects(); }}
         />
       )}
+    </div>
     </div>
   );
 }

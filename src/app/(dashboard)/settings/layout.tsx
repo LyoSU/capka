@@ -203,7 +203,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           {renderSearch(false)}
           {/* Capped and scrollable: a one-letter query matches nearly the whole
               directory, which would otherwise push the page content off screen. */}
-          {searching && <div className="max-h-[50vh] overflow-y-auto pt-2">{renderResults(false)}</div>}
+          {searching && <div className="max-h-[50dvh] overflow-y-auto pt-2">{renderResults(false)}</div>}
         </div>
         <nav className={cn("flex gap-1 overflow-x-auto border-b px-3 py-2 md:hidden", searching && "hidden")}>
           {flatItems.map((item) => (
