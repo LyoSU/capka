@@ -14,9 +14,29 @@ describe("describeStep — categories", () => {
     expect(describeStep(t, "list_files").category).toBe("file");
   });
 
-  it("uses the file basename in the label", () => {
-    expect(describeStep(t, "write_file", { path: "/workspace/deep/logo.svg" }).label)
-      .toContain("logo.svg");
+  // The object acted on goes in `detail` (the sunken mono well), never spliced
+  // into the sentence — same grammar `execute_bash` has always used. The label
+  // stays a whole phrase in the user's language so the eye can read it and skip
+  // the machine token in one move.
+  it("carries the file basename as the detail, not inside the label", () => {
+    const d = describeStep(t, "write_file", { path: "/workspace/deep/logo.svg" });
+    expect(d.detail).toBe("logo.svg");
+    expect(d.label).not.toContain("logo.svg");
+    expect(d.activeLabel).not.toContain("logo.svg");
+  });
+
+  it("uses the same label for every file of one action, whatever the name", () => {
+    const a = describeStep(t, "str_replace", { path: "a.tsx" });
+    const b = describeStep(t, "str_replace", { path: "b/c/долгое имя.csv" });
+    expect(a.label).toBe(b.label);
+    expect(b.detail).toBe("долгое имя.csv");
+  });
+
+  // Args stream in progressively: the path can be missing on the first render.
+  it("omits the detail entirely when no path has arrived yet", () => {
+    const d = describeStep(t, "read_file", {});
+    expect(d.detail).toBeUndefined();
+    expect(d.label).toBeTruthy();
   });
 
   it("unifies execution tools under one category", () => {
@@ -31,6 +51,21 @@ describe("describeStep — categories", () => {
 
   it("classifies workspace search", () => {
     expect(describeStep(t, "search_files", { pattern: "TODO" }).category).toBe("search");
+  });
+
+  // A glob/regex is a machine token, so it belongs in the well like a filename.
+  it("carries the workspace search pattern as the detail", () => {
+    const d = describeStep(t, "search_files", { pattern: "TODO" });
+    expect(d.detail).toBe("TODO");
+    expect(d.label).not.toContain("TODO");
+  });
+
+  // A web query is prose, not a token: in a mono well it reads as broken type.
+  // It stays inside the sentence, which is why this tool keeps its own key.
+  it("keeps a web search query in the sentence rather than the well", () => {
+    const d = describeStep(t, "brave_web_search", { query: "ціни на бензин" });
+    expect(d.detail).toBeUndefined();
+    expect(JSON.stringify(d.label)).toContain("ціни на бензин");
   });
 
   it("classifies web search and page fetch via heuristics", () => {
@@ -99,10 +134,11 @@ describe("describeStep — skills", () => {
     expect(d.category).toBe("skill");
   });
 
-  it("uses the skill name in the label", () => {
+  // A skill name is a slug, so it reads as a token and belongs in the well.
+  it("carries the skill name as the detail", () => {
     const d = describeStep(t, "skill", { name: "seo-audit" });
-    // name is passed through the translator values
-    expect(JSON.stringify(d)).toContain("seo-audit");
+    expect(d.detail).toBe("seo-audit");
+    expect(d.label).not.toContain("seo-audit");
   });
 });
 

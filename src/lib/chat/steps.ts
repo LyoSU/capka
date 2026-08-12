@@ -190,63 +190,61 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
   }
 
   if (name === "skill") {
-    const skill = typeof args.name === "string" ? args.name : "";
     return {
       iconKey: "sparkles",
-      label: skill ? t("usedSkill", { name: skill }) : t("usedSkillGeneric"),
-      activeLabel: skill ? t("usingSkill", { name: skill }) : t("usingSkillGeneric"),
+      label: t("usedSkillGeneric"),
+      activeLabel: t("usingSkillGeneric"),
+      // A skill id is a slug ("seo-audit"), so it reads as a token, not prose.
+      detail: (typeof args.name === "string" ? args.name : "") || undefined,
       category: "skill",
     };
   }
 
   switch (name) {
-    case "write_file": {
-      const file = basename(args.path);
+    case "write_file":
       return {
         iconKey: "file-plus",
-        label: file ? t("createdFile", { file }) : t("createdFileGeneric"),
-        activeLabel: file ? t("creatingFile", { file }) : t("creatingFileGeneric"),
+        label: t("createdFileGeneric"),
+        activeLabel: t("creatingFileGeneric"),
+        detail: basename(args.path) || undefined,
         category: "file",
       };
-    }
-    case "str_replace": {
-      const file = basename(args.path);
+    case "str_replace":
       return {
         iconKey: "file-pen",
-        label: file ? t("editedFile", { file }) : t("editedFileGeneric"),
-        activeLabel: file ? t("editingFile", { file }) : t("editingFileGeneric"),
+        label: t("editedFileGeneric"),
+        activeLabel: t("editingFileGeneric"),
+        detail: basename(args.path) || undefined,
         category: "file",
       };
-    }
-    case "read_file": {
-      const file = basename(args.path);
+    case "read_file":
       return {
         iconKey: "file-text",
-        label: file ? t("readFile", { file }) : t("readFileGeneric"),
-        activeLabel: file ? t("readingFile", { file }) : t("readingFileGeneric"),
+        label: t("readFileGeneric"),
+        activeLabel: t("readingFileGeneric"),
+        detail: basename(args.path) || undefined,
         category: "file",
       };
-    }
     case "list_files":
       return { iconKey: "folder", label: t("listedFiles"), activeLabel: t("listingFiles"), category: "file" };
-    case "search_files": {
-      const query = clip(args.pattern, 32);
+    case "search_files":
+      // A glob/regex is a machine token like a path, so it goes in the well too.
+      // The web *query* below deliberately does not — see the comment there.
       return {
         iconKey: "search",
-        label: query ? t("searchedFor", { query }) : t("searchedFiles"),
+        label: t("searchedFiles"),
         activeLabel: t("searchingFiles"),
+        detail: clip(args.pattern, 32) || undefined,
         category: "search",
       };
-    }
-    case "view_file": {
-      const file = basename(args.path);
+    case "view_file":
       return {
         iconKey: "file-text",
-        label: file ? t("viewedFile", { file }) : t("viewedFileGeneric"),
-        activeLabel: file ? t("viewingFile", { file }) : t("viewingFileGeneric"),
+        label: t("viewedFileGeneric"),
+        activeLabel: t("viewingFileGeneric"),
+        detail: basename(args.path) || undefined,
         category: "file",
       };
-    }
     case "check_job":
       return { iconKey: "terminal", label: t("checkedJob"), activeLabel: t("checkingJob"), category: "exec" };
     case "execute_bash":
@@ -259,6 +257,12 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
       return { iconKey: "code", label: t("ranJavaScript"), activeLabel: t("runningJavaScript"), category: "exec" };
   }
 
+  // The one object that stays INSIDE the sentence. Every other step puts the
+  // thing it acted on in `detail`, which the web renders as a sunken mono well —
+  // right for a path, a glob or a slug, wrong for a web query, because a query is
+  // prose the user typed. "ціни на бензин" set in monospace reads as broken
+  // typography, and the well's "machine detail, skippable" framing is a lie for
+  // the one field that says what the user actually wanted to know.
   if (/(web|search|google|brave|tavily)/.test(name)) {
     const query = clip(args.query ?? args.q ?? args.pattern, 40);
     return { iconKey: "globe", label: query ? t("searchedWebFor", { query }) : t("searchedWeb"), activeLabel: t("searchingWeb"), category: "search" };

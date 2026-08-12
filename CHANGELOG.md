@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Tool steps in the activity rail put the filename, search pattern or skill name in the same sunken well the shell command already used, instead of splicing it into the sentence; Telegram step lines carry it too.
 - Chats that belong to a project are grouped under a single project header in the sidebar instead of each row carrying a project badge, so chat titles are no longer truncated to make room for a repeated name.
 
 ### Fixed
