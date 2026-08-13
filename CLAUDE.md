@@ -103,6 +103,15 @@ for the context-window meter and the auto-compaction trigger — summing would
 count a cached prefix once per step and wildly overstate how full the window
 really is).
 
+One turn is usually one task, but an approval/ask continuation
+(`payload.resumeMessageId`) is a SECOND task writing the SAME message row, with
+its own `prepareRun` and possibly a different model. So the two accounting
+surfaces diverge there and must not be unified: the `usage` ledger and the turn
+span are per TASK (each half owns its row/span, keyed by `taskId`), while
+`messages.metadata` is per MESSAGE and has to carry both halves —
+`foldTurnHalves` in `src/lib/tasks/turn-accounting.ts` does that folding, and
+folding it into the ledger instead would double-count the spend.
+
 ### Chat rendering (`src/lib/chat/`)
 
 DB rows are never handed to components raw — `presenter.ts` maps them into the
@@ -137,6 +146,13 @@ pin moves.
 - Prefer minimal, direct code: inline one-off logic rather than introducing a
   helper/constant/abstraction for a single call site, and lean on what a
   dependency already does before hand-rolling it.
+- An inverse lives next to the registration it undoes. Go through the module that
+  owns a thing to delete it (`deleteServer` in `src/lib/mcp/service.ts`,
+  `deleteSkill` in `src/lib/skills/service.ts`) — never a bare `db.delete` from a
+  caller: a service owns the inverse of whatever its upsert installed *beyond* the
+  row (cached tool schemas, materialized files), and a bulk delete skips that
+  silently, leaving no trace in the DB to notice. Same rule for in-process state:
+  whatever populates a module-level `Map` states its own bound and enforces it.
 - UI copy is localized via `next-intl` (`messages/*.json`); Ukrainian is a
   first-class locale, not an afterthought translation.
 
