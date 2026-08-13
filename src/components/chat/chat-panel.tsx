@@ -1,20 +1,11 @@
 "use client";
 
-import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
 import { nanoid } from "nanoid";
-
-// useLayoutEffect warns during SSR; this client component is still rendered on
-// the server, so fall back to useEffect there. The choice is stable per render.
-const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
-
-// Clearance below the floating gradient header where a pinned turn comes to
-// rest (kept in sync with the scroll container's pt-16). Content above this
-// line is what the header gradient fades out.
-const TOP_INSET = 64;
 
 /** Plain text of a message — the user turns feed the chat navigator. */
 function msgText(m: { parts?: { type: string; text?: string }[] }): string {
@@ -26,7 +17,7 @@ function msgText(m: { parts?: { type: string; text?: string }[] }): string {
     .trim();
 }
 
-import { AlertCircle, ArrowDown, FolderOpen, RefreshCw, Send, Clock, X, Square } from "lucide-react";
+import { AlertCircle, FolderOpen, RefreshCw, Send, Clock, X, Square } from "lucide-react";
 import { ChatMessage } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -54,6 +45,8 @@ import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
 import { ChatNav } from "@/components/chat/chat-nav";
+import { useChatScroll, ChatScrollProvider } from "@/components/chat/use-chat-scroll";
+import { JumpPill } from "@/components/chat/jump-pill";
 import { ClawMark } from "@/components/brand/claw-mark";
 import { pickGreeting, type GreetingLocale } from "@/lib/chat/greeting";
 import { haptic } from "@/lib/haptics";
@@ -156,40 +149,39 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   useEffect(() => {
     setGreeting(pickGreeting({ name: userName, locale: locale as GreetingLocale }));
   }, [chatId, userName, locale]);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  // The latest user message ("the question"), the end of real content (before
-  // the spacer), and the spacer itself — together they let us pin a turn to the
-  // top the way ChatGPT/Claude do.
-  const lastUserMsgRef = useRef<HTMLDivElement>(null);
-  const contentEndRef = useRef<HTMLDivElement>(null);
-  const spacerRef = useRef<HTMLDivElement>(null);
-  // Whether we're still holding the latest turn at the top. True right after a
-  // send; the user taking manual scroll control (wheel/touch/nav) releases it.
-  const pinnedRef = useRef(true);
-  // First paint of a chat snaps into place instantly; later sends animate. The
-  // page mounts ChatPanel with key={chatId}, so this resets per chat for free.
-  const seenFirstTurn = useRef(false);
-  const [showScrollDown, setShowScrollDown] = useState(false);
-  // The user turn currently at the top of the view — highlighted in the nav.
-  const [activeUserId, setActiveUserId] = useState<string | null>(null);
-  // The composer floats over the scroll area as an overlay, so the scroll area
-  // reserves bottom room equal to the composer's live height. Attaching files
-  // grows the composer; a fixed inset would then hide the tail of the reply
-  // behind it with nowhere to scroll. Measured here and fed into paddingBottom.
-  const composerRef = useRef<HTMLDivElement>(null);
-  const [composerH, setComposerH] = useState(160);
-  // Carries a height delta from the ResizeObserver to a layout effect that
-  // applies the matching scroll shift — done after the new padding commits so
-  // the room exists and a grow-shift isn't clamped. prevComposerH lets the
-  // observer compute the delta without re-measuring.
-  const pendingShift = useRef(0);
-  const prevComposerH = useRef(160);
-
   const router = useRouter();
   const { messages, isLoading, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, taskInfo } = useBackgroundChat({
     chatId,
     projectId,
   });
+
+  // Show the new-chat greeting ONLY for a genuinely fresh chat. `messages` start
+  // empty until the hook's history fetch resolves, so `messages.length === 0`
+  // alone can't tell a new chat from an existing one mid-load — that conflation
+  // is what flashed the greeting on direct navigation. `initialHasHistory` is the
+  // server's authoritative answer (chat.activeLeafId != null), so an existing
+  // chat renders the stream shell from first paint; the `messages.length` guard
+  // keeps the greeting from lingering after the first send on a truly new chat.
+  const showGreeting = !initialHasHistory && messages.length === 0;
+
+  // The message that starts the latest turn. A change here means a new turn
+  // exists — the scroll engine decides what that means (our send pins it; a turn
+  // that merely appeared becomes a notice).
+  const lastUserId = messages.findLast((m) => m.role === "user")?.id;
+
+  // Everything about scrolling this transcript — the pin, following the tail,
+  // holding the reader's place across the ~46 things that change its height, the
+  // reading-line anchor, the jump pill and the nav's active turn.
+  const scroll = useChatScroll({
+    turnKey: lastUserId,
+    isStreaming: isLoading,
+    messageCount: messages.length,
+    enabled: !showGreeting,
+  });
+  // Stable for the panel's lifetime, unlike `scroll` itself — so callbacks handed to
+  // `memo(ChatMessage)` can close over these without a ref to keep them from
+  // changing identity on every keystroke.
+  const scrollActions = scroll.actions;
   // Composer attachments upload eagerly on attach (so send is instant and a
   // retry never re-uploads) and persist their refs per chat — they survive a
   // reload just like the text draft.
@@ -232,14 +224,24 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // Surface edit/regenerate failures (esp. a network reject, now localized in
   // the hook) as a toast — without a catch these rejected silently, so a failed
   // edit looked like it just vanished.
+  // An edit rewrites the question, so it produces a new turn key and claims the
+  // pin exactly like a send. A regenerate does NOT — the question is unchanged
+  // and stays in place — so it re-seats the turn it already has, with nothing to
+  // wait for. Both are the reader asking for a fresh answer, and both should put
+  // the question they asked back on the reading line.
   const handleEdit = useCallback(
-    (id: string, text: string) =>
-      editMessage(id, text, model).catch((e) => toast.error(e instanceof Error ? e.message : t("panel.sendFailed"))),
-    [editMessage, model, t],
+    (id: string, text: string) => {
+      scrollActions.armForSend();
+      return editMessage(id, text, model).catch((e) => toast.error(e instanceof Error ? e.message : t("panel.sendFailed")));
+    },
+    [editMessage, model, t, scrollActions],
   );
   const handleRegenerate = useCallback(
-    () => regenerate(model).catch((e) => toast.error(e instanceof Error ? e.message : t("panel.sendFailed"))),
-    [regenerate, model, t],
+    () => {
+      scrollActions.pinLatest();
+      return regenerate(model).catch((e) => toast.error(e instanceof Error ? e.message : t("panel.sendFailed")));
+    },
+    [regenerate, model, t, scrollActions],
   );
 
   // "Continue here": fork a read-only Telegram chat from its latest message into
@@ -258,10 +260,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     return -1;
   })();
 
-  // The message that starts the latest turn. Changing this (a new send, or
-  // opening a chat) is what triggers the pin-to-top animation.
-  const lastUserId = messages.findLast((m) => m.role === "user")?.id;
-
   // Provenance: an imported chat marks every row `import:<source>`. Read it off
   // the root message so the transcript can show a single quiet "Imported from …"
   // pill at the top (not per message).
@@ -278,195 +276,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   const navItems = messages
     .filter((m) => m.role === "user")
     .map((m) => ({ id: m.id, text: msgText(m as { parts?: { type: string; text?: string }[] }) }));
-
-  // Show the "scroll to latest" button only when streamed content has grown
-  // past the visible reading area (the input bar floats over the bottom ~120px).
-  const updateScrollDown = () => {
-    const el = scrollRef.current;
-    const end = contentEndRef.current;
-    if (!el || !end) return;
-    const cRect = el.getBoundingClientRect();
-    const eRect = end.getBoundingClientRect();
-    setShowScrollDown(eRect.bottom > cRect.bottom - 120);
-  };
-
-  const scrollToLatest = () => {
-    const el = scrollRef.current;
-    const end = contentEndRef.current;
-    if (!el || !end) return;
-    pinnedRef.current = false; // explicit navigation — stop holding the turn at top
-    const cRect = el.getBoundingClientRect();
-    const eRect = end.getBoundingClientRect();
-    el.scrollTo({ top: el.scrollTop + (eRect.bottom - cRect.bottom) + 120, behavior: "smooth" });
-  };
-
-  // Bring any message (by id) to rest just below the header — powers the nav.
-  const scrollToMessage = (id: string) => {
-    const el = scrollRef.current;
-    const target = el?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
-    if (!el || !target) return;
-    pinnedRef.current = false; // user navigated to a specific turn — release the pin
-    const top = el.scrollTop + (target.getBoundingClientRect().top - el.getBoundingClientRect().top) - TOP_INSET;
-    el.scrollTo({ top, behavior: "smooth" });
-  };
-
-  // The active turn is the last user message whose top has reached the header
-  // line — i.e. the one you're currently reading.
-  const updateActiveTurn = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const cTop = el.getBoundingClientRect().top;
-    const nodes = el.querySelectorAll<HTMLElement>('[data-role="user"]');
-    let active: string | null = nodes[0]?.dataset.msgId ?? null;
-    nodes.forEach((n) => {
-      if (n.getBoundingClientRect().top - cTop <= TOP_INSET + 8) active = n.dataset.msgId ?? active;
-    });
-    setActiveUserId(active);
-  };
-
-  const handleScroll = () => { updateScrollDown(); updateActiveTurn(); };
-
-  // Size the spacer to exactly the room still missing for the latest user
-  // message to reach the top — i.e. one viewport minus whatever already sits
-  // below it (its reply + status). As the reply streams in, this shrinks toward
-  // zero, so a long answer leaves no dead space; a short one still pins to top.
-  const resizeSpacer = () => {
-    const el = scrollRef.current;
-    const userEl = lastUserMsgRef.current;
-    const end = contentEndRef.current;
-    const spacer = spacerRef.current;
-    if (!el || !userEl || !end || !spacer) return;
-    const contentBelowUser = end.getBoundingClientRect().top - userEl.getBoundingClientRect().top;
-    // Subtract the composer's own footer (its live height + the 16px of air) —
-    // the scroll area already reserves exactly that as paddingBottom. Counting
-    // only the viewport here would stack the two and leave a composer-tall band
-    // of dead scroll below the turn. (--kb is left in the padding on purpose:
-    // that slack is what lets the list rise above the on-screen keyboard.)
-    const footer = prevComposerH.current + 16;
-    // -2: an exact fit would rest the content precisely on the overflow
-    // boundary, where sub-pixel drift (fractional text heights vs the rounded
-    // clientHeight) flips the scrollbar on and off with every streamed delta
-    // in a fresh chat. Undershooting keeps "no scrollbar" a stable state; the
-    // pinned turn resting 2px shy of the header line is imperceptible.
-    const h = `${Math.max(0, el.clientHeight - footer - contentBelowUser - TOP_INSET - 2)}px`;
-    // Only write when it actually changes — a no-op write would re-trigger the
-    // ResizeObserver that calls this, risking a feedback loop.
-    if (spacer.style.height !== h) spacer.style.height = h;
-  };
-
-  // Put the latest question back on the header line. Used by every path that can
-  // change layout under a held pin — content growing/shrinking, and the composer
-  // changing height — so all of them land the turn in the same place instead of
-  // each nudging scrollTop by its own delta.
-  const reseatPinned = () => {
-    const el = scrollRef.current;
-    const userEl = lastUserMsgRef.current;
-    if (!el || !userEl) return false;
-    const top = el.scrollTop + (userEl.getBoundingClientRect().top - el.getBoundingClientRect().top) - TOP_INSET;
-    if (Math.abs(top - el.scrollTop) > 1) el.scrollTop = top; // instant re-seat, no animation
-    return true;
-  };
-
-  // Pin the latest turn to the top. When a new user message appears we grow the
-  // bottom spacer (so a short reply can still be scrolled up), then bring the
-  // message to the top. The reply streams downward into the space below — we
-  // never auto-follow it, so the view stays calm while the model writes.
-  useIsomorphicLayoutEffect(() => {
-    if (!lastUserId) return;
-    const el = scrollRef.current;
-    const userEl = lastUserMsgRef.current;
-    if (!el || !userEl) return;
-
-    resizeSpacer(); // synchronous style write — layout is ready before we scroll
-    const cRect = el.getBoundingClientRect();
-    const uRect = userEl.getBoundingClientRect();
-    const top = el.scrollTop + (uRect.top - cRect.top) - TOP_INSET;
-    // "instant" (not "auto") — "auto" defers to the CSS scroll-behavior, which
-    // would animate the very first positioning and read as a stray scroll.
-    el.scrollTo({ top, behavior: seenFirstTurn.current ? "smooth" : "instant" });
-    seenFirstTurn.current = true;
-    pinnedRef.current = true; // a fresh turn re-arms the pin
-    updateScrollDown();
-    updateActiveTurn();
-  }, [lastUserId]);
-
-  // Hold the latest turn at the top through ANY content height change — not just
-  // message additions. A long reasoning block collapsing on its own shrinks the
-  // reply; without this the browser clamps the scroll and the question visibly
-  // drops down the page. We keep the spacer sized and, while the pin is still
-  // held (the user hasn't grabbed scroll), re-seat the question at the header
-  // line. Wheel/touch release the pin so we never fight a deliberate scroll.
-  useIsomorphicLayoutEffect(() => {
-    const el = scrollRef.current;
-    const content = el?.firstElementChild as HTMLElement | null;
-    if (!el || !content) return;
-
-    const release = () => { pinnedRef.current = false; };
-    // Scrollbar drags emit no wheel event — only pointerdown/mousedown — so
-    // without this the re-seat below snaps the position back on every streamed
-    // delta and the page feels scroll-locked on desktop. Mouse only: touch taps
-    // arrive as synthetic mouse events too, and a tap isn't a scroll intent.
-    const releaseOnMouse = (e: PointerEvent) => { if (e.pointerType === "mouse") release(); };
-    el.addEventListener("wheel", release, { passive: true });
-    el.addEventListener("touchmove", release, { passive: true });
-    el.addEventListener("pointerdown", releaseOnMouse, { passive: true });
-
-    const ro = new ResizeObserver(() => {
-      resizeSpacer(); // grow the spacer first so re-seating has room to scroll into
-      if (pinnedRef.current) reseatPinned();
-      updateScrollDown();
-    });
-    ro.observe(content);
-    return () => {
-      ro.disconnect();
-      el.removeEventListener("wheel", release);
-      el.removeEventListener("touchmove", release);
-      el.removeEventListener("pointerdown", releaseOnMouse);
-    };
-  }, []);
-
-  // Keep the spacer correct on viewport changes; refresh the button as the
-  // reply streams in (content grows, but we deliberately don't scroll).
-  useEffect(() => {
-    const onResize = () => { resizeSpacer(); updateScrollDown(); };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  // Glue the conversation to the rising keyboard. iOS overlays the on-screen
-  // keyboard without resizing layout, so the --kb padding only adds room *below*
-  // — it never lifts what you're looking at, and the newest message slips behind
-  // the keyboard. Mirror the keyboard's height change into scrollTop so the list
-  // moves up in lockstep with it, the way every messenger does: your position
-  // (latest reply, or mid-history) is preserved, just raised above the keyboard —
-  // expected, not a jump. Deferred to a frame so useKeyboardInset's matching
-  // padding bump has committed first; otherwise the scroll would clamp for lack
-  // of room. Android resizes layout instead (inset stays ~0), so this is a no-op.
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    let prevInset = Math.max(0, window.innerHeight - vv.height);
-    const onResize = () => {
-      const inset = Math.max(0, window.innerHeight - vv.height);
-      const delta = inset - prevInset;
-      prevInset = inset;
-      if (Math.abs(delta) <= 1) return;
-      requestAnimationFrame(() => {
-        const el = scrollRef.current;
-        if (el) el.scrollTop += delta;
-      });
-    };
-    vv.addEventListener("resize", onResize);
-    return () => vv.removeEventListener("resize", onResize);
-  }, []);
-
-  // As the reply streams in, keep the spacer trimmed to just-enough and refresh
-  // the button + active turn. Deferred to a frame so we measure after the new
-  // content has laid out (and so the state writes aren't synchronous in-effect).
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => { resizeSpacer(); updateScrollDown(); updateActiveTurn(); });
-    return () => cancelAnimationFrame(raf);
-  }, [messages]);
 
   // A gentle "done" buzz on the falling edge of loading (touch devices only).
   const wasLoading = useRef(false);
@@ -526,6 +335,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       // block the send on it — a sync hiccup surfaces in the attach menu, not a
       // failed turn.
       await folderSync.pushAll().catch(() => {});
+      // Claim the pin for the turn this send is about to create — here rather than
+      // in the submit handler, so the queue drain and the manage cards' own sends
+      // get the same treatment. Claimed as late as possible and consumed by the
+      // bubble `sendMessage` adds optimistically, which keeps the window in which
+      // an unrelated Telegram turn could collect it down to this one call.
+      scrollActions.armForSend();
       await sendMessage(text, model, refs.length > 0 ? refs : undefined, id, thinkAmount);
       return true;
     } catch (e) {
@@ -612,55 +427,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, queued, historyLoaded]);
 
-  // Show the new-chat greeting ONLY for a genuinely fresh chat. `messages` start
-  // empty until the hook's history fetch resolves, so `messages.length === 0`
-  // alone can't tell a new chat from an existing one mid-load — that conflation
-  // is what flashed the greeting on direct navigation. `initialHasHistory` is the
-  // server's authoritative answer (chat.activeLeafId != null), so an existing
-  // chat renders the stream shell from first paint; the `messages.length` guard
-  // keeps the greeting from lingering after the first send on a truly new chat.
-  const showGreeting = !initialHasHistory && messages.length === 0;
   const [filesOpen, setFilesOpen] = useState(false);
-
-  // Track the composer's height so the scroll inset always matches it. Re-run
-  // when the greeting gives way to the message stream, since the composer only
-  // mounts there. The initial measurement seeds prevComposerH WITHOUT queuing a
-  // shift (first paint shouldn't jump); subsequent growth/shrink (a file chip
-  // appearing, the queue filling) queues the delta.
-  useIsomorphicLayoutEffect(() => {
-    const el = composerRef.current;
-    if (!el) return;
-    prevComposerH.current = el.offsetHeight;
-    setComposerH(el.offsetHeight);
-    const ro = new ResizeObserver(() => {
-      const h = el.offsetHeight;
-      const delta = h - prevComposerH.current;
-      if (!delta) return;
-      prevComposerH.current = h;
-      pendingShift.current += delta;
-      setComposerH(h);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [showGreeting]);
-
-  // Once the padding (driven by composerH) has committed, settle the scroll for the
-  // composer's new height. Under a held pin that means re-seating the question, not
-  // nudging by the delta: sending with attachments drops a ~110px row of preview
-  // tiles just as the pin seats the question, and the blind shift pushed it that far
-  // down the page (one-line text has a zero delta, hence "only with attachments").
-  // With the pin released the delta is the point — it keeps the line you were
-  // reading glued above the composer instead of being swallowed by it.
-  useIsomorphicLayoutEffect(() => {
-    const d = pendingShift.current;
-    if (!d) return;
-    pendingShift.current = 0;
-    const el = scrollRef.current;
-    if (!el) return;
-    resizeSpacer(); // the composer's height is part of the spacer's budget
-    if (pinnedRef.current && reseatPinned()) return;
-    el.scrollTop += d;
-  }, [composerH]);
 
   // A monotonically-rising count of completed tool calls across the whole thread.
   // It ticks up the moment a tool finishes — exactly when the agent may have
@@ -832,6 +599,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   ) : null;
 
   return (
+    <ChatScrollProvider value={scrollActions}>
     <PreviewProvider>
     {/* Full-window drop target — disabled for read-only Telegram chats (no composer). */}
     <FileDropZone onFiles={attachments.add} disabled={readOnly} />
@@ -922,14 +690,39 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               both-edges keeps the centered column aligned with those overlays
               (which don't know about the gutter) whether or not a classic
               scrollbar is showing. */}
+          {/* `overflow-anchor:none` is load-bearing, not a tidy-up: Chrome and
+              Firefox would otherwise ALSO compensate for height changes above the
+              reader, on top of the compensation useChatScroll performs — while
+              Safari, which ships scroll anchoring in no stable release, would not.
+              Turning the native one off is what makes iOS and Android behave the
+              same. The reading line is one CSS token: it sets this padding, the
+              matching `scroll-padding` for browser-driven scrolls, and — since the
+              engine reads the padding back off the element — the line the whole
+              state machine measures against. */}
           <div
-            ref={scrollRef}
-            onScroll={handleScroll}
-            className="flex-1 overflow-y-auto overscroll-contain pt-16 [scrollbar-gutter:stable_both-edges]"
-            // Bottom room tracks the composer's live height (+a little air, +the
-            // keyboard inset) so the last message always clears the overlaid
-            // composer — even after attachments grow it.
-            style={{ paddingBottom: `calc(${composerH + 16}px + var(--kb, 0px))` }}
+            ref={scroll.scrollRef}
+            className="flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]"
+            role="log"
+            aria-label={t("panel.conversation")}
+            // A series of streamed deltas is not a series of announcements. `role="log"`
+            // carries an implicit polite live region, so without this a screen reader
+            // would read a reply out a token at a time; `aria-busy` lets the whole turn
+            // land as one unit. Verified behaviour differs between readers, so this is
+            // the conservative choice, not a guess at a nicety.
+            aria-busy={isLoading || undefined}
+            style={{
+              // Bottom room is the composer's live height plus the footer gradient's
+              // own air, both measured — so the tail of a reply always clears the
+              // overlaid composer, even after attachments grow it.
+              paddingTop: "var(--reading-line)",
+              paddingBottom: `calc(${scroll.bottomReserve}px + var(--kb, 0px))`,
+              // The same optimal region, declared for the scrolls the BROWSER drives:
+              // focusing a control with the keyboard, find-in-page, `scrollIntoView`.
+              // Without it those land their target under the gradient header or behind
+              // the composer, which our own engine would then have to undo.
+              scrollPaddingBlockStart: "var(--reading-line)",
+              scrollPaddingBlockEnd: `calc(${scroll.bottomReserve}px + var(--kb, 0px))`,
+            }}
           >
             <div className="mx-auto max-w-3xl lg:max-w-4xl px-2 md:px-4">
               {importedFrom && (
@@ -949,7 +742,14 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                     key={message.id}
                     data-msg-id={message.id}
                     data-role={message.role}
-                    ref={isLatestUser ? lastUserMsgRef : undefined}
+                    // Anchor candidate. Marked here as the fallback granularity;
+                    // assistant messages also mark their individual blocks, and the
+                    // engine prefers the deepest marked block near the reading line
+                    // — a change inside a screens-tall message can leave the
+                    // message's own box still while moving the text being read.
+                    data-scroll-anchor="msg"
+                    data-anchor-id={message.id}
+                    ref={isLatestUser ? scroll.pinRef : undefined}
                   >
                     <ChatMessage
                       message={message as never}
@@ -982,8 +782,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               })()}
               {/* End of real content (used to detect/scroll to the latest), then
                   the spacer that lets the latest turn rise to the top. */}
-              <div ref={contentEndRef} />
-              <div ref={spacerRef} aria-hidden className="shrink-0" />
+              <div ref={scroll.contentEndRef} />
+              <div ref={scroll.spacerRef} aria-hidden className="shrink-0" />
             </div>
           </div>
 
@@ -1032,8 +832,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
 
           <ChatNav
             items={navItems}
-            activeId={activeUserId}
-            onJump={scrollToMessage}
+            activeId={scroll.activeUserId}
+            onJump={scrollActions.jumpToMessage}
             label={t("panel.navigation")}
           />
 
@@ -1043,34 +843,28 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
               the (i)/copy/regenerate row of whatever message rested under it
               (it worked in some chats and not others purely by scroll position).
               Mirrors the header above; only the real controls re-enable events. */}
+          {/* The jump pill lives OUTSIDE the footer's flow, floating over the
+              transcript. Inside it, its ~44px row was reserved scroll room even
+              while hidden — a permanent band of dead space paying for an
+              affordance that is absent most of the time. */}
+          <JumpPill
+            show={scroll.showJump}
+            tone={scroll.jumpTone}
+            bottom={scroll.bottomReserve}
+            onClick={scrollActions.jumpToBottom}
+            newLabel={t("panel.newMessage")}
+            label={t("panel.scrollDown")}
+          />
+
           <div
+            ref={scroll.footerRef}
             className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-6 transition-transform duration-200 ease-out"
             // Lift the composer above the on-screen keyboard (iOS; ~0 elsewhere).
             style={{ transform: "translateY(calc(-1 * var(--kb, 0px)))" }}
           >
-            <div
-              className={`pointer-events-none mb-2 flex justify-center transition-[transform,opacity] duration-200 ${
-                showScrollDown ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
-              }`}
-            >
-              <Button
-                variant="outline"
-                size="icon"
-                tabIndex={showScrollDown ? 0 : -1}
-                aria-hidden={!showScrollDown}
-                className={`h-9 w-9 rounded-full shadow-raised transition-transform [@media(hover:hover)]:hover:scale-105 ${
-                  showScrollDown ? "pointer-events-auto" : "pointer-events-none"
-                }`}
-                onClick={scrollToLatest}
-                aria-label={t("panel.scrollDown")}
-              >
-                <ArrowDown className="h-4 w-4" />
-              </Button>
-            </div>
             {/* The composer, queue and error banner are the genuinely
-                interactive part of this otherwise click-through block. Its
-                height (measured via composerRef) drives the scroll inset. */}
-            <div ref={composerRef} className="pointer-events-auto">
+                interactive part of this otherwise click-through block. */}
+            <div className="pointer-events-auto">
               {error && !lastFailed && (
                 <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
                   <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -1106,5 +900,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       />
     </div>
     </PreviewProvider>
+    </ChatScrollProvider>
   );
 }

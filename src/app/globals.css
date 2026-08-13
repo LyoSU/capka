@@ -96,6 +96,30 @@
      one-shot reveal but as rubbery on a hover that fires hundreds of times.
      Two curves, split by role — never more. */
   --ease-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  /* How long anything that appears at the END of an assistant turn waits before
+     it does. The end of a turn is the busiest instant in the app: the reasoning
+     spoiler collapses, the label rewrites itself from "Thinking…" to "Reasoned
+     for 58s", produced files land, and the copy/regenerate row appears — all in
+     one frame. Letting the geometry settle first and the trim arrive just after
+     turns that pile-up into a sequence: the text finishes, then its controls
+     show up. Short enough that nobody waits for it, long enough that nothing
+     lands mid-collapse. The reduced-motion block zeroes every delay, so this
+     folds back into a single frame there. */
+  --settle: 120ms;
+  /* How long a disclosure panel takes to grow or collapse. Declared here, not
+     inline in the transition below, because the scroll engine needs the same
+     number: while a panel animates, the row the reader clicked has to be held
+     exactly still, and the engine can only hold it for as long as it moves. The
+     panel doesn't exist yet at the moment you click a CLOSED one, so its duration
+     cannot be measured off the element — one token both sides read is the only
+     way to keep them from drifting apart. */
+  --collapse-dur: 200ms;
+  /* Where a pinned question comes to rest, and the top of the region the browser
+     should keep its own scrolls clear of. One token drives the scroll container's
+     padding-top, its `scroll-padding-block-start`, and — because the engine reads
+     the padding back off the element — the reading line the whole state machine is
+     measured against. There is no second copy of this number anywhere. */
+  --reading-line: 4rem;
   --background: oklch(0.97 0.004 75);
   --foreground: oklch(0.18 0.005 285);
   --card: oklch(0.995 0.002 75);
@@ -387,11 +411,21 @@
 [data-slot="collapsible-content"] {
   height: var(--collapsible-panel-height);
   overflow: hidden;
-  transition: height 0.2s var(--ease-out);
+  transition: height var(--collapse-dur) var(--ease-out);
 }
 [data-slot="collapsible-content"][data-starting-style],
 [data-slot="collapsible-content"][data-ending-style] {
   height: 0;
+}
+/* A panel the app closes on the reader's behalf, while it sits outside the
+   viewport, closes instantly. The motion above is for a lid the reader can see
+   moving; off screen it buys nothing and costs a 200ms height interpolation on
+   the longest DOM in the app, plus a scroll correction on every frame of it —
+   which is what an end-of-turn reasoning collapse used to spend. Direct child
+   only: the activity rail nests spoilers (a step's raw payload), and those keep
+   their own animation because the reader opens them by hand. */
+[data-collapse-instant] > [data-slot="collapsible-content"] {
+  transition: none;
 }
 
 /* Claw reveal: each tapered blade wipes in from its top to its tip via

@@ -214,6 +214,8 @@
         }
       },
       "scrollDown": "Scroll to bottom",
+      "newMessage": "New message",
+      "conversation": "Conversation",
       "retry": "Retry",
       "navigation": "Chat navigation",
       "telegramReadOnly": "This is a Telegram chat. Reply there",

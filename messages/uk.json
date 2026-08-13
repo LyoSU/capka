@@ -214,6 +214,8 @@
         }
       },
       "scrollDown": "Донизу",
+      "newMessage": "Нове повідомлення",
+      "conversation": "Розмова",
       "retry": "Повторити",
       "navigation": "Навігація чатом",
       "telegramReadOnly": "Це Telegram-чат, відповідайте там",

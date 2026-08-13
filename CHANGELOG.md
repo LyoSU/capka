@@ -11,8 +11,30 @@ All notable changes to Capka are documented here. Format follows
 - Optional agent tracing over standard OTLP: set `OTEL_EXPORTER_OTLP_ENDPOINT` to export a span tree per turn (turn → LLM calls → tool calls → sandbox/MCP work) to any OpenTelemetry backend (Langfuse, Phoenix, Tempo, Jaeger, an OTel Collector). Unset means off with zero overhead; no new services and no vendor SDK.
 - Prompts, documents, tool payloads and sandbox commands stay out of exported traces unless `CAPKA_TELEMETRY_CONTENT=true`, plus `CAPKA_TELEMETRY_CONTENT_REMOTE=true` when the collector is not on this host — without the second flag content is force-disabled and the boot log says so. Cost in USD is likewise withheld by default (`CAPKA_TELEMETRY_COST=true`) so the Postgres usage ledger stays the single money truth. Tunable further with `CAPKA_TELEMETRY_SPAN_PREFIXES` and `CAPKA_TELEMETRY_EXTRA_ATTRIBUTES`.
 
+### Changed
+
+- A reply longer than the screen now follows its own tail: the question rises to the top as before, and once the answer fills the view the chat keeps the write head in sight instead of leaving the reader to chase it. Scrolling up stops it; returning to the bottom resumes it.
+- Opening a chat lands at the end of the conversation rather than pinning its last question to the top.
+- The "scroll to bottom" button appears only when the reader is actually away from the end — it used to sit on screen for most of every streaming turn. It reads as "new message" for a turn that arrived from Telegram or an automation, which no longer pulls the view away from what is being read.
+- Reasoning collapses at the end of a turn without animating when it is off screen, and the copy/regenerate row appears just after the height settles instead of during it.
+
 ### Fixed
 
+- Opening a spoiler no longer moves the chat. Whatever was driving the view — following a streamed reply, or holding a pinned question — hands over to the row you pressed for as long as its panel animates, so the panel grows out of a control that stays put.
+- Thinking is not collapsed out from under you: a spoiler you have touched once is never closed by the app again, and neither is one holding the keyboard focus or a text selection.
+- Following a streamed reply stops when the turn does, so a late image, a syntax-highlight pass or a diagram rendering no longer drags an idle chat to the bottom.
+- Opening a chat with history stays at the end while it finishes assembling — images decoding and syntax highlighting arriving used to grow content above the landing point and leave a long chat sitting in its middle.
+- The on-screen keyboard is one measurement app-wide: the transcript lifted by a different amount than the layout reserved on iOS, because a second copy of the formula omitted `visualViewport.offsetTop` and never listened for its `scroll` event.
+- Nothing moves the transcript while a finger is on the screen — a resting thumb suspends following until it lifts, and touching the screen stops an eased scroll at once.
+- The "scroll to bottom" pill now actually goes there, and stops showing once you arrive: an explicit jump was measured as drift and undone, so the pill could appear to do nothing.
+- A keyboard appearing or dismissing mid-gesture no longer writes over an iOS touch or its momentum — the shift is held back and applied once the gesture ends.
+- A reply finishing no longer announces itself as a new message: if you had scrolled up during your own turn, the jump pill flipped to "New message" (and a screen reader said so) when the stream merely ended.
+- The chat navigator highlights the turn you are actually reading instead of lagging a message behind it.
+- The chat exposes itself as a log region and marks a streaming turn busy, so a screen reader announces a reply once rather than a token at a time.
+- Rendered pages in a tool's result reserve a fixed box, so a decoding image can neither push the transcript down nor rewrap the row it sits in.
+- The chat no longer jumps when anything above the reader changes height — thinking auto-collapsing, a spoiler closing, a rendered page decoding, or syntax highlighting and diagrams arriving late and re-laying-out the whole history. Previously only Chrome and Firefox absorbed this via native scroll anchoring, which Safari does not implement, so iOS jumped where Android did not.
+- Scrolling with the keyboard (PageUp/Home/arrows) releases the pinned turn like the wheel and touch already did, instead of being pulled back on the next streamed delta.
+- Streaming is smoother on phones: scroll position is corrected once per height change instead of forcing a layout pass on every one, the reading-line and active-turn tracking no longer measures every message on every scroll event, and nothing writes to the scroll position mid-gesture or during iOS momentum.
 - Automations fire at their scheduled time on hosts whose `TZ` isn't UTC — raw queries encoded dates in the process timezone against timezone-less columns, so a `TZ=Europe/Kyiv` box fired them three hours early.
 
 ## [0.20.1] - 2026-08-12

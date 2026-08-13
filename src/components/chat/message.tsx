@@ -10,12 +10,13 @@ import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
 import { Markdown } from "@/components/chat/markdown";
 import { haptic } from "@/lib/haptics";
 import { useLongPress } from "@/hooks/use-long-press";
-import { useState, useMemo, useEffect, useRef, memo } from "react";
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
 import { extractWorkspacePaths, splitTouchedByMention } from "@/lib/chat/artifacts";
 import { cleanReasoning } from "@/lib/chat/reasoning";
+import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { LLM_ERROR_CATEGORIES } from "@/lib/errors/friendly";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
@@ -23,6 +24,28 @@ import { describeStep, type StepDescriptor } from "./steps";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
+
+/** useLayoutEffect warns during SSR; these are client components still rendered on
+ *  the server, so fall back there. Stable per render. */
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+/** Is the reader actively using what's inside this panel? Focus inside it, or a
+ *  text selection within it, both mean the app's tidying-up instinct does not get
+ *  to close it — nothing feels worse than an interface folding away the thing you
+ *  were reading, and "the turn finished" is not a good enough reason. */
+function isReaderEngaged(root: HTMLElement): boolean {
+  const active = document.activeElement;
+  if (active && active !== document.body && root.contains(active)) return true;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return false;
+  // Both ends, not the common ancestor: a selection that starts inside this panel
+  // and runs past its end has an ancestor ABOVE us, so asking about the ancestor
+  // would report "not engaged" and collapse the very text being selected.
+  return (
+    (!!sel.anchorNode && root.contains(sel.anchorNode)) ||
+    (!!sel.focusNode && root.contains(sel.focusNode))
+  );
+}
 
 // --- Helpers ---
 
@@ -174,13 +197,23 @@ function ToolDetails({ toolName, output, errorText, chatId }: { toolName: string
     return (
       <div className="flex flex-wrap gap-2">
         {media.pages.slice(0, 4).map((pg) => (
+          // A box fixed in BOTH axes, with the page fitted inside it.
+          //
+          // An unsized image is zero-by-zero until it decodes, so a rendered page
+          // landing shoved everything below it down by its full height — at a moment
+          // nothing announces and React never re-renders for. Pinning only the height
+          // is not enough either: the decoded WIDTH still changes, and in a wrapping
+          // row that can change how many tiles fit per line and move the block by a
+          // whole row. The workspace tiles elsewhere already reserve a fixed box for
+          // exactly this reason; this now matches them. `object-contain` means the box
+          // is a frame, not a crop, so no aspect ratio has to be guessed at.
           // eslint-disable-next-line @next/next/no-img-element -- authed same-origin workspace stream, not a static asset
           <img
             key={pg.path}
             src={`/api/sandbox/files/download?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(pg.path)}&inline=1`}
             alt=""
             loading="lazy"
-            className="max-h-40 rounded-md border border-border"
+            className="h-40 w-32 rounded-md border border-border bg-muted/40 object-contain"
             onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
           />
         ))}
@@ -264,6 +297,7 @@ function TextContent({ text, isStreaming, chatId, touched }: { text: string; isS
  *  message that produced one result still LOOKS like it produced one result. */
 function AlsoChanged({ paths, chatId }: { paths: string[]; chatId: string }) {
   const tw = useTranslations("chat.workspace");
+  const anchorDisclosure = useDisclosureAnchor();
   const viewable: PreviewFile[] = useMemo(
     () =>
       paths
@@ -272,7 +306,7 @@ function AlsoChanged({ paths, chatId }: { paths: string[]; chatId: string }) {
     [paths, chatId],
   );
   return (
-    <Collapsible defaultOpen={false}>
+    <Collapsible defaultOpen={false} onOpenChange={(_, d) => anchorDisclosure(d)}>
       {/* Same 40% resting chevron as the activity group and the step rows — one
           quiet level for "there is more here", not a third opacity in the mix. */}
       <CollapsibleTrigger className="group/also mt-2 inline-flex items-center gap-1.5 rounded-md py-1 text-xs text-muted-foreground transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-90">
@@ -447,6 +481,7 @@ function StepBadge({ d, state }: { d: StepDescriptor; state: "running" | "error"
  *  output/error tucked into a click-to-expand block beneath it. */
 function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
   const tSteps = useTranslations("steps");
+  const anchorDisclosure = useDisclosureAnchor();
   const t = useTranslations("chat.tool");
   const rawName = getToolName(part);
   const d = describeStep(tSteps, rawName, part.input);
@@ -497,7 +532,7 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
   if (!expandable) return row;
 
   return (
-    <Collapsible defaultOpen={false}>
+    <Collapsible defaultOpen={false} onOpenChange={(_, d) => anchorDisclosure(d)}>
       {/* `opacity-40 → 100` on hover rather than hide-until-hover: an affordance
           nobody can see is an affordance nobody finds, so the chevron stays
           faintly present at rest and only firms up under the cursor. Same 40%
@@ -567,16 +602,41 @@ function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; i
  *  because no honest number exists for it. */
 function ActivityGroup({ items, isStreaming, timing, chatId }: { items: ActivityItem[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string }) {
   const t = useTranslations("chat.message");
+  const anchorDisclosure = useDisclosureAnchor();
   const streaming = !!isStreaming;
   const timed = timing != null;
   const { measuredMs, startedMsAgo } = timing ?? {};
-  const [userToggled, setUserToggled] = useState(false);
   const [open, setOpen] = useState(streaming);
-  const [prevStreaming, setPrevStreaming] = useState(streaming);
-  if (!userToggled && prevStreaming !== streaming) {
-    setPrevStreaming(streaming);
+  // Whether the automatic collapse below should animate. An animation nobody can
+  // see is not smoothness — it is 200ms of height interpolation, the most expensive
+  // property there is, on the longest DOM in the app, plus a scroll correction on
+  // every frame of it. At the end of a turn this block is usually far above the
+  // reader (who is watching the answer), so the collapse is paid for and never
+  // witnessed.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [instant, setInstant] = useState(false);
+  // A ref, not state: once the reader has touched this spoiler the app stops
+  // deciding for them, and that fact never needs to trigger a render.
+  const userToggled = useRef(false);
+
+  // A LAYOUT effect, not a render-phase branch. Measuring the DOM and queueing
+  // state during render is something React explicitly forbids — a concurrent
+  // render can be repeated or thrown away while the DOM it measured still belongs
+  // to the previous commit, so the animate-or-not decision would sometimes be made
+  // from stale geometry. Here the DOM is committed and known, both state writes
+  // batch into one re-render, and that re-render lands before paint — so the panel
+  // still closes with `data-collapse-instant` already applied and the transition
+  // never starts.
+  useIsomorphicLayoutEffect(() => {
+    if (userToggled.current) return;
+    // Never close under someone's hands: if focus is inside the panel, or they are
+    // selecting text in it, the reader is plainly using it and the app's opinion
+    // about tidiness does not outrank that.
+    if (!streaming && rootRef.current && isReaderEngaged(rootRef.current)) return;
+    const r = rootRef.current?.getBoundingClientRect();
+    setInstant(!!r && (r.bottom <= 0 || r.top >= window.innerHeight));
     setOpen(streaming);
-  }
+  }, [streaming]);
 
   // Live stopwatch for the turn in flight. It ticks from the run's REAL start,
   // not from this component's first paint: `startedMsAgo` says how long the turn
@@ -618,7 +678,22 @@ function ActivityGroup({ items, isStreaming, timing, chatId }: { items: Activity
   const countLabel = !streaming && toolCount > 1 ? t("stepCount", { count: toolCount }) : null;
 
   return (
-    <Collapsible open={open} onOpenChange={(v) => { setUserToggled(true); setOpen(v); }}>
+    <Collapsible
+      ref={rootRef}
+      open={open}
+      // A deliberate press is always animated — the reader is looking straight at
+      // what they clicked, and that is the one place the growing-lid motion earns
+      // its keep — and it hands the scroll position to the pressed row, so the
+      // panel grows downward out of a control that does not move. Base UI tells us
+      // the reason and the trigger, so a press and a collapse the app performed on
+      // the reader's behalf are told apart by the library, not guessed at.
+      onOpenChange={(v, details) => {
+        anchorDisclosure(details);
+        if (details.reason === "trigger-press") { userToggled.current = true; setInstant(false); }
+        setOpen(v);
+      }}
+      data-collapse-instant={instant ? "" : undefined}
+    >
       {/* No pulse on the label while live: the rail below is already open and
           shows a spinning node on the running step, so a pulsing header is the
           same fact stated a second time. `tabular-nums` keeps the ticking duration
@@ -643,6 +718,7 @@ function ActivityGroup({ items, isStreaming, timing, chatId }: { items: Activity
  *  expand the raw technical `detail`. */
 function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean }) {
   const t = useTranslations("chat.tool");
+  const anchorDisclosure = useDisclosureAnchor();
   return (
     // A failure is a state of the turn, not a hazard sign taped over it. The old
     // pink slab with a hard red border was the loudest object in the transcript,
@@ -662,7 +738,7 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: stri
         <span className="flex-1 leading-relaxed text-foreground">{message}</span>
       </div>
       {(isAdmin || ownsResource) && detail && detail !== message && (
-        <Collapsible>
+        <Collapsible onOpenChange={(_, d) => anchorDisclosure(d)}>
           {/* Not red. Opening the raw detail is an ordinary affordance, and
               painting it with the error colour made the notice read as two
               alarms — one of which is just a disclosure triangle. */}
@@ -1171,8 +1247,9 @@ interface ChatMessageProps {
  *  now sees in place of those turns — the full history above stays scrollable. */
 function CompactionDivider({ summary }: { summary: string }) {
   const t = useTranslations("chat.message");
+  const anchorDisclosure = useDisclosureAnchor();
   return (
-    <Collapsible className="my-4 px-2">
+    <Collapsible className="my-4 px-2" onOpenChange={(_, d) => anchorDisclosure(d)}>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <div className="h-px flex-1 bg-border" />
         <CollapsibleTrigger className="flex items-center gap-1.5 rounded-full border px-3 py-1 transition-colors hover:bg-hover">
@@ -1302,7 +1379,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             if (g.kind === "text") {
               const afterActivity = gi > 0 && groups[gi - 1].kind !== "text";
               return (
-                <div key={gi} className={`animate-message-in ${afterActivity ? "mt-3 border-t border-border pt-3" : gi > 0 ? "mt-3" : ""}`}>
+                <div key={gi} data-scroll-anchor="text" className={`animate-message-in ${afterActivity ? "mt-3 border-t border-border pt-3" : gi > 0 ? "mt-3" : ""}`}>
                   {/* `touchedFiles` belongs to the whole turn, not to one text
                       block, so it hangs off the LAST one — where the eye already
                       is when the answer ends. */}
@@ -1330,7 +1407,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             // No wrapper blur-rise here — the spoiler header animates itself in,
             // and on expand each rail row surfaces with .animate-step-in.
             return (
-              <div key={gi} className={gi > 0 ? "mt-1.5" : ""}>
+              <div key={gi} data-scroll-anchor="activity" className={gi > 0 ? "mt-1.5" : ""}>
                 <ActivityGroup
                   items={g.items}
                   isStreaming={isStreaming && gi === lastIdx}
@@ -1366,7 +1443,11 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
         {!isStreaming && (() => {
           const copyText = groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n\n").trim();
           return (
-            <div className="mt-1 flex items-center gap-1">
+            // Arrives one `--settle` after the turn ends, not with it. This row
+            // mounts in the same frame as the reasoning spoiler collapsing and the
+            // produced-file tiles landing, and appearing mid-collapse is what made
+            // the end of a turn read as a pile-up. Geometry first, trim after.
+            <div className="animate-message-in mt-1 flex items-center gap-1 [animation-delay:var(--settle)]">
               {onSwitchBranch && (
                 <BranchSwitcher index={siblingIndex} count={siblingCount} messageId={message.id} onSwitch={onSwitchBranch} disabled={actionsDisabled} />
               )}
