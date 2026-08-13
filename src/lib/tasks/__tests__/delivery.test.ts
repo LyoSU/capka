@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { composeConfirmPreview, composeDraft, composeError, composeFinal, draftIdFrom, makeDeliverySink } from "../delivery";
+import { GrammyError, HttpError } from "grammy";
+import { composeConfirmPreview, composeDraft, composeError, composeFinal, draftIdFrom, makeDeliverySink, refusedDelivery } from "../delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 
 const uk = getTranslator("uk", "telegram");
@@ -269,7 +270,9 @@ describe("TelegramSink streaming", () => {
   });
 
   it("falls back to plain chunks when rich send is rejected", async () => {
-    api.sendRichMessage.mockRejectedValueOnce(new Error("400: can't parse rich message"));
+    // A real API refusal (`ok: false`), not any thrown error: see refusedDelivery —
+    // a bare Error proves nothing about whether the message was posted.
+    api.sendRichMessage.mockRejectedValueOnce(apiError(400, "can't parse rich message"));
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 9, locale: "en" });
     await sink.finish({ status: "completed", text: "hello", toolCount: 0, elapsedMs: 100 });
 
@@ -331,5 +334,68 @@ describe("TelegramSink streaming", () => {
     expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe(
       "⚠️ Couldn't reach the AI service. Please try again in a moment.\n\n<details><summary>Technical details</summary>\n\n```\nfetch failed: ECONNREFUSED\n```\n\n</details>",
     );
+  });
+});
+
+/**
+ * Sending is an emission: once it leaves, this process can't undo it and can't
+ * always tell whether it arrived. So the plain-text fallback may only run when
+ * Telegram's own answer proves nothing was posted — otherwise one turn becomes two
+ * messages in the user's chat.
+ */
+const apiError = (code: number, description: string) =>
+  new GrammyError(`Call to 'sendRichMessage' failed! (${code}: ${description})`, { ok: false, error_code: code, description }, "sendRichMessage", {});
+
+describe("refusedDelivery", () => {
+  it("is true for an API answer that rejected the message", () => {
+    expect(refusedDelivery(apiError(400, "can't parse entities"))).toBe(true);
+    expect(refusedDelivery(apiError(404, "Not Found: method not found"))).toBe(true); // no rich messages on this Bot API
+    expect(refusedDelivery(apiError(429, "Too Many Requests"))).toBe(true);
+  });
+
+  it("is false when the outcome is unknown", () => {
+    // No answer arrived: Telegram may have posted the message and lost the response.
+    expect(refusedDelivery(new HttpError("network error", new Error("ECONNRESET")))).toBe(false);
+    // Same ambiguity from the far side.
+    expect(refusedDelivery(apiError(500, "Internal Server Error"))).toBe(false);
+    expect(refusedDelivery(new Error("something else"))).toBe(false);
+  });
+});
+
+describe("TelegramSink emission safety", () => {
+  beforeEach(() => {
+    api.sendRichMessageDraft.mockClear();
+    api.sendRichMessage.mockClear();
+    api.sendMessage.mockClear();
+    api.sendRichMessage.mockResolvedValue({});
+  });
+  afterEach(() => api.sendRichMessage.mockResolvedValue({}));
+
+  it("falls back to plain text when Telegram rejected the markup", async () => {
+    api.sendRichMessage.mockRejectedValueOnce(apiError(400, "can't parse entities"));
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 21, locale: "uk" });
+
+    await sink.finish({ status: "completed", text: "answer", toolCount: 0, elapsedMs: 1000 });
+
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage.mock.calls[0][1]).toContain("answer");
+  });
+
+  it("does NOT re-send when the response was lost — the message may already be there", async () => {
+    api.sendRichMessage.mockRejectedValueOnce(new HttpError("network error", new Error("ECONNRESET")));
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 22, locale: "uk" });
+
+    await sink.finish({ status: "completed", text: "answer", toolCount: 0, elapsedMs: 1000 });
+
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does NOT re-send on a 5xx, which is the same ambiguity from the far side", async () => {
+    api.sendRichMessage.mockRejectedValueOnce(apiError(500, "Internal Server Error"));
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 23, locale: "uk" });
+
+    await sink.finish({ status: "completed", text: "answer", toolCount: 0, elapsedMs: 1000 });
+
+    expect(api.sendMessage).not.toHaveBeenCalled();
   });
 });

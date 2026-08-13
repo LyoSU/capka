@@ -10,7 +10,7 @@
  * streaming uses `sendRichMessageDraft` (an ephemeral, animated 30s preview);
  * the final answer is persisted with `sendRichMessage`.
  */
-import { InputFile, InlineKeyboard } from "grammy";
+import { InputFile, InlineKeyboard, GrammyError } from "grammy";
 import { log } from "@/lib/log";
 import { getTranslator, type Translator } from "@/lib/i18n/translator";
 import type { Modality } from "@/lib/providers/registry";
@@ -123,6 +123,26 @@ function chunk(text: string, size: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
   return out.length ? out : [""];
+}
+
+/**
+ * Whether Telegram ANSWERED and its answer proves the message was never posted —
+ * the only case in which re-sending the same turn as plain text is one delivery
+ * rather than two.
+ *
+ * A `GrammyError` IS that answer (`ok: false`), so nothing was created: rejected
+ * Markdown entities (400), a Bot API server that has no rich messages at all (404 —
+ * the compatibility path that makes the fallback worth having), a rate limit (429).
+ * Everything else is ambiguous and must not be retried: grammY's `HttpError` means
+ * no answer arrived, so the request may well have been received and the message
+ * posted with only the response lost; a 5xx is the same ambiguity from the far side.
+ *
+ * Sending is an emission — it leaves the boundary inside which this process can undo
+ * things — so an ambiguous outcome cannot be resolved by trying again. One delivery
+ * that may have been missed beats two the user has to read.
+ */
+export function refusedDelivery(e: unknown): boolean {
+  return e instanceof GrammyError && e.error_code < 500;
 }
 
 /** Stable, non-zero 31-bit draft id. Same value across one response's updates
@@ -351,9 +371,10 @@ class TelegramSink implements DeliverySink {
     }
   }
 
-  // Send one rich message, falling back to plain-text chunks if the Markdown is
-  // rejected (so a formatting quirk never drops the message). `plain` is the
-  // markup-free text for that fallback; `silent` suppresses the notification.
+  // Send one rich message, falling back to plain-text chunks when Telegram REFUSES
+  // it (so a formatting quirk, or a Bot API server without rich messages at all,
+  // never drops the message). `plain` is the markup-free text for that fallback;
+  // `silent` suppresses the notification.
   private async sendRich(markdown: string, plain: string, silent: boolean, keyboard?: InlineKeyboard): Promise<void> {
     const bot = await this.getBot();
     if (!bot) return;
@@ -379,7 +400,15 @@ class TelegramSink implements DeliverySink {
     try {
       await bot.api.sendRichMessage(this.chatId, { markdown }, other);
     } catch (e) {
-      log.warn("telegram rich send failed; falling back to plain", { chatId: this.chatId, err: String(e) });
+      // Only re-send when Telegram's own answer proves nothing was posted. A lost
+      // response or a 5xx leaves the outcome unknown, and a plain copy sent "just in
+      // case" is a SECOND delivery of one turn — a duplicate the user reads and we
+      // cannot take back. Prefer a silence the logs record.
+      if (!refusedDelivery(e)) {
+        log.error("telegram rich send failed with an unknown outcome; not re-sending", { chatId: this.chatId, err: String(e) });
+        return;
+      }
+      log.warn("telegram refused the rich message; falling back to plain", { chatId: this.chatId, err: String(e) });
       try {
         // Keep the buttons on the plain-text fallback too — they're the whole point.
         const parts = chunk(plain, TELEGRAM_LIMIT);
