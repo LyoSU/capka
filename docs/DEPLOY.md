@@ -132,6 +132,13 @@ this host you must ALSO set `CAPKA_TELEMETRY_CONTENT_REMOTE=true`; with only the
 first flag the content is dropped and the boot log records why. Treat that as
 sending your users' documents to a third party.
 
+**Token counts.** They arrive as `capka.usage.*` attributes on the turn span
+(input / output / cached / cache-write / reasoning, plus `capka.context.tokens` for
+the last call's prompt size). A backend's own usage and cost graphs stay **empty**:
+`ai@6` does not emit token attributes onto its spans at all, so there is nothing
+for a backend to aggregate. This is not a misconfiguration on your side — read the
+turn attributes instead, and keep using `/settings/usage` for spend.
+
 **What stays here.** Cost in USD is not exported (`CAPKA_TELEMETRY_COST=true` to
 change that): the `usage` table is the money record — it holds pending
 reservations and the shared-vs-own-key distinction that billing depends on, and a
