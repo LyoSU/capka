@@ -6,6 +6,12 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `OTEL_RESOURCE_ATTRIBUTES` now applies (e.g. `deployment.environment=prod`) — it was read by nobody, because `defaultResource()` does not run the env detector.
+- Failed spans carry `error.type` (the exception class, never its message), so an error in the tracing backend says what kind it was instead of arriving red and blank.
+- `OTEL_RESOURCE_ATTRIBUTES`, the `OTEL_BSP_*` batch tuning, `OTEL_EXPORTER_OTLP_TIMEOUT` and `_COMPRESSION` are passed into the platform container; previously they were accepted and ignored.
+
 ## [0.21.1] - 2026-08-13
 
 ### Fixed

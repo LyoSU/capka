@@ -47,7 +47,7 @@ function bridgeDiagnostics(): void {
 }
 
 export async function registerProvider(config: TelemetryConfig): Promise<Registration> {
-  const [{ NodeTracerProvider }, { BatchSpanProcessor }, { resourceFromAttributes, defaultResource }, semconv] =
+  const [{ NodeTracerProvider }, { BatchSpanProcessor }, { resourceFromAttributes, defaultResource, detectResources, envDetector }, semconv] =
     await Promise.all([
       import("@opentelemetry/sdk-trace-node"),
       import("@opentelemetry/sdk-trace-base"),
@@ -81,7 +81,12 @@ export async function registerProvider(config: TelemetryConfig): Promise<Registr
 
   const batch = new BatchSpanProcessor(exporter);
   const provider = new NodeTracerProvider({
-    resource: defaultResource().merge(
+    // detectResources({ detectors: [envDetector] }) is what reads
+    // OTEL_RESOURCE_ATTRIBUTES — defaultResource() does NOT (it returns only
+    // service.name + telemetry.sdk.*). Without it, the standard way to tag an
+    // environment (OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod, which is
+    // what Langfuse/Tempo/Grafana docs tell operators to set) is silently ignored.
+    resource: defaultResource().merge(detectResources({ detectors: [envDetector] })).merge(
       resourceFromAttributes({
         [semconv.ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || "capka",
         [semconv.ATTR_SERVICE_VERSION]: process.env.CAPKA_VERSION || "dev",

@@ -16,26 +16,54 @@ import { resolveTelemetryConfig } from "../config";
  * `${VAR:-}` pattern it uses does not switch anything on.
  */
 const COMPOSE = readFileSync("docker-compose.yml", "utf8");
-const CONFIG_SOURCE = readFileSync("src/lib/telemetry/config.ts", "utf8");
+/** Every source file in this module — config.ts is not the only one reading env. */
+const MODULE_SOURCE = ["config.ts", "provider.ts", "spans.ts", "index.ts", "sanitize.ts"]
+  .map((f) => readFileSync(`src/lib/telemetry/${f}`, "utf8"))
+  .join("\n");
+
+/**
+ * Variables the OTel SDK reads on its own, which we deliberately support. Grep
+ * cannot find these — nothing in our code mentions them — so the decision has to
+ * be written down. Supporting the sampler but not the batch tuning would be an
+ * arbitrary split, and every omission is a silent no-op: the variable is accepted
+ * by compose and then read by nobody.
+ */
+const SDK_HONORED = [
+  "OTEL_TRACES_SAMPLER",
+  "OTEL_TRACES_SAMPLER_ARG",
+  "OTEL_RESOURCE_ATTRIBUTES",
+  "OTEL_BSP_MAX_QUEUE_SIZE",
+  "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+  "OTEL_BSP_SCHEDULE_DELAY",
+  "OTEL_BSP_EXPORT_TIMEOUT",
+  "OTEL_EXPORTER_OTLP_TIMEOUT",
+  "OTEL_EXPORTER_OTLP_COMPRESSION",
+];
 
 /** The platform service's environment block, where the whitelist lives. */
 function platformEnvironment(): string {
   const start = COMPOSE.indexOf("\n  platform:");
   expect(start).toBeGreaterThan(-1);
   const rest = COMPOSE.slice(start + 1);
-  // Up to the next top-level service key (two-space indent, non-blank).
-  const end = rest.search(/\n {2}[a-z][a-z0-9_-]*:\n/);
-  return end === -1 ? rest : rest.slice(0, end);
+  // Up to the next top-level service key. `:` may be followed by an inline value
+  // or a comment, so do not require a newline right after it.
+  const end = rest.search(/\n {2}[a-z][a-z0-9_-]*:/);
+  const block = end === -1 ? rest : rest.slice(0, end);
+  // Commented-out lines must not count as passed through.
+  return block.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
 }
 
 describe("docker-compose passes through every telemetry knob", () => {
   it("forwards each env var this module reads into the platform container", () => {
-    // Whatever config.ts reads off `env`, the container must actually receive.
-    const read = [...CONFIG_SOURCE.matchAll(/\benv\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1]);
-    expect(read.length).toBeGreaterThan(5); // guard against the regex silently matching nothing
+    // Two sources, because a grep of config.ts alone misses both `process.env.X`
+    // elsewhere in the module (OTEL_SERVICE_NAME is read in provider.ts) and the
+    // variables only the SDK reads.
+    const read = [...MODULE_SOURCE.matchAll(/(?:\benv|process\.env)\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1]);
+    expect(read.length).toBeGreaterThan(10); // guard against the regex silently matching nothing
 
     const passedThrough = platformEnvironment();
-    const missing = [...new Set(read)].filter((name) => !passedThrough.includes(`${name}=`));
+    const expected = [...new Set([...read, ...SDK_HONORED])].filter((n) => n.startsWith("OTEL_") || n.startsWith("CAPKA_TELEMETRY_"));
+    const missing = expected.filter((name) => !new RegExp(`^\\s*- ${name}=`, "m").test(passedThrough));
 
     expect(missing, `not passed into the platform container in docker-compose.yml: ${missing.join(", ")}`).toEqual([]);
   });

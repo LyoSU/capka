@@ -174,6 +174,21 @@ export function sanitizeSpan(
     if (isAllowed(key, content, options)) attributes[key] = value;
   }
 
+  // Salvage the exception TYPE before the event carrying it is dropped. A class
+  // name ("AI_APICallError") is not user data, and without it an error span reaches
+  // the backend red and mute: a live trace showed six failed spans with an empty
+  // statusMessage and nothing to say whether it was a rate limit or a crash.
+  if (attributes["error.type"] === undefined) {
+    for (const event of span.events) {
+      if (event.name !== "exception") continue;
+      const type = event.attributes?.["exception.type"];
+      if (typeof type === "string" && type) {
+        attributes["error.type"] = type;
+        break;
+      }
+    }
+  }
+
   // Only where the SDK actually reports usage, never on our own turn span.
   if (span.name.startsWith("ai.")) {
     for (const [from, to] of USAGE_ALIASES) {

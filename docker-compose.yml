@@ -241,6 +241,17 @@ services:
       - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-}
       - OTEL_TRACES_SAMPLER=${OTEL_TRACES_SAMPLER:-}
       - OTEL_TRACES_SAMPLER_ARG=${OTEL_TRACES_SAMPLER_ARG:-}
+      # Read by the OTel SDK itself, not by our code — resource attributes by the
+      # env detector, the BSP_* set by BatchSpanProcessor, timeout/compression by
+      # the OTLP exporter. Listed because supporting the sampler but not these
+      # would be an arbitrary split, and each omission is a silent no-op.
+      - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-}
+      - OTEL_BSP_MAX_QUEUE_SIZE=${OTEL_BSP_MAX_QUEUE_SIZE:-}
+      - OTEL_BSP_MAX_EXPORT_BATCH_SIZE=${OTEL_BSP_MAX_EXPORT_BATCH_SIZE:-}
+      - OTEL_BSP_SCHEDULE_DELAY=${OTEL_BSP_SCHEDULE_DELAY:-}
+      - OTEL_BSP_EXPORT_TIMEOUT=${OTEL_BSP_EXPORT_TIMEOUT:-}
+      - OTEL_EXPORTER_OTLP_TIMEOUT=${OTEL_EXPORTER_OTLP_TIMEOUT:-}
+      - OTEL_EXPORTER_OTLP_COMPRESSION=${OTEL_EXPORTER_OTLP_COMPRESSION:-}
       - CAPKA_TELEMETRY_CONTENT=${CAPKA_TELEMETRY_CONTENT:-}
       - CAPKA_TELEMETRY_CONTENT_REMOTE=${CAPKA_TELEMETRY_CONTENT_REMOTE:-}
       - CAPKA_TELEMETRY_COST=${CAPKA_TELEMETRY_COST:-}

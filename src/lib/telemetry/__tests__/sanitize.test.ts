@@ -310,3 +310,40 @@ describe("normalizing the SDK's usage attributes to the GenAI convention", () =>
     expect(clean.attributes["gen_ai.usage.input_tokens"]).toBeUndefined();
   });
 });
+
+describe("an error span must say what KIND of error it was", () => {
+  it("keeps the exception type as an attribute while dropping the event", () => {
+    // Real complaint from a live trace: six red rows, every statusMessage empty,
+    // nothing to tell an operator whether it was a rate limit or a crash. The
+    // exception's CLASS name is not user data, so it survives; the message and
+    // stack still do not.
+    const span = makeSpan("ai.streamText", (s) => {
+      const err = new Error(`429 rate limited: ${CANARY}`);
+      err.name = "AI_APICallError";
+      s.recordException(err);
+      s.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+    });
+
+    const clean = sanitizeSpan(span, false);
+    expect(clean.attributes["error.type"]).toBe("AI_APICallError");
+    expect(clean.events).toEqual([]);
+    expect(JSON.stringify(clean)).not.toContain(CANARY);
+  });
+
+  it("does not overwrite an error.type we set ourselves", () => {
+    const span = makeSpan("capka.turn", (s) => {
+      s.setAttribute("error.type", "ProviderRateLimited");
+      const err = new Error("boom");
+      err.name = "SomethingElse";
+      s.recordException(err);
+    });
+
+    expect(sanitizeSpan(span, false).attributes["error.type"]).toBe("ProviderRateLimited");
+  });
+
+  it("adds nothing when the span carries no exception", () => {
+    const span = makeSpan("ai.streamText", (s) => s.setAttribute("ai.model.id", "m"));
+
+    expect(sanitizeSpan(span, false).attributes["error.type"]).toBeUndefined();
+  });
+});
