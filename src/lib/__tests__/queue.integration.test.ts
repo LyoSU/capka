@@ -205,6 +205,38 @@ run("durable queue", () => {
     expect(msg.rows[0].content).toBe("");
   });
 
+  it("a lost CAS leaves no orphan message behind for a failure that never got one", async () => {
+    // The setup-failure shape: prepareRun threw before the assistant row existed, so
+    // the outcome commit has to INSERT it. If it loses the race, the insert and the
+    // chat's leaf move must fall with it — otherwise a turn the reconciler already
+    // called interrupted grows a second, contradicting message.
+    await enqueueTask({ id: "qt3e", chatId: C, userId: U, payload: {} });
+    await pool.query(
+      `UPDATE tasks SET status='running', worker_id='w1', lease_expires_at = now() - interval '1 minute' WHERE id='qt3e'`,
+    );
+    const leafBefore = (await pool.query<{ active_leaf_id: string | null }>(
+      `SELECT active_leaf_id FROM chats WHERE id=$1`, [C],
+    )).rows[0].active_leaf_id;
+
+    await reconcileZombies();
+
+    const committed = await commitTurnOutcome({
+      taskId: "qt3e", workerId: "w1", status: "failed", error: "provider gone",
+      message: {
+        id: "qmsg3e", content: "a failure notice that must not appear", metadata: { taskId: "qt3e", status: "failed" },
+        insert: { chatId: C, parentId: null, platform: "web" },
+      },
+    });
+
+    expect(committed).toBe(false);
+    const msg = await pool.query(`SELECT id FROM messages WHERE id='qmsg3e'`);
+    expect(msg.rowCount).toBe(0);
+    const leafAfter = (await pool.query<{ active_leaf_id: string | null }>(
+      `SELECT active_leaf_id FROM chats WHERE id=$1`, [C],
+    )).rows[0].active_leaf_id;
+    expect(leafAfter).toBe(leafBefore);
+  });
+
   it("reconciles the abandoned assistant message, not just the task", async () => {
     await enqueueTask({ id: "qt4", chatId: C, userId: U, payload: {} });
     await pool.query(

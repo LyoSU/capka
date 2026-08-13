@@ -72,6 +72,43 @@ describe("commitTurnOutcome", () => {
       .toEqual(["task-1", "completed", null, "worker-1"]);
   });
 
+  it("inserts the message and moves the chat's leaf inside the same transaction", async () => {
+    // A failure before the reply row existed. The insert cannot live outside the
+    // transaction: reconcileZombies repairs a message stranded at `running`, but it
+    // cannot create one that was never written, so a crash between the CAS and an
+    // outside insert would leave a terminal task with nothing in the chat.
+    await expect(commitTurnOutcome({
+      ...input,
+      status: "failed",
+      message: { ...input.message, insert: { chatId: "chat-1", parentId: "user-msg-1", platform: "telegram" } },
+    })).resolves.toBe(true);
+
+    const sql = statements();
+    expect(sql[0]).toBe("BEGIN");
+    expect(sql.at(-1)).toBe("COMMIT");
+    expect(sql.some((s) => s.startsWith("INSERT INTO messages"))).toBe(true);
+    expect(sql.some((s) => s.startsWith("UPDATE chats SET active_leaf_id"))).toBe(true);
+    // The update branch must not also run.
+    expect(sql.some((s) => s.startsWith("UPDATE messages"))).toBe(false);
+  });
+
+  it("neither inserts the message nor moves the leaf when it loses the CAS", async () => {
+    client.query.mockImplementation(async (sql: string) =>
+      String(sql).trim().startsWith("UPDATE tasks") ? { rowCount: 0 } : { rowCount: 1 },
+    );
+
+    await expect(commitTurnOutcome({
+      ...input,
+      status: "failed",
+      message: { ...input.message, insert: { chatId: "chat-1", parentId: null, platform: "web" } },
+    })).resolves.toBe(false);
+
+    const sql = statements();
+    expect(sql).toContain("ROLLBACK");
+    expect(sql.some((s) => s.startsWith("INSERT INTO messages"))).toBe(false);
+    expect(sql.some((s) => s.startsWith("UPDATE chats"))).toBe(false);
+  });
+
   it("rolls back, releases the client and rethrows when a statement fails", async () => {
     client.query.mockImplementation(async (sql: string) => {
       const s = String(sql).trim();

@@ -251,13 +251,34 @@ export async function finalizeTask(
  * Money is deliberately NOT part of this: tokens were really spent whoever owns the
  * outcome, so the caller settles the usage ledger before calling and regardless of
  * the answer here.
+ *
+ * Throwing is NOT the same answer as `false`. False means someone else owns the
+ * outcome and the caller must stand down; a throw means the question is unanswerable
+ * (the database is unreachable) — and then nobody else recorded an outcome either,
+ * so a caller whose job is to report a failure should still report it.
  */
 export async function commitTurnOutcome(input: {
   taskId: string;
   workerId: string;
   status: Extract<TaskStatus, "completed" | "failed" | "cancelled">;
   error?: string | null;
-  message: { id: string; content: string; metadata: MessageMeta };
+  message: {
+    id: string;
+    content: string;
+    metadata: MessageMeta;
+    /**
+     * Set when the assistant row does not exist yet — a failure before the reply was
+     * ever inserted (e.g. the provider was gone at setup). The row is inserted and
+     * the chat's leaf moved to it inside this same transaction, so the failure is a
+     * visible message rather than a silent dead end.
+     *
+     * This is why the insert cannot be left outside: `reconcileZombies` repairs an
+     * existing message stranded at `running`, but it cannot conjure one that was
+     * never written — so a crash between the CAS and an out-of-transaction insert
+     * would leave a terminal task with nothing in the chat at all.
+     */
+    insert?: { chatId: string; parentId: string | null; platform: string };
+  };
 }): Promise<boolean> {
   const client = await pool.connect();
   try {
@@ -271,10 +292,18 @@ export async function commitTurnOutcome(input: {
       await client.query("ROLLBACK");
       return false;
     }
-    await client.query(
-      `UPDATE messages SET content = $2, metadata = $3::jsonb WHERE id = $1`,
-      [input.message.id, input.message.content, JSON.stringify(input.message.metadata)],
-    );
+    const { id, content, metadata, insert } = input.message;
+    const meta = JSON.stringify(metadata);
+    if (insert) {
+      await client.query(
+        `INSERT INTO messages (id, chat_id, parent_id, role, content, platform, metadata)
+         VALUES ($1, $2, $3, 'assistant', $4, $5, $6::jsonb)`,
+        [id, insert.chatId, insert.parentId, content, insert.platform, meta],
+      );
+      await client.query(`UPDATE chats SET active_leaf_id = $1 WHERE id = $2`, [id, insert.chatId]);
+    } else {
+      await client.query(`UPDATE messages SET content = $2, metadata = $3::jsonb WHERE id = $1`, [id, content, meta]);
+    }
     await client.query("COMMIT");
     return true;
   } catch (e) {

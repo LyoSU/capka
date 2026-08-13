@@ -289,8 +289,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   try {
     // Cancelled while still queued — don't spin anything up.
     if (await isCancelRequested(taskId)) {
-      await finalizeTask(taskId, "cancelled", null, workerId);
-      await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, status: "cancelled" });
+      // Nothing was streamed yet, so there is no message to write — but the event
+      // still announces an outcome, and announcing one we don't own would contradict
+      // whatever the reconciler already told this user.
+      if (await finalizeTask(taskId, "cancelled", null, workerId)) {
+        await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, status: "cancelled" });
+      } else {
+        tlog.warn("cancellation outcome was already settled elsewhere; standing down");
+      }
       return;
     }
 
@@ -1657,35 +1663,42 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       ...(runModelId ? { model: runModelId } : {}),
       ...(failure ? { error: failure.userMessage, errorDetail: failure.adminDetail, errorCategory: failure.category, errorOwned: ownKey } : {}),
     };
-    // If prepareRun threw before the assistant row existed (provider gone, model
-    // removed), there's nothing to UPDATE — INSERT the failed reply instead and
-    // point the chat at it, so the failure is a visible message rather than a
-    // silent dead-end. Otherwise update the row we already streamed into.
-    const persistMessage = messageInserted
-      ? db.update(messages).set({ content: getFullText(), metadata: failureMeta }).where(eq(messages.id, msgId))
-      : (async () => {
-          const parentId = (payload.uiMessages ?? []).at(-1)?.id ?? null;
-          await db.insert(messages).values({
-            id: msgId,
-            chatId,
-            parentId,
-            role: "assistant",
-            content: getFullText(),
-            platform: payload.origin?.platform ?? "web",
-            metadata: failureMeta,
-          });
-          await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
-        })();
-    // Claim the outcome FIRST, then write: same rule as the success path, so a
-    // reaped run can't overwrite the reconciler's verdict or re-announce a turn the
-    // user was already told about. Sequential rather than transactional here because
-    // every status this path produces is non-success, and a task left terminal with
-    // its message still at `running` is exactly what reconcileZombies repairs.
-    if (!(await finalizeTask(taskId, status, failure?.adminDetail ?? null, workerId).catch(() => false))) {
+    // Same single decision as the success path: claim the outcome and write the
+    // message together, nothing before the claim. If prepareRun threw before the
+    // assistant row existed (provider gone, model removed), there is nothing to
+    // UPDATE — the row is INSERTed and the chat's leaf moved to it, inside the same
+    // transaction, so the failure is a visible message rather than a silent dead end.
+    let owned: boolean;
+    try {
+      owned = await commitTurnOutcome({
+        taskId, workerId, status,
+        error: failure?.adminDetail ?? null,
+        message: {
+          id: msgId,
+          content: getFullText(),
+          metadata: failureMeta,
+          ...(messageInserted ? {} : {
+            insert: {
+              chatId,
+              parentId: (payload.uiMessages ?? []).at(-1)?.id ?? null,
+              platform: payload.origin?.platform ?? "web",
+            },
+          }),
+        },
+      });
+    } catch (e) {
+      // Unanswerable, not lost: the database is unreachable, so no reconciler has
+      // recorded an outcome either. This path's whole job is to tell the user
+      // something broke — going silent here would make the product quiet at exactly
+      // the moment it has to speak. Same refusal-vs-unknown split as the Telegram
+      // fallback: only a definite "someone else owns this" stands us down.
+      tlog.error("could not record the failure outcome; reporting it anyway", { err: errMsg(e) });
+      owned = true;
+    }
+    if (!owned) {
       tlog.warn("failure outcome was already settled elsewhere (lease lost); standing down", { attempted: status });
       return; // `finally` still releases the hold and closes the MCP clients
     }
-    await persistMessage.catch(() => {});
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
     // This catch path finalizes the turn WITHOUT rethrowing, so the turn span
     // would otherwise close as "completed". Report the real outcome here.
