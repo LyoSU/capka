@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- A turn resumed from an approval card now reports the whole turn's tokens, cost and time in its message details, not just the half after the click (the `usage` ledger and budgets were already correct).
 - Turns on OpenAI-compatible connections (LiteLLM, vLLM, DeepSeek, Mistral, xAI, Groq, Z.ai) now record real token counts instead of zero — usage is requested per stream, so those turns reach `/settings/usage`, cost analytics and traces as actual spend. A gateway that rejects the request is detected, retried without it, and remembered; `CAPKA_STREAM_USAGE=false` stops asking entirely.
 - `OTEL_RESOURCE_ATTRIBUTES` now applies (e.g. `deployment.environment=prod`) — it was read by nobody, because `defaultResource()` does not run the env detector.
 - Failed spans carry `error.type` (the exception class, never its message), so an error in the tracing backend says what kind it was instead of arriving red and blank.

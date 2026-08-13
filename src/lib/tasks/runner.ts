@@ -43,6 +43,7 @@ import type { StoredPart, MessageMeta } from "@/lib/chat/contracts";
 import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 import { prepareRun } from "./run-context";
+import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
 
 const errMsg = (e: unknown) => errorText(e);
 
@@ -216,6 +217,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   let runModelId: string | undefined;
   let runShared = false;
   const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
+  // What an approval continuation's FIRST half already billed. A continuation reuses
+  // the suspended message's row, so this run is the second half of one logical turn
+  // and the (i) popover has to show both — read off that row below, folded in at the
+  // metadata write only (foldTurnHalves explains why the ledger must not see it).
+  const prior: TurnHalf = {};
   // The LAST step's raw prompt size (input incl. cached), overwritten (not summed)
   // on every finish-step — unlike liveUsage above, this is a snapshot of the final
   // call's context, not a running total across a multi-step tool-calling turn.
@@ -348,6 +354,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const meta = (row?.metadata ?? {}) as MessageMeta;
       for (const p of meta.parts ?? []) parts.push(p);
       seq = meta.streamSeq ?? 0;
+      // The suspended half's accounting, carried so the finalize below reports the
+      // WHOLE turn. A suspended turn finalizes as `completed` (only its metadata
+      // `status` says awaiting_*), so these were persisted; the first snapshot of
+      // this run overwrites the row's metadata, which is why they're read here and
+      // held in memory rather than merged at write time.
+      prior.usage = meta.usage;
+      prior.costUsd = meta.costUsd;
+      prior.costSource = meta.costSource;
+      prior.durationMs = meta.durationMs;
+      prior.reasoningMs = meta.reasoningMs;
       replyParentId = resumeMessageId;
       messageInserted = true;
     } else {
@@ -1329,6 +1345,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
+    // The message row carries the WHOLE turn, which for an approval continuation is
+    // this run plus the half that ran before the user clicked. Everything below this
+    // point that reports per-RUN facts — the `usage` ledger, the turn span, the log
+    // line, the channel footer — deliberately keeps using the un-folded figures.
+    const turn = foldTurnHalves(
+      { usage: usageMeta, costUsd: costMeta ?? undefined, costSource, durationMs: Date.now() - startedAt, reasoningMs },
+      prior,
+    );
+
     await db.update(messages).set({
       content: getFullText(),
       metadata: {
@@ -1343,18 +1368,22 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // after three minutes should still say it thought for three minutes;
         // withholding it left the failed turns in the transcript labelled with a
         // bare "Reasoning", which reads as if nothing had happened at all.
-        reasoningMs,
+        reasoningMs: turn.reasoningMs,
         ...(touchedFiles ? { touchedFiles } : {}),
         // Tech details for the (i) popover. A manual cancel still did real work
         // (it has a model, elapsed time, and billed tokens), so carry them too —
         // otherwise the stopped turn loses its (i) affordance. A failed turn owns
         // the ErrorNotice instead, so it stays excluded.
         ...(finalStatus === "completed" || finalStatus === "cancelled" ? {
-          durationMs: Date.now() - startedAt,
+          durationMs: turn.durationMs,
+          // The model of the LAST half. One field can't describe two halves that
+          // resolved different models, and the later one is what produced the text
+          // the user is reading; the cost above is still the sum of both halves,
+          // each priced against its own model.
           model: modelId,
-          ...(usageMeta ? { usage: usageMeta } : {}),
-          ...(costMeta != null ? { costUsd: costMeta } : {}),
-          ...(costSource ? { costSource } : {}),
+          ...(turn.usage ? { usage: turn.usage } : {}),
+          ...(turn.costUsd != null ? { costUsd: turn.costUsd } : {}),
+          ...(turn.costSource ? { costSource: turn.costSource } : {}),
           // The real upstream that served the turn (OpenRouter routes one model id
           // to many providers) — shown in the (i) popover's route section.
           ...(orLive.upstreamProvider ? { upstreamProvider: orLive.upstreamProvider } : {}),
