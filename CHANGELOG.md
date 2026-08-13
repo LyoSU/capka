@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-13
+
 ### Added
 
 - Optional agent tracing over standard OTLP: set `OTEL_EXPORTER_OTLP_ENDPOINT` to export a span tree per turn (turn → LLM calls → tool calls → sandbox/MCP work) to any OpenTelemetry backend (Langfuse, Phoenix, Tempo, Jaeger, an OTel Collector). Unset means off with zero overhead; no new services and no vendor SDK.
