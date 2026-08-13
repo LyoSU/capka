@@ -257,6 +257,10 @@ services:
       - CAPKA_TELEMETRY_COST=${CAPKA_TELEMETRY_COST:-}
       - CAPKA_TELEMETRY_SPAN_PREFIXES=${CAPKA_TELEMETRY_SPAN_PREFIXES:-}
       - CAPKA_TELEMETRY_EXTRA_ATTRIBUTES=${CAPKA_TELEMETRY_EXTRA_ATTRIBUTES:-}
+      # Last resort: `false` stops asking OpenAI-compatible endpoints to report
+      # token counts on a stream. Only for a gateway that breaks on the parameter
+      # without saying so — the cost of switching it off is turns billed as zero.
+      - CAPKA_STREAM_USAGE=${CAPKA_STREAM_USAGE:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

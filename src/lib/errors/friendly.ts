@@ -235,6 +235,30 @@ export function isReasoningEchoRejectedError(raw: unknown): boolean {
 }
 
 /**
+ * The endpoint refuses `stream_options: {include_usage: true}` — the request we
+ * make to get token counts back on a stream (see providers/stream-usage.ts for why
+ * it has to be asked for, and why optimistically).
+ *
+ *   OpenAI-style proxy:  "Unrecognized request argument supplied: stream_options"
+ *   pydantic gateway:    {"loc":["body","stream_options"],"msg":"Extra inputs are not permitted"}
+ *   xAI / Databricks:    "Argument not supported on this model: stream_options"
+ *
+ * Narrow on the same two axes as the classifiers above — it must name the field
+ * AND carry a rejection verb — because a false positive costs more than a missed
+ * one: on a hit we stop asking that endpoint for usage, and every later turn there
+ * is billed as zero. A miss only costs one degraded turn.
+ */
+export function isStreamUsageRejectedError(raw: unknown): boolean {
+  const detail = errorText(raw);
+  return (
+    /\b(stream_options|include_usage)\b/i.test(detail) &&
+    /\b(unsupported|not supported|not allowed|not permitted|invalid|unexpected|unrecognized|unknown|forbidden)\b/i.test(
+      detail,
+    )
+  );
+}
+
+/**
  * Any native attachment a provider rejects — image/vision, audio, or file/PDF.
  * A superset of `isVisionUnsupportedError`: the runner optimistically trusts the
  * catalog's per-model modalities (which can over-claim for a custom backend), so

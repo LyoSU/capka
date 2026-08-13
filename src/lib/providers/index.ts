@@ -9,6 +9,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOllama } from "ollama-ai-provider-v2";
 import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
 import { createGuardedFetch } from "@/lib/net/ssrf";
+import { withoutStreamUsage } from "./stream-usage";
 
 /**
  * A user-supplied custom base URL is an SSRF surface. Routing the SDK through
@@ -71,7 +72,16 @@ export type ApiStyle = "auto" | "chat" | "responses";
 export function getModel(
   provider: string,
   modelId: string,
-  config?: { apiKey?: string; baseUrl?: string; apiStyle?: ApiStyle | null; blockPrivate?: boolean },
+  config?: {
+    apiKey?: string;
+    baseUrl?: string;
+    apiStyle?: ApiStyle | null;
+    blockPrivate?: boolean;
+    /** The connection row this model runs on — the key under which a refusal of
+     *  `stream_options` is remembered (see stream-usage.ts). Absent off the turn
+     *  path (a connection test), where nothing streams. */
+    connectionId?: string;
+  },
 ) {
   const blockPrivate = config?.blockPrivate ?? false;
   switch (provider) {
@@ -92,7 +102,21 @@ export function getModel(
       // providerOptions namespace; the runner's reasoningOptions() keys off the
       // very same provider string, so the reasoning knob actually lands.
       const baseURL = config?.baseUrl || PROVIDER_META[provider as ProviderName].defaultBaseUrl || "";
-      const p = createOpenAICompatible({ name: provider, baseURL, apiKey: config?.apiKey, fetch: guardedFetchFor(config?.baseUrl, blockPrivate) });
+      // Ask for token counts on the stream (`stream_options: {include_usage: true}`)
+      // — without it, a spec-strict gateway reports no usage and the turn bills as
+      // zero. Not every endpoint accepts the field, so the ask is stripped per
+      // request for a connection that has refused it: `includeUsage` is fixed at
+      // construction, but transformRequestBody runs per call, which is what lets one
+      // model instance keep serving the turn that learned the answer.
+      const usageKey = config?.connectionId ?? provider;
+      const p = createOpenAICompatible({
+        name: provider,
+        baseURL,
+        apiKey: config?.apiKey,
+        fetch: guardedFetchFor(config?.baseUrl, blockPrivate),
+        includeUsage: true,
+        transformRequestBody: (body) => withoutStreamUsage(usageKey, body),
+      });
       // An endpoint that splits reasoning into `reasoning_content` is handled by the
       // provider above; one that doesn't inlines `<think>` in the text — extract it.
       return withReasoningExtraction(p(modelId));

@@ -142,7 +142,10 @@ sending your users' documents to a third party.
 the last call's prompt size). A backend's own usage and cost graphs stay **empty**:
 `ai@6` does not emit token attributes onto its spans at all, so there is nothing
 for a backend to aggregate. This is not a misconfiguration on your side — read the
-turn attributes instead, and keep using `/settings/usage` for spend.
+turn attributes instead, and keep using `/settings/usage` for spend. They are only
+as good as what the provider reports: on an OpenAI-compatible endpoint usage has to
+be asked for per request, and a gateway that refuses the ask leaves them at zero
+(see `CAPKA_STREAM_USAGE` under Gotchas).
 
 **What stays here.** Cost in USD is not exported (`CAPKA_TELEMETRY_COST=true` to
 change that): the `usage` table is the money record — it holds pending
@@ -171,4 +174,10 @@ wakes Next.js's own request spans). Standard `OTEL_SDK_DISABLED`,
   stored `SANDBOX_RUNTIME` is stale `runsc`; set it back to `runc` (above).
 - **Uploads fail / `413`** → raise the reverse proxy's body-size limit
   (`client_max_body_size` in nginx).
+- **An OpenAI-compatible gateway breaks on every turn after an upgrade** → it may
+  be rejecting `stream_options`, the parameter that asks for token counts on a
+  stream. Capka asks optimistically, recognizes a rejection and re-streams without
+  it, then stops asking that connection. If a gateway refuses in some way that
+  doesn't read as a rejection, set `CAPKA_STREAM_USAGE=false` to stop asking
+  entirely — at the cost of turns being recorded with no token counts.
 - **Build OOM** doesn't apply on the pull path — no build runs on the box.

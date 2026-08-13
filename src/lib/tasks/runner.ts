@@ -31,7 +31,8 @@ import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { maintainMemoryDoc } from "@/lib/memory/store";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
+import { disableStreamUsage } from "@/lib/providers/stream-usage";
 import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
 import { rememberModelEfforts } from "@/lib/models/catalog";
 import { buildResumeMessages, stitchOverlap } from "./resume";
@@ -1100,6 +1101,23 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         streamError = undefined;
         await discardPartial();
         modelMessages = foldReasoningIntoText(modelMessages);
+        foldDiscarded();
+        result = makeStream();
+        await consume();
+        return true;
+      }
+      if (isStreamUsageRejectedError(err) && disableStreamUsage(configId)) {
+        // This endpoint refuses `stream_options` — our ask for token counts on the
+        // stream (providers/stream-usage.ts). The ask has no bearing on the ANSWER,
+        // so re-stream without it rather than failing the user's turn. No rebuilt
+        // model: the ask is stripped per request, so this same instance now sends a
+        // body the endpoint accepts. The cost is that this turn — and every later
+        // one on this connection, until a restart — records no token counts, exactly
+        // as it did before we started asking. `disableStreamUsage` returning false
+        // is what stops a rejection that survives the retry from looping.
+        tlog.info("provider rejects stream_options — retrying without usage reporting");
+        streamError = undefined;
+        await discardPartial();
         foldDiscarded();
         result = makeStream();
         await consume();

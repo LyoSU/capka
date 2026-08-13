@@ -194,6 +194,10 @@ export async function resolveUserModelInfo(userId: string, requestModel?: string
     // Honor the admin's strict-SSRF policy on the redirect re-check too, matching
     // the assertSafeProviderConfig pre-flight above.
     blockPrivate: await getBlockPrivateProviderUrls(),
+    // Keyed by connection, so an endpoint that refuses the stream-usage ask is
+    // remembered without penalizing another connection on the same provider. The
+    // runner marks it with this very id (it already has `configId`).
+    connectionId: config.id,
   });
   // Per-model native input modalities from the synced catalog: OpenRouter's
   // `architecture.input_modalities` and LiteLLM's `supported_modalities` +
