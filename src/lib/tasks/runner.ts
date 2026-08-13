@@ -12,7 +12,7 @@ import { describeStep } from "@/lib/chat/steps";
 import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
-import { heartbeat, isCancelRequested, finalizeTask, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
+import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
 import { listFiles } from "@/lib/sandbox/client";
@@ -289,7 +289,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   try {
     // Cancelled while still queued — don't spin anything up.
     if (await isCancelRequested(taskId)) {
-      await finalizeTask(taskId, "cancelled");
+      await finalizeTask(taskId, "cancelled", null, workerId);
       await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, status: "cancelled" });
       return;
     }
@@ -1354,9 +1354,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       prior,
     );
 
-    await db.update(messages).set({
-      content: getFullText(),
-      metadata: {
+    const outcomeMeta: MessageMeta = {
         // A suspended turn is NOT done — mark it so the presenter maps the pending
         // tool call to its card state (approval-requested / ask input-available),
         // not an orphan error, and the client blocks the composer until the user
@@ -1395,8 +1393,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           // show how full the window is: contextTokens / this.
           ...(budget ? { contextWindow: budget.effectiveLimit, contextTokens: lastStepContextTokens } : {}),
         } : {}),
-      },
-    }).where(eq(messages.id, msgId));
+    };
 
     // Settle the turn's budget hold to the REAL figures BEFORE flipping the task
     // to its terminal status — so a completed task can never be left holding a
@@ -1427,12 +1424,26 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       });
     }
 
-    // False means something already finalized this task — in practice the zombie
-    // reconciler, after our lease expired. The turn's own work is done and its
-    // message row is written; what we've lost is the right to say how it ended, so
-    // say so in the log rather than overwriting the reconciler's verdict.
-    if (!(await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null))) {
-      tlog.warn("task was already finalized elsewhere (lease lost); keeping that outcome", { attempted: finalStatus });
+    // Claim the right to say how this turn ended, and write the message with it, in
+    // one transaction. Everything after this point is that claim being acted on —
+    // the realtime event, the automation streak, the channel push, the follow-up
+    // work — so all of it hangs off the same answer.
+    const owned = await commitTurnOutcome({
+      taskId, workerId, status: finalStatus,
+      error: failure?.adminDetail ?? streamError ?? null,
+      message: { id: msgId, content: getFullText(), metadata: outcomeMeta },
+    });
+    if (!owned) {
+      // The zombie reconciler got here first (our lease expired) and has already
+      // told the user this turn was interrupted. Its verdict stands: publishing a
+      // completed event or pushing the answer to Telegram now would contradict what
+      // they were shown, which is the exact flip the CAS exists to prevent. The
+      // spend is already settled above — that part is ours either way. An
+      // automation's streak goes unrecorded here, same as after a hard crash.
+      tlog.warn("turn outcome was already settled elsewhere (lease lost); standing down", { attempted: finalStatus });
+      // Say so on the span too, or it would close as the success it never became.
+      setTurnOutcome({ status: "failed" as TurnStatus, keyShared: runShared, tools: toolCount, errorCategory: "interrupted" });
+      return; // `finally` still releases the hold and closes the MCP clients
     }
     if (payload.automationId) {
       // Outcome accounting must never fail the turn itself. A turn that SUSPENDED
@@ -1665,10 +1676,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           });
           await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
         })();
-    await Promise.all([
-      finalizeTask(taskId, status, failure?.adminDetail ?? null).catch(() => {}),
-      persistMessage.catch(() => {}),
-    ]);
+    // Claim the outcome FIRST, then write: same rule as the success path, so a
+    // reaped run can't overwrite the reconciler's verdict or re-announce a turn the
+    // user was already told about. Sequential rather than transactional here because
+    // every status this path produces is non-success, and a task left terminal with
+    // its message still at `running` is exactly what reconcileZombies repairs.
+    if (!(await finalizeTask(taskId, status, failure?.adminDetail ?? null, workerId).catch(() => false))) {
+      tlog.warn("failure outcome was already settled elsewhere (lease lost); standing down", { attempted: status });
+      return; // `finally` still releases the hold and closes the MCP clients
+    }
+    await persistMessage.catch(() => {});
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
     // This catch path finalizes the turn WITHOUT rethrowing, so the turn span
     // would otherwise close as "completed". Report the real outcome here.

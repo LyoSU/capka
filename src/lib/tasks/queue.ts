@@ -1,5 +1,6 @@
 import { pool } from "@/lib/db";
 import { realtime } from "@/lib/realtime";
+import type { MessageMeta } from "@/lib/chat/contracts";
 
 /**
  * Durable task queue on Postgres. Tasks are rows; a worker claims them
@@ -218,13 +219,70 @@ export async function finalizeTask(
   id: string,
   status: Extract<TaskStatus, "completed" | "failed" | "cancelled">,
   error?: string | null,
+  /** The worker claiming the outcome. Adds an ownership check to the CAS; omit only
+   *  where there is no run to own the row (clearing a still-queued task). */
+  workerId?: string,
 ): Promise<boolean> {
   const { rowCount } = await pool.query(
     `UPDATE tasks SET status = $2, error = $3, updated_at = now()
-      WHERE id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')`,
-    [id, status, error ?? null],
+      WHERE id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')
+        ${workerId ? "AND worker_id = $4" : ""}`,
+    workerId ? [id, status, error ?? null, workerId] : [id, status, error ?? null],
   );
   return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Settle a turn's outcome: the task's terminal status and the assistant message's
+ * final content/metadata, in ONE transaction, gated by the same compare-and-set as
+ * {@link finalizeTask}.
+ *
+ * Guarding only the task row is not enough. What the user actually sees is the
+ * message row and the realtime event, so a reaped worker that wakes up could leave
+ * the task `failed` while rewriting the message to `completed` and pushing the
+ * answer out — the "interrupted flips to an answer" the reaper exists to prevent,
+ * just moved one table over. Binding both writes to the CAS makes the outcome a
+ * single decision: whoever wins it owns the message, the event, the channel push and
+ * the follow-up work; whoever loses must not touch any of them.
+ *
+ * Returns false when the outcome was already settled — by then `reconcileZombies`
+ * has told the user the turn was interrupted, and that verdict stands.
+ *
+ * Money is deliberately NOT part of this: tokens were really spent whoever owns the
+ * outcome, so the caller settles the usage ledger before calling and regardless of
+ * the answer here.
+ */
+export async function commitTurnOutcome(input: {
+  taskId: string;
+  workerId: string;
+  status: Extract<TaskStatus, "completed" | "failed" | "cancelled">;
+  error?: string | null;
+  message: { id: string; content: string; metadata: MessageMeta };
+}): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rowCount } = await client.query(
+      `UPDATE tasks SET status = $2, error = $3, updated_at = now()
+        WHERE id = $1 AND worker_id = $4 AND status NOT IN ('completed', 'failed', 'cancelled')`,
+      [input.taskId, input.status, input.error ?? null, input.workerId],
+    );
+    if (!rowCount) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(
+      `UPDATE messages SET content = $2, metadata = $3::jsonb WHERE id = $1`,
+      [input.message.id, input.message.content, JSON.stringify(input.message.metadata)],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /** Request cooperative cancellation (cross-process: a flag the runner polls). */

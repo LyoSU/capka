@@ -8,6 +8,7 @@ import {
   requestCancel,
   isCancelRequested,
   reconcileZombies,
+  commitTurnOutcome,
 } from "../tasks/queue";
 
 // Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run queue.integration
@@ -148,6 +149,60 @@ run("durable queue", () => {
     const { rows } = await pool.query(`SELECT status, error FROM tasks WHERE id='qt3'`);
     expect(rows[0].status).toBe("failed");
     expect(rows[0].error).toMatch(/lease expired/);
+  });
+
+  it("first terminal status wins: a reaped worker cannot revive its task", async () => {
+    await enqueueTask({ id: "qt3b", chatId: C, userId: U, payload: {} });
+    await pool.query(`UPDATE tasks SET status='running', worker_id='w1' WHERE id='qt3b'`);
+
+    // The run that owns the row settles it.
+    expect(await finalizeTask("qt3b", "completed", null, "w1")).toBe(true);
+    // Anything arriving afterwards loses, whoever it is.
+    expect(await finalizeTask("qt3b", "failed", "too late", "w1")).toBe(false);
+    const { rows } = await pool.query(`SELECT status, error FROM tasks WHERE id='qt3b'`);
+    expect(rows[0].status).toBe("completed");
+    expect(rows[0].error).toBeNull();
+  });
+
+  it("a worker cannot settle a task that is no longer its own", async () => {
+    await enqueueTask({ id: "qt3c", chatId: C, userId: U, payload: {} });
+    await pool.query(`UPDATE tasks SET status='running', worker_id='w1' WHERE id='qt3c'`);
+
+    expect(await finalizeTask("qt3c", "completed", null, "someone-else")).toBe(false);
+    const { rows } = await pool.query(`SELECT status FROM tasks WHERE id='qt3c'`);
+    expect(rows[0].status).toBe("running");
+  });
+
+  it("a reaped run's outcome commit takes neither the task nor the message", async () => {
+    // The race this whole guard exists for: the reconciler declares the turn
+    // interrupted and rewrites the assistant message, THEN the stalled worker wakes
+    // up with a finished answer. Guarding only the task row let it rewrite the
+    // message and push the answer out, so the user still saw "interrupted" flip to a
+    // real reply. Both writes must fall together.
+    await enqueueTask({ id: "qt3d", chatId: C, userId: U, payload: {} });
+    await pool.query(
+      `UPDATE tasks SET status='running', worker_id='w1', lease_expires_at = now() - interval '1 minute' WHERE id='qt3d'`,
+    );
+    await pool.query(
+      `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','',$3)`,
+      ["qmsg3d", C, JSON.stringify({ taskId: "qt3d", status: "running", parts: [] })],
+    );
+
+    await reconcileZombies();
+
+    const committed = await commitTurnOutcome({
+      taskId: "qt3d", workerId: "w1", status: "completed", error: null,
+      message: { id: "qmsg3d", content: "the answer the user must not see now", metadata: { taskId: "qt3d", status: "completed" } },
+    });
+
+    expect(committed).toBe(false);
+    const task = await pool.query(`SELECT status FROM tasks WHERE id='qt3d'`);
+    expect(task.rows[0].status).toBe("failed");
+    const msg = await pool.query<{ content: string; metadata: { status: string } }>(
+      `SELECT content, metadata FROM messages WHERE id='qmsg3d'`,
+    );
+    expect(msg.rows[0].metadata.status).toBe("failed");
+    expect(msg.rows[0].content).toBe("");
   });
 
   it("reconciles the abandoned assistant message, not just the task", async () => {
