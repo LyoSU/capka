@@ -18,7 +18,18 @@ function key(userId: string, id: string): string {
 
 export function recordConnectError(userId: string, id: string | undefined, detail: string): void {
   if (!id) return;
-  errors.set(key(userId, id), { detail: detail.slice(0, 400), at: Date.now() });
+  const now = Date.now();
+  // Bound the map on the way in. An entry for a connector that was edited away or
+  // uninstalled is never read again — the health endpoint only asks about rows that
+  // still exist — so `getConnectError`'s lazy expiry never reaches it and the map
+  // would grow for the life of the process. Every entry past the TTL is already dead
+  // to readers, so dropping it here changes no answer.
+  //
+  // Safe only while no caller's backoff window exceeds the TTL: load.ts's
+  // CONNECT_BACKOFF_MS is exactly TTL_MS. A longer window would need this threshold
+  // raised to match, or the backoff it asks for would be silently cut short.
+  for (const [k, e] of errors) if (now - e.at > TTL_MS) errors.delete(k);
+  errors.set(key(userId, id), { detail: detail.slice(0, 400), at: now });
 }
 
 export function clearConnectError(userId: string, id: string | undefined): void {

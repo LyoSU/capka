@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- The connector health and connect-error caches no longer keep an entry per connector revision for the life of the process; both now hold only what is still within their TTL.
 - Upgrading or uninstalling a plugin now releases its connectors' cached tool schemas instead of leaving an entry behind per removed connector, on every upgrade.
 - A turn resumed from an approval card now reports the whole turn's tokens, cost and time in its message details, not just the half after the click (the `usage` ledger and budgets were already correct).
 - Turns on OpenAI-compatible connections (LiteLLM, vLLM, DeepSeek, Mistral, xAI, Groq, Z.ai) now record real token counts instead of zero — usage is requested per stream, so those turns reach `/settings/usage`, cost analytics and traces as actual spend. A gateway that rejects the request is detected, retried without it, and remembered; `CAPKA_STREAM_USAGE=false` stops asking entirely.

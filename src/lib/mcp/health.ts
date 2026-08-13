@@ -101,6 +101,13 @@ export async function probeUserServers(userId: string): Promise<Record<string, S
   const key = await getMasterKey();
   const blockPrivate = await getBlockPrivateProviderUrls();
   const now = Date.now();
+  // Bound the map before reading it. The key carries `updatedAt`, so every edit of a
+  // connector mints a fresh key and abandons the old one, and an uninstalled
+  // connector is never looked up again — nothing else evicts either, so entries
+  // accumulated for the life of the process. Anything past the TTL is already a miss,
+  // so this changes no outcome: the map holds what is still servable rather than
+  // every (connector, revision) the process has ever probed.
+  for (const [k, hit] of cache) if (now - hit.at >= CACHE_TTL_MS) cache.delete(k);
   const out: Record<string, ServerHealth> = {};
 
   // stdio servers can't be probed here (they need a live sandbox session), but if a
