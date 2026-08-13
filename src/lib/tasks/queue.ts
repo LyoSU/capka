@@ -201,16 +201,30 @@ export async function heartbeat(id: string, workerId: string): Promise<boolean> 
   return (rowCount ?? 0) > 0;
 }
 
-/** Mark a task finished. */
+/**
+ * Mark a task finished, but only if nothing has finished it already.
+ *
+ * Compare-and-set against a terminal status, because the write races
+ * `reconcileZombies`: a worker that stalled long enough to lose its lease gets
+ * reaped to `failed`, and if it then wakes up an unconditional UPDATE would revive
+ * the row as `completed` — the user watching the turn sees "interrupted" flip to an
+ * answer, or the reverse. The 15-second reap margin makes that rare; this makes it
+ * impossible. First terminal status wins.
+ *
+ * Returns false when the row was already terminal, i.e. this run no longer owns the
+ * turn's outcome.
+ */
 export async function finalizeTask(
   id: string,
   status: Extract<TaskStatus, "completed" | "failed" | "cancelled">,
   error?: string | null,
-): Promise<void> {
-  await pool.query(
-    `UPDATE tasks SET status = $2, error = $3, updated_at = now() WHERE id = $1`,
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE tasks SET status = $2, error = $3, updated_at = now()
+      WHERE id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')`,
     [id, status, error ?? null],
   );
+  return (rowCount ?? 0) > 0;
 }
 
 /** Request cooperative cancellation (cross-process: a flag the runner polls). */

@@ -1427,7 +1427,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       });
     }
 
-    await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null);
+    // False means something already finalized this task — in practice the zombie
+    // reconciler, after our lease expired. The turn's own work is done and its
+    // message row is written; what we've lost is the right to say how it ended, so
+    // say so in the log rather than overwriting the reconciler's verdict.
+    if (!(await finalizeTask(taskId, finalStatus, failure?.adminDetail ?? streamError ?? null))) {
+      tlog.warn("task was already finalized elsewhere (lease lost); keeping that outcome", { attempted: finalStatus });
+    }
     if (payload.automationId) {
       // Outcome accounting must never fail the turn itself. A turn that SUSPENDED
       // for input (approval/ask) is neither a success nor a failure — report it as

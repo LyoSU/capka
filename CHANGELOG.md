@@ -8,6 +8,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- A Telegram reply is no longer re-sent as plain text when the rich send's outcome is unknown (lost response, 5xx), which could deliver one turn twice; the fallback now runs only when Telegram itself refused the message.
+- A worker that lost its lease can no longer overwrite the outcome the zombie reconciler already recorded for its task — the first terminal status wins.
 - The connector health and connect-error caches no longer keep an entry per connector revision for the life of the process; both now hold only what is still within their TTL.
 - Upgrading or uninstalling a plugin now releases its connectors' cached tool schemas instead of leaving an entry behind per removed connector, on every upgrade.
 - A turn resumed from an approval card now reports the whole turn's tokens, cost and time in its message details, not just the half after the click (the `usage` ledger and budgets were already correct).
