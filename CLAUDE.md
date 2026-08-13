@@ -150,8 +150,9 @@ pin moves.
   owns a thing to delete it (`deleteServer` in `src/lib/mcp/service.ts`,
   `deleteSkill` in `src/lib/skills/service.ts`) — never a bare `db.delete` from a
   caller: a service owns the inverse of whatever its upsert installed *beyond* the
-  row (cached tool schemas, materialized files), and a bulk delete skips that
-  silently, leaving no trace in the DB to notice. Same rule for in-process state:
+  row — today that means `deleteServer` dropping the connector's cached tool
+  schemas — and a bulk delete skips it silently, leaving no trace in the DB to
+  notice. Same rule for in-process state:
   whatever populates a module-level `Map` states its own bound and enforces it.
 - UI copy is localized via `next-intl` (`messages/*.json`); Ukrainian is a
   first-class locale, not an afterthought translation.
