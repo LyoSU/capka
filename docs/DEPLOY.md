@@ -59,6 +59,11 @@ deploys onto a host with a Docker daemon.
      `MAX_SESSIONS_PER_USER` (2), `SANDBOX_IDLE_TTL_MS` (900000),
      `WORKSPACE_TTL_MS` (2592000000), `GC_GRACE_MS` (604800000),
      `SANDBOX_ALLOW_NETWORK` (true).
+   - Optional tracing (see [Tracing](#tracing-optional)):
+     `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`. Paste the
+     header value **unquoted**, exactly as one line — it legitimately contains
+     `=` and `,` (`Authorization=Basic <base64>,x-langfuse-ingestion-version=4`),
+     and wrapping it in quotes makes them part of the value.
 4. Deploy.
 
 ## Routing / TLS

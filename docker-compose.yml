@@ -226,6 +226,26 @@ services:
       - USAGE_RETENTION_DAYS=${USAGE_RETENTION_DAYS:-365}
       - AUDIT_RETENTION_DAYS=${AUDIT_RETENTION_DAYS:-365}
       - DB_RETENTION_BATCH_SIZE=${DB_RETENTION_BATCH_SIZE:-1000}
+      # OPTIONAL agent tracing over OTLP. Unset ⇒ off. These must be listed here:
+      # the prod image has no mounted repo and no .env of its own, so a variable set
+      # on the host (or in a Coolify service) reaches compose but NOT the container
+      # unless it is passed through explicitly. Adding a new OTEL_* knob means adding
+      # it here too, or it will silently do nothing in production.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
+      - OTEL_EXPORTER_OTLP_TRACES_HEADERS=${OTEL_EXPORTER_OTLP_TRACES_HEADERS:-}
+      - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-}
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-}
+      - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-}
+      - OTEL_TRACES_SAMPLER=${OTEL_TRACES_SAMPLER:-}
+      - OTEL_TRACES_SAMPLER_ARG=${OTEL_TRACES_SAMPLER_ARG:-}
+      - CAPKA_TELEMETRY_CONTENT=${CAPKA_TELEMETRY_CONTENT:-}
+      - CAPKA_TELEMETRY_CONTENT_REMOTE=${CAPKA_TELEMETRY_CONTENT_REMOTE:-}
+      - CAPKA_TELEMETRY_COST=${CAPKA_TELEMETRY_COST:-}
+      - CAPKA_TELEMETRY_SPAN_PREFIXES=${CAPKA_TELEMETRY_SPAN_PREFIXES:-}
+      - CAPKA_TELEMETRY_EXTRA_ATTRIBUTES=${CAPKA_TELEMETRY_EXTRA_ATTRIBUTES:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
