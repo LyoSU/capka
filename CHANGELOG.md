@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-08-13
+
 ### Fixed
 
 - Tracing now actually starts in a Docker/Coolify deployment: the `OTEL_*` and `CAPKA_TELEMETRY_*` variables were not passed into the platform container, so v0.21.0 exported nothing in production regardless of configuration. Redeploy to pick up the updated `docker-compose.yml`.
