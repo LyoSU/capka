@@ -8,6 +8,7 @@ import { drainInFlight } from "@/lib/tasks/drain";
 import { releaseHold } from "@/lib/billing/limits";
 import { runAgentTask } from "@/lib/tasks/runner";
 import { publishTaskEvent } from "@/lib/tasks/events";
+import { withTurnSpan, endActiveTurnSpans, shutdownTelemetry } from "@/lib/telemetry";
 import { syncModelCatalog } from "@/lib/models/catalog";
 import { log } from "@/lib/log";
 
@@ -60,7 +61,23 @@ async function tick(): Promise<void> {
       const task = await claimNextTask(s.workerId);
       if (!task) break;
       s.inFlight++;
-      void runAgentTask(task, s.workerId)
+      // The turn span wraps the run from HERE (its only call site) rather than
+      // inside runAgentTask, so the AI SDK's own ai.streamText / ai.toolCall spans
+      // attach as children via the active context without runner.ts owning any
+      // span lifecycle — it only reports the outcome (setTurnOutcome).
+      const payload = (task.payload ?? {}) as { projectId?: string; automationId?: string; resumeMessageId?: string; origin?: { platform?: string } };
+      void withTurnSpan(
+        {
+          taskId: task.id,
+          chatId: task.chat_id,
+          userId: task.user_id,
+          projectId: payload.projectId ?? null,
+          workerId: s.workerId,
+          channel: payload.automationId ? "automation" : payload.origin?.platform === "telegram" ? "telegram" : "web",
+          resumeOf: payload.resumeMessageId ?? null,
+        },
+        () => runAgentTask(task, s.workerId),
+      )
         .catch((e) => log.error("task crashed", { workerId: s.workerId, taskId: task.id, chatId: task.chat_id, err: String(e) }))
         .finally(() => {
           s.inFlight--;
@@ -218,6 +235,14 @@ export async function startWorker(): Promise<void> {
     // doesn't kill an in-flight LLM call mid-write and lose the spend/checkpoint.
     const { drained, remaining } = await drainInFlight(() => state().inFlight + auxInFlight(), DRAIN_GRACE_MS);
     log.info("worker drain complete", { signal, workerId: s.workerId, drained, remaining });
+    // A BatchSpanProcessor only sees a span in onEnd, so any turn still running
+    // past the drain window would never be exported — and the drain deliberately
+    // tolerates that case (see DRAIN_GRACE_MS). Close those spans as interrupted
+    // WITHOUT touching the tasks (the next instance reconciles them as retryable),
+    // then flush. Budget: 25s drain + 5s flush stays under the platform's 35s
+    // stop_grace_period in docker-compose.yml.
+    endActiveTurnSpans(signal);
+    await shutdownTelemetry();
     process.exit(0);
   };
   process.once("SIGTERM", () => void shutdown("SIGTERM"));

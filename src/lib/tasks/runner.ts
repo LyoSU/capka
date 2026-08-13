@@ -14,6 +14,7 @@ import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { heartbeat, isCancelRequested, finalizeTask, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
+import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
 import { listFiles } from "@/lib/sandbox/client";
 import { extractWorkspacePaths, selectTouchedFiles, type ToolWindow } from "@/lib/chat/artifacts";
 import { classifyFiles, findBlindModalities } from "@/lib/chat/prompt";
@@ -592,6 +593,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
         // Either signal aborts the stream; only `attemptAc` aborts are retryable.
         abortSignal: AbortSignal.any([ac.signal, attemptAc.signal]),
+        // Emits ai.streamText / ai.toolCall under the active turn span. Built by
+        // telemetryFor, never inline: the SDK treats an omitted recordInputs as
+        // `true`, so a hand-written literal is one missing field away from
+        // shipping prompts and tool results off-host.
+        experimental_telemetry: telemetryFor("capka.turn.llm", { "capka.task.id": taskId }),
       });
     };
 
@@ -1391,6 +1397,23 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       ...(costMeta != null ? { costUsd: costMeta } : {}),
       ...(streamError ? { error: streamError } : {}),
     });
+    // Same facts onto the turn span (the worker owns its lifecycle; we only report).
+    // Cost is passed but NOT exported by default — the `usage` ledger is the money
+    // truth, and a second dollar figure in a tracing backend would be a second
+    // answer to the same question (CAPKA_TELEMETRY_COST=true to consolidate there).
+    setTurnOutcome({
+      status: finalStatus as TurnStatus,
+      ...(usageMeta ? { usage: { input: usageMeta.input, output: usageMeta.output, cached: usageMeta.cached, cacheWrite: usageMeta.cacheWrite, reasoning: usageMeta.reasoning } } : {}),
+      contextTokens: lastStepContextTokens,
+      ...(costMeta != null ? { costUsd: costMeta } : {}),
+      ...(costSource ? { costSource } : {}),
+      keyShared: runShared,
+      tools: toolCount,
+      ...(hadDiscard ? { discardedTokens: discarded.input + discarded.output } : {}),
+      ...(firstTextAt ? { firstTextMs: firstTextAt - startedAt } : {}),
+      modelFinal: modelId,
+      ...(failure?.category ? { errorCategory: failure.category } : {}),
+    });
     // Build the Telegram approval payload (buttons + preview) only on an origin
     // channel — the web card fetches its own preview, so this query is skipped there.
     let telegramApproval: { messageId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] } | undefined;
@@ -1581,6 +1604,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       persistMessage.catch(() => {}),
     ]);
     await publishTaskEvent(userId, { type: "task:finish", taskId, chatId, messageId: msgId, status, ...(failure ? { error: failure.userMessage } : {}) }).catch(() => {});
+    // This catch path finalizes the turn WITHOUT rethrowing, so the turn span
+    // would otherwise close as "completed". Report the real outcome here.
+    setTurnOutcome({
+      status: status as TurnStatus,
+      keyShared: runShared,
+      tools: toolCount,
+      ...(runModelId ? { modelFinal: runModelId } : {}),
+      ...(failure?.category ? { errorCategory: failure.category } : {}),
+    });
     try {
       await sink.finish({
         status, text: getFullText(), error: failure?.userMessage, errorDetail: failure?.adminDetail, errorCategory: failure?.category,

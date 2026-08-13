@@ -36,6 +36,12 @@
     "@lobehub/icons": "^5.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openrouter/ai-sdk-provider": "^2.3.3",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.221.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-trace-node": "^2.10.0",
+    "@opentelemetry/semantic-conventions": "1.43.0",
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
@@ -72,6 +78,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
     "@tailwindcss/postcss": "^4",
     "@types/luxon": "^3.7.2",
     "@types/mdast": "^4.0.4",

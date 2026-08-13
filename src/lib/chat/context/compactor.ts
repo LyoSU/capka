@@ -2,6 +2,7 @@ import { generateText, type ModelMessage, type LanguageModel } from "ai";
 import { toTokenUsage, type TokenUsage } from "@/lib/pricing";
 import { AUX_TIMEOUT_MS } from "./aux";
 import { log } from "@/lib/log";
+import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
 
 /**
  * The compaction instruction, delivered as the FINAL user turn rather than as a
@@ -54,13 +55,16 @@ export async function compactConversation(
   onUsage?: (usage: TokenUsage) => void,
 ): Promise<string | null> {
   try {
-    const { text, usage } = await generateText({
+    // Own root trace, like the other aux calls — compaction is fire-and-forget and
+    // can outlive the turn that triggered it (see auxGenerate).
+    const { text, usage } = await withoutParentContext(() => generateText({
       model,
       messages: buildCompactionMessages(systemMessages, modelMessages),
       // Same deadline as the other fire-and-forget aux calls: a hung provider
       // request here pins the whole conversation prefix (see AUX_TIMEOUT_MS).
       abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS),
-    });
+      experimental_telemetry: telemetryFor("capka.aux.compaction"),
+    }));
     const billable = toTokenUsage(usage);
     if (billable && onUsage) onUsage(billable);
     const summary = text.trim();

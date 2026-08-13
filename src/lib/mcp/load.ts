@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import type { Tool } from "ai";
 import { getBlockPrivateProviderUrls } from "@/lib/settings";
+import { withChildSpan } from "@/lib/telemetry";
 import { connectMcpServer, disconnectMcp, type ConnectedMcp } from "./client";
 import { adaptMcpTool, mcpToolName } from "./adapt";
 import { listEnabledServerConfigs } from "./service";
@@ -92,7 +94,14 @@ export async function loadMcpTools(opts: {
     const k = cacheKey(c);
     let p = connections.get(k);
     if (!p) {
-      p = (async () => {
+      // The handshake costs ~0.9–1.7s for a remote server and is invisible in the
+      // SDK's ai.toolCall timing — the first tool call on a cold connection just
+      // looks slow. Server NAMES are user-supplied, so only the transport and a
+      // stable hash of the key are recorded.
+      p = withChildSpan("capka.mcp.connect", {
+        "capka.mcp.transport": c.transport ?? "unknown",
+        "capka.mcp.server_hash": createHash("sha256").update(k).digest("hex").slice(0, 12),
+      }, async () => {
         // stdio: its server is `docker exec`'d into the sandbox (and a plugin's
         // files are materialized via exec), so the container must exist first.
         if (c.transport === "stdio" && opts.ensureSession) await opts.ensureSession();
@@ -107,7 +116,7 @@ export async function loadMcpTools(opts: {
         setCachedTools(k, conn.tools); // refresh the schema cache for next turn
         clearConnectError(opts.userId, c.id);
         return conn;
-      })().catch((e) => {
+      }).catch((e) => {
         // Let a later consumer in the same run retry, and surface WHY in the UI.
         connections.delete(k);
         recordConnectError(opts.userId, c.id, e instanceof Error ? e.message : String(e));

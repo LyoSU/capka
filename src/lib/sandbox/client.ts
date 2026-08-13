@@ -4,8 +4,10 @@
  */
 
 import { createHmac } from "node:crypto";
+import type { Span } from "@opentelemetry/api";
 import { SandboxError } from "@/lib/errors";
 import { log } from "@/lib/log";
+import { withChildSpan, sanitizeRoute } from "@/lib/telemetry";
 
 const CONTROLLER_URL = process.env.SANDBOX_CONTROLLER_URL || "http://localhost:3001";
 const CONTROLLER_SECRET = process.env.CONTROLLER_SECRET ?? "";
@@ -46,7 +48,24 @@ async function sandboxFetch(input: RequestInfo, init?: RequestInit): Promise<Res
   }
 }
 
+/**
+ * Every JSON controller call goes through here, so one span covers exec, session
+ * create, file listing, and the MCP bridge — and shows a cold container start as
+ * a slow `/sessions` sibling before the `/sessions/{id}/exec` that follows it.
+ *
+ * The raw `path` is NEVER recorded: it carries session keys, filenames,
+ * user-chosen MCP server names, and on DELETE a `workspaceToken` in the query
+ * string. `sanitizeRoute` reduces it to a template with the query dropped.
+ */
 async function request(path: string, method: string, body?: unknown, timeoutMs?: number) {
+  return withChildSpan(
+    "capka.sandbox.request",
+    { "capka.sandbox.route": sanitizeRoute(path), "capka.sandbox.method": method },
+    (span) => sendRequest(path, method, body, timeoutMs, span),
+  );
+}
+
+async function sendRequest(path: string, method: string, body: unknown, timeoutMs: number | undefined, span: Span) {
   const res = await sandboxFetch(`${CONTROLLER_URL}${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -54,10 +73,15 @@ async function request(path: string, method: string, body?: unknown, timeoutMs?:
     signal: AbortSignal.timeout(timeoutMs ?? (method === "POST" ? 150_000 : 10_000)),
   });
 
+  span.setAttribute("capka.sandbox.status", res.status);
+
   const data = await res.json().catch(() => ({ error: `Sandbox ${res.status}` }));
   if (!res.ok) {
     const op = path.split("/").pop() || method.toLowerCase();
     const raw = data.error || `Sandbox ${res.status}`;
+    // The controller's `code` values are a closed set (WORKSPACE_FULL,
+    // IMAGE_PULLING, …), so they are safe to record; `raw` is not.
+    if (typeof data.code === "string") span.setAttribute("capka.sandbox.error_code", data.code);
     log.error("sandbox request failed", { method, path, status: res.status, err: String(raw) });
     // The workspace-full block is an actionable condition the agent must SEE and
     // act on (free space, then retry), so its message passes through verbatim.

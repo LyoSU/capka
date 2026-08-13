@@ -111,6 +111,57 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
       });
     }
   }
+  // Tracing. Advisory, like everything here — the actual enforcement of the
+  // content policy lives in resolveTelemetryConfig, because this function never
+  // blocks boot and so cannot be what prevents a data leak.
+  const otlp = (env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || env.OTEL_EXPORTER_OTLP_ENDPOINT)?.trim();
+  let otlpHost: string | undefined;
+  if (otlp) {
+    try {
+      const u = new URL(otlp);
+      if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("scheme");
+      otlpHost = u.hostname;
+    } catch {
+      issues.push({
+        level: "error",
+        key: env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ? "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" : "OTEL_EXPORTER_OTLP_ENDPOINT",
+        message: `set to "${otlp}", which is not a valid http(s) URL — traces will not be exported.`,
+      });
+    }
+    const protocol = env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim();
+    if (protocol && protocol !== "http/protobuf" && protocol !== "http/json") {
+      issues.push({
+        level: "warn",
+        key: "OTEL_EXPORTER_OTLP_PROTOCOL",
+        message: `set to "${protocol}", which is not supported (only http/protobuf and http/json) — http/protobuf will be used.`,
+      });
+    }
+  }
+
+  if (env.CAPKA_TELEMETRY_CONTENT?.trim() === "true") {
+    const isLocal = otlpHost !== undefined && (
+      otlpHost === "localhost" || otlpHost.endsWith(".localhost") || otlpHost.endsWith(".local") ||
+      otlpHost === "::1" || /^127\./.test(otlpHost) || /^10\./.test(otlpHost) ||
+      /^192\.168\./.test(otlpHost) || /^169\.254\./.test(otlpHost) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(otlpHost)
+    );
+    if (!otlp) {
+      issues.push({
+        level: "warn",
+        key: "CAPKA_TELEMETRY_CONTENT",
+        message: "set but no OTLP endpoint is configured — it has no effect.",
+      });
+    } else if (!isLocal && env.CAPKA_TELEMETRY_CONTENT_REMOTE?.trim() !== "true") {
+      issues.push({
+        level: "error",
+        key: "CAPKA_TELEMETRY_CONTENT",
+        message:
+          `would send chat content (prompts, user documents, tool output) to ${otlpHost}, which is not this host. ` +
+          "It is being IGNORED until CAPKA_TELEMETRY_CONTENT_REMOTE=true is also set.",
+      });
+    }
+  }
+
   const retentionBatch = env.DB_RETENTION_BATCH_SIZE?.trim();
   if (retentionBatch) {
     const n = Number(retentionBatch);

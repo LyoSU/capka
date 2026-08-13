@@ -79,3 +79,49 @@ describe("checkConfig", () => {
     );
   });
 });
+
+describe("checkConfig — telemetry", () => {
+  it("says nothing when telemetry is not configured", () => {
+    expect(keysOf(VALID)).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+  });
+
+  it("errors on a malformed OTLP endpoint", () => {
+    const issues = checkConfig({ ...VALID, OTEL_EXPORTER_OTLP_ENDPOINT: "collector:4318" });
+    expect(issues.find((i) => i.key === "OTEL_EXPORTER_OTLP_ENDPOINT")?.level).toBe("error");
+  });
+
+  it("errors when chat content would be sent to a third-party host", () => {
+    const issues = checkConfig({
+      ...VALID,
+      OTEL_EXPORTER_OTLP_ENDPOINT: "https://cloud.langfuse.com/api/public/otel",
+      CAPKA_TELEMETRY_CONTENT: "true",
+    });
+    const issue = issues.find((i) => i.key === "CAPKA_TELEMETRY_CONTENT");
+    expect(issue?.level).toBe("error");
+    expect(issue?.message).toContain("cloud.langfuse.com");
+  });
+
+  it("accepts content capture toward a local collector", () => {
+    const issues = checkConfig({
+      ...VALID,
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
+      CAPKA_TELEMETRY_CONTENT: "true",
+    });
+    expect(keysOf({ ...VALID })).not.toContain("CAPKA_TELEMETRY_CONTENT");
+    expect(issues.find((i) => i.key === "CAPKA_TELEMETRY_CONTENT")).toBeUndefined();
+  });
+
+  it("warns when a content flag has no endpoint to apply to", () => {
+    const issues = checkConfig({ ...VALID, CAPKA_TELEMETRY_CONTENT: "true" });
+    expect(issues.find((i) => i.key === "CAPKA_TELEMETRY_CONTENT")?.level).toBe("warn");
+  });
+
+  it("warns about an OTLP protocol it cannot produce", () => {
+    const issues = checkConfig({
+      ...VALID,
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc",
+    });
+    expect(issues.find((i) => i.key === "OTEL_EXPORTER_OTLP_PROTOCOL")?.level).toBe("warn");
+  });
+});

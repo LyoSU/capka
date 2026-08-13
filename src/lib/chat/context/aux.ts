@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
 import { isReasoningUnsupportedError } from "@/lib/errors/friendly";
+import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
 
 /**
  * Assemble an auxiliary request (memory extraction, etc.) that RIDES the just-
@@ -63,14 +64,22 @@ export const AUX_TIMEOUT_MS = 180_000;
 /** generateText for aux calls: suppress reasoning, but if a non-reasoning model
  *  rejects the knob (gpt-4o, claude-3.5…), retry once without it — same
  *  optimistic-then-fallback philosophy as the main run. */
-export async function auxGenerate(model: LanguageModel, provider: string, args: AuxArgs) {
+export async function auxGenerate(model: LanguageModel, provider: string, args: AuxArgs, label = "aux") {
   const providerOptions = auxReasoningOptions(provider);
-  try {
-    return await generateText({ model, ...args, abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS), ...(providerOptions ? { providerOptions: providerOptions as never } : {}) });
-  } catch (e) {
-    if (providerOptions && isReasoningUnsupportedError(e)) {
-      return await generateText({ model, ...args, abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS) });
+  const telemetry = telemetryFor(`capka.aux.${label}`);
+  // ROOT_CONTEXT, not the caller's context: aux work is fire-and-forget and
+  // OUTLIVES the turn that spawned it (that is what trackAux/auxInFlight exist
+  // for). As a child span it would outlive its own parent, which renders as a
+  // corrupt trace — so each aux call becomes its own root, correlated by the
+  // session id instead.
+  return withoutParentContext(async () => {
+    try {
+      return await generateText({ model, ...args, abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS), experimental_telemetry: telemetry, ...(providerOptions ? { providerOptions: providerOptions as never } : {}) });
+    } catch (e) {
+      if (providerOptions && isReasoningUnsupportedError(e)) {
+        return await generateText({ model, ...args, abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS), experimental_telemetry: telemetry });
+      }
+      throw e;
     }
-    throw e;
-  }
+  });
 }

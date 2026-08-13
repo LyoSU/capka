@@ -12,6 +12,16 @@ export async function register() {
   const { reportConfig } = await import("@/lib/config/check");
   reportConfig();
 
+  // Tracing, AFTER the audit so its warnings (notably a content-capture request
+  // aimed at a third-party endpoint) are already in the log before any exporter
+  // exists. No-op unless an OTLP endpoint is configured, and never fatal.
+  try {
+    const { startTelemetry } = await import("@/lib/telemetry");
+    await startTelemetry();
+  } catch (e) {
+    console.error("[telemetry] failed to start (continuing without it):", e);
+  }
+
   // Bring the schema up to date so self-hosting needs no manual migrate step.
   // A failure here shouldn't prevent the server from booting (e.g. the setup
   // page should still load to surface the problem) — log loudly and continue.

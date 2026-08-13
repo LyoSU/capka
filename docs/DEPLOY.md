@@ -103,6 +103,48 @@ server {
 Set `PLATFORM_BIND=127.0.0.1` so the platform is reachable only through nginx,
 and keep `PUBLIC_URL=https://capka.example.com` in sync with the served domain.
 
+## Tracing (optional)
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` and Capka exports one trace per agent turn over
+standard OTLP — turn → LLM calls → tool calls → sandbox request / MCP handshake,
+with durations, models, token counts, retry/stall markers and error categories.
+Any OpenTelemetry backend works; nothing is added to the compose stack.
+
+```
+# Local collector
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+
+# Langfuse Cloud — the ingestion-version header is required in practice,
+# without it new data can lag by up to 10 minutes.
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64(pk-lf-...:sk-lf-...)>,x-langfuse-ingestion-version=4
+```
+
+**What leaves the host.** By default only structure: timings, model ids, token
+counts, tool names, route templates, error *categories*. Never prompts,
+completions, tool arguments/results, sandbox commands, filenames, session keys,
+workspace tokens, or exception messages and stack traces — the exporter runs a
+deny-by-default allowlist, so even a future SDK attribute cannot leak without
+being added deliberately.
+
+To include content, set `CAPKA_TELEMETRY_CONTENT=true`. If the collector is not on
+this host you must ALSO set `CAPKA_TELEMETRY_CONTENT_REMOTE=true`; with only the
+first flag the content is dropped and the boot log records why. Treat that as
+sending your users' documents to a third party.
+
+**What stays here.** Cost in USD is not exported (`CAPKA_TELEMETRY_COST=true` to
+change that): the `usage` table is the money record — it holds pending
+reservations and the shared-vs-own-key distinction that billing depends on, and a
+second dollar figure elsewhere would be a second answer to the same question. The
+division of labour is deliberate: money and the admin analytics live here, trace
+structure and per-step latency live in the tracing backend.
+
+**Limits.** HTTP/protobuf (default) and `http/json` only — `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`
+is refused with a warning and falls back. Only agent spans are exported;
+`CAPKA_TELEMETRY_SPAN_PREFIXES=*` widens that (a registered tracer provider also
+wakes Next.js's own request spans). Standard `OTEL_SDK_DISABLED`,
+`OTEL_TRACES_EXPORTER=none`, sampler and batch variables are honored.
+
 ## Gotchas seen in practice
 
 - **`INVALID_ORIGIN` at login** → set `PUBLIC_URL` to the exact public origin

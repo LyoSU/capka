@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Optional agent tracing over standard OTLP: set `OTEL_EXPORTER_OTLP_ENDPOINT` to export a span tree per turn (turn → LLM calls → tool calls → sandbox/MCP work) to any OpenTelemetry backend (Langfuse, Phoenix, Tempo, Jaeger, an OTel Collector). Unset means off with zero overhead; no new services and no vendor SDK.
+- Prompts, documents, tool payloads and sandbox commands stay out of exported traces unless `CAPKA_TELEMETRY_CONTENT=true`, plus `CAPKA_TELEMETRY_CONTENT_REMOTE=true` when the collector is not on this host — without the second flag content is force-disabled and the boot log says so. Cost in USD is likewise withheld by default (`CAPKA_TELEMETRY_COST=true`) so the Postgres usage ledger stays the single money truth. Tunable further with `CAPKA_TELEMETRY_SPAN_PREFIXES` and `CAPKA_TELEMETRY_EXTRA_ATTRIBUTES`.
+
 ### Fixed
 
 - Automations fire at their scheduled time on hosts whose `TZ` isn't UTC — raw queries encoded dates in the process timezone against timezone-less columns, so a `TZ=Europe/Kyiv` box fired them three hours early.
