@@ -161,3 +161,48 @@ describe("endActiveTurnSpans — shutdown", () => {
     expect(exporter.getFinishedSpans()).toHaveLength(0);
   });
 });
+
+describe("legibility in a backend listing", () => {
+  it("names the trace by what it was, not just 'capka.turn'", async () => {
+    await withTurnSpan(TURN, async () => {
+      setTurnOutcome({ status: "completed", modelFinal: "claude-opus-5" });
+    });
+
+    // A thousand identically-named rows are unreadable; this is what the backend
+    // shows as the trace title.
+    expect(byName("capka.turn")!.attributes["langfuse.trace.name"]).toBe("turn · web · claude-opus-5");
+  });
+
+  it("tags the turn so a listing can be filtered without opening rows", async () => {
+    await withTurnSpan({ ...TURN, projectId: "proj_1" }, async () => {
+      setTurnOutcome({ status: "failed", errorCategory: "rate_limit", modelFinal: "gpt-5" });
+    });
+
+    const tags = byName("capka.turn")!.attributes["langfuse.tags"] as string[];
+    expect(tags).toContain("channel:web");
+    expect(tags).toContain("status:failed");
+    expect(tags).toContain("error:rate_limit");
+    expect(tags).toContain("project:proj_1");
+  });
+
+  it("carries a link back into Capka so a bad trace is one click from its chat", async () => {
+    process.env.PUBLIC_URL = "https://capka.example.com";
+    try {
+      await withTurnSpan(TURN, async () => {});
+      expect(byName("capka.turn")!.attributes["capka.chat.url"]).toBe("https://capka.example.com/chat/chat_1");
+    } finally {
+      delete process.env.PUBLIC_URL;
+    }
+  });
+
+  it("records the retry/stall markers that explain a slow turn", async () => {
+    await withTurnSpan(TURN, async () => {
+      setTurnOutcome({ status: "completed", recoveries: 2, stalled: true, steps: 12 });
+    });
+
+    const a = byName("capka.turn")!.attributes;
+    expect(a["capka.recoveries"]).toBe(2);
+    expect(a["capka.stalled"]).toBe(true);
+    expect(a["capka.steps"]).toBe(12);
+  });
+});

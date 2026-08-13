@@ -59,12 +59,15 @@ const g = globalThis as unknown as { __capkaOpenTurns?: Set<Span> };
 const openTurns = (g.__capkaOpenTurns ??= new Set<Span>());
 
 /**
- * The outcome runner.ts reported, if any. Without this, a turn that finished as
- * `cancelled` / `awaiting_approval` would be overwritten with "completed" on the
- * clean exit path — losing exactly the non-terminal states we take care to
- * distinguish. Weak so an abandoned span cannot pin memory.
+ * What runner.ts reported, and what the turn was started with. Kept until the span
+ * closes so the human-facing name and tags can be composed once, from the final
+ * facts. Also fixes a subtler bug: without the remembered status, a turn that
+ * finished as `cancelled` / `awaiting_approval` was overwritten with "completed"
+ * on the clean exit path, losing exactly the non-terminal states we distinguish.
+ * Weak so an abandoned span cannot pin memory.
  */
-const declaredStatus = new WeakMap<Span, TurnStatus>();
+const declaredOutcome = new WeakMap<Span, TurnOutcome>();
+const turnInput = new WeakMap<Span, TurnSpanInput>();
 
 function set(span: Span, attrs: Record<string, string | number | boolean | undefined | null>): void {
   for (const [key, value] of Object.entries(attrs)) {
@@ -79,10 +82,31 @@ function set(span: Span, attrs: Record<string, string | number | boolean | undef
  */
 function finishTurn(span: Span, fallback: TurnStatus): void {
   if (!openTurns.delete(span)) return;
-  const declared = declaredStatus.get(span);
+  const outcome = declaredOutcome.get(span);
+  const input = turnInput.get(span);
   const status =
-    fallback === "failed" || fallback === "interrupted" ? fallback : (declared ?? fallback);
+    fallback === "failed" || fallback === "interrupted" ? fallback : (outcome?.status ?? fallback);
   span.setAttribute("capka.status", status);
+
+  // A listing of a thousand rows all called "capka.turn" is unreadable, and most
+  // backends key their filters off tags. Composed here because the model and the
+  // outcome are only known now. Nothing here is user content.
+  if (input) {
+    const model = outcome?.modelFinal;
+    span.setAttribute(
+      "langfuse.trace.name",
+      ["turn", input.channel, model].filter(Boolean).join(" · "),
+    );
+    span.setAttribute("langfuse.tags", [
+      `channel:${input.channel}`,
+      `status:${status}`,
+      ...(input.projectId ? [`project:${input.projectId}`] : []),
+      ...(model ? [`model:${model}`] : []),
+      ...(outcome?.errorCategory ? [`error:${outcome.errorCategory}`] : []),
+      ...(outcome?.stalled ? ["stalled"] : []),
+      ...(outcome?.recoveries ? ["retried"] : []),
+    ]);
+  }
   // Only a genuine failure is an error. Cancels and the awaiting_* suspends are
   // ordinary outcomes — flagging them would make every approval look like an
   // incident. `message` is deliberately never set: it is free-form provider text.
@@ -122,6 +146,12 @@ export function withTurnSpan<T>(input: TurnSpanInput, fn: () => Promise<T>): Pro
     },
     async (span) => {
       openTurns.add(span);
+      turnInput.set(span, input);
+      // Deep link so a suspicious trace is one click from the conversation it
+      // describes. Only when the deployment's public origin is known — guessing
+      // one would produce links that 404.
+      const origin = (process.env.PUBLIC_URL || process.env.BETTER_AUTH_URL)?.trim().replace(/\/+$/, "");
+      if (origin) span.setAttribute("capka.chat.url", `${origin}/chat/${input.chatId}`);
       try {
         const result = await fn();
         finishTurn(span, "completed");
@@ -143,7 +173,7 @@ export function withTurnSpan<T>(input: TurnSpanInput, fn: () => Promise<T>): Pro
 export function setTurnOutcome(outcome: TurnOutcome): void {
   const span = trace.getActiveSpan();
   if (!span) return;
-  declaredStatus.set(span, outcome.status);
+  declaredOutcome.set(span, outcome);
 
   const u = outcome.usage;
   set(span, {

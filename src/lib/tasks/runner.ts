@@ -219,6 +219,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // on every finish-step — unlike liveUsage above, this is a snapshot of the final
   // call's context, not a running total across a multi-step tool-calling turn.
   let lastStepContextTokens = 0;
+  // How many LLM round-trips this turn took. "Why did this burn 12 steps" is one
+  // of the two questions asked of a slow turn (the other is retries/stalls), and
+  // neither was answerable from the trace before.
+  let stepCount = 0;
   const discarded = { input: 0, output: 0, cached: 0, cost: 0 };
   const orLive: { cost: number; upstreamProvider?: string; generationId?: string } = { cost: 0 };
   let discardedOrServed = false;
@@ -517,6 +521,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let attemptAc = new AbortController();
     let stalled = false;
     let stalledOut = false;
+    // `stalled` is per-attempt and resets on each retry; `stalledOut` means we gave
+    // up. Neither answers "did this turn wait on a silent provider at any point",
+    // which is the interesting one for a turn that recovered and still took 90s.
+    let stalledEver = false;
     let recoveries = 0;
     // A continuation re-stream appends these to the prompt (see resume()); empty
     // on the first attempt and on clean (capability/context) restarts.
@@ -526,6 +534,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let resumeTail = "";
     const watchdog = new StallWatchdog(STREAM_IDLE_MS, () => {
       stalled = true;
+      stalledEver = true;
       tlog.warn("provider.stall", { model: modelId, attempt: recoveries, idleMs: STREAM_IDLE_MS });
       attemptAc.abort();
     });
@@ -953,6 +962,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             liveUsage.output += event.usage.outputTokens ?? 0;
             liveUsage.cached += cached;
             lastStepContextTokens = event.usage.inputTokens ?? 0;
+            stepCount++;
             // Generic splits via the AI SDK's normalized usage (every provider):
             // cache WRITE is distinct from read, reasoning is a slice of output.
             liveUsage.cacheWrite += event.usage.inputTokenDetails?.cacheWriteTokens ?? 0;
@@ -1412,6 +1422,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       ...(hadDiscard ? { discardedTokens: discarded.input + discarded.output } : {}),
       ...(firstTextAt ? { firstTextMs: firstTextAt - startedAt } : {}),
       modelFinal: modelId,
+      steps: stepCount,
+      recoveries,
+      stalled: stalledEver,
       ...(failure?.category ? { errorCategory: failure.category } : {}),
     });
     // Build the Telegram approval payload (buttons + preview) only on an origin
