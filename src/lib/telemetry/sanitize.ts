@@ -129,11 +129,25 @@ function isAllowed(key: string, content: boolean, opts: SanitizeOptions): boolea
 
 /**
  * The AI SDK records token counts under its own camelCase namespace, while every
- * backend (and the GenAI conventions) read `gen_ai.usage.*`. Live-verified: without
- * this translation a generation arrives with usage {input: 0, output: 0}, i.e. an
- * empty token graph that looks like a backend bug. Applied only to the SDK's own
- * model-call spans — putting these on the turn root would make it a second
- * generation holding the sum of its children.
+ * backend (and the GenAI conventions) read `gen_ai.usage.*`.
+ *
+ * NOTE, verified empirically against ai@6.0.235 on 2026-08-13 (live export to a
+ * Langfuse project, plus a local dump of the finished spans' attributes): the SDK
+ * emits NO usage attributes at all — not on `ai.streamText` / `.doStream`, not on
+ * `ai.generateText` / `.doGenerate`, and not with recordInputs/recordOutputs
+ * enabled — even though these attribute names exist in its bundle. So this
+ * translation is a no-op today and starts working the moment the SDK does.
+ *
+ * Two consequences worth knowing before touching this file:
+ *   1. `capka.usage.*` on the turn span (set from runner.ts's own accumulators) is
+ *      the ONLY source of token counts in a trace. It is not a duplicate of what
+ *      the children carry, so removing it as "redundant" leaves traces with no
+ *      token data whatsoever, and a backend's native usage/cost graphs stay empty
+ *      regardless (nothing for them to aggregate).
+ *   2. These aliases are keyed to the SDK's own `ai.*` span names on purpose.
+ *      Applying them to our turn root would make Langfuse classify it as a
+ *      generation holding the SUM of its children's tokens — the double count that
+ *      `langfuse.observation.type=span` exists to prevent.
  */
 const USAGE_ALIASES: ReadonlyArray<readonly [string, string]> = [
   ["ai.usage.inputTokens", "gen_ai.usage.input_tokens"],
