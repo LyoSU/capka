@@ -1687,12 +1687,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         },
       });
     } catch (e) {
-      // Unanswerable, not lost: the database is unreachable, so no reconciler has
-      // recorded an outcome either. This path's whole job is to tell the user
-      // something broke — going silent here would make the product quiet at exactly
-      // the moment it has to speak. Same refusal-vs-unknown split as the Telegram
-      // fallback: only a definite "someone else owns this" stands us down.
-      tlog.error("could not record the failure outcome; reporting it anyway", { err: errMsg(e) });
+      // A throw does NOT prove we don't own the outcome, and it does not prove we do:
+      // the COMMIT may have landed with only its response lost, or this session alone
+      // may have failed while the reconciler is working fine, or the rollback may be
+      // real and nobody owns the turn yet. There is no way to tell them apart here.
+      //
+      // So this is a deliberate exception to the rule the rest of this file follows,
+      // not an application of it: we report a failure WITHOUT confirmed ownership,
+      // because this path's whole job is to tell the user something broke and going
+      // silent would make the product quiet exactly when it has to speak. What keeps
+      // the exception cheap is that every status this path produces is a non-success:
+      // the worst case is a failure announced twice, or ahead of the row settling —
+      // never the contradicting "interrupted turns into an answer" that the gate on
+      // the success path exists to prevent.
+      tlog.error("could not confirm ownership of the failure outcome; reporting it anyway", { err: errMsg(e) });
       owned = true;
     }
     if (!owned) {
