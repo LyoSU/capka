@@ -279,3 +279,34 @@ describe("vendor correlation keys", () => {
     expect(JSON.stringify(clean)).not.toContain(CANARY);
   });
 });
+
+describe("normalizing the SDK's usage attributes to the GenAI convention", () => {
+  it("translates ai.usage.* into gen_ai.usage.* on model-call spans", () => {
+    // The AI SDK writes its own camelCase namespace; every backend reads the OTel
+    // convention. Verified against a live Langfuse project: without this the
+    // generation arrived with usage {input: 0, output: 0} — a silently empty token
+    // graph, which is exactly the kind of thing people discover from a dashboard
+    // rather than from docs.
+    const span = makeSpan("ai.streamText.doStream", (s) => {
+      s.setAttribute("ai.usage.inputTokens", 4211);
+      s.setAttribute("ai.usage.outputTokens", 318);
+      s.setAttribute("ai.usage.cachedInputTokens", 3900);
+    });
+
+    const clean = sanitizeSpan(span, false);
+    expect(clean.attributes["gen_ai.usage.input_tokens"]).toBe(4211);
+    expect(clean.attributes["gen_ai.usage.output_tokens"]).toBe(318);
+    expect(clean.attributes["gen_ai.usage.cache_read.input_tokens"]).toBe(3900);
+    // The originals stay: they are the SDK's own record and cost nothing.
+    expect(clean.attributes["ai.usage.inputTokens"]).toBe(4211);
+  });
+
+  it("does not put gen_ai.usage.* on the turn root, which would double-count", () => {
+    const span = makeSpan("capka.turn", (s) => {
+      s.setAttribute("capka.usage.input_tokens", 4211);
+    });
+
+    const clean = sanitizeSpan(span, false);
+    expect(clean.attributes["gen_ai.usage.input_tokens"]).toBeUndefined();
+  });
+});

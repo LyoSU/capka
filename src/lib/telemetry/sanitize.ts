@@ -128,6 +128,21 @@ function isAllowed(key: string, content: boolean, opts: SanitizeOptions): boolea
 }
 
 /**
+ * The AI SDK records token counts under its own camelCase namespace, while every
+ * backend (and the GenAI conventions) read `gen_ai.usage.*`. Live-verified: without
+ * this translation a generation arrives with usage {input: 0, output: 0}, i.e. an
+ * empty token graph that looks like a backend bug. Applied only to the SDK's own
+ * model-call spans — putting these on the turn root would make it a second
+ * generation holding the sum of its children.
+ */
+const USAGE_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  ["ai.usage.inputTokens", "gen_ai.usage.input_tokens"],
+  ["ai.usage.outputTokens", "gen_ai.usage.output_tokens"],
+  ["ai.usage.cachedInputTokens", "gen_ai.usage.cache_read.input_tokens"],
+  ["ai.usage.inputTokenDetails.cacheWriteTokens", "gen_ai.usage.cache_creation.input_tokens"],
+];
+
+/**
  * Returns a span equivalent to `span` with disallowed data removed. Span
  * identity (trace/span ids, parent, name, kind, timings) is preserved verbatim
  * so the trace tree stays intact — scrubbing must not orphan children.
@@ -143,6 +158,14 @@ export function sanitizeSpan(
   const attributes: Attributes = {};
   for (const [key, value] of Object.entries(span.attributes)) {
     if (isAllowed(key, content, options)) attributes[key] = value;
+  }
+
+  // Only where the SDK actually reports usage, never on our own turn span.
+  if (span.name.startsWith("ai.")) {
+    for (const [from, to] of USAGE_ALIASES) {
+      const value = span.attributes[from];
+      if (typeof value === "number" && attributes[to] === undefined) attributes[to] = value;
+    }
   }
 
   // Every field is listed explicitly rather than spread from `span`. Spreading a
