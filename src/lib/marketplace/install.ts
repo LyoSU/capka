@@ -3,8 +3,8 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } from "@/lib/db/schema";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
-import { ingestSkill } from "@/lib/skills/service";
-import { upsertServer, upsertStdioServer, setEnabled } from "@/lib/mcp/service";
+import { ingestSkill, deleteSkill } from "@/lib/skills/service";
+import { upsertServer, upsertStdioServer, setEnabled, deleteServer } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl, resolveGitHub } from "./source";
@@ -33,18 +33,29 @@ interface InstallTarget { scope: "system" | "user"; userId: string | null; proje
  *  small + user-facing). */
 interface ApplyResult { manifest: InstallManifest; files: { path: string; content: string }[] }
 
-/** Delete skills/connectors this install owns that the latest tree no longer
- *  produces (upstream removals). Keyed by the install tag. */
-async function pruneRemoved(tag: string, manifest: InstallManifest): Promise<void> {
-  const keepSkills = new Set(manifest.skills);
-  const keepConnectors = new Set(manifest.connectors);
+/**
+ * Delete the skills/connectors this install owns that `keep*` no longer names —
+ * upstream removals on an upgrade, or EVERYTHING on an uninstall (empty sets).
+ * Keyed by the install tag.
+ *
+ * Deletes through each service instead of issuing its own `db.delete`: a service
+ * owns the inverse of whatever its upsert installed BEYOND the row itself, and
+ * `deleteServer` also drops the connector's cached tool schemas. A bulk delete here
+ * skips that silently, leaving the in-process schema cache holding an entry for a
+ * connector that no longer exists — the map documents itself as holding one entry
+ * per EXISTING connector, and an upgrade ran this on every removal.
+ *
+ * Exported so the routing itself can be asserted: the regression this prevents is
+ * invisible in the DB, which is why it survived unnoticed.
+ */
+export async function pruneRemoved(tag: string, keepSkills: Set<string>, keepConnectors: Set<string>): Promise<void> {
   const ownedSkills = await db.select({ id: skills.id, name: skills.name }).from(skills).where(eq(skills.source, tag));
   for (const s of ownedSkills) {
-    if (!keepSkills.has(s.name)) await db.delete(skills).where(eq(skills.id, s.id));
+    if (!keepSkills.has(s.name)) await deleteSkill(s.id);
   }
   const ownedConnectors = await db.select({ id: mcpServers.id, name: mcpServers.name }).from(mcpServers).where(eq(mcpServers.source, tag));
   for (const c of ownedConnectors) {
-    if (!keepConnectors.has(c.name)) await db.delete(mcpServers).where(eq(mcpServers.id, c.id));
+    if (!keepConnectors.has(c.name)) await deleteServer(c.id);
   }
 }
 
@@ -285,7 +296,8 @@ export async function installPlugin(opts: {
   const { manifest, files } = await applyPlugin({ ...gh, ref }, `catalog:${installId}`, target, opts.only);
 
   if (existing) {
-    await pruneRemoved(`catalog:${installId}`, manifest); // re-install: drop rows removed upstream
+    // re-install: drop rows removed upstream
+    await pruneRemoved(`catalog:${installId}`, new Set(manifest.skills), new Set(manifest.connectors));
     await db.update(pluginInstalls)
       .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? existing.commitSha, manifest: manifest as unknown as Record<string, unknown> })
       .where(eq(pluginInstalls.id, installId));
@@ -373,7 +385,7 @@ export async function upgradePlugin(installId: string, toSha: string): Promise<I
   // Apply (and pin to) EXACTLY the reviewed commit.
   const { manifest, files } = await applyPlugin({ ...gh, ref: toSha }, tag, target);
   await persistPluginFiles(installId, files);
-  await pruneRemoved(tag, manifest);
+  await pruneRemoved(tag, new Set(manifest.skills), new Set(manifest.connectors));
 
   await db.update(pluginInstalls)
     .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? row.commitSha, manifest: manifest as unknown as Record<string, unknown> })
@@ -418,7 +430,8 @@ export async function installSkillRepo(opts: {
  *  files + oauth rows when the pluginInstalls row goes). */
 export async function uninstallPlugin(installId: string): Promise<void> {
   const tag = `catalog:${installId}`;
-  await db.delete(skills).where(eq(skills.source, tag));
-  await db.delete(mcpServers).where(eq(mcpServers.source, tag));
+  // An uninstall is a prune that keeps nothing — same routing, so a connector's
+  // cached schemas go with it here too.
+  await pruneRemoved(tag, new Set(), new Set());
   await db.delete(pluginInstalls).where(eq(pluginInstalls.id, installId));
 }

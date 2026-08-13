@@ -192,7 +192,12 @@ export async function getInstallOwner(installId: string): Promise<{ scope: strin
 }
 
 /** Flip enabled on every skill + connector a plugin routed — one action for the
- *  whole group (the data model already filters runtime use by `enabled`). */
+ *  whole group (the data model already filters runtime use by `enabled`).
+ *
+ *  A bulk update is fine here, unlike the deletes in install.ts: an `enabled` flip
+ *  has no inverse to run beyond the column itself. Nothing reads a disabled row —
+ *  `listEnabledServerConfigs` filters on it — so a cached tool schema left behind by
+ *  a disable is never served, and is still valid if the plugin is re-enabled. */
 export async function setPluginEnabled(installId: string, enabled: boolean): Promise<void> {
   const tag = `catalog:${installId}`;
   const now = new Date();
