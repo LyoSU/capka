@@ -6,9 +6,9 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
-### Security
-
 > **⚠ Breaking — the plugin install/upgrade API moved.** `POST /api/extensions/install`, `POST /api/admin/marketplaces/install` and `POST /api/extensions` (upgrade) now return 410. Installs and upgrades go through `GET /api/extensions/review` followed by `POST` of the `reviewHash` it returns. Any script or integration calling the old endpoints must be updated.
+
+### Security
 
 - A member could delete an org-wide or project permission rule by installing a personal plugin whose resource name matched it — and a missing rule means allow, so this granted what an admin had forbidden. Deleting a rule now requires being an admin (or owning that rule), and only ever a rule that will apply to nothing; each deletion is recorded as `policy.clear`.
 - The install review is now the only way to install or upgrade a plugin. Three older endpoints wrote skills, connectors and executable plugin files with no review at all, and the UI silently fell back to one of them whenever the review had not loaded.
