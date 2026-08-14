@@ -2,27 +2,18 @@ import { nanoid } from "nanoid";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } from "@/lib/db/schema";
-import { parseSkillMarkdown } from "@/lib/skills/parse";
 import { ingestSkill, deleteSkill } from "@/lib/skills/service";
 import { upsertServer, upsertStdioServer, setEnabled, deleteServer } from "@/lib/mcp/service";
 import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl, resolveGitHub } from "./source";
-import { ghFetch, ghTree, ghRaw, resolveCommit, diffTrees, type TreeEntry, type TreeDiff } from "./fetch";
-import { extractServers, parseManifestMcp, type ServerDef } from "./manifest";
-import { refsPluginRoot, hasUnresolvedPlaceholder, serverDefParts, selectPluginFiles } from "./plugin-root";
+import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
+import { buildPluginPlan } from "./plan";
 import type { CatalogItem, CommitInfo, GitHubRef, InstallManifest } from "./types";
 
-const IGNORED_DIRS = ["agents", "hooks", "lspServers", "outputStyles"];
 // A pin is a full 40-hex commit SHA. Anything else (a branch/tag/"HEAD") would
 // re-dereference to live upstream HEAD at apply time and defeat the review.
 const FULL_SHA = /^[0-9a-f]{40}$/;
-const MAX_SKILL_FILES = 50;
-// Caps on a plugin's bundled file tree (materialized into every user's sandbox),
-// so a fat or hostile plugin can't bloat the DB or the sandbox.
-const MAX_PLUGIN_FILES = 200;
-const MAX_PLUGIN_FILE_BYTES = 1_000_000;
-const MAX_PLUGIN_TOTAL_BYTES = 5_000_000;
 
 /** Where a plugin's skills + connectors are routed: org-wide (system) or personal
  *  (user). A member install is `{ scope: "user", userId: <them> }`. */
@@ -89,174 +80,35 @@ async function resolvePlugin(marketplaceId: string, pluginName: string) {
  *  (docs/plugin-install-review-plan-phase-a.md). Deleted in Task 5 along with the
  *  function itself — no production caller outside this module. */
 export async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget, only?: string[]): Promise<ApplyResult> {
-  // `only` (from `--skill`) narrows the install to specific skills by name. A
-  // skill-scoped install ignores connectors entirely — the intent is "just these
-  // skills", and connectors are a separate, gated concern.
-  const onlySet = only && only.length ? new Set(only) : null;
-  const prefix = gh.subdir ? `${gh.subdir}/` : "";
-  const fetchFn = await ghFetch();
-  // Pin gh.ref (a branch/tag/HEAD) to a concrete commit, then pull the tree AND
-  // every file AT that SHA — a single consistent snapshot (no TOCTOU if the branch
-  // moves mid-install) and a provenance record of exactly what was installed.
-  const commit = await resolveCommit(gh.owner, gh.repo, gh.ref, fetchFn);
-  const tree = await ghTree(gh.owner, gh.repo, commit.sha, fetchFn);
+  const plan = await buildPluginPlan(gh, only);
+  const manifest: InstallManifest = {
+    skills: [], connectors: [], ignored: plan.ignored, notes: plan.notes, commit: plan.commit,
+    ...(plan.version ? { version: plan.version } : {}),
+    ...(plan.displayName ? { displayName: plan.displayName } : {}),
+  };
 
-  const manifest: InstallManifest = { skills: [], connectors: [], ignored: [], notes: [], commit };
-  const raw = (path: string) => ghRaw(gh.owner, gh.repo, commit.sha, path, fetchFn);
-  // Set when a routed stdio server bundles files (${CLAUDE_PLUGIN_ROOT}); triggers
-  // storing the plugin tree for runtime materialization.
-  let needsFiles = false;
-
-  // ── Plugin manifest (.claude-plugin/plugin.json) — better metadata + MCP ──
-  // `mcpServers` per the plugin schema is string | array | object: a config-file
-  // path, a mix of paths and inline maps, or a single inline map. Inline maps
-  // apply directly; path references are fetched below.
-  let inlineServers: Record<string, ServerDef> = {};
-  let manifestPaths: string[] = [];
-  const pjPath = `${prefix}.claude-plugin/plugin.json`;
-  if (tree.some((t) => t.path === pjPath)) {
-    try {
-      const pj = JSON.parse((await raw(pjPath)) ?? "{}") as Record<string, unknown>;
-      if (typeof pj.version === "string") manifest.version = pj.version;
-      if (typeof pj.displayName === "string") manifest.displayName = pj.displayName;
-      if (pj.mcpServers != null) {
-        const parsed = parseManifestMcp(pj.mcpServers);
-        inlineServers = parsed.inline;
-        manifestPaths = parsed.paths;
-      }
-    } catch { /* tolerate a malformed manifest */ }
-  }
-
-  // ── MCP connectors (.mcp.json + plugin.json mcpServers, inline & referenced) ──
-  async function routeServer(sname: string, def: ServerDef) {
-    if (!def || typeof def !== "object") return;
-    // Local (stdio) server — runs inside the session sandbox (the trust boundary).
-    // Bare-command servers (npx/uvx/etc.) and bundled ones pointing at
-    // ${CLAUDE_PLUGIN_ROOT} are both routed; bundled ones additionally store the
-    // plugin tree (materialized + ${CLAUDE_PLUGIN_ROOT}-substituted at run time).
-    if (def.command || def.type === "stdio") {
-      if (!def.command) { manifest.notes.push(`${sname}: local server has no command, skipped`); return; }
-      // command/args/env keep their ${CLAUDE_PLUGIN_ROOT} literal — substituted per
-      // session at connect time. Only NON-resolvable ${...} (a real secret) gates.
-      const bundled = refsPluginRoot(serverDefParts(def));
-      const envUnresolved = def.env ? Object.values(def.env).some(hasUnresolvedPlaceholder) : false;
-      const sid = await upsertStdioServer({ ...target, name: sname, command: def.command, args: def.args, env: def.env, source: tag });
-      // Consent gate: EVERY stdio server from a marketplace runs third-party code in
-      // the user's sandbox — a bundled plugin's code OR a bare `npx`/`uvx`/`pip`
-      // command that fetches and executes a remote package. The bundled vs
-      // bare-command distinction is irrelevant to the threat, so install ALL of them
-      // OFF; an admin reviews and enables from Extensions. (Sandbox isolation is the
-      // containment; this is informed consent.) Previously only bundled/unconfigured
-      // servers were gated, so a bare-command server auto-ran on the next chat turn.
+  for (const c of plan.connectors) {
+    if (c.kind === "stdio") {
+      // Every marketplace stdio server runs third-party code in a user's sandbox, so
+      // all of them install OFF and an admin enables them from Extensions.
+      const sid = await upsertStdioServer({ ...target, name: c.name, command: c.command!, args: c.args, env: c.env, source: tag });
       await setEnabled(sid, false);
-      if (bundled) {
-        needsFiles = true;
-        manifest.notes.push(`${sname}: ships code that runs in users' sandboxes — review and enable it in Extensions`);
-      } else if (envUnresolved) {
-        manifest.notes.push(`${sname}: needs configuration — open Connectors to finish`);
-      } else {
-        manifest.notes.push(`${sname}: runs third-party code in your sandbox — review and enable it in Extensions`);
-      }
-      manifest.connectors.push(sname);
-      return;
+    } else {
+      let authKind: "token" | "oauth" = "token";
+      try { authKind = await detectAuthKind(c.url!); } catch { /* default token */ }
+      const secrets = c.headers && !c.hasPlaceholder ? { headers: c.headers } : undefined;
+      const id = await upsertServer({ ...target, name: c.name, url: c.url!, secrets, authKind, source: tag });
+      if (c.hasPlaceholder) await setEnabled(id, false);
     }
-    if (!def.url) { manifest.notes.push(`${sname}: no URL, skipped`); return; }
-    const hasPlaceholder = def.headers ? JSON.stringify(def.headers).includes("${") : false;
-    const secrets = def.headers && !hasPlaceholder ? { headers: def.headers } : undefined;
-    let authKind: "token" | "oauth" = "token";
-    try { authKind = await detectAuthKind(def.url); } catch { /* default token */ }
-    const id = await upsertServer({ ...target, name: sname, url: def.url, secrets, authKind, source: tag });
-    if (hasPlaceholder) { await setEnabled(id, false); manifest.notes.push(`${sname}: needs an access key — open Connectors to add it`); }
-    manifest.connectors.push(sname);
+    manifest.connectors.push(c.name);
   }
 
-  // Config files referenced by plugin.json `mcpServers` (path/array forms).
-  const pathServers: Record<string, ServerDef> = {};
-  for (const rel of manifestPaths) {
-    const full = `${prefix}${rel}`;
-    if (!tree.some((t) => t.path === full)) { manifest.notes.push(`${rel}: referenced MCP config not found`); continue; }
-    try {
-      const txt = await raw(full);
-      Object.assign(pathServers, extractServers(txt ? JSON.parse(txt) : {}));
-    } catch (e) {
-      manifest.notes.push(`${rel} could not be read: ${e instanceof Error ? e.message : "error"}`);
-    }
+  for (const s of plan.skills) {
+    await ingestSkill(s.parsed, s.files, { ...target, source: tag });
+    manifest.skills.push(s.name);
   }
 
-  let fileServers: Record<string, ServerDef> = {};
-  if (tree.some((t) => t.path === `${prefix}.mcp.json`)) {
-    try {
-      const mcpRaw = await raw(`${prefix}.mcp.json`);
-      fileServers = extractServers(mcpRaw ? JSON.parse(mcpRaw) : {});
-    } catch (e) {
-      manifest.notes.push(`.mcp.json could not be read: ${e instanceof Error ? e.message : "error"}`);
-    }
-  }
-  // Precedence on a name clash: inline < referenced config < root .mcp.json.
-  const servers = { ...inlineServers, ...pathServers, ...fileServers };
-  if (!onlySet) for (const [sname, def] of Object.entries(servers)) await routeServer(sname, def);
-
-  // ── Skills (skills/<name>/SKILL.md + bundled files) ────────────────────────
-  const skillMds = tree.filter((t) => t.type === "blob" && t.path.startsWith(`${prefix}skills/`) && t.path.endsWith("/SKILL.md"));
-  for (const md of skillMds) {
-    const dir = md.path.slice(0, -"/SKILL.md".length);
-    const body = await raw(md.path);
-    if (!body) continue;
-    let parsed;
-    try { parsed = parseSkillMarkdown(body); } catch { continue; }
-    if (!parsed.name) continue;
-    if (onlySet && !onlySet.has(parsed.name)) continue;
-    const files: { path: string; content: string }[] = [];
-    const sibs = tree.filter((t) => t.type === "blob" && t.path.startsWith(`${dir}/`) && t.path !== md.path).slice(0, MAX_SKILL_FILES);
-    for (const f of sibs) {
-      const content = await raw(f.path);
-      if (content == null) continue;
-      files.push({ path: f.path.slice(dir.length + 1), content: Buffer.from(content, "utf8").toString("base64") });
-    }
-    await ingestSkill(parsed, files, { ...target, source: tag });
-    manifest.skills.push(parsed.name);
-  }
-
-  // ── Commands → skills (Anthropic converged commands→skills) ────────────────
-  const cmds = tree.filter((t) => t.type === "blob" && t.path.startsWith(`${prefix}commands/`) && t.path.endsWith(".md"));
-  for (const c of cmds) {
-    const body = await raw(c.path);
-    if (!body) continue;
-    let parsed: ReturnType<typeof parseSkillMarkdown> | null = null;
-    try { parsed = parseSkillMarkdown(body); } catch { parsed = null; }
-    const base = c.path.split("/").pop()!.replace(/\.md$/, "");
-    const finalParsed = parsed && parsed.name ? parsed : { name: base, description: undefined, body, frontmatter: {} };
-    if (onlySet && !onlySet.has(finalParsed.name)) continue;
-    await ingestSkill(finalParsed, [], { ...target, source: tag });
-    manifest.skills.push(finalParsed.name);
-  }
-
-  // ── Components we preserve but don't activate ──────────────────────────────
-  for (const d of IGNORED_DIRS) {
-    const count = tree.filter((t: TreeEntry) => t.type === "blob" && t.path.startsWith(`${prefix}${d}/`)).length;
-    if (count) manifest.ignored.push({ type: d, count });
-  }
-
-  // ── Bundled plugin files (only when a bundled server was routed) ────────────
-  // Stored relative to the plugin root; materialized into /plugins/<installId> in
-  // the sandbox at run time. Capped per-file + total so a hostile plugin can't
-  // bloat storage or the sandbox.
-  const files: { path: string; content: string }[] = [];
-  if (needsFiles) {
-    let total = 0;
-    for (const p of selectPluginFiles(tree, prefix, { maxFiles: MAX_PLUGIN_FILES })) {
-      const content = await raw(p);
-      if (content == null) continue;
-      const bytes = Buffer.byteLength(content, "utf8");
-      const rel = p.slice(prefix.length);
-      if (bytes > MAX_PLUGIN_FILE_BYTES) { manifest.notes.push(`${rel}: file too large, skipped`); continue; }
-      if (total + bytes > MAX_PLUGIN_TOTAL_BYTES) { manifest.notes.push(`plugin files exceed the size cap; some were skipped`); break; }
-      total += bytes;
-      files.push({ path: rel, content: Buffer.from(content, "utf8").toString("base64") });
-    }
-  }
-
-  return { manifest, files };
+  return { manifest, files: plan.files };
 }
 
 /** Install one plugin from an added marketplace into A (skills) + B (connectors),

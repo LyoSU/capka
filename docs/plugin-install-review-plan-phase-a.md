@@ -461,9 +461,11 @@ describe("buildPluginPlan", () => {
         hasPlaceholder: true,
         bundled: false,
         envUnresolved: false,
-        note: "api: needs an access key — open Connectors to add it",
       },
     ]);
+    // The note lives in `plan.notes`, not on the connector: its ORDER is behaviour,
+    // so it must have exactly one home.
+    expect(plan.notes).toEqual(["api: needs an access key — open Connectors to add it"]);
     expect(plan.needsFiles).toBe(false);
     expect(plan.files).toEqual([]);
   });
