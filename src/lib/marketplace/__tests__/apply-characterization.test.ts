@@ -27,6 +27,11 @@ vi.mock("../fetch", () => ({
   diffTrees: vi.fn(),
 }));
 vi.mock("@/lib/mcp/oauth/detect", () => ({ detectAuthKind: async () => h.state.authKind }));
+// Phase B gave `observePluginPlan` a DNS preflight. Pinned to `allowed` so these
+// fixtures keep characterizing the SAME behaviour: the auth probe still runs, and no
+// expectation below changes. An unmocked preflight would resolve fixture hostnames for
+// real, which is both slow and non-deterministic.
+vi.mock("@/lib/net/ssrf", () => ({ preflightUrl: async () => "allowed" }));
 vi.mock("@/lib/mcp/service", () => ({
   upsertServer: async (input: Record<string, unknown>) => { h.calls.push("upsertServer"); h.args.push(input); return "srv-remote"; },
   upsertStdioServer: async (input: Record<string, unknown>) => { h.calls.push("upsertStdioServer"); h.args.push(input); return "srv-stdio"; },
@@ -69,7 +74,7 @@ async function runFixture(
   h.state.tree = Object.keys(files).map((path) => ({ path, type: "blob" as const, sha: "s" }));
   h.state.authKind = authKind;
   const plan = await buildPluginPlan(GH, only);
-  const obs = await observePluginPlan(plan);
+  const obs = await observePluginPlan(plan, { blockPrivate: false });
   const manifest = await applyPlanResources(plan, obs, TAG, TARGET);
   return { manifest, files: plan.files };
 }

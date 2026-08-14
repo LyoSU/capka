@@ -12,9 +12,14 @@ vi.mock("@/lib/skills/service", () => ({
 }));
 
 import { applyPlanResources } from "../apply";
+import type { ReviewObservations } from "../observe";
 import type { ResolvedPluginPlan } from "../plan";
 
 const TARGET = { scope: "system" as const, userId: null, projectId: null };
+/** Only `detectedAuth` reaches the writer; the rest of the observation exists for the
+ *  review, so it is filled in as inert here rather than left out. */
+const obs = (detectedAuth: Record<string, "token" | "oauth"> = {}): ReviewObservations =>
+  ({ urls: {}, detectedAuth, policy: { blockPrivate: false }, observedAt: "2026-08-14T00:00:00.000Z" });
 const TAG = "catalog:i1";
 
 const basePlan = (over: Partial<ResolvedPluginPlan> = {}): ResolvedPluginPlan => ({
@@ -28,7 +33,7 @@ describe("applyPlanResources", () => {
   it("copies the plan's parse-derived fields into the manifest verbatim", async () => {
     const manifest = await applyPlanResources(
       basePlan({ version: "1.2.3", displayName: "Fx", ignored: [{ type: "agents", count: 2 }], notes: ["n1", "n2"] }),
-      { detectedAuth: {} }, TAG, TARGET,
+      obs(), TAG, TARGET,
     );
     expect(manifest).toEqual({
       skills: [], connectors: [], ignored: [{ type: "agents", count: 2 }], notes: ["n1", "n2"],
@@ -40,7 +45,7 @@ describe("applyPlanResources", () => {
     await applyPlanResources(
       basePlan({ connectors: [{ name: "gh", originKey: "x#gh", kind: "stdio", command: "npx", args: ["gh"],
                                 bundled: false, envUnresolved: false, hasPlaceholder: false }] }),
-      { detectedAuth: {} }, TAG, TARGET,
+      obs(), TAG, TARGET,
     );
     expect(h.calls).toEqual(["upsertStdioServer", "setEnabled(srv-stdio,false)"]);
   });
@@ -53,7 +58,7 @@ describe("applyPlanResources", () => {
         { name: "b", originKey: "x#b", kind: "remote", url: "https://b.example/mcp", headers: { K: "${T}" },
           bundled: false, envUnresolved: false, hasPlaceholder: true },
       ] }),
-      { detectedAuth: { a: "oauth" } }, TAG, TARGET,
+      obs({ a: "oauth" }), TAG, TARGET,
     );
     expect(h.calls).toEqual(["upsertServer", "upsertServer", "setEnabled(srv-remote,false)"]);
     expect(h.args[0]).toMatchObject({ authKind: "oauth", secrets: { headers: { K: "v" } } });
@@ -69,7 +74,7 @@ describe("applyPlanResources", () => {
       await applyPlanResources(
         basePlan({ connectors: [{ name: "a", originKey: "x#a", kind: "remote", url: "https://a.example/mcp",
                                   bundled: false, envUnresolved: false, hasPlaceholder: false }] }),
-        { detectedAuth: {} }, TAG, TARGET,
+        obs(), TAG, TARGET,
       );
     } finally {
       globalThis.fetch = original;

@@ -42,6 +42,14 @@ export interface PlannedConnector {
 
 export interface PlannedSkill {
   name: string;
+  /** Where the definition lives in the repo, relative to the plugin root —
+   *  `skills/<dir>` or `commands/<file>.md`. Part of the surface: the same skill name
+   *  arriving from a different path is a different resource. */
+  originPath: string;
+  /** The SKILL.md bytes as fetched, frontmatter included. Hashed for the surface, so it
+   *  must be the RAW file: hashing `parsed.body` would miss a frontmatter edit, and
+   *  frontmatter is where a skill's description and tool wiring live. */
+  raw: string;
   parsed: ReturnType<typeof parseSkillMarkdown>;
   files: { path: string; content: string }[];
 }
@@ -165,7 +173,7 @@ export async function buildPluginPlan(gh: GitHubRef, only?: string[]): Promise<R
       if (content == null) continue;
       files.push({ path: f.path.slice(dir.length + 1), content: Buffer.from(content, "utf8").toString("base64") });
     }
-    skills.push({ name: parsed.name, parsed, files });
+    skills.push({ name: parsed.name, originPath: dir.slice(prefix.length), raw: body, parsed, files });
   }
 
   // ── Commands → skills (Anthropic converged commands→skills) ────────────────
@@ -178,7 +186,7 @@ export async function buildPluginPlan(gh: GitHubRef, only?: string[]): Promise<R
     const base = c.path.split("/").pop()!.replace(/\.md$/, "");
     const finalParsed: ReturnType<typeof parseSkillMarkdown> = parsed && parsed.name ? parsed : { name: base, description: undefined, body, frontmatter: {} };
     if (onlySet && !onlySet.has(finalParsed.name)) continue;
-    skills.push({ name: finalParsed.name, parsed: finalParsed, files: [] });
+    skills.push({ name: finalParsed.name, originPath: c.path.slice(prefix.length), raw: body, parsed: finalParsed, files: [] });
   }
 
   // ── Components we preserve but don't activate ──────────────────────────────

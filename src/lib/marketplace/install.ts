@@ -5,6 +5,7 @@ import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } f
 import { deleteSkill } from "@/lib/skills/service";
 import { deleteServer } from "@/lib/mcp/service";
 import { ValidationError } from "@/lib/errors";
+import { getBlockPrivateProviderUrls } from "@/lib/settings";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
 import { applyPlanResources } from "./apply";
@@ -108,7 +109,7 @@ export async function installPlugin(opts: {
   // upgrade (with a diff).
   const ref = existing?.commitSha || opts.pinSha || gh.ref;
   const plan = await buildPluginPlan({ ...gh, ref }, opts.only);
-  const obs = await observePluginPlan(plan);
+  const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
   const manifest = await applyPlanResources(plan, obs, `catalog:${installId}`, target);
   const files = plan.files;
 
@@ -201,7 +202,7 @@ export async function upgradePlugin(installId: string, toSha: string): Promise<I
 
   // Apply (and pin to) EXACTLY the reviewed commit.
   const plan = await buildPluginPlan({ ...gh, ref: toSha });
-  const obs = await observePluginPlan(plan);
+  const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
   const manifest = await applyPlanResources(plan, obs, tag, target);
   const files = plan.files;
   await persistPluginFiles(installId, files);
