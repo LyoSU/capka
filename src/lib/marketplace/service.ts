@@ -65,6 +65,18 @@ async function fetchCatalog(url: string): Promise<{ name: string; owner: string 
 export async function addMarketplace(url: string): Promise<string> {
   const clean = url.trim();
   const { name, owner, items } = await fetchCatalog(clean);
+  // A repo somebody already installed skills from has a synthetic row under this URL. ADOPT
+  // it instead of inserting a second one: the id is what `plugin_installs` points at and what
+  // a review hash is computed over, and two rows sharing a URL make "which one is this repo?"
+  // a question resolved by row order.
+  const existing = (await db.select({ id: pluginMarketplaces.id })
+    .from(pluginMarketplaces).where(eq(pluginMarketplaces.url, clean)).limit(1))[0];
+  if (existing) {
+    await db.update(pluginMarketplaces)
+      .set({ name, owner, catalog: items, synthetic: false, refreshedAt: new Date() })
+      .where(eq(pluginMarketplaces.id, existing.id));
+    return existing.id;
+  }
   const id = nanoid();
   await db.insert(pluginMarketplaces).values({ id, url: clean, name, owner, catalog: items, refreshedAt: new Date() });
   return id;
@@ -81,8 +93,11 @@ export async function deleteMarketplace(id: string): Promise<void> {
   await db.delete(pluginMarketplaces).where(eq(pluginMarketplaces.id, id));
 }
 
+/** The catalogs an admin put there. Synthetic rows are excluded: they exist so a personal
+ *  `skill add {repo}` has a parent row, and listing them would let one member's install
+ *  appear in everyone's Browse as though the organization offered it. */
 export async function listMarketplaces() {
-  const rows = await db.select().from(pluginMarketplaces);
+  const rows = await db.select().from(pluginMarketplaces).where(eq(pluginMarketplaces.synthetic, false));
   return rows.map((r) => ({
     id: r.id, url: r.url, name: r.name, owner: r.owner,
     pluginCount: (r.catalog ?? []).length, refreshedAt: r.refreshedAt,

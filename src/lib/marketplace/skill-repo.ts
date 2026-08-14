@@ -140,13 +140,16 @@ export async function applySkillRepoInstall(input: {
     // worth failing, since the id is derived and both would write the same row.
     await db.insert(pluginMarketplaces).values({
       id: marketplaceId, url: input.url.trim(), name: `${gh.owner}/${gh.repo}`,
-      owner: gh.owner, catalog: catalogFor(gh.owner, pluginName), refreshedAt: new Date(),
+      owner: gh.owner, catalog: catalogFor(gh.owner, pluginName),
+      // Plumbing, not a catalog an admin chose to publish — kept out of the Browse list so a
+      // member installing skills for themselves does not edit what the organization sees.
+      synthetic: true, refreshedAt: new Date(),
     }).onConflictDoNothing();
   }
   const ownerId = input.scope === "user" ? input.userId : null;
   const own = await findOwnInstall(marketplaceId, pluginName, input.scope, ownerId);
 
-  return applyPluginReviewed({
+  const outcome = await applyPluginReviewed({
     gh: { ...gh, ref: input.targetSha },
     marketplaceId, pluginName, scope: input.scope, ownerId,
     installId: own?.id ?? null, targetSha: input.targetSha,
@@ -163,6 +166,22 @@ export async function applySkillRepoInstall(input: {
       fallbackVersion: input.targetSha.slice(0, 7),
     }),
   });
+
+  // The row exists only to be an install's parent, so an apply that installed NOTHING leaves
+  // it with no reason to exist — a `stale` hash, a `blocked` gate or a claim that could not be
+  // written all end here. It has to be created before the barrier (the FK is checked by the
+  // staging insert) rather than inside its transaction, so the undo lives beside the create
+  // instead: only when we are the ones who created it, and only while nothing points at it,
+  // which is what keeps a racing second install's row from being deleted out from under it.
+  if (!registered && outcome.outcome !== "succeeded") {
+    const [stillEmpty] = await db.select({ id: pluginInstalls.id }).from(pluginInstalls)
+      .where(eq(pluginInstalls.marketplaceId, marketplaceId)).limit(1);
+    if (!stillEmpty) {
+      await db.delete(pluginMarketplaces)
+        .where(and(eq(pluginMarketplaces.id, marketplaceId), eq(pluginMarketplaces.synthetic, true)));
+    }
+  }
+  return outcome;
 }
 
 /** The skill names an accepted review will actually install — read off the review itself, so

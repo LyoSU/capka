@@ -1,0 +1,1 @@
+ALTER TABLE "plugin_marketplaces" ADD COLUMN "synthetic" boolean DEFAULT false NOT NULL;

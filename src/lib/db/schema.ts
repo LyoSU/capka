@@ -554,6 +554,12 @@ export const pluginMarketplaces = pgTable("plugin_marketplaces", {
   name: text("name").notNull(),
   owner: text("owner"),
   catalog: jsonb("catalog").$type<unknown[]>().default([]),
+  // Created by an install rather than added by an admin: `manage skill add {repo}` models a
+  // bare skills repo as a one-plugin marketplace because `plugin_installs` needs a parent
+  // row. That row is plumbing, not a catalog anyone chose to offer, so it stays out of the
+  // Browse list — otherwise any member's personal install silently edits what the whole
+  // organization sees. An admin adding the same URL adopts the row and clears the flag.
+  synthetic: boolean("synthetic").notNull().default(false),
   refreshedAt: timestamp("refreshed_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });
