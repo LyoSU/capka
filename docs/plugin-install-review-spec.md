@@ -972,6 +972,27 @@ And the shape of the UI break was worth keeping: the gate landed ahead of its ca
 Browse → Install answered 410 rather than installing without a review. That is the survivable
 direction of the mistake, and the reverse is what made the gate optional the first time.
 
+- **`installPlugin` is still a second path to these rows, and it is a WEAKER claim than the one
+  that condemned `upgradePlugin`.** Worth separating, because the two get treated as one
+  finding. `upgradePlugin` could CORRUPT the barrier's own state: an unfenced
+  `set({ manifest })` over the column `applyState` lives in. `installPlugin` no longer can — it
+  is fenced, so it refuses outright while any apply is in flight, and it routes skills only.
+  What remains is that it is a second CONSENT SURFACE, which is a different and lesser problem
+  than a second writer.
+
+  Authorization on it is intact (org-wide needs admin, checked in both `validateAdd` and `add`,
+  plus the member-install switch), so this is not escalation. Four things the manage approval
+  card cannot say that the review can: a skill edited by hand is overwritten with no "locally
+  modified" warning; no `plugin.apply_*` entry is written, so the lifecycle journal has a gap
+  the manage audit does not fill; there is no claim, so a crash mid-write leaves a `ready` row
+  holding a partial set instead of one marked as needing attention; and a re-install that drops
+  a name surfaces no orphaned permission rule.
+
+  Closing it needs a decision, not a patch. The tempting bounded version — give it a claim and
+  a journal entry without a review — requires a `reviewHash` for the entry, and inventing one
+  makes the journal assert that a review happened. That is worse than the gap. So the real
+  options are: render a compact review inside the approval card, or retire `skill add {repo}`
+  in favour of Settings. Both are product calls.
 - **`installSkillRepo` now installs skills only.** Not a product decision after all: the manage
   approval card enumerates the skills it found, so routing a `.mcp.json` connector and bundled
   plugin files off the same repo applied a strictly larger set than the human agreed to.
