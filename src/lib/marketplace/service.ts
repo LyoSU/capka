@@ -7,6 +7,7 @@ import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl } from "./source";
 import { ghFetch, ghRaw, parseMarketplace } from "./fetch";
 import { discoverSkills } from "./discover";
+import { readStoredManifest } from "./manifest-store";
 import type { CatalogItem } from "./types";
 
 /** Fetch + normalize a marketplace's plugin catalog from its GitHub repo. */
@@ -145,7 +146,10 @@ export async function listInstalledPlugins(userId: string) {
     // themselves: muted when every one of its items is in their mute set.
     const ids = [...pluginSkills.map((s) => ({ id: s.id, set: mutedSkill })), ...connectors.map((c) => ({ id: c.id, set: mutedMcp }))];
     const mutedByMe = ids.length > 0 && ids.every((x) => x.set.has(x.id));
-    const m = (i.manifest ?? {}) as { displayName?: string; notes?: string[]; commit?: { sha: string; date: string | null; message: string | null } };
+    // Through the central reader, not an inline cast: under the V2 layout these fields
+    // live under `inventory`, and a cast would have kept compiling while rendering
+    // blanks for every upgraded plugin.
+    const m = readStoredManifest(i.manifest).inventory;
     return {
       id: i.id,
       pluginName: i.pluginName,

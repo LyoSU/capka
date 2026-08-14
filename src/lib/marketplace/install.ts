@@ -5,12 +5,16 @@ import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } f
 import { deleteSkill } from "@/lib/skills/service";
 import { deleteServer } from "@/lib/mcp/service";
 import { ValidationError } from "@/lib/errors";
-import { getBlockPrivateProviderUrls } from "@/lib/settings";
+import { getBlockPrivateProviderUrls, getMasterKey } from "@/lib/settings";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
 import { applyPlanResources } from "./apply";
 import { observePluginPlan } from "./observe";
+import { readStoredManifest, writeStoredManifest } from "./manifest-store";
 import { buildPluginPlan } from "./plan";
+import { projectPlanSurface } from "./project";
+import type { ReviewObservations } from "./observe";
+import type { ResolvedPluginPlan } from "./plan";
 import type { CatalogItem, CommitInfo, InstallManifest } from "./types";
 
 // A pin is a full 40-hex commit SHA. Anything else (a branch/tag/"HEAD") would
@@ -45,6 +49,34 @@ export async function pruneRemoved(tag: string, keepSkills: Set<string>, keepCon
   for (const c of ownedConnectors) {
     if (!keepConnectors.has(c.name)) await deleteServer(c.id);
   }
+}
+
+/**
+ * The committed manifest value for a finished apply: the inventory the UI reads plus
+ * the surface the NEXT upgrade compares against, under one revision counter.
+ *
+ * Built here rather than at each write site so the two callers cannot disagree about
+ * where a field lives or forget to bump the counter — the counter is what a later
+ * claim's CAS compares, so a missed bump would let a stale apply win
+ * (docs/plugin-install-review-spec.md §4, §7).
+ */
+async function committedManifest(
+  plan: ResolvedPluginPlan,
+  obs: ReviewObservations,
+  inventory: InstallManifest,
+  priorManifest: unknown,
+): Promise<Record<string, unknown>> {
+  const prior = readStoredManifest(priorManifest);
+  const surface = projectPlanSurface(plan, obs, await getMasterKey());
+  // A legacy row reads as 0 and becomes 1 here — the lazy upgrade, with no backfill.
+  // A CORRUPT V2 row reads as NaN and stays NaN, so `writeStoredManifest` refuses: an
+  // apply that silently renumbered a row whose counter went missing would repair the
+  // symptom and destroy the evidence.
+  return writeStoredManifest({
+    inventory,
+    installSurface: surface,
+    committedRevision: prior.committedRevision + 1,
+  }) as unknown as Record<string, unknown>;
 }
 
 /** Replace the bundled-file set for an install (delete-then-insert keeps upgrade
@@ -95,7 +127,7 @@ export async function installPlugin(opts: {
   // Idempotent per (marketplace, plugin, owner): re-installing reuses the same
   // install row + tag instead of duplicating. A member's personal install is
   // distinct from the org-wide one (matched by scope + userId).
-  const existing = (await db.select({ id: pluginInstalls.id, commitSha: pluginInstalls.commitSha }).from(pluginInstalls)
+  const existing = (await db.select({ id: pluginInstalls.id, commitSha: pluginInstalls.commitSha, manifest: pluginInstalls.manifest }).from(pluginInstalls)
     .where(and(
       eq(pluginInstalls.marketplaceId, opts.marketplaceId),
       eq(pluginInstalls.pluginName, opts.pluginName),
@@ -112,19 +144,20 @@ export async function installPlugin(opts: {
   const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
   const manifest = await applyPlanResources(plan, obs, `catalog:${installId}`, target);
   const files = plan.files;
+  const stored = await committedManifest(plan, obs, manifest, existing?.manifest);
 
   if (existing) {
     // re-install: drop rows removed upstream
     await pruneRemoved(`catalog:${installId}`, new Set(manifest.skills), new Set(manifest.connectors));
     await db.update(pluginInstalls)
-      .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? existing.commitSha, manifest: manifest as unknown as Record<string, unknown> })
+      .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? existing.commitSha, manifest: stored })
       .where(eq(pluginInstalls.id, installId));
   } else {
     // Insert the install row before its files (pluginFiles FK → pluginInstalls).
     await db.insert(pluginInstalls).values({
       id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
       version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? null, scope, userId: ownerId,
-      manifest: manifest as unknown as Record<string, unknown>, installedBy: opts.installedBy,
+      manifest: stored, installedBy: opts.installedBy,
     });
   }
   await persistPluginFiles(installId, files);
@@ -209,7 +242,7 @@ export async function upgradePlugin(installId: string, toSha: string): Promise<I
   await pruneRemoved(tag, new Set(manifest.skills), new Set(manifest.connectors));
 
   await db.update(pluginInstalls)
-    .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? row.commitSha, manifest: manifest as unknown as Record<string, unknown> })
+    .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? row.commitSha, manifest: await committedManifest(plan, obs, manifest, row.manifest) })
     .where(eq(pluginInstalls.id, installId));
   return manifest;
 }
