@@ -67,3 +67,32 @@ describe("buildPluginPlan", () => {
     expect(plan.skills.map((s) => s.name)).toEqual(["writer"]);
   });
 });
+
+describe("properties the later phases rely on", () => {
+  it("builds a plan without any write path in scope", async () => {
+    // plan.ts must not import a service that writes. Enforced by inspection rather
+    // than mocking: a mock proves nothing was CALLED, this proves nothing was WIRED.
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../plan.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/@\/lib\/mcp\/service/);
+    expect(src).not.toMatch(/@\/lib\/skills\/service/);
+    expect(src).not.toMatch(/@\/lib\/db/);
+    expect(src).not.toMatch(/oauth\/detect/);
+  });
+
+  it("keeps note order stable across the three sources", async () => {
+    load({
+      ".claude-plugin/plugin.json": JSON.stringify({ mcpServers: ["cfg/missing.json"] }),
+      ".mcp.json": "{ broken",
+    });
+    const plan = await buildPluginPlan(GH);
+    expect(plan.notes[0]).toBe("cfg/missing.json: referenced MCP config not found");
+    expect(plan.notes[1]).toMatch(/^\.mcp\.json could not be read: /);
+  });
+
+  it("gives every routed connector an originKey naming its source file", async () => {
+    load({ ".mcp.json": JSON.stringify({ mcpServers: { gh: { command: "npx" } } }) });
+    const plan = await buildPluginPlan(GH);
+    expect(plan.connectors[0].originKey).toBe(".mcp.json#gh");
+  });
+});
