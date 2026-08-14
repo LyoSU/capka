@@ -26,6 +26,15 @@ describe("resolveGitHub", () => {
     expect(resolveGitHub("./plugins/foo", mkt))
       .toEqual({ owner: "acme", repo: "market", ref: "HEAD", subdir: "plugins/foo" });
   });
+  it('resolves "." to the repo ROOT, not to a directory called "."', () => {
+    // installSkillRepo models a plain skills repo as a one-plugin marketplace whose
+    // source is exactly ".". A subdir of "." makes buildPluginPlan prefix every lookup
+    // with "./", which matches nothing in a GitHub tree — so the install used to
+    // succeed and route zero skills, with no error anywhere to say so.
+    expect(resolveGitHub(".", mkt)).toEqual({ owner: "acme", repo: "market", ref: "HEAD", subdir: "" });
+    expect(resolveGitHub("./", mkt)!.subdir).toBe("");
+  });
+
   it("non-GitHub git url is not resolvable", () => {
     expect(resolveGitHub({ source: "git", url: "https://gitlab.com/a/b" }, mkt)).toBeNull();
   });

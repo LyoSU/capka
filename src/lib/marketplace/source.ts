@@ -14,7 +14,17 @@ export function parseGitHubUrl(raw: string): { owner: string; repo: string } | n
   return { owner: parts[0], repo: parts[1].replace(/\.git$/, "") };
 }
 
-const cleanSubdir = (p?: string) => (p ?? "").replace(/^\.?\/+/, "").replace(/\/+$/, "");
+/**
+ * A source path reduced to a subdir relative to the repo root, where the repo root is
+ * the empty string.
+ *
+ * `"."` has to reduce to `""`, not to `"."`: `installSkillRepo` models a plain skills
+ * repo as a one-plugin marketplace whose source IS `"."`, and `buildPluginPlan` turns a
+ * non-empty subdir into the prefix `"<subdir>/"`. A surviving `"."` therefore made every
+ * lookup search `./skills/…`, which matches no path in a GitHub tree — so the install
+ * completed, reported success, and routed nothing.
+ */
+const cleanSubdir = (p?: string) => (p ?? "").replace(/^\.(\/+|$)/, "").replace(/\/+$/, "");
 
 /**
  * Resolve a plugin `source` to a GitHub location. `marketplace` supplies the repo
