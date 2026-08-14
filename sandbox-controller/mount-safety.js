@@ -13,8 +13,13 @@ import { normalize } from "node:path";
 // /etcetera is not. The DATA_ROOT family is denied in BOTH directions —
 // mounting a child leaks other users' workspaces, mounting an ancestor leaks
 // the whole store.
+// `/lib64`, `/lib32` and `/libx32` are SIBLINGS of /lib, not children — no containment
+// check reaches them, so they need their own entries. (`/lib64`.startsWith("/lib/") is
+// false.) On a merged-/usr host they are symlinks into /usr, but the controller cannot
+// resolve host symlinks from inside its container, so the lexical entry is what holds.
 const DENY = ["/", "/etc", "/proc", "/sys", "/dev", "/run", "/var/run",
-  "/var/lib/docker", "/boot", "/root", "/usr", "/bin", "/sbin", "/lib"];
+  "/var/lib/docker", "/boot", "/root", "/usr", "/bin", "/sbin",
+  "/lib", "/lib64", "/lib32", "/libx32"];
 
 // Normalize a path and strip a trailing slash so containment checks compare
 // like with like. Without this, a root written with a trailing slash
@@ -37,9 +42,16 @@ export function validateMountPath(hostPath, { dataRoot, hostDataRoot, allowRoots
   const p = clean(hostPath);
   if (p.includes("..")) return { ok: false, code: "denied" };
   // "/" denies only the exact filesystem root; every other entry denies the
-  // path itself and anything under it. (isUnder treats "/" as "contains all",
-  // which is what we want for the allowlist below but not here.)
-  if (p === "/" || DENY.some((d) => d !== "/" && isUnder(p, clean(d)))) {
+  // path itself, anything under it, and anything that CONTAINS it. (isUnder treats
+  // "/" as "contains all", which is what we want for the allowlist below but not here.)
+  //
+  // Both directions, exactly like the dataRoot check below — this used to test
+  // descendants only, so `/var/run/docker.sock` was denied while its parent `/var` was
+  // not, and mounting `/var` handed the sandbox the Docker socket anyway. Note that this
+  // is deliberately NOT the same as adding "/var" to the list: `/var` is refused because
+  // it CONTAINS a denied tree, while `/var/www` contains none and stays mountable for an
+  // admin who confirms it. A blanket "/var" entry would take that away.
+  if (p === "/" || DENY.some((d) => d !== "/" && (isUnder(p, clean(d)) || isUnder(clean(d), p)))) {
     return { ok: false, code: "denied" };
   }
   for (const dr of [dataRoot, hostDataRoot].filter(Boolean)) {

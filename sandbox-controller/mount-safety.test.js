@@ -24,6 +24,26 @@ describe("validateMountPath", () => {
     });
   }
 
+  for (const p of ["/lib64", "/lib32", "/libx32"]) {
+    it(`denies ${p} — a sibling of /lib, which no containment check reaches`, () => {
+      expect(validateMountPath(p, opts).code).toBe("denied");
+    });
+  }
+
+  it("denies an ANCESTOR of a system path, not just a descendant", () => {
+    // The check used to run one way, so /var/run/docker.sock was denied while mounting
+    // its parent /var handed the sandbox the very same socket.
+    expect(validateMountPath("/var", opts).code).toBe("denied");       // contains /var/run
+    expect(validateMountPath("/var/lib", opts).code).toBe("denied");   // contains /var/lib/docker
+  });
+
+  it("but an unrelated subtree of /var is still mountable", () => {
+    // Denying by containment rather than by blanket-listing "/var" is what keeps this
+    // usable: an admin can still confirm a web root or a reports directory.
+    expect(validateMountPath("/var/www", opts).ok).toBe(true);
+    expect(validateMountPath("/var/lib-reports", opts).ok).toBe(true); // boundary, not /var/lib
+  });
+
   it("denies DATA_ROOT, its children, and its ancestors", () => {
     expect(validateMountPath("/data", opts).code).toBe("denied");
     expect(validateMountPath("/data/u1", opts).code).toBe("denied");
