@@ -20,6 +20,7 @@ All notable changes to Capka are documented here. Format follows
 - A cross-origin redirect from a custom provider base URL no longer forwards the provider API key. Only `accept`, `accept-encoding`, `accept-language`, `content-type` and `user-agent` survive the hop; a redirected `POST` also becomes a `GET` without the body, except on 307/308.
 - `CAPKA_MASTER_KEY` is validated as 32 bytes of hex at startup; a malformed key previously failed deep inside encryption, or silently weakened the HMACs.
 - IPv6 addresses in a connector URL are now evaluated against the network policy instead of being reported as unresolvable.
+- An IPv4 address written inside an IPv6 one (`::ffff:a9fe:a9fe`, `::7f00:1`, the NAT64 prefix) is now blocked like the IPv4 address it is; previously only the dotted `::ffff:1.2.3.4` form was recognized, so a hostname resolving to the hex form reached cloud metadata and loopback. An address that parses as neither family is refused rather than allowed.
 
 ### Added
 
