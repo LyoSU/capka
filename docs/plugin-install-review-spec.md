@@ -1,8 +1,9 @@
 # Plugin install review — design
 
 **Date:** 2026-08-13
-**Status:** implemented — all four phases. See the note at the end of §12a for what
-remains open and what was deliberately left out.
+**Status:** implemented — all four phases, then hardened after an audit found the gate was
+neither mandatory nor authorized. See "What shipped" and "What the audit found" at the end of
+§12a.
 
 ## 1. Purpose
 
@@ -897,6 +898,43 @@ than a checklist.
   review does not carry. Treating it as `keep` would apply something other than what was
   accepted, so it throws.
 
+### What the audit found (2026-08-14, after shipping)
+
+Recorded because the pattern matters more than the list: every one of these passed 235 green
+tests. The tests exercised the mechanisms against the threats the author imagined, and none of
+them tested an ATTACK.
+
+- **The gate was optional.** Three writer paths took no `reviewHash`, so the barrier was
+  bypassable by choosing an older endpoint — and the UI fell back to one of them whenever the
+  review had not loaded, i.e. fail-open on exactly the request that matters. All three now
+  return 410. §5's "PluginReview REPLACES UpgradePreview" was the right instruction and was not
+  followed; leaving the old writer alive is what made the new one optional.
+- **The gate was not authorization.** `readPolicyBaseline` returns rules of every scope by
+  design (§6), and nothing stopped a personal installer from naming an org-wide rule in
+  `dispositions` and deleting it — with default-allow, that is escalation. The review hash could
+  not have helped: the client supplies the dispositions and the server hashes them WITH the
+  request, so a forged one yields a different valid hash. **A hash proves nothing was swapped;
+  it cannot prove the asker was entitled to ask.** That distinction was missing from this
+  document and is now §6's `assertDispositionAllowed`.
+- **The fence stopped at the parent rows.** `plugin_files` and `skill_files` — the bytes
+  `plugin-runtime.ts` materializes and chmods — were written unfenced, so an apply that lost its
+  lease could overwrite the executable files of a completed one. §7's "the fence applies to …
+  `persistPluginFiles`" was stated and not implemented.
+- **Two redactions hid real changes.** The endpoint is normalized without query values or
+  userinfo and `secretKeys` holds only names, so a changed token was byte-identical: a
+  stored-only `credentialFingerprint` over the raw url+headers now covers it. And
+  `runtimeBefore` copied the skill hashes from the artifact, making a database-side edit
+  invisible — the artifact now also records `bodyHash`, the quantity the row actually holds.
+- **The commit order was wrong.** Dispositions and `succeeded` committed before `finalizeApply`,
+  so a lost CAS left the policy deleted, the journal saying succeeded, and the plugin invisible.
+  Finalize now runs first, inside the same transaction.
+
+The departure worth generalizing: **"deliberately shows everything" and "may therefore change
+everything" are different sentences.** Two of the five holes above are the same mistake — a
+comment asserting a guarantee the code did not implement (`resolveSubject`'s scope claim,
+`runtime-surface`'s false-positive argument). A comment is not an enforcement mechanism, and one
+that overstates is worse than none.
+
 **Open.**
 
 - **`previewUpgrade`'s file diff still exists.** §5 says `PluginReview` REPLACES it; in
@@ -907,9 +945,15 @@ than a checklist.
   per resource; `ownerStates` computes exactly that and is tested, but only the per-install
   state is surfaced to the UI. A resource-level badge in the Connectors list is the
   remaining half.
-- **The first-install flow still goes through the old admin route.** The review gate is wired
-  into the UPGRADE path; a first install from the marketplace browser has not been moved onto
-  it, so its consent is still the Install button without the derived review on screen.
+- **The marketplace browser has no review screen yet.** The first-install API now goes through
+  the gate, so the browser's Install button currently gets a 410 until it is pointed at
+  `/api/extensions/review` and given the same panel the upgrade dialog renders. The gate is
+  correct and the caller is behind it — deliberately that way round, since the reverse is what
+  made the gate optional.
+- **`installSkillRepo` routes CONNECTORS through the manage approval card, which only counts
+  skills.** A repo with a `.mcp.json` installs a stdio server behind a card that says "N
+  skills". Narrowing it to skills only, or routing it through the review, is a product decision
+  and is deliberately not taken unilaterally here.
 
 ### Where the line sat before that (2026-08-14, mid-session)
 

@@ -6,6 +6,20 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Security
+
+> **⚠ Breaking — the plugin install/upgrade API moved.** `POST /api/extensions/install`, `POST /api/admin/marketplaces/install` and `POST /api/extensions` (upgrade) now return 410. Installs and upgrades go through `GET /api/extensions/review` followed by `POST` of the `reviewHash` it returns. Any script or integration calling the old endpoints must be updated.
+
+- A member could delete an org-wide or project permission rule by installing a personal plugin whose resource name matched it — and a missing rule means allow, so this granted what an admin had forbidden. Deleting a rule now requires being an admin (or owning that rule), and only ever a rule that will apply to nothing; each deletion is recorded as `policy.clear`.
+- The install review is now the only way to install or upgrade a plugin. Three older endpoints wrote skills, connectors and executable plugin files with no review at all, and the UI silently fell back to one of them whenever the review had not loaded.
+- Installing and upgrading now require a writer role again, honour the "members can install plugins" switch, and are rate-limited on both the review and the apply. The new endpoint had briefly admitted viewers and ignored the switch.
+- A plugin's bundled files and a skill's support files are no longer writable by an update that lost its lease — previously an interrupted update could overwrite the executable bytes of a completed one, leaving the recorded version and the running code disagreeing.
+- A plugin changing an access token, a query value or URL credentials — without changing any header name — now requires consent; it previously showed as no change at all.
+- A skill edited directly in the database is now reported as locally modified before an update overwrites it.
+- An `https` redirect to `http` is refused instead of forwarding the Authorization header, secret headers, method and body in cleartext.
+- `CAPKA_MASTER_KEY` is validated as 32 bytes of hex at startup; a malformed key previously failed deep inside encryption, or silently weakened the HMACs.
+- IPv6 addresses in a connector URL are now evaluated against the network policy instead of being reported as unresolvable.
+
 ### Added
 
 - Updating a plugin now shows what it will reach — which addresses its connectors talk to, which program runs in the sandbox, which access details it asks for — with the exact detail behind an expander, and refuses to apply if any of it changed while you were reading. Permission rules left pointing at a removed resource are surfaced with a choice to keep or delete them.
