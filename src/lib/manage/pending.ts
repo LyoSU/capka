@@ -6,7 +6,12 @@ import { managePending } from "@/lib/db/schema";
 /** A staged, human-authorized-on-apply mutation. `apply` runs a fresh change,
  *  `undo` restores a prior value — both consumed only via a path the human
  *  controls (web session / Telegram callback), never by the model. */
-export type PendingKind = "apply" | "undo";
+/** `review-pin` is not a mutation waiting for a click: it is what an approval card SHOWED
+ *  (a resolved commit + the hash of the plan built at it), parked between the preview call
+ *  and the apply call of one suspended tool call. It lives here because it wants exactly
+ *  this row's properties — owner-checked, single-use, short-TTL — and `applyPending`
+ *  refuses to run one, so the two kinds can't be confused for each other. */
+export type PendingKind = "apply" | "undo" | "review-pin";
 
 export interface PendingRecord {
   userId: string;
@@ -19,8 +24,13 @@ export interface PendingRecord {
 
 export interface PendingStore {
   /** Persist a staged action, returning its opaque id (safe to expose — useless
-   *  without the session/callback that authorizes consuming it). */
-  stage(rec: PendingRecord, ttlMs?: number): Promise<string>;
+   *  without the session/callback that authorizes consuming it).
+   *
+   *  `id` pins the row to a caller-chosen key instead of a fresh one, and then REPLACES
+   *  any row already under it. Used by the review pin, whose key is the suspended tool
+   *  call it belongs to: the approval card re-previews on every mount (a reload, a
+   *  re-render), and each of those is the same pin refreshed — not a second one. */
+  stage(rec: PendingRecord, ttlMs?: number, id?: string): Promise<string>;
   /** Atomically claim the row for `userId` exactly once. Returns null if it's
    *  missing, expired, already consumed, or owned by another user (no leak). */
   consume(id: string, userId: string): Promise<PendingRecord | null>;
@@ -37,17 +47,27 @@ export type PendingStatus = "open" | "applied" | "expired" | "gone";
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 
 export const dbPendingStore: PendingStore = {
-  async stage(rec, ttlMs = DEFAULT_TTL_MS) {
-    const id = nanoid();
-    await db.insert(managePending).values({
-      id,
+  async stage(rec, ttlMs = DEFAULT_TTL_MS, id) {
+    const rowId = id ?? nanoid();
+    const values = {
+      id: rowId,
       userId: rec.userId,
       projectId: rec.projectId,
       kind: rec.kind,
       payload: rec.payload,
       expiresAt: new Date(Date.now() + ttlMs),
-    });
-    return id;
+    };
+    const q = db.insert(managePending).values(values);
+    // A caller-chosen key is re-stageable BY that caller only: the owner is part of the
+    // match, so re-previewing cannot overwrite a pin someone else parked under the same id.
+    await (id
+      ? q.onConflictDoUpdate({
+        target: managePending.id,
+        set: { payload: values.payload, expiresAt: values.expiresAt, consumedAt: null },
+        where: eq(managePending.userId, rec.userId),
+      })
+      : q);
+    return rowId;
   },
 
   async consume(id, userId) {

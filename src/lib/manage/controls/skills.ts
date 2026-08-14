@@ -18,6 +18,7 @@ import { parseGitHubUrl } from "@/lib/marketplace/source";
 import { discoverWorkspaceSkills, ingestWorkspaceSkills } from "@/lib/skills/workspace";
 import type { SkillScope } from "@/lib/skills/types";
 import { loc, manageT } from "../i18n";
+import { claimReviewPin, parkReviewPin, pinIdentity } from "../review-pin";
 import type { Collection, ManageContext } from "../types";
 
 // Add a skill EITHER inline (one SKILL.md) OR from a whole GitHub repo (install
@@ -47,38 +48,20 @@ type AddArgs = z.infer<typeof addSchema>;
  *
  * `previewAdd` resolves HEAD to a concrete commit, builds the install review at that commit
  * and shows it; `add` must apply THAT review — not re-resolve HEAD when the separate approval
- * call runs, and not apply an unreviewed plan. Native tool approval has nowhere to stash
- * either value, so they hop through this in-memory map: platform routes and the worker share
- * one process, so preview and apply land here together. Keyed by the raw `repo` arg, which is
- * identical across the two calls (it is the same persisted tool-call input).
+ * call runs, and not apply an unreviewed plan.
  *
- * **A miss now REFUSES.** It used to fall back to live HEAD, which was defensible while the
+ * **A miss REFUSES.** It used to fall back to live HEAD, which was defensible while the
  * preview was advisory. It is not defensible now that the card is the consent gate: falling
  * back would apply a plan nobody reviewed, on exactly the request where review matters —
  * the same fail-open shape as the Apply button that installed whenever its review had not
- * loaded. A miss (restart, TTL lapse, a repo never previewed) asks for the card again.
+ * loaded. A miss (TTL lapse, a repo never previewed) asks for the card again.
  *
- * Bound: entries expire after `PIN_TTL_MS` and every write sweeps the expired ones, so the
- * map holds at most one live entry per (user, repo) within one TTL window.
+ * Where the pin LIVES, and why it is keyed by the tool call rather than by the repo, is
+ * review-pin.ts — the short version is that a per-process map keyed by `userId:repo` lost
+ * the pin across a restart and crossed two approvals of one repo.
  */
-const previewedReviews = new Map<string, { sha: string; reviewHash: string; at: number }>();
-const PIN_TTL_MS = 10 * 60_000;
-const pinKey = (userId: string, repo: string) => `${userId}:${repo.trim()}`;
-
-function parkPreviewedReview(userId: string, repo: string, sha: string, reviewHash: string): void {
-  const now = Date.now();
-  for (const [k, v] of previewedReviews) if (now - v.at > PIN_TTL_MS) previewedReviews.delete(k);
-  previewedReviews.set(pinKey(userId, repo), { sha, reviewHash, at: now });
-}
-
-/** Take (and forget) what a just-shown card pinned for this user+repo, or undefined if none is
- *  live — in which case the add refuses rather than proceeding unreviewed. */
-function claimPreviewedReview(userId: string, repo: string): { sha: string; reviewHash: string } | undefined {
-  const k = pinKey(userId, repo);
-  const v = previewedReviews.get(k);
-  previewedReviews.delete(k);
-  return v && Date.now() - v.at <= PIN_TTL_MS ? { sha: v.sha, reviewHash: v.reviewHash } : undefined;
-}
+const identityOf = (a: { repo: string; only?: string[]; scope?: string }) =>
+  pinIdentity({ repo: a.repo, scope: skillScope(a).scope, only: a.only });
 
 /** A user-scope skill is personal; an org skill is shared and admin-only. */
 export function skillScope(args: { scope?: string }): { scope: SkillScope; needsAdmin: boolean } {
@@ -184,7 +167,7 @@ export const skillCollection: Collection = {
           actor: { userId: ctx.userId, isAdmin: ctx.isAdmin },
         });
         // Pin BOTH: the commit and the hash of the review just shown. `add` refuses without them.
-        parkPreviewedReview(ctx.userId, a.repo, targetSha, review.reviewHash);
+        await parkReviewPin(ctx, identityOf(a), { sha: targetSha, reviewHash: review.reviewHash });
         const names = reviewedSkillNames(review);
         const orphaned = orphanedPolicyKeys(policies);
         // One card, so the lines are ordered by how much they should change the decision:
@@ -256,7 +239,7 @@ export const skillCollection: Collection = {
       // The card IS the gate, so its review is required — not preferred. Without it there is
       // nothing to apply exactly, and applying approximately is what this whole barrier exists
       // to stop.
-      const pinned = claimPreviewedReview(ctx.userId, a.repo);
+      const pinned = await claimReviewPin(ctx, identityOf(a));
       if (!pinned) {
         throw new Error("This install needs to be reviewed again before it can go ahead — ask for it once more and confirm the card that appears.");
       }
@@ -272,6 +255,11 @@ export const skillCollection: Collection = {
       }
       if (outcome.outcome === "blocked") {
         throw new Error("This can't be installed right now: one of the addresses it needs is unreachable or not allowed by the network settings.");
+      }
+      if (outcome.outcome === "failed" && (outcome.errorCode === "claim_failed" || outcome.errorCode === "audit_failed")) {
+        // It never started: the claim itself could not be written, so nothing was installed
+        // and nothing is half-applied to go looking for in Settings.
+        throw new Error("The install couldn't be started — nothing was changed. Please try again.");
       }
       if (outcome.outcome !== "succeeded") {
         throw new Error("The install didn't finish. It is marked as needing attention in Settings › Skills.");

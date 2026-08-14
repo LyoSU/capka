@@ -348,6 +348,11 @@ export async function applyPending(reg: Registry, ctx: ManageContext, pendingId:
   const store = await pendingStore(ctx);
   const rec = await store.consume(pendingId, ctx.userId);
   if (!rec) return err("confirm_expired", "This confirmation is no longer valid — please ask again.");
+  // The staging table also holds review pins, which are NOT mutations awaiting a click and
+  // carry a different payload shape. Confirming one would reach applySet with no controlId.
+  if (rec.kind !== "apply" && rec.kind !== "undo") {
+    return err("confirm_expired", "This confirmation is no longer valid — please ask again.");
+  }
   // Apply in the SCOPE it was staged in — the web endpoint / Telegram callback
   // has no project context, but a project-scoped change captured its projectId.
   const ectx: ManageContext = { ...ctx, projectId: rec.projectId };

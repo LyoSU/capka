@@ -37,6 +37,7 @@ import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thi
 import { rememberModelEfforts } from "@/lib/models/catalog";
 import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
+import { repairToolCall } from "./tool-repair";
 import { errorText } from "@/lib/errors/message";
 import { type FileRef } from "@/lib/constants";
 import type { StoredPart, MessageMeta } from "@/lib/chat/contracts";
@@ -604,6 +605,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
               // deferring = all tools active (the SDK default).
               ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
               stopWhen: stepCountIs(MAX_STEPS),
+              // Salvage the one malformation that is a formatting slip rather than a wrong
+              // request: several tool calls emitted as one set of arguments. Anything else
+              // (and any unknown tool) is left to fail, so the model sees its own mistake.
+              experimental_repairToolCall: repairToolCall as never,
               prepareStep: async ({ stepNumber, messages }) => {
                 const base = reasoningStripped ? foldReasoningIntoText(messages) : messages;
                 // BRIDGE: on a chat-completions transport the image can't ride the
@@ -1517,8 +1522,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const callPart = parts.find((p) => p.type === "tool-call" && p.id === awaitingApproval!.toolCallId);
       const input = callPart?.type === "tool-call" ? callPart.input : undefined;
       const { previewManageForUser } = await import("@/lib/manage/authed");
-      // Pass the run's sandbox session so a workspace-path preview reads the real files.
-      const pv = await previewManageForUser(userId, input, { sessionKey }).catch(() => null);
+      // Pass the run's sandbox session so a workspace-path preview reads the real files, and
+      // the call id so a preview that resolves a moving target pins what these buttons will
+      // show — without it a Telegram approval of a repo install has no review to apply and
+      // (correctly, but pointlessly) refuses.
+      const pv = await previewManageForUser(userId, input, { sessionKey, toolCallId: awaitingApproval.toolCallId }).catch(() => null);
       if (pv) telegramApproval = { messageId: msgId, title: pv.title, before: pv.before, after: pv.after, impact: pv.impact, body: pv.body, items: pv.items };
     }
     // A suspended `ask` on an origin channel starts a sequential field-by-field

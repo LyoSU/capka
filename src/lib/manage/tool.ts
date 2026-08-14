@@ -149,13 +149,14 @@ Collections (target="mcp" for connectors, target="skill" for agent skills, targe
 Permission and info are different things. Permission is server-side — just attempt the action; never infer what YOU can do from a setting's value (a toggle like "members can install connectors" restricts other end-users, not you-as-caller). If you're only missing INPUT to act — most often a connector's url (remote) or command (local) — ask the user for exactly that in one plain question, and never dress a missing url up as a permissions/admin problem.`;
 
 export function makeManageTool(identity: ManageIdentity) {
-  const ctx = (): ManageContext => ({
+  const ctx = (toolCallId?: string): ManageContext => ({
     userId: identity.userId,
     isAdmin: identity.isAdmin,
     projectId: identity.projectId,
     sessionKey: identity.sessionKey,
     locale: identity.locale,
     model: identity.model,
+    toolCallId,
   });
   // Exactly-once execution per tool call within this task. The runner re-streams
   // the SAME model messages on a capability/stall retry (see makeStream); for an
@@ -196,7 +197,7 @@ export function makeManageTool(identity: ManageIdentity) {
               summary: `action="${args.action}" needs ${REQUIRED_FIELDS[args.action] ?? "more fields"} — re-call with them set.`,
             };
           }
-          return dispatch(registry, ctx(), input);
+          return dispatch(registry, ctx(toolCallId), input);
         })();
         inflight.set(toolCallId, run);
         // Drop a rejected run so a legitimate retry can re-attempt (dispatch itself

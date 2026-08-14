@@ -28,6 +28,11 @@ export interface ManageContext {
    *  form, as stored on the chat). Captured so a created automation inherits it and
    *  runs on the same model. Undefined → the automation resolves the default model. */
   model?: string | null;
+  /** The suspended tool call being previewed or applied. It is what names ONE approval,
+   *  so it is the key a preview→apply hand-off is stored under (see manage/review-pin.ts).
+   *  Undefined for callers that cannot name one, in which case a pinned review is simply
+   *  not found and the apply refuses rather than proceeding unreviewed. */
+  toolCallId?: string;
   /** Store for staged confirmations. Injected in tests; production falls back to
    *  the DB-backed store (lazy-imported), like `audit`. */
   pending?: PendingStore;

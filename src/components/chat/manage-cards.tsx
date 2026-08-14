@@ -383,15 +383,17 @@ export function ApprovalCard({
         const res = await fetch("/api/manage/preview", {
           method: "POST", headers: { "Content-Type": "application/json" },
           // messageId lets the server recover the run's sandbox session so a
-          // workspace-path preview (skill add {path}) lists the real skills.
-          body: JSON.stringify({ input, messageId }),
+          // workspace-path preview (skill add {path}) lists the real skills; toolCallId
+          // is what a preview of a moving target pins its resolved commit against, so
+          // approving this card applies the plan the card actually showed.
+          body: JSON.stringify({ input, messageId, toolCallId }),
         });
         const { preview } = (await res.json()) as { preview: Preview | null };
         if (alive && preview) setPreview(preview);
       } catch { /* fall back to the header alone */ }
     })();
     return () => { alive = false; };
-  }, [awaiting, input, messageId]);
+  }, [awaiting, input, messageId, toolCallId]);
 
   const decide = async (approved: boolean) => {
     if (submitting) return;

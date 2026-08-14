@@ -14,6 +14,10 @@ const bodySchema = z.object({
   // sandbox session key (ownership-checked) so a workspace-path preview reads the
   // actual files instead of degrading to "can't read it now".
   messageId: z.string().optional(),
+  // Which suspended call this is. A preview that resolves a moving target (a repo's HEAD)
+  // pins what it showed against this id, and the apply spends that pin — so an approval
+  // applies the plan the card described rather than whatever HEAD says by then.
+  toolCallId: z.string().optional(),
 });
 
 /**
@@ -26,6 +30,6 @@ const bodySchema = z.object({
  */
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
-  const { input, messageId } = bodySchema.parse(await req.json());
-  return Response.json({ preview: await previewManageForUser(userId, input, { messageId }) });
+  const { input, messageId, toolCallId } = bodySchema.parse(await req.json());
+  return Response.json({ preview: await previewManageForUser(userId, input, { messageId, toolCallId }) });
 });

@@ -38,9 +38,37 @@ vi.mock("@/lib/skills/service", () => ({
 vi.mock("@/lib/sandbox/client", () => ({ uploadFile: vi.fn() }));
 
 import { skillCollection } from "../controls/skills";
+import type { PendingRecord, PendingStore } from "../pending";
 import type { ManageContext } from "../types";
 
-const ctx: ManageContext = { userId: "u1", isAdmin: false, projectId: null, sessionKey: "s1" };
+/**
+ * The pin lives in the staging table, so the store stands in for it here — and it is shared
+ * across the contexts below on purpose: that is what makes "a second process/replica" and
+ * "the same user approving twice" expressible at all. A per-process Map could not fail these.
+ */
+const rows = new Map<string, { rec: PendingRecord; expiresAt: number; consumed: boolean }>();
+const store: PendingStore = {
+  async stage(rec, ttlMs = 600_000, id) {
+    const key = id ?? `gen-${rows.size}`;
+    const existing = rows.get(key);
+    if (existing && existing.rec.userId !== rec.userId) return key; // owner-scoped upsert
+    rows.set(key, { rec, expiresAt: Date.now() + ttlMs, consumed: false });
+    return key;
+  },
+  async consume(id, userId) {
+    const r = rows.get(id);
+    if (!r || r.consumed || r.rec.userId !== userId || r.expiresAt <= Date.now()) return null;
+    r.consumed = true;
+    return r.rec;
+  },
+  async cancel() {},
+  async peek() { return "gone"; },
+};
+
+const CALL = "call_1";
+const at = (toolCallId: string, userId = "u1"): ManageContext =>
+  ({ userId, isAdmin: false, projectId: null, sessionKey: "s1", pending: store, toolCallId });
+const ctx = at(CALL);
 const SHA = "f".repeat(40);
 const HASH = "a".repeat(64);
 
@@ -63,7 +91,7 @@ const review = (over: {
 });
 
 describe("manage/skills repo install is gated on the card's review", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); rows.clear(); });
 
   it("applies the commit AND the hash the card showed", async () => {
     previewSkillRepoInstall.mockResolvedValue(review());
@@ -83,6 +111,48 @@ describe("manage/skills repo install is gated on the card's review", () => {
     previewSkillRepoInstall.mockResolvedValue(review());
     await skillCollection.previewAdd!(ctx, { repo: "a/one" });
     await expect(skillCollection.add!(ctx, { repo: "a/two" })).rejects.toThrow(/reviewed again/);
+    expect(applySkillRepoInstall).not.toHaveBeenCalled();
+  });
+
+  it("keeps two approvals of the SAME repo apart when they differ only in what they install", async () => {
+    // The defect this replaces: the pin was keyed by user+repo, so the narrower card's pin
+    // overwrote the wider one. Then the FIRST confirm applied the second card's hash — a plan
+    // that user had not approved yet — and the second confirm found nothing and refused.
+    // Each approval is its own suspended call, so each carries its own pin.
+    const all = at("call_all"), one = at("call_one");
+    previewSkillRepoInstall.mockResolvedValue(review({ skills: ["toast", "csv-tidy"] }));
+    await skillCollection.previewAdd!(all, { repo: "a/one" });
+    previewSkillRepoInstall.mockResolvedValue(review({ skills: ["toast"], hash: "b".repeat(64) }));
+    await skillCollection.previewAdd!(one, { repo: "a/one", only: ["toast"] });
+
+    await skillCollection.add!(all, { repo: "a/one" });
+    expect(applySkillRepoInstall).toHaveBeenLastCalledWith(expect.objectContaining({ reviewHash: HASH }));
+    await skillCollection.add!(one, { repo: "a/one", only: ["toast"] });
+    expect(applySkillRepoInstall).toHaveBeenLastCalledWith(expect.objectContaining({ reviewHash: "b".repeat(64) }));
+  });
+
+  it("refuses a pin spent on arguments the card did not describe", async () => {
+    // Same call id, different `only`: the key alone would hand this the wider review, so the
+    // identity of what was previewed is checked on the way out too.
+    previewSkillRepoInstall.mockResolvedValue(review());
+    await skillCollection.previewAdd!(ctx, { repo: "a/one" });
+    await expect(skillCollection.add!(ctx, { repo: "a/one", only: ["toast"] })).rejects.toThrow(/reviewed again/);
+    expect(applySkillRepoInstall).not.toHaveBeenCalled();
+  });
+
+  it("survives the process that showed the card going away", async () => {
+    // The pin is durable, so the apply may run in a different process than the preview —
+    // a restart between the two, or a second replica taking the approval request.
+    previewSkillRepoInstall.mockResolvedValue(review());
+    await skillCollection.previewAdd!(at(CALL), { repo: "a/one" });
+    await skillCollection.add!(at(CALL), { repo: "a/one" });
+    expect(applySkillRepoInstall).toHaveBeenCalledWith(expect.objectContaining({ targetSha: SHA, reviewHash: HASH }));
+  });
+
+  it("does not let another user spend a pin by naming its call", async () => {
+    previewSkillRepoInstall.mockResolvedValue(review());
+    await skillCollection.previewAdd!(ctx, { repo: "a/one" });
+    await expect(skillCollection.add!(at(CALL, "u2"), { repo: "a/one" })).rejects.toThrow(/reviewed again/);
     expect(applySkillRepoInstall).not.toHaveBeenCalled();
   });
 

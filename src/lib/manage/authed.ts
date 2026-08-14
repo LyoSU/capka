@@ -10,7 +10,10 @@ import { applyPending, preview } from "./dispatch";
 import { toManageInput } from "./tool";
 import type { ManageContext, ManageResult } from "./types";
 
-async function identity(userId: string, over?: { projectId?: string | null; sessionKey?: string }): Promise<ManageContext> {
+async function identity(
+  userId: string,
+  over?: { projectId?: string | null; sessionKey?: string; toolCallId?: string },
+): Promise<ManageContext> {
   const [u] = await db.select({ role: users.role, locale: users.locale }).from(users).where(eq(users.id, userId)).limit(1);
   return {
     userId,
@@ -18,6 +21,7 @@ async function identity(userId: string, over?: { projectId?: string | null; sess
     projectId: over?.projectId ?? null,
     sessionKey: over?.sessionKey,
     locale: u?.locale ?? undefined,
+    toolCallId: over?.toolCallId,
   };
 }
 
@@ -46,13 +50,20 @@ export async function applyPendingForUser(userId: string, pendingId: string): Pr
 export async function previewManageForUser(
   userId: string,
   input: unknown,
-  opts?: { sessionKey?: string; messageId?: string },
+  opts?: { sessionKey?: string; messageId?: string; toolCallId?: string },
 ): Promise<ReturnType<typeof preview>> {
   const mi = toManageInput((input ?? {}) as { action: string });
   if (!mi) return null;
-  let over: { projectId?: string | null; sessionKey?: string } | undefined;
+  // The call this preview is FOR. A preview that resolves a moving target pins what it
+  // showed against this exact suspended call, so the later apply runs that plan instead of
+  // re-resolving one (manage/review-pin.ts). The pin is written under the PREVIEWING user,
+  // and read back under the user the run belongs to, so a caller naming someone else's call
+  // parks a row only they can reach — it never becomes the pin that apply spends.
+  let over: { projectId?: string | null; sessionKey?: string; toolCallId?: string } = {
+    toolCallId: opts?.toolCallId,
+  };
   if (opts?.sessionKey) {
-    over = { sessionKey: opts.sessionKey };
+    over = { ...over, sessionKey: opts.sessionKey };
   } else if (opts?.messageId) {
     // Resolve the suspended message's chat, verifying the caller owns it, and derive
     // the sandbox session key the run used (projectId ?? chatId).
@@ -63,7 +74,7 @@ export async function previewManageForUser(
       .where(eq(messages.id, opts.messageId))
       .limit(1);
     if (m && m.ownerId === userId) {
-      over = { projectId: m.projectId, sessionKey: m.projectId ?? m.chatId };
+      over = { ...over, projectId: m.projectId, sessionKey: m.projectId ?? m.chatId };
     }
   }
   return preview(buildRegistry(), await identity(userId, over), mi);
