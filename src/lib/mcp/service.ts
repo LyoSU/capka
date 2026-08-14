@@ -8,6 +8,7 @@ import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import { ValidationError } from "@/lib/errors";
 import { mutedIds } from "@/lib/muted-resources";
+import { keepRuntimeVisible, ownerStates } from "@/lib/marketplace/runtime-view";
 import { clearCachedTools } from "./tool-cache";
 import { inferRemoteTransport, type McpAuthKind, type McpScope, type McpSecrets, type McpServerConfig, type McpServerInfo } from "./types";
 
@@ -54,7 +55,10 @@ export async function listEnabledServerConfigs(userId: string, projectId?: strin
   // Runtime enforcement of the per-user opt-out: a shared connector this user
   // muted never connects (only shared ids are ever muted, so own rows are safe).
   const muted = await mutedIds(userId, "mcp");
-  const rows = allRows.filter((r) => !muted.has(r.id));
+  // Fourth filter in the chain (scope → enabled → muted → owner ready): a plugin
+  // mid-apply, failed, or whose install row is gone stays invisible to the agent, so a
+  // run never picks up a half-applied set. Nobody's `enabled` choice is changed.
+  const rows = await keepRuntimeVisible(allRows.filter((r) => !muted.has(r.id)));
   const winners = dedupeServersByPrecedence(rows.map(toInfo));
   const winnerIds = new Set(winners.map((w) => w.id));
   const key = await getMasterKey();
@@ -108,10 +112,15 @@ export async function listServers(userId: string, projectId?: string | null): Pr
   // Effective per-user state: a shared connector the user muted shows as off
   // (and `mine` lets the UI choose a global toggle vs a personal mute).
   const muted = await mutedIds(userId, "mcp");
+  // Plugin-installed connectors are managed on the Extensions tab; the Connectors list
+  // shows only hand-added ones so nothing appears in two places. The exception is an
+  // ORPHAN — a `catalog:` row whose install is gone, which a failed install can leave
+  // behind. It has no Extensions entry to be managed from, so hiding it here made it
+  // unreachable from every screen: invisible, unusable by the agent, and impossible to
+  // remove. It is surfaced here precisely so it can be deleted by hand.
+  const owners = await ownerStates(rows.map((r) => r.source));
   return rows
-    // Plugin-installed connectors are managed on the Extensions tab; the Connectors
-    // list shows only hand-added ones so nothing appears in two places.
-    .filter((r) => !r.source.startsWith("catalog:"))
+    .filter((r) => !r.source.startsWith("catalog:") || owners.get(r.source) === "orphaned")
     .map((r) => {
       const info = toInfo(r);
       const mine = r.scope === "user";

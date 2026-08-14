@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { skills, skillFiles } from "@/lib/db/schema";
 import { mutedIds } from "@/lib/muted-resources";
+import { keepRuntimeVisible } from "@/lib/marketplace/runtime-view";
 import type { SkillInfo, SkillScope, ParsedSkill } from "./types";
 
 const SCOPE_RANK: Record<SkillScope, number> = { system: 0, user: 1, project: 2 };
@@ -47,7 +48,11 @@ export async function listAvailableSkills(userId: string, projectId?: string | n
   // of the per-user opt-out (only shared ids are ever muted, so own skills,
   // governed by their own `enabled`, are unaffected).
   const muted = await mutedIds(userId, "skill");
-  return dedupeByPrecedence(rows.filter((r) => !muted.has(r.id)).map(toInfo));
+  // Fourth filter (scope → enabled → muted → owner ready), the same one the connector
+  // reader applies: a skill belonging to an install that is mid-apply, failed, or gone
+  // is not offered to the agent. `getSkillForRun` goes through here, so it inherits it.
+  const visible = await keepRuntimeVisible(rows.filter((r) => !muted.has(r.id)));
+  return dedupeByPrecedence(visible.map(toInfo));
 }
 
 export interface ManagedSkill {
