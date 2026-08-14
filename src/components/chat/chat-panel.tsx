@@ -358,12 +358,13 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     }
   };
 
-  // Stable sender for manage cards' confirm/undo buttons — kept referentially
+  // Stable sender for in-transcript buttons that speak as the user — a manage
+  // card's confirm/undo, and the "continue" on a part-way failure. Kept referentially
   // stable (via a ref to the latest `send`) so it doesn't bust ChatMessage's memo
   // and re-render the whole transcript on every keystroke.
   const sendRef = useRef(send);
   sendRef.current = send;
-  const handleManageSend = useCallback((text: string) => {
+  const handleSendAsUser = useCallback((text: string) => {
     void sendRef.current(text, []);
   }, []);
 
@@ -761,7 +762,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                       onSwitchBranch={switchBranch}
                       onFork={handleFork}
                       actionsDisabled={isLoading}
-                      onSend={readOnly ? undefined : handleManageSend}
+                      onSend={readOnly ? undefined : handleSendAsUser}
+                      // Same gate as regenerate: continuing is only meaningful for
+                      // the newest reply, since anything later has already moved on.
+                      onContinue={i === lastAssistantIndex && !readOnly ? handleSendAsUser : undefined}
                     />
                   </div>
                 );

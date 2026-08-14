@@ -26,6 +26,7 @@ export const LLM_ERROR_CATEGORIES = [
   "network",
   "timed_out",
   "provider_unresponsive",
+  "provider_unresponsive_partial",
   "interrupted",
   "unknown",
 ] as const;
@@ -331,6 +332,39 @@ export const PROVIDER_UNRESPONSIVE_ERROR: FriendlyError = {
     "The AI model stopped responding. Please try again — if it keeps happening, switch to a different model.",
   adminDetail: "Provider streamed no output before the stall timeout; retries were exhausted.",
 };
+
+/**
+ * The same stall, but the turn had already produced work the user can keep —
+ * answer text on screen, or a tool step that finished (files in the workspace).
+ * Same cause, so the same adminDetail; a different sentence because the advice
+ * inverts. "Try again" means REGENERATE, which re-runs every tool from scratch
+ * and rewrites what the turn already wrote — the wrong move here. Continuing is
+ * the right one, and the reply is resumable precisely because the completed
+ * steps replay as history rather than re-executing (see tasks/resume.ts).
+ */
+export const PROVIDER_UNRESPONSIVE_PARTIAL_ERROR: FriendlyError = {
+  category: "provider_unresponsive_partial",
+  userMessage:
+    "The reply was cut off part-way — the model went quiet. What it finished above is kept; ask it to continue.",
+  adminDetail: "Provider streamed no output before the stall timeout; retries were exhausted.",
+};
+
+/**
+ * Pick which of the two stall messages a finished turn earns, from what it left
+ * behind. Reasoning does NOT count, and neither does a tool call with no result:
+ * both are visible in the transcript, but neither leaves the user anything to
+ * keep, and promising otherwise sends them hunting for files that were never
+ * written. Structural parameter type — the caller passes the runner's live parts
+ * (`StoredPart[]`), which this module has no reason to depend on.
+ */
+export function providerUnresponsiveError(
+  parts: ReadonlyArray<{ type: string; text?: string }>,
+): FriendlyError {
+  const producedWork = parts.some(
+    (p) => (p.type === "text" && !!p.text?.trim()) || p.type === "tool-result",
+  );
+  return producedWork ? PROVIDER_UNRESPONSIVE_PARTIAL_ERROR : PROVIDER_UNRESPONSIVE_ERROR;
+}
 
 /**
  * The worker running this turn lost its lease — the server restarted, or the

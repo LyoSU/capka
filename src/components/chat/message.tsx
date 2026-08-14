@@ -2,6 +2,7 @@ import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
   ChevronLeft, ChevronRight, GitBranch, X, Lightbulb, Info,
+  MoreHorizontal, ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -716,9 +717,13 @@ function ActivityGroup({ items, isStreaming, timing, chatId }: { items: Activity
 
 /** Friendly, role-aware failure notice. Everyone sees `message`; admins can
  *  expand the raw technical `detail`. */
-function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean }) {
+function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContinue }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean; partial?: boolean; onContinue?: (text: string) => void }) {
   const t = useTranslations("chat.tool");
   const anchorDisclosure = useDisclosureAnchor();
+  // One-shot: the click sends a real user turn, and until that turn's message
+  // arrives this notice is still mounted. Without the latch a double-click asks
+  // the model to continue twice.
+  const [continued, setContinued] = useState(false);
   return (
     // A failure is a state of the turn, not a hazard sign taped over it. The old
     // pink slab with a hard red border was the loudest object in the transcript,
@@ -729,14 +734,52 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource }: { message: stri
     // Colour is never the only channel: role="alert", the mark, and the sentence.
     <div role="alert" className="mt-2 rounded-2xl bg-card px-3.5 py-3 shadow-panel">
       <div className="flex items-start gap-2.5 text-sm">
-        <span
-          aria-hidden
-          className="animate-step-in mt-px grid size-5 shrink-0 place-items-center rounded-full bg-destructive text-destructive-foreground"
-        >
-          <X className="h-3 w-3" strokeWidth={3.5} />
-        </span>
+        {/* The badge is the whole tone of the notice, so it carries the one
+            distinction that matters here: did the turn lose everything, or did it
+            stop part-way with work still standing? A red ✕ on a turn that wrote
+            five files says "nothing happened" and pushes the reader toward
+            regenerating, which would redo it all. The part-way state gets the
+            warning tone and an ellipsis — cut off mid-sentence, not broken — and
+            keeps a border, because the amber surface is too light to read as a
+            disc against the card on its own. */}
+        {partial ? (
+          <span
+            aria-hidden
+            className="animate-step-in mt-px grid size-5 shrink-0 place-items-center rounded-full border border-warning-border bg-warning-surface text-warning-text"
+          >
+            <MoreHorizontal className="h-3 w-3" strokeWidth={3} />
+          </span>
+        ) : (
+          <span
+            aria-hidden
+            className="animate-step-in mt-px grid size-5 shrink-0 place-items-center rounded-full bg-destructive text-destructive-foreground"
+          >
+            <X className="h-3 w-3" strokeWidth={3.5} />
+          </span>
+        )}
         <span className="flex-1 leading-relaxed text-foreground">{message}</span>
       </div>
+      {/* Offered only on the part-way state, and only where continuing is
+          meaningful (the newest reply — see chat-panel). It sends an ordinary
+          user message rather than resuming behind the scenes: the request stays
+          visible in the transcript, which is also what makes it obvious this is
+          "carry on", not the ↻ that starts the whole turn over. */}
+      {partial && onContinue && (
+        <div className="mt-2.5 ml-[30px]">
+          <Button
+            size="sm"
+            disabled={continued}
+            onClick={() => {
+              setContinued(true);
+              haptic("tap");
+              onContinue(t("continuePrompt"));
+            }}
+          >
+            <ArrowRight className="h-3.5 w-3.5" />
+            {t("continueTurn")}
+          </Button>
+        </div>
+      )}
       {(isAdmin || ownsResource) && detail && detail !== message && (
         <Collapsible onOpenChange={(_, d) => anchorDisclosure(d)}>
           {/* Not red. Opening the raw detail is an ordinary affordance, and
@@ -1240,6 +1283,10 @@ interface ChatMessageProps {
    *  so a config change is driven through the same chat turn (works in Telegram
    *  too, where the agent still holds the confirm/undo token in its context). */
   onSend?: (text: string) => void;
+  /** Same sender as `onSend`, but provided only on the latest assistant reply, so
+   *  the "continue" button on a part-way failure can't be offered on a turn the
+   *  conversation has already moved past. */
+  onContinue?: (text: string) => void;
 }
 
 /** A compaction checkpoint in the transcript: a labelled divider where earlier
@@ -1265,7 +1312,7 @@ function CompactionDivider({ summary }: { summary: string }) {
   );
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -1438,6 +1485,8 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
             ownsResource={metadata.errorOwned ?? undefined}
+            partial={metadata.errorCategory === "provider_unresponsive_partial"}
+            onContinue={onContinue}
           />
         )}
         {!isStreaming && (() => {

@@ -31,7 +31,7 @@ import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { maintainMemoryDoc } from "@/lib/memory/store";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, PROVIDER_UNRESPONSIVE_ERROR, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, providerUnresponsiveError, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
 import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
 import { rememberModelEfforts } from "@/lib/models/catalog";
@@ -1280,8 +1280,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Map any provider error to a friendly, role-aware shape: users see
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
     // A stall-out gets its own category (distinct from a clean timeout) so the
-    // user is told to retry/switch models rather than "shorten your request".
-    const failure = deadlineHit ? TIMED_OUT_ERROR : leaseLost ? INTERRUPTED_ERROR : stalledOut ? PROVIDER_UNRESPONSIVE_ERROR : streamError ? classifyLLMError(streamError) : undefined;
+    // user is told to retry/switch models rather than "shorten your request" —
+    // and a two-way split within it, because a stall that hit mid-work must not
+    // advise "try again": regenerating re-runs every tool and rewrites what this
+    // turn already wrote. `parts` is what the turn is keeping, so it decides.
+    const failure = deadlineHit ? TIMED_OUT_ERROR : leaseLost ? INTERRUPTED_ERROR : stalledOut ? providerUnresponsiveError(parts) : streamError ? classifyLLMError(streamError) : undefined;
 
     // Token usage + cost, computed once. Needed BOTH for the persisted message
     // metadata (so the (i) details survive a reload — elapsedMs and the usage

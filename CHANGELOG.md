@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - A single dropped realtime event no longer freezes a reply on screen for the rest of the turn: the client holds what it cannot apply yet and replays it once the reply's snapshot catches up, instead of discarding it and waiting for the turn to end. Previously any interruption of the event stream — an SSE reconnect, a Postgres `LISTEN` blip, a payload over the `NOTIFY` size limit — left the user watching a stalled answer while the agent kept working.
+- A turn that stalls *after* producing work now says the reply was cut off part-way and offers "Continue", instead of advising a retry — regenerating re-runs every tool and rewrites what the turn already wrote. Telegram gets the same wording, without the button.
 - A stalled provider no longer looks like a frozen chat: the "model is not responding — retrying" row now shows even after part of the reply has streamed, where it was previously suppressed (which is every turn on a reasoning model).
 - A retry after a stall now waits twice as long as the first attempt before giving up, so a model that is alive but thinking longer than `STREAM_IDLE_SECONDS` (default 60s) is no longer failed four times in a row. Raise `STREAM_IDLE_SECONDS` to scale both windows.
 - A Telegram reply is no longer re-sent as plain text when the rich send's outcome is unknown (lost response, 5xx), which could deliver one turn twice; the fallback now runs only when Telegram itself refused the message.
