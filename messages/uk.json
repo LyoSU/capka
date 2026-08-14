@@ -1255,6 +1255,7 @@
         "diffAdded": "Додано",
         "diffModified": "Змінено",
         "diffRemoved": "Вилучено",
+        "diffMore": "{count, plural, one {ще # файл} few {ще # файли} many {ще # файлів} other {ще # файла}}",
         "reviewApply": "Застосувати оновлення",
         "review": {
           "sandboxTitle": "Цей плагін запускає власну програму",

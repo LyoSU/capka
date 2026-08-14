@@ -1255,6 +1255,7 @@
         "diffAdded": "Added",
         "diffModified": "Changed",
         "diffRemoved": "Removed",
+        "diffMore": "{count, plural, one {# more file} other {# more files}}",
         "reviewApply": "Apply update",
         "review": {
           "sandboxTitle": "This plugin runs a program of its own",

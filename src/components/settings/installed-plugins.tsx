@@ -477,9 +477,9 @@ export default function InstalledPlugins() {
                     )}
                     {review.preview.diff && (
                       <div className="max-h-48 space-y-2 overflow-y-auto">
-                        <FileList label={t("diffAdded")} paths={review.preview.diff.added} />
-                        <FileList label={t("diffModified")} paths={review.preview.diff.modified} />
-                        <FileList label={t("diffRemoved")} paths={review.preview.diff.removed} />
+                        <FileList label={t("diffAdded")} paths={review.preview.diff.added} t={t} />
+                        <FileList label={t("diffModified")} paths={review.preview.diff.modified} t={t} />
+                        <FileList label={t("diffRemoved")} paths={review.preview.diff.removed} t={t} />
                       </div>
                     )}
                   </CollapsibleContent>
@@ -510,16 +510,23 @@ export default function InstalledPlugins() {
  * a filename adds is where the author was working. `break-all` because a plugin's paths are
  * long and truncating the tail hides the filename, which is the informative half.
  */
-function FileList({ label, paths }: { label: string; paths: string[] }) {
+function FileList({ label, paths, t }: { label: string; paths: string[]; t: ReturnType<typeof useTranslations> }) {
   if (!paths.length) return null;
+  // `previewUpgrade` does not cap the diff, and a plugin that restructured its tree can return
+  // thousands of paths. Reading past the first few dozen is not how anyone uses this list, and
+  // the count already stands above it — so the tail becomes a number instead of DOM nodes.
+  const shown = paths.slice(0, 50);
   return (
     <div className="space-y-0.5">
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
       <ul className="space-y-0.5">
-        {paths.map((p) => (
+        {shown.map((p) => (
           <li key={p} className="break-all font-mono text-[11px] text-muted-foreground">{p}</li>
         ))}
       </ul>
+      {paths.length > shown.length && (
+        <p className="text-[11px] text-muted-foreground">{t("diffMore", { count: paths.length - shown.length })}</p>
+      )}
     </div>
   );
 }
