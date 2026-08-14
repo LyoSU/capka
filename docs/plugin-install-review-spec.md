@@ -1,9 +1,8 @@
 # Plugin install review — design
 
 **Date:** 2026-08-13
-**Status:** phases A and B shipped; C shipped except its state UI; D not started —
-see §12a for what each phase covers and the note at the end of it for exactly where the
-line currently sits.
+**Status:** implemented — all four phases. See the note at the end of §12a for what
+remains open and what was deliberately left out.
 
 ## 1. Purpose
 
@@ -869,7 +868,50 @@ policy dispositions. This is the phase that delivers the consent gate.
 Phase A must land alone: a refactor of the largest function in `install.ts` mixed with
 new behaviour would make a regression impossible to attribute.
 
-### Where the line sits (2026-08-14)
+### What shipped (2026-08-14)
+
+All four phases are implemented and on `master`. What follows records where the
+implementation departs from the design above, and what is left open — both are more useful
+than a checklist.
+
+**Departures.**
+
+- **§12a's phasing was wrong about the state UI, then right again.** It required C's state UI
+  to ship with C, on the grounds that C starts hiding resources from the agent. But C alone
+  does not PRODUCE `applying` or `failed` — nothing claimed until D's barrier landed — so
+  through C the only hidden state was `orphaned`, which C made visible under Connectors. The
+  UI shipped with the barrier, which is where the argument actually bites.
+- **`runtimeBefore` is partly artifact-derived, and has to be.** §6 describes it as read from
+  the rows. Some of the surface is an artifact property the row does not record: a
+  placeholder connector's header NAMES are not persisted at all. Reading their absence off
+  the row would report `needsSecret: true → false` on every upgrade of every such connector,
+  forever — a permanent false positive that teaches the reader to ignore the screen. So the
+  row supplies what it knows and the committed artifact supplies the rest, marked
+  `completeness: "reconstructed"`.
+- **A plugin-owned INSERT is fenced by a lock, not by a WHERE clause.** §7 puts the predicate
+  inside the mutating statement. An insert has no row to read `source` from, so
+  `insertFenceLock` takes `FOR NO KEY UPDATE` on the owning install inside the caller's
+  transaction instead. Claim, fail, finalize and reap are all UPDATEs on that row, so each
+  blocks until commit and the check cannot go stale — equivalent, by a different mechanism.
+- **`reassign` is unimplemented and refuses loudly.** Moving a policy needs a target the
+  review does not carry. Treating it as `keep` would apply something other than what was
+  accepted, so it throws.
+
+**Open.**
+
+- **`previewUpgrade`'s file diff still exists.** §5 says `PluginReview` REPLACES it; in
+  practice the two render together, because the diff answers "what did the author change"
+  and the review answers "what will this be able to do", and an operator wants both. If they
+  ever disagree, that is the signal to finish the replacement.
+- **No per-RESOURCE status in the API.** §8 asks for `ready | applying | failed | orphaned`
+  per resource; `ownerStates` computes exactly that and is tested, but only the per-install
+  state is surfaced to the UI. A resource-level badge in the Connectors list is the
+  remaining half.
+- **The first-install flow still goes through the old admin route.** The review gate is wired
+  into the UPGRADE path; a first install from the marketplace browser has not been moved onto
+  it, so its consent is still the Install button without the derived review on screen.
+
+### Where the line sat before that (2026-08-14, mid-session)
 
 **A — done.** `plan.ts` / `observe.ts` / `apply.ts`, behind 17 characterization fixtures.
 
