@@ -4,10 +4,10 @@ import { db } from "@/lib/db";
 import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } from "@/lib/db/schema";
 import { ingestSkill, deleteSkill } from "@/lib/skills/service";
 import { upsertServer, upsertStdioServer, setEnabled, deleteServer } from "@/lib/mcp/service";
-import { detectAuthKind } from "@/lib/mcp/oauth/detect";
 import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
+import { observePluginPlan } from "./observe";
 import { buildPluginPlan } from "./plan";
 import type { CatalogItem, CommitInfo, GitHubRef, InstallManifest } from "./types";
 
@@ -81,6 +81,7 @@ async function resolvePlugin(marketplaceId: string, pluginName: string) {
  *  function itself — no production caller outside this module. */
 export async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget, only?: string[]): Promise<ApplyResult> {
   const plan = await buildPluginPlan(gh, only);
+  const obs = await observePluginPlan(plan);
   const manifest: InstallManifest = {
     skills: [], connectors: [], ignored: plan.ignored, notes: plan.notes, commit: plan.commit,
     ...(plan.version ? { version: plan.version } : {}),
@@ -94,8 +95,7 @@ export async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTar
       const sid = await upsertStdioServer({ ...target, name: c.name, command: c.command!, args: c.args, env: c.env, source: tag });
       await setEnabled(sid, false);
     } else {
-      let authKind: "token" | "oauth" = "token";
-      try { authKind = await detectAuthKind(c.url!); } catch { /* default token */ }
+      const authKind = obs.detectedAuth[c.name] ?? "token";
       const secrets = c.headers && !c.hasPlaceholder ? { headers: c.headers } : undefined;
       const id = await upsertServer({ ...target, name: c.name, url: c.url!, secrets, authKind, source: tag });
       if (c.hasPlaceholder) await setEnabled(id, false);
