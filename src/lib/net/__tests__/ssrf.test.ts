@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { lookup } from "node:dns/promises";
-import { isBlockedAddress, createGuardedFetch } from "../ssrf";
+import { isBlockedAddress, createGuardedFetch, assertSafeUrl, preflightUrl, UnsafeUrlError } from "../ssrf";
 
 // IP literals resolve to themselves; named hosts resolve to a public IP.
 vi.mock("node:dns/promises", () => ({
@@ -116,5 +116,62 @@ describe("createGuardedFetch", () => {
     expect(res.status).toBe(200);
     expect(calls[0].auth).toBe("Bearer ghtoken"); // sent to the original host
     expect(calls[1].auth).toBeNull(); // NOT forwarded to the cross-host redirect target
+  });
+});
+
+describe("UnsafeUrlError", () => {
+  afterEach(() => {
+    vi.mocked(lookup).mockImplementation(async (host: string) =>
+      [{ address: /^[\d.]+$/.test(host as string) ? (host as string) : "93.184.216.34", family: 4 }] as never);
+  });
+
+  it("carries a machine-readable reason while leaving the friendly message intact", async () => {
+    // The message is user-facing copy that an editor may reword at any time. A caller
+    // classifying on it would flip a SECURITY verdict on a copy edit, so the reason is
+    // a separate, typed field — and the message must not change with it, because
+    // mcp/service.ts re-wraps `e.message` verbatim as a ValidationError.
+    await expect(assertSafeUrl("not-a-url", false)).rejects.toThrow("Invalid URL");
+    await expect(assertSafeUrl("ftp://example.com", false)).rejects.toThrow("URL must use http or https");
+
+    for (const [raw, reason] of [["not-a-url", "invalid"], ["ftp://example.com", "invalid"]] as const) {
+      await expect(assertSafeUrl(raw, false)).rejects.toSatisfy(
+        (e) => e instanceof UnsafeUrlError && e.reason === reason);
+    }
+  });
+
+  it("distinguishes a host that does not resolve from one that resolves somewhere forbidden", async () => {
+    vi.mocked(lookup).mockRejectedValueOnce(new Error("ENOTFOUND"));
+    await expect(assertSafeUrl("https://gone.example", false)).rejects.toSatisfy(
+      (e) => e instanceof UnsafeUrlError && e.reason === "unresolved");
+
+    await expect(assertSafeUrl("http://169.254.169.254/latest/", false)).rejects.toSatisfy(
+      (e) => e instanceof UnsafeUrlError && e.reason === "blocked");
+  });
+});
+
+describe("preflightUrl", () => {
+  afterEach(() => {
+    vi.mocked(lookup).mockImplementation(async (host: string) =>
+      [{ address: /^[\d.]+$/.test(host as string) ? (host as string) : "93.184.216.34", family: 4 }] as never);
+  });
+
+  it("returns a verdict instead of throwing, so one bad connector cannot abort a review", async () => {
+    expect(await preflightUrl("https://api.example.com/mcp", false)).toBe("allowed");
+    expect(await preflightUrl("http://169.254.169.254/", false)).toBe("blocked");
+    expect(await preflightUrl("ftp://example.com", false)).toBe("invalid");
+    vi.mocked(lookup).mockRejectedValueOnce(new Error("ENOTFOUND"));
+    expect(await preflightUrl("https://gone.example", false)).toBe("unresolved");
+  });
+
+  it("honours the private-range policy, since the same URL is safe on one instance and not another", async () => {
+    expect(await preflightUrl("http://10.0.0.5/mcp", false)).toBe("allowed");
+    expect(await preflightUrl("http://10.0.0.5/mcp", true)).toBe("blocked");
+  });
+
+  it("reports an unexpected failure as blocked, never as allowed", async () => {
+    // Fail-closed: a verdict computed for display still decides `cannot_apply`, so an
+    // internal error must not read as permission.
+    vi.mocked(lookup).mockImplementationOnce((() => { throw new TypeError("boom"); }) as never);
+    expect(await preflightUrl("https://api.example.com/mcp", false)).not.toBe("allowed");
   });
 });

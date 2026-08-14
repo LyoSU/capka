@@ -15,6 +15,26 @@ export const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
  * blocked when the admin opts into the stricter policy. Resolves DNS so a
  * public hostname can't point at an internal address.
  */
+/**
+ * Why a URL was refused, as a value rather than as prose.
+ *
+ * The four refusal sites below differ only by message text, and those messages are
+ * deliberately friendly copy that surfaces straight to an admin (`mcp/service.ts`
+ * re-wraps `e.message` as a `ValidationError`). Classifying on that text would let a
+ * copy edit silently flip a security verdict, so the reason travels beside the message
+ * instead of inside it (docs/plugin-install-review-spec.md §5).
+ */
+export type UnsafeUrlReason = "blocked" | "unresolved" | "invalid";
+
+export class UnsafeUrlError extends Error {
+  readonly reason: UnsafeUrlReason;
+  constructor(reason: UnsafeUrlReason, message: string) {
+    super(message);
+    this.name = "UnsafeUrlError";
+    this.reason = reason;
+  }
+}
+
 export function isBlockedAddress(ip: string, blockPrivate: boolean): boolean {
   const v4 = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
   if (isIPv4(v4)) {
@@ -57,11 +77,11 @@ async function resolveGuarded(hostname: string, blockPrivate: boolean): Promise<
   try {
     addrs = await lookup(hostname, { all: true });
   } catch {
-    throw new Error(`Could not resolve host: ${hostname}`);
+    throw new UnsafeUrlError("unresolved", `Could not resolve host: ${hostname}`);
   }
   for (const { address } of addrs) {
     if (isBlockedAddress(address, blockPrivate)) {
-      throw new Error("That address isn't allowed. Check the URL or ask your admin about network restrictions.");
+      throw new UnsafeUrlError("blocked", "That address isn't allowed. Check the URL or ask your admin about network restrictions.");
     }
   }
   return addrs;
@@ -72,10 +92,10 @@ function assertHttpUrl(raw: string): URL {
   try {
     u = new URL(raw);
   } catch {
-    throw new Error("Invalid URL");
+    throw new UnsafeUrlError("invalid", "Invalid URL");
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") {
-    throw new Error("URL must use http or https");
+    throw new UnsafeUrlError("invalid", "URL must use http or https");
   }
   return u;
 }
@@ -196,9 +216,26 @@ export async function assertSafeUrl(raw: string, blockPrivate: boolean): Promise
   await resolveGuarded(assertHttpUrl(raw).hostname, blockPrivate);
 }
 
+/** What a preflight saw. `allowed` is the only value that is not a refusal. */
+export type UrlVerdict = "allowed" | UnsafeUrlReason;
+
 /**
- * Pre-flight validation that ALSO returns a connection-pinned dispatcher, for
- * callers that do a single request outside `createGuardedFetch` (provider model
- * listing). Pass the dispatcher into `fetch(url, { dispatcher })` so the request
- * connects to the same IP that was just vetted — no rebinding window.
+ * `assertSafeUrl` as a verdict rather than an exception, for a review that has to
+ * describe every connector including the unsafe ones — a throw would abort the whole
+ * review over one bad URL.
+ *
+ * This is a FOURTH check for display, not a replacement for any of the three that
+ * enforce: `assertSafeUrl` still runs in `upsertServer` and in `connectMcpServer`, and
+ * the guarded fetch still re-validates every request and redirect hop
+ * (docs/plugin-install-review-spec.md §3, invariant 1). Anything it cannot explain is
+ * reported as `blocked`, because a verdict computed for display still decides
+ * `cannot_apply`, and an internal error must never read as permission.
  */
+export async function preflightUrl(raw: string, blockPrivate: boolean): Promise<UrlVerdict> {
+  try {
+    await assertSafeUrl(raw, blockPrivate);
+    return "allowed";
+  } catch (e) {
+    return e instanceof UnsafeUrlError ? e.reason : "blocked";
+  }
+}
