@@ -7,6 +7,7 @@ import { type FileRef } from "@/lib/constants";
 import type { TaskEvent } from "@/lib/tasks/events";
 import { mergePendingMessages, pendingStillUnknown } from "@/lib/chat/optimistic";
 import { classifyStreamEvent } from "@/lib/chat/stream-reconcile";
+import { createStreamRecovery } from "@/lib/chat/stream-recovery";
 import { createDeltaCoalescer } from "@/lib/chat/delta-coalesce";
 
 // ── Types ────────────────────────────────────────────────────
@@ -15,6 +16,11 @@ type Part =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
   | { type: "dynamic-tool"; toolCallId: string; toolName: string; state: string; input?: unknown; output?: unknown; approval?: { id: string; approved?: boolean; reason?: string }; askForm?: import("@/lib/ask/types").AskForm; askValue?: import("@/lib/ask/types").AskAnswer };
+
+// The events the reconcile path can hold and replay: the ones that mutate a
+// specific reply and carry a seq (see GATED below). Narrowed off TaskEvent so a
+// new event type can't silently become bufferable without a seq to order it by.
+type GapEvent = Extract<TaskEvent, { messageId: string }> & { seq?: number };
 
 type Message = {
   id: string;
@@ -64,8 +70,10 @@ export function useBackgroundChat({
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
   // ── Load history from DB ───────────────────────────────────
+  // Returns the in-flight load so the reconcile path can replay the events it
+  // held back the moment the snapshot lands (see createStreamRecovery below).
   const loadHistory = useCallback(() => {
-    fetch(`/api/chat?chatId=${chatId}`)
+    return fetch(`/api/chat?chatId=${chatId}`)
       .then((r) => {
         if (r.status === 404) return []; // new chat — no history yet
         if (!r.ok) throw new Error(`Failed to load chat (${r.status})`);
@@ -144,20 +152,7 @@ export function useBackgroundChat({
   useEffect(() => {
     let es: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout>;
-    let truncReloadTimer: ReturnType<typeof setTimeout>;
-    let reconcileTimer: ReturnType<typeof setTimeout>;
     let retryDelay = 1000; // exponential backoff: 1s, 2s, 4s, 8s, max 30s
-
-    // A gap in the seq stream (we reconnected mid-stream, or a NOTIFY dropped)
-    // means our delta-accumulated copy is behind — pull a fresh DB snapshot
-    // rather than append onto a stale prefix. Debounced so a burst of gapped
-    // deltas during the resume window collapses into one reload; loadHistory
-    // re-seeds appliedSeq from the snapshot's streamSeq, after which live deltas
-    // resume cleanly.
-    const reconcileSoon = () => {
-      clearTimeout(reconcileTimer);
-      reconcileTimer = setTimeout(loadHistory, 250);
-    };
 
     // Streaming events that mutate the reply and carry a per-message seq — gated
     // through classifyStreamEvent so a resumed stream reconciles instead of
@@ -168,8 +163,21 @@ export function useBackgroundChat({
     ]);
 
     // The full per-event state application, shared by the immediate path and
-    // the coalescer's deferred flush.
-    const applyEvent = (data: TaskEvent) => {
+    // the coalescer's deferred flush. Returns false when the event could NOT be
+    // applied, so the caller holds it for the reconcile path instead of letting
+    // it vanish.
+    const applyEvent = (data: TaskEvent): boolean => {
+      // Every handler below bails out (`idx === -1`) when the reply row isn't in
+      // our copy — and the seq cursor has ALREADY counted the event as applied by
+      // then, so the loss would be invisible to the gap detector and the text
+      // would never come back until the turn ended. Report it as unapplied.
+      // The row goes missing when a history reload lands between task:start and
+      // the deltas that follow it: the GET ran before the reply row existed, so
+      // its snapshot replaces the row task:start just appended.
+      if (GATED.has(data.type) && "messageId" in data && data.messageId
+          && !msgRef.current.some((m) => m.id === data.messageId)) {
+        return false;
+      }
       switch (data.type) {
         case "task:start": {
           setStatus("running");
@@ -393,8 +401,14 @@ export function useBackgroundChat({
           setTaskId(null);
           setTaskInfo({ startedAt: 0, currentTool: null, retrying: null });
           // Stop tracking this reply's seq — the turn is done; loadHistory
-          // below reloads the final, authoritative content.
-          if (data.messageId) appliedSeqRef.current.delete(data.messageId);
+          // below reloads the final, authoritative content. Drop anything still
+          // held for this reply too: with its cursor gone, a later drain would
+          // read "nothing applied yet" and replay those deltas onto the finished
+          // message, duplicating text the reload already brought back in full.
+          if (data.messageId) {
+            appliedSeqRef.current.delete(data.messageId);
+            recovery.drop(data.messageId);
+          }
           // Don't surface a failure via the bottom banner here: the server
           // has already persisted it on the message row (taskStatus:"failed"
           // + error), so the reload below brings it back as the message's own
@@ -429,7 +443,18 @@ export function useBackgroundChat({
           break;
         }
       }
+      return true;
     };
+
+    // Events that arrive past a gap (an SSE reconnect, a dropped NOTIFY, a payload
+    // too big for one) are held here and replayed once a fresh DB snapshot covers
+    // the hole — rather than dropped, which used to freeze the reply on screen for
+    // the rest of the turn while the agent kept working. See stream-recovery.
+    const recovery = createStreamRecovery<GapEvent>({
+      reload: loadHistory,
+      apply: applyEvent,
+      cursors: appliedSeqRef.current,
+    });
 
     // Text/reasoning deltas arrive ~10/s and each applied one re-renders the
     // whole streaming message at O(its full length) — on long replies that
@@ -437,7 +462,12 @@ export function useBackgroundChat({
     // them into one burst ≤4/s; React batches the burst into a single render.
     // All other events are rare but order-sensitive relative to the deltas, so
     // they flush the buffer first and apply immediately.
-    const coalescer = createDeltaCoalescer(applyEvent);
+    // A delta held here is applied a beat after it arrived, so the reply row can
+    // disappear underneath it (a reload landing in between) — hold those for the
+    // reconcile path rather than dropping them.
+    const coalescer = createDeltaCoalescer((event: TaskEvent) => {
+      if (!applyEvent(event)) recovery.hold(event as GapEvent);
+    });
 
     const connect = () => {
       es = new EventSource("/api/events");
@@ -455,11 +485,12 @@ export function useBackgroundChat({
           // arrives as a stripped marker carrying only `_truncated: true` plus the
           // ids — its body (delta/result) is gone. Honour the contract the realtime
           // layer promises and re-read this message from the DB, which holds the
-          // full part. Debounced so a burst collapses into one reload. (Big tool
-          // results are already capped server-side, so this is a rare safety net.)
+          // full part. Deliberately leaves the cursor where it is: this seq was
+          // never applied, so the events after it read as gapped and buffer
+          // themselves until a snapshot covers the hole. (Big tool results are
+          // already capped server-side, so this is a rare safety net.)
           if ((data as { _truncated?: boolean })._truncated) {
-            clearTimeout(truncReloadTimer);
-            truncReloadTimer = setTimeout(loadHistory, 250);
+            recovery.reconcile();
             return;
           }
 
@@ -472,7 +503,9 @@ export function useBackgroundChat({
             const seq = (data as { seq?: number }).seq;
             const action = classifyStreamEvent(appliedSeqRef.current.get(mid) ?? -1, seq);
             if (action === "ignore") return;
-            if (action === "reconcile") { reconcileSoon(); return; }
+            // Past a gap: hold the event instead of dropping it, so the reload's
+            // snapshot can be topped up with everything it doesn't cover.
+            if (action === "reconcile") { recovery.hold(data as GapEvent); return; }
             // action === "apply": advance the cursor, then run the handler below.
             // (The cursor advances at receive time even for buffered deltas —
             // classification is about arrival order, not paint time.)
@@ -486,7 +519,7 @@ export function useBackgroundChat({
             return;
           }
           coalescer.flush();
-          applyEvent(data);
+          if (!applyEvent(data)) recovery.hold(data as GapEvent);
         } catch { /* ignore parse errors */ }
       };
 
@@ -503,8 +536,7 @@ export function useBackgroundChat({
     return () => {
       sseHealthyRef.current = false;
       clearTimeout(reconnectTimer);
-      clearTimeout(truncReloadTimer);
-      clearTimeout(reconcileTimer);
+      recovery.dispose();
       coalescer.dispose();
       es?.close();
     };

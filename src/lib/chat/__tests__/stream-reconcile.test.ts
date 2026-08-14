@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyStreamEvent } from "../stream-reconcile";
+import { classifyStreamEvent, planGapDrain } from "../stream-reconcile";
 
 describe("classifyStreamEvent", () => {
   it("applies an event from a legacy publisher that carries no seq", () => {
@@ -34,6 +34,77 @@ describe("classifyStreamEvent", () => {
     // Remounted mid-stream: a live delta (seq 50) lands before loadHistory seeds
     // applied — the gap pulls the full snapshot in.
     expect(classifyStreamEvent(-1, 50)).toBe("reconcile");
+  });
+});
+
+// The gap buffer is what makes a reconcile CONVERGE. The snapshot the reload
+// returns is up to ~1s stale (saveSnapshot throttles to 1/s) while deltas publish
+// ~10/s, so adopting the snapshot alone lands the client straight back in a gap.
+// Holding the gapped events and replaying the ones the snapshot doesn't cover is
+// what closes the distance to the live stream.
+describe("planGapDrain", () => {
+  const ev = (messageId: string, seq: number | undefined, text = "") => ({ messageId, seq, text });
+
+  it("drops events the snapshot already covers", () => {
+    const { apply, keep } = planGapDrain(
+      [ev("m1", 4), ev("m1", 5)],
+      new Map([["m1", 5]]),
+    );
+    expect(apply).toEqual([]);
+    expect(keep).toEqual([]);
+  });
+
+  it("replays the events the snapshot does not cover, in order", () => {
+    const { apply, keep } = planGapDrain(
+      [ev("m1", 4, "d"), ev("m1", 5, "e"), ev("m1", 6, "f")],
+      new Map([["m1", 3]]),
+    );
+    expect(apply.map((e) => e.text)).toEqual(["d", "e", "f"]);
+    expect(keep).toEqual([]);
+  });
+
+  it("mixes both: skips the covered prefix, replays the rest", () => {
+    const { apply, keep } = planGapDrain(
+      [ev("m1", 4, "d"), ev("m1", 5, "e"), ev("m1", 6, "f")],
+      new Map([["m1", 5]]),
+    );
+    expect(apply.map((e) => e.text)).toEqual(["f"]);
+    expect(keep).toEqual([]);
+  });
+
+  it("keeps everything when the snapshot is still behind the hole", () => {
+    // The lost event was seq 4, but the snapshot only covers 3 and the buffer
+    // starts at 5 — replaying now would paint text over a hole. Keep the buffer
+    // and reload again once a fresher snapshot exists.
+    const { apply, keep } = planGapDrain(
+      [ev("m1", 5, "e"), ev("m1", 6, "f")],
+      new Map([["m1", 3]]),
+    );
+    expect(apply).toEqual([]);
+    expect(keep.map((e) => e.text)).toEqual(["e", "f"]);
+  });
+
+  it("stops at the first still-gapped event and keeps the tail in order", () => {
+    // 4 applies; 6 is past a hole (5 never arrived) — 6 and everything after it
+    // stay buffered so the retry replays them contiguously.
+    const { apply, keep } = planGapDrain(
+      [ev("m1", 4, "d"), ev("m1", 6, "f"), ev("m1", 7, "g")],
+      new Map([["m1", 3]]),
+    );
+    expect(apply.map((e) => e.text)).toEqual(["d"]);
+    expect(keep.map((e) => e.text)).toEqual(["f", "g"]);
+  });
+
+  it("replays an event from a publisher that stamps no seq", () => {
+    // Same rule as classifyStreamEvent: never gate a legacy publisher.
+    const { apply } = planGapDrain([ev("m1", undefined, "x")], new Map());
+    expect(apply.map((e) => e.text)).toEqual(["x"]);
+  });
+
+  it("treats a message with no cursor as 'nothing applied yet'", () => {
+    const { apply, keep } = planGapDrain([ev("m2", 0, "start"), ev("m2", 1, "a")], new Map());
+    expect(apply.map((e) => e.text)).toEqual(["start", "a"]);
+    expect(keep).toEqual([]);
   });
 });
 
