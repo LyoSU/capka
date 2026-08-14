@@ -5,6 +5,7 @@ import { models } from "@/lib/db/schema";
 import { realtime } from "@/lib/realtime";
 import { claimNextTask, reconcileZombies, auxInFlight, INTERRUPTED_MESSAGE } from "@/lib/tasks/queue";
 import { drainInFlight } from "@/lib/tasks/drain";
+import { reconcileStaleApplies } from "@/lib/marketplace/operation";
 import { releaseHold } from "@/lib/billing/limits";
 import { runAgentTask } from "@/lib/tasks/runner";
 import { publishTaskEvent } from "@/lib/tasks/events";
@@ -106,6 +107,19 @@ async function reconcile(): Promise<void> {
     if (dead.length) log.info("reconciled zombie tasks", { count: dead.length, taskIds: dead.map((t) => t.id) });
   } catch (e) {
     log.error("reconcile error", { err: String(e) });
+  }
+  try {
+    // A plugin apply whose worker died holds its install `applying`, which hides that
+    // plugin's connectors and skills from every run (marketplace/runtime-view.ts). Without
+    // a reaper the lease never lapses in anyone's eyes and the plugin stays dark forever.
+    //
+    // It is never RESUMED, only failed: the executable plan may have existed only in
+    // memory and the observations have moved, so continuing would apply something nobody
+    // reviewed. Same stance as a zombie task, which is failed and never requeued.
+    const stale = await reconcileStaleApplies();
+    if (stale.length) log.info("reconciled stale plugin applies", { count: stale.length, installIds: stale.map((s) => s.installId) });
+  } catch (e) {
+    log.error("plugin apply reconcile error", { err: String(e) });
   }
 }
 
