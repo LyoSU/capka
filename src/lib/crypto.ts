@@ -1,4 +1,4 @@
-import { randomBytes, createCipheriv, createDecipheriv } from "crypto";
+import { randomBytes, createCipheriv, createDecipheriv, createHmac } from "crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
@@ -32,6 +32,23 @@ export function decrypt(ciphertext: string, keyHex: string): string {
 
 export function generateSecret(): string {
   return randomBytes(32).toString("hex");
+}
+
+/**
+ * A stable, non-reversible marker for a value that must be comparable but must not be
+ * stored — a plugin's command line in the install surface
+ * (docs/plugin-install-review-spec.md §4).
+ *
+ * Keyed, not a plain digest: a command line or an env value is often low-entropy
+ * enough to recover from a wordlist, and a digest that can be confirmed by guessing
+ * would leak the contents of a private plugin. The key is DERIVED from the master key
+ * under a fixed label rather than used directly, so these digests are not comparable
+ * with any other HMAC the instance computes under the same master key
+ * (`sandbox/client.ts` does).
+ */
+export function fingerprint(canonicalValue: string, keyHex: string): string {
+  const derived = createHmac("sha256", Buffer.from(keyHex, "hex")).update("capka:plugin-surface:v1").digest();
+  return createHmac("sha256", derived).update(canonicalValue).digest("hex");
 }
 
 /** A master key must be 32 bytes encoded as 64 hex chars (AES-256). */
