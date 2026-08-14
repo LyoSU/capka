@@ -27,10 +27,18 @@ async function fetchCatalog(url: string): Promise<{ name: string; owner: string 
   // `npx skills add owner/repo`) is still installable: model the repo itself as a
   // single plugin (source ".") whose install pulls every skill. Fail only if it has
   // neither a catalog nor any skills.
+  //
+  // `discoverSkills` answers "is this installable at all" and nothing more. It used to also
+  // supply a "{n} skills" blurb, and its n is an UNDERCOUNT: it walks `skills/<name>/SKILL.md`
+  // while the installer's `buildPluginPlan` also turns `commands/*.md` into skills. Naming a
+  // number here would be the same wrong count that made the old approval card describe a
+  // smaller set than it installed — smaller in the direction that flatters the install. The
+  // truthful list is the install review, which is built from the installer's own enumerator;
+  // a browser blurb has no business asserting a second one.
   const { skills } = await discoverSkills({ owner: repo.owner, repo: repo.repo, ref: "HEAD", subdir: "" }, fetchFn);
   if (!skills.length) throw new ValidationError("No marketplace.json or skills/ folder found in that repo.");
   const item: CatalogItem = {
-    name: repo.repo, description: `${skills.length} skill${skills.length === 1 ? "" : "s"}`,
+    name: repo.repo, description: "",
     author: repo.owner, category: null, homepage: null, kind: "plugin", source: ".", installable: true,
   };
   return { name: `${repo.owner}/${repo.repo}`, owner: repo.owner, items: [item] };

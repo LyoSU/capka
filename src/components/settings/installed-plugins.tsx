@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, RefreshCw, Trash2, Sparkles, Plug, Package, AlertTriangle, CheckCircle2, Power, PowerOff, LogIn } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Sparkles, Plug, Package, AlertTriangle, CheckCircle2, ChevronDown, Power, PowerOff, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { PluginReviewPanel, type PluginReview, type PolicyOutlook } from "@/components/settings/plugin-review";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { SettingsEmpty } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
@@ -55,10 +56,17 @@ interface UpgradePreview {
   touchesConnectors?: boolean;
 }
 
-/** The derived review from GET /api/extensions/review — what the update REACHES, as
- *  opposed to which files it touches. It sits beside the file diff rather than replacing
- *  it: the diff answers "what did the author change", the review answers "what will this
- *  be able to do", and an operator wants both in front of them at once. */
+/**
+ * The derived review from GET /api/extensions/review — what the update REACHES, as opposed to
+ * which files it touches.
+ *
+ * The design (§5) has this replacing the file diff. It does not: the two answer different
+ * questions — the diff "what did the author change", the review "what will this be able to do"
+ * — and only the second is the decision. So the dialog ORDERS them instead: the review is the
+ * body, the diff is collapsed provenance beneath it. Kept in its own state rather than inside
+ * `review` because it arrives from a second request and may fail on its own without making the
+ * file diff unusable.
+ */
 interface ReviewPayload {
   review: PluginReview;
   policies: PolicyOutlook[];
@@ -420,23 +428,15 @@ export default function InstalledPlugins() {
                   })}
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              {review.preview.to.message && (
-                <p className="truncate text-xs text-muted-foreground" title={review.preview.to.message}>
-                  {review.preview.to.message}
-                </p>
-              )}
-              {review.preview.diff && (
-                <p className="text-xs text-muted-foreground">
-                  {t("reviewChanges", {
-                    added: review.preview.diff.added.length,
-                    removed: review.preview.diff.removed.length,
-                    modified: review.preview.diff.modified.length,
-                  })}
-                </p>
-              )}
-              {/* The derived review — what the update will REACH. The file-diff warning
-                  above stays only while the review has not loaded: once it has, it says the
-                  same thing precisely instead of by inference from a filename. */}
+              {/* The derived review FIRST, because it is the thing being consented to.
+                  §5 of the design has the review replacing the file diff outright; it does not,
+                  and shouldn't — the diff answers "what did the author change", the review "what
+                  will this be able to do", and only the second is a decision. So the two are
+                  ordered rather than merged, and the diff sits under the fold below.
+
+                  Side by side they were the same weight, and their numbers invite a comparison
+                  that means nothing: "2 files changed" against "nothing changes here" is not a
+                  contradiction, but it reads as one. */}
               {derived ? (
                 <PluginReviewPanel
                   review={derived.review}
@@ -449,7 +449,42 @@ export default function InstalledPlugins() {
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   {t("reviewConnectorsWarning")}
                 </p>
-              ) : null}
+              ) : (
+                <p className="text-xs text-muted-foreground">{t("reviewLoading")}</p>
+              )}
+              {/* Provenance, under the fold: the author's commit and the files it touched.
+                  Collapsed because it is context for a decision already stated above, and
+                  because these filenames were fetched and thrown away until now — the counts
+                  line said "2 changed" and could not say which two. */}
+              {(review.preview.diff || review.preview.to.message) && (
+                <Collapsible>
+                  <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded py-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&[data-panel-open]_.chevron]:rotate-180">
+                    <ChevronDown className="chevron h-3.5 w-3.5 shrink-0 transition-transform" />
+                    <span>{t("diffTitle")}</span>
+                    {review.preview.diff && (
+                      <span className="ml-auto tabular-nums">
+                        {t("reviewChanges", {
+                          added: review.preview.diff.added.length,
+                          removed: review.preview.diff.removed.length,
+                          modified: review.preview.diff.modified.length,
+                        })}
+                      </span>
+                    )}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-2 overflow-hidden pt-1">
+                    {review.preview.to.message && (
+                      <p className="text-xs text-muted-foreground">{review.preview.to.message}</p>
+                    )}
+                    {review.preview.diff && (
+                      <div className="max-h-48 space-y-2 overflow-y-auto">
+                        <FileList label={t("diffAdded")} paths={review.preview.diff.added} />
+                        <FileList label={t("diffModified")} paths={review.preview.diff.modified} />
+                        <FileList label={t("diffRemoved")} paths={review.preview.diff.removed} />
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
               <AlertDialogFooter>
                 <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
                 {/* Disabled until the review is loaded AND applicable: consent means having
@@ -464,6 +499,27 @@ export default function InstalledPlugins() {
           )}
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/**
+ * One group of the author's file changes.
+ *
+ * Paths, not a patch: the review above already says what the change REACHES, so the only thing
+ * a filename adds is where the author was working. `break-all` because a plugin's paths are
+ * long and truncating the tail hides the filename, which is the informative half.
+ */
+function FileList({ label, paths }: { label: string; paths: string[] }) {
+  if (!paths.length) return null;
+  return (
+    <div className="space-y-0.5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <ul className="space-y-0.5">
+        {paths.map((p) => (
+          <li key={p} className="break-all font-mono text-[11px] text-muted-foreground">{p}</li>
+        ))}
+      </ul>
     </div>
   );
 }

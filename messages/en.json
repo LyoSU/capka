@@ -1250,6 +1250,11 @@
         "reviewDesc": "Updating “{name}” moves it from {from} to {to}.",
         "reviewChanges": "{added} added · {removed} removed · {modified} changed",
         "reviewConnectorsWarning": "This update changes a connector definition — it can introduce code that runs in your sandbox. Review before applying.",
+        "reviewLoading": "Working out what this update will be able to do…",
+        "diffTitle": "What the author changed",
+        "diffAdded": "Added",
+        "diffModified": "Changed",
+        "diffRemoved": "Removed",
         "reviewApply": "Apply update",
         "review": {
           "sandboxTitle": "This plugin runs a program of its own",

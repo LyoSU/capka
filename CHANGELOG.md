@@ -6,6 +6,17 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The update review dialog leads with what the update will be able to do; the author's file changes moved below it into an expander that now lists the actual filenames.
+- A skills repo added as a marketplace no longer advertises a skill count in its description — the count omitted `commands/*.md` and read lower than what an install brings.
+
+### Fixed
+
+- The Plugins tab showed `settings.skills.installed.state.on` instead of On / Off / Partly on.
+- A connector or skill left behind by a removed plugin now says so, explains that nothing can use it, and offers only Delete. Such a skill was previously hidden from the Library, from every run, and from the Plugins tab at once — reachable from no screen.
+- `npm test` no longer needs a local PostgreSQL: the plugin-permission suite's teardown ran outside its `RUN_INTEGRATION` gate and failed the whole file where no database was listening.
+
 ## [0.22.0] - 2026-08-14
 
 > **⚠ Breaking — the plugin install/upgrade API moved.** `POST /api/extensions/install`, `POST /api/admin/marketplaces/install` and `POST /api/extensions` (upgrade) now return 410. Installs and upgrades go through `GET /api/extensions/review` followed by `POST` of the `reviewHash` it returns. Any script or integration calling the old endpoints must be updated.

@@ -1024,6 +1024,39 @@ correct it.
   misrepresented either. Whether such a repo should be installable through the full review
   instead is still open, and still a product question.
 
+### The three items left open, resolved (2026-08-14, after v0.22.0)
+
+**§5's "the review REPLACES the file diff" is wrong, and the code now says why.** They answer
+different questions — the diff "what did the author change", the review "what will this be able
+to do" — and only the second is a decision. Rendering both at equal weight was the real defect:
+their numbers invite a comparison that means nothing ("2 files changed" against "nothing changes
+here" is not a contradiction but reads as one). The upgrade dialog therefore ORDERS them: the
+review is the body, the diff is collapsed provenance beneath it, and it finally lists the
+filenames the preview had been fetching and discarding.
+
+**The per-resource `ready | applying | failed | orphaned` badge does not exist because it cannot.
+The note asking for it was wrong in two ways.** It named the wrong surface — the Connectors list
+is not where plugin resources live — and it over-scoped the state set. A management list shows
+only rows an install does not manage, and that filter admits exactly one state: `applying` and
+`failed` belong to an install that still exists, and are shown once on its Extensions row for
+every resource it routed; `ready` needs no mark. So the reachable badge is `orphaned`, and a
+field typed to promise four would have been inviting a value that cannot arrive.
+
+What the note did hide was a real defect on the other resource kind. The Connectors list keeps
+orphans deliberately; the Skills Library applied the same rule *without* that exception, so an
+orphaned skill was hidden from the Library, hidden from every run by `keepRuntimeVisible`, and
+had no Extensions row left to be managed from — reachable from no screen at all. The rule is now
+`keepManageable`, stated once beside `keepRuntimeVisible` for both kinds, and it reports the
+orphan rather than leaving each caller to infer it from a `startsWith`. Both lists name it,
+explain it, and offer only Delete.
+
+**`fetchCatalog`'s "N skills" blurb is gone rather than corrected.** Its count came from
+`discoverSkills`, which walks `skills/<name>/SKILL.md` and misses the `commands/*.md` the
+installer also converts — the same undercount, in the same flattering direction, as the approval
+card this design removed. Teaching a browser blurb the installer's enumeration rules would
+recreate the two-enumerators problem for a line of marketing text. The truthful list is the
+install review; nothing else asserts a number.
+
 ### Where the line sat before that (2026-08-14, mid-session)
 
 **A — done.** `plan.ts` / `observe.ts` / `apply.ts`, behind 17 characterization fixtures.
