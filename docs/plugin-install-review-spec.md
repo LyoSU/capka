@@ -945,15 +945,40 @@ that overstates is worse than none.
   per resource; `ownerStates` computes exactly that and is tested, but only the per-install
   state is surfaced to the UI. A resource-level badge in the Connectors list is the
   remaining half.
-- **The marketplace browser has no review screen yet.** The first-install API now goes through
-  the gate, so the browser's Install button currently gets a 410 until it is pointed at
-  `/api/extensions/review` and given the same panel the upgrade dialog renders. The gate is
-  correct and the caller is behind it — deliberately that way round, since the reverse is what
-  made the gate optional.
-- **`installSkillRepo` routes CONNECTORS through the manage approval card, which only counts
-  skills.** A repo with a `.mcp.json` installs a stdio server behind a card that says "N
-  skills". Narrowing it to skills only, or routing it through the review, is a product decision
-  and is deliberately not taken unilaterally here.
+### A second audit the same day, and what it says about the first one (2026-08-14)
+
+An independent review of the four fix commits found nine more defects, four of them P1. Two
+facts about that list matter more than the list.
+
+**One was introduced BY a fix in it.** Closing the "IPv6 literals read as unresolvable" hole
+brought bracket-stripping, which woke a v6 branch that had been dead — and that branch decided
+a security question by STRING PREFIX (`startsWith("::ffff:")`). So `::ffff:169.254.169.254`
+was caught and `::ffff:a9fe:a9fe`, the same address in hex, was not; nor were `::7f00:1`,
+`::127.0.0.1`, the NAT64 prefix, or loopback spelled `0:0:0:0:0:0:0:1`. `dns.lookup` returns a
+literal UNCHANGED, so for literals the guard is the only thing that ever looks at the address.
+Fail-closed code being replaced by fail-open code is the specific risk of fixing a
+classification bug, and nothing in the first pass looked for it.
+
+**Four of the nine are one shape: a second actor could reach a row, and nothing in the
+statement said it had the right to.** `upgradePlugin` (deleted, not deprecated — it was an
+unfenced `set({ manifest })` and `applyState` lives in that column), `installPlugin`'s
+unfenced pin/manifest writes, the manual fence's `NOT EXISTS (… FOR NO KEY UPDATE)` locking
+NOTHING in the only case that proceeds, and two writers claiming one terminal journal id. The
+last one generalizes the P0's lesson to the journal: **winning the CAS is what authorizes the
+record, exactly as it authorizes the write.** `markApplyFailed` returning false means the
+reaper already owns this outcome, so there is nothing left for us to say about it.
+
+And the shape of the UI break was worth keeping: the gate landed ahead of its callers, so
+Browse → Install answered 410 rather than installing without a review. That is the survivable
+direction of the mistake, and the reverse is what made the gate optional the first time.
+
+- **`installSkillRepo` now installs skills only.** Not a product decision after all: the manage
+  approval card enumerates the skills it found, so routing a `.mcp.json` connector and bundled
+  plugin files off the same repo applied a strictly larger set than the human agreed to.
+  Narrowing it makes the code match consent already obtained rather than imposing a new
+  restriction — and `plan.notes` names the skipped connectors, so the repo is not quietly
+  misrepresented either. Whether such a repo should be installable through the full review
+  instead is still open, and still a product question.
 
 ### Where the line sat before that (2026-08-14, mid-session)
 
