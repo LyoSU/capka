@@ -39,8 +39,16 @@ async function resolveSubject(input: {
   userId: string; role: string;
   installId: string | null; marketplaceId: string | null; pluginName: string | null; scope: "system" | "user";
 }): Promise<Resolved> {
+  // Look for an existing install of the SCOPE being asked for, not just of the plugin: a
+  // member asking to install personally must not be handed the org-wide row (which they may
+  // not manage, so the ask came back as a bare 403), and an admin's system install must not
+  // land on somebody's personal one.
   const installId = input.installId
-    ?? (input.marketplaceId && input.pluginName ? await findInstall(input.marketplaceId, input.pluginName) : null);
+    ?? (input.marketplaceId && input.pluginName
+      ? await findInstall(input.marketplaceId, input.pluginName, {
+        scope: input.scope, userId: input.scope === "user" ? input.userId : null,
+      })
+      : null);
 
   if (installId) {
     const row = (await db.select({
@@ -132,6 +140,10 @@ export const GET = apiHandler(async (req: Request) => {
     marketplaceId: subject.marketplaceId, pluginName: subject.pluginName,
     scope: subject.scope, ownerId: subject.ownerId,
     installId: subject.installId, targetSha, storedManifestRaw: subject.manifest,
+    // The reader's own authority — it decides which policy rules the screen is allowed to
+    // offer a delete for. Offering one it cannot carry out does not merely fail: the refusal
+    // lands inside the apply and marks the install as needing attention.
+    actor: { userId, isAdmin: role === "admin" },
   });
   return Response.json({ review, policies, targetSha });
 });

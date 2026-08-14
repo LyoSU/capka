@@ -37,6 +37,60 @@ export function applyEventId(operationId: string, event: PluginApplyEvent): stri
 }
 
 /**
+ * Append one audit row idempotently, and REFUSE when the id already exists carrying a
+ * DIFFERENT payload.
+ *
+ * `ON CONFLICT DO NOTHING` on its own is a silent last-writer-wins: whichever of two
+ * disagreeing writers arrives first decides what the history says, and nothing anywhere
+ * records that they disagreed. So the insert reports whether it landed, and on a conflict the
+ * stored row is compared.
+ *
+ * The comparison is over the WHOLE `detail`, not a field list. Two reasons. It cannot be
+ * under-specified — the previous version named six columns and therefore called two `accepted`
+ * events idempotent while their stored `review` differed, which is the one field that records
+ * what was actually consented to. And it is done in SQL as `jsonb`, which normalizes key order:
+ * a JS `JSON.stringify` comparison would have reported two identical payloads as a conflict
+ * purely because their keys were built in a different order.
+ */
+async function insertOnce(tx: Tx, row: {
+  id: string;
+  actorId: string | null;
+  action: string;
+  targetType: string;
+  targetKey: string;
+  detail: Record<string, unknown>;
+}): Promise<void> {
+  const detail = JSON.stringify(row.detail);
+  const inserted = await tx.execute(sql`
+    INSERT INTO audit_log (id, actor_id, action, target_type, target_key, detail)
+    VALUES (${row.id}, ${row.actorId}, ${row.action}, ${row.targetType}, ${row.targetKey}, ${detail}::jsonb)
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id`);
+  if ((inserted.rowCount ?? 0) > 0) return;
+
+  // `IS NOT DISTINCT FROM` rather than `=` throughout: actor_id, target_key and an absent
+  // `detail` key are all nullable, and `NULL = NULL` is NULL — which would have read as
+  // "differs" and turned every legitimately idempotent retry into an invariant violation.
+  const existing = await tx.execute(sql`
+    SELECT actor_id IS NOT DISTINCT FROM ${row.actorId} AS same_actor,
+           action IS NOT DISTINCT FROM ${row.action} AS same_action,
+           target_key IS NOT DISTINCT FROM ${row.targetKey} AS same_target,
+           detail IS NOT DISTINCT FROM ${detail}::jsonb AS same_detail,
+           detail AS stored
+      FROM audit_log WHERE id = ${row.id}`);
+  const got = (existing.rows as {
+    same_actor: boolean | null; same_action: boolean | null;
+    same_target: boolean | null; same_detail: boolean | null; stored: unknown;
+  }[])[0];
+  // A row we cannot read back after LOSING the conflict is not an idempotent success:
+  // something else is going on, and this transaction must not commit on that basis.
+  if (!got) throw new AuditInvariantViolation(row.id, null, row.detail);
+  if (!(got.same_actor && got.same_action && got.same_target && got.same_detail)) {
+    throw new AuditInvariantViolation(row.id, got.stored, row.detail);
+  }
+}
+
+/**
  * A `policy.clear` entry for a rule an apply deleted, in the SAME transaction as the delete.
  *
  * The same action a hand edit records, so the permissions trail reads as one history rather
@@ -62,12 +116,18 @@ export async function insertPolicyClearAudit(
     projectId: input.row.projectId,
     via: "plugin-apply",
   };
-  // Deterministic per (operation, policy), so a retried commit cannot double-log one delete.
-  await tx.execute(sql`
-    INSERT INTO audit_log (id, actor_id, action, target_type, target_key, detail)
-    VALUES (${`plugin-apply:${input.operationId}:policy:${input.row.id}`}, ${input.actorId}, 'policy.clear',
-            ${input.row.capabilityType}, ${input.row.capabilityKey}, ${JSON.stringify(detail)}::jsonb)
-    ON CONFLICT (id) DO NOTHING`);
+  // Deterministic per (operation, policy), so a retried commit cannot double-log one delete —
+  // and through `insertOnce`, so a SECOND writer claiming this id with different contents is
+  // refused rather than silently discarded. This one used to be the weaker of the two: a bare
+  // `ON CONFLICT DO NOTHING` with no comparison at all.
+  await insertOnce(tx, {
+    id: `plugin-apply:${input.operationId}:policy:${input.row.id}`,
+    actorId: input.actorId,
+    action: "policy.clear",
+    targetType: input.row.capabilityType,
+    targetKey: input.row.capabilityKey,
+    detail,
+  });
 }
 
 /** Derived from `db.transaction` itself rather than spelled out: drizzle's transaction
@@ -85,11 +145,10 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
  * literal command line cannot reach the journal by accident. That is a type boundary, not
  * a rule someone has to remember.
  *
- * `ON CONFLICT DO NOTHING` alone would silently swallow a DIFFERENT payload written under
- * the same id, leaving whichever arrived first with no signal that two writers disagreed.
- * So the insert reports whether it inserted, and on a conflict the stored outcome is
- * compared. Two reconcilers writing the same terminal event are the idempotent case; two
- * writing different ones are a bug that must stop the write it belongs to.
+ * Idempotency and the conflict comparison both live in `insertOnce`: two reconcilers writing
+ * the same terminal event are the idempotent case, two writing different ones are a bug that
+ * must stop the write it belongs to. Which of the two is happening is decided by comparing the
+ * ENTIRE payload, `review` included.
  */
 export async function insertPluginAudit(
   tx: Tx,

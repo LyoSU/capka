@@ -89,12 +89,21 @@ export async function readRuntimeSurface(
       ...(r.url ? { endpoint: normalizeEndpoint(r.url) ?? undefined } : {}),
       ...(stdio ? {} : {
         authKind: r.authKind as "token" | "oauth",
-        // From the decrypted row, so a token swapped in the DATABASE is visible too. Where the
-        // row holds no secrets (a placeholder connector persisted none) the artifact's digest
-        // stands in, so the absence does not read as a change on every upgrade.
+        // From the decrypted row, so a token swapped in the DATABASE is visible too.
+        //
+        // Where the row holds no secrets — a placeholder connector persisted none — the
+        // artifact's digest stands in, so the absence does not read as a credential change on
+        // every upgrade of every placeholder connector. But ONLY while the row's endpoint still
+        // matches the artifact's: this digest covers the url AND the headers together, so
+        // copying it across a CHANGED url reported `unchanged` about a connector now pointing
+        // somewhere else. Where they disagree, the row's own url is fingerprinted with no
+        // headers — a value that cannot equal the artifact's, which is correct. Something did
+        // change, and the row is the only thing that knows it.
         credentialFingerprint: rawHeaders
           ? fingerprint(canonicalTypedValue("credential", { url: r.url ?? "", headers: rawHeaders }), keyHex)
-          : prior?.credentialFingerprint,
+          : prior && normalizeEndpoint(r.url ?? "") === prior.endpoint
+            ? prior.credentialFingerprint
+            : fingerprint(canonicalTypedValue("credential", { url: r.url ?? "", headers: {} }), keyHex),
       }),
       // Header/env NAMES from the row when it has them, otherwise from the artifact: a
       // placeholder connector persisted none, and inventing their absence would read as a

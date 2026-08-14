@@ -61,10 +61,25 @@ const performWrites = async () => {
  *  policy-disposition.integration. */
 const ADMIN_ACTOR = { userId: "barrier-admin", isAdmin: true };
 
-const preview = (installId: string | null) => previewPluginApply({
-  gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
-  installId, targetSha: SHA, storedManifestRaw: undefined, actor: ADMIN_ACTOR,
-});
+/**
+ * Mirrors the route: a preview of an EXISTING install reads that row's own manifest.
+ *
+ * Passing `undefined` for an existing install — which this helper used to do unconditionally —
+ * is the test lying about stored state, and it produces a real failure rather than a cosmetic
+ * one: `subjectKind` reads `neverCommitted` off the manifest, so the preview computed
+ * `kind: "upgrade"` while the apply (which reads the row itself) computed `install`. `kind` is
+ * inside `reviewHash`, so the two could never match and a retry returned `stale` forever.
+ */
+const preview = async (installId: string | null) => {
+  const stored = installId
+    ? (await pool.query<{ manifest: unknown }>(
+      `SELECT manifest FROM plugin_installs WHERE id = $1`, [installId])).rows[0]?.manifest
+    : undefined;
+  return previewPluginApply({
+    gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
+    installId, targetSha: SHA, storedManifestRaw: stored, actor: ADMIN_ACTOR,
+  });
+};
 
 const apply = (installId: string | null, reviewHash: string) => applyPluginReviewed({
   gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
@@ -193,11 +208,10 @@ run("apply barrier", () => {
     const { rows } = await pool.query<{ id: string }>(`SELECT id FROM plugin_installs WHERE marketplace_id = $1`, [MK]);
     h.failWrites = false;
 
-    // The retry is an upgrade of the existing (failed) row, reviewed afresh.
-    const second = await previewPluginApply({
-      gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
-      installId: rows[0].id, targetSha: SHA, storedManifestRaw: undefined, actor: ADMIN_ACTOR,
-    });
+    // Reviewed afresh against the row as it actually stands — which for a first install that
+    // never committed is a RETRY, not an upgrade, and `preview` reads that off the manifest
+    // exactly as the route does.
+    const second = await preview(rows[0].id);
     expect(await apply(rows[0].id, second.review.reviewHash)).toEqual({ outcome: "succeeded" });
     expect(await readApplyState(rows[0].id)).toBeNull();
   });

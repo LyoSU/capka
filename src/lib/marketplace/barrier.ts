@@ -15,7 +15,7 @@ import {
 } from "./operation";
 import { buildPluginPlan } from "./plan";
 import {
-  ForbiddenDispositionError, analysePolicies, applyDispositions, policyRevisions,
+  ForbiddenDispositionError, analysePolicies, applyDispositions, foreignSurvivors, policyRevisions,
   readPolicyBaseline, type DispositionActor, type PolicyOutlook,
 } from "./policy-disposition";
 import { projectPlanSurface } from "./project";
@@ -144,11 +144,18 @@ async function gather(input: {
     ...(sourceBefore?.skills ?? []).map((s) => ({ type: "skill" as const, name: s.name })),
   ];
   const policyBaseline = await readPolicyBaseline(names);
+  // What survives is not "what this plan still declares" but "what ANY resource of that name
+  // still answers to". A policy is keyed on (type, name) alone, so a rule is orphaned only when
+  // nothing of that name remains anywhere — not merely when this plugin stops declaring it.
   const policies = analysePolicies({
     affected: policyBaseline,
     survivingNames: [
       ...sourceAfter.connectors.map((c) => ({ type: "connector" as const, name: c.name })),
       ...sourceAfter.skills.map((s) => ({ type: "skill" as const, name: s.name })),
+      ...await foreignSurvivors(
+        policyBaseline.map((r) => ({ type: r.capabilityType, name: r.capabilityKey })),
+        input.installId ? `catalog:${input.installId}` : null,
+      ),
     ],
     actor: input.actor,
   });

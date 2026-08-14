@@ -11,6 +11,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { PluginIcon } from "@/components/plugin-icon";
+import { PluginInstallDialog } from "@/components/settings/plugin-install-dialog";
 import MembersInstallToggle from "@/components/settings/members-install-toggle";
 import GithubTokenField from "@/components/settings/github-token-field";
 import { SettingsEmpty } from "@/components/settings/shell";
@@ -116,26 +117,11 @@ export function MarketplaceBrowser() {
     } else toast.error(t("removeFailed"));
   };
 
-  const install = async (pluginName: string) => {
-    if (!selected) return;
-    setBusy(pluginName);
-    try {
-      const res = await fetch("/api/admin/marketplaces/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ marketplaceId: selected, pluginName }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        const m = data.manifest ?? {};
-        toast.success(t("installed", { skills: (m.skills ?? []).length, connectors: (m.connectors ?? []).length }));
-        for (const note of m.notes ?? []) toast.message(note);
-        await loadCatalog(selected);
-      } else toast.error(t("installFailed"));
-    } finally {
-      setBusy(null);
-    }
-  };
+  // Install now goes through the review dialog, which owns the whole round trip. This used to
+  // POST `/api/admin/marketplaces/install` directly — and when that endpoint moved behind the
+  // consent gate and started returning 410, this button broke: the gate was correct and its
+  // caller was not behind it, which is the one direction of that mistake worth having.
+  const [pendingInstall, setPendingInstall] = useState<{ marketplaceId: string; pluginName: string } | null>(null);
 
 
   const uninstall = async (pluginName: string) => {
@@ -287,7 +273,11 @@ export function MarketplaceBrowser() {
                       </AlertDialogContent>
                     </AlertDialog>
                   ) : (
-                    <Button size="sm" disabled={!c.installable || busy === c.name} onClick={() => install(c.name)}>
+                    <Button
+                      size="sm"
+                      disabled={!c.installable || busy === c.name}
+                      onClick={() => selected && setPendingInstall({ marketplaceId: selected, pluginName: c.name })}
+                    >
                       {busy === c.name ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Download className="mr-1.5 h-4 w-4" />}
                       {t("install")}
                     </Button>
@@ -300,6 +290,15 @@ export function MarketplaceBrowser() {
       {!catalogLoading && selected && catalog.length > 0 && sections.length === 0 && (
         <p className="py-6 text-center text-sm text-muted-foreground">{t("noMatches", { query })}</p>
       )}
+
+      {/* The consent screen. `system` scope: this is the admin catalog, and an org-wide install
+          is what it has always done — the server re-checks that the asker is an admin. */}
+      <PluginInstallDialog
+        target={pendingInstall}
+        scope="system"
+        onClose={() => setPendingInstall(null)}
+        onInstalled={() => { if (selected) return loadCatalog(selected); }}
+      />
     </div>
   );
 }

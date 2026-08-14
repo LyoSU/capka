@@ -3,7 +3,7 @@ import { pool, db } from "@/lib/db";
 import { setPolicy } from "@/lib/governance/policy";
 import {
   ForbiddenDispositionError, StalePolicyError, analysePolicies, applyDispositions,
-  assertDispositionAllowed, policyKey, policyRevisions, readPolicyBaseline,
+  assertDispositionAllowed, foreignSurvivors, policyKey, policyRevisions, readPolicyBaseline,
   type PolicyBaselineRow, type PolicyOutlook,
 } from "../policy-disposition";
 
@@ -57,6 +57,60 @@ run("policy revision", () => {
     await seed();
     await pool.query(`DELETE FROM capability_policies WHERE capability_key = $1`, [NAME]);
     expect(await readPolicyBaseline([{ type: "connector", name: NAME }])).toEqual([]);
+  });
+});
+
+run("foreignSurvivors", () => {
+  const OWN = "catalog:pdtest-own";
+  const OTHER = "catalog:pdtest-other";
+  const wipe = () => pool.query(`DELETE FROM mcp_servers WHERE name = $1`, [NAME]);
+  const addConnector = (source: string) => pool.query(
+    `INSERT INTO mcp_servers (id, scope, user_id, project_id, name, transport, url, enabled, auth_kind, source, created_at, updated_at)
+     VALUES ($1, 'system', NULL, NULL, $2, 'http', 'https://x.test/mcp', true, 'token', $3, now(), now())`,
+    [`pdtest-${source}`, NAME, source]);
+
+  beforeEach(wipe);
+  afterAll(wipe);
+
+  const ask = (ownTag: string | null) => foreignSurvivors([{ type: "connector", name: NAME }], ownTag);
+
+  it("does not count the operation's OWN rows — its plan is the authority on those", async () => {
+    await addConnector(OWN);
+    expect(await ask(OWN)).toEqual([]);
+  });
+
+  it("counts an identically named resource owned by a DIFFERENT source", async () => {
+    // The defect: a policy is keyed on (type, name) and nothing else, while Capka allows the
+    // same connector name from several sources. An upgrade that dropped its own `api` reported
+    // every rule naming `api` as orphaned and offered to delete rules another plugin's still
+    // present `api` was answering to — the review describing the wrong consequence in the one
+    // screen whose entire job is to describe consequences.
+    await addConnector(OTHER);
+    expect(await ask(OWN)).toEqual([{ type: "connector", name: NAME }]);
+  });
+
+  it("counts every row for a FIRST install, which owns nothing yet", async () => {
+    await addConnector(OTHER);
+    expect(await ask(null)).toEqual([{ type: "connector", name: NAME }]);
+  });
+
+  it("turns `applies_to_nothing` into `still_applies` end to end", async () => {
+    await seedActor();
+    await cleanup();
+    await seed("deny");
+    await addConnector(OTHER);
+    const rows = await readPolicyBaseline([{ type: "connector", name: NAME }]);
+    // Nothing in this plugin's plan survives, so the plan-only view said the rule was orphaned.
+    expect(analysePolicies({ affected: rows, survivingNames: [], actor: ADMIN_ACTOR })[0].outlook)
+      .toBe("applies_to_nothing");
+    // With the other source's row counted, the truth is the opposite — and `canDelete` follows,
+    // so the checkbox disappears rather than offering to delete a live rule.
+    const withForeign = analysePolicies({
+      affected: rows, survivingNames: await ask(OWN), actor: ADMIN_ACTOR,
+    })[0];
+    expect(withForeign.outlook).toBe("still_applies");
+    expect(withForeign.canDelete).toBe(false);
+    await cleanup();
   });
 });
 
@@ -227,5 +281,57 @@ describe("assertDispositionAllowed (pure — the ownership rule)", () => {
     // member could not submit a review that merely lists somebody else's rule.
     const r = row();
     expect(() => assertDispositionAllowed("k", "keep", r, undefined, { userId: "m1", isAdmin: false })).not.toThrow();
+  });
+});
+
+/**
+ * `canDelete` is what the SCREEN reads, and it has to reach the same verdict the enforcement
+ * will. These two answering differently is not a cosmetic bug: a checkbox the apply then
+ * refuses lands as a `ForbiddenDispositionError` INSIDE the operation, which marks the install
+ * `failed` — so an offer the UI should never have made leaves a plugin needing attention.
+ */
+describe("analysePolicies canDelete (what the screen may offer)", () => {
+  const row = (over: Partial<PolicyBaselineRow> = {}): PolicyBaselineRow => ({
+    id: "p1", capabilityType: "connector", capabilityKey: "api", effect: "deny",
+    scope: "system", userId: null, projectId: null, revision: 0, ...over,
+  });
+  const analyse = (r: PolicyBaselineRow, actor: { userId: string; isAdmin: boolean }, surviving: { type: "connector"; name: string }[] = []) =>
+    analysePolicies({ affected: [r], survivingNames: surviving, actor })[0];
+
+  it("offers a member nothing on an ORG-WIDE rule, even when it is orphaned", () => {
+    // The exact path of the P0: a member installs a personal plugin declaring a resource named
+    // to match an org-wide `deny`, and a missing rule is DEFAULT ALLOW. Enforcement refuses it;
+    // the screen must not have offered it in the first place.
+    const o = analyse(row(), { userId: "m1", isAdmin: false });
+    expect(o.outlook).toBe("applies_to_nothing");
+    expect(o.canDelete).toBe(false);
+  });
+
+  it("offers a member their OWN orphaned rule", () => {
+    expect(analyse(row({ scope: "user", userId: "m1" }), { userId: "m1", isAdmin: false }).canDelete).toBe(true);
+  });
+
+  it("offers nobody a rule that still applies — not even an admin", () => {
+    // Both gates are independent, and this is the second one. A rule still governing a
+    // surviving resource is not part of this decision at all.
+    const o = analyse(row(), { userId: "a1", isAdmin: true }, [{ type: "connector", name: "api" }]);
+    expect(o.outlook).toBe("still_applies");
+    expect(o.canDelete).toBe(false);
+  });
+
+  it("agrees with the enforcement on every combination", () => {
+    // Written as a cross-product rather than as cases, because the failure mode is the two
+    // predicates DRIFTING — and a hand-picked case list is exactly what stops covering the
+    // combination somebody adds later.
+    const rows = [row(), row({ scope: "user", userId: "m1" }), row({ scope: "user", userId: "m2" }), row({ scope: "project", projectId: "pr1" })];
+    const actors = [{ userId: "m1", isAdmin: false }, { userId: "a1", isAdmin: true }];
+    const survivingSets = [[], [{ type: "connector" as const, name: "api" }]];
+    for (const r of rows) for (const actor of actors) for (const surviving of survivingSets) {
+      const o = analyse(r, actor, surviving);
+      let enforcementAllows = true;
+      try { assertDispositionAllowed(o.key, "delete", r, o, actor); } catch { enforcementAllows = false; }
+      expect(o.canDelete, `${r.scope}/${r.userId ?? "-"} as ${actor.isAdmin ? "admin" : actor.userId}, surviving=${surviving.length}`)
+        .toBe(enforcementAllows);
+    }
   });
 });

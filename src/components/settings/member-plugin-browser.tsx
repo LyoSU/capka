@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2, Download, Check, Search, Store } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PluginIcon } from "@/components/plugin-icon";
+import { PluginInstallDialog } from "@/components/settings/plugin-install-dialog";
 import { SettingsEmpty } from "@/components/settings/shell";
 
 interface Marketplace { id: string; name: string; owner: string | null }
@@ -28,7 +28,6 @@ export default function MemberPluginBrowser() {
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -53,27 +52,10 @@ export default function MemberPluginBrowser() {
   }, []);
   useEffect(() => { if (selected) loadCatalog(selected); }, [selected, loadCatalog]);
 
-  const install = async (name: string) => {
-    if (!selected) return;
-    setBusy(name);
-    try {
-      const r = await fetch("/api/extensions/install", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ marketplaceId: selected, pluginName: name }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok) {
-        const m = d.manifest ?? {};
-        toast.success(t("installed", { skills: (m.skills ?? []).length, connectors: (m.connectors ?? []).length }));
-        for (const note of m.notes ?? []) toast.message(note);
-        await loadCatalog(selected);
-      } else toast.error(t("installFailed"));
-    } catch {
-      toast.error(t("installFailed"));
-    } finally {
-      setBusy(null);
-    }
-  };
+  // The same review dialog the admin catalog uses, asking for `user` scope — a member installs
+  // for themselves. This used to POST `/api/extensions/install`, which now returns 410, so this
+  // button was broken by the gate landing ahead of its callers.
+  const [pendingInstall, setPendingInstall] = useState<{ marketplaceId: string; pluginName: string } | null>(null);
 
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
   if (!markets.length) {
@@ -121,8 +103,13 @@ export default function MemberPluginBrowser() {
                   <Check className="h-3.5 w-3.5" />{t("installedLabel")}
                 </span>
               ) : (
-                <Button size="sm" variant="outline" disabled={!c.installable || busy === c.name} onClick={() => install(c.name)}>
-                  {busy === c.name ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1 h-3.5 w-3.5" />}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!c.installable}
+                  onClick={() => selected && setPendingInstall({ marketplaceId: selected, pluginName: c.name })}
+                >
+                  <Download className="mr-1 h-3.5 w-3.5" />
                   {t("install")}
                 </Button>
               )}
@@ -131,6 +118,13 @@ export default function MemberPluginBrowser() {
           {filtered.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">{t("noMatches", { query })}</p>}
         </div>
       )}
+
+      <PluginInstallDialog
+        target={pendingInstall}
+        scope="user"
+        onClose={() => setPendingInstall(null)}
+        onInstalled={() => { if (selected) return loadCatalog(selected); }}
+      />
     </div>
   );
 }

@@ -27,7 +27,10 @@ export const DELETE = apiHandler(async (req: Request) => {
   const marketplaceId = url.searchParams.get("marketplaceId");
   const pluginName = url.searchParams.get("pluginName");
   if (!marketplaceId || !pluginName) return Response.json({ error: "marketplaceId and pluginName required" }, { status: 400 });
-  const installId = await findInstall(marketplaceId, pluginName);
+  // The org-wide install, explicitly. This route is the admin catalog's "uninstall for
+  // everyone"; a member's personal copy of the same plugin is theirs, and removing it from
+  // under them here would be silent — nothing in this response says whose install it was.
+  const installId = await findInstall(marketplaceId, pluginName, { scope: "system", userId: null });
   if (!installId) return Response.json({ error: "Not installed" }, { status: 404 });
   await uninstallPlugin(installId);
   await audit({ actorId: userId, action: "plugin.uninstall", targetType: "plugin", targetKey: pluginName });

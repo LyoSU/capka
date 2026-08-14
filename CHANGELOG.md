@@ -21,6 +21,9 @@ All notable changes to Capka are documented here. Format follows
 - `CAPKA_MASTER_KEY` is validated as 32 bytes of hex at startup; a malformed key previously failed deep inside encryption, or silently weakened the HMACs.
 - IPv6 addresses in a connector URL are now evaluated against the network policy instead of being reported as unresolvable.
 - An IPv4 address written inside an IPv6 one (`::ffff:a9fe:a9fe`, `::7f00:1`, the NAT64 prefix) is now blocked like the IPv4 address it is; previously only the dotted `::ffff:1.2.3.4` form was recognized, so a hostname resolving to the hex form reached cloud metadata and loopback. An address that parses as neither family is refused rather than allowed.
+- Installing skills from a GitHub repo no longer also installs connectors and executable plugin files the approval card never mentioned; a repo declaring them installs its skills and says in the install notes that the connectors were skipped.
+- A legacy upgrade path that could erase a running update's claim is removed, and the remaining install path writes a plugin's pin, inventory and bundled files as one fenced unit. An install that fails part-way no longer leaves an empty plugin behind.
+- The review no longer offers to delete a permission rule that another source's identically named connector or skill still answers to, and no longer offers a rule the person asking is not allowed to delete (which previously failed inside the apply and left the plugin needing attention).
 
 ### Added
 
@@ -30,6 +33,8 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Installing skills straight from a GitHub repo (a repo with no `marketplace.json`) now actually routes them; it previously reported success and installed nothing.
+- Browse → Install works again for both admins and members: it now opens the same review screen an update does. It had been left calling the endpoints that moved behind the review, so every first install returned an error.
+- A plugin update whose lease expires now records how it ended in the activity list instead of stopping at `plugin.apply_accepted`, and one operation can no longer produce two conflicting outcomes there.
 - A connector or skill left behind by a plugin whose install record is gone is no longer offered to the agent, and now shows up under Connectors so it can be deleted — it was previously live, reachable, and invisible on every screen.
 
 - A single dropped realtime event no longer freezes a reply on screen for the rest of the turn: the client holds what it cannot apply yet and replays it once the reply's snapshot catches up, instead of discarding it and waiting for the turn to end. Previously any interruption of the event stream — an SSE reconnect, a Postgres `LISTEN` blip, a payload over the `NOTIFY` size limit — left the user watching a stalled answer while the agent kept working.

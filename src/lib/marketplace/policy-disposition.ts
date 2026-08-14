@@ -70,6 +70,44 @@ export async function readPolicyBaseline(
   }));
 }
 
+/**
+ * Names that a resource this operation does NOT own will still answer to afterwards.
+ *
+ * `analysePolicies` decides `applies_to_nothing` from the surviving names, and those used to
+ * come only from THIS plugin's plan. But a policy is keyed on `(capabilityType, capabilityKey)`
+ * and nothing else — `run-context.ts` asks `policy.effect("connector", name)` and knows nothing
+ * about `source` — while Capka deliberately allows the same name from several sources at once:
+ * an org-wide install, a member's personal one, another plugin, a hand-added row.
+ *
+ * So an upgrade that dropped its own `api` connector reported every rule naming `api` as
+ * applying to nothing, and offered to delete rules that another plugin's still-present `api`
+ * was answering to. Authorization already refuses what the actor may not touch, so this is not
+ * escalation — it is the review describing the wrong consequence, which is worse in a screen
+ * whose entire job is to describe consequences.
+ *
+ * Only rows OUTSIDE `ownTag` count. This operation's own rows are described by its plan, which
+ * is the authority on what becomes of them.
+ */
+export async function foreignSurvivors(
+  names: { type: CapabilityType; name: string }[],
+  ownTag: string | null,
+): Promise<{ type: CapabilityType; name: string }[]> {
+  const connectorNames = names.filter((n) => n.type === "connector").map((n) => n.name);
+  const skillNames = names.filter((n) => n.type === "skill").map((n) => n.name);
+  if (!connectorNames.length && !skillNames.length) return [];
+  // A first install owns nothing yet, so nothing is excluded — `source <> ''` matches every
+  // row, which is exactly right.
+  const { rows } = await pool.query<{ kind: string; name: string }>(
+    `SELECT 'connector' AS kind, name FROM mcp_servers
+       WHERE name = ANY($1::text[]) AND coalesce(source, '') <> $3
+     UNION
+     SELECT 'skill' AS kind, name FROM skills
+       WHERE name = ANY($2::text[]) AND coalesce(source, '') <> $3`,
+    [connectorNames, skillNames, ownTag ?? ""],
+  );
+  return rows.map((r) => ({ type: r.kind as CapabilityType, name: r.name }));
+}
+
 /** `policyKey` → `revision`, the shape `reviewHash` folds in. A wider baseline is what
  *  covers a hand edit the apply-state fence cannot: the policy tables are not
  *  plugin-owned, so an admin editing one mid-apply is not refused — it simply makes the
