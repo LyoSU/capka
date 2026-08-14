@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ForbiddenDispositionError, analysePolicies, assertDispositionAllowed, policyKey,
-  type PolicyBaselineRow, type PolicyOutlook,
+  survivingDispositions, type PolicyBaselineRow, type PolicyOutlook,
 } from "../policy-disposition";
 
 /**
@@ -108,5 +108,39 @@ describe("analysePolicies canDelete (what the screen may offer)", () => {
       expect(o.canDelete, `${r.scope}/${r.userId ?? "-"} as ${actor.isAdmin ? "admin" : actor.userId}, surviving=${surviving.length}`)
         .toBe(enforcementAllows);
     }
+  });
+});
+
+describe("survivingDispositions", () => {
+  const outlook = (over: Partial<PolicyOutlook> = {}): PolicyOutlook => ({
+    key: "connector:api:system::", capabilityType: "connector", capabilityKey: "api",
+    effect: "deny", outlook: "applies_to_nothing", canDelete: true, ...over,
+  });
+
+  it("drops a decision about a rule that is no longer there", () => {
+    // The failure this prevents: a stale refusal re-presents a fresh review, and the old
+    // decision rides along INSIDE its hash. The pair then agrees with itself and passes both
+    // hash checks, so the rule being gone is discovered inside the apply — after resources
+    // changed, where it marks the install as needing attention instead of asking again.
+    expect(survivingDispositions({ "connector:gone:system::": "delete" }, [outlook()])).toEqual({});
+  });
+
+  it("drops a delete this actor turned out not to be allowed to make", () => {
+    // `canDelete` is recomputed per review against the reader's authority, so a decision
+    // taken when it was true must not survive into a review where it is false.
+    expect(survivingDispositions({ "connector:api:system::": "delete" }, [outlook({ canDelete: false })])).toEqual({});
+  });
+
+  it("keeps what the fresh review can still carry out", () => {
+    const d = { "connector:api:system::": "delete" as const };
+    expect(survivingDispositions(d, [outlook()])).toEqual(d);
+    // `keep` is a decision too — it is in the hash — and it stays as long as its rule does.
+    expect(survivingDispositions({ "connector:api:system::": "keep" }, [outlook({ canDelete: false })]))
+      .toEqual({ "connector:api:system::": "keep" });
+  });
+
+  it("is empty when there is nothing left to decide about", () => {
+    expect(survivingDispositions({ "connector:api:system::": "delete" }, [])).toEqual({});
+    expect(survivingDispositions({}, [outlook()])).toEqual({});
   });
 });

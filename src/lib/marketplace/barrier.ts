@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { pluginInstalls } from "@/lib/db/schema";
 import { getBlockPrivateProviderUrls, getMasterKey } from "@/lib/settings";
 import { log } from "@/lib/log";
-import { insertPluginAudit, insertPolicyClearAudit } from "./audit";
+import { AuditInvariantViolation, insertPluginAudit, insertPolicyClearAudit } from "./audit";
 import { classifyDelta } from "./delta";
 import { FencedWriteError } from "./fence";
 import { readStoredManifest, reservedManifest, type ApplyKind } from "./manifest-store";
@@ -16,7 +16,7 @@ import {
 import { buildPluginPlan } from "./plan";
 import {
   ForbiddenDispositionError, analysePolicies, applyDispositions, foreignSurvivors, policyRevisions,
-  readPolicyBaseline, type DispositionActor, type PolicyOutlook,
+  readPolicyBaseline, survivingDispositions, type DispositionActor, type PolicyOutlook,
 } from "./policy-disposition";
 import { projectPlanSurface } from "./project";
 import { projectPluginReview, type PolicyDisposition, type ReviewResponse, type ReviewSubject } from "./review";
@@ -78,7 +78,10 @@ export type ApplyOutcome =
   /** The review no longer describes reality. Carries the FRESH review so the caller can
    *  re-present it without another round trip — which does not close the new window, and
    *  is why the next attempt rebuilds everything again. */
-  | { outcome: "stale"; review: ReviewResponse; policies: PolicyOutlook[] }
+  // `dispositions` is what the caller sent, minus anything the FRESH review can no longer
+  // carry out — the screen must adopt it along with the review, or the pair it sends back
+  // passes the hash checks and fails inside the apply.
+  | { outcome: "stale"; review: ReviewResponse; policies: PolicyOutlook[]; dispositions: Record<string, PolicyDisposition> }
   | { outcome: "blocked"; review: ReviewResponse; policies: PolicyOutlook[] }
   | { outcome: "failed"; errorCode: string }
   /** The request itself was not acceptable — no operation was started and nothing is
@@ -266,6 +269,29 @@ export async function applyPluginReviewed(input: ApplyRequest & {
     return { ...g, ...projected };
   };
 
+  /**
+   * A stale refusal, carrying a review the screen can act on directly.
+   *
+   * The dispositions have to travel WITH it, re-derived against the fresh outlooks: they are
+   * inside the hash, so re-presenting the new review beside the old decisions produces a pair
+   * that agrees with itself and sails through both hash checks — and the disposition that can
+   * no longer be carried out is discovered inside the apply, after resources changed, where
+   * it marks the install as needing attention instead of asking a question.
+   *
+   * So the review is re-projected over what survives. The gather is reused: nothing has been
+   * read again, only hashed again, which is why this cannot disagree with the outlooks it
+   * ships beside.
+   */
+  const staleWith = (g: Awaited<ReturnType<typeof build>>): Extract<ApplyOutcome, { outcome: "stale" }> => {
+    const dispositions = survivingDispositions(input.dispositions, g.policies);
+    const projected = projectPluginReview({
+      subject, plan: g.plan, observations: g.observations,
+      sourceBefore: g.sourceBefore, runtimeBefore: g.runtimeBefore, sourceAfter: g.sourceAfter,
+      delta: g.delta, dispositions, policyRevisions: policyRevisions(g.policyBaseline),
+    });
+    return { outcome: "stale", review: projected.response, policies: g.policies, dispositions };
+  };
+
   const first = await build();
   const targetKey = `${input.pluginName}`;
 
@@ -274,7 +300,7 @@ export async function applyPluginReviewed(input: ApplyRequest & {
   // seeing.
   if (first.durable.reviewHash !== input.reviewHash) {
     await insertPluginAudit(db, { operationId: `stale-${nanoid(8)}`, event: "stale", actorId: input.actorId, reviewHash: input.reviewHash, targetKey });
-    return { outcome: "stale", review: first.response, policies: first.policies };
+    return staleWith(first);
   }
   // A valid hash does NOT override an inability to proceed. DNS may have turned unsafe
   // since the review, which is not a different consent but a reason there is nothing safe
@@ -339,11 +365,19 @@ export async function applyPluginReviewed(input: ApplyRequest & {
     });
   } catch (e) {
     // A conflict is an expected outcome, not a fault: someone else owns this apply.
+    // Everything else IS a fault, and saying "stale" about it is a lie the screen acts on —
+    // it re-presents the same review and invites the user to accept it again, which walks
+    // straight back into an FK violation or a dead transaction. Only losing the race means
+    // the review went out of date; a claim that could not be written means the write failed.
     if (!(e instanceof StagingConflict)) {
       log.error("plugin apply could not record its claim", { installId, operationId, err: String(e) });
+      // The journal write is called out separately because it fails for its own reason — the
+      // audit entry violated an invariant — and the claim it rolled back was otherwise fine.
+      const errorCode = e instanceof AuditInvariantViolation ? "audit_failed" : "claim_failed";
+      return { outcome: "failed", errorCode };
     }
   }
-  if (!claimed) return { outcome: "stale", review: first.response, policies: first.policies };
+  if (!claimed) return staleWith(first);
 
   /**
    * Record that this apply ended badly — but only when the flip to `failed` was OURS to make.
@@ -381,7 +415,7 @@ export async function applyPluginReviewed(input: ApplyRequest & {
     if (second.durable.reviewHash !== input.reviewHash) {
       await releaseApplyClaim(installId, operationId, kind);
       await insertPluginAudit(db, { operationId, event: "stale", actorId: input.actorId, reviewHash: input.reviewHash, targetKey });
-      return { outcome: "stale", review: second.response, policies: second.policies };
+      return staleWith(second);
     }
 
     // ── mutating ─────────────────────────────────────────────────────────────────

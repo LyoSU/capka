@@ -209,7 +209,13 @@ export const POST = apiHandler(async (req: Request) => {
     case "stale":
       // 409 with the FRESH review, so the screen can re-present it without another round
       // trip. It does not close the new window — the next accept rebuilds everything again.
-      return Response.json({ error: "stale", review: outcome.review, policies: outcome.policies }, { status: 409 });
+      // `dispositions` comes with it and REPLACES what the screen was holding: the hash is
+      // computed over them, so a fresh review carrying the old decisions is a pair that
+      // agrees with itself, passes both checks, and then fails inside the apply.
+      return Response.json(
+        { error: "stale", review: outcome.review, policies: outcome.policies, dispositions: outcome.dispositions },
+        { status: 409 },
+      );
     case "blocked":
       return Response.json({ error: "blocked", review: outcome.review, policies: outcome.policies }, { status: 409 });
     case "rejected":

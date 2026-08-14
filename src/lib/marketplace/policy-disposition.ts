@@ -151,6 +151,34 @@ function ownsPolicy(row: PolicyBaselineRow, actor: DispositionActor): boolean {
 }
 
 /**
+ * The subset of a set of dispositions that the CURRENT outlooks can still carry out.
+ *
+ * A refusal that re-presents a fresh review has to re-present the decisions against it too.
+ * Handing back the fresh review while keeping the old dispositions produces something worse
+ * than a mismatch: the hash is computed over the dispositions, so the pair AGREES and passes
+ * both hash checks — and the disposition is only found to be unenforceable inside the apply,
+ * after resources have changed, where the refusal marks the install as needing attention.
+ *
+ * Dropped rather than rewritten: a rule that is gone has no decision left to make, and a
+ * delete this actor may not carry out was never theirs to choose. What survives is what the
+ * installer decided AND the server can still honour.
+ */
+export function survivingDispositions(
+  dispositions: Record<string, PolicyDisposition>,
+  outlooks: PolicyOutlook[],
+): Record<string, PolicyDisposition> {
+  const byKey = new Map(outlooks.map((o) => [o.key, o]));
+  const out: Record<string, PolicyDisposition> = {};
+  for (const [key, disposition] of Object.entries(dispositions)) {
+    const outlook = byKey.get(key);
+    if (!outlook) continue;
+    if (disposition === "delete" && !outlook.canDelete) continue;
+    out[key] = disposition;
+  }
+  return out;
+}
+
+/**
  * What each affected rule will mean once the apply lands — the analysis the review screen
  * renders and the installer decides against.
  *

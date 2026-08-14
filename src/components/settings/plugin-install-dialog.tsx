@@ -95,12 +95,21 @@ export function PluginInstallDialog({ target, scope, onInstalled, onClose }: {
         await onInstalled();
         return;
       }
-      const d = await r.json().catch(() => ({})) as { error?: string; review?: PluginReview; policies?: PolicyOutlook[] };
+      const d = await r.json().catch(() => ({})) as {
+        error?: string; review?: PluginReview; policies?: PolicyOutlook[];
+        dispositions?: Record<string, "keep" | "delete">;
+      };
       if (r.status === 409 && d.review) {
         // Something moved while the operator was reading. Re-present the FRESH review the
         // server already sent, in place — asking for it again would only widen the same window.
         toast.error(tReview(d.error === "blocked" ? "cannotApply" : "staleTitle"));
         setPayload({ review: d.review, policies: d.policies ?? [], targetSha: payload.targetSha });
+        // The choices go back to what the SERVER says can still be carried out. Keeping the
+        // old ones is not a cosmetic mismatch: they are inside the hash the server just
+        // rebuilt, so the next accept would pass both checks and only then discover that a
+        // rule it promised to delete is gone — by which time resources have changed and the
+        // install is marked as needing attention instead of asking the question again.
+        if (d.error !== "blocked") setDispositions(d.dispositions ?? {});
         return;
       }
       toast.error(d.error === "failed" ? tReview("applyFailed") : t("installFailed"));

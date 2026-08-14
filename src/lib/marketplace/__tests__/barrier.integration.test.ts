@@ -226,6 +226,46 @@ run("apply barrier", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("hands back a review and the decisions that go WITH it, so the retry is accepted", async () => {
+    // The pair is what matters: the dispositions are inside the hash, so a screen that adopts
+    // the fresh review while keeping its old decisions sends back a combination the server
+    // never produced. Here the retry uses both halves the refusal returned, and is accepted —
+    // which is only true if the returned hash was computed over the returned dispositions.
+    const { review } = await preview(null);
+    load({ ".mcp.json": JSON.stringify({ mcpServers: { api: { url: "https://api.example.com/mcp" }, extra: { url: "https://other.example.com/mcp" } } }) });
+    const stale = await apply(null, review.reviewHash);
+    expect(stale.outcome).toBe("stale");
+    if (stale.outcome !== "stale") return;
+    expect(stale.dispositions).toEqual({});
+    expect(h.writes).toBe(0);
+
+    const retry = await applyPluginReviewed({
+      gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
+      installId: null, targetSha: SHA, actorId: ACTOR, reviewHash: stale.review.reviewHash,
+      dispositions: stale.dispositions, performWrites, actor: { userId: ACTOR, isAdmin: true },
+    });
+    expect(retry).toEqual({ outcome: "succeeded" });
+  });
+
+  it("calls a claim that could not be WRITTEN a failure, not a stale review", async () => {
+    // Losing the unique index (the test above) is the only reason a claim means the review went
+    // out of date. Every other way the transaction can die — an FK violation, a dead connection,
+    // an audit invariant — used to be reported as `stale` too, and the screen acts on that: it
+    // re-presents the same review and invites the user to accept it again, straight back into
+    // the same broken write. A journal entry whose actor does not exist violates the FK.
+    const { review } = await preview(null);
+    const outcome = await applyPluginReviewed({
+      gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
+      installId: null, targetSha: SHA, actorId: "brtest-ghost", reviewHash: review.reviewHash,
+      dispositions: {}, performWrites, actor: { userId: "brtest-ghost", isAdmin: true },
+    });
+    expect(outcome).toEqual({ outcome: "failed", errorCode: "claim_failed" });
+    // And it failed BEFORE anything changed: the claim is the gate the writes sit behind.
+    expect(h.writes).toBe(0);
+    const { rows } = await pool.query(`SELECT id FROM plugin_installs WHERE marketplace_id = $1`, [MK]);
+    expect(rows).toHaveLength(0);
+  });
+
   it("records `accepted` and the claim atomically", async () => {
     // The journal entry and the claim are one transaction, so there is no state where an
     // install is claimed with no record of who claimed it.
