@@ -184,6 +184,14 @@ export function createGuardedFetch(opts: {
   headers?: Record<string, string>;
 }): typeof fetch {
   const MAX_REDIRECTS = 5;
+  // The only request headers that survive a cross-origin hop. Deny-by-default, because a
+  // blocklist has to enumerate every credential header anybody might send — and the
+  // `authorization`/`cookie` pair it used to be already missed the ones every AI SDK
+  // actually uses: `x-api-key` (Anthropic), `x-goog-api-key` (Google), `api-key` (Azure).
+  // Those arrive in the CALLER's `init.headers`, not in `opts.headers`, so a provider on an
+  // admin-supplied base URL could 3xx an operator's key straight to another host. None of
+  // the five below carry authority; everything else, known or not, is dropped.
+  const CROSS_ORIGIN_SAFE = new Set(["accept", "accept-encoding", "accept-language", "content-type", "user-agent"]);
   const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number, origin: string): Promise<Response> => {
     const reqUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     // `origin`, not `host`: comparing hosts treated `https://api.example.com` and
@@ -197,9 +205,10 @@ export function createGuardedFetch(opts: {
     // while still on the original host. GitHub's raw/codeload endpoints 3xx to
     // *.githubusercontent.com / object storage, and forwarding the Authorization
     // there would leak the operator's token to an attacker-influenced redirect
-    // target. On a cross-host hop, also strip any caller-supplied auth/cookie.
+    // target. On a cross-origin hop, everything the caller sent is dropped too unless
+    // it is on the deny-by-default allowlist above.
     if (opts.headers && sameOrigin) for (const [k, v] of Object.entries(opts.headers)) h.set(k, v);
-    if (!sameOrigin) { h.delete("authorization"); h.delete("cookie"); }
+    if (!sameOrigin) for (const k of [...h.keys()]) if (!CROSS_ORIGIN_SAFE.has(k)) h.delete(k);
     let signal = init?.signal ?? undefined;
     if (opts.timeoutMs) {
       const ts = AbortSignal.timeout(opts.timeoutMs);
@@ -227,7 +236,16 @@ export function createGuardedFetch(opts: {
       // so that hop's retiring Agent can close now rather than retain a pool until
       // garbage collection or the remote peer times out.
       await res.body?.cancel().catch(() => {});
-      return doFetch(next, init, depth + 1, origin);
+      // Follow the redirect the way `fetch` itself does: 303 — and, by universal practice,
+      // 301/302 — turn a non-GET into a GET and drop the body. Replaying it verbatim re-sent
+      // the caller's request body, which they aimed at the ORIGINAL host, to whatever the
+      // redirect names; only 307/308 are defined to preserve method and body.
+      const preserve = res.status === 307 || res.status === 308;
+      const method = (init?.method ?? "GET").toUpperCase();
+      const nextInit = preserve || method === "GET" || method === "HEAD"
+        ? init
+        : { ...init, method: "GET", body: undefined };
+      return doFetch(next, nextInit, depth + 1, origin);
     }
     return res;
   };

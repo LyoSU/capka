@@ -143,6 +143,64 @@ describe("createGuardedFetch", () => {
     expect(calls[0].auth).toBe("Bearer ghtoken"); // sent to the original host
     expect(calls[1].auth).toBeNull(); // NOT forwarded to the cross-host redirect target
   });
+
+  it("drops EVERY caller header cross-origin, not just authorization/cookie", async () => {
+    // The strip used to be a two-name blocklist, which missed the header every AI SDK
+    // actually authenticates with: a custom Anthropic/Google/Azure base URL hands the key
+    // to this fetch in `init.headers`, so one 3xx to an attacker's host leaked it.
+    const calls: Record<string, string | null>[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const h = new Headers(init?.headers);
+      calls.push({
+        "x-api-key": h.get("x-api-key"),
+        "x-goog-api-key": h.get("x-goog-api-key"),
+        "api-key": h.get("api-key"),
+        "content-type": h.get("content-type"),
+      });
+      if (calls.length === 1) return new Response(null, { status: 302, headers: { location: "https://evil.example.net/collect" } });
+      return new Response("ok", { status: 200 });
+    }) as never;
+    const guarded = createGuardedFetch({ blockPrivate: false });
+    const res = await guarded("https://gateway.example.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": "sk-ant-secret", "x-goog-api-key": "goog-secret", "api-key": "azure-secret", "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    expect(calls[0]["x-api-key"]).toBe("sk-ant-secret"); // fine — still the origin the admin configured
+    expect(calls[1]["x-api-key"]).toBeNull();
+    expect(calls[1]["x-goog-api-key"]).toBeNull();
+    expect(calls[1]["api-key"]).toBeNull();
+    expect(calls[1]["content-type"]).toBe("application/json"); // carries no authority; kept
+  });
+
+  it("turns a redirected POST into a GET and drops the body (301/302/303)", async () => {
+    // Replaying method+body verbatim re-sent a request the caller aimed at the ORIGINAL
+    // host to whatever the redirect names. Only 307/308 are defined to preserve them.
+    const calls: { method: string | undefined; body: unknown }[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ method: init?.method, body: init?.body });
+      if (calls.length === 1) return new Response(null, { status: 302, headers: { location: "https://api.example.com/v2" } });
+      return new Response("ok", { status: 200 });
+    }) as never;
+    const guarded = createGuardedFetch({ blockPrivate: false });
+    await guarded("https://api.example.com/v1", { method: "POST", body: "secret=1" });
+    expect(calls[0]).toMatchObject({ method: "POST", body: "secret=1" });
+    expect(calls[1].method).toBe("GET");
+    expect(calls[1].body).toBeUndefined();
+  });
+
+  it("preserves method and body across a 307", async () => {
+    const calls: { method: string | undefined; body: unknown }[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ method: init?.method, body: init?.body });
+      if (calls.length === 1) return new Response(null, { status: 307, headers: { location: "https://api.example.com/v2" } });
+      return new Response("ok", { status: 200 });
+    }) as never;
+    const guarded = createGuardedFetch({ blockPrivate: false });
+    await guarded("https://api.example.com/v1", { method: "POST", body: "payload" });
+    expect(calls[1]).toMatchObject({ method: "POST", body: "payload" });
+  });
 });
 
 describe("UnsafeUrlError", () => {
