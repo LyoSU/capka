@@ -2,11 +2,12 @@ import { nanoid } from "nanoid";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } from "@/lib/db/schema";
-import { ingestSkill, deleteSkill } from "@/lib/skills/service";
-import { upsertServer, upsertStdioServer, setEnabled, deleteServer } from "@/lib/mcp/service";
+import { deleteSkill } from "@/lib/skills/service";
+import { deleteServer } from "@/lib/mcp/service";
 import { ValidationError } from "@/lib/errors";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
+import { applyPlanResources } from "./apply";
 import { observePluginPlan } from "./observe";
 import { buildPluginPlan } from "./plan";
 import type { CatalogItem, CommitInfo, GitHubRef, InstallManifest } from "./types";
@@ -82,33 +83,7 @@ async function resolvePlugin(marketplaceId: string, pluginName: string) {
 export async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget, only?: string[]): Promise<ApplyResult> {
   const plan = await buildPluginPlan(gh, only);
   const obs = await observePluginPlan(plan);
-  const manifest: InstallManifest = {
-    skills: [], connectors: [], ignored: plan.ignored, notes: plan.notes, commit: plan.commit,
-    ...(plan.version ? { version: plan.version } : {}),
-    ...(plan.displayName ? { displayName: plan.displayName } : {}),
-  };
-
-  for (const c of plan.connectors) {
-    if (c.kind === "stdio") {
-      // Every marketplace stdio server runs third-party code in a user's sandbox, so
-      // all of them install OFF and an admin enables them from Extensions.
-      const sid = await upsertStdioServer({ ...target, name: c.name, command: c.command!, args: c.args, env: c.env, source: tag });
-      await setEnabled(sid, false);
-    } else {
-      const authKind = obs.detectedAuth[c.name] ?? "token";
-      const secrets = c.headers && !c.hasPlaceholder ? { headers: c.headers } : undefined;
-      const id = await upsertServer({ ...target, name: c.name, url: c.url!, secrets, authKind, source: tag });
-      if (c.hasPlaceholder) await setEnabled(id, false);
-    }
-    manifest.connectors.push(c.name);
-  }
-
-  for (const s of plan.skills) {
-    await ingestSkill(s.parsed, s.files, { ...target, source: tag });
-    manifest.skills.push(s.name);
-  }
-
-  return { manifest, files: plan.files };
+  return { manifest: await applyPlanResources(plan, obs, tag, target), files: plan.files };
 }
 
 /** Install one plugin from an added marketplace into A (skills) + B (connectors),
