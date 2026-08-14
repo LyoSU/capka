@@ -108,6 +108,30 @@ describe("no unpainted frame", () => {
   });
 });
 
+describe("the navigator's active turn", () => {
+  it("the end of the transcript wins over the reading line", () => {
+    // Several turns fit on one screen, so the block on the reading line usually
+    // belongs to a turn two or three back. At the very bottom that read as the
+    // wrong mark being lit while the reader looked straight at the newest reply —
+    // and it made the LAST mark unreachable by scrolling at all.
+    const src = readFileSync(HOOK, "utf8");
+    expect(src).toContain("const upTo = st.endVisible || !anchor ? nodes.length - 1 : nodes.indexOf(anchor)");
+  });
+
+  it("crossing into view re-derives it, since no intersection reports that", () => {
+    // The last pixels of a scroll to the bottom move nothing in or out of the
+    // observed region, so the observer stays silent and the highlight would sit on
+    // whatever the reading line said before. `settle` owns that boundary.
+    const src = readFileSync(HOOK, "utf8");
+    const branch = src.slice(src.indexOf("if (plan.endVisible !== s.current.endVisible) {"));
+    expect(branch.slice(0, branch.indexOf("\n    }"))).toContain("s.current.recomputeActive?.()");
+    // Lent out by the observer effect and taken back on teardown — a call into a
+    // disconnected observer's node set would highlight from a stale `seen`.
+    expect(src).toContain("st.recomputeActive = recompute");
+    expect(src).toContain("st.recomputeActive = null");
+  });
+});
+
 describe("cross-platform anchoring", () => {
   it("the container opts out of native scroll anchoring", () => {
     // Safari ships `overflow-anchor` in no stable release, so the engine

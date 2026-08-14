@@ -223,6 +223,11 @@ export function useChatScroll({ turnKey, isStreaming, messageCount, enabled }: O
      *  so the held element and the nav's active turn both come from observer
      *  callbacks instead of measuring every message on every scroll event. */
     seen: new Set<HTMLElement>(),
+    /** Re-derive the nav's active turn. Owned by the observer effect below (which
+     *  clears it on teardown) and called from `settle` on the one transition the
+     *  observer cannot report: the end of the transcript coming into or going out
+     *  of view, which changes the answer without changing any intersection. */
+    recomputeActive: null as (() => void) | null,
     /** Set when THIS client sends; consumed by the turn that send creates. */
     expectSend: false,
     /** The turn this engine has already reacted to, so the arrival branch fires
@@ -508,6 +513,12 @@ export function useChatScroll({ turnKey, isStreaming, messageCount, enabled }: O
       s.current.endVisible = plan.endVisible;
       setEndVisible(plan.endVisible);
       if (plan.endVisible) setHasUnseen(false);
+      // Crossing that boundary changes which turn the nav highlights, and it is the
+      // one such change no intersection reports: the last few pixels of a scroll to
+      // the bottom move nothing in or out of the observed region. Recomputed only on
+      // the transition — the reading-line answer costs a DOM walk, and paying it per
+      // scroll frame is what the observer exists to avoid.
+      s.current.recomputeActive?.();
     }
     captureAnchor();
 
@@ -702,7 +713,13 @@ export function useChatScroll({ turnKey, isStreaming, messageCount, enabled }: O
         st.anchorEl = anchor;
         captureAnchor();
       }
-      // The turn being read is the last user message at or before the anchor.
+      // The turn being read is the last user message at or before the anchor —
+      // EXCEPT at the end of the transcript, which answers "where am I" by itself.
+      // Several turns fit on one screen, so the block sitting on the reading line
+      // routinely belongs to a turn two or three back: a reader at the very bottom,
+      // looking straight at the newest reply, got an older mark highlighted and the
+      // last mark was unreachable by scrolling at all. With nothing below the newest
+      // turn, that turn is where the reader is.
       //
       // Derived from DOM order rather than from remembered geometry on purpose. The
       // obvious implementation — recording, per message, whether its top is above
@@ -712,7 +729,7 @@ export function useChatScroll({ turnKey, isStreaming, messageCount, enabled }: O
       // leaves and the highlight lags a full message behind. The anchor, by
       // contrast, is accurate by construction: entering and leaving the observed
       // region are exactly the callbacks the observer does deliver.
-      const upTo = anchor ? nodes.indexOf(anchor) : nodes.length - 1;
+      const upTo = st.endVisible || !anchor ? nodes.length - 1 : nodes.indexOf(anchor);
       let active: string | null = null;
       let firstUser: string | null = null;
       for (let i = 0; i < nodes.length; i++) {
@@ -743,8 +760,13 @@ export function useChatScroll({ turnKey, isStreaming, messageCount, enabled }: O
       watched.add(node);
     }
     recompute();
+    // Lent to `settle` for the end-of-transcript transition, and taken back here —
+    // the inverse lives next to what it undoes, so no stale closure over a
+    // disconnected observer's node set can outlive this effect.
+    st.recomputeActive = recompute;
     return () => {
       io.disconnect();
+      st.recomputeActive = null;
       for (const node of watched) st.seen.delete(node);
     };
   }, [enabled, messageCount, readingLine, captureAnchor]);

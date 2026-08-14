@@ -33,12 +33,14 @@ describe("streamed text", () => {
     expect(block).not.toMatch(/filter|mask-image|opacity:\s*0(\.0*)?[;\s]/);
   });
 
-  it("renders reasoning as plain text, not a per-character split", () => {
+  it("renders reasoning whole, not as a per-character split", () => {
     // A tail requires slicing the thought into "settled" + "arriving" halves.
     // No slice, no tail — and no re-render cost proportional to stream speed.
+    // (The thought is markdown now, so the whole of it goes to one renderer;
+    // what's forbidden is cutting it into a settled and an arriving half.)
     const row = message.slice(message.indexOf("function ReasoningRow"));
     const body = row.slice(0, row.indexOf("\n}"));
     expect(body).not.toMatch(/\.slice\(/);
-    expect(body).toContain(">{clean}</p>"); // the whole thought, one text node
+    expect(body).toContain(">{clean}</Markdown>");
   });
 });

@@ -8,11 +8,13 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- The model's thinking now renders as Markdown instead of raw text — `**bold**` pseudo-headings, lists and fenced code inside a thought are typeset, at the thinking row's own size.
 - The update review dialog leads with what the update will be able to do; the author's file changes moved below it into an expander that now lists the actual filenames.
 - A skills repo added as a marketplace no longer advertises a skill count in its description — the count omitted `commands/*.md` and read lower than what an install brings.
 
 ### Fixed
 
+- The chat navigator down the right edge now marks the newest turn once the end of the transcript is on screen; at the bottom of a chat it highlighted an older turn, and the last mark could not be reached by scrolling at all.
 - The Plugins tab showed `settings.skills.installed.state.on` instead of On / Off / Partly on.
 - A connector or skill left behind by a removed plugin now says so, explains that nothing can use it, and offers only Delete. Such a skill was previously hidden from the Library, from every run, and from the Plugins tab at once — reachable from no screen.
 - `npm test` no longer needs a local PostgreSQL: the plugin-permission suite's teardown ran outside its `RUN_INTEGRATION` gate and failed the whole file where no database was listening.

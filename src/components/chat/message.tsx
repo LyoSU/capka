@@ -421,8 +421,16 @@ function WorkspaceLinks({ text, chatId, live, touched }: { text: string; chatId:
  *  carries no streaming/done state (`contracts.ts`), so the dissolving tail this
  *  used to have was driven by position in the rail and sat frozen over final text
  *  whenever the model paused before answering. Liveness is already carried by the
- *  group header's ticking duration and the running step's spinner. */
-function ReasoningRow({ text }: { text: string }) {
+ *  group header's ticking duration and the running step's spinner.
+ *
+ *  It renders as markdown, not as a pre-wrapped text node: models write `**bold**`
+ *  pseudo-headings, lists and fenced code straight into their thoughts, and left
+ *  unparsed those markers are the loudest thing on the row. `reasoning-prose`
+ *  (globals.css) flattens the heading scale back to this row's own size —
+ *  Streamdown types an `h1` at `text-3xl`, which would set a thought bigger than
+ *  the answer it precedes. No `chatId`: /workspace chips belong to the answer,
+ *  where a file mention is something to act on, not to a thought about one. */
+function ReasoningRow({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
   // Strip leaked chain-of-thought wrapper tags and the extra leading break some
   // models open a thought with — recomputed only when the streamed text grows.
   const clean = useMemo(() => cleanReasoning(text), [text]);
@@ -439,7 +447,9 @@ function ReasoningRow({ text }: { text: string }) {
           mechanically slanted — the same reason blockquotes dropped italic in
           globals.css. Reasoning is already set apart by the rail and the muted
           colour; it doesn't need a second, worse-legibility signal. */}
-      <p className="whitespace-pre-wrap text-sm leading-relaxed">{clean}</p>
+      <div className="reasoning-prose text-sm leading-relaxed">
+        <Markdown isStreaming={isStreaming}>{clean}</Markdown>
+      </div>
     </div>
   );
 }
@@ -576,7 +586,7 @@ function DoneRow() {
 function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string }) {
   const rows = items.map((it, i) =>
     it.kind === "reasoning"
-      ? <ReasoningRow key={`r${i}`} text={it.text} />
+      ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} />
       : <StepRow key={it.part.toolCallId} part={it.part} chatId={chatId} />,
   );
   if (!isStreaming) rows.push(<DoneRow key="done" />);

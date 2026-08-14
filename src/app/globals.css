@@ -643,6 +643,22 @@
   max-width: 70ch;
 }
 
+/* Reasoning rows render markdown too — models put `**bold**` pseudo-headings,
+   lists and fenced code in their thoughts, and unparsed markers are noise. But a
+   thought is an aside on the step rail, not an answer: Streamdown types headings
+   at answer scale (h1 `text-3xl`), which would set a passing thought larger than
+   the reply it precedes. Flatten the whole heading scale to the row's own size —
+   weight and the blank line above are enough to mark a section inside an aside.
+   Nothing here zeroes the first block's top margin: Streamdown's own wrapper
+   already carries `[&>*:first-child]:mt-0`, at a specificity that outranks this
+   rule, so the first line stays aligned with the bulb badge beside it. */
+.reasoning-prose :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 0.75rem;
+  margin-bottom: 0.125rem;
+  font-size: inherit;
+  line-height: inherit;
+}
+
 /* Respect the OS "reduce motion" setting. Single source of truth for the whole
    app: collapse every animation/transition to near-instant rather than chasing
    each component. New animated code is covered automatically. */
