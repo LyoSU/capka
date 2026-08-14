@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { mcpServers, skills, pluginFiles, skillFiles } from "@/lib/db/schema";
 import { decrypt, fingerprint } from "@/lib/crypto";
-import { canonicalTypedValue, contentHash, normalizeEndpoint, rootHash } from "./canonical";
+import { canonicalTypedValue, contentHash, normalizeEndpoint, rootHash, type NormalizedEndpoint } from "./canonical";
 import { hasUnresolvedPlaceholder, refsPluginRoot, serverDefParts } from "./plugin-root";
 import {
   SURFACE_SCHEMA_VERSION,
@@ -44,6 +44,32 @@ const EMPTY_FILES = { projection: "stored" as const, count: 0, bytes: 0, rootHas
  *  what a first install's own Install button provides). */
 export function emptySurface(): StoredInstallSurface {
   return { schemaVersion: SURFACE_SCHEMA_VERSION, completeness: "derived", connectors: [], skills: [], files: EMPTY_FILES };
+}
+
+/**
+ * Whether the row points at the SAME PLACE the artifact recorded — compared BY VALUE.
+ *
+ * `normalizeEndpoint` builds a fresh object on every call, so `===` between its result and a
+ * stored one is always false. That made the `prior.credentialFingerprint` fallback below
+ * unreachable, and every placeholder connector then reported a credential change on every
+ * single upgrade — the exact permanent false positive this file's header argues against,
+ * reintroduced while fixing the opposite hole. The comment above that line already said
+ * "endpoint still matches"; saying it was not implementing it.
+ *
+ * `canonicalTypedValue` sorts keys, so this compares the values rather than their identities,
+ * and does not depend on two objects having been built in the same key order.
+ */
+function sameEndpoint(rowUrl: string, priorEndpoint: NormalizedEndpoint | undefined): boolean {
+  const rowEndpoint = normalizeEndpoint(rowUrl);
+  // Either side missing is not a match: fall through to a freshly computed fingerprint, which
+  // reports a change. Conservative, and the rare case — a non-stdio row with no usable URL.
+  if (!rowEndpoint || !priorEndpoint) return false;
+  // Spelled out rather than passed whole: `CanonValue` needs an index signature, which a fixed
+  // interface does not have, and writing the fields names exactly what "the same place" means.
+  const canon = (e: NormalizedEndpoint) => canonicalTypedValue("endpoint", {
+    scheme: e.scheme, host: e.host, port: e.port, pathname: e.pathname, queryKeys: e.queryKeys,
+  });
+  return canon(rowEndpoint) === canon(priorEndpoint);
 }
 
 /** Within one install a resource's identity IS its name — `upsertServer` dedupes on
@@ -101,7 +127,7 @@ export async function readRuntimeSurface(
         // change, and the row is the only thing that knows it.
         credentialFingerprint: rawHeaders
           ? fingerprint(canonicalTypedValue("credential", { url: r.url ?? "", headers: rawHeaders }), keyHex)
-          : prior && normalizeEndpoint(r.url ?? "") === prior.endpoint
+          : prior && sameEndpoint(r.url ?? "", prior.endpoint)
             ? prior.credentialFingerprint
             : fingerprint(canonicalTypedValue("credential", { url: r.url ?? "", headers: {} }), keyHex),
       }),
