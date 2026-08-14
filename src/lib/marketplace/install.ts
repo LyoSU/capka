@@ -85,7 +85,10 @@ async function resolvePlugin(marketplaceId: string, pluginName: string) {
  *  tagging every row `catalog:<installId>`. Idempotent per name: ingestSkill /
  *  upsertServer upsert by name, so re-running with the same tag updates in place
  *  (the basis of upgrade). Returns what the current tree produced. */
-async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget, only?: string[]): Promise<ApplyResult> {
+/** Exported ONLY for the characterization suite that guards the Phase A split
+ *  (docs/plugin-install-review-plan-phase-a.md). Deleted in Task 5 along with the
+ *  function itself — no production caller outside this module. */
+export async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget, only?: string[]): Promise<ApplyResult> {
   // `only` (from `--skill`) narrows the install to specific skills by name. A
   // skill-scoped install ignores connectors entirely — the intent is "just these
   // skills", and connectors are a separate, gated concern.

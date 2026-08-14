@@ -40,7 +40,7 @@ Three files rather than one because their determinism differs: `plan.ts` is repr
 The safety net must exist and pass **before** any code moves. It captures three things per fixture: the returned `InstallManifest`, the bundled `files` array, and the ordered journal of writer calls — because identical manifests do not prove identical writes.
 
 **Files:**
-- Modify: `src/lib/marketplace/install.ts:117` (export `applyPlugin` temporarily)
+- Modify: `src/lib/marketplace/install.ts:88` (export `applyPlugin` temporarily)
 - Test: `src/lib/marketplace/__tests__/apply-characterization.test.ts` (create)
 
 **Interfaces:**
@@ -498,7 +498,7 @@ Expected: FAIL — `Failed to resolve import "../plan"`.
 import { ghFetch, ghRaw, ghTree, resolveCommit, type TreeEntry } from "./fetch";
 import { extractServers, parseManifestMcp, type ServerDef } from "./manifest";
 import { hasUnresolvedPlaceholder, refsPluginRoot, selectPluginFiles, serverDefParts } from "./plugin-root";
-import { parseSkillMarkdown } from "@/lib/skills/parse";
+import { parseSkillMarkdown, type ParsedSkill } from "@/lib/skills/parse";
 import type { CommitInfo, GitHubRef } from "./types";
 
 const IGNORED_DIRS = ["agents", "hooks", "lspServers", "outputStyles"];
@@ -528,7 +528,7 @@ export interface PlannedConnector {
 
 export interface PlannedSkill {
   name: string;
-  parsed: ReturnType<typeof parseSkillMarkdown>;
+  parsed: ParsedSkill;
   files: { path: string; content: string }[];
 }
 
