@@ -256,14 +256,18 @@ export function createGuardedFetch(opts: {
   // admin-supplied base URL could 3xx an operator's key straight to another host. None of
   // the five below carry authority; everything else, known or not, is dropped.
   const CROSS_ORIGIN_SAFE = new Set(["accept", "accept-encoding", "accept-language", "content-type", "user-agent"]);
-  const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number, origin: string): Promise<Response> => {
+  const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number, origin: string, stripped: boolean): Promise<Response> => {
     const reqUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     // `origin`, not `host`: comparing hosts treated `https://api.example.com` and
     // `http://api.example.com` as the same place, so an https→http redirect kept the
     // Authorization header, any fixed secret headers, the method and the request body — in
     // cleartext. Connection pinning does not help against a downgrade; the bytes are simply
     // no longer encrypted.
-    const sameOrigin = new URL(reqUrl).origin === origin;
+    // Trust is monotone: once a hop has gone cross-origin the credentials stay gone, even
+    // if a later hop lands back on the original origin. Recomputing this per hop let an
+    // attacker-controlled host bounce the chain home and get the headers re-attached — to a
+    // PATH it chose. Fetch drops `Authorization` permanently for the same reason.
+    const trusted = new URL(reqUrl).origin === origin && !stripped;
     const h = new Headers(init?.headers);
     // Inject fixed headers (which may carry credentials, e.g. a GitHub token) ONLY
     // while still on the original host. GitHub's raw/codeload endpoints 3xx to
@@ -271,8 +275,8 @@ export function createGuardedFetch(opts: {
     // there would leak the operator's token to an attacker-influenced redirect
     // target. On a cross-origin hop, everything the caller sent is dropped too unless
     // it is on the deny-by-default allowlist above.
-    if (opts.headers && sameOrigin) for (const [k, v] of Object.entries(opts.headers)) h.set(k, v);
-    if (!sameOrigin) for (const k of [...h.keys()]) if (!CROSS_ORIGIN_SAFE.has(k)) h.delete(k);
+    if (opts.headers && trusted) for (const [k, v] of Object.entries(opts.headers)) h.set(k, v);
+    if (!trusted) for (const k of [...h.keys()]) if (!CROSS_ORIGIN_SAFE.has(k)) h.delete(k);
     let signal = init?.signal ?? undefined;
     if (opts.timeoutMs) {
       const ts = AbortSignal.timeout(opts.timeoutMs);
@@ -306,16 +310,24 @@ export function createGuardedFetch(opts: {
       // redirect names; only 307/308 are defined to preserve method and body.
       const preserve = res.status === 307 || res.status === 308;
       const method = (init?.method ?? "GET").toUpperCase();
+      // 307/308 are the two that keep the body, so stripping headers does not protect them:
+      // the secret is IN the body. An MCP token request carries `code` + `client_secret` +
+      // `code_verifier`; a provider request carries the whole conversation and system prompt.
+      // Refused rather than replayed body-less, because silently turning the caller's POST
+      // into a GET would be a confusing failure at the far end instead of an honest one here.
+      if (preserve && init?.body != null && next.origin !== origin) {
+        throw new UnsafeUrlError("blocked", "That address isn't allowed. Check the URL or ask your admin about network restrictions.");
+      }
       const nextInit = preserve || method === "GET" || method === "HEAD"
         ? init
         : { ...init, method: "GET", body: undefined };
-      return doFetch(next, nextInit, depth + 1, origin);
+      return doFetch(next, nextInit, depth + 1, origin, stripped || next.origin !== origin);
     }
     return res;
   };
   return ((input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    return doFetch(input, init, 0, new URL(url).origin);
+    return doFetch(input, init, 0, new URL(url).origin, false);
   }) as typeof fetch;
 }
 

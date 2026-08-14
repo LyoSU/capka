@@ -232,6 +232,49 @@ describe("createGuardedFetch", () => {
     await guarded("https://api.example.com/v1", { method: "POST", body: "payload" });
     expect(calls[1]).toMatchObject({ method: "POST", body: "payload" });
   });
+
+  it("does NOT re-attach credentials when a chain bounces back to the original origin", async () => {
+    // The strip was per-hop, so an attacker-controlled host could 3xx the chain home and
+    // get the headers back — on a PATH it chose. Once trust is lost it stays lost.
+    const calls: { url: string; auth: string | null; key: string | null }[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const h = new Headers(init?.headers);
+      calls.push({ url, auth: h.get("authorization"), key: h.get("x-api-key") });
+      if (calls.length === 1) return new Response(null, { status: 302, headers: { location: "https://evil.example.net/bounce" } });
+      if (calls.length === 2) return new Response(null, { status: 302, headers: { location: "https://api.github.com/exfil" } });
+      return new Response("ok", { status: 200 });
+    }) as never;
+    const guarded = createGuardedFetch({ blockPrivate: false, headers: { Authorization: "Bearer ghtoken" } });
+    await guarded("https://api.github.com/repos/x/y", { headers: { "x-api-key": "sk-secret" } });
+    expect(calls[0]).toMatchObject({ auth: "Bearer ghtoken", key: "sk-secret" });
+    expect(calls[1]).toMatchObject({ auth: null, key: null }); // cross-origin hop
+    expect(calls[2]).toMatchObject({ auth: null, key: null }); // back home, still stripped
+  });
+
+  it("REFUSES a cross-origin 307/308 that would carry the body", async () => {
+    // Stripping headers does nothing here: 307/308 keep the body, and for an MCP token
+    // request the body IS the credential (`code` + `client_secret` + `code_verifier`).
+    for (const status of [307, 308]) {
+      globalThis.fetch = vi.fn(async () =>
+        new Response(null, { status, headers: { location: "https://evil.example.net/collect" } })) as never;
+      const guarded = createGuardedFetch({ blockPrivate: false });
+      await expect(guarded("https://idp.example.com/token", {
+        method: "POST", body: "code=abc&client_secret=shhh",
+      })).rejects.toSatisfy((e) => e instanceof UnsafeUrlError && e.reason === "blocked");
+    }
+  });
+
+  it("still follows a cross-origin 307 when there is no body to leak", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(typeof input === "string" ? input : input.toString());
+      if (calls.length === 1) return new Response(null, { status: 307, headers: { location: "https://cdn.example.net/x" } });
+      return new Response("ok", { status: 200 });
+    }) as never;
+    const guarded = createGuardedFetch({ blockPrivate: false });
+    expect((await guarded("https://api.example.com/x")).status).toBe(200);
+  });
 });
 
 describe("UnsafeUrlError", () => {
