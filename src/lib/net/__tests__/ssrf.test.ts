@@ -28,6 +28,37 @@ describe("isBlockedAddress", () => {
     expect(isBlockedAddress("255.255.255.255", false)).toBe(true); // broadcast
     expect(isBlockedAddress("ff02::1", false)).toBe(true); // v6 multicast
   });
+
+  it("blocks an IPv4 address however it is spelled inside IPv6", () => {
+    // The check used to slice the literal prefix "::ffff:" and hand the rest to isIPv4 —
+    // which only works for the DOTTED tail. A resolver is free to answer with the hex form,
+    // and then metadata and loopback sailed straight through. `new URL()` is no help: it
+    // normalizes the safe spelling INTO the unsafe one (`::ffff:169.254.169.254` becomes
+    // `::ffff:a9fe:a9fe`), which is why this is decided on bytes.
+    expect(isBlockedAddress("::ffff:169.254.169.254", false)).toBe(true);
+    expect(isBlockedAddress("::ffff:a9fe:a9fe", false)).toBe(true); // same address, hex
+    expect(isBlockedAddress("64:ff9b::a9fe:a9fe", false)).toBe(true); // NAT64 well-known prefix
+    expect(isBlockedAddress("::ffff:7f00:1", true)).toBe(true); // 127.0.0.1, mapped
+    expect(isBlockedAddress("::7f00:1", true)).toBe(true); // 127.0.0.1, v4-compatible
+    expect(isBlockedAddress("::127.0.0.1", true)).toBe(true); // the same, dotted
+    // A public address stays reachable through every one of those spellings.
+    expect(isBlockedAddress("::ffff:1.1.1.1", true)).toBe(false);
+    expect(isBlockedAddress("::ffff:101:101", true)).toBe(false);
+  });
+
+  it("blocks loopback and the unspecified address written out in full", () => {
+    // Neither matched the old `lower === "::1"` / `lower === "::"` equality tests.
+    expect(isBlockedAddress("0:0:0:0:0:0:0:1", true)).toBe(true);
+    expect(isBlockedAddress("0:0:0:0:0:0:0:0", false)).toBe(true);
+    expect(isBlockedAddress("fe80:0:0:0:0:0:0:1", false)).toBe(true);
+  });
+
+  it("refuses an address it cannot parse instead of allowing it", () => {
+    // Fail-closed: this decides whether to open a connection, and "unrecognized" is not
+    // evidence of safety. These used to fall through to `return false`.
+    expect(isBlockedAddress("not-an-address", false)).toBe(true);
+    expect(isBlockedAddress("", false)).toBe(true);
+  });
 });
 
 describe("createGuardedFetch", () => {
