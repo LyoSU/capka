@@ -972,27 +972,50 @@ And the shape of the UI break was worth keeping: the gate landed ahead of its ca
 Browse → Install answered 410 rather than installing without a review. That is the survivable
 direction of the mistake, and the reverse is what made the gate optional the first time.
 
-- **`installPlugin` is still a second path to these rows, and it is a WEAKER claim than the one
-  that condemned `upgradePlugin`.** Worth separating, because the two get treated as one
-  finding. `upgradePlugin` could CORRUPT the barrier's own state: an unfenced
-  `set({ manifest })` over the column `applyState` lives in. `installPlugin` no longer can — it
-  is fenced, so it refuses outright while any apply is in flight, and it routes skills only.
-  What remains is that it is a second CONSENT SURFACE, which is a different and lesser problem
-  than a second writer.
+### The last unreviewed writer is gone (2026-08-14, same day)
 
-  Authorization on it is intact (org-wide needs admin, checked in both `validateAdd` and `add`,
-  plus the member-install switch), so this is not escalation. Four things the manage approval
-  card cannot say that the review can: a skill edited by hand is overwritten with no "locally
-  modified" warning; no `plugin.apply_*` entry is written, so the lifecycle journal has a gap
-  the manage audit does not fill; there is no claim, so a crash mid-write leaves a `ready` row
-  holding a partial set instead of one marked as needing attention; and a re-install that drops
-  a name surfaces no orphaned permission rule.
+`installPlugin` and `installSkillRepo` are **deleted**. There is now exactly one writer that
+routes a plugin's resources — `writeReviewedPlan`, under an operation claim — and one consent
+surface, the review.
 
-  Closing it needs a decision, not a patch. The tempting bounded version — give it a claim and
-  a journal entry without a review — requires a `reviewHash` for the entry, and inventing one
-  makes the journal assert that a review happened. That is worse than the gap. So the real
-  options are: render a compact review inside the approval card, or retire `skill add {repo}`
-  in favour of Settings. Both are product calls.
+The decision that unblocked it: render the review INSIDE the manage approval card. Two facts
+made that the right half of the fork.
+
+**The card was already claiming to be a review, and getting it wrong.** It enumerated the repo
+with `discoverSkills` (`skills/<name>/SKILL.md`) while the installer used `buildPluginPlan`,
+which ALSO converts `commands/*.md` into skills — naming them from the filename rather than
+validated frontmatter. So a user approving "csv-tidy" also got `commands/report.md`, enabled,
+its body in the agent's context. The card listed what would be installed and the list was
+incomplete: it asserted something untrue about its own outcome. Teaching `discoverSkills` about
+`commands/` would have made the two agree that day and left the next branch added to `plan.ts`
+to break them again in silence. So the card is built from the review, which is built from
+`buildPluginPlan`: one enumerator, by construction.
+
+**`skillsOnly` had to enter `reviewHash`.** It changes which resources the plan returns, so a
+review computed with it and an apply computed without it describe different sets — a review
+saying "two skills" would authorize installing a connector and its executable files. It is in
+the subject now, beside `only`, for exactly the reason `only` is.
+
+Two inversions worth recording, because both are the same shape as the fail-open the first
+audit found:
+
+- **A missing pin now REFUSES.** `claimPreviewedReview` returning nothing used to mean "fall
+  back to live HEAD", which was honest while the card was advisory. Once the card is the gate,
+  that same fallback applies a plan nobody reviewed — identical in shape to the Apply button
+  that installed whenever its review had not loaded. Same code, opposite correct behaviour,
+  because the card's ROLE changed.
+- **The card's unreachable-repo branch stopped offering to proceed.** It said "you can still
+  install; it'll pull on confirm". With no review there is no consent to obtain.
+
+Dispositions stay EMPTY on this path deliberately: a chat card is the wrong place to decide
+about a permission rule, since there is no room to show what the rule does. Orphaned rules are
+NAMED and kept, which is the conservative outcome, and deleting one is done in Settings where it
+can be read.
+
+The bounded alternative stays rejected for the record: giving the old path a claim and a journal
+entry without a review needs a `reviewHash`, and inventing one makes the journal assert that a
+review happened — a false guarantee in the one place designed to outlive everyone who could
+correct it.
 - **`installSkillRepo` now installs skills only.** Not a product decision after all: the manage
   approval card enumerates the skills it found, so routing a `.mcp.json` connector and bundled
   plugin files off the same repo applied a strictly larger set than the human agreed to.

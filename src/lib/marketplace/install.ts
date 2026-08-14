@@ -1,18 +1,15 @@
 import { nanoid } from "nanoid";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginInstalls, pluginMarketplaces, pluginFiles, skills, mcpServers } from "@/lib/db/schema";
 import { deleteSkill } from "@/lib/skills/service";
 import { deleteServer } from "@/lib/mcp/service";
-import { ValidationError } from "@/lib/errors";
-import { getBlockPrivateProviderUrls, getMasterKey } from "@/lib/settings";
+import { getMasterKey } from "@/lib/settings";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
 import { applyPlanResources } from "./apply";
 import { FencedWriteError, MANUAL, acquireFence, type MutationAuthority } from "./fence";
-import { observePluginPlan } from "./observe";
-import { readStoredManifest, reservedManifest, writeStoredManifest } from "./manifest-store";
-import { buildPluginPlan } from "./plan";
+import { readStoredManifest, writeStoredManifest } from "./manifest-store";
 import { projectPlanSurface } from "./project";
 import type { ReviewObservations } from "./observe";
 import type { ResolvedPluginPlan } from "./plan";
@@ -181,103 +178,8 @@ export async function resolvePlugin(marketplaceId: string, pluginName: string) {
   return { gh };
 }
 
-/** Install one plugin from an added marketplace into A (skills) + B (connectors),
- *  tagging every routed row `catalog:<installId>` for clean uninstall. Idempotent per
- *  name: ingestSkill / upsertServer upsert by name, so re-running with the same tag
- *  updates in place — the basis of upgrade. */
-export async function installPlugin(opts: {
-  marketplaceId: string;
-  pluginName: string;
-  installedBy: string;
-  /** Org-wide (admin) or personal (a member installing for themselves). */
-  scope?: "system" | "user";
-  /** Narrow to specific skills by name (`--skill`); omit for all. */
-  only?: string[];
-  /** Route ONLY skills, whatever else the repo declares — what `installSkillRepo`'s
-   *  approval card promises. */
-  skillsOnly?: boolean;
-  /** Pin a FIRST install to a specific reviewed commit (from the pre-install
-   *  preview) instead of live HEAD — closes the preview→apply TOCTOU. Ignored on
-   *  re-install, which stays on its already-pinned commit (moving the pin is an
-   *  explicit upgrade). */
-  pinSha?: string;
-}): Promise<InstallManifest> {
-  const { gh } = await resolvePlugin(opts.marketplaceId, opts.pluginName);
-  const scope = opts.scope ?? "system";
-  const ownerId = scope === "user" ? opts.installedBy : null;
-  const target: InstallTarget = { scope, userId: ownerId, projectId: null };
-
-  // Idempotent per (marketplace, plugin, owner): re-installing reuses the same
-  // install row + tag instead of duplicating. A member's personal install is
-  // distinct from the org-wide one (matched by scope + userId).
-  const existing = (await db.select({ id: pluginInstalls.id, commitSha: pluginInstalls.commitSha, manifest: pluginInstalls.manifest }).from(pluginInstalls)
-    .where(and(
-      eq(pluginInstalls.marketplaceId, opts.marketplaceId),
-      eq(pluginInstalls.pluginName, opts.pluginName),
-      eq(pluginInstalls.scope, scope),
-      ownerId ? eq(pluginInstalls.userId, ownerId) : isNull(pluginInstalls.userId),
-    )).limit(1))[0];
-  const installId = existing?.id ?? nanoid();
-  // Re-install stays PINNED: re-pull the commit already installed, not whatever the
-  // branch points at now. A first install uses the reviewed commit from the preview
-  // (`pinSha`) when present, else live HEAD (`gh.ref`). Moving the pin is an explicit
-  // upgrade (with a diff).
-  const ref = existing?.commitSha || opts.pinSha || gh.ref;
-
-  // Reserve the row BEFORE routing a single resource.
-  //
-  // Routing first and inserting afterwards meant two concurrent first installs of the same
-  // plugin each wrote skills and connectors tagged with their OWN `catalog:<id>`, and then only
-  // one insert survived the partial unique index. The loser's rows were left owned by an
-  // install row that does not exist — invisible to `uninstallPlugin`, skipped by every prune,
-  // and reachable from no screen. Claiming the identity first turns that race into a refused
-  // insert before anything is written.
-  if (!existing) {
-    await db.insert(pluginInstalls).values({
-      id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
-      version: ref, commitSha: null, scope, userId: ownerId, installedBy: opts.installedBy,
-      manifest: reservedManifest() as unknown as Record<string, unknown>,
-    });
-  }
-
-  try {
-    const plan = await buildPluginPlan({ ...gh, ref }, { only: opts.only, skillsOnly: opts.skillsOnly });
-    const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
-    const manifest = await applyPlanResources(plan, obs, `catalog:${installId}`, target, MANUAL);
-    const stored = await committedManifest(plan, obs, manifest, existing?.manifest);
-
-    // The pin, the manifest and the bundled files in ONE FENCED transaction. All three used to
-    // be unconditional writes keyed by install id alone, and `manifest` is the one that hurt:
-    // `applyState` lives inside that column, so this path could erase a reviewed apply's live
-    // claim — after which that operation's `finalizeApply` failed on a row it still owned, and
-    // the plugin was left `failed` for a reason nothing recorded.
-    //
-    // MANUAL authority, which is the point: the fence refuses outright while any apply is in
-    // flight on this install.
-    await persistPluginFilesFenced({
-      installId, files: plan.files, authority: MANUAL,
-      metadata: {
-        version: manifest.version ?? gh.ref,
-        commitSha: manifest.commit?.sha ?? existing?.commitSha ?? null,
-        manifest: stored,
-      },
-    });
-    // After the files, exactly as `writeReviewedPlan` orders it: a file set replaced after a
-    // prune could reference a resource the prune had just removed.
-    await pruneRemoved(`catalog:${installId}`, new Set(manifest.skills), new Set(manifest.connectors));
-    return manifest;
-  } catch (e) {
-    // Undo OUR reservation, and only ours. Leaving it would put an install in Extensions with
-    // no resources and no explanation — the reservation exists to close a race, not to
-    // outlive the install it was reserving for. An existing row predates this call and its
-    // resources are still real, so it is left exactly as it was.
-    if (!existing) await uninstallPlugin(installId);
-    throw e;
-  }
-}
-
-/** What `upgradePlugin` would change, computed WITHOUT touching the DB so an
- *  operator can review (informed consent) before moving the pin. `changed:false`
+/** What moving an install's pin would change, computed WITHOUT touching the DB so an
+ *  operator can review (informed consent) before it happens. `changed:false`
  *  means the pinned commit is already the latest. */
 export interface UpgradePreview {
   changed: boolean;
@@ -318,57 +220,24 @@ export async function previewUpgrade(installId: string): Promise<UpgradePreview>
 }
 
 /*
- * `upgradePlugin` used to live here, and its deletion is the fix rather than a cleanup.
+ * `installPlugin` and `installSkillRepo` used to live here, and their deletion completes what
+ * removing `upgradePlugin` started: there is now exactly ONE writer that routes a plugin's
+ * resources, and it is `writeReviewedPlan` under an operation claim.
  *
- * It was the second unfenced writer: an unconditional
- * `db.update(pluginInstalls).set({ manifest })` that would overwrite a reviewed apply's live
- * `applyState`, with no claim, no lease and no transaction spanning its resource writes. Its
- * only caller was `POST /api/extensions`, which now returns 410 — every upgrade goes through
- * `writeReviewedPlan` under an operation claim. Leaving a reachable second path to the same
- * rows is exactly what made the consent gate optional the first time, so the path is gone
- * instead of merely being unused.
+ * They were the last unreviewed path to these rows. `installPlugin` had already been narrowed
+ * (fenced, skills-only for a repo, its row reserved before anything was routed) so it could no
+ * longer corrupt a concurrent apply — but it remained a second CONSENT surface: no reviewHash,
+ * no claim, no lifecycle journal, no "locally modified" warning before it overwrote a
+ * hand-edited skill, and no orphaned-permission analysis. Their only caller was the chat-driven
+ * `manage skill add {repo}`, which now goes through `marketplace/skill-repo.ts` and the barrier.
+ *
+ * Deleting rather than leaving them unused is the point. Twice in this feature a live writer
+ * with no caller turned out to be reachable after all, and both times that is what made the
+ * consent gate optional. An unreachable path cannot be reached by mistake.
+ *
+ * `uninstallPlugin` below is deliberately NOT one of them: removing everything an install
+ * routed needs no review, and it is the inverse the two API routes still call.
  */
-
-/** Install skills straight from a git repo with no marketplace.json — a plain
- *  `skills/<name>/SKILL.md` collection, à la `npx skills add owner/repo`. The repo
- *  is modelled as a single-plugin marketplace whose one plugin (source ".") is the
- *  repo root, so installing it enumerates every skill — and the whole pin / upgrade
- *  / uninstall / Extensions machinery is reused unchanged. `only` narrows to
- *  specific skills (`--skill`). The synthetic marketplace row is reused per URL. */
-export async function installSkillRepo(opts: {
-  url: string;
-  installedBy: string;
-  scope?: "system" | "user";
-  only?: string[];
-  /** Reviewed commit from the pre-install preview — pins a first install to it (TOCTOU). */
-  sha?: string;
-}): Promise<InstallManifest> {
-  const repo = parseGitHubUrl(opts.url);
-  if (!repo) throw new ValidationError("Only GitHub repositories are supported. Paste a github.com repo URL.");
-  const clean = opts.url.trim();
-  const pluginName = repo.repo;
-  const existing = (await db.select({ id: pluginMarketplaces.id }).from(pluginMarketplaces).where(eq(pluginMarketplaces.url, clean)).limit(1))[0];
-  let marketplaceId = existing?.id;
-  if (!marketplaceId) {
-    marketplaceId = nanoid();
-    const catalog: CatalogItem[] = [{
-      name: pluginName, description: "", author: repo.owner, category: null,
-      homepage: null, kind: "plugin", source: ".", installable: true,
-    }];
-    await db.insert(pluginMarketplaces).values({
-      id: marketplaceId, url: clean, name: `${repo.owner}/${repo.repo}`, owner: repo.owner, catalog, refreshedAt: new Date(),
-    });
-  }
-  // `skillsOnly`, and it is load-bearing: the manage approval card for this enumerates the
-  // SKILLS it found, so routing a `.mcp.json` connector or bundled plugin files off the same
-  // repo would apply a larger set of capabilities than the human agreed to. A repo that
-  // declares connectors is still installable — its skills land and `plan.notes` says the
-  // connectors did not, which is reviewable, rather than silent either way.
-  return installPlugin({
-    marketplaceId, pluginName, installedBy: opts.installedBy, scope: opts.scope,
-    only: opts.only, skillsOnly: true, pinSha: opts.sha,
-  });
-}
 
 /** Remove everything an install routed (FK cascade drops skill files, plugin
  *  files + oauth rows when the pluginInstalls row goes). */

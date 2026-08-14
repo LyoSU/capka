@@ -1960,8 +1960,12 @@
     "skill": {
       "addRepoTitle": "Install skills from {repo}",
       "repoEmpty": "No matching skills found in that repo",
-      "repoUnreachable": "Couldn't read the repo just now — you can still install; it'll pull on confirm.",
+      "repoUnreachable": "Couldn't read that repo just now, so there is nothing to review — try again in a moment.",
+      "repoCannotApply": "This can't be installed right now — one of the addresses it needs is unreachable or not allowed.",
+      "repoOverwrites": "Some of these were changed after they were installed. Installing will overwrite those changes.",
+      "repoOrphanedPolicies": "Permission rules for {names} will no longer apply to anything. They are kept — remove them in Settings if you want to.",
       "repoInstalled": "{n, plural, one {# skill} other {# skills}} from {repo}",
+      "repoInstalledAll": "Skills from {repo}",
       "addPathTitle": "Install skills from {path}",
       "pathEmpty": "No SKILL.md found at that path.",
       "pathUnreachable": "Couldn't read that path just now — you can still install; it'll be read on confirm.",

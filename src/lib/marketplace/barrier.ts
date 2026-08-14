@@ -62,6 +62,9 @@ export interface ApplyRequest {
   ownerId: string | null;
   targetSha: string;
   only?: string[];
+  /** Skills only. See `ReviewSubject.skillsOnly` — it changes which resources the plan
+   *  returns, so it must be identical on both sides of the hash. */
+  skillsOnly?: boolean;
   actorId: string;
   reviewHash: string;
   dispositions: Record<string, PolicyDisposition>;
@@ -108,7 +111,7 @@ async function gather(input: {
   actor: DispositionActor;
 }) {
   const keyHex = await getMasterKey();
-  const plan = await buildPluginPlan(input.gh, { only: input.subject.only ?? undefined });
+  const plan = await buildPluginPlan(input.gh, { only: input.subject.only ?? undefined, skillsOnly: input.subject.skillsOnly });
   const observations = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
   const sourceAfter = projectPlanSurface(plan, observations, keyHex);
 
@@ -179,6 +182,9 @@ export async function previewPluginApply(input: {
   installId: string | null;
   targetSha: string;
   only?: string[];
+  /** Skills only, whatever else the repo declares — a bare skills repo's promise. In the
+   *  hash, so the apply cannot install a wider set than the review described. */
+  skillsOnly?: boolean;
   storedManifestRaw: unknown;
   dispositions?: Record<string, PolicyDisposition>;
   /** Decides which policy rules this reader is told they may delete. */
@@ -189,6 +195,7 @@ export async function previewPluginApply(input: {
     installId: input.installId, marketplaceId: input.marketplaceId, pluginName: input.pluginName,
     scope: input.scope, ownerId: input.ownerId, targetSha: input.targetSha,
     only: input.only?.length ? input.only : null,
+    skillsOnly: input.skillsOnly === true,
   };
   const g = await gather({
     gh: input.gh, subject, installId: input.installId,
@@ -246,6 +253,7 @@ export async function applyPluginReviewed(input: ApplyRequest & {
     marketplaceId: input.marketplaceId, pluginName: input.pluginName,
     scope: input.scope, ownerId: input.ownerId, targetSha: input.targetSha,
     only: input.only?.length ? input.only : null,
+    skillsOnly: input.skillsOnly === true,
   };
 
   const build = async () => {

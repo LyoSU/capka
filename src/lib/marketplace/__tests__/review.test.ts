@@ -21,7 +21,7 @@ const surface = (over: Partial<StoredInstallSurface> = {}): StoredInstallSurface
 
 const SUBJECT: ReviewSubject = {
   kind: "upgrade", installId: "i1", marketplaceId: "mk1", pluginName: "plug",
-  scope: "system", ownerId: null, targetSha: "a".repeat(40), only: null,
+  scope: "system", ownerId: null, targetSha: "a".repeat(40), only: null, skillsOnly: false,
 };
 
 const OBS: ReviewObservations = {
@@ -55,6 +55,14 @@ describe("reviewHash covers every input the decision depends on", () => {
   it("changes when a preflight verdict or an applied auth kind changes", () => {
     expect(reviewHash({ ...base, observations: { ...OBS, urls: { api: "blocked" } } })).not.toBe(reviewHash(base));
     expect(reviewHash({ ...base, observations: { ...OBS, detectedAuth: { api: "oauth" } } })).not.toBe(reviewHash(base));
+  });
+
+  it("changes when the subject narrows to skills only", () => {
+    // Not decoration: `skillsOnly` changes which resources `buildPluginPlan` returns. Outside
+    // the hash, a review built for a bare skills repo — whose approval card promises skills and
+    // nothing else — would authorize an apply that also installed the repo's `.mcp.json`
+    // connector and its bundled, executable plugin files.
+    expect(reviewHash({ ...base, subject: { ...SUBJECT, skillsOnly: true } })).not.toBe(reviewHash(base));
   });
 
   it("changes when the private-range policy changes", () => {

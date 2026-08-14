@@ -46,12 +46,19 @@ vi.mock("@/lib/skills/service", () => ({
 // every fenced write look REFUSED — which is how these five tests failed the moment the fence
 // landed, and why the mock has to grow with it.
 //
-// The POLARITY inverted when the manual fence stopped being one statement. It used to yield a
-// row when the write was ALLOWED, so `rowCount: 1` meant "go ahead"; now it locks the owning
-// install and then probes for `applyState.status = 'applying'`, so rows mean "somebody is
-// applying" and ZERO is the permissive answer. `rowCount: 1` therefore flipped these five from
-// passing to fenced without a single line of their own changing — a reminder that a stub which
-// answers every query the same way is deciding a security verdict by accident.
+// The permissive `rowCount` DEPENDS ON THE AUTHORITY, and a stub that answers every query the
+// same way is therefore deciding a security verdict by accident:
+//
+//   - `plugin-apply` — the statement selects the install row only while it is still applying
+//     under OUR operation, so A ROW means "yes, this is ours" and 1 is permissive. That is the
+//     authority `writeReviewedPlan` carries, so these tests need 1.
+//   - `manual` — locks the owning install unconditionally, then probes for
+//     `applyState.status = 'applying'`, so A ROW means "somebody else is applying" and 0 is
+//     permissive. The reverse.
+//
+// This file has now been flipped by that difference twice: once when the manual fence stopped
+// being a single statement, and once when its subject moved from `installPlugin` (manual) to
+// `writeReviewedPlan` (plugin-apply). Both times not a line of the tests' own logic changed.
 vi.mock("@/lib/db", () => {
   const db: Record<string, unknown> = {
     select: (cols?: Record<string, unknown>) => ({
@@ -71,14 +78,16 @@ vi.mock("@/lib/db", () => {
     insert: () => ({ values: async (v: { manifest: unknown }) => { h.writes.push({ op: "insert", manifest: v.manifest }); } }),
     update: () => ({ set: (v: { manifest: unknown }) => ({ where: async () => { h.writes.push({ op: "update", manifest: v.manifest }); } }) }),
     delete: () => ({ where: async () => {} }),
-    // No apply is in flight in any of these tests, so the fence's probe finds nothing.
-    execute: async () => ({ rowCount: 0, rows: [] }),
+    // The operation holds a live claim, which is what `plugin-apply` asks the fence to confirm.
+    execute: async () => ({ rowCount: 1, rows: [] }),
   };
   db.transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(db);
   return { db };
 });
 
-import { installPlugin } from "../install";
+import { writeReviewedPlan } from "../install";
+import { observePluginPlan } from "../observe";
+import { buildPluginPlan } from "../plan";
 import { readStoredManifest } from "../manifest-store";
 
 const FIXTURE = {
@@ -93,24 +102,37 @@ beforeEach(() => {
   h.state.tree = Object.keys(FIXTURE).map((path) => ({ path, type: "blob" as const, sha: "s" }));
 });
 
-const run = () => installPlugin({ marketplaceId: "mk1", pluginName: "plug", installedBy: "u1" });
+/**
+ * `writeReviewedPlan` is now the ONE writer that routes a plugin's resources. `installPlugin`
+ * used to be the subject here; it and `installSkillRepo` are gone, because they were the last
+ * unreviewed path to these rows and their only caller now goes through the barrier.
+ *
+ * The subject of these assertions did not change: `committedManifest` still builds the value,
+ * and it is easier to see here — `writeReviewedPlan` RETURNS the manifest rather than writing
+ * it, because `finalizeApply` is what publishes it under its own compare-and-set.
+ */
+const run = async (priorManifest?: unknown) => {
+  const plan = await buildPluginPlan({ owner: "acme", repo: "plug", ref: "HEAD", subdir: "" });
+  const obs = await observePluginPlan(plan, { blockPrivate: false });
+  return writeReviewedPlan({
+    operationId: "op_1", installId: "i1", plan, observations: obs,
+    target: { scope: "system", userId: null, projectId: null },
+    priorManifest, fallbackVersion: "c".repeat(7),
+  });
+};
 
 /**
- * The write that PUBLISHES the committed view — the LAST manifest write, not the first.
+ * The committed view is now the RETURN VALUE, not a write to watch for.
  *
- * A first install now writes the column twice: a reservation that claims the row's identity
- * before a single resource is routed, then the commit. Reading `writes[0]` used to be the same
- * thing and no longer is, so these assertions name what they mean.
+ * `writeReviewedPlan` hands the manifest back and `finalizeApply` publishes it under its own
+ * compare-and-set — so until the claim resolves, the runtime still sees the previous committed
+ * state. That is the invariant, and it reads directly here instead of through the write log.
  */
-const committed = () => {
-  const manifests = h.writes.filter((w) => w.op !== "route");
-  return readStoredManifest(manifests[manifests.length - 1].manifest);
-};
+const committed = (m: Record<string, unknown>) => readStoredManifest(m);
 
 describe("what an apply commits", () => {
   it("stores the surface beside the inventory under schemaVersion 2", async () => {
-    await run();
-    const written = committed();
+    const written = committed(await run());
     expect(written.inventory.connectors).toEqual(["api"]);
     expect(written.inventory.skills).toEqual(["writer"]);
     expect(written.installSurface?.completeness).toBe("derived");
@@ -119,43 +141,32 @@ describe("what an apply commits", () => {
   });
 
   it("starts a first install at revision 1, so 0 stays the value only a first claim matches", async () => {
-    await run();
-    expect(committed().committedRevision).toBe(1);
+    expect(committed(await run()).committedRevision).toBe(1);
   });
 
-  it("reserves the row BEFORE routing a single resource", async () => {
-    await run();
-    // Routing first and inserting afterwards let two concurrent first installs each write
-    // skills and connectors under their own `catalog:<id>`, with only one insert surviving the
-    // partial unique index — leaving the loser's rows owned by an install that does not exist:
-    // skipped by every prune, invisible to `uninstallPlugin`, reachable from no screen.
-    expect(h.writes[0].op).toBe("insert");
-    expect(h.writes.findIndex((w) => w.op === "route")).toBeGreaterThan(0);
-    // And the reservation is a RESERVATION: it publishes nothing, so `committedRevision` stays
-    // at the one value only a first claim can match.
-    expect(readStoredManifest(h.writes[0].manifest).committedRevision).toBe(0);
-    expect(readStoredManifest(h.writes[0].manifest).neverCommitted).toBe(true);
+  it("does NOT publish the manifest itself — finalize does, under its own CAS", async () => {
+    // The routing writes resources and bundled files, and returns the view. Publishing it here
+    // would make an apply visible before its claim resolved, so a lost lease would leave the
+    // runtime reading a state no operation ever committed.
+    const returned = await run();
+    expect((returned as { schemaVersion?: number }).schemaVersion).toBe(2);
+    expect(h.writes.some((w) => w.op === "route")).toBe(true);
+    // The only row write it makes is the pin + files, in one fenced transaction — never the
+    // committed manifest.
+    expect(h.writes.filter((w) => w.op === "insert" || w.op === "update").map((w) => w.manifest))
+      .not.toContain(returned);
   });
 
   it("bumps the revision on a re-install", async () => {
-    h.state.existing = {
-      id: "i1", commitSha: "c".repeat(40),
-      manifest: { schemaVersion: 2, inventory: { skills: [], connectors: [], ignored: [], notes: [] },
-                  installSurface: null, committedRevision: 4 },
-    };
-    await run();
-    expect(committed().committedRevision).toBe(5);
+    const prior = { schemaVersion: 2, inventory: { skills: [], connectors: [], ignored: [], notes: [] },
+                    installSurface: null, committedRevision: 4 };
+    expect(committed(await run(prior)).committedRevision).toBe(5);
   });
 
   it("upgrades a legacy row lazily: 0 → 1, with no backfill pass", async () => {
     // A legacy row stored the inventory at the top level and has no counter. It becomes
     // V2 on its next apply and not before — nothing migrates rows in bulk.
-    h.state.existing = {
-      id: "i1", commitSha: "c".repeat(40),
-      manifest: { skills: ["writer"], connectors: [], ignored: [], notes: [], displayName: "Fx" },
-    };
-    await run();
-    const written = committed();
+    const written = committed(await run({ skills: ["writer"], connectors: [], ignored: [], notes: [], displayName: "Fx" }));
     expect(written.committedRevision).toBe(1);
     expect(written.installSurface).not.toBeNull();
   });
@@ -163,23 +174,16 @@ describe("what an apply commits", () => {
   it("refuses to renumber a V2 row whose counter went missing", async () => {
     // Silently restarting the count would repair the symptom and destroy the evidence,
     // and 1 is a value a stale apply could then match.
-    h.state.existing = {
-      id: "i1", commitSha: "c".repeat(40),
-      manifest: { schemaVersion: 2, inventory: { skills: [], connectors: [], ignored: [], notes: [] }, installSurface: null },
-    };
-    await expect(run()).rejects.toThrow(/non-finite committedRevision/);
+    await expect(run({ schemaVersion: 2, inventory: { skills: [], connectors: [], ignored: [], notes: [] }, installSurface: null }))
+      .rejects.toThrow(/non-finite committedRevision/);
   });
 
-  it("never writes a raw InstallManifest to the column any more", async () => {
-    // The regression this guards: a write site that skipped the builder would look fine
-    // and leave the next upgrade with no baseline to compare against. Checked across EVERY
-    // manifest write rather than just the first — the reservation is a second write site, and
-    // it goes through `reservedManifest` for exactly this reason.
-    await run();
-    const manifests = h.writes.filter((w) => w.op !== "route");
-    expect(manifests.map((w) => w.op)).toEqual(["insert", "update"]);
-    for (const w of manifests) {
-      expect((w.manifest as { schemaVersion?: number }).schemaVersion).toBe(2);
-    }
+  it("never produces a raw InstallManifest any more", async () => {
+    // The regression this guards: a write site that skipped the builder would look fine and
+    // leave the next upgrade with no baseline to compare against.
+    const returned = await run();
+    expect((returned as { schemaVersion?: number }).schemaVersion).toBe(2);
+    expect(returned).toHaveProperty("inventory");
+    expect(returned).toHaveProperty("installSurface");
   });
 });

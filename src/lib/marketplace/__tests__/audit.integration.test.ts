@@ -17,7 +17,7 @@ const HASH = "hash-1";
 
 const review = (over: Partial<DurablePluginReview> = {}): DurablePluginReview => ({
   subject: { kind: "upgrade", installId: "i1", marketplaceId: "mk1", pluginName: "plug",
-             scope: "system", ownerId: null, targetSha: "a".repeat(40), only: null },
+             scope: "system", ownerId: null, targetSha: "a".repeat(40), only: null, skillsOnly: false },
   reviewHash: HASH,
   surface: { schemaVersion: 1, completeness: "derived", connectors: [], skills: [],
              files: { projection: "public", count: 0, bytes: 0, entrypoints: [] } },

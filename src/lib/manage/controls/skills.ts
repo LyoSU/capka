@@ -11,8 +11,9 @@ import {
 import { uploadFile } from "@/lib/sandbox/client";
 import { parseSkillMarkdown } from "@/lib/skills/parse";
 import { canInstallExtensions, assertCanInstall } from "@/lib/settings";
-import { discoverRepoSkills } from "@/lib/marketplace/service";
-import { installSkillRepo } from "@/lib/marketplace/install";
+import {
+  applySkillRepoInstall, hasLocalEdits, orphanedPolicyKeys, previewSkillRepoInstall, reviewedSkillNames,
+} from "@/lib/marketplace/skill-repo";
 import { parseGitHubUrl } from "@/lib/marketplace/source";
 import { discoverWorkspaceSkills, ingestWorkspaceSkills } from "@/lib/skills/workspace";
 import type { SkillScope } from "@/lib/skills/types";
@@ -41,33 +42,42 @@ const addSchema = z.union([
 
 type AddArgs = z.infer<typeof addSchema>;
 
-// preview→apply commit pin. `previewAdd` resolves the repo's HEAD to a concrete
-// commit and shows the user the skills AT that commit; `add` must install THAT
-// commit, not re-resolve HEAD when the (separate) approval call runs — otherwise a
-// hostile upstream could move the branch between the card and the click. Native
-// tool approval has nowhere to stash the sha, so it hops through this in-memory
-// map: platform routes and the worker share one process, so preview and apply land
-// here together. A miss (restart, TTL, or a repo the user never previewed) falls
-// back to live HEAD — exactly the advisory-preview behaviour we already ship, not a
-// new fallback. Keyed by the raw `repo` arg, which is identical across the two calls
-// (it's the same persisted tool-call input).
-const previewedShas = new Map<string, { sha: string; at: number }>();
+/**
+ * preview→apply hand-off for a repo install: the commit AND the review hash the card showed.
+ *
+ * `previewAdd` resolves HEAD to a concrete commit, builds the install review at that commit
+ * and shows it; `add` must apply THAT review — not re-resolve HEAD when the separate approval
+ * call runs, and not apply an unreviewed plan. Native tool approval has nowhere to stash
+ * either value, so they hop through this in-memory map: platform routes and the worker share
+ * one process, so preview and apply land here together. Keyed by the raw `repo` arg, which is
+ * identical across the two calls (it is the same persisted tool-call input).
+ *
+ * **A miss now REFUSES.** It used to fall back to live HEAD, which was defensible while the
+ * preview was advisory. It is not defensible now that the card is the consent gate: falling
+ * back would apply a plan nobody reviewed, on exactly the request where review matters —
+ * the same fail-open shape as the Apply button that installed whenever its review had not
+ * loaded. A miss (restart, TTL lapse, a repo never previewed) asks for the card again.
+ *
+ * Bound: entries expire after `PIN_TTL_MS` and every write sweeps the expired ones, so the
+ * map holds at most one live entry per (user, repo) within one TTL window.
+ */
+const previewedReviews = new Map<string, { sha: string; reviewHash: string; at: number }>();
 const PIN_TTL_MS = 10 * 60_000;
 const pinKey = (userId: string, repo: string) => `${userId}:${repo.trim()}`;
 
-function parkPreviewedSha(userId: string, repo: string, sha: string): void {
+function parkPreviewedReview(userId: string, repo: string, sha: string, reviewHash: string): void {
   const now = Date.now();
-  for (const [k, v] of previewedShas) if (now - v.at > PIN_TTL_MS) previewedShas.delete(k);
-  previewedShas.set(pinKey(userId, repo), { sha, at: now });
+  for (const [k, v] of previewedReviews) if (now - v.at > PIN_TTL_MS) previewedReviews.delete(k);
+  previewedReviews.set(pinKey(userId, repo), { sha, reviewHash, at: now });
 }
 
-/** Take (and forget) the commit a just-shown preview pinned for this user+repo, or
- *  undefined if none is live — install then falls back to HEAD. */
-function claimPreviewedSha(userId: string, repo: string): string | undefined {
+/** Take (and forget) what a just-shown card pinned for this user+repo, or undefined if none is
+ *  live — in which case the add refuses rather than proceeding unreviewed. */
+function claimPreviewedReview(userId: string, repo: string): { sha: string; reviewHash: string } | undefined {
   const k = pinKey(userId, repo);
-  const v = previewedShas.get(k);
-  previewedShas.delete(k);
-  return v && Date.now() - v.at <= PIN_TTL_MS ? v.sha : undefined;
+  const v = previewedReviews.get(k);
+  previewedReviews.delete(k);
+  return v && Date.now() - v.at <= PIN_TTL_MS ? { sha: v.sha, reviewHash: v.reviewHash } : undefined;
 }
 
 /** A user-scope skill is personal; an org skill is shared and admin-only. */
@@ -159,27 +169,54 @@ export const skillCollection: Collection = {
       }
     }
 
-    // Repo install: enumerate the skills it would install so the user approves the
-    // whole SET before confirming (like `npx skills add owner/repo --list`).
+    // Repo install: the card is built from the install REVIEW, not from a second enumerator.
+    //
+    // It used to call `discoverRepoSkills`, which walks `skills/<name>/SKILL.md` — while the
+    // installer's `buildPluginPlan` ALSO converts `commands/*.md` into skills (taking the name
+    // from the filename, bypassing the frontmatter check). So the card listed what would be
+    // installed and the list was incomplete: it asserted something untrue about its own
+    // outcome. Keeping two enumerators in step is a promise a comment makes and code does not,
+    // so the card now reads the plan that will actually land.
     if ("repo" in a) {
       try {
-        const { owner, repo, sha, skills } = await discoverRepoSkills(a.repo);
-        parkPreviewedSha(ctx.userId, a.repo, sha); // pin what the user is about to approve
-        const only = a.only?.length ? new Set(a.only) : null;
-        const names = (only ? skills.filter((s) => only.has(s.name)) : skills).map((s) => s.name);
+        const { review, policies, targetSha } = await previewSkillRepoInstall({
+          url: a.repo, only: a.only, scope: scope === "system" ? "system" : "user", userId: ctx.userId,
+          actor: { userId: ctx.userId, isAdmin: ctx.isAdmin },
+        });
+        // Pin BOTH: the commit and the hash of the review just shown. `add` refuses without them.
+        parkPreviewedReview(ctx.userId, a.repo, targetSha, review.reviewHash);
+        const names = reviewedSkillNames(review);
+        const orphaned = orphanedPolicyKeys(policies);
+        // One card, so the lines are ordered by how much they should change the decision:
+        // "cannot be applied" first, then an overwrite of somebody's edits, then permissions.
+        const lines = [
+          review.gate === "cannot_apply"
+            ? loc(t, "skill.repoCannotApply", "This can't be installed right now — one of the addresses it needs is unreachable or not allowed.")
+            : null,
+          hasLocalEdits(review)
+            ? loc(t, "skill.repoOverwrites", "Some of these were changed after they were installed. Installing will overwrite those changes.")
+            : null,
+          orphaned.length
+            ? loc(t, "skill.repoOrphanedPolicies", `Permission rules for ${orphaned.join(", ")} will no longer apply to anything. They are kept — remove them in Settings if you want to.`, { names: orphaned.join(", ") })
+            : null,
+          !names.length ? loc(t, "skill.repoEmpty", "No matching skills found in that repo.") : null,
+          ...review.notes,
+        ].filter((x): x is string => !!x);
         return {
-          title: loc(t, "skill.addRepoTitle", `Install skills from ${owner}/${repo}`, { repo: `${owner}/${repo}` }),
-          after: `${owner}/${repo}`,
+          title: loc(t, "skill.addRepoTitle", `Install skills from ${review.subject.pluginName}`, { repo: a.repo }),
+          after: a.repo,
           items: names,
-          details: names.length ? undefined : loc(t, "skill.repoEmpty", "No matching skills found in that repo."),
+          details: lines.length ? lines.join(" ") : undefined,
           impact,
         };
       } catch {
-        // Advisory probe — a read failure must never block the add.
+        // No review means no consent to obtain, so this card cannot offer to proceed. It used
+        // to say "you can still install; it'll pull on confirm" — which was honest while the
+        // preview was advisory and is fail-open now that it is the gate.
         return {
           title: loc(t, "skill.addRepoTitle", `Install skills from ${a.repo}`, { repo: a.repo }),
           after: a.repo,
-          details: loc(t, "skill.repoUnreachable", "Couldn't read the repo just now — you can still install; it'll pull on confirm."),
+          details: loc(t, "skill.repoUnreachable", "Couldn't read that repo just now, so there is nothing to review — try again in a moment."),
           impact,
         };
       }
@@ -216,17 +253,35 @@ export const skillCollection: Collection = {
     }
 
     if ("repo" in a) {
-      const manifest = await installSkillRepo({
-        url: a.repo,
-        installedBy: ctx.userId,
-        scope: scope === "system" ? "system" : "user",
-        only: a.only,
-        // Install the commit the approval card showed; falls back to HEAD if the
-        // preview's pin is no longer live (see parkPreviewedSha).
-        sha: claimPreviewedSha(ctx.userId, a.repo),
+      // The card IS the gate, so its review is required — not preferred. Without it there is
+      // nothing to apply exactly, and applying approximately is what this whole barrier exists
+      // to stop.
+      const pinned = claimPreviewedReview(ctx.userId, a.repo);
+      if (!pinned) {
+        throw new Error("This install needs to be reviewed again before it can go ahead — ask for it once more and confirm the card that appears.");
+      }
+      const outcome = await applySkillRepoInstall({
+        url: a.repo, only: a.only, scope: scope === "system" ? "system" : "user",
+        userId: ctx.userId, actor: { userId: ctx.userId, isAdmin: ctx.isAdmin },
+        reviewHash: pinned.reviewHash, targetSha: pinned.sha,
       });
-      const n = manifest.skills.length;
-      return { itemTitle: loc(t, "skill.repoInstalled", `${n} skill${n === 1 ? "" : "s"} from ${a.repo}`, { n, repo: a.repo }) };
+      // Each outcome gets its own sentence: "stale" is not a failure the user caused, and
+      // "blocked" is not something a retry fixes.
+      if (outcome.outcome === "stale") {
+        throw new Error("The repo changed while you were reading — nothing was installed. Ask again to see what it says now.");
+      }
+      if (outcome.outcome === "blocked") {
+        throw new Error("This can't be installed right now: one of the addresses it needs is unreachable or not allowed by the network settings.");
+      }
+      if (outcome.outcome !== "succeeded") {
+        throw new Error("The install didn't finish. It is marked as needing attention in Settings › Skills.");
+      }
+      const n = (a.only?.length ?? 0) || undefined;
+      return {
+        itemTitle: n
+          ? loc(t, "skill.repoInstalled", `${n} skill${n === 1 ? "" : "s"} from ${a.repo}`, { n, repo: a.repo })
+          : loc(t, "skill.repoInstalledAll", `Skills from ${a.repo}`, { repo: a.repo }),
+      };
     }
 
     const parsed = parseSkillMarkdown(a.content); // throws SkillParseError → surfaced as a friendly error

@@ -36,17 +36,23 @@ async function fetchCatalog(url: string): Promise<{ name: string; owner: string 
   return { name: `${repo.owner}/${repo.repo}`, owner: repo.owner, items: [item] };
 }
 
-/** Dry-run the skills a repo would install (name + description), pinned to the
- *  current HEAD commit — the pre-install preview for "add a whole skills repo".
- *  Accepts a full github.com URL OR the `owner/repo` shorthand (parseGitHubUrl
- *  handles both). Advisory: throws only on a bad URL / unreachable repo. */
-export async function discoverRepoSkills(url: string): Promise<{ owner: string; repo: string; sha: string; skills: { name: string; description: string | null }[] }> {
-  const repo = parseGitHubUrl(url);
-  if (!repo) throw new ValidationError("Only GitHub repositories are supported. Paste a github.com repo URL or owner/repo.");
-  const fetchFn = await ghFetch();
-  const { commit, skills } = await discoverSkills({ owner: repo.owner, repo: repo.repo, ref: "HEAD", subdir: "" }, fetchFn);
-  return { owner: repo.owner, repo: repo.repo, sha: commit.sha, skills };
-}
+/*
+ * `discoverRepoSkills` used to live here: the enumerator behind the `manage skill add {repo}`
+ * approval card. It is gone rather than fixed, because the fix was structural.
+ *
+ * It walked `skills/<name>/SKILL.md`, while the installer's `buildPluginPlan` ALSO converts
+ * `commands/*.md` into skills — so the card listed a strictly smaller set than the one that
+ * landed, and a user approving "csv-tidy" also got `commands/report.md`, enabled, its body in
+ * the agent's context, with a name taken from the filename instead of validated frontmatter.
+ *
+ * Teaching this function about `commands/` would have made the two agree TODAY, and left the
+ * next branch added to `plan.ts` to break them again silently. The card is built from the
+ * install review instead (`marketplace/skill-repo.ts`), which is built from `buildPluginPlan`:
+ * one enumerator, so the card cannot describe a different set from the one it authorizes.
+ *
+ * `discoverSkills` itself remains, used by `fetchCatalog` below — but for a PRESENCE check
+ * ("is this repo installable at all") and a catalog blurb, not for a list anyone approves.
+ */
 
 export async function addMarketplace(url: string): Promise<string> {
   const clean = url.trim();

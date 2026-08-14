@@ -28,6 +28,16 @@ export interface ReviewSubject {
   /** `--skill` narrowing. Part of the hash: a review of two skills must not authorize
    *  an apply of twenty. */
   only: string[] | null;
+  /**
+   * Skills only, whatever else the repo declares — what a bare skills repo's approval
+   * promises.
+   *
+   * In the hash for the same reason `only` is, and it is load-bearing rather than
+   * informational: it changes which resources `buildPluginPlan` returns, so a review computed
+   * with it and an apply computed without it would describe and install different sets. A
+   * review that said "two skills" would authorize installing a connector.
+   */
+  skillsOnly: boolean;
 }
 
 /** Ephemeral — to the authorized installer, in one response, never persisted. */
@@ -126,6 +136,7 @@ export function reviewHash(input: {
       scope: input.subject.scope, ownerId: input.subject.ownerId,
       targetSha: input.subject.targetSha,
       only: input.subject.only ? [...input.subject.only].sort() : null,
+      skillsOnly: input.subject.skillsOnly,
     },
     sourceBefore: hashableSurface(input.sourceBefore),
     runtimeBefore: hashableSurface(input.runtimeBefore),
