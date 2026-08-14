@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-14
+
 ### Changed
 
 - The model's thinking now renders as Markdown instead of raw text — `**bold**` pseudo-headings, lists and fenced code inside a thought are typeset, at the thinking row's own size.
