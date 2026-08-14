@@ -9,7 +9,7 @@ import { getBlockPrivateProviderUrls, getMasterKey } from "@/lib/settings";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
 import { applyPlanResources } from "./apply";
-import { FencedWriteError, MANUAL, type MutationAuthority } from "./fence";
+import { FencedWriteError, MANUAL, insertFenceLock, type MutationAuthority } from "./fence";
 import { observePluginPlan } from "./observe";
 import { readStoredManifest, writeStoredManifest } from "./manifest-store";
 import { buildPluginPlan } from "./plan";
@@ -92,13 +92,42 @@ async function committedManifest(
   }) as unknown as Record<string, unknown>;
 }
 
-/** Replace the bundled-file set for an install (delete-then-insert keeps upgrade
- *  in sync with the new tree). */
-async function persistPluginFiles(installId: string, files: { path: string; content: string }[]): Promise<void> {
-  await db.delete(pluginFiles).where(eq(pluginFiles.installId, installId));
-  if (files.length) {
-    await db.insert(pluginFiles).values(files.map((f) => ({ id: nanoid(), installId, path: f.path, content: f.content })));
-  }
+/**
+ * Replace the bundled-file set for an install, FENCED and atomic.
+ *
+ * These bytes are the ones that actually run: `plugin-runtime.ts` materializes them into the
+ * sandbox and `chmod +x`es the entrypoint. Fencing the parent rows and leaving this
+ * unconditional produced a real race — A loses its lease, B applies and finalizes a safe
+ * version, A then wakes up and overwrites the FILES while the install already reads `ready`.
+ * The row said B, the sandbox ran A.
+ *
+ * So: one transaction, holding `insertFenceLock` on the owning install for its whole length.
+ * That lock is what makes it airtight rather than a re-check — the reaper, a rival claim,
+ * `markApplyFailed` and `finalizeApply` are all UPDATEs on that row and block until commit,
+ * so the lease cannot lapse between the check and the last insert. A dispossessed worker gets
+ * zero rows from the lock and writes nothing.
+ *
+ * The metadata update rides in the same transaction for the same reason: keyed only by
+ * install id, it was another unfenced write that a dispossessed worker could land.
+ */
+async function persistPluginFilesFenced(args: {
+  installId: string;
+  files: { path: string; content: string }[];
+  authority: MutationAuthority;
+  /** Written in the SAME transaction when given. Omitted by the legacy paths, which write
+   *  their own row update including the manifest. */
+  metadata?: { version: string; commitSha: string | null };
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    const ok = await tx.execute(insertFenceLock(args.authority, `catalog:${args.installId}`));
+    if ((ok.rowCount ?? 0) === 0) throw new FencedWriteError(`bundled files for install ${args.installId}`);
+    await tx.delete(pluginFiles).where(eq(pluginFiles.installId, args.installId));
+    if (args.files.length) {
+      await tx.insert(pluginFiles).values(
+        args.files.map((f) => ({ id: nanoid(), installId: args.installId, path: f.path, content: f.content })));
+    }
+    if (args.metadata) await tx.update(pluginInstalls).set(args.metadata).where(eq(pluginInstalls.id, args.installId));
+  });
 }
 
 /**
@@ -124,11 +153,13 @@ export async function writeReviewedPlan(args: {
   const authority: MutationAuthority = { kind: "plugin-apply", operationId: args.operationId };
   const tag = `catalog:${args.installId}`;
   const manifest = await applyPlanResources(args.plan, args.observations, tag, args.target, authority);
-  await persistPluginFiles(args.installId, args.plan.files);
+  await persistPluginFilesFenced({
+    installId: args.installId,
+    files: args.plan.files,
+    authority,
+    metadata: { version: manifest.version ?? args.fallbackVersion, commitSha: manifest.commit?.sha ?? null },
+  });
   await pruneRemoved(tag, new Set(manifest.skills), new Set(manifest.connectors), authority);
-  await db.update(pluginInstalls)
-    .set({ version: manifest.version ?? args.fallbackVersion, commitSha: manifest.commit?.sha ?? null })
-    .where(eq(pluginInstalls.id, args.installId));
   // Returned rather than written: `finalizeApply` publishes it, so until the claim is
   // resolved the runtime still sees the previous committed view.
   return committedManifest(args.plan, args.observations, manifest, args.priorManifest);
@@ -208,7 +239,9 @@ export async function installPlugin(opts: {
       manifest: stored, installedBy: opts.installedBy,
     });
   }
-  await persistPluginFiles(installId, files);
+  // MANUAL authority, and that is the point: `insertFenceLock` refuses while any apply is in
+  // flight, so this path cannot overwrite the bundled files of an operation that holds a claim.
+  await persistPluginFilesFenced({ installId, files, authority: MANUAL });
   return manifest;
 }
 
@@ -286,7 +319,7 @@ export async function upgradePlugin(installId: string, toSha: string): Promise<I
   const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
   const manifest = await applyPlanResources(plan, obs, tag, target, MANUAL);
   const files = plan.files;
-  await persistPluginFiles(installId, files);
+  await persistPluginFilesFenced({ installId, files, authority: MANUAL });
   await pruneRemoved(tag, new Set(manifest.skills), new Set(manifest.connectors));
 
   await db.update(pluginInstalls)

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { pool } from "@/lib/db";
 import { deleteServer, setEnabled, upsertStdioServer } from "@/lib/mcp/service";
+import { writeReviewedPlan } from "../install";
 import { deleteSkill, ingestSkill, setSkillEnabled } from "@/lib/skills/service";
 import { FencedWriteError, MANUAL } from "../fence";
 
@@ -149,5 +150,90 @@ run("mutation fence", () => {
     await setApplyState(state({ operationId: "op-someone-else" }));
     await expect(ingestSkill(parsed("fnskill2"), [], { ...target, source: TAG, authority: OURS }))
       .rejects.toThrow(FencedWriteError);
+  });
+});
+
+run("the fence covers the bytes that actually run", () => {
+  beforeAll(async () => {
+    await pool.query(
+      `INSERT INTO plugin_marketplaces (id, url, name) VALUES ($1, 'https://github.com/fn/test', 'fn')
+         ON CONFLICT (id) DO NOTHING`, [MK]);
+  });
+  afterAll(async () => {
+    await pool.query(`DELETE FROM plugin_installs WHERE marketplace_id = $1`, [MK]);
+    await pool.query(`DELETE FROM plugin_marketplaces WHERE id = $1`, [MK]);
+  });
+  beforeEach(async () => {
+    await pool.query(`DELETE FROM plugin_installs WHERE marketplace_id = $1`, [MK]);
+    await pool.query(
+      `INSERT INTO plugin_installs (id, marketplace_id, plugin_name, scope, manifest)
+       VALUES ($1, $2, 'fn-plugin', 'system', '{"schemaVersion":2,"committedRevision":1}'::jsonb)`, [INSTALL, MK]);
+  });
+
+  const plan = (content: string) => ({
+    commit: { sha: "f".repeat(40), date: null, message: null },
+    connectors: [], skills: [], ignored: [], notes: [], needsFiles: true,
+    files: [{ path: "bin/run.sh", content: Buffer.from(content, "utf8").toString("base64") }],
+  });
+  const obs = { urls: {}, detectedAuth: {}, policy: { blockPrivate: false }, observedAt: "2026-08-14T00:00:00.000Z" };
+
+  const write = (operationId: string, content: string) => writeReviewedPlan({
+    operationId, installId: INSTALL, plan: plan(content) as never, observations: obs,
+    target, priorManifest: undefined, fallbackVersion: "fffffff",
+  });
+
+  const bytes = async () => {
+    const { rows } = await pool.query<{ content: string }>(
+      `SELECT content FROM plugin_files WHERE install_id = $1`, [INSTALL]);
+    return rows.map((r) => Buffer.from(r.content, "base64").toString("utf8"));
+  };
+
+  it("refuses a dispossessed worker's file write — the race that beat the old fence", async () => {
+    // A holds the claim and writes. Its lease is then taken (the reaper's transition), B
+    // applies a safe version. A wakes up and tries again: the parent rows are fenced, but the
+    // FILES used to be an unconditional delete+insert, so A would overwrite them while the
+    // install already read `ready`. The row said B, the sandbox ran A.
+    await setApplyState(state({ operationId: "op-A" }));
+    await write("op-A", "#!/bin/sh\necho A\n");
+    expect(await bytes()).toEqual(["#!/bin/sh\necho A\n"]);
+
+    // The reaper takes it from A; B claims and writes.
+    await setApplyState(state({ operationId: "op-B" }));
+    await write("op-B", "#!/bin/sh\necho B\n");
+    expect(await bytes()).toEqual(["#!/bin/sh\necho B\n"]);
+
+    // A wakes up. It must write NOTHING.
+    await expect(write("op-A", "#!/bin/sh\necho A-again\n")).rejects.toThrow(FencedWriteError);
+    expect(await bytes()).toEqual(["#!/bin/sh\necho B\n"]);
+  });
+
+  it("refuses a file write once the operation has been marked failed", async () => {
+    await setApplyState(state({ operationId: "op-A" }));
+    await write("op-A", "one");
+    await setApplyState(state({ operationId: "op-A", status: "failed" }));
+    await expect(write("op-A", "two")).rejects.toThrow(FencedWriteError);
+    expect(await bytes()).toEqual(["one"]);
+  });
+
+  it("refuses a file write after finalize cleared the claim", async () => {
+    await setApplyState(state({ operationId: "op-A" }));
+    await write("op-A", "one");
+    await setApplyState(null);
+    await expect(write("op-A", "two")).rejects.toThrow(FencedWriteError);
+    expect(await bytes()).toEqual(["one"]);
+  });
+
+  it("leaves version and commitSha untouched when the file write is refused", async () => {
+    // The metadata update rides in the same transaction, so a refused apply cannot leave the
+    // row claiming a version whose bytes were never written.
+    await setApplyState(state({ operationId: "op-A" }));
+    await write("op-A", "one");
+    const before = await pool.query<{ commit_sha: string }>(
+      `SELECT commit_sha FROM plugin_installs WHERE id = $1`, [INSTALL]);
+    await setApplyState(null);
+    await expect(write("op-A", "two")).rejects.toThrow(FencedWriteError);
+    const after = await pool.query<{ commit_sha: string }>(
+      `SELECT commit_sha FROM plugin_installs WHERE id = $1`, [INSTALL]);
+    expect(after.rows[0].commit_sha).toBe(before.rows[0].commit_sha);
   });
 });

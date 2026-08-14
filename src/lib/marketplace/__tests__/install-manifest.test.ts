@@ -36,8 +36,12 @@ vi.mock("@/lib/mcp/service", () => ({
   deleteServer: vi.fn(),
 }));
 vi.mock("@/lib/skills/service", () => ({ ingestSkill: async () => {}, deleteSkill: vi.fn() }));
-vi.mock("@/lib/db", () => ({
-  db: {
+// Fencing the writers means a mock must model `execute` (the lock's row count) and
+// `transaction` (the row and its child files are now one unit). A mock missing either makes
+// every fenced write look REFUSED — which is how these five tests failed the moment the fence
+// landed, and why the mock has to grow with it.
+vi.mock("@/lib/db", () => {
+  const db: Record<string, unknown> = {
     select: (cols?: Record<string, unknown>) => ({
       from: () => ({
         // The marketplace row lookup and the install lookup both land here; the shape of
@@ -55,8 +59,11 @@ vi.mock("@/lib/db", () => ({
     insert: () => ({ values: async (v: { manifest: unknown }) => { h.writes.push({ op: "insert", manifest: v.manifest }); } }),
     update: () => ({ set: (v: { manifest: unknown }) => ({ where: async () => { h.writes.push({ op: "update", manifest: v.manifest }); } }) }),
     delete: () => ({ where: async () => {} }),
-  },
-}));
+    execute: async () => ({ rowCount: 1, rows: [] }),
+  };
+  db.transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(db);
+  return { db };
+});
 
 import { installPlugin } from "../install";
 import { readStoredManifest } from "../manifest-store";

@@ -201,28 +201,35 @@ export async function ingestSkill(
   };
 
   const authority = target.authority ?? MANUAL;
-  if (existing[0]) {
-    const res = await db.update(skills).set(values)
-      .where(and(eq(skills.id, id), fencePredicate(authority, sql`skills.source`)));
-    // Throws rather than returning an outcome: the caller asked for the id of a row it was
-    // not allowed to write, and there is no honest value for that. The apply path catches
-    // it and abandons the operation.
-    if ((res.rowCount ?? 0) === 0) throw new FencedWriteError(`skill ${parsed.name}`);
-    await db.delete(skillFiles).where(eq(skillFiles.skillId, id));
-  } else {
-    // See `insertFenceLock`: an insert has no row to read `source` from, so the rule is
-    // serialized under a lock on the owning install instead of living in a WHERE clause.
-    await db.transaction(async (tx) => {
-      const ok = await tx.execute(insertFenceLock(authority, target.source ?? "manual"));
-      if ((ok.rowCount ?? 0) === 0) throw new FencedWriteError(`skill ${parsed.name}`);
-      await tx.insert(skills).values(values);
-    });
-  }
+  // ONE transaction for the row AND its files, holding `insertFenceLock` on the owning
+  // install throughout.
+  //
+  // Splitting them was a real hole: the parent update was fenced, then `skill_files` were
+  // written afterwards with no fence at all. A worker that lost its lease between the two
+  // could overwrite the support files of a skill someone else had just applied — and those
+  // files reach the sandbox. The lock also blocks the reaper and any rival claim for the
+  // transaction's whole length, so the lease cannot lapse mid-write.
+  return db.transaction(async (tx) => {
+    const ok = await tx.execute(insertFenceLock(authority, target.source ?? "manual"));
+    if ((ok.rowCount ?? 0) === 0) throw new FencedWriteError(`skill ${parsed.name}`);
 
-  if (files.length) {
-    await db
-      .insert(skillFiles)
-      .values(files.map((f) => ({ id: nanoid(), skillId: id, path: f.path, content: f.content })));
-  }
-  return id;
+    if (existing[0]) {
+      const res = await tx.update(skills).set(values)
+        .where(and(eq(skills.id, id), fencePredicate(authority, sql`skills.source`)));
+      // Throws rather than returning an outcome: the caller asked for the id of a row it was
+      // not allowed to write, and there is no honest value for that. The apply path catches
+      // it and abandons the operation.
+      if ((res.rowCount ?? 0) === 0) throw new FencedWriteError(`skill ${parsed.name}`);
+      await tx.delete(skillFiles).where(eq(skillFiles.skillId, id));
+    } else {
+      await tx.insert(skills).values(values);
+    }
+
+    if (files.length) {
+      await tx
+        .insert(skillFiles)
+        .values(files.map((f) => ({ id: nanoid(), skillId: id, path: f.path, content: f.content })));
+    }
+    return id;
+  });
 }
