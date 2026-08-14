@@ -1598,7 +1598,12 @@
           "uninstall": "Removed plugin",
           "update": "Updated plugin",
           "enable": "Enabled plugin",
-          "disable": "Disabled plugin"
+          "disable": "Disabled plugin",
+          "apply_accepted": "Approved plugin changes",
+          "apply_succeeded": "Applied plugin changes",
+          "apply_stale": "Cancelled plugin changes (review out of date)",
+          "apply_blocked": "Refused plugin changes (unreachable address)",
+          "apply_failed": "Plugin changes did not finish"
         },
         "connector": {
           "add": "Added connector",

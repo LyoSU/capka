@@ -34,6 +34,11 @@ export interface PolicyMatcher {
 
 export type AuditAction =
   | "plugin.install" | "plugin.uninstall" | "plugin.update" | "plugin.enable" | "plugin.disable"
+  // One event per apply OUTCOME, as separate actions rather than one action with a
+  // status in `detail`: an outcome has to be visible and filterable from the activity
+  // list itself, not only after expanding a row.
+  | "plugin.apply_accepted" | "plugin.apply_succeeded" | "plugin.apply_stale"
+  | "plugin.apply_blocked" | "plugin.apply_failed"
   | "connector.add" | "connector.remove" | "connector.enable" | "connector.disable"
   | "skill.add" | "skill.remove" | "skill.enable" | "skill.disable"
   | "automation.add" | "automation.remove" | "automation.enable" | "automation.disable"
@@ -54,6 +59,8 @@ export type AuditAction =
  *  rendering as a raw key. */
 export const AUDIT_ACTIONS = [
   "plugin.install", "plugin.uninstall", "plugin.update", "plugin.enable", "plugin.disable",
+  "plugin.apply_accepted", "plugin.apply_succeeded", "plugin.apply_stale",
+  "plugin.apply_blocked", "plugin.apply_failed",
   "connector.add", "connector.remove", "connector.enable", "connector.disable",
   "skill.add", "skill.remove", "skill.enable", "skill.disable",
   "automation.add", "automation.remove", "automation.enable", "automation.disable",
