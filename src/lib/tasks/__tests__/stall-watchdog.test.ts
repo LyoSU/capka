@@ -93,4 +93,29 @@ describe("StallWatchdog", () => {
     vi.advanceTimersByTime(1000);
     expect(onStall).toHaveBeenCalledTimes(2);
   });
+
+  // A retry widens the window (the runner doubles it per attempt), so an attempt
+  // can be started with its own patience — including for the re-arm on activity.
+  it("start(idleMs) widens the window for that attempt, activity included", () => {
+    const onStall = vi.fn();
+    const wd = new StallWatchdog(1000, onStall);
+    wd.start(3000);
+    vi.advanceTimersByTime(2999);
+    expect(onStall).not.toHaveBeenCalled();
+    wd.activity(); // re-arms on the ATTEMPT's window, not the base one
+    vi.advanceTimersByTime(2999);
+    expect(onStall).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onStall).toHaveBeenCalledTimes(1);
+  });
+
+  it("start() with no argument returns to the base window", () => {
+    const onStall = vi.fn();
+    const wd = new StallWatchdog(1000, onStall);
+    wd.start(5000);
+    wd.stop();
+    wd.start(); // the override was for that attempt only
+    vi.advanceTimersByTime(1000);
+    expect(onStall).toHaveBeenCalledTimes(1);
+  });
 });

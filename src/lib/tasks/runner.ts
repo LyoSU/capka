@@ -108,7 +108,9 @@ const MAX_TASK_MS = (Number(process.env.TASK_TIMEOUT_MINUTES) || 10) * 60_000;
  * The stall watchdog aborts an attempt that produces nothing for this long while
  * we're waiting on the model (it's PAUSED during local tool execution, which is
  * legitimately quiet — see StallWatchdog). 60s is comfortably longer than any
- * real time-to-first-token, short enough that a hung gateway fails fast.
+ * real time-to-first-token, short enough that a hung gateway fails fast. This is
+ * the FIRST attempt's window; every retry gets twice it (see `consume`), so the
+ * knob scales the whole progression.
  */
 const STREAM_IDLE_MS = (Number(process.env.STREAM_IDLE_SECONDS) || 60) * 1000;
 /** Max recovery attempts (stall + transient) per turn before giving up with a
@@ -806,8 +808,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const consume = async () => {
       // Arm the stall watchdog for this attempt: it fires only while we're waiting
       // on the model (paused during local tool runs) and is torn down whatever way
-      // the loop ends (clean finish, abort event, or throw).
-      watchdog.start();
+      // the loop ends (clean finish, abort event, or throw). A retry is twice as
+      // patient as the first try: the first attempt must fail FAST on a hung
+      // gateway, but once we've seen one stall the likelier story is a model that
+      // is alive and thinking longer than the base window (a reasoning phase the
+      // provider doesn't stream looks identical to silence on the wire), and
+      // retrying it with the same window just fails the same way three more times.
+      // Doubling once, not per attempt, keeps the worst case (60s + 3×120s) inside
+      // MAX_TASK_MS, so an exhausted turn still reports "provider unresponsive"
+      // rather than being cut off as a generic timeout.
+      watchdog.start(recoveries > 0 ? STREAM_IDLE_MS * 2 : STREAM_IDLE_MS);
       try {
       for await (const event of result.fullStream) {
         if (ac.signal.aborted) break;

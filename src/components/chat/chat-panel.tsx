@@ -770,10 +770,18 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   so it never remounts (and flickers) as the turn progresses. It
                   shows only while nothing has streamed yet — before the assistant
                   message exists, or while it's still empty. Once the first part
-                  arrives, the rail's own running tail node takes over. */}
+                  arrives, the rail's own running tail node takes over.
+                  EXCEPTION: a provider stall. The rail's nodes carry no "we are
+                  retrying" state, so with that rule alone the retry notice had
+                  nowhere to render as soon as anything had streamed — which for a
+                  reasoning model is within a second, leaving the user watching
+                  minutes of silence and then a bare failure. While `retrying` is
+                  set the row comes back regardless, reading as the next step on
+                  the rail (it mirrors a running node) and explaining the frozen
+                  spinner above it. It clears itself the moment content flows. */}
               {isLoading && (() => {
                 const last = messages[messages.length - 1] as { role: string; parts?: unknown[] } | undefined;
-                const showStatus = !!last && (last.role === "user" || (last.role === "assistant" && (last.parts?.length ?? 0) === 0));
+                const showStatus = !!taskInfo.retrying || (!!last && (last.role === "user" || (last.role === "assistant" && (last.parts?.length ?? 0) === 0)));
                 return showStatus ? (
                   <div className="px-4 py-4 md:px-6">
                     <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} retrying={taskInfo.retrying} />

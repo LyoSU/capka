@@ -8,6 +8,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- A stalled provider no longer looks like a frozen chat: the "model is not responding — retrying" row now shows even after part of the reply has streamed, where it was previously suppressed (which is every turn on a reasoning model).
+- A retry after a stall now waits twice as long as the first attempt before giving up, so a model that is alive but thinking longer than `STREAM_IDLE_SECONDS` (default 60s) is no longer failed four times in a row. Raise `STREAM_IDLE_SECONDS` to scale both windows.
 - A Telegram reply is no longer re-sent as plain text when the rich send's outcome is unknown (lost response, 5xx), which could deliver one turn twice; the fallback now runs only when Telegram itself refused the message.
 - A worker that lost its lease no longer overwrites the outcome the zombie reconciler recorded: the task status, the assistant message, the realtime event and the Telegram push all hang off one compare-and-set, so a turn already shown as interrupted can no longer flip to an answer.
 - The connector health and connect-error caches no longer keep an entry per connector revision for the life of the process; both now hold only what is still within their TTL.

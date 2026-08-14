@@ -19,14 +19,21 @@ export class StallWatchdog {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight = 0;
   private stopped = true;
+  /** Window for the attempt currently being watched — `start(idleMs)` sets it, so
+   *  a retry can be more patient than the first try (the runner widens it). */
+  private attemptMs: number;
 
   constructor(
     private readonly idleMs: number,
     private readonly onStall: () => void,
-  ) {}
+  ) {
+    this.attemptMs = idleMs;
+  }
 
-  /** Begin (or restart, for a retry) watching the current attempt. */
-  start(): void {
+  /** Begin (or restart, for a retry) watching the current attempt, optionally with
+   *  a wider window than the default for this one attempt. */
+  start(idleMs: number = this.idleMs): void {
+    this.attemptMs = idleMs;
     this.stopped = false;
     this.inFlight = 0;
     this.rearm();
@@ -65,7 +72,7 @@ export class StallWatchdog {
       if (this.stopped || this.inFlight > 0) return;
       this.stopped = true; // fire at most once per armed period
       this.onStall();
-    }, this.idleMs);
+    }, this.attemptMs);
   }
 
   private clear(): void {
