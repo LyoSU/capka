@@ -164,19 +164,15 @@ export default function InstalledPlugins() {
 
   // Step 2: apply — re-pull from source, pinning to the EXACT commit just reviewed
   // (toSha), not whatever the branch points at now (consent bound to the artifact).
-  const applyUpdate = async (p: InstalledPlugin, toSha: string) => {
-    // With a derived review in hand, apply through the gate — it re-derives everything and
-    // refuses if anything moved since the operator read it. Without one (the review request
-    // failed), fall back to the pinned re-pull, which is still bound to the reviewed commit.
+  const applyUpdate = async (p: InstalledPlugin) => {
+    // No fallback. The old `POST /api/extensions` path moved the pin without a reviewHash, so
+    // falling back to it whenever the derived review had not loaded made the gate optional —
+    // fail-OPEN on exactly the request that matters. That route now refuses, and the Apply
+    // button stays disabled until a review is in hand.
     const payload = derived;
+    if (!payload) return;
     setReview(null);
     setDerived(null);
-    if (!payload) {
-      return act(() => fetch("/api/extensions", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ installId: p.id, toSha }),
-      }), p.id, t("updated"));
-    }
     setBusy(p.id);
     try {
       const r = await fetch("/api/extensions/review", {
@@ -443,9 +439,12 @@ export default function InstalledPlugins() {
               ) : null}
               <AlertDialogFooter>
                 <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                {/* Disabled until the review is loaded AND applicable: consent means having
+                    seen what the update reaches, so an Apply that can fire before the panel
+                    renders is not a gate at all. */}
                 <AlertDialogAction
-                  disabled={derived?.review.gate === "cannot_apply"}
-                  onClick={() => applyUpdate(review.plugin, review.preview.to.sha)}
+                  disabled={!derived || derived.review.gate === "cannot_apply"}
+                  onClick={() => applyUpdate(review.plugin)}
                 >{t("reviewApply")}</AlertDialogAction>
               </AlertDialogFooter>
             </>

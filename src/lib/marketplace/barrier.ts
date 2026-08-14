@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { pluginInstalls } from "@/lib/db/schema";
 import { getBlockPrivateProviderUrls, getMasterKey } from "@/lib/settings";
 import { log } from "@/lib/log";
-import { insertPluginAudit } from "./audit";
+import { insertPluginAudit, insertPolicyClearAudit } from "./audit";
 import { classifyDelta } from "./delta";
 import { FencedWriteError } from "./fence";
 import { readStoredManifest, type ApplyKind } from "./manifest-store";
@@ -14,7 +14,8 @@ import {
 } from "./operation";
 import { buildPluginPlan } from "./plan";
 import {
-  analysePolicies, applyDispositions, policyRevisions, readPolicyBaseline, type PolicyOutlook,
+  ForbiddenDispositionError, analysePolicies, applyDispositions, policyRevisions,
+  readPolicyBaseline, type DispositionActor, type PolicyOutlook,
 } from "./policy-disposition";
 import { projectPlanSurface } from "./project";
 import { projectPluginReview, type PolicyDisposition, type ReviewResponse, type ReviewSubject } from "./review";
@@ -42,6 +43,9 @@ export interface ApplyRequest {
   actorId: string;
   reviewHash: string;
   dispositions: Record<string, PolicyDisposition>;
+  /** The asker's own authority, NOT the install's scope. A personal install may name an
+   *  org-wide rule in its baseline, so what decides is who is asking. */
+  actor: DispositionActor;
 }
 
 export type ApplyOutcome =
@@ -280,30 +284,48 @@ export async function applyPluginReviewed(input: ApplyRequest & {
     }
 
     // ── committed ────────────────────────────────────────────────────────────────
-    // The dispositions, the published view and the `succeeded` event are ONE transaction:
-    // there is no honest version of "succeeded" where part of the consented change did not
-    // happen, and no "committed but the audit failed" phase.
+    // Publishing the view, carrying out the dispositions and recording `succeeded` are ONE
+    // transaction, and the ORDER inside it matters: finalize first, so a lost CAS aborts
+    // before a single policy row is deleted.
+    //
+    // Doing the dispositions first and finalizing after — which is what this used to do —
+    // produced a state with no honest description: the policy was already gone, the journal
+    // said `succeeded`, the finalize had lost, a second `failed` event followed it, and the
+    // plugin stayed invisible. Rolling back is only possible while it is all one statement
+    // sequence in one transaction.
+    let lostLease = false;
     try {
       await db.transaction(async (tx) => {
-        await applyDispositions(tx, { dispositions: input.dispositions, baseline: second.policyBaseline });
+        if (!await finalizeApply({ installId, operationId, manifest }, tx)) {
+          lostLease = true;
+          // Abort so nothing else in this transaction lands. The reaper took the lease while
+          // we were writing, so the resources are changed but must not be published.
+          throw new Error("lease lost at finalize");
+        }
+        const { deleted } = await applyDispositions(tx, {
+          dispositions: input.dispositions,
+          baseline: second.policyBaseline,
+          outlooks: second.policies,
+          actor: input.actor,
+        });
+        // Each deletion gets the SAME `policy.clear` entry a hand edit would, carrying the
+        // operation that caused it — otherwise a rule vanishes with only a plugin event to
+        // explain it, and the permissions trail has a hole exactly where it matters.
+        for (const row of deleted) {
+          await insertPolicyClearAudit(tx, { actorId: input.actorId, operationId, row });
+        }
         await insertPluginAudit(tx, { operationId, event: "succeeded", actorId: input.actorId, reviewHash: input.reviewHash, targetKey });
       });
     } catch (e) {
+      const errorCode = lostLease ? "lease_lost"
+        : e instanceof ForbiddenDispositionError ? "policy_forbidden"
+          : "policy_stale";
       await markApplyFailed(installId, operationId);
       await insertPluginAudit(db, {
-        operationId, event: "failed", actorId: input.actorId, reviewHash: input.reviewHash, targetKey, errorCode: "policy_stale",
+        operationId, event: "failed", actorId: input.actorId, reviewHash: input.reviewHash, targetKey, errorCode,
       });
-      log.error("plugin apply failed applying policy dispositions", { installId, operationId, err: String(e) });
-      return { outcome: "failed", errorCode: "policy_stale" };
-    }
-
-    if (!await finalizeApply({ installId, operationId, manifest })) {
-      // The reaper took the lease while we were writing. The resources are already changed,
-      // so this is `failed`, and the operator has to review and retry.
-      await insertPluginAudit(db, {
-        operationId, event: "failed", actorId: input.actorId, reviewHash: input.reviewHash, targetKey, errorCode: "lease_lost",
-      });
-      return { outcome: "failed", errorCode: "lease_lost" };
+      log.error("plugin apply failed at commit", { installId, operationId, errorCode, err: String(e) });
+      return { outcome: "failed", errorCode };
     }
     return { outcome: "succeeded" };
   } catch (e) {

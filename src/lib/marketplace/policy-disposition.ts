@@ -124,6 +124,63 @@ export class StalePolicyError extends Error {
   }
 }
 
+/** A disposition the actor is not entitled to make. Distinct from `StalePolicyError`,
+ *  which means the world moved: this one means the request should never have been made. */
+export class ForbiddenDispositionError extends Error {
+  constructor(key: string, why: string) {
+    super(`Not allowed to change policy ${key}: ${why}`);
+    this.name = "ForbiddenDispositionError";
+  }
+}
+
+/** Who is asking. Not derived from the install's scope — a PERSONAL install may name an
+ *  org-wide rule in its baseline, so the actor's own authority is what decides. */
+export interface DispositionActor {
+  userId: string;
+  isAdmin: boolean;
+}
+
+/**
+ * Decide whether this actor may carry out this disposition, given the outlook the review
+ * computed. Pure, so the route and the apply cannot disagree.
+ *
+ * Two independent gates, and BOTH are load-bearing:
+ *
+ * 1. **Ownership.** `readPolicyBaseline` deliberately returns rules of every scope, because
+ *    a review that showed only the installer's own would describe a smaller change than the
+ *    one being consented to. Showing is not touching: a non-admin may delete only a rule
+ *    that is theirs — `scope = 'user'` AND `user_id = them`. Without this, a member could
+ *    install a personal plugin declaring a resource named to match an org-wide `deny`, name
+ *    that rule in `dispositions`, and delete it — and a missing rule is DEFAULT ALLOW
+ *    (`buildMatcher`), so that is privilege escalation, not cleanup.
+ *
+ * 2. **The outlook.** Only a rule that will apply to nothing may be deleted. A rule that
+ *    still governs a surviving resource is not part of this decision at all, and the UI
+ *    never offers it — so a request to delete one is forged by construction.
+ *
+ * The review hash cannot substitute for either. The client supplies the dispositions AND
+ * the server recomputes the hash *with them*, so a forged disposition simply produces a
+ * different valid hash: the first attempt 409s with a fresh review, and the second one —
+ * carrying that hash — would succeed. A hash proves nothing was swapped underneath; it
+ * cannot prove the asker was entitled to ask.
+ */
+export function assertDispositionAllowed(
+  key: string,
+  disposition: PolicyDisposition,
+  row: PolicyBaselineRow,
+  outlook: PolicyOutlook | undefined,
+  actor: DispositionActor,
+): void {
+  if (disposition === "keep") return;
+  if (!actor.isAdmin && !(row.scope === "user" && row.userId === actor.userId)) {
+    throw new ForbiddenDispositionError(key, "only an admin can change a rule that is not your own");
+  }
+  if (!outlook) throw new ForbiddenDispositionError(key, "this rule is not part of the review");
+  if (outlook.outlook !== "applies_to_nothing") {
+    throw new ForbiddenDispositionError(key, "this rule still applies to a resource that remains");
+  }
+}
+
 /**
  * Carry out the dispositions the installer accepted, inside the caller's transaction.
  *
@@ -144,21 +201,33 @@ export async function applyDispositions(
   input: {
     dispositions: Record<string, PolicyDisposition>;
     baseline: PolicyBaselineRow[];
+    /** The outlook the review computed, per key. A disposition for a key with no outlook is
+     *  not part of the reviewed decision and is refused. */
+    outlooks: PolicyOutlook[];
+    /** REQUIRED. Ownership is checked here rather than at the route, so no future caller can
+     *  reach this function without it. */
+    actor: DispositionActor;
   },
-): Promise<{ deleted: string[] }> {
+): Promise<{ deleted: PolicyBaselineRow[] }> {
   const byKey = new Map(input.baseline.map((r) => [policyKey(r), r]));
-  const deleted: string[] = [];
+  const outlookByKey = new Map(input.outlooks.map((o) => [o.key, o]));
+  const deleted: PolicyBaselineRow[] = [];
   for (const [key, disposition] of Object.entries(input.dispositions)) {
     if (disposition === "keep") continue;
     const row = byKey.get(key);
     // A disposition naming a row that is no longer in the baseline is itself a stale
     // review: the installer decided about something that has since changed.
     if (!row) throw new StalePolicyError(key);
+    // Entitlement BEFORE the write, and before the CAS: a forged disposition must be
+    // refused outright, not merely lose a race.
+    assertDispositionAllowed(key, disposition, row, outlookByKey.get(key), input.actor);
     if (disposition === "delete") {
       const res = await tx.execute(sql`
         DELETE FROM capability_policies WHERE id = ${row.id} AND revision = ${row.revision}`);
       if ((res.rowCount ?? 0) === 0) throw new StalePolicyError(key);
-      deleted.push(key);
+      // The ROW, not the key: `policy.clear` has to record what the rule contained, and
+      // after the delete it is unreconstructable.
+      deleted.push(row);
       continue;
     }
     // `reassign` exists to MOVE a rule to a renamed resource, and moving it needs a

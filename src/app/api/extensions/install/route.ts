@@ -1,35 +1,19 @@
 import { apiHandler, requireActive } from "@/lib/auth";
-import { membersCanInstallPlugins } from "@/lib/settings";
-import { installPlugin } from "@/lib/marketplace/install";
-import { hasSystemInstall } from "@/lib/marketplace/service";
-import { audit } from "@/lib/governance/audit";
-import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
-
-/** Install a plugin from an admin-connected marketplace. Admins install org-wide
- *  (system); members install personally (user-scope) — and only when the admin has
- *  enabled member installs. */
-export const POST = apiHandler(async (req: Request) => {
-  const { userId, role } = await requireActive();
-  const limited = guardRateLimit(
-    `extension-mutation:${userId}`,
-    RATE_LIMITS.extensionMutation,
-    "Too many extension requests — please wait before trying again.",
+/**
+ * GONE ON PURPOSE — a first install now goes through the review gate.
+ *
+ * This route wrote skills, connectors and executable plugin files with no `reviewHash` at
+ * all, so the consent gate was bypassable simply by calling it. Kept as an explicit refusal,
+ * rather than deleted, so an old client is told where to go instead of retrying a 405.
+ *
+ * The gate's own route enforces everything this one did — `requireWriter`, the
+ * `membersCanInstallPlugins` switch, the "already installed for everyone" refusal — plus the
+ * review a person has to have seen.
+ */
+export const POST = apiHandler(async () => {
+  await requireActive();
+  return Response.json(
+    { error: "Installs now go through the install review. Use GET /api/extensions/review, then POST it back with the reviewHash." },
+    { status: 410 },
   );
-  if (limited) return limited;
-  const isAdmin = role === "admin";
-  if (!isAdmin && !(await membersCanInstallPlugins())) {
-    return Response.json({ error: "Plugin installs are admin-only on this instance." }, { status: 403 });
-  }
-  const { marketplaceId, pluginName } = await req.json();
-  if (typeof marketplaceId !== "string" || typeof pluginName !== "string") {
-    return Response.json({ error: "marketplaceId and pluginName required" }, { status: 400 });
-  }
-  // A member needn't install personally what's already available org-wide.
-  if (!isAdmin && (await hasSystemInstall(marketplaceId, pluginName))) {
-    return Response.json({ error: "This plugin is already installed for everyone." }, { status: 409 });
-  }
-  const scope = isAdmin ? "system" : "user";
-  const manifest = await installPlugin({ marketplaceId, pluginName, installedBy: userId, scope });
-  await audit({ actorId: userId, action: "plugin.install", targetType: "plugin", targetKey: pluginName, detail: { scope, skills: manifest.skills.length, connectors: manifest.connectors.length } });
-  return Response.json({ ok: true, manifest });
 });

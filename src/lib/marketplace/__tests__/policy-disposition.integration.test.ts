@@ -2,7 +2,9 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
 import { pool, db } from "@/lib/db";
 import { setPolicy } from "@/lib/governance/policy";
 import {
-  StalePolicyError, analysePolicies, applyDispositions, policyKey, policyRevisions, readPolicyBaseline,
+  ForbiddenDispositionError, StalePolicyError, analysePolicies, applyDispositions,
+  assertDispositionAllowed, policyKey, policyRevisions, readPolicyBaseline,
+  type PolicyBaselineRow, type PolicyOutlook,
 } from "../policy-disposition";
 
 /**
@@ -111,21 +113,28 @@ run("applyDispositions", () => {
   afterAll(cleanup);
 
   const baseline = () => readPolicyBaseline([{ type: "connector", name: NAME }]);
+  const ADMIN = { userId: "someone", isAdmin: true };
+  /** The rule is gone from the new surface, so deleting it is the offered choice. */
+  const gone = (rows: PolicyBaselineRow[]): PolicyOutlook[] =>
+    analysePolicies({ affected: rows, survivingNames: [] });
+  const run = (rows: PolicyBaselineRow[], dispositions: Record<string, "keep" | "delete" | "reassign">,
+               actor = ADMIN, outlooks = gone(rows)) =>
+    db.transaction((tx) => applyDispositions(tx, { dispositions, baseline: rows, outlooks, actor }));
 
   it("deletes what the installer chose to delete", async () => {
     await seed();
     const rows = await baseline();
-    const out = await db.transaction((tx) => applyDispositions(tx, {
-      dispositions: { [policyKey(rows[0])]: "delete" }, baseline: rows,
-    }));
-    expect(out.deleted).toEqual([policyKey(rows[0])]);
+    const out = await run(rows, { [policyKey(rows[0])]: "delete" });
+    // The ROW, not the key: `policy.clear` has to say what the rule contained, and after the
+    // delete it is unreconstructable.
+    expect(out.deleted.map((r) => policyKey(r))).toEqual([policyKey(rows[0])]);
     expect(await baseline()).toEqual([]);
   });
 
   it("leaves `keep` alone", async () => {
     await seed();
     const rows = await baseline();
-    await db.transaction((tx) => applyDispositions(tx, { dispositions: { [policyKey(rows[0])]: "keep" }, baseline: rows }));
+    await run(rows, { [policyKey(rows[0])]: "keep" });
     expect(await baseline()).toHaveLength(1);
   });
 
@@ -137,17 +146,44 @@ run("applyDispositions", () => {
     await seed("deny");
     const rows = await baseline();
     await seed("allow"); // someone else moved it; revision advanced
-    await expect(db.transaction((tx) => applyDispositions(tx, {
-      dispositions: { [policyKey(rows[0])]: "delete" }, baseline: rows,
-    }))).rejects.toThrow(StalePolicyError);
+    await expect(run(rows, { [policyKey(rows[0])]: "delete" })).rejects.toThrow(StalePolicyError);
     // Nothing was deleted, and the transaction rolled back.
     expect(await baseline()).toHaveLength(1);
   });
 
   it("aborts when a disposition names a row that is no longer in the baseline", async () => {
-    await expect(db.transaction((tx) => applyDispositions(tx, {
-      dispositions: { "system:connector:vanished::": "delete" }, baseline: [],
-    }))).rejects.toThrow(StalePolicyError);
+    await expect(run([], { "system:connector:vanished::": "delete" })).rejects.toThrow(StalePolicyError);
+  });
+
+  it("refuses a NON-ADMIN deleting a system rule — the escalation this gate exists for", async () => {
+    // The attack: a member installs a personal plugin declaring a resource named to match an
+    // org-wide `deny`, then names that rule in `dispositions`. A missing rule is DEFAULT
+    // ALLOW, so deleting it grants the member what the admin forbade. The review hash cannot
+    // stop this: the client supplies the dispositions and the server hashes them WITH the
+    // request, so a forged one simply produces a different valid hash.
+    await seed("deny");
+    const rows = await baseline();
+    await expect(run(rows, { [policyKey(rows[0])]: "delete" }, { userId: "member", isAdmin: false }))
+      .rejects.toThrow(ForbiddenDispositionError);
+    expect(await baseline()).toHaveLength(1);
+  });
+
+  it("refuses deleting a rule that still applies to a surviving resource", async () => {
+    // Not part of this decision at all, and the screen never offers it — so a request to
+    // delete one is forged by construction.
+    await seed("deny");
+    const rows = await baseline();
+    const stillApplies = analysePolicies({ affected: rows, survivingNames: [{ type: "connector", name: NAME }] });
+    await expect(run(rows, { [policyKey(rows[0])]: "delete" }, ADMIN, stillApplies))
+      .rejects.toThrow(ForbiddenDispositionError);
+    expect(await baseline()).toHaveLength(1);
+  });
+
+  it("refuses a key with no outlook, even for an admin", async () => {
+    await seed("deny");
+    const rows = await baseline();
+    await expect(run(rows, { [policyKey(rows[0])]: "delete" }, ADMIN, []))
+      .rejects.toThrow(ForbiddenDispositionError);
   });
 
   it("refuses `reassign` loudly rather than silently treating it as keep", async () => {
@@ -155,13 +191,38 @@ run("applyDispositions", () => {
     // Quietly keeping would apply something other than what was accepted.
     await seed();
     const rows = await baseline();
-    await expect(db.transaction((tx) => applyDispositions(tx, {
-      dispositions: { [policyKey(rows[0])]: "reassign" }, baseline: rows,
-    }))).rejects.toThrow(/not implemented/);
+    await expect(run(rows, { [policyKey(rows[0])]: "reassign" })).rejects.toThrow(/not implemented/);
   });
 });
 
 afterAll(async () => {
   await cleanup();
   await pool.query(`DELETE FROM "user" WHERE id = $1`, [ACTOR]);
+});
+
+describe("assertDispositionAllowed (pure — the ownership rule)", () => {
+  const row = (over: Partial<PolicyBaselineRow> = {}): PolicyBaselineRow => ({
+    id: "p1", capabilityType: "connector", capabilityKey: "api", effect: "deny",
+    scope: "system", userId: null, projectId: null, revision: 0, ...over,
+  });
+  const gone = (r: PolicyBaselineRow): PolicyOutlook =>
+    ({ key: policyKey(r), capabilityType: r.capabilityType, capabilityKey: r.capabilityKey, effect: r.effect, outlook: "applies_to_nothing" });
+
+  it("lets a member delete only a rule that is theirs", () => {
+    const mine = row({ scope: "user", userId: "m1" });
+    expect(() => assertDispositionAllowed("k", "delete", mine, gone(mine), { userId: "m1", isAdmin: false })).not.toThrow();
+    // Someone else's personal rule is not theirs to touch either — the gate is ownership,
+    // not merely "is it user-scoped".
+    const theirs = row({ scope: "user", userId: "m2" });
+    expect(() => assertDispositionAllowed("k", "delete", theirs, gone(theirs), { userId: "m1", isAdmin: false })).toThrow(ForbiddenDispositionError);
+    const project = row({ scope: "project", projectId: "pr1", userId: null });
+    expect(() => assertDispositionAllowed("k", "delete", project, gone(project), { userId: "m1", isAdmin: false })).toThrow(ForbiddenDispositionError);
+  });
+
+  it("never blocks `keep`, whoever asks", () => {
+    // Keeping is the default and changes nothing, so it needs no entitlement — otherwise a
+    // member could not submit a review that merely lists somebody else's rule.
+    const r = row();
+    expect(() => assertDispositionAllowed("k", "keep", r, undefined, { userId: "m1", isAdmin: false })).not.toThrow();
+  });
 });

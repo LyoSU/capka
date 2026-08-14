@@ -65,6 +65,7 @@ const preview = (installId: string | null) => previewPluginApply({
 const apply = (installId: string | null, reviewHash: string) => applyPluginReviewed({
   gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
   installId, targetSha: SHA, actorId: ACTOR, reviewHash, dispositions: {}, performWrites,
+  actor: { userId: ACTOR, isAdmin: true },
 });
 
 const eventCount = async (event: string) => {

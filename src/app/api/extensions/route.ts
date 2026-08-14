@@ -1,8 +1,7 @@
 import { apiHandler, requireSession, requireWriter } from "@/lib/auth";
 import { getInstallOwner, listInstalledPlugins, setPluginEnabled, setPluginMutedForUser } from "@/lib/marketplace/service";
-import { uninstallPlugin, upgradePlugin } from "@/lib/marketplace/install";
+import { uninstallPlugin } from "@/lib/marketplace/install";
 import { audit } from "@/lib/governance/audit";
-import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /** The install if this user may manage it, else null. Admins manage org-wide
  *  (system) installs; a member manages only their own personal (user-scope) one.
@@ -47,28 +46,25 @@ export const PATCH = apiHandler(async (req: Request) => {
   return Response.json({ ok: true });
 });
 
-/** Re-pull a plugin from its source (update to latest). */
-export const POST = apiHandler(async (req: Request) => {
-  // requireWriter: re-pulling third-party code is install-class, like POST /install.
-  const { userId, role } = await requireWriter();
-  const limited = guardRateLimit(
-    `extension-mutation:${userId}`,
-    RATE_LIMITS.extensionMutation,
-    "Too many extension requests — please wait before trying again.",
+/**
+ * GONE ON PURPOSE.
+ *
+ * This route moved the pin on a reviewed COMMIT, which is not the same thing as having been
+ * reviewed: a full SHA proves the target did not drift, and proves nothing about whether a
+ * human saw what the plugin would reach. While it existed it was a complete bypass of the
+ * consent gate — the barrier could be skipped by choosing the older endpoint, and the UI's
+ * own fallback did exactly that whenever the derived review had not loaded.
+ *
+ * Upgrades go through `GET`/`POST /api/extensions/review`, which is the single server-side
+ * writer. Kept as an explicit refusal rather than deleted so an old client gets an answer
+ * that says where to go, instead of a 405 it will retry.
+ */
+export const POST = apiHandler(async () => {
+  await requireWriter();
+  return Response.json(
+    { error: "Upgrades now go through the install review. Use POST /api/extensions/review with the reviewHash it returns." },
+    { status: 410 },
   );
-  if (limited) return limited;
-  const { installId, toSha } = await req.json();
-  if (typeof installId !== "string") return Response.json({ error: "installId required" }, { status: 400 });
-  // toSha binds the upgrade to the commit the user reviewed (see previewUpgrade).
-  // Required and fail-closed: no blind "pull latest" path that skips the review.
-  // Must be a full 40-hex commit SHA — a branch/tag/"HEAD" would re-dereference to
-  // live upstream HEAD at apply time and defeat the pin (upgradePlugin re-checks).
-  if (typeof toSha !== "string" || !/^[0-9a-f]{40}$/.test(toSha)) return Response.json({ error: "toSha (reviewed commit) must be a full 40-character commit SHA" }, { status: 400 });
-  const inst = await canManage(installId, userId, role === "admin");
-  if (!inst) return Response.json({ error: "Not allowed" }, { status: 403 });
-  const manifest = await upgradePlugin(installId, toSha);
-  await audit({ actorId: userId, action: "plugin.update", targetType: "plugin", targetKey: installId, detail: { name: inst.pluginName, skills: manifest.skills.length, connectors: manifest.connectors.length } });
-  return Response.json({ ok: true, manifest });
 });
 
 export const DELETE = apiHandler(async (req: Request) => {

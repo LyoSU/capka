@@ -36,6 +36,40 @@ export function applyEventId(operationId: string, event: PluginApplyEvent): stri
   return `plugin-apply:${operationId}:${event}`;
 }
 
+/**
+ * A `policy.clear` entry for a rule an apply deleted, in the SAME transaction as the delete.
+ *
+ * The same action a hand edit records, so the permissions trail reads as one history rather
+ * than splitting by cause — but carrying `operationId`, so the plugin operation that did it
+ * is traceable. Without this a rule vanishes with only a `plugin.apply_succeeded` to explain
+ * it, and someone auditing permissions would find a `deny` gone with nothing that says so.
+ */
+export async function insertPolicyClearAudit(
+  tx: Tx,
+  input: {
+    actorId: string | null;
+    operationId: string;
+    row: { id: string; scope: string; capabilityType: string; capabilityKey: string; effect: string; userId: string | null; projectId: string | null };
+  },
+): Promise<void> {
+  const detail = {
+    operationId: input.operationId,
+    scope: input.row.scope,
+    capabilityType: input.row.capabilityType,
+    capabilityKey: input.row.capabilityKey,
+    effect: input.row.effect,
+    userId: input.row.userId,
+    projectId: input.row.projectId,
+    via: "plugin-apply",
+  };
+  // Deterministic per (operation, policy), so a retried commit cannot double-log one delete.
+  await tx.execute(sql`
+    INSERT INTO audit_log (id, actor_id, action, target_type, target_key, detail)
+    VALUES (${`plugin-apply:${input.operationId}:policy:${input.row.id}`}, ${input.actorId}, 'policy.clear',
+            ${input.row.capabilityType}, ${input.row.capabilityKey}, ${JSON.stringify(detail)}::jsonb)
+    ON CONFLICT (id) DO NOTHING`);
+}
+
 /** Derived from `db.transaction` itself rather than spelled out: drizzle's transaction
  *  type carries four inferred generics, and naming them by hand is a guess that goes stale
  *  the moment the schema or driver type changes. */

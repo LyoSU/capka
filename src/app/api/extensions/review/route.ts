@@ -1,4 +1,4 @@
-import { apiHandler, requireSession } from "@/lib/auth";
+import { apiHandler, requireWriter } from "@/lib/auth";
 import { audit } from "@/lib/governance/audit";
 import { applyPluginReviewed, previewPluginApply } from "@/lib/marketplace/barrier";
 import { resolvePlugin, writeReviewedPlan } from "@/lib/marketplace/install";
@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { pluginInstalls } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { membersCanInstallPlugins } from "@/lib/settings";
 
 /**
  * The install review and its accept (docs/plugin-install-review-spec.md §7, §9).
@@ -67,6 +68,22 @@ async function resolveSubject(input: {
   };
 }
 
+/**
+ * The instance-level switch a member's FIRST personal install has to pass.
+ *
+ * The route this one supersedes checked it; omitting it here would have let a member install
+ * personally on an instance where the admin turned member installs off — the gate would have
+ * been bypassable by choosing the newer endpoint.
+ */
+async function memberInstallGate(
+  subject: Extract<Resolved, { ok: true }>,
+  role: string,
+): Promise<Response | null> {
+  if (role === "admin" || subject.installId !== null) return null;
+  if (await membersCanInstallPlugins()) return null;
+  return Response.json({ error: "Plugin installs are admin-only on this instance." }, { status: 403 });
+}
+
 /** The commit under review. Given explicitly it must be a full SHA — a movable tag would
  *  re-dereference at apply time and defeat the whole review. */
 async function resolveTarget(gh: { owner: string; repo: string; ref: string }, requested: string | null): Promise<string> {
@@ -82,7 +99,19 @@ async function resolveTarget(gh: { owner: string; repo: string; ref: string }, r
 }
 
 export const GET = apiHandler(async (req: Request) => {
-  const { userId, role } = await requireSession();
+  // `requireWriter`, not `requireSession`: this is install-class, exactly like the routes it
+  // supersedes. `requireSession` admitted a `viewer` — making the gated path WEAKER than the
+  // ungated one it replaced.
+  const { userId, role } = await requireWriter();
+  // Rate-limited like the POST. GET is the EXPENSIVE half — it resolves a commit, pulls the
+  // whole tree and every file, resolves DNS per connector and probes OAuth on each — and
+  // limiting only the write left the amplification wide open, on the operator's GitHub token.
+  const limited = guardRateLimit(
+    `extension-mutation:${userId}`,
+    RATE_LIMITS.extensionMutation,
+    "Too many extension requests — please wait before trying again.",
+  );
+  if (limited) return limited;
   const url = new URL(req.url);
   const subject = await resolveSubject({
     userId, role,
@@ -92,6 +121,8 @@ export const GET = apiHandler(async (req: Request) => {
     scope: url.searchParams.get("scope") === "user" ? "user" : "system",
   });
   if (!subject.ok) return Response.json({ error: subject.error }, { status: subject.status });
+  const gated = await memberInstallGate(subject, role);
+  if (gated) return gated;
 
   const { gh } = await resolvePlugin(subject.marketplaceId, subject.pluginName);
   const targetSha = await resolveTarget(gh, url.searchParams.get("targetSha"));
@@ -106,7 +137,7 @@ export const GET = apiHandler(async (req: Request) => {
 });
 
 export const POST = apiHandler(async (req: Request) => {
-  const { userId, role } = await requireSession();
+  const { userId, role } = await requireWriter();
   const limited = guardRateLimit(
     `extension-mutation:${userId}`,
     RATE_LIMITS.extensionMutation,
@@ -129,6 +160,8 @@ export const POST = apiHandler(async (req: Request) => {
     scope: body.scope === "user" ? "user" : "system",
   });
   if (!subject.ok) return Response.json({ error: subject.error }, { status: subject.status });
+  const gated = await memberInstallGate(subject, role);
+  if (gated) return gated;
 
   const { gh } = await resolvePlugin(subject.marketplaceId, subject.pluginName);
   const targetSha = await resolveTarget(gh, typeof body.targetSha === "string" ? body.targetSha : null);
@@ -138,6 +171,9 @@ export const POST = apiHandler(async (req: Request) => {
     marketplaceId: subject.marketplaceId, pluginName: subject.pluginName,
     scope: subject.scope, ownerId: subject.ownerId,
     installId: subject.installId, targetSha, actorId: userId, reviewHash: body.reviewHash,
+    // The ASKER's authority, separate from the install's scope: a personal install may name
+    // an org-wide rule in its policy baseline, and only an admin may touch one.
+    actor: { userId, isAdmin: role === "admin" },
     dispositions: (body.dispositions ?? {}) as Record<string, PolicyDisposition>,
     only: Array.isArray(body.only) ? body.only.filter((x): x is string => typeof x === "string") : undefined,
     performWrites: ({ operationId, plan, observations, installId }) => writeReviewedPlan({

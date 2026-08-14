@@ -1,24 +1,20 @@
 import { apiHandler, requireAdmin } from "@/lib/auth";
-import { installPlugin, uninstallPlugin } from "@/lib/marketplace/install";
+import { uninstallPlugin } from "@/lib/marketplace/install";
 import { findInstall } from "@/lib/marketplace/service";
 import { audit } from "@/lib/governance/audit";
-import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
-
-export const POST = apiHandler(async (req: Request) => {
-  const { userId } = await requireAdmin();
-  const limited = guardRateLimit(
-    `extension-mutation:${userId}`,
-    RATE_LIMITS.extensionMutation,
-    "Too many extension requests — please wait before trying again.",
+/**
+ * GONE ON PURPOSE — see /api/extensions/review.
+ *
+ * An admin install skipped the consent gate entirely: it wrote connectors, skills and
+ * executable bundled files with no review and no hash. Being an admin is authorization to
+ * install, not evidence of having read what the plugin reaches.
+ */
+export const POST = apiHandler(async () => {
+  await requireAdmin();
+  return Response.json(
+    { error: "Installs now go through the install review. Use GET /api/extensions/review, then POST it back with the reviewHash." },
+    { status: 410 },
   );
-  if (limited) return limited;
-  const { marketplaceId, pluginName } = await req.json();
-  if (typeof marketplaceId !== "string" || typeof pluginName !== "string") {
-    return Response.json({ error: "marketplaceId and pluginName required" }, { status: 400 });
-  }
-  const manifest = await installPlugin({ marketplaceId, pluginName, installedBy: userId });
-  await audit({ actorId: userId, action: "plugin.install", targetType: "plugin", targetKey: pluginName, detail: { skills: manifest.skills.length, connectors: manifest.connectors.length } });
-  return Response.json({ ok: true, manifest });
 });
 
 // NOTE: no PATCH/upgrade here on purpose. Upgrades must go through the review flow
