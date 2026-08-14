@@ -78,6 +78,21 @@ export interface SurfaceConnectorBase {
  */
 export type StoredSurfaceConnector = SurfaceConnectorBase & {
   readonly projection: "stored";
+  /**
+   * Keyed HMAC over the canonical RAW `{ url, headers }` — values included.
+   *
+   * Without it a credential change was invisible: the rest of this type carries header NAMES
+   * and a normalized endpoint with no query values and no userinfo, so
+   * `Authorization: Bearer old → new`, a changed query value, changed URL credentials, or a
+   * new value under an unchanged header name all produced a byte-identical surface. The delta
+   * read `unchanged` and the gate said `no_consent` — a plugin could silently repoint where
+   * your token goes.
+   *
+   * Stored only, never public: it is a confirmation oracle for a guessed token, which is
+   * exactly the thing that must not leave the server. The public projection says only that
+   * the credential changed.
+   */
+  credentialFingerprint?: string;
   execution?: {
     /** argv[0] only — "npx", "node", or a path inside the plugin root. */
     binary: string;
@@ -122,7 +137,18 @@ export interface StoredSurfaceSkill {
   readonly projection: "stored";
   name: string;
   originPath: string;
+  /** Over the RAW `SKILL.md`, frontmatter included. Comparable only between two ARTIFACT
+   *  surfaces — the row does not keep the raw file. */
   instructionHash: string;
+  /**
+   * Over the PARSED body, which is what `skills.body` actually stores.
+   *
+   * This exists so the runtime axis has something it can genuinely compute. Without it the
+   * reconstructed surface had to copy `instructionHash` from the artifact — meaning a
+   * locally edited or prompt-injected `SKILL.md` sitting in the database was invisible, and
+   * an apply overwrote it with no `locally modified` note and no consent.
+   */
+  bodyHash: string;
   filesRootHash: string;
 }
 

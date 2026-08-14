@@ -10,7 +10,7 @@ import { FencedWriteError } from "./fence";
 import { readStoredManifest, type ApplyKind } from "./manifest-store";
 import { observePluginPlan } from "./observe";
 import {
-  claimApply, finalizeApply, markApplyFailed, releaseApplyClaim, renewApplyLease,
+  APPLY_LEASE_SECONDS, claimApply, finalizeApply, markApplyFailed, releaseApplyClaim, renewApplyLease,
 } from "./operation";
 import { buildPluginPlan } from "./plan";
 import {
@@ -32,6 +32,10 @@ import type { StoredInstallSurface } from "./surface";
 
 /** A 64-hex digest, which is what `reviewHash` produces. */
 const HASH_RE = /^[0-9a-f]{64}$/;
+
+/** Someone else owns this apply. Thrown to abort the claiming transaction so nothing it
+ *  inserted survives — an expected outcome, deliberately not logged as a fault. */
+class StagingConflict extends Error {}
 
 export interface ApplyRequest {
   marketplaceId: string;
@@ -213,31 +217,48 @@ export async function applyPluginReviewed(input: ApplyRequest & {
   const installId = input.installId ?? nanoid();
 
   // ── claimed ────────────────────────────────────────────────────────────────────
-  // For a first install the staging INSERT is the claim: the partial unique indexes make
-  // one of two parallel attempts fail, so the winner owns it.
-  if (input.installId === null) {
-    try {
-      await db.insert(pluginInstalls).values({
-        id: installId, marketplaceId: input.marketplaceId, pluginName: input.pluginName,
-        scope: input.scope, userId: input.ownerId, installedBy: input.actorId,
-        manifest: { schemaVersion: 2, inventory: { skills: [], connectors: [], ignored: [], notes: [] }, installSurface: null, committedRevision: 0 },
-      });
-    } catch {
-      // Someone else's first install won the index. Theirs is in flight; ours is stale.
-      return { outcome: "stale", review: first.response, policies: first.policies };
-    }
-  }
+  // For a first install the staging INSERT *is* the claim — the partial unique indexes make
+  // one of two parallel attempts fail — so the row is INSERTED ALREADY CLAIMED, in the same
+  // transaction as the `accepted` entry.
+  //
+  // Inserting it first and claiming afterwards left a window where a crash between the two
+  // stranded a row with no applyState: permanently `ready`, permanently empty, invisible to
+  // the reaper (which only looks at `applying`), and blocking every retry through the unique
+  // index. Building the claim into the insert removes the window rather than narrowing it.
+  const stagedApplyState = {
+    operationId, targetSha: input.targetSha, status: "applying" as const, kind,
+    reviewHash: input.reviewHash,
+    startedAt: new Date().toISOString(),
+    leaseExpiresAt: new Date(Date.now() + APPLY_LEASE_SECONDS * 1000).toISOString(),
+  };
   // The claim and its `accepted` entry are ONE transaction. A journal write that cannot
   // land rolls the claim back, so an install is never left claimed with no record of who
   // claimed it — and `insertPluginAudit` throws precisely so that rollback happens.
   let claimed = false;
   try {
     claimed = await db.transaction(async (tx) => {
-      const claim = await claimApply({
-        installId, operationId, expectedRevision: input.installId === null ? 0 : first.stored.committedRevision,
-        targetSha: input.targetSha, kind,
-      }, tx);
-      if (!claim.ok) return false;
+      if (input.installId === null) {
+        try {
+          await tx.insert(pluginInstalls).values({
+            id: installId, marketplaceId: input.marketplaceId, pluginName: input.pluginName,
+            scope: input.scope, userId: input.ownerId, installedBy: input.actorId,
+            manifest: {
+              schemaVersion: 2, inventory: { skills: [], connectors: [], ignored: [], notes: [] },
+              installSurface: null, committedRevision: 0, applyState: stagedApplyState,
+            },
+          });
+        } catch {
+          // Someone else's first install won the unique index. Theirs is in flight; ours is
+          // stale. The transaction is aborted by the constraint, so nothing is stranded.
+          throw new StagingConflict();
+        }
+      } else {
+        const claim = await claimApply({
+          installId, operationId, expectedRevision: first.stored.committedRevision,
+          targetSha: input.targetSha, kind, reviewHash: input.reviewHash,
+        }, tx);
+        if (!claim.ok) throw new StagingConflict();
+      }
       await insertPluginAudit(tx, {
         operationId, event: "accepted", actorId: input.actorId,
         review: first.durable, reviewHash: input.reviewHash, targetKey,
@@ -245,12 +266,12 @@ export async function applyPluginReviewed(input: ApplyRequest & {
       return true;
     });
   } catch (e) {
-    log.error("plugin apply could not record its claim", { installId, operationId, err: String(e) });
+    // A conflict is an expected outcome, not a fault: someone else owns this apply.
+    if (!(e instanceof StagingConflict)) {
+      log.error("plugin apply could not record its claim", { installId, operationId, err: String(e) });
+    }
   }
-  if (!claimed) {
-    if (input.installId === null) await db.delete(pluginInstalls).where(eq(pluginInstalls.id, installId));
-    return { outcome: "stale", review: first.response, policies: first.policies };
-  }
+  if (!claimed) return { outcome: "stale", review: first.response, policies: first.policies };
 
   try {
     // ── the SECOND check ─────────────────────────────────────────────────────────

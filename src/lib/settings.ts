@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { settings } from "./db/schema";
-import { encrypt, decrypt, generateSecret } from "./crypto";
+import { encrypt, decrypt, generateSecret, isValidMasterKey } from "./crypto";
 import { checkMasterKey, CANARY_PLAINTEXT } from "./master-key";
 import { parseRegistrationMode, type RegistrationMode } from "./auth/telegram-oidc";
 import { DEFAULT_MODEL_MIN_CONTEXT } from "./constants";
@@ -16,6 +16,17 @@ export async function getMasterKey(): Promise<string> {
   // against a DB leak, so production must set CAPKA_MASTER_KEY.
   const envKey = process.env.CAPKA_MASTER_KEY?.trim();
   if (envKey) {
+    // Validated HERE, at the root of trust, rather than left to fail deep inside a cipher.
+    // `encrypt`/`decrypt` need exactly 32 bytes, and `fingerprint` derives an HMAC key from
+    // the same value — so a short or non-hex key produced either a confusing crypto error far
+    // from its cause, or (for HMAC, which accepts any length) a silently weaker key that
+    // nothing would ever report.
+    if (!isValidMasterKey(envKey)) {
+      throw new Error(
+        "CAPKA_MASTER_KEY must be 32 bytes as 64 hex characters. Generate one with " +
+        "`openssl rand -hex 32`.",
+      );
+    }
     masterKeyCache = envKey;
     return envKey;
   }
@@ -38,6 +49,11 @@ export async function getMasterKey(): Promise<string> {
   const row = await db.select().from(settings).where(eq(settings.key, "auth_secret")).limit(1);
 
   if (row[0]) {
+    // The same check for the DB fallback: a value that predates this validation, or one edited
+    // by hand, must not silently become a weak HMAC key.
+    if (!isValidMasterKey(row[0].value)) {
+      throw new Error("The master key stored in the database is not 32 bytes of hex. Set CAPKA_MASTER_KEY instead.");
+    }
     masterKeyCache = row[0].value;
     return masterKeyCache;
   }

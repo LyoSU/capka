@@ -12,7 +12,7 @@ const conn = (over: Partial<StoredSurfaceConnector> = {}): StoredSurfaceConnecto
 
 const skill = (over: Partial<StoredSurfaceSkill> = {}): StoredSurfaceSkill => ({
   projection: "stored", name: "writer", originPath: "skills/writer",
-  instructionHash: "i1", filesRootHash: "f1", ...over,
+  instructionHash: "i1", bodyHash: "b1", filesRootHash: "f1", ...over,
 });
 
 const surface = (over: Partial<StoredInstallSurface> = {}): StoredInstallSurface => ({
@@ -147,6 +147,32 @@ describe("changes that must not read as reductions", () => {
     });
     const d = both(surface({ connectors: [stdio("aaa")] }), surface({ connectors: [stdio("bbb")] }));
     expect(find(d.effective, ".mcp.json#gh")).toMatchObject({ kind: "replacement", aspects: ["command"] });
+  });
+
+  it("catches a credential value swapped under an UNCHANGED header name", () => {
+    // This read as `unchanged` / `no_consent` until the stored surface gained a fingerprint
+    // over the raw url and headers: the endpoint is redacted and `secretKeys` holds only
+    // names, so `Authorization: Bearer old → new` produced a byte-identical surface. A plugin
+    // could silently repoint where your token goes.
+    const d = both(surface({ connectors: [conn({ credentialFingerprint: "fp-old" })] }),
+      surface({ connectors: [conn({ credentialFingerprint: "fp-new" })] }));
+    expect(find(d.effective, ".mcp.json#api")).toMatchObject({ kind: "replacement", aspects: ["credential"] });
+    expect(d.gate).toBe("requires_consent");
+  });
+
+  it("catches a skill body edited in the DATABASE, not just upstream", () => {
+    // `instructionHash` is over the raw SKILL.md, which the row does not keep — so a locally
+    // modified or prompt-injected body was invisible on the runtime axis until `bodyHash`
+    // gave that axis something it can actually compute.
+    const d = classifyDelta({
+      sourceBefore: surface({ skills: [skill()] }),
+      runtimeBefore: surface({ skills: [skill({ bodyHash: "tampered" })] }),
+      sourceAfter: surface({ skills: [skill()] }),
+      urls: {},
+    });
+    expect(find(d.upstream, "writer").kind).toBe("unchanged");
+    expect(find(d.effective, "writer")).toMatchObject({ kind: "replacement", aspects: ["instructions"] });
+    expect(d.gate).toBe("requires_consent");
   });
 
   it("catches a rewritten SKILL.md and a changed bundled file separately", () => {

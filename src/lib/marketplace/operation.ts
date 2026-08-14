@@ -63,12 +63,17 @@ export async function claimApply(input: {
   expectedRevision: number;
   targetSha: string;
   kind: ApplyKind;
+  reviewHash?: string;
 }, tx: OperationTx = db): Promise<ClaimResult> {
   // A non-finite expected revision means the row's counter could not be read; refuse
   // before touching the database rather than sending NaN into SQL, where it would
   // compare as NULL and could match nothing OR everything depending on the operator.
   if (!Number.isFinite(input.expectedRevision)) return { ok: false, reason: "conflict" };
 
+  // `reviewHash` is recorded in the claim so the REAPER can write a terminal event naming
+  // the same review the `accepted` entry did — without it, a reaped apply's journal cannot be
+  // tied back to what was consented to. (Kept out of the SQL as a comment: a backtick inside
+  // a template literal ends the string, which is how this line first failed to compile.)
   const { rowCount } = await tx.execute(sql`
     UPDATE plugin_installs
        SET manifest = coalesce(manifest, '{}'::jsonb) || jsonb_build_object('applyState', jsonb_build_object(
@@ -76,6 +81,7 @@ export async function claimApply(input: {
              'targetSha', ${input.targetSha}::text,
              'status', 'applying',
              'kind', ${input.kind}::text,
+             'reviewHash', ${input.reviewHash ?? null}::text,
              'startedAt', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
              'leaseExpiresAt', to_char((now() + (${String(APPLY_LEASE_SECONDS)} || ' seconds')::interval) at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
            ))
@@ -170,17 +176,23 @@ export async function releaseApplyClaim(installId: string, operationId: string, 
  * Racing the worker's own renewal through the same CAS is the point: whoever wins, the
  * loser can no longer mutate or finalize.
  */
-export async function reconcileStaleApplies(tx: OperationTx = db): Promise<{ installId: string; operationId: string; kind: ApplyKind }[]> {
+export async function reconcileStaleApplies(tx: OperationTx = db): Promise<{
+  installId: string; operationId: string; kind: ApplyKind;
+  /** So the reaper can write the terminal audit event this transition owes. */
+  pluginName: string; reviewHash: string | null;
+}[]> {
   const res = await tx.execute(sql`
     UPDATE plugin_installs
        SET manifest = jsonb_set(manifest, '{applyState,status}', '"failed"'::jsonb)
      WHERE manifest #>> '{applyState,status}' = 'applying'
        AND (manifest #>> '{applyState,leaseExpiresAt}')::timestamptz < now() - (${String(REAP_MARGIN_SECONDS)} || ' seconds')::interval
     RETURNING id AS install_id,
+              plugin_name,
               manifest #>> '{applyState,operationId}' AS operation_id,
+              manifest #>> '{applyState,reviewHash}' AS review_hash,
               coalesce(manifest #>> '{applyState,kind}', 'upgrade') AS kind`);
-  return (res.rows as { install_id: string; operation_id: string; kind: ApplyKind }[])
-    .map((r) => ({ installId: r.install_id, operationId: r.operation_id, kind: r.kind }));
+  return (res.rows as { install_id: string; plugin_name: string; operation_id: string; review_hash: string | null; kind: ApplyKind }[])
+    .map((r) => ({ installId: r.install_id, operationId: r.operation_id, kind: r.kind, pluginName: r.plugin_name, reviewHash: r.review_hash }));
 }
 
 /** Read an install's apply state without going through the whole manifest reader — for a

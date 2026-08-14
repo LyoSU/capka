@@ -87,6 +87,18 @@ async function resolveGuarded(hostname: string, blockPrivate: boolean): Promise<
   return addrs;
 }
 
+/**
+ * `URL.hostname` returns an IPv6 literal WITH its brackets (`"[::1]"`), and `dns.lookup`
+ * rejects that form — so every IPv6 literal URL used to fail resolution and be classified
+ * `unresolved`, which meant `isBlockedAddress` never saw the address at all and its whole
+ * v6 branch was dead on this path. Fail-closed, but wrong: a legitimate v6 endpoint could
+ * never be used, and the classification said "cannot resolve" about an address that is
+ * right there in the URL.
+ */
+function bareHostname(u: URL): string {
+  return u.hostname.startsWith("[") && u.hostname.endsWith("]") ? u.hostname.slice(1, -1) : u.hostname;
+}
+
 function assertHttpUrl(raw: string): URL {
   let u: URL;
   try {
@@ -145,7 +157,7 @@ export async function guardedFetchOnce(
   blockPrivate: boolean,
   init?: RequestInit,
 ): Promise<Response> {
-  const dispatcher = pinnedDispatcher(await resolveGuarded(assertHttpUrl(raw).hostname, blockPrivate));
+  const dispatcher = pinnedDispatcher(await resolveGuarded(bareHostname(assertHttpUrl(raw)), blockPrivate));
   try {
     const response = await fetch(raw, { ...init, dispatcher } as RequestInit);
     retireDispatcher(dispatcher);
@@ -172,9 +184,14 @@ export function createGuardedFetch(opts: {
   headers?: Record<string, string>;
 }): typeof fetch {
   const MAX_REDIRECTS = 5;
-  const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number, originHost: string): Promise<Response> => {
+  const doFetch = async (input: RequestInfo | URL, init: RequestInit | undefined, depth: number, origin: string): Promise<Response> => {
     const reqUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    const sameOrigin = new URL(reqUrl).host === originHost;
+    // `origin`, not `host`: comparing hosts treated `https://api.example.com` and
+    // `http://api.example.com` as the same place, so an https→http redirect kept the
+    // Authorization header, any fixed secret headers, the method and the request body — in
+    // cleartext. Connection pinning does not help against a downgrade; the bytes are simply
+    // no longer encrypted.
+    const sameOrigin = new URL(reqUrl).origin === origin;
     const h = new Headers(init?.headers);
     // Inject fixed headers (which may carry credentials, e.g. a GitHub token) ONLY
     // while still on the original host. GitHub's raw/codeload endpoints 3xx to
@@ -198,22 +215,30 @@ export function createGuardedFetch(opts: {
       const loc = res.headers.get("location");
       if (!loc) return res;
       if (depth >= MAX_REDIRECTS) throw new Error("Too many redirects");
+      // A downgrade is refused outright rather than merely stripped of credentials. Following
+      // it would still send the method and body over cleartext to a host that just asked for
+      // exactly that, which is the shape of the attack, not a side effect of it.
+      const next = new URL(loc, reqUrl);
+      if (new URL(reqUrl).protocol === "https:" && next.protocol === "http:") {
+        await res.body?.cancel().catch(() => {});
+        throw new UnsafeUrlError("blocked", "That address isn't allowed. Check the URL or ask your admin about network restrictions.");
+      }
       // Nobody will consume an intermediate redirect body. Cancel it explicitly
       // so that hop's retiring Agent can close now rather than retain a pool until
       // garbage collection or the remote peer times out.
       await res.body?.cancel().catch(() => {});
-      return doFetch(new URL(loc, reqUrl), init, depth + 1, originHost);
+      return doFetch(next, init, depth + 1, origin);
     }
     return res;
   };
   return ((input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    return doFetch(input, init, 0, new URL(url).host);
+    return doFetch(input, init, 0, new URL(url).origin);
   }) as typeof fetch;
 }
 
 export async function assertSafeUrl(raw: string, blockPrivate: boolean): Promise<void> {
-  await resolveGuarded(assertHttpUrl(raw).hostname, blockPrivate);
+  await resolveGuarded(bareHostname(assertHttpUrl(raw)), blockPrivate);
 }
 
 /** What a preflight saw. `allowed` is the only value that is not a refusal. */

@@ -53,6 +53,9 @@ function connectorIdentity(c: StoredSurfaceConnector): string {
     transport: c.transport,
     endpoint: c.endpoint ? { ...c.endpoint, queryKeys: [...c.endpoint.queryKeys] } : null,
     authKind: c.authKind ?? null,
+    // The endpoint above is redacted, so this digest is the ONLY thing that can see a
+    // changed token, query value or URL password. Omitting it made those `unchanged`.
+    credentialFingerprint: c.credentialFingerprint ?? null,
     secretKeys: [...c.secretKeys],
     needsSecret: c.needsSecret,
     runsThirdPartyCode: c.runsThirdPartyCode,
@@ -72,7 +75,9 @@ function connectorAspects(before: StoredSurfaceConnector, after: StoredSurfaceCo
   // never a reduction to wave through.
   if (before.needsSecret !== after.needsSecret
     || canonicalTypedValue("k", [...before.secretKeys]) !== canonicalTypedValue("k", [...after.secretKeys])
-    || (before.authKind ?? null) !== (after.authKind ?? null)) aspects.push("credential");
+    || (before.authKind ?? null) !== (after.authKind ?? null)
+    // A value change under an unchanged NAME is only visible here.
+    || (before.credentialFingerprint ?? null) !== (after.credentialFingerprint ?? null)) aspects.push("credential");
   if (canonicalTypedValue("e", before.execution ? { ...before.execution, placeholderArgs: [...before.execution.placeholderArgs] } : null)
     !== canonicalTypedValue("e", after.execution ? { ...after.execution, placeholderArgs: [...after.execution.placeholderArgs] } : null)) aspects.push("command");
   if (canonicalTypedValue("p", before.endpoint ? { ...before.endpoint, queryKeys: [...before.endpoint.queryKeys] } : null)
@@ -83,7 +88,12 @@ function connectorAspects(before: StoredSurfaceConnector, after: StoredSurfaceCo
 
 function skillAspects(before: StoredSurfaceSkill, after: StoredSurfaceSkill): DeltaAspect[] {
   const aspects: DeltaAspect[] = [];
-  if (before.instructionHash !== after.instructionHash || before.originPath !== after.originPath) aspects.push("instructions");
+  // Both hashes: `instructionHash` catches what the author changed (raw file, frontmatter
+  // included), `bodyHash` catches what the ROW says — which is how a hand-edited or
+  // prompt-injected skill body in the database becomes visible at all.
+  if (before.instructionHash !== after.instructionHash
+    || before.bodyHash !== after.bodyHash
+    || before.originPath !== after.originPath) aspects.push("instructions");
   if (before.filesRootHash !== after.filesRootHash) aspects.push("files");
   return aspects;
 }

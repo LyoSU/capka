@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { mcpServers, skills, pluginFiles } from "@/lib/db/schema";
+import { mcpServers, skills, pluginFiles, skillFiles } from "@/lib/db/schema";
 import { decrypt, fingerprint } from "@/lib/crypto";
 import { canonicalTypedValue, contentHash, normalizeEndpoint, rootHash } from "./canonical";
 import { hasUnresolvedPlaceholder, refsPluginRoot, serverDefParts } from "./plugin-root";
@@ -70,10 +70,12 @@ export async function readRuntimeSurface(
     const prior = committed?.connectors.find((c) => c.name === r.name);
     let env: Record<string, string> | undefined;
     let headerKeys: string[] | undefined;
+    let rawHeaders: Record<string, string> | undefined;
     if (r.secrets) {
       try {
         const parsed = JSON.parse(decrypt(r.secrets, keyHex)) as { env?: Record<string, string>; headers?: Record<string, string> };
         env = parsed.env;
+        rawHeaders = parsed.headers;
         headerKeys = parsed.headers ? Object.keys(parsed.headers).sort() : undefined;
       } catch { /* an undecryptable secret tells us nothing; fall through to the artifact */ }
     }
@@ -85,7 +87,15 @@ export async function readRuntimeSurface(
       originKey: originKeyFor(committed, r.name),
       transport: r.transport as "http" | "sse" | "stdio",
       ...(r.url ? { endpoint: normalizeEndpoint(r.url) ?? undefined } : {}),
-      ...(stdio ? {} : { authKind: r.authKind as "token" | "oauth" }),
+      ...(stdio ? {} : {
+        authKind: r.authKind as "token" | "oauth",
+        // From the decrypted row, so a token swapped in the DATABASE is visible too. Where the
+        // row holds no secrets (a placeholder connector persisted none) the artifact's digest
+        // stands in, so the absence does not read as a change on every upgrade.
+        credentialFingerprint: rawHeaders
+          ? fingerprint(canonicalTypedValue("credential", { url: r.url ?? "", headers: rawHeaders }), keyHex)
+          : prior?.credentialFingerprint,
+      }),
       // Header/env NAMES from the row when it has them, otherwise from the artifact: a
       // placeholder connector persisted none, and inventing their absence would read as a
       // credential change on every upgrade.
@@ -112,20 +122,37 @@ export async function readRuntimeSurface(
     };
   }).sort((a, b) => (a.originKey < b.originKey ? -1 : a.originKey > b.originKey ? 1 : 0));
 
+  // Every skill's ACTUAL support files, keyed by skill id. Read rather than assumed: the
+  // previous version copied `filesRootHash` from the artifact, which meant a support file
+  // edited in the database — or corrupted by an earlier lost-lease race — was invisible.
+  const skillFileRows = skillRows.length
+    ? await db.select({ skillId: skillFiles.skillId, path: skillFiles.path, content: skillFiles.content })
+        .from(skillFiles).where(inArray(skillFiles.skillId, skillRows.map((r) => r.id)))
+    : [];
+  const filesBySkill = new Map<string, { path: string; contentHash: string }[]>();
+  for (const f of skillFileRows) {
+    const list = filesBySkill.get(f.skillId) ?? [];
+    list.push({ path: f.path, contentHash: contentHash(Buffer.from(f.content, "base64")) });
+    filesBySkill.set(f.skillId, list);
+  }
+
   const skillSurface: StoredSurfaceSkill[] = skillRows.map((r) => {
     const prior = committed?.skills.find((s) => s.name === r.name);
     return {
       projection: "stored" as const,
       name: r.name,
-      // `originPath` is an artifact property; the row keeps only the body. Taking it from
-      // the artifact avoids reporting a moved file where nothing moved.
+      // `originPath` genuinely is an artifact property — the row keeps no path — so taking
+      // it from the artifact avoids reporting a moved file where nothing moved.
       originPath: prior?.originPath ?? `skills/${r.name}`,
-      // The row stores the PARSED body, not the raw file, so a hash of it would never equal
-      // the artifact's `instructionHash` over the raw SKILL.md. The artifact's value is the
-      // only one comparable with `sourceAfter`; where there is none, a hash of the body at
-      // least changes when the body does.
+      // Likewise `instructionHash`: it is over the RAW SKILL.md, which the row does not keep,
+      // so it can only ever come from the artifact. It is NOT how a local edit is detected.
       instructionHash: prior?.instructionHash ?? contentHash(r.body),
-      filesRootHash: prior?.filesRootHash ?? rootHash([]),
+      // These two ARE computed from the rows, and that is the whole point. The artifact used
+      // to supply them, which made a locally modified or prompt-injected skill body — and any
+      // support-file corruption — invisible: an apply overwrote it with no `locally modified`
+      // note and no consent, and the delta could not have shown otherwise.
+      bodyHash: contentHash(r.body),
+      filesRootHash: rootHash(filesBySkill.get(r.id) ?? []),
     };
   }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 

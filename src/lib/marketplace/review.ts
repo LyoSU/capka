@@ -75,6 +75,7 @@ function hashableSurface(s: StoredInstallSurface | null): CanonValue {
       originKey: c.originKey, name: c.name, transport: c.transport,
       endpoint: c.endpoint ? { ...c.endpoint, queryKeys: [...c.endpoint.queryKeys] } : null,
       authKind: c.authKind ?? null,
+      credentialFingerprint: c.credentialFingerprint ?? null,
       secretKeys: [...c.secretKeys], needsSecret: c.needsSecret,
       runsThirdPartyCode: c.runsThirdPartyCode, bundled: c.bundled, activation: c.activation,
       execution: c.execution
@@ -82,7 +83,7 @@ function hashableSurface(s: StoredInstallSurface | null): CanonValue {
             placeholderArgs: [...c.execution.placeholderArgs], fingerprint: c.execution.fingerprint }
         : null,
     })),
-    skills: s.skills.map((k) => ({ name: k.name, originPath: k.originPath, instructionHash: k.instructionHash, filesRootHash: k.filesRootHash })),
+    skills: s.skills.map((k) => ({ name: k.name, originPath: k.originPath, instructionHash: k.instructionHash, bodyHash: k.bodyHash, filesRootHash: k.filesRootHash })),
     files: { count: s.files.count, bytes: s.files.bytes, rootHash: s.files.rootHash, entrypoints: [...s.files.entrypoints] },
   };
 }

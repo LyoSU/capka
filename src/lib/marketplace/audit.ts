@@ -121,14 +121,32 @@ export async function insertPluginAudit(
     RETURNING id`);
   if ((inserted.rowCount ?? 0) > 0) return;
 
+  // Compare the whole IDENTITY of the event, not just its outcome and hash. Two writers
+  // disagreeing about the actor, the target or the error code is the same class of bug as
+  // disagreeing about the outcome, and comparing only two fields would have called those
+  // idempotent and kept whichever landed first.
   const existing = await tx.execute(sql`
-    SELECT detail #>> '{outcome}' AS outcome, detail #>> '{reviewHash}' AS review_hash
+    SELECT actor_id, action, target_key,
+           detail #>> '{outcome}' AS outcome,
+           detail #>> '{reviewHash}' AS review_hash,
+           detail #>> '{errorCode}' AS error_code
       FROM audit_log WHERE id = ${id}`);
-  const row = (existing.rows as { outcome: string | null; review_hash: string | null }[])[0];
+  const row = (existing.rows as {
+    actor_id: string | null; action: string; target_key: string | null;
+    outcome: string | null; review_hash: string | null; error_code: string | null;
+  }[])[0];
   // A row we cannot read back after losing the conflict is not an idempotent success:
   // something else is going on, and this transaction must not commit on that basis.
   if (!row) throw new AuditInvariantViolation(id, null, { outcome, reviewHash: input.reviewHash });
-  if (row.outcome !== outcome || row.review_hash !== input.reviewHash) {
-    throw new AuditInvariantViolation(id, row, { outcome, reviewHash: input.reviewHash });
+  const incoming = {
+    actor_id: input.actorId, action: ACTION[input.event], target_key: input.targetKey,
+    outcome, review_hash: input.reviewHash, error_code: input.errorCode ?? null,
+  };
+  const stored = {
+    actor_id: row.actor_id, action: row.action, target_key: row.target_key,
+    outcome: row.outcome, review_hash: row.review_hash, error_code: row.error_code,
+  };
+  if (JSON.stringify(stored) !== JSON.stringify(incoming)) {
+    throw new AuditInvariantViolation(id, stored, incoming);
   }
 }

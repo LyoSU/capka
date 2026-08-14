@@ -6,6 +6,7 @@ import { realtime } from "@/lib/realtime";
 import { claimNextTask, reconcileZombies, auxInFlight, INTERRUPTED_MESSAGE } from "@/lib/tasks/queue";
 import { drainInFlight } from "@/lib/tasks/drain";
 import { reconcileStaleApplies } from "@/lib/marketplace/operation";
+import { insertPluginAudit } from "@/lib/marketplace/audit";
 import { releaseHold } from "@/lib/billing/limits";
 import { runAgentTask } from "@/lib/tasks/runner";
 import { publishTaskEvent } from "@/lib/tasks/events";
@@ -117,6 +118,16 @@ async function reconcile(): Promise<void> {
     // memory and the observations have moved, so continuing would apply something nobody
     // reviewed. Same stance as a zombie task, which is failed and never requeued.
     const stale = await reconcileStaleApplies();
+    for (const s of stale) {
+      // The reaper used to flip `applying → failed` and write NOTHING, so the operation's
+      // journal ended at `accepted` — the one outcome with no terminal event, and the only
+      // way an apply could end without the trail saying how. Idempotent by id, so a second
+      // reconciler cannot duplicate it.
+      await insertPluginAudit(db, {
+        operationId: s.operationId, event: "failed", actorId: null,
+        reviewHash: s.reviewHash ?? "", targetKey: s.pluginName, errorCode: "lease_expired",
+      }).catch((e) => log.error("could not record a reaped apply", { installId: s.installId, err: String(e) }));
+    }
     if (stale.length) log.info("reconciled stale plugin applies", { count: stale.length, installIds: stale.map((s) => s.installId) });
   } catch (e) {
     log.error("plugin apply reconcile error", { err: String(e) });

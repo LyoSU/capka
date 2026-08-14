@@ -26,8 +26,18 @@ describe("getMasterKey", () => {
   });
 
   it("trims surrounding whitespace from the env value", async () => {
-    process.env.CAPKA_MASTER_KEY = "  abc123  ";
+    // A valid key, because `getMasterKey` now validates the shape at the root of trust — a
+    // short or non-hex value used to fail later, deep inside a cipher, or silently become a
+    // weaker HMAC key (which accepts any length and would report nothing).
+    const key = "a".repeat(64);
+    process.env.CAPKA_MASTER_KEY = `  ${key}  `;
     const { getMasterKey } = await import("../settings");
-    expect(await getMasterKey()).toBe("abc123");
+    expect(await getMasterKey()).toBe(key);
+  });
+
+  it("refuses a master key that is not 32 bytes of hex", async () => {
+    process.env.CAPKA_MASTER_KEY = "abc123";
+    const { getMasterKey } = await import("../settings");
+    await expect(getMasterKey()).rejects.toThrow(/64 hex characters/);
   });
 });

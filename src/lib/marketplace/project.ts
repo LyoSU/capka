@@ -79,6 +79,10 @@ function projectConnector(c: PlannedConnector, obs: ReviewObservations, keyHex: 
     projection: "stored", ...base,
     transport: c.url ? inferRemoteTransport(c.url) : "http",
     ...(c.url ? { endpoint: normalizeEndpoint(c.url) ?? undefined } : {}),
+    // Over the RAW url and headers, values and all — the endpoint above is redacted, so
+    // without this a changed token, query value or URL password reads as no change at all.
+    credentialFingerprint: fingerprint(
+      canonicalTypedValue("credential", { url: c.url ?? "", headers: c.headers ?? {} }), keyHex),
     // The APPLIED value, matching what `applyPlanResources` writes to the row — which
     // is why it belongs to the surface even though the probe that produced it is an
     // observation.
@@ -90,6 +94,9 @@ function projectSkill(s: PlannedSkill): StoredSurfaceSkill {
   return {
     projection: "stored", name: s.name, originPath: s.originPath,
     instructionHash: contentHash(s.raw),
+    // The same quantity the ROW will hold, so `readRuntimeSurface` can compute it for real
+    // instead of copying this artifact's value back and hiding a local edit.
+    bodyHash: contentHash(s.parsed.body),
     filesRootHash: rootHash(s.files.map((f) => ({ path: f.path, contentHash: contentHash(Buffer.from(f.content, "base64")) }))),
   };
 }

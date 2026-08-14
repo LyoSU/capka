@@ -6,9 +6,10 @@ const guardedRoutes = [
   ["sandbox/files/archive/route.ts", "workspaceArchive"],
   ["sandbox/files/download-all/route.ts", "workspaceArchive"],
   ["ask/answer/route.ts", "askAnswer"],
-  ["extensions/install/route.ts", "extensionMutation"],
-  ["admin/marketplaces/install/route.ts", "extensionMutation"],
-  ["extensions/route.ts", "extensionMutation"],
+  // The three routes that used to do this work now refuse with 410; the work moved behind the
+  // install review, which is what has to be limited — and BOTH halves of it, because GET is the
+  // expensive one (commit + whole tree + every file + DNS per connector + OAuth probes).
+  ["extensions/review/route.ts", "extensionMutation"],
   ["chats/clone/route.ts", "chatCopy"],
   ["chats/fork/route.ts", "chatCopy"],
 ] as const;

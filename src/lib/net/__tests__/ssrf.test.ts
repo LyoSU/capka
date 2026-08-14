@@ -102,6 +102,32 @@ describe("createGuardedFetch", () => {
     }
   });
 
+  it("REFUSES an https → http redirect outright, same host or not", async () => {
+    // "Same origin" was compared by host, so a downgrade to the SAME hostname kept the
+    // Authorization header, any fixed secret headers, the method and the body — in cleartext.
+    // Connection pinning is no help: the bytes are simply no longer encrypted. And stripping
+    // credentials would not be enough either, since the method and body still travel.
+    globalThis.fetch = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { location: "http://api.example.com/mcp" } }),
+    ) as never;
+    const guarded = createGuardedFetch({ blockPrivate: false, headers: { Authorization: "Bearer t" } });
+    await expect(guarded("https://api.example.com/mcp")).rejects.toSatisfy(
+      (e) => e instanceof UnsafeUrlError && e.reason === "blocked");
+  });
+
+  it("still injects headers on a same-ORIGIN redirect, scheme included", async () => {
+    const calls: { url: string; auth: string | null }[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      calls.push({ url, auth: new Headers(init?.headers).get("authorization") });
+      if (calls.length === 1) return new Response(null, { status: 302, headers: { location: "https://api.example.com/v2/mcp" } });
+      return new Response("ok", { status: 200 });
+    }) as never;
+    const guarded = createGuardedFetch({ blockPrivate: false, headers: { Authorization: "Bearer t" } });
+    expect((await guarded("https://api.example.com/mcp")).status).toBe(200);
+    expect(calls[1].auth).toBe("Bearer t");
+  });
+
   it("strips credentials on a cross-host redirect (no token leak to a different host)", async () => {
     const calls: { url: string; auth: string | null }[] = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -173,5 +199,26 @@ describe("preflightUrl", () => {
     // internal error must not read as permission.
     vi.mocked(lookup).mockImplementationOnce((() => { throw new TypeError("boom"); }) as never);
     expect(await preflightUrl("https://api.example.com/mcp", false)).not.toBe("allowed");
+  });
+});
+
+describe("IPv6 literal URLs", () => {
+  afterEach(() => {
+    vi.mocked(lookup).mockImplementation(async (host: string) =>
+      [{ address: /^[\d.]+$/.test(host as string) ? (host as string) : "93.184.216.34", family: 4 }] as never);
+  });
+
+  it("resolves the address instead of reporting it unresolvable", async () => {
+    // `URL.hostname` keeps the brackets (`"[::1]"`) and `dns.lookup` rejects that form, so
+    // every v6 literal used to come back `unresolved` — and `isBlockedAddress` never saw the
+    // address at all, leaving its whole v6 branch dead on this path.
+    vi.mocked(lookup).mockImplementation(async (host: string) => {
+      if ((host as string).startsWith("[")) throw new Error("EINVAL");
+      return [{ address: host as string, family: 6 }] as never;
+    });
+    expect(await preflightUrl("http://[2606:4700::1111]/mcp", false)).toBe("allowed");
+    // And a forbidden v6 address is now classified as BLOCKED, which is what it is.
+    expect(await preflightUrl("http://[fe80::1]/mcp", false)).toBe("blocked");
+    expect(await preflightUrl("http://[::1]/mcp", true)).toBe("blocked");
   });
 });
