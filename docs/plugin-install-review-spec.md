@@ -1,7 +1,9 @@
 # Plugin install review — design
 
 **Date:** 2026-08-13
-**Status:** approved design, not implemented
+**Status:** phases A and B shipped; C shipped except its state UI; D not started —
+see §12a for what each phase covers and the note at the end of it for exactly where the
+line currently sits.
 
 ## 1. Purpose
 
@@ -866,6 +868,38 @@ policy dispositions. This is the phase that delivers the consent gate.
 
 Phase A must land alone: a refactor of the largest function in `install.ts` mixed with
 new behaviour would make a regression impossible to attribute.
+
+### Where the line sits (2026-08-14)
+
+**A — done.** `plan.ts` / `observe.ts` / `apply.ts`, behind 17 characterization fixtures.
+
+**B — done.** `UnsafeUrlError` + `preflightUrl` (`net/ssrf.ts`), `canonical.ts`,
+`crypto.fingerprint`, `surface.ts`, `project.ts`, `delta.ts`, `manifest-store.ts` (V2 +
+central reader, wired into both apply paths and `service.ts`).
+
+**C — mechanisms done, state UI not.** Migration `0049` (partial unique indexes with the
+duplicate pre-flight, `capability_policies.revision`), `operation.ts`,
+`runtime-view.ts`, `fence.ts`, and the reaper in `tasks/worker.ts`. All Postgres-verified.
+
+The state UI (`ready | applying | failed | orphaned` per resource, and the "Потребує
+уваги" affordance) is NOT built, and that is not the gap §12a warned about. The argument
+there — that C starts hiding resources from the agent, so it must also explain why —
+assumed C also starts PRODUCING those states. It does not: nothing in a production path
+calls `claimApply`, so no install can be `applying` or `failed` yet. The only state the
+runtime filter currently hides is `orphaned`, which C makes visible under Connectors
+precisely so it can be removed.
+
+The UI therefore has to land in the same change as the barrier, not before it. That is a
+correction to §12a's phasing, not a deferral.
+
+**D — the pure half done, the barrier deliberately not.** `review.ts` (`reviewHash`,
+`projectPluginReview`, `DurablePluginReview`) is in and tested; it is inert until
+something calls it.
+
+The barrier, the review screen, the audit events and policy dispositions must land
+TOGETHER. Wiring the claim without the screen would make every install that widens access
+refuse with `requires_consent` and give nobody a way to consent — which breaks installing
+outright. Half a gate is worse than none.
 
 ## 13. Conditions for future work
 
