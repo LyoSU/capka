@@ -1,4 +1,4 @@
-import { and, eq, or, isNull } from "drizzle-orm";
+import { and, eq, or, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { mcpServers, projects } from "@/lib/db/schema";
@@ -9,6 +9,7 @@ import { assertSafeUrl } from "@/lib/net/ssrf";
 import { ValidationError } from "@/lib/errors";
 import { mutedIds } from "@/lib/muted-resources";
 import { keepRuntimeVisible, ownerStates } from "@/lib/marketplace/runtime-view";
+import { FencedWriteError, MANUAL, fencePredicate, insertFenceLock, outcomeOf, type MutationAuthority, type WriteOutcome } from "@/lib/marketplace/fence";
 import { clearCachedTools } from "./tool-cache";
 import { inferRemoteTransport, type McpAuthKind, type McpScope, type McpSecrets, type McpServerConfig, type McpServerInfo } from "./types";
 
@@ -140,6 +141,8 @@ export interface UpsertServerInput {
   secrets?: McpSecrets;
   authKind?: McpAuthKind;
   source?: string; // 'manual' | 'catalog:<installId>'
+  /** Defaults to a manual edit, which is refused while the owning plugin is applying. */
+  authority?: MutationAuthority;
 }
 
 /** Id of an existing row with the same identity (explicit id, else scope + name +
@@ -182,10 +185,47 @@ export async function upsertServer(input: UpsertServerInput): Promise<string> {
     ...(input.source ? { source: input.source } : {}),
     updatedAt: new Date(),
   };
-  if (matchedId) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
-  else await db.insert(mcpServers).values(values);
+  await writeServerRow(matchedId, id, values, input.source, input.authority ?? MANUAL);
   clearCachedTools(id);
   return id;
+}
+
+/**
+ * The fenced write both upserts share.
+ *
+ * It THROWS when fenced rather than returning an outcome, because there is no honest
+ * value to return: the caller asked for the id of a row it was not allowed to write. The
+ * apply path catches this and abandons the operation, which is the only correct response.
+ */
+async function writeServerRow(
+  matchedId: string | undefined,
+  id: string,
+  values: Record<string, unknown>,
+  source: string | undefined,
+  authority: MutationAuthority,
+): Promise<void> {
+  if (matchedId) {
+    const res = await db.update(mcpServers).set(values as never)
+      .where(and(eq(mcpServers.id, id), fencePredicate(authority, sql`mcp_servers.source`)));
+    if ((res.rowCount ?? 0) === 0) throw new FencedWriteError(`connector ${String(values.name)}`);
+    return;
+  }
+  // An INSERT has no row to read `source` from, so the predicate cannot live in the
+  // statement's WHERE clause the way it does above. It is serialized instead: inside one
+  // transaction, lock the owning install row and re-assert the rule, then insert.
+  //
+  // `FOR NO KEY UPDATE` is what makes this equivalent rather than a check-then-write
+  // gap — claimApply, markApplyFailed, finalizeApply and the reaper are all UPDATEs on
+  // that same row, so each of them blocks until this transaction commits. The check
+  // therefore cannot go stale before the insert lands.
+  //
+  // For a plugin apply the rule is stricter than for an update: the install must exist
+  // and be applying under OUR operation. That is also what makes a NEW orphan impossible.
+  await db.transaction(async (tx) => {
+    const ok = await tx.execute(insertFenceLock(authority, source ?? "manual"));
+    if ((ok.rowCount ?? 0) === 0) throw new FencedWriteError(`connector ${String(values.name)}`);
+    await tx.insert(mcpServers).values(values as never);
+  });
 }
 
 export interface UpsertStdioInput {
@@ -198,6 +238,7 @@ export interface UpsertStdioInput {
   args?: string[];
   env?: Record<string, string>;
   source?: string;
+  authority?: MutationAuthority;
 }
 
 /**
@@ -222,8 +263,7 @@ export async function upsertStdioServer(input: UpsertStdioInput): Promise<string
     ...(input.source ? { source: input.source } : {}),
     updatedAt: new Date(),
   };
-  if (matchedId) await db.update(mcpServers).set(values).where(eq(mcpServers.id, id));
-  else await db.insert(mcpServers).values(values);
+  await writeServerRow(matchedId, id, values, input.source, input.authority ?? MANUAL);
   clearCachedTools(id);
   return id;
 }
@@ -244,15 +284,34 @@ export async function getAccessibleServer(userId: string, serverId: string) {
   return null;
 }
 
-export async function setEnabled(id: string, enabled: boolean): Promise<void> {
-  await db.update(mcpServers).set({ enabled, updatedAt: new Date() }).where(eq(mcpServers.id, id));
+/**
+ * Flip a connector's enabled flag, fenced.
+ *
+ * Returns an OUTCOME rather than void: `missing` (no such row) and `fenced` (the row
+ * exists and its plugin is mid-apply under someone else's operation) are different
+ * answers, and a caller that cannot tell them apart cannot say anything true to the user.
+ */
+export async function setEnabled(id: string, enabled: boolean, authority: MutationAuthority = MANUAL): Promise<WriteOutcome> {
+  const res = await db.update(mcpServers).set({ enabled, updatedAt: new Date() })
+    .where(and(eq(mcpServers.id, id), fencePredicate(authority, sql`mcp_servers.source`)));
+  if ((res.rowCount ?? 0) > 0) return "updated";
+  const still = await db.select({ id: mcpServers.id }).from(mcpServers).where(eq(mcpServers.id, id)).limit(1);
+  return outcomeOf(0, still.length > 0);
 }
 
-export async function deleteServer(id: string): Promise<void> {
-  await db.delete(mcpServers).where(eq(mcpServers.id, id));
+export async function deleteServer(id: string, authority: MutationAuthority = MANUAL): Promise<WriteOutcome> {
+  const res = await db.delete(mcpServers)
+    .where(and(eq(mcpServers.id, id), fencePredicate(authority, sql`mcp_servers.source`)));
+  if ((res.rowCount ?? 0) === 0) {
+    const still = await db.select({ id: mcpServers.id }).from(mcpServers).where(eq(mcpServers.id, id)).limit(1);
+    // A prune runs this for every row it does not keep, so `missing` is a success there;
+    // `fenced` never is.
+    return outcomeOf(0, still.length > 0);
+  }
   // Also what bounds the schema cache: it holds an entry per EXISTING connector,
   // rather than one per connector the instance has ever had.
   clearCachedTools(id);
+  return "updated";
 }
 
 /** Scope + display name of a connector by id, or null if it doesn't exist. Lets

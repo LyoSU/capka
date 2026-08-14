@@ -17,22 +17,28 @@ vi.mock("@/lib/db", () => {
     self.then = (res: (v: unknown) => unknown) => Promise.resolve(rows.mcp).then(res);
     return self;
   };
-  return {
-    db: {
-      select: () => chain(),
-      insert: () => ({
-        values: (v: Record<string, unknown>) => {
-          writes.values.push(v);
-          return {
-            onConflictDoUpdate: () => Promise.resolve(),
-            returning: () => Promise.resolve([{ id: v.id }]),
-          };
-        },
-      }),
-      update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
-      delete: () => ({ where: () => Promise.resolve() }),
-    },
+  // The writers are FENCED, so a mock has to model two things it did not before: a
+  // `rowCount` (how the fence tells "written" from "refused") and `transaction` (a
+  // plugin-owned insert serializes its rule under a lock on the owning install). A mock
+  // that omits them makes every write look refused.
+  const db = {
+    select: () => chain(),
+    insert: () => ({
+      values: (v: Record<string, unknown>) => {
+        writes.values.push(v);
+        return {
+          onConflictDoUpdate: () => Promise.resolve(),
+          returning: () => Promise.resolve([{ id: v.id }]),
+          then: (res: (x: unknown) => unknown) => Promise.resolve({ rowCount: 1 }).then(res),
+        };
+      },
+    }),
+    update: () => ({ set: () => ({ where: () => Promise.resolve({ rowCount: 1 }) }) }),
+    delete: () => ({ where: () => Promise.resolve({ rowCount: 1 }) }),
+    execute: () => Promise.resolve({ rowCount: 1 }),
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
   };
+  return { db };
 });
 vi.mock("@/lib/crypto", () => ({ encrypt: (s: string) => s, decrypt: (s: string) => s }));
 vi.mock("@/lib/settings", () => ({

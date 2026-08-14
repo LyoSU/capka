@@ -1,9 +1,10 @@
-import { and, eq, or, isNull } from "drizzle-orm";
+import { and, eq, or, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { skills, skillFiles } from "@/lib/db/schema";
 import { mutedIds } from "@/lib/muted-resources";
 import { keepRuntimeVisible } from "@/lib/marketplace/runtime-view";
+import { FencedWriteError, MANUAL, fencePredicate, insertFenceLock, outcomeOf, type MutationAuthority, type WriteOutcome } from "@/lib/marketplace/fence";
 import type { SkillInfo, SkillScope, ParsedSkill } from "./types";
 
 const SCOPE_RANK: Record<SkillScope, number> = { system: 0, user: 1, project: 2 };
@@ -129,14 +130,29 @@ export async function getSkillMeta(
   return row ? { id: row.id, name: row.name, scope: row.scope as SkillScope, userId: row.userId } : null;
 }
 
-/** Flip a skill's enabled flag. Authorization is the caller's responsibility. */
-export async function setSkillEnabled(id: string, enabled: boolean): Promise<void> {
-  await db.update(skills).set({ enabled, updatedAt: new Date() }).where(eq(skills.id, id));
+/**
+ * Flip a skill's enabled flag, fenced. Authorization (who may ask) is still the caller's
+ * responsibility; the fence answers a different question — whether the row may be written
+ * AT ALL right now, because its plugin is mid-apply.
+ *
+ * Returns an outcome, so `missing` and `fenced` stay distinguishable.
+ */
+export async function setSkillEnabled(id: string, enabled: boolean, authority: MutationAuthority = MANUAL): Promise<WriteOutcome> {
+  const res = await db.update(skills).set({ enabled, updatedAt: new Date() })
+    .where(and(eq(skills.id, id), fencePredicate(authority, sql`skills.source`)));
+  if ((res.rowCount ?? 0) > 0) return "updated";
+  const still = await db.select({ id: skills.id }).from(skills).where(eq(skills.id, id)).limit(1);
+  return outcomeOf(0, still.length > 0);
 }
 
-/** Delete a skill (FK cascade drops its bundle files). Authorization is the caller's. */
-export async function deleteSkill(id: string): Promise<void> {
-  await db.delete(skills).where(eq(skills.id, id));
+/** Delete a skill (FK cascade drops its bundle files), fenced. For an idempotent prune
+ *  `missing` is a success; `fenced` never is. */
+export async function deleteSkill(id: string, authority: MutationAuthority = MANUAL): Promise<WriteOutcome> {
+  const res = await db.delete(skills)
+    .where(and(eq(skills.id, id), fencePredicate(authority, sql`skills.source`)));
+  if ((res.rowCount ?? 0) > 0) return "updated";
+  const still = await db.select({ id: skills.id }).from(skills).where(eq(skills.id, id)).limit(1);
+  return outcomeOf(0, still.length > 0);
 }
 
 export interface IngestTarget {
@@ -144,6 +160,8 @@ export interface IngestTarget {
   userId: string | null;
   projectId: string | null;
   source?: string;
+  /** Defaults to a manual edit, which is refused while the owning plugin is applying. */
+  authority?: MutationAuthority;
 }
 
 /** Upsert a parsed skill (+ bundle files) by (scope, owner, name). */
@@ -182,11 +200,23 @@ export async function ingestSkill(
     updatedAt: new Date(),
   };
 
+  const authority = target.authority ?? MANUAL;
   if (existing[0]) {
-    await db.update(skills).set(values).where(eq(skills.id, id));
+    const res = await db.update(skills).set(values)
+      .where(and(eq(skills.id, id), fencePredicate(authority, sql`skills.source`)));
+    // Throws rather than returning an outcome: the caller asked for the id of a row it was
+    // not allowed to write, and there is no honest value for that. The apply path catches
+    // it and abandons the operation.
+    if ((res.rowCount ?? 0) === 0) throw new FencedWriteError(`skill ${parsed.name}`);
     await db.delete(skillFiles).where(eq(skillFiles.skillId, id));
   } else {
-    await db.insert(skills).values(values);
+    // See `insertFenceLock`: an insert has no row to read `source` from, so the rule is
+    // serialized under a lock on the owning install instead of living in a WHERE clause.
+    await db.transaction(async (tx) => {
+      const ok = await tx.execute(insertFenceLock(authority, target.source ?? "manual"));
+      if ((ok.rowCount ?? 0) === 0) throw new FencedWriteError(`skill ${parsed.name}`);
+      await tx.insert(skills).values(values);
+    });
   }
 
   if (files.length) {

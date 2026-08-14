@@ -54,6 +54,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { applyPlanResources } from "../apply";
+import { MANUAL } from "../fence";
 import { observePluginPlan } from "../observe";
 import { buildPluginPlan } from "../plan";
 
@@ -75,7 +76,7 @@ async function runFixture(
   h.state.authKind = authKind;
   const plan = await buildPluginPlan(GH, only);
   const obs = await observePluginPlan(plan, { blockPrivate: false });
-  const manifest = await applyPlanResources(plan, obs, TAG, TARGET);
+  const manifest = await applyPlanResources(plan, obs, TAG, TARGET, MANUAL);
   return { manifest, files: plan.files };
 }
 

@@ -9,6 +9,7 @@ import { getBlockPrivateProviderUrls, getMasterKey } from "@/lib/settings";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
 import { applyPlanResources } from "./apply";
+import { FencedWriteError, MANUAL, type MutationAuthority } from "./fence";
 import { observePluginPlan } from "./observe";
 import { readStoredManifest, writeStoredManifest } from "./manifest-store";
 import { buildPluginPlan } from "./plan";
@@ -40,14 +41,26 @@ interface InstallTarget { scope: "system" | "user"; userId: string | null; proje
  * Exported so the routing itself can be asserted: the regression this prevents is
  * invisible in the DB, which is why it survived unnoticed.
  */
-export async function pruneRemoved(tag: string, keepSkills: Set<string>, keepConnectors: Set<string>): Promise<void> {
+export async function pruneRemoved(
+  tag: string,
+  keepSkills: Set<string>,
+  keepConnectors: Set<string>,
+  authority: MutationAuthority = MANUAL,
+): Promise<void> {
   const ownedSkills = await db.select({ id: skills.id, name: skills.name }).from(skills).where(eq(skills.source, tag));
   for (const s of ownedSkills) {
-    if (!keepSkills.has(s.name)) await deleteSkill(s.id);
+    if (keepSkills.has(s.name)) continue;
+    // A prune is idempotent, so `missing` IS success — the row is already gone, which is
+    // what was wanted. `fenced` never is: it means this operation no longer owns the
+    // install, and continuing would delete resources on behalf of a claim someone else
+    // holds. That distinction is exactly why these writers return an outcome and not a
+    // boolean.
+    if (await deleteSkill(s.id, authority) === "fenced") throw new FencedWriteError(`skill ${s.name}`);
   }
   const ownedConnectors = await db.select({ id: mcpServers.id, name: mcpServers.name }).from(mcpServers).where(eq(mcpServers.source, tag));
   for (const c of ownedConnectors) {
-    if (!keepConnectors.has(c.name)) await deleteServer(c.id);
+    if (keepConnectors.has(c.name)) continue;
+    if (await deleteServer(c.id, authority) === "fenced") throw new FencedWriteError(`connector ${c.name}`);
   }
 }
 
@@ -142,7 +155,7 @@ export async function installPlugin(opts: {
   const ref = existing?.commitSha || opts.pinSha || gh.ref;
   const plan = await buildPluginPlan({ ...gh, ref }, opts.only);
   const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
-  const manifest = await applyPlanResources(plan, obs, `catalog:${installId}`, target);
+  const manifest = await applyPlanResources(plan, obs, `catalog:${installId}`, target, MANUAL);
   const files = plan.files;
   const stored = await committedManifest(plan, obs, manifest, existing?.manifest);
 
@@ -236,7 +249,7 @@ export async function upgradePlugin(installId: string, toSha: string): Promise<I
   // Apply (and pin to) EXACTLY the reviewed commit.
   const plan = await buildPluginPlan({ ...gh, ref: toSha });
   const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
-  const manifest = await applyPlanResources(plan, obs, tag, target);
+  const manifest = await applyPlanResources(plan, obs, tag, target, MANUAL);
   const files = plan.files;
   await persistPluginFiles(installId, files);
   await pruneRemoved(tag, new Set(manifest.skills), new Set(manifest.connectors));
