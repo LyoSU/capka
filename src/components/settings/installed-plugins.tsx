@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2, RefreshCw, Trash2, Sparkles, Plug, Package, AlertTriangle, CheckCircle2, Power, PowerOff, LogIn } from "lucide-react";
 import { toast } from "sonner";
+import { PluginReviewPanel, type PluginReview, type PolicyOutlook } from "@/components/settings/plugin-review";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -50,6 +51,16 @@ interface UpgradePreview {
   touchesConnectors?: boolean;
 }
 
+/** The derived review from GET /api/extensions/review — what the update REACHES, as
+ *  opposed to which files it touches. It sits beside the file diff rather than replacing
+ *  it: the diff answers "what did the author change", the review answers "what will this
+ *  be able to do", and an operator wants both in front of them at once. */
+interface ReviewPayload {
+  review: PluginReview;
+  policies: PolicyOutlook[];
+  targetSha: string;
+}
+
 /** The Extensions tab: each installed plugin shown as one unit with its skills +
  *  connectors and group-level actions (enable/disable/update/uninstall), so the
  *  pieces a plugin adds are managed together instead of scattered. */
@@ -58,6 +69,7 @@ export default function InstalledPlugins() {
   // Reuse the same "reach" wording the Library/Connectors tabs already use, so
   // shared-vs-personal reads identically everywhere in Settings > Skills.
   const tReach = useTranslations("settings.skills");
+  const tReview = useTranslations("settings.skills.installed.review");
   const isAdmin = useIsAdmin();
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [health, setHealth] = useState<Record<string, Health>>({});
@@ -66,6 +78,11 @@ export default function InstalledPlugins() {
   // The upgrade-review dialog: set after a preview reports real changes, so the
   // operator confirms exactly what an update brings before the pin is moved.
   const [review, setReview] = useState<{ plugin: InstalledPlugin; preview: UpgradePreview } | null>(null);
+  // The derived review for the plugin in the dialog, plus the policy choices the operator
+  // makes in it. Kept beside `review` rather than inside it because it arrives from a second
+  // request and may fail on its own without making the file diff unusable.
+  const [derived, setDerived] = useState<ReviewPayload | null>(null);
+  const [dispositions, setDispositions] = useState<Record<string, "keep" | "delete">>({});
 
   const load = useCallback(async () => {
     try {
@@ -127,6 +144,12 @@ export default function InstalledPlugins() {
       const preview = d as UpgradePreview;
       if (!preview.changed) { toast.success(t("upToDate")); return; }
       setReview({ plugin: p, preview });
+      setDispositions({});
+      setDerived(null);
+      // Bound to the SAME commit the file diff describes, so the two halves of the dialog
+      // cannot be about different versions.
+      const rr = await fetch(`/api/extensions/review?installId=${encodeURIComponent(p.id)}&targetSha=${encodeURIComponent(preview.to.sha)}`);
+      if (rr.ok) setDerived(await rr.json() as ReviewPayload);
     } catch {
       toast.error(t("previewFailed"));
     } finally {
@@ -136,12 +159,45 @@ export default function InstalledPlugins() {
 
   // Step 2: apply — re-pull from source, pinning to the EXACT commit just reviewed
   // (toSha), not whatever the branch points at now (consent bound to the artifact).
-  const applyUpdate = (p: InstalledPlugin, toSha: string) => {
+  const applyUpdate = async (p: InstalledPlugin, toSha: string) => {
+    // With a derived review in hand, apply through the gate — it re-derives everything and
+    // refuses if anything moved since the operator read it. Without one (the review request
+    // failed), fall back to the pinned re-pull, which is still bound to the reviewed commit.
+    const payload = derived;
     setReview(null);
-    return act(() => fetch("/api/extensions", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ installId: p.id, toSha }),
-    }), p.id, t("updated"));
+    setDerived(null);
+    if (!payload) {
+      return act(() => fetch("/api/extensions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ installId: p.id, toSha }),
+      }), p.id, t("updated"));
+    }
+    setBusy(p.id);
+    try {
+      const r = await fetch("/api/extensions/review", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          installId: p.id, targetSha: payload.targetSha,
+          reviewHash: payload.review.reviewHash, dispositions,
+        }),
+      });
+      if (r.ok) { toast.success(t("updated")); await load(); return; }
+      const d = await r.json().catch(() => ({})) as { error?: string; review?: PluginReview; policies?: PolicyOutlook[] };
+      if (r.status === 409 && d.review) {
+        // Something moved while the operator was reading. Re-open with the FRESH review the
+        // server already sent — asking for it again would only widen the same window.
+        toast.error(tReview(d.error === "blocked" ? "cannotApply" : "staleTitle"));
+        setReview({ plugin: p, preview: { changed: true, fromSha: p.commitSha, to: { sha: payload.targetSha, date: null, message: null } } });
+        setDerived({ review: d.review, policies: d.policies ?? [], targetSha: payload.targetSha });
+        return;
+      }
+      toast.error(d.error === "failed" ? tReview("applyFailed") : t("actionFailed"));
+    } catch {
+      toast.error(t("actionFailed"));
+    } finally {
+      setBusy(null);
+      await load();
+    }
   };
 
   const uninstall = (p: InstalledPlugin) =>
@@ -332,15 +388,28 @@ export default function InstalledPlugins() {
                   })}
                 </p>
               )}
-              {review.preview.touchesConnectors && (
+              {/* The derived review — what the update will REACH. The file-diff warning
+                  above stays only while the review has not loaded: once it has, it says the
+                  same thing precisely instead of by inference from a filename. */}
+              {derived ? (
+                <PluginReviewPanel
+                  review={derived.review}
+                  policies={derived.policies}
+                  dispositions={dispositions}
+                  onDisposition={(key, value) => setDispositions((d) => ({ ...d, [key]: value }))}
+                />
+              ) : review.preview.touchesConnectors ? (
                 <p className="flex items-start gap-1.5 rounded-lg bg-warning/10 p-2 text-xs text-warning-text">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   {t("reviewConnectorsWarning")}
                 </p>
-              )}
+              ) : null}
               <AlertDialogFooter>
                 <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                <AlertDialogAction onClick={() => applyUpdate(review.plugin, review.preview.to.sha)}>{t("reviewApply")}</AlertDialogAction>
+                <AlertDialogAction
+                  disabled={derived?.review.gate === "cannot_apply"}
+                  onClick={() => applyUpdate(review.plugin, review.preview.to.sha)}
+                >{t("reviewApply")}</AlertDialogAction>
               </AlertDialogFooter>
             </>
           )}

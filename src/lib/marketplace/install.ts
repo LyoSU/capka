@@ -101,8 +101,43 @@ async function persistPluginFiles(installId: string, files: { path: string; cont
   }
 }
 
-/** Resolve a (marketplace, plugin) to its GitHub location + catalog entry. */
-async function resolvePlugin(marketplaceId: string, pluginName: string) {
+/**
+ * Route a reviewed plan into rows, under the authority of a live operation.
+ *
+ * This is the `performWrites` the barrier drives, and everything it does carries
+ * `{ kind: "plugin-apply", operationId }` — so if the operation loses its lease part-way,
+ * the next write is `fenced` and the whole apply fails instead of half-landing under a
+ * claim someone else now holds.
+ *
+ * The bundled files come before the prune for the same reason install has always done it:
+ * a file set replaced after a prune could reference a resource the prune just removed.
+ */
+export async function writeReviewedPlan(args: {
+  operationId: string;
+  installId: string;
+  plan: ResolvedPluginPlan;
+  observations: ReviewObservations;
+  target: InstallTarget;
+  priorManifest: unknown;
+  fallbackVersion: string;
+}): Promise<Record<string, unknown>> {
+  const authority: MutationAuthority = { kind: "plugin-apply", operationId: args.operationId };
+  const tag = `catalog:${args.installId}`;
+  const manifest = await applyPlanResources(args.plan, args.observations, tag, args.target, authority);
+  await persistPluginFiles(args.installId, args.plan.files);
+  await pruneRemoved(tag, new Set(manifest.skills), new Set(manifest.connectors), authority);
+  await db.update(pluginInstalls)
+    .set({ version: manifest.version ?? args.fallbackVersion, commitSha: manifest.commit?.sha ?? null })
+    .where(eq(pluginInstalls.id, args.installId));
+  // Returned rather than written: `finalizeApply` publishes it, so until the claim is
+  // resolved the runtime still sees the previous committed view.
+  return committedManifest(args.plan, args.observations, manifest, args.priorManifest);
+}
+
+/** Resolve a (marketplace, plugin) to its GitHub location + catalog entry. Exported so the
+ *  review flow resolves the SAME location the apply will use — two resolvers could disagree
+ *  about which commit is being reviewed. */
+export async function resolvePlugin(marketplaceId: string, pluginName: string) {
   const mkRow = (await db.select().from(pluginMarketplaces).where(eq(pluginMarketplaces.id, marketplaceId)).limit(1))[0];
   if (!mkRow) throw new Error("Marketplace not found");
   const mktRepo = parseGitHubUrl(mkRow.url);

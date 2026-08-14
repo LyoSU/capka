@@ -6,6 +6,11 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Updating a plugin now shows what it will reach — which addresses its connectors talk to, which program runs in the sandbox, which access details it asks for — with the exact detail behind an expander, and refuses to apply if any of it changed while you were reading. Permission rules left pointing at a removed resource are surfaced with a choice to keep or delete them.
+- Plugin apply outcomes appear in the activity list as their own entries (`plugin.apply_accepted` / `_succeeded` / `_stale` / `_blocked` / `_failed`), so an install that did not finish is visible without expanding a row.
+
 ### Fixed
 
 - Installing skills straight from a GitHub repo (a repo with no `marketplace.json`) now actually routes them; it previously reported success and installed nothing.
