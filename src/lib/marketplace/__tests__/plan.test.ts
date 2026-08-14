@@ -62,9 +62,44 @@ describe("buildPluginPlan", () => {
       ".mcp.json": JSON.stringify({ mcpServers: { gh: { command: "npx" } } }),
       "skills/writer/SKILL.md": "---\nname: writer\n---\nBody",
     });
-    const plan = await buildPluginPlan(GH, ["writer"]);
+    const plan = await buildPluginPlan(GH, { only: ["writer"] });
     expect(plan.connectors).toEqual([]);
     expect(plan.skills.map((s) => s.name)).toEqual(["writer"]);
+  });
+
+  // `installSkillRepo` models a plain skills repo as a one-plugin marketplace and its manage
+  // approval card enumerates the SKILLS it found. Without this narrowing the same plan also
+  // read `.mcp.json` and the plugin manifest, so a card reading "install 1 skill" installed a
+  // connector too — a human approving a strictly smaller set than the one applied.
+  it("routes no connectors under skillsOnly, even with no `only` list", async () => {
+    load({
+      ".mcp.json": JSON.stringify({ mcpServers: { gh: { command: "npx" } } }),
+      "skills/writer/SKILL.md": "---\nname: writer\n---\nBody",
+    });
+    const plan = await buildPluginPlan(GH, { skillsOnly: true });
+    expect(plan.connectors).toEqual([]);
+    expect(plan.skills.map((s) => s.name)).toEqual(["writer"]);
+    // No routed stdio server means nothing sets `needsFiles`, so the bundled plugin tree is
+    // not collected either — the other half of what the card did not mention.
+    expect(plan.needsFiles).toBe(false);
+    expect(plan.files).toEqual([]);
+  });
+
+  it("says so in the notes rather than dropping the connectors silently", async () => {
+    load({
+      ".mcp.json": JSON.stringify({ mcpServers: { gh: { command: "npx" }, api: { url: "https://x.test" } } }),
+      "skills/writer/SKILL.md": "---\nname: writer\n---\nBody",
+    });
+    const plan = await buildPluginPlan(GH, { skillsOnly: true });
+    // A repo presented as a skills collection that also ships connectors is not what it
+    // appears to be, and the operator has to be able to learn that from the install itself.
+    expect(plan.notes.some((n) => /2 connector definition\(s\).*not installed/.test(n))).toBe(true);
+  });
+
+  it("emits no such note when the repo declares no connectors", async () => {
+    load({ "skills/writer/SKILL.md": "---\nname: writer\n---\nBody" });
+    const plan = await buildPluginPlan(GH, { skillsOnly: true });
+    expect(plan.notes.some((n) => /connector definition/.test(n))).toBe(false);
   });
 });
 

@@ -57,9 +57,13 @@ const performWrites = async () => {
   return { schemaVersion: 2, inventory: { skills: [], connectors: ["api"], ignored: [], notes: [] }, installSurface: null, committedRevision: 1 } as Record<string, unknown>;
 };
 
+/** Reviews here are read as an admin; who may delete which policy rule is asserted in
+ *  policy-disposition.integration. */
+const ADMIN_ACTOR = { userId: "barrier-admin", isAdmin: true };
+
 const preview = (installId: string | null) => previewPluginApply({
   gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
-  installId, targetSha: SHA, storedManifestRaw: undefined,
+  installId, targetSha: SHA, storedManifestRaw: undefined, actor: ADMIN_ACTOR,
 });
 
 const apply = (installId: string | null, reviewHash: string) => applyPluginReviewed({
@@ -192,7 +196,7 @@ run("apply barrier", () => {
     // The retry is an upgrade of the existing (failed) row, reviewed afresh.
     const second = await previewPluginApply({
       gh: GH, marketplaceId: MK, pluginName: "plug", scope: "system", ownerId: null,
-      installId: rows[0].id, targetSha: SHA, storedManifestRaw: undefined,
+      installId: rows[0].id, targetSha: SHA, storedManifestRaw: undefined, actor: ADMIN_ACTOR,
     });
     expect(await apply(rows[0].id, second.review.reviewHash)).toEqual({ outcome: "succeeded" });
     expect(await readApplyState(rows[0].id)).toBeNull();

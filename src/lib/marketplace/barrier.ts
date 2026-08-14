@@ -7,10 +7,11 @@ import { log } from "@/lib/log";
 import { insertPluginAudit, insertPolicyClearAudit } from "./audit";
 import { classifyDelta } from "./delta";
 import { FencedWriteError } from "./fence";
-import { readStoredManifest, type ApplyKind } from "./manifest-store";
+import { readStoredManifest, reservedManifest, type ApplyKind } from "./manifest-store";
 import { observePluginPlan } from "./observe";
 import {
   APPLY_LEASE_SECONDS, claimApply, finalizeApply, markApplyFailed, releaseApplyClaim, renewApplyLease,
+  type ApplyPhase,
 } from "./operation";
 import { buildPluginPlan } from "./plan";
 import {
@@ -36,6 +37,23 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 /** Someone else owns this apply. Thrown to abort the claiming transaction so nothing it
  *  inserted survives — an expected outcome, deliberately not logged as a fault. */
 class StagingConflict extends Error {}
+
+/**
+ * Whether a failed INSERT means "someone else got here first" — and nothing else does.
+ *
+ * The staging insert used to treat EVERY exception as a conflict, which reported an FK
+ * violation (the marketplace was deleted mid-request), a check constraint, or a
+ * serialization failure back to the caller as a routine 409 with a fresh review. That is a
+ * false diagnosis, and it puts a real fault behind a retry prompt where nothing gets logged
+ * and the retry cannot possibly work.
+ *
+ * Drizzle wraps driver errors from v0.36 on, keeping the pg error as `cause`; older versions
+ * reject with it directly. Both are checked rather than pinning a version.
+ */
+function isUniqueViolation(e: unknown): boolean {
+  const code = (e as { code?: unknown })?.code ?? (e as { cause?: { code?: unknown } })?.cause?.code;
+  return code === "23505";
+}
 
 export interface ApplyRequest {
   marketplaceId: string;
@@ -64,6 +82,20 @@ export type ApplyOutcome =
    *  audited, because nothing was attempted. */
   | { outcome: "rejected"; reason: "malformed_hash" };
 
+/**
+ * What the REVIEW calls this operation — which is not always what the apply calls it.
+ *
+ * `kind` is inside `reviewHash`, so the preview and the accept must derive it identically or
+ * every retry would come back `stale` and no first install could ever be finished. A retry
+ * is an install that has not happened yet, and the person is consenting to exactly the
+ * install they consented to before, so the subject says `install`. The apply's own
+ * `ApplyKind` is a different question — it decides which undo a released claim owes — and
+ * that one does distinguish the retry.
+ */
+function subjectKind(installId: string | null, storedManifestRaw: unknown): ApplyKind {
+  return installId === null || readStoredManifest(storedManifestRaw).neverCommitted ? "install" : "upgrade";
+}
+
 /** Everything a review needs, gathered fresh. Used identically by the preview and by the
  *  apply, so the two cannot compute a different picture from the same inputs. */
 async function gather(input: {
@@ -71,9 +103,12 @@ async function gather(input: {
   subject: ReviewSubject;
   installId: string | null;
   storedManifestRaw: unknown;
+  /** Whose authority the policy outlooks are computed against — the asker's, never the
+   *  install's: a personal install may name an org-wide rule in its baseline. */
+  actor: DispositionActor;
 }) {
   const keyHex = await getMasterKey();
-  const plan = await buildPluginPlan(input.gh, input.subject.only ?? undefined);
+  const plan = await buildPluginPlan(input.gh, { only: input.subject.only ?? undefined });
   const observations = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
   const sourceAfter = projectPlanSurface(plan, observations, keyHex);
 
@@ -81,7 +116,13 @@ async function gather(input: {
   // A first install's baseline is EMPTY, not unknown: nothing existed, which is a known
   // fact and makes every resource an `expansion`. A legacy row's baseline is genuinely
   // unknown — it stored no surface — and `null` is what the delta reads as `unknown`.
-  const isFirst = input.installId === null;
+  //
+  // A staging row whose install never committed is the FIRST case, not the second, even
+  // though it has an id: nothing was ever published, so the baseline is empty for the same
+  // reason. `committedRevision` alone cannot tell the two apart (both read 0), which is why
+  // the reader reports `neverCommitted` separately — conflating them made every retry of a
+  // failed first install read as an `unknown` replacement of resources that do not exist.
+  const isFirst = input.installId === null || stored.neverCommitted;
   const sourceBefore: StoredInstallSurface | null = isFirst ? emptySurface() : stored.installSurface;
   const runtimeBefore: StoredInstallSurface | null = isFirst
     ? emptySurface()
@@ -109,6 +150,7 @@ async function gather(input: {
       ...sourceAfter.connectors.map((c) => ({ type: "connector" as const, name: c.name })),
       ...sourceAfter.skills.map((s) => ({ type: "skill" as const, name: s.name })),
     ],
+    actor: input.actor,
   });
 
   return { keyHex, plan, observations, sourceBefore, runtimeBefore, sourceAfter, delta, policyBaseline, policies, stored };
@@ -132,14 +174,19 @@ export async function previewPluginApply(input: {
   only?: string[];
   storedManifestRaw: unknown;
   dispositions?: Record<string, PolicyDisposition>;
+  /** Decides which policy rules this reader is told they may delete. */
+  actor: DispositionActor;
 }): Promise<{ review: ReviewResponse; policies: PolicyOutlook[] }> {
   const subject: ReviewSubject = {
-    kind: input.installId === null ? "install" : "upgrade",
+    kind: subjectKind(input.installId, input.storedManifestRaw),
     installId: input.installId, marketplaceId: input.marketplaceId, pluginName: input.pluginName,
     scope: input.scope, ownerId: input.ownerId, targetSha: input.targetSha,
     only: input.only?.length ? input.only : null,
   };
-  const g = await gather({ gh: input.gh, subject, installId: input.installId, storedManifestRaw: input.storedManifestRaw });
+  const g = await gather({
+    gh: input.gh, subject, installId: input.installId,
+    storedManifestRaw: input.storedManifestRaw, actor: input.actor,
+  });
   const { response } = projectPluginReview({
     subject, plan: g.plan, observations: g.observations,
     sourceBefore: g.sourceBefore, runtimeBefore: g.runtimeBefore, sourceAfter: g.sourceAfter,
@@ -174,19 +221,28 @@ export async function applyPluginReviewed(input: ApplyRequest & {
 }): Promise<ApplyOutcome> {
   if (!HASH_RE.test(input.reviewHash)) return { outcome: "rejected", reason: "malformed_hash" };
 
-  const kind: ApplyKind = input.installId === null ? "install" : "upgrade";
-  const subject: ReviewSubject = {
-    kind, installId: input.installId, marketplaceId: input.marketplaceId, pluginName: input.pluginName,
-    scope: input.scope, ownerId: input.ownerId, targetSha: input.targetSha,
-    only: input.only?.length ? input.only : null,
-  };
-
   const row = input.installId
     ? (await db.select({ manifest: pluginInstalls.manifest }).from(pluginInstalls).where(eq(pluginInstalls.id, input.installId)).limit(1))[0]
     : undefined;
 
+  // Three kinds, because `releaseApplyClaim` owes each a different undo — and only the
+  // claim can say which, since a staging row and a claimed ready install are the same shape
+  // once `applyState` is set. `retry` was declared and handled there but never PRODUCED:
+  // every apply naming an existing row was recorded as an upgrade, so giving back a retry's
+  // claim cleared `applyState` outright and a first install that never committed came back
+  // looking like a healthy, empty plugin instead of one still needing attention.
+  const kind: ApplyKind = input.installId === null
+    ? "install"
+    : readStoredManifest(row?.manifest).neverCommitted ? "retry" : "upgrade";
+  const subject: ReviewSubject = {
+    kind: subjectKind(input.installId, row?.manifest), installId: input.installId,
+    marketplaceId: input.marketplaceId, pluginName: input.pluginName,
+    scope: input.scope, ownerId: input.ownerId, targetSha: input.targetSha,
+    only: input.only?.length ? input.only : null,
+  };
+
   const build = async () => {
-    const g = await gather({ gh: input.gh, subject, installId: input.installId, storedManifestRaw: row?.manifest });
+    const g = await gather({ gh: input.gh, subject, installId: input.installId, storedManifestRaw: row?.manifest, actor: input.actor });
     const projected = projectPluginReview({
       subject, plan: g.plan, observations: g.observations,
       sourceBefore: g.sourceBefore, runtimeBefore: g.runtimeBefore, sourceAfter: g.sourceAfter,
@@ -242,14 +298,15 @@ export async function applyPluginReviewed(input: ApplyRequest & {
           await tx.insert(pluginInstalls).values({
             id: installId, marketplaceId: input.marketplaceId, pluginName: input.pluginName,
             scope: input.scope, userId: input.ownerId, installedBy: input.actorId,
-            manifest: {
-              schemaVersion: 2, inventory: { skills: [], connectors: [], ignored: [], notes: [] },
-              installSurface: null, committedRevision: 0, applyState: stagedApplyState,
-            },
+            // Through `reservedManifest`, not a literal: the reader discriminates on
+            // `schemaVersion`, and a second hand-written copy of this shape is how one of them
+            // quietly starts reading as a legacy row.
+            manifest: reservedManifest(stagedApplyState) as unknown as Record<string, unknown>,
           });
-        } catch {
+        } catch (e) {
           // Someone else's first install won the unique index. Theirs is in flight; ours is
           // stale. The transaction is aborted by the constraint, so nothing is stranded.
+          if (!isUniqueViolation(e)) throw e;
           throw new StagingConflict();
         }
       } else {
@@ -273,6 +330,31 @@ export async function applyPluginReviewed(input: ApplyRequest & {
   }
   if (!claimed) return { outcome: "stale", review: first.response, policies: first.policies };
 
+  /**
+   * Record that this apply ended badly — but only when the flip to `failed` was OURS to make.
+   *
+   * `markApplyFailed` is a compare-and-set, and losing it means something else already ended
+   * this operation: the reaper took the expired lease and has already written `lease_expired`
+   * under the SAME deterministic event id. Writing ours as well produced two different
+   * terminal payloads for one operation, and whichever landed first decided what the history
+   * said while the other threw an invariant violation out of a `catch` block — which then fell
+   * through to the outer handler and RELEASED a claim after resources had already changed.
+   *
+   * Winning the transition is the authority to describe the outcome, exactly as it is the
+   * authority to write a resource. Same rule as the P0, applied to the journal.
+   */
+  const recordTerminalFailure = async (errorCode: string): Promise<void> => {
+    if (!await markApplyFailed(installId, operationId)) return;
+    await insertPluginAudit(db, {
+      operationId, event: "failed", actorId: input.actorId, reviewHash: input.reviewHash, targetKey, errorCode,
+    });
+  };
+
+  // Which `catch` is allowed to do what, decided by WHERE we are rather than by what was
+  // thrown. Only `claimed` may release: a release past that point would claim nothing
+  // happened, and resources had already moved.
+  let phase: ApplyPhase = "claimed";
+
   try {
     // ── the SECOND check ─────────────────────────────────────────────────────────
     // Between the first check and the claim, someone else's upgrade can land, an admin can
@@ -289,19 +371,17 @@ export async function applyPluginReviewed(input: ApplyRequest & {
 
     // ── mutating ─────────────────────────────────────────────────────────────────
     let manifest: Record<string, unknown>;
+    phase = "mutating";
     try {
       await renewApplyLease(installId, operationId);
       manifest = await input.performWrites({ operationId, plan: second.plan, observations: second.observations, installId });
     } catch (e) {
       // Resources were already changed, so the operation is `failed` — not released. A
       // released claim would claim nothing happened.
-      await markApplyFailed(installId, operationId);
-      await insertPluginAudit(db, {
-        operationId, event: "failed", actorId: input.actorId, reviewHash: input.reviewHash, targetKey,
-        errorCode: e instanceof FencedWriteError ? "fenced" : "write_failed",
-      });
+      const errorCode = e instanceof FencedWriteError ? "fenced" : "write_failed";
+      await recordTerminalFailure(errorCode);
       log.error("plugin apply failed while mutating", { installId, operationId, err: String(e) });
-      return { outcome: "failed", errorCode: e instanceof FencedWriteError ? "fenced" : "write_failed" };
+      return { outcome: "failed", errorCode };
     }
 
     // ── committed ────────────────────────────────────────────────────────────────
@@ -341,19 +421,25 @@ export async function applyPluginReviewed(input: ApplyRequest & {
       const errorCode = lostLease ? "lease_lost"
         : e instanceof ForbiddenDispositionError ? "policy_forbidden"
           : "policy_stale";
-      await markApplyFailed(installId, operationId);
-      await insertPluginAudit(db, {
-        operationId, event: "failed", actorId: input.actorId, reviewHash: input.reviewHash, targetKey, errorCode,
-      });
+      // `lostLease` is precisely the case where the flip is NOT ours: the reaper already
+      // holds this operation and has already named the outcome `lease_expired`. So this
+      // writes nothing, which is correct — the history has one terminal event, from the
+      // writer that earned it.
+      await recordTerminalFailure(errorCode);
       log.error("plugin apply failed at commit", { installId, operationId, errorCode, err: String(e) });
       return { outcome: "failed", errorCode };
     }
     return { outcome: "succeeded" };
   } catch (e) {
-    // Anything unexpected between the claim and the mutation. Phase `claimed`, so the claim
-    // is released rather than recorded as a failure of work that never started.
-    await releaseApplyClaim(installId, operationId, kind);
-    log.error("plugin apply aborted before mutating", { installId, operationId, err: String(e) });
+    // Anything unexpected. WHERE it happened decides what may be done about it: at `claimed`
+    // nothing has been touched, so the claim is released rather than recorded as a failure of
+    // work that never started. Past that, resources have moved and releasing would say the
+    // opposite of what is true — so the claim is recorded as failed instead. Reaching here
+    // from `mutating` at all means one of the inner handlers threw, which is why this branch
+    // can no longer just release.
+    if (phase === "claimed") await releaseApplyClaim(installId, operationId, kind);
+    else await recordTerminalFailure("aborted");
+    log.error("plugin apply aborted", { installId, operationId, phase, err: String(e) });
     return { outcome: "failed", errorCode: "aborted" };
   }
 }

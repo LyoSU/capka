@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pluginMarketplaces, pluginInstalls, skills, mcpServers } from "@/lib/db/schema";
 import { mutedIds, setMuted } from "@/lib/muted-resources";
@@ -231,9 +231,28 @@ export async function hasSystemInstall(marketplaceId: string, pluginName: string
   return !!r[0];
 }
 
-/** The install id for a (marketplace, plugin), or null. */
-export async function findInstall(marketplaceId: string, pluginName: string): Promise<string | null> {
-  const all = await db.select({ id: pluginInstalls.id, name: pluginInstalls.pluginName })
-    .from(pluginInstalls).where(eq(pluginInstalls.marketplaceId, marketplaceId));
-  return all.find((i) => i.name === pluginName)?.id ?? null;
+/**
+ * The install id for a (marketplace, plugin) **belonging to a specific owner**, or null.
+ *
+ * The owner is not optional, because a plugin no longer has ONE install: the schema's two
+ * partial unique indexes deliberately allow one org-wide row plus a personal row per member
+ * (`uq_plugin_installs_system` / `uq_plugin_installs_user`). Matching on
+ * (marketplace, plugin) alone returned whichever row came back first — so a member asking to
+ * install personally got handed the SYSTEM row and was refused as a non-admin, an admin's
+ * upgrade could move somebody's personal pin, and an uninstall could delete a row nobody
+ * named. The keys here are exactly the columns those indexes are unique over.
+ */
+export async function findInstall(
+  marketplaceId: string,
+  pluginName: string,
+  owner: { scope: "system" | "user"; userId: string | null },
+): Promise<string | null> {
+  const r = await db.select({ id: pluginInstalls.id }).from(pluginInstalls).where(and(
+    eq(pluginInstalls.marketplaceId, marketplaceId),
+    eq(pluginInstalls.pluginName, pluginName),
+    eq(pluginInstalls.scope, owner.scope),
+    // `user_id IS NULL` for a system install, and `= NULL` is never true in SQL.
+    owner.scope === "user" && owner.userId ? eq(pluginInstalls.userId, owner.userId) : isNull(pluginInstalls.userId),
+  )).limit(1);
+  return r[0]?.id ?? null;
 }

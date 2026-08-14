@@ -93,6 +93,23 @@ export interface PolicyOutlook {
    * CHOICE and not a cleanup: leaving it is a standing rule for a future resource.
    */
   outlook: "still_applies" | "applies_to_nothing";
+  /**
+   * Whether THIS actor may actually carry out a delete — the same verdict
+   * `assertDispositionAllowed` will reach, computed once and sent to the screen.
+   *
+   * Without it the review had no way to know, so it offered the checkbox beside every
+   * `applies_to_nothing` rule including org-wide ones a member cannot touch. Ticking it
+   * did not merely fail: the refusal lands inside the apply, which marks the install
+   * `failed`, so an offer the UI should never have made left a plugin needing attention.
+   */
+  canDelete: boolean;
+}
+
+/** The ownership half of `assertDispositionAllowed`, shared with the review so the screen
+ *  cannot offer a choice the enforcement refuses. A second copy of this predicate is
+ *  exactly how those two drift apart. */
+function ownsPolicy(row: PolicyBaselineRow, actor: DispositionActor): boolean {
+  return actor.isAdmin || (row.scope === "user" && row.userId === actor.userId);
 }
 
 /**
@@ -106,15 +123,24 @@ export function analysePolicies(input: {
   affected: PolicyBaselineRow[];
   /** Names that will exist after the apply, by type. */
   survivingNames: { type: CapabilityType; name: string }[];
+  /** Who is reading this review. The baseline deliberately spans every scope, so without
+   *  the asker there is no way to tell which of those rules are theirs to act on. */
+  actor: DispositionActor;
 }): PolicyOutlook[] {
   const surviving = new Set(input.survivingNames.map((n) => `${n.type}:${n.name}`));
-  return input.affected.map((r) => ({
-    key: policyKey(r),
-    capabilityType: r.capabilityType,
-    capabilityKey: r.capabilityKey,
-    effect: r.effect,
-    outlook: surviving.has(`${r.capabilityType}:${r.capabilityKey}`) ? "still_applies" : "applies_to_nothing",
-  }));
+  return input.affected.map((r) => {
+    const outlook = surviving.has(`${r.capabilityType}:${r.capabilityKey}`) ? "still_applies" as const : "applies_to_nothing" as const;
+    return {
+      key: policyKey(r),
+      capabilityType: r.capabilityType,
+      capabilityKey: r.capabilityKey,
+      effect: r.effect,
+      outlook,
+      // The two gates `assertDispositionAllowed` applies, answered in advance. Deliberately
+      // the same expression and not a paraphrase of it.
+      canDelete: outlook === "applies_to_nothing" && ownsPolicy(r, input.actor),
+    };
+  });
 }
 
 export class StalePolicyError extends Error {
@@ -172,7 +198,7 @@ export function assertDispositionAllowed(
   actor: DispositionActor,
 ): void {
   if (disposition === "keep") return;
-  if (!actor.isAdmin && !(row.scope === "user" && row.userId === actor.userId)) {
+  if (!ownsPolicy(row, actor)) {
     throw new ForbiddenDispositionError(key, "only an admin can change a rule that is not your own");
   }
   if (!outlook) throw new ForbiddenDispositionError(key, "this rule is not part of the review");

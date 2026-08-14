@@ -21,6 +21,11 @@ vi.mock("@/lib/db", () => {
   // `rowCount` (how the fence tells "written" from "refused") and `transaction` (a
   // plugin-owned insert serializes its rule under a lock on the owning install). A mock
   // that omits them makes every write look refused.
+  //
+  // Note the POLARITY of `execute`. The manual fence stopped being one statement: it now locks
+  // the owning install and then probes for `applyState.status = 'applying'`, so a row means
+  // "somebody is applying" and ZERO is the permissive answer — the reverse of the single
+  // statement it replaced, which yielded a row when the write was allowed.
   const db = {
     select: () => chain(),
     insert: () => ({
@@ -35,7 +40,8 @@ vi.mock("@/lib/db", () => {
     }),
     update: () => ({ set: () => ({ where: () => Promise.resolve({ rowCount: 1 }) }) }),
     delete: () => ({ where: () => Promise.resolve({ rowCount: 1 }) }),
-    execute: () => Promise.resolve({ rowCount: 1 }),
+    // Nothing is applying in these tests, so the fence's probe finds no row.
+    execute: () => Promise.resolve({ rowCount: 0 }),
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
   };
   return { db };

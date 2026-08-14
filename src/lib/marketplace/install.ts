@@ -9,18 +9,15 @@ import { getBlockPrivateProviderUrls, getMasterKey } from "@/lib/settings";
 import { parseGitHubUrl, resolveGitHub } from "./source";
 import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetch";
 import { applyPlanResources } from "./apply";
-import { FencedWriteError, MANUAL, insertFenceLock, type MutationAuthority } from "./fence";
+import { FencedWriteError, MANUAL, acquireFence, type MutationAuthority } from "./fence";
 import { observePluginPlan } from "./observe";
-import { readStoredManifest, writeStoredManifest } from "./manifest-store";
+import { readStoredManifest, reservedManifest, writeStoredManifest } from "./manifest-store";
 import { buildPluginPlan } from "./plan";
 import { projectPlanSurface } from "./project";
 import type { ReviewObservations } from "./observe";
 import type { ResolvedPluginPlan } from "./plan";
 import type { CatalogItem, CommitInfo, InstallManifest } from "./types";
 
-// A pin is a full 40-hex commit SHA. Anything else (a branch/tag/"HEAD") would
-// re-dereference to live upstream HEAD at apply time and defeat the review.
-const FULL_SHA = /^[0-9a-f]{40}$/;
 
 /** Where a plugin's skills + connectors are routed: org-wide (system) or personal
  *  (user). A member install is `{ scope: "user", userId: <them> }`. */
@@ -101,26 +98,30 @@ async function committedManifest(
  * version, A then wakes up and overwrites the FILES while the install already reads `ready`.
  * The row said B, the sandbox ran A.
  *
- * So: one transaction, holding `insertFenceLock` on the owning install for its whole length.
- * That lock is what makes it airtight rather than a re-check — the reaper, a rival claim,
+ * So: one transaction, holding the fence on the owning install for its whole length. That
+ * lock is what makes it airtight rather than a re-check — the reaper, a rival claim,
  * `markApplyFailed` and `finalizeApply` are all UPDATEs on that row and block until commit,
- * so the lease cannot lapse between the check and the last insert. A dispossessed worker gets
- * zero rows from the lock and writes nothing.
+ * so the lease cannot lapse between the check and the last insert. A dispossessed worker is
+ * refused and writes nothing.
  *
- * The metadata update rides in the same transaction for the same reason: keyed only by
- * install id, it was another unfenced write that a dispossessed worker could land.
+ * The row's own columns ride in the same transaction for the same reason: keyed only by
+ * install id, they were unfenced writes a dispossessed worker could land. `manifest`
+ * especially — `applyState` lives inside that column, so an unconditional overwrite of it
+ * ERASED a concurrent reviewed apply's claim, and that operation's finalize then failed on a
+ * row it still legitimately owned.
  */
 async function persistPluginFilesFenced(args: {
   installId: string;
   files: { path: string; content: string }[];
   authority: MutationAuthority;
-  /** Written in the SAME transaction when given. Omitted by the legacy paths, which write
-   *  their own row update including the manifest. */
-  metadata?: { version: string; commitSha: string | null };
+  /** Written in the SAME transaction when given. `writeReviewedPlan` omits `manifest`,
+   *  because `finalizeApply` is what publishes that — under its own CAS. */
+  metadata?: { version: string; commitSha: string | null; manifest?: Record<string, unknown> };
 }): Promise<void> {
   await db.transaction(async (tx) => {
-    const ok = await tx.execute(insertFenceLock(args.authority, `catalog:${args.installId}`));
-    if ((ok.rowCount ?? 0) === 0) throw new FencedWriteError(`bundled files for install ${args.installId}`);
+    if (!await acquireFence(tx, args.authority, `catalog:${args.installId}`)) {
+      throw new FencedWriteError(`bundled files for install ${args.installId}`);
+    }
     await tx.delete(pluginFiles).where(eq(pluginFiles.installId, args.installId));
     if (args.files.length) {
       await tx.insert(pluginFiles).values(
@@ -192,6 +193,9 @@ export async function installPlugin(opts: {
   scope?: "system" | "user";
   /** Narrow to specific skills by name (`--skill`); omit for all. */
   only?: string[];
+  /** Route ONLY skills, whatever else the repo declares — what `installSkillRepo`'s
+   *  approval card promises. */
+  skillsOnly?: boolean;
   /** Pin a FIRST install to a specific reviewed commit (from the pre-install
    *  preview) instead of live HEAD — closes the preview→apply TOCTOU. Ignored on
    *  re-install, which stays on its already-pinned commit (moving the pin is an
@@ -219,30 +223,57 @@ export async function installPlugin(opts: {
   // (`pinSha`) when present, else live HEAD (`gh.ref`). Moving the pin is an explicit
   // upgrade (with a diff).
   const ref = existing?.commitSha || opts.pinSha || gh.ref;
-  const plan = await buildPluginPlan({ ...gh, ref }, opts.only);
-  const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
-  const manifest = await applyPlanResources(plan, obs, `catalog:${installId}`, target, MANUAL);
-  const files = plan.files;
-  const stored = await committedManifest(plan, obs, manifest, existing?.manifest);
 
-  if (existing) {
-    // re-install: drop rows removed upstream
-    await pruneRemoved(`catalog:${installId}`, new Set(manifest.skills), new Set(manifest.connectors));
-    await db.update(pluginInstalls)
-      .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? existing.commitSha, manifest: stored })
-      .where(eq(pluginInstalls.id, installId));
-  } else {
-    // Insert the install row before its files (pluginFiles FK → pluginInstalls).
+  // Reserve the row BEFORE routing a single resource.
+  //
+  // Routing first and inserting afterwards meant two concurrent first installs of the same
+  // plugin each wrote skills and connectors tagged with their OWN `catalog:<id>`, and then only
+  // one insert survived the partial unique index. The loser's rows were left owned by an
+  // install row that does not exist — invisible to `uninstallPlugin`, skipped by every prune,
+  // and reachable from no screen. Claiming the identity first turns that race into a refused
+  // insert before anything is written.
+  if (!existing) {
     await db.insert(pluginInstalls).values({
       id: installId, marketplaceId: opts.marketplaceId, pluginName: opts.pluginName,
-      version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? null, scope, userId: ownerId,
-      manifest: stored, installedBy: opts.installedBy,
+      version: ref, commitSha: null, scope, userId: ownerId, installedBy: opts.installedBy,
+      manifest: reservedManifest() as unknown as Record<string, unknown>,
     });
   }
-  // MANUAL authority, and that is the point: `insertFenceLock` refuses while any apply is in
-  // flight, so this path cannot overwrite the bundled files of an operation that holds a claim.
-  await persistPluginFilesFenced({ installId, files, authority: MANUAL });
-  return manifest;
+
+  try {
+    const plan = await buildPluginPlan({ ...gh, ref }, { only: opts.only, skillsOnly: opts.skillsOnly });
+    const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
+    const manifest = await applyPlanResources(plan, obs, `catalog:${installId}`, target, MANUAL);
+    const stored = await committedManifest(plan, obs, manifest, existing?.manifest);
+
+    // The pin, the manifest and the bundled files in ONE FENCED transaction. All three used to
+    // be unconditional writes keyed by install id alone, and `manifest` is the one that hurt:
+    // `applyState` lives inside that column, so this path could erase a reviewed apply's live
+    // claim — after which that operation's `finalizeApply` failed on a row it still owned, and
+    // the plugin was left `failed` for a reason nothing recorded.
+    //
+    // MANUAL authority, which is the point: the fence refuses outright while any apply is in
+    // flight on this install.
+    await persistPluginFilesFenced({
+      installId, files: plan.files, authority: MANUAL,
+      metadata: {
+        version: manifest.version ?? gh.ref,
+        commitSha: manifest.commit?.sha ?? existing?.commitSha ?? null,
+        manifest: stored,
+      },
+    });
+    // After the files, exactly as `writeReviewedPlan` orders it: a file set replaced after a
+    // prune could reference a resource the prune had just removed.
+    await pruneRemoved(`catalog:${installId}`, new Set(manifest.skills), new Set(manifest.connectors));
+    return manifest;
+  } catch (e) {
+    // Undo OUR reservation, and only ours. Leaving it would put an install in Extensions with
+    // no resources and no explanation — the reservation exists to close a race, not to
+    // outlive the install it was reserving for. An existing row predates this call and its
+    // resources are still real, so it is left exactly as it was.
+    if (!existing) await uninstallPlugin(installId);
+    throw e;
+  }
 }
 
 /** What `upgradePlugin` would change, computed WITHOUT touching the DB so an
@@ -286,47 +317,17 @@ export async function previewUpgrade(installId: string): Promise<UpgradePreview>
   return { changed: true, fromSha: row.commitSha, to, diff, touchesConnectors };
 }
 
-/** Re-pull an installed plugin from its source, keeping the same installId/tag so
- *  rows update in place. Skills/connectors removed upstream are pruned; the
- *  pluginInstalls row gets the fresh version + manifest.
+/*
+ * `upgradePlugin` used to live here, and its deletion is the fix rather than a cleanup.
  *
- *  FAIL-CLOSED on consent: an upgrade MUST target a specific reviewed commit
- *  (`toSha`). The UI previews that commit via previewUpgrade, then passes its SHA
- *  here so we apply EXACTLY what was reviewed — never whatever the branch points at
- *  by the time "Apply" runs (a hostile upstream could otherwise swap in a new
- *  commit between review and apply). The no-review "just re-pull what's installed"
- *  need is served by installPlugin, which stays on the already-pinned commit. */
-export async function upgradePlugin(installId: string, toSha: string): Promise<InstallManifest> {
-  // Must be a full commit SHA, not a branch/tag/"HEAD" — those re-dereference to
-  // live upstream HEAD and would defeat the review.
-  if (!FULL_SHA.test(toSha)) throw new Error("upgradePlugin requires the reviewed commit SHA (toSha): a full 40-character hex commit SHA");
-  const row = (await db.select().from(pluginInstalls).where(eq(pluginInstalls.id, installId)).limit(1))[0];
-  if (!row) throw new Error("Install not found");
-  const { gh } = await resolvePlugin(row.marketplaceId, row.pluginName);
-  const tag = `catalog:${installId}`;
-  // Re-route into the same scope/owner the install already has.
-  const target: InstallTarget = { scope: row.scope === "user" ? "user" : "system", userId: row.userId, projectId: null };
-
-  // Bind apply to the EXACT reviewed commit. Resolve toSha and assert GitHub returns
-  // the same SHA — a 40-hex value that is actually a (movable) lightweight tag would
-  // resolve to a different commit, and we refuse rather than pin to drifted content.
-  const fetchFn = await ghFetch();
-  const resolved = await resolveCommit(gh.owner, gh.repo, toSha, fetchFn);
-  if (resolved.sha !== toSha) throw new Error(`Reviewed commit ${toSha} no longer resolves to itself (got ${resolved.sha}); re-review before upgrading`);
-
-  // Apply (and pin to) EXACTLY the reviewed commit.
-  const plan = await buildPluginPlan({ ...gh, ref: toSha });
-  const obs = await observePluginPlan(plan, { blockPrivate: await getBlockPrivateProviderUrls() });
-  const manifest = await applyPlanResources(plan, obs, tag, target, MANUAL);
-  const files = plan.files;
-  await persistPluginFilesFenced({ installId, files, authority: MANUAL });
-  await pruneRemoved(tag, new Set(manifest.skills), new Set(manifest.connectors));
-
-  await db.update(pluginInstalls)
-    .set({ version: manifest.version ?? gh.ref, commitSha: manifest.commit?.sha ?? row.commitSha, manifest: await committedManifest(plan, obs, manifest, row.manifest) })
-    .where(eq(pluginInstalls.id, installId));
-  return manifest;
-}
+ * It was the second unfenced writer: an unconditional
+ * `db.update(pluginInstalls).set({ manifest })` that would overwrite a reviewed apply's live
+ * `applyState`, with no claim, no lease and no transaction spanning its resource writes. Its
+ * only caller was `POST /api/extensions`, which now returns 410 — every upgrade goes through
+ * `writeReviewedPlan` under an operation claim. Leaving a reachable second path to the same
+ * rows is exactly what made the consent gate optional the first time, so the path is gone
+ * instead of merely being unused.
+ */
 
 /** Install skills straight from a git repo with no marketplace.json — a plain
  *  `skills/<name>/SKILL.md` collection, à la `npx skills add owner/repo`. The repo
@@ -358,7 +359,15 @@ export async function installSkillRepo(opts: {
       id: marketplaceId, url: clean, name: `${repo.owner}/${repo.repo}`, owner: repo.owner, catalog, refreshedAt: new Date(),
     });
   }
-  return installPlugin({ marketplaceId, pluginName, installedBy: opts.installedBy, scope: opts.scope, only: opts.only, pinSha: opts.sha });
+  // `skillsOnly`, and it is load-bearing: the manage approval card for this enumerates the
+  // SKILLS it found, so routing a `.mcp.json` connector or bundled plugin files off the same
+  // repo would apply a larger set of capabilities than the human agreed to. A repo that
+  // declares connectors is still installable — its skills land and `plan.notes` says the
+  // connectors did not, which is reviewable, rather than silent either way.
+  return installPlugin({
+    marketplaceId, pluginName, installedBy: opts.installedBy, scope: opts.scope,
+    only: opts.only, skillsOnly: true, pinSha: opts.sha,
+  });
 }
 
 /** Remove everything an install routed (FK cascade drops skill files, plugin

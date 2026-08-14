@@ -68,11 +68,29 @@ export interface ResolvedPluginPlan {
   needsFiles: boolean;
 }
 
-export async function buildPluginPlan(gh: GitHubRef, only?: string[]): Promise<ResolvedPluginPlan> {
-  // `only` (from `--skill`) narrows the install to specific skills by name. A
-  // skill-scoped install ignores connectors entirely — the intent is "just these
-  // skills", and connectors are a separate, gated concern.
-  const onlySet = only && only.length ? new Set(only) : null;
+/**
+ * How an install is narrowed. Either form means SKILLS ONLY, and for the same reason: the
+ * consent that was obtained named skills and nothing else.
+ *
+ * `only` (from `--skill`) always did. `skillsOnly` is the second caller that needs it and
+ * could not say so: `installSkillRepo` models a plain `skills/<name>/SKILL.md` repo as a
+ * one-plugin marketplace and called this with `only: undefined`, so the plan also read
+ * `.mcp.json` and the plugin manifest — and the manage approval card, which enumerates only
+ * the skills it found, said "install N skills" over a plan that additionally installed a
+ * connector and bundled plugin files. The human approved a smaller set than the one applied.
+ */
+export interface PlanNarrowing {
+  /** Specific skills by name. */
+  only?: string[];
+  /** Route ONLY skills, whatever else the repo declares. */
+  skillsOnly?: boolean;
+}
+
+export async function buildPluginPlan(gh: GitHubRef, narrow?: PlanNarrowing): Promise<ResolvedPluginPlan> {
+  const onlySet = narrow?.only?.length ? new Set(narrow.only) : null;
+  // Connectors are a separate, gated concern; a skill-scoped install has consent for neither
+  // them nor the bundled files only a routed stdio server pulls in.
+  const skillsOnly = onlySet !== null || narrow?.skillsOnly === true;
   const prefix = gh.subdir ? `${gh.subdir}/` : "";
   const fetchFn = await ghFetch();
   // Pin gh.ref (a branch/tag/HEAD) to a concrete commit, then pull the tree AND
@@ -145,7 +163,13 @@ export async function buildPluginPlan(gh: GitHubRef, only?: string[]): Promise<R
 
   // Precedence on a name clash: inline < referenced config < root .mcp.json.
   const servers = { ...inlineServers, ...pathServers, ...fileServers };
-  if (!onlySet) {
+  // Named, never silently dropped. A repo presented as a skills collection that also ships
+  // connector definitions is not what it appears to be, and the operator has to be able to
+  // find that out from the install itself.
+  if (skillsOnly && Object.keys(servers).length) {
+    notes.push(`${Object.keys(servers).length} connector definition(s) in this repo were not installed — install it as a plugin from a marketplace to review them`);
+  }
+  if (!skillsOnly) {
     for (const [sname, def] of Object.entries(servers)) {
       const result = planConnector(sname, origin.get(sname) ?? `#${sname}`, def);
       if (!result) continue;

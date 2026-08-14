@@ -45,6 +45,16 @@ export interface ReadManifest {
   /** 0 for a legacy row — the value a first claim expects. */
   committedRevision: number;
   applyState: ApplyState | null;
+  /**
+   * A V2 row that has never committed anything: the staging row of a first install that
+   * failed or was reaped. Its baseline is EMPTY — nothing was ever published — which is a
+   * known fact, unlike a legacy row whose baseline is genuinely unknown.
+   *
+   * `committedRevision` cannot tell those apart (both read 0), and conflating them made a
+   * retry of a failed first install read as an `unknown` replacement of resources that do
+   * not exist. Only a V2 row can claim this; anything unrecognized stays conservative.
+   */
+  neverCommitted: boolean;
 }
 
 const EMPTY: InstallManifest = { skills: [], connectors: [], ignored: [], notes: [] };
@@ -58,7 +68,7 @@ const EMPTY: InstallManifest = { skills: [], connectors: [], ignored: [], notes:
  */
 export function readStoredManifest(raw: unknown): ReadManifest {
   if (!raw || typeof raw !== "object") {
-    return { inventory: EMPTY, installSurface: null, committedRevision: 0, applyState: null };
+    return { inventory: EMPTY, installSurface: null, committedRevision: 0, applyState: null, neverCommitted: false };
   }
   const o = raw as Record<string, unknown>;
   if (o.schemaVersion !== 2) {
@@ -67,18 +77,46 @@ export function readStoredManifest(raw: unknown): ReadManifest {
       installSurface: null,
       committedRevision: 0,
       applyState: null,
+      neverCommitted: false,
     };
   }
   const v2 = o as unknown as StoredPluginManifestV2;
   return {
     inventory: v2.inventory ?? EMPTY,
     installSurface: v2.installSurface ?? null,
+    // Written by the staging insert as 0 and bumped by every commit, so "still 0" is the
+    // one reliable statement that nothing this row describes was ever published.
+    neverCommitted: v2.committedRevision === 0,
     // A V2 row that somehow lost its counter must not read as 0: that is the value a
     // FIRST claim expects, so it would let a stale apply win the CAS. Treat a missing
     // counter as a value no claim can match.
     committedRevision: typeof v2.committedRevision === "number" ? v2.committedRevision : Number.NaN,
     applyState: v2.applyState ?? null,
   };
+}
+
+/**
+ * A row that EXISTS but has never committed anything — a reservation.
+ *
+ * Both first-install paths need exactly this value: the barrier's staging insert (which
+ * carries its claim in `applyState`) and `installPlugin`'s reservation (which does not). Both
+ * used to hand-write the literal, and two copies of a shape whose reader discriminates on
+ * `schemaVersion` is how one of them quietly starts reading as a legacy row.
+ *
+ * `writeStoredManifest` cannot express it: that one builds a COMMITTED value and requires a
+ * surface. Here `installSurface` is `null` precisely because nothing was published — which
+ * `neverCommitted` is what tells apart from a legacy row's genuinely unknown baseline.
+ */
+export interface ReservedPluginManifest {
+  schemaVersion: 2;
+  inventory: InstallManifest;
+  installSurface: null;
+  committedRevision: 0;
+  applyState?: ApplyState;
+}
+
+export function reservedManifest(applyState?: ApplyState): ReservedPluginManifest {
+  return { schemaVersion: 2, inventory: EMPTY, installSurface: null, committedRevision: 0, ...(applyState ? { applyState } : {}) };
 }
 
 /** Build the committed V2 value. Kept beside the reader so the two cannot disagree

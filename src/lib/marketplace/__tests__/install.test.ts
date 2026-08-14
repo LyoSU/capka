@@ -1,27 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { upgradePlugin } from "../install";
+import * as install from "../install";
 
-const SHA = "a".repeat(40);
-
-describe("upgradePlugin consent guard", () => {
-  it("rejects an upgrade with no reviewed commit SHA (fail-closed, before any DB access)", async () => {
-    // The guard runs first, so a blind 'pull latest' can never move the pin.
-    await expect(upgradePlugin("any-install", "")).rejects.toThrow(/reviewed commit SHA/);
+/**
+ * The single-writer invariant.
+ *
+ * This file used to test `upgradePlugin`'s "must be a full 40-hex SHA" guard. That guard was
+ * never the problem — the problem was that the function existed at all: a second path to the
+ * same rows, with no operation claim, no lease, and an unconditional
+ * `db.update(pluginInstalls).set({ manifest })` that would erase a live apply's `applyState`.
+ * The pin discipline it enforced now lives in `resolveTarget` in the review route, where every
+ * upgrade actually passes.
+ *
+ * So what is worth pinning is the SHAPE, not the guard: exactly one writer may move an
+ * install's committed view. A structural assertion is a weak test in general, but the entire
+ * class of defect here was "somebody added a second writer", and that is visible in the module
+ * surface and nowhere else — no behavioural test can fail when a NEW export appears.
+ */
+describe("install module surface", () => {
+  it("exposes no writer that can move a pin outside an operation claim", () => {
+    expect(install).not.toHaveProperty("upgradePlugin");
   });
 
-  it("rejects a branch/HEAD ref as toSha (would re-dereference to live upstream HEAD)", async () => {
-    // C3/L4: only a full 40-hex SHA is a real pin; anything else is rejected
-    // before any DB or network access, so a branch tip can't be applied.
-    await expect(upgradePlugin("any-install", "main")).rejects.toThrow(/40-character hex commit SHA/);
-    await expect(upgradePlugin("any-install", "HEAD")).rejects.toThrow(/40-character hex commit SHA/);
-    await expect(upgradePlugin("any-install", SHA.slice(0, 39))).rejects.toThrow(/40-character hex commit SHA/); // too short
-    await expect(upgradePlugin("any-install", SHA.toUpperCase())).rejects.toThrow(/40-character hex commit SHA/); // uppercase isn't git's canonical form
-    await expect(upgradePlugin("any-install", `${SHA}g`)).rejects.toThrow(/40-character hex commit SHA/); // non-hex
-  });
-
-  it("accepts a valid 40-hex SHA past the format guard (proceeds to the install lookup)", async () => {
-    // A well-formed pin clears the synchronous SHA check and reaches the DB lookup,
-    // so whatever it rejects with, it is NOT the 40-hex format error.
-    await expect(upgradePlugin("no-such-install", SHA)).rejects.not.toThrow(/40-character hex commit SHA/);
+  it("keeps the readonly upgrade preview, which touches nothing", () => {
+    // `previewUpgrade` is the half that was always safe: it resolves a commit and diffs two
+    // trees. Deleting it along with the writer would have taken the file diff off the review
+    // screen for no reason.
+    expect(install.previewUpgrade).toBeTypeOf("function");
   });
 });

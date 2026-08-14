@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readStoredManifest, writeStoredManifest } from "../manifest-store";
+import { readStoredManifest, reservedManifest, writeStoredManifest } from "../manifest-store";
 import type { StoredInstallSurface } from "../surface";
 
 const surface: StoredInstallSurface = {
@@ -74,6 +74,38 @@ describe("writeStoredManifest", () => {
   it("round-trips through JSON, which is how the column actually stores it", () => {
     const written = writeStoredManifest({ inventory: legacy, installSurface: surface, committedRevision: 3 });
     const r = readStoredManifest(JSON.parse(JSON.stringify(written)));
-    expect(r).toEqual({ inventory: legacy, installSurface: surface, committedRevision: 3, applyState: null });
+    expect(r).toEqual({
+      inventory: legacy, installSurface: surface, committedRevision: 3, applyState: null,
+      // A committed row has published something, so it is not `neverCommitted` — the whole
+      // point of the flag is to separate this from a staging row that also reads revision 0.
+      neverCommitted: false,
+    });
+  });
+});
+
+describe("reservedManifest", () => {
+  it("reads back as a row that exists but has published nothing", () => {
+    const r = readStoredManifest(JSON.parse(JSON.stringify(reservedManifest())));
+    // Not a legacy row (which also has no surface) and not a committed one. `neverCommitted`
+    // is the only thing that separates it from the former, since both read revision 0.
+    expect(r.neverCommitted).toBe(true);
+    expect(r.committedRevision).toBe(0);
+    expect(r.installSurface).toBeNull();
+    expect(r.applyState).toBeNull();
+    expect(r.inventory).toEqual({ skills: [], connectors: [], ignored: [], notes: [] });
+  });
+
+  it("carries a claim when the caller has one, so the row is inserted ALREADY claimed", () => {
+    // The barrier's staging insert must not leave a window between "the row exists" and "it is
+    // claimed": a crash in between stranded a row that was permanently `ready`, permanently
+    // empty, invisible to the reaper (which only looks at `applying`) and blocking every retry
+    // through the unique index.
+    const state = {
+      operationId: "op_1", targetSha: "a".repeat(40), status: "applying" as const,
+      kind: "install" as const, startedAt: "2026-08-14T00:00:00.000Z", leaseExpiresAt: "2026-08-14T00:01:00.000Z",
+    };
+    const r = readStoredManifest(JSON.parse(JSON.stringify(reservedManifest(state))));
+    expect(r.applyState).toEqual(state);
+    expect(r.neverCommitted).toBe(true);
   });
 });

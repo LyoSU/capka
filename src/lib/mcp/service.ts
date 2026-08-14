@@ -9,7 +9,7 @@ import { assertSafeUrl } from "@/lib/net/ssrf";
 import { ValidationError } from "@/lib/errors";
 import { mutedIds } from "@/lib/muted-resources";
 import { keepRuntimeVisible, ownerStates } from "@/lib/marketplace/runtime-view";
-import { FencedWriteError, MANUAL, fencePredicate, insertFenceLock, outcomeOf, type MutationAuthority, type WriteOutcome } from "@/lib/marketplace/fence";
+import { FencedWriteError, MANUAL, acquireFence, fencePredicate, outcomeOf, type MutationAuthority, type WriteOutcome } from "@/lib/marketplace/fence";
 import { clearCachedTools } from "./tool-cache";
 import { inferRemoteTransport, type McpAuthKind, type McpScope, type McpSecrets, type McpServerConfig, type McpServerInfo } from "./types";
 
@@ -222,8 +222,9 @@ async function writeServerRow(
   // For a plugin apply the rule is stricter than for an update: the install must exist
   // and be applying under OUR operation. That is also what makes a NEW orphan impossible.
   await db.transaction(async (tx) => {
-    const ok = await tx.execute(insertFenceLock(authority, source ?? "manual"));
-    if ((ok.rowCount ?? 0) === 0) throw new FencedWriteError(`connector ${String(values.name)}`);
+    if (!await acquireFence(tx, authority, source ?? "manual")) {
+      throw new FencedWriteError(`connector ${String(values.name)}`);
+    }
     await tx.insert(mcpServers).values(values as never);
   });
 }

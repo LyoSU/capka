@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { skills, skillFiles } from "@/lib/db/schema";
 import { mutedIds } from "@/lib/muted-resources";
 import { keepRuntimeVisible } from "@/lib/marketplace/runtime-view";
-import { FencedWriteError, MANUAL, fencePredicate, insertFenceLock, outcomeOf, type MutationAuthority, type WriteOutcome } from "@/lib/marketplace/fence";
+import { FencedWriteError, MANUAL, acquireFence, fencePredicate, outcomeOf, type MutationAuthority, type WriteOutcome } from "@/lib/marketplace/fence";
 import type { SkillInfo, SkillScope, ParsedSkill } from "./types";
 
 const SCOPE_RANK: Record<SkillScope, number> = { system: 0, user: 1, project: 2 };
@@ -210,8 +210,9 @@ export async function ingestSkill(
   // files reach the sandbox. The lock also blocks the reaper and any rival claim for the
   // transaction's whole length, so the lease cannot lapse mid-write.
   return db.transaction(async (tx) => {
-    const ok = await tx.execute(insertFenceLock(authority, target.source ?? "manual"));
-    if ((ok.rowCount ?? 0) === 0) throw new FencedWriteError(`skill ${parsed.name}`);
+    if (!await acquireFence(tx, authority, target.source ?? "manual")) {
+      throw new FencedWriteError(`skill ${parsed.name}`);
+    }
 
     if (existing[0]) {
       const res = await tx.update(skills).set(values)

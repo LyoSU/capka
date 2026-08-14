@@ -117,17 +117,25 @@ async function reconcile(): Promise<void> {
     // It is never RESUMED, only failed: the executable plan may have existed only in
     // memory and the observations have moved, so continuing would apply something nobody
     // reviewed. Same stance as a zombie task, which is failed and never requeued.
-    const stale = await reconcileStaleApplies();
-    for (const s of stale) {
-      // The reaper used to flip `applying → failed` and write NOTHING, so the operation's
-      // journal ended at `accepted` — the one outcome with no terminal event, and the only
-      // way an apply could end without the trail saying how. Idempotent by id, so a second
-      // reconciler cannot duplicate it.
-      await insertPluginAudit(db, {
-        operationId: s.operationId, event: "failed", actorId: null,
-        reviewHash: s.reviewHash ?? "", targetKey: s.pluginName, errorCode: "lease_expired",
-      }).catch((e) => log.error("could not record a reaped apply", { installId: s.installId, err: String(e) }));
-    }
+    //
+    // The flip and the terminal journal entry it owes are ONE transaction. Committing the
+    // state first and logging the audit failure afterwards — which is what this used to do —
+    // left the only unrepairable end state in the system: the install `failed` forever, the
+    // journal ending at `accepted`, and no later reaper coming back for it, because the
+    // reaper only ever looks at `applying`. Rolling back instead leaves the row expired and
+    // `applying`, which is exactly the state this pass is for, so the next tick retries it.
+    const stale = await db.transaction(async (tx) => {
+      const reaped = await reconcileStaleApplies(tx);
+      for (const s of reaped) {
+        // No `.catch`: `insertPluginAudit` throws precisely so that a journal write which
+        // cannot land takes the transition down with it (see audit.ts).
+        await insertPluginAudit(tx, {
+          operationId: s.operationId, event: "failed", actorId: null,
+          reviewHash: s.reviewHash ?? "", targetKey: s.pluginName, errorCode: "lease_expired",
+        });
+      }
+      return reaped;
+    });
     if (stale.length) log.info("reconciled stale plugin applies", { count: stale.length, installIds: stale.map((s) => s.installId) });
   } catch (e) {
     log.error("plugin apply reconcile error", { err: String(e) });

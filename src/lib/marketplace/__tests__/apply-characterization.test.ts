@@ -74,7 +74,7 @@ async function runFixture(
   h.state.files = files;
   h.state.tree = Object.keys(files).map((path) => ({ path, type: "blob" as const, sha: "s" }));
   h.state.authKind = authKind;
-  const plan = await buildPluginPlan(GH, only);
+  const plan = await buildPluginPlan(GH, { only });
   const obs = await observePluginPlan(plan, { blockPrivate: false });
   const manifest = await applyPlanResources(plan, obs, TAG, TARGET, MANUAL);
   return { manifest, files: plan.files };

@@ -72,31 +72,16 @@ export function fencePredicate(authority: MutationAuthority, sourceColumn: SQL):
  * The INSERT case, which cannot use the predicate above: there is no row yet to read
  * `source` from, so the rule cannot live in a WHERE clause on the target table.
  *
- * This returns a statement that RETURNS A ROW when the write is allowed and no rows when
- * it is not, and that takes `FOR NO KEY UPDATE` on the owning install. The lock is what
- * makes it equivalent to an in-statement predicate rather than a check-then-write gap:
- * `claimApply`, `markApplyFailed`, `finalizeApply` and the reaper are all UPDATEs on that
- * same row, so each blocks until the caller's transaction commits, and the answer cannot
- * go stale before the insert lands. Run it inside a transaction with the insert.
+ * Returns a statement that yields A ROW when the write is allowed and no rows when it is
+ * not, taking `FOR NO KEY UPDATE` on the owning install. The lock is what makes it
+ * equivalent to an in-statement predicate rather than a check-then-write gap: `claimApply`,
+ * `markApplyFailed`, `finalizeApply` and the reaper are all UPDATEs on that same row, so
+ * each blocks until the caller's transaction commits.
  *
- * For a plugin apply the rule is stricter than for an update — the install must exist AND
- * be applying under our operation — which is also what makes a NEW orphan impossible.
- *
- * A row whose source is not `catalog:<id>` belongs to no install; the manual form then
- * matches nothing to refuse and the statement returns its one synthetic row.
+ * Only the plugin-apply form lives here now. The manual one cannot be expressed as a single
+ * statement at all — see `acquireFence`, which is what callers use.
  */
-export function insertFenceLock(authority: MutationAuthority, source: string): SQL {
-  if (authority.kind === "manual") {
-    // One row unless some install owning this source is applying. The `FOR NO KEY UPDATE`
-    // sits on the subquery so the same blocking applies.
-    return sql`
-      SELECT 1 WHERE NOT EXISTS (
-        SELECT 1 FROM plugin_installs pi
-         WHERE ${source} = 'catalog:' || pi.id
-           AND pi.manifest #>> '{applyState,status}' = 'applying'
-         FOR NO KEY UPDATE
-      )`;
-  }
+function applyFenceLock(authority: Extract<MutationAuthority, { kind: "plugin-apply" }>, source: string): SQL {
   return sql`
     SELECT 1 FROM plugin_installs pi
      WHERE ${source} = 'catalog:' || pi.id
@@ -104,6 +89,44 @@ export function insertFenceLock(authority: MutationAuthority, source: string): S
        AND pi.manifest #>> '{applyState,operationId}' = ${authority.operationId}
        AND (pi.manifest #>> '{applyState,leaseExpiresAt}')::timestamptz > now()
      FOR NO KEY UPDATE`;
+}
+
+/** Anything that can run a raw statement: the global handle or a transaction. */
+type FenceTx = { execute(query: SQL): Promise<{ rowCount: number | null }> };
+
+/**
+ * Take the fence for one `source` inside the caller's transaction, and say whether the write
+ * may proceed. Every fenced INSERT goes through this.
+ *
+ * The manual authority needs TWO statements, and that is a correctness requirement rather
+ * than a stylistic one. Its predicate used to be a single
+ * `SELECT 1 WHERE NOT EXISTS (SELECT … WHERE applying FOR NO KEY UPDATE)` — and in the only
+ * case that PROCEEDS, the subquery matches no row, so `FOR NO KEY UPDATE` locked nothing at
+ * all. The answer was therefore free to go stale the instant it was computed: `claimApply`
+ * could land immediately after, and the manual write went in underneath a claim it never
+ * saw. A lock that only fires when the answer is "refuse" protects nothing.
+ *
+ * So the owning row is locked UNCONDITIONALLY first, and its status read afterwards — inside
+ * one transaction, which is what makes the second read authoritative. A `source` belonging to
+ * no install (a hand-added row, or the literal `"manual"`) locks nothing and passes, which is
+ * correct: there is no apply that could own it.
+ *
+ * The plugin-apply form still needs one statement: its predicate matches the very row it
+ * locks, so winning it and holding it are the same act.
+ */
+export async function acquireFence(tx: FenceTx, authority: MutationAuthority, source: string): Promise<boolean> {
+  if (authority.kind !== "manual") {
+    return ((await tx.execute(applyFenceLock(authority, source))).rowCount ?? 0) > 0;
+  }
+  await tx.execute(sql`
+    SELECT 1 FROM plugin_installs pi
+     WHERE ${source} = 'catalog:' || pi.id
+     FOR NO KEY UPDATE`);
+  const applying = await tx.execute(sql`
+    SELECT 1 FROM plugin_installs pi
+     WHERE ${source} = 'catalog:' || pi.id
+       AND pi.manifest #>> '{applyState,status}' = 'applying'`);
+  return (applying.rowCount ?? 0) === 0;
 }
 
 /**
