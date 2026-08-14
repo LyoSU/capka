@@ -18,6 +18,22 @@ describe("suspended is gated at every access perimeter", () => {
     expect(src).toContain('status === "suspended"');
   });
 
+  it("requireSession itself refuses a non-active account, so the safe default needs no opt-in", () => {
+    // Scoped to the function body, not the file: the same line inside requireActive would
+    // otherwise satisfy a substring match while a bare requireSession still handed a
+    // suspended caller a live session. That is the exact shape of the original defect —
+    // every gate had the check except the one everything else is built on.
+    const src = read("src/lib/auth.ts");
+    const body = src.slice(
+      src.indexOf("export async function requireSession()"),
+      src.indexOf("export async function requireRole("),
+    );
+    expect(body).not.toBe("");
+    expect(body).toMatch(/if \(status !== "active"\) throw inactiveError\(status\)/);
+    // ...and before it hands the session back, not after.
+    expect(body.indexOf('throw inactiveError(status)')).toBeLessThan(body.indexOf("return { userId:"));
+  });
+
   it("the dashboard layout parks a suspended session on its own screen", () => {
     const src = read("src/app/(dashboard)/layout.tsx");
     expect(src).toContain('status === "suspended"');

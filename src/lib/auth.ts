@@ -338,7 +338,8 @@ export function normalizeAccountStatus(raw: unknown): AccountStatus {
   return raw === "active" || raw === "pending" || raw === "suspended" ? raw : "rejected";
 }
 
-/** Require authenticated session — throws UnauthorizedError. */
+/** Require an authenticated, ACTIVE session — throws UnauthorizedError when there is no
+ *  session, ForbiddenError when the account is pending/suspended/rejected. */
 export async function requireSession(): Promise<{
   userId: string;
   role: Role;
@@ -361,6 +362,18 @@ export async function requireSession(): Promise<{
   // suspended, rejected, or some future/manually-set value) is non-active and gated
   // out — the old `!== "pending" ? "active"` defaulted unknown statuses to active.
   const status = normalizeAccountStatus((session.user as Record<string, unknown>).status);
+  // Authenticated is not authorized. This used to hand back a suspended session and leave
+  // the status check to whoever remembered one: requireActive/requireRole/requireWriter
+  // enforced it, a bare requireSession did not. That put the safe behaviour behind an
+  // opt-in, and the set of routes that opted in drifted apart from the set that exposes
+  // data — `chats/[id]/export` was gated while the chat list and the full history behind
+  // `/api/chat` were not; `sandbox/files/download-all` was gated while `download` and the
+  // file listing beside it were not. Suspending someone therefore revoked their writes and
+  // left every read, workspace bytes included, plus the OAuth routes that mint connector
+  // tokens. There is no caller that legitimately wants a non-active session (the /pending
+  // and /suspended screens talk to better-auth directly, not to these routes), so the
+  // default is inverted rather than given an escape hatch nobody would need.
+  if (status !== "active") throw inactiveError(status);
   return { userId: session.user.id, role, status, session };
 }
 
