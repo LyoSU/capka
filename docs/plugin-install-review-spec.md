@@ -53,7 +53,19 @@ These are load-bearing. A change that breaks one changes the feature's guarantee
 2. **Values never enter a durable or client-visible projection.** Only names of
    secrets, headers, env vars and query parameters. No URL credentials. No content
    hashes outside the server-only projection.
-3. **No write happens before the claim is won.**
+
+   There is exactly **one** carve-out, and it is narrow enough to state in full: the
+   ephemeral `EphemeralExecutionDetail` carries a literal `command` and `args` to the
+   authorized installer in one response. It is never persisted, never audited, and
+   never reaches a non-installer, and the type boundary — `insertPluginAudit` accepts
+   only `DurablePluginReview` — makes the persistence half unrepresentable rather than
+   merely forbidden. The reason is that a command line is the *subject* of the review;
+   redacting it would leave the installer consenting to something they cannot read.
+   Nothing else may claim this exception.
+3. **No change to product, install or resource state happens before the claim is
+   won.** Append-only audit of a *refusal* (`stale`, `blocked`) is permitted before
+   the claim and is the only exception — a refusal that left no trace would hide
+   exactly the attempts worth seeing.
 4. **Runtime sees only a committed view.** A plugin mid-apply or failed is invisible
    to the agent, without changing anyone's `enabled` choice.
 5. **A proven rename does not exist** in the current manifest format.
@@ -91,31 +103,95 @@ reach the journal by accident.
 ### Surface shape
 
 ```ts
-InstallSurface {
+/** Parameterized, not a union of element types: `connectors: (Stored | Public)[]`
+ *  would let a stored element carrying fingerprints sit inside a public surface, so
+ *  the leak would still be representable. */
+interface InstallSurface<C, S, F> {
   schemaVersion: number;
   completeness: "derived" | "reconstructed" | "unknown";
-  connectors: SurfaceConnector[];   // sorted by originKey
-  skills: SurfaceSkill[];           // sorted by name
-  files: { count: number; bytes: number; rootHash: string; entrypoints: string[] };
+  connectors: C[];        // sorted by originKey
+  skills: S[];            // sorted by name
+  files: F;
 }
 
-SurfaceConnector {
+type StoredInstallSurface = InstallSurface<StoredSurfaceConnector, StoredSurfaceSkill, StoredSurfaceFiles>;
+type PublicInstallSurface = InstallSurface<PublicSurfaceConnector, PublicSurfaceSkill, PublicSurfaceFiles>;
+
+/** What every projection shares. Contains no value of any kind. */
+SurfaceConnectorBase {
   name: string;
   originKey: string;                // manifest path + server key; valid WITHIN one commit
   transport: "http" | "sse" | "stdio";
   endpoint?: { scheme: string; host: string; port: number; pathname: string; queryKeys: string[] };
+  /** The APPLIED value — what `upsertServer` writes to the row — so it belongs to the
+   *  surface even though its source is an observation (`detectedAuth`). The two are
+   *  not duplicates: `detectedAuth` is what the probe saw at review time, this is what
+   *  the install would persist. A difference here is a `replacement`: a connector that
+   *  now wants OAuth is a real change for the user regardless of whether the plugin or
+   *  the remote server caused it. A difference appearing between preview and apply is
+   *  an observation change and takes the 409 path instead. */
   authKind?: "token" | "oauth";
   secretKeys: string[];             // header / env NAMES only
   needsSecret: boolean;
-  command?: string;
-  args?: string[];
   runsThirdPartyCode: boolean;      // always true for stdio
   bundled: boolean;
+  /**
+   * What this side says about activation, and the two sides say different KINDS of
+   * thing — which is why one shared `enabled: boolean` would be wrong.
+   *
+   * An artifact surface (`sourceBefore` / `sourceAfter`) can only ever say
+   * `forced_disabled` or `left_as_is`: `upsertServer`'s update path does not touch
+   * `enabled`, so an install never forces a connector ON. It forces OFF exactly when a
+   * `${...}` placeholder is present (`setEnabled(id, false)` in `applyPlugin`).
+   *
+   * A runtime surface (`runtimeBefore`) reports the row's actual state, `enabled` or
+   * `disabled`, which is whatever the user or admin last chose.
+   */
+  activation: "forced_disabled" | "left_as_is" | "enabled" | "disabled";
 }
 
-SurfaceSkill { name: string; originPath: string; instructionHash: string; filesRootHash: string }
-SurfaceFile  { path: string; bytes: number; contentHash: string }
+/** Persisted. The execution shape, never the command line itself: enough to detect a
+ *  change, not enough to leak what was in it. */
+StoredSurfaceConnector = SurfaceConnectorBase & {
+  readonly projection: "stored";
+  execution?: {
+    binary: string;                 // argv[0] only — "npx", "node", or a plugin-root path
+    argCount: number;
+    placeholderArgs: number[];      // indices carrying ${...}
+    fingerprint: string;            // keyed HMAC over the full canonical command line
+  };
+}
+
+/** Client-facing. Same minus the fingerprint: a keyed digest still confirms a guess
+ *  about a private plugin's contents, so it stays server-side. */
+PublicSurfaceConnector = SurfaceConnectorBase & {
+  readonly projection: "public";
+  execution?: { binary: string; argCount: number; placeholderArgs: number[] };
+  changed?: ("credential" | "command" | "endpoint" | "instructions")[];
+}
+
+/** Ephemeral only, and only to the authorized installer. The single place a literal
+ *  command line exists outside `ResolvedPluginPlan`. Never persisted, never audited —
+ *  `insertPluginAudit` cannot accept it (§4, type boundary). */
+EphemeralExecutionDetail { connectorName: string; command: string; args: string[] }
+
+/** Skills and files split the same way as connectors — a hash is a confirmation
+ *  oracle, so it stays server-side even though it is not a secret. */
+StoredSurfaceSkill { readonly projection: "stored"; name: string; originPath: string; instructionHash: string; filesRootHash: string }
+PublicSurfaceSkill { readonly projection: "public"; name: string; originPath: string; changed?: ("instructions" | "files")[] }
+
+StoredSurfaceFile  { path: string; bytes: number; contentHash: string }
+StoredSurfaceFiles { readonly projection: "stored"; count: number; bytes: number; rootHash: string; entrypoints: string[]; files: StoredSurfaceFile[] }
+PublicSurfaceFiles { readonly projection: "public"; count: number; bytes: number; entrypoints: string[]; changedPaths?: string[]; addedPaths?: string[]; removedPaths?: string[] }
 ```
+
+The generic alone is necessary but not sufficient. TypeScript is structurally typed,
+and excess-property checks only fire on fresh object literals — so
+`const p: PublicSurfaceConnector = someStoredConnector` compiles, and a stored value
+with its fingerprint would flow into a public slot at runtime. The literal
+`projection` discriminant is what makes the two mutually unassignable in **both**
+directions, which is the property being claimed. Without it the type would document
+the split rather than enforce it.
 
 Normalization: host lowercased, port always explicit (443/80 filled in), `pathname`
 without a trailing slash, `queryKeys` sorted, arrays deterministically ordered.
@@ -171,6 +247,10 @@ type StoredPluginManifestV2 = {
     operationId: string;
     targetSha: string;
     status: "applying" | "failed";
+    /** Which of the three releases applies if this claim has to be given back. The row
+     *  cannot infer it at release time — a staging row and a claimed ready install look
+     *  identical once `applyState` is set — so the claim records it. */
+    kind: "install" | "upgrade" | "retry";
     startedAt: string;
     leaseExpiresAt: string;
   };
@@ -188,7 +268,12 @@ compiler. Hence the discriminator: legacy rows are detected by the **absence** o
 `schemaVersion`. All reads go through one function:
 
 ```ts
-readStoredManifest(row): { inventory: InstallManifest; installSurface: StoredInstallSurface | null }
+readStoredManifest(row): {
+  inventory: InstallManifest;
+  installSurface: StoredInstallSurface | null;   // null for a legacy row
+  committedRevision: number;                     // 0 for a legacy row
+  applyState: ApplyState | null;
+}
 ```
 
 Outside `install.ts` exactly one place reads this column today —
@@ -200,19 +285,31 @@ apply.
 ## 5. Function contract
 
 ```
-buildPluginPlan(gh, only?)        → ResolvedPluginPlan   fetch + parse + preflight; no persistent writes
-projectPluginReview(plan, base)   → { response, durable, storedAfter }
-applyPlanResources(plan, tag, t)  → InstallManifest      re-runs security guards; performs writes
-installPlugin(...)                                       orchestration
-upgradePlugin(...)                                       hash check → orchestration → prune → audit
+buildPluginPlan(gh, only?)           → ResolvedPluginPlan    artifact ONLY: fetch + parse, no probes, no writes
+observePluginPlan(plan, policy)      → ReviewObservations    DNS preflight + OAuth discovery
+projectPluginReview(plan, obs, base) → { response, durable, storedAfter }
+applyPlanResources(plan, tag, t)     → InstallManifest       re-runs security guards; performs writes
+installPlugin(...)                                          orchestration
+upgradePlugin(...)                                          hash check → orchestration → prune → audit
 ```
 
-`buildPluginPlan` absorbs everything `applyPlugin` does today except the writes:
-commit resolution, `ghTree`, `plugin.json` and `.mcp.json` parsing,
-`parseManifestMcp`, `extractServers`, `detectAuthKind`, `selectPluginFiles`, the
-`ignored` tally. Decisions that are currently side effects of parsing become typed
-plan fields: `needsSecret`, `runsThirdPartyCode`, and the notes that today are pushed
-onto `manifest.notes` from inside `routeServer`.
+`buildPluginPlan` and `observePluginPlan` are separate because their determinism
+differs, and mixing them is what would let a stale DNS verdict masquerade as an
+artifact property (§4). A plan for a fixed SHA is reproducible and cacheable; an
+observation is a fact about the world at one moment and is recomputed on every apply.
+
+`buildPluginPlan` absorbs everything `applyPlugin` does today except the writes **and
+except the probes**: commit resolution, `ghTree`, `plugin.json` and `.mcp.json`
+parsing, `parseManifestMcp`, `extractServers`, `selectPluginFiles`, the `ignored`
+tally. Decisions that are currently side effects of parsing become typed plan fields:
+`needsSecret`, `runsThirdPartyCode`, and the notes that today are pushed onto
+`manifest.notes` from inside `routeServer`.
+
+`detectAuthKind` and `preflightUrl` go to `observePluginPlan`, not here. Today
+`detectAuthKind` runs inside the parse loop in `applyPlugin`, which is precisely what
+makes a plan built twice for the same SHA produce two different results — the property
+the split exists to remove. Anything reachable over the network belongs to
+observations, wherever it sits today.
 
 `InstallManifest` remains the output shape of `applyPlanResources`, so the plugins UI,
 audit and `pruneRemoved` keep working — the manifest becomes a projection of the plan
@@ -247,20 +344,28 @@ InstallDelta {
 }
 ```
 
+The classes partition by **identity**, so no change falls into two of them:
+
 | Kind | Rule |
 |---|---|
-| `unchanged` | canonical forms equal |
-| `attenuation` | **provable only**: resource fully removed, or connector force-disabled |
-| `expansion` | anything added: connector, query key, secret key, arg, entrypoint, `authKind` where there was none |
-| `replacement` | same identity, different target: `scheme`, `host`, `port`, `pathname`, `command`, a `KEY=VALUE` arg value, `instructionHash`, `contentHash` |
-| `removal` | gone entirely |
-| `unknown` | baseline incomplete: legacy without `installSurface`, or the pinned commit is gone from upstream |
+| `unchanged` | the resource's canonical form is byte-identical |
+| `removal` | the resource is gone from the new surface |
+| `expansion` | a resource exists that did not before |
+| `attenuation` | **only** `runtimeBefore.activation = "enabled"` together with `sourceAfter.activation = "forced_disabled"`, on a resource whose canonical form is otherwise byte-identical |
+| `replacement` | any other difference in a resource that exists on both sides |
+| `unknown` | the baseline cannot be established: legacy without `installSurface`, or the pinned commit is gone from upstream |
 
-Any change to an *existing* resource is `replacement`. "Fewer" does not prove
-"weaker": the canonical counterexample, which belongs in the test suite, is
-`needsSecret: true → false` — a placeholder replaced by a hard-coded credential,
-i.e. the plugin now carries its own key to someone else's service. That is strictly
-worse and classifies as `replacement`.
+The earlier formulation listed a removed resource under both `attenuation` and
+`removal`, and called an added argument `expansion` while also declaring every change
+to an existing resource a `replacement`. Keying on identity removes the overlap: what
+changed about a resource that still exists is always `replacement`, and `expansion` is
+reserved for a resource appearing.
+
+`needsSecret: true → false` is therefore `replacement`, and the reason matters. It is
+**not** "strictly worse" — it may equally mean the plugin dropped a feature that
+needed the key. It is *ambiguous*, and ambiguity is exactly what must not be waved
+through as a reduction. This case belongs in the test suite as the guard against
+reading "fewer" as "weaker".
 
 Gate mapping:
 
@@ -293,6 +398,64 @@ applied inside the same operation, logged with the existing `policy.set` /
 `policy.clear` actions carrying `operationId`. Otherwise the installer consents to one
 policy outcome and apply performs another.
 
+The apply-state fence does not cover a policy edit: the policy tables are not
+plugin-owned, so an admin editing one by hand is not refused while an install applies.
+The resolution is not a new fence but a wider baseline — **the policy rows for every
+key a disposition touches are part of `runtimeBefore`**, and therefore part of
+`reviewHash`.
+
+A concurrent policy change is then not a special case at all: it is a stale baseline,
+detected by the second hash check like any other, before a single resource is written.
+The operation returns `stale` with a 409, the installer re-reviews against the policy
+as it now stands, and nothing partial happens.
+
+An earlier draft had the disposition skipped while the operation still finalized,
+recording `policy_disposition_skipped`. That is discarded: it applied the resource half
+of a decision and dropped the policy half, so what executed was not what the installer
+consented to — a direct violation of invariant 6. There is no version of "succeeded"
+that is honest when part of the consented change did not happen.
+
+The conditional write stays as a belt inside the finalizing transaction, and it is a
+**revision** CAS rather than a field-by-field comparison:
+
+```sql
+DELETE FROM capability_policies WHERE id = $1 AND revision = $2
+```
+
+A field list would have to be exhaustive to be safe — the policy's identity is
+`(scope, capabilityType, capabilityKey, userId, projectId)` plus `effect`, with two
+nullable owner columns needing null-safe comparison — and any field omitted is a hole:
+a concurrent change to `capabilityType`, `userId` or `projectId` would slip past a
+predicate checking only `effect`, `scope` and `capabilityKey`, deleting a policy that is
+no longer the one the review analysed. One token covers every column at once and cannot
+be under-specified.
+
+That token cannot be `updated_at`, even though the column already exists. `setPolicy`
+writes it as `new Date()`, i.e. millisecond precision with no monotonicity guarantee, so
+two updates inside one millisecond produce an identical value and the CAS sees no
+change. Moving it to a database default would be **worse**: `now()` is transaction-start
+time, so two updates in one transaction would be identical by construction.
+
+So the migration that adds the partial unique indexes also adds:
+
+```sql
+ALTER TABLE capability_policies ADD COLUMN revision bigint NOT NULL DEFAULT 0
+```
+
+and `setPolicy` increments it in the same `onConflictDoUpdate.set` that writes `effect`.
+There is exactly one place to do this: the module owns both write paths — `setPolicy`
+(upsert) and `clearPolicy` (delete, which needs no increment because the row goes) — so
+the "a writer forgot to bump it" failure has a single possible site, inside the module
+that owns the table. `updated_at` stays for display; it is simply not the CAS token.
+
+An explicit counter is preferred over `xmin` because it is testable and stable as a
+long-term contract rather than an implementation detail of the storage engine.
+
+Its zero-row case means the row moved between the second hash check and the write — a
+window the fence does not cover — and that aborts the transaction rather than skipping
+the disposition. The operation becomes `failed`, which is legible, instead of
+`succeeded`, which would be a lie.
+
 ## 7. Claim, lease, fence
 
 ### First-install claim needs a database guarantee
@@ -323,10 +486,24 @@ A local phase decides what a `catch` may do:
 
 | Phase | A failure means | Allowed transition |
 |---|---|---|
-| `unclaimed` | nothing changed | none, audit only |
-| `claimed` | second hash check failed, no writes yet | release claim, outcome `stale` |
+| `unclaimed` | nothing changed | none; append the refusal event only |
+| `claimed` | the second hash check failed, no resource writes yet | release the claim (see below), outcome `stale` |
 | `mutating` | resources were already changed | → `failed` |
-| `committed` | only the audit write failed | none; the install succeeded |
+| `committed` | nothing can fail here | none |
+
+**Releasing a claim is not one operation.** What "release" means depends on how the
+row got there, and conflating them either strands a staging row or destroys a prior
+state:
+
+| `applyState.kind` | Release restores |
+|---|---|
+| `install` | delete the staging row — there is no committed state to return to |
+| `upgrade` | clear `applyState`, leaving the committed view untouched |
+| `retry` | restore `status = 'failed'`, not `NULL` — the earlier failure is still true and must stay visible |
+
+There is no "committed but the audit failed" phase: finalize and its `succeeded` event
+are one transaction, so either both landed or neither did. If neither did, the phase
+is still `mutating` and the operation is `failed`.
 
 A blanket `catch → failed` would mark a failure where nothing happened and, worse,
 where everything had already succeeded.
@@ -366,14 +543,35 @@ inverted hole: once the reconciler sets `failed`, a dispossessed worker finds no
 Install identity is derived from the row's own `source`, not from a caller-supplied
 id, so a wrong id cannot bypass the fence:
 
+The two predicates are **different SQL**, not one with a parameter. Copying only the
+first into an apply path is the mistake this section exists to prevent.
+
+`{ kind: "manual" }` — refuse while anyone is applying:
+
 ```sql
 AND NOT EXISTS (
   SELECT 1 FROM plugin_installs pi
   WHERE mcp_servers.source = 'catalog:' || pi.id
     AND pi.manifest #>> '{applyState,status}' = 'applying'
-    AND pi.manifest #>> '{applyState,operationId}' IS DISTINCT FROM $operation_id
 )
 ```
+
+`{ kind: "plugin-apply", operationId }` — proceed only while the row is still ours and
+the lease is alive:
+
+```sql
+AND EXISTS (
+  SELECT 1 FROM plugin_installs pi
+  WHERE mcp_servers.source = 'catalog:' || pi.id
+    AND pi.manifest #>> '{applyState,status}' = 'applying'
+    AND pi.manifest #>> '{applyState,operationId}' = $operation_id
+    AND (pi.manifest #>> '{applyState,leaseExpiresAt}')::timestamptz > now()
+)
+```
+
+`NOT EXISTS(... IS DISTINCT FROM ...)` satisfies neither: it lets a dispossessed
+worker through once the reconciler has set `failed`, because then no `applying` row
+exists at all.
 
 For a plugin-owned **insert** the rule is stricter: the install must exist and its
 applying `operationId` must equal ours. That also makes new orphans impossible.
@@ -395,8 +593,8 @@ any design's reach.
 preview: build → observe → baselines → review
 
 apply:
-  validate request/authority
-  reject if no reviewHash          — before any DB access
+  reject if reviewHash is absent or malformed   — SYNTACTIC, before any DB access
+  validate request + authority                  — needs the DB, so it comes second
   rebuild plan + fresh observations + both baselines
   compare accepted hash            → stale  → audit(stale) + 409 with the fresh review
   gate === cannot_apply            → audit(blocked) + refuse
@@ -456,6 +654,12 @@ it inherits the filter — a direct test pins that.
 
 Finalize becomes the publication moment. This also neutralizes today's `catalog:`
 orphans at runtime while leaving them visible in Connections for manual cleanup.
+
+The management API must expose which of these a resource is in —
+`ready | applying | failed | orphaned` per resource, not just per install — or the UI
+cannot distinguish "temporarily unavailable" from "gone", and a user staring at a
+connector that no longer answers has no way to learn why. `orphaned` is the
+owner-missing case: visible, unusable by the agent, removable by hand.
 
 **Temporal boundary:** the claim affects *new* runs. A run already in flight finishes
 with the tool snapshot it resolved, as everywhere else in this codebase; instant
@@ -534,6 +738,23 @@ uses `ON CONFLICT (id) DO NOTHING`. `auditLog.id` is already a text primary key,
 schema change is needed. Two reconcilers, or one that runs twice, cannot duplicate a
 terminal event.
 
+`DO NOTHING` alone would also silently swallow a *different* payload written under the
+same id — two writers disagreeing about the outcome would leave whichever arrived
+first, with no signal. So the insert returns whether it inserted, and on a conflict the
+existing row's `{ outcome, reviewHash }` is compared:
+
+```
+same id + same payload      → idempotent success
+same id + different payload → throw InvariantViolation
+```
+
+It must **throw**, not log. `insertPluginAudit` runs inside the same transaction as the
+state transition it records, so throwing rolls that transition back; merely logging
+would let the transaction commit while the journal asserts a different outcome — the
+state and its record disagreeing permanently, with only a warning line to show for it.
+Two reconcilers writing the same terminal event are the idempotent case; two writing
+different ones are a bug that must stop the write it belongs to.
+
 The lifecycle events use `insertPluginAudit`, which takes a `tx` and **throws** —
 the existing `audit()` swallows its own failure, so it cannot provide the `pending`
 record the reconciler completes. `audit()` stays for less critical events.
@@ -556,15 +777,21 @@ The partial unique indexes will fail to create if duplicates already exist, and
 migrations run automatically at boot (`instrumentation.ts` → `runMigrations()`), so a
 bare `CREATE UNIQUE INDEX` would leave an upgraded instance refusing to start.
 
+The same migration adds `capability_policies.revision` (§6). Both changes share one
+migration so an instance can never run with the indexes but without the revision column,
+which would leave the policy CAS silently matching everything.
+
 The migration therefore pre-checks:
 
 ```sql
-SELECT marketplace_id, plugin_name, scope, user_id, count(*)
+SELECT marketplace_id, plugin_name, scope, user_id, count(*), array_agg(id) AS install_ids
   FROM plugin_installs GROUP BY 1,2,3,4 HAVING count(*) > 1
 ```
 
-and on a hit stops with the offending rows named in the error and the required action
-stated: the merge is manual, because each duplicate may own a distinct set of
+`array_agg(id)` is not decoration: the error promises to name the offending rows, and
+a bare `count(*)` could not. Each id is what the operator needs to inspect the
+`catalog:<id>` resources before merging. On a hit the migration stops with those ids in
+the message and the required action stated: the merge is manual, because each duplicate may own a distinct set of
 `catalog:<id>` resources. Nothing is deleted automatically. The `CHANGELOG` entry
 names this operator action.
 
@@ -572,13 +799,15 @@ names this operator action.
 
 | Group | Proves | Needs Postgres |
 |---|---|---|
-| Characterization of `buildPluginPlan` | the refactor is behaviour-neutral: inline/referenced/root precedence, placeholder headers/env, stdio bundled/unbundled, `only`, duplicate names, malformed manifest, auth-probe failure, caps/truncation, rename | no |
+| Characterization of `buildPluginPlan` | the refactor is behaviour-neutral: inline/referenced/root precedence, placeholder headers/env, stdio bundled/unbundled, `only`, duplicate names, malformed manifest, caps/truncation, rename. Also that a plan built twice for one SHA is identical — which holds only because no probe runs here | no |
+| Characterization of `observePluginPlan` | auth-probe failure degrades to a verdict rather than aborting the plan (phase A); preflight failure does the same and an observation change alters `reviewHash` (phase B) | no |
+| Projection typing | a `StoredSurfaceConnector` is not assignable to a `PublicSurfaceConnector` in either direction, so a fingerprint cannot reach a public surface — a compile-time test, since the discriminant is the whole mechanism | no (tsc) |
 | Canonicalization and hash | order independence, length-prefixing (`"a"+"bc"` ≠ `"ab"+"c"`), domain separation, field path in the fingerprint, and that timestamps, notes, localized strings and resolved IPs are absent | no |
 | Delta table | all six kinds plus `needsSecret: true→false`, `https→http`, `/read→/admin`, port change, a same-size file swap, and a rewritten `SKILL.md` | no |
 | Redaction | no values in the public or durable projection, no `contentHash` in public, no URL credentials; a compile-time test that `insertPluginAudit` rejects `ReviewResponse` | no (tsc) |
 | Phase machine | which transition each of `unclaimed / claimed / mutating / committed` permits | no |
 | SSRF | typed `blocked / unresolved / invalid`; the build preflight replaces neither the upsert nor the connect guard; public→public DNS rotation needs no fresh consent; public→private blocks apply | no |
-| Apply gate | missing hash refused before any DB access, and a valid hash does not bypass `cannot_apply` (unit); stale before the claim, and stale after the claim releasing it with no resource writes (Postgres) | **yes**, in part |
+| Apply gate | an absent or malformed hash is refused with no DB access at all — the check is syntactic and precedes authority resolution, which itself needs the DB; and a valid hash does not bypass `cannot_apply` (unit); stale before the claim, and stale after the claim releasing it with no resource writes (Postgres) | **yes**, in part |
 | Replay | the hash is bound to operation kind, install id, marketplace and plugin, scope, owner, target SHA and `only`, so a review accepted for one install cannot be replayed against another | no |
 | First-install claim | two parallel installs, one conflict | **yes** |
 | Operation-owned transitions | a foreign `operationId` can neither finalize nor mark failed | **yes** |
@@ -589,6 +818,7 @@ names this operator action.
 | Migration pre-flight | duplicates stop the migration with an actionable message; nothing is auto-deleted | **yes** |
 | Orphan prevention | a `catalog:` insert without a staging owner and a valid operation lease is rejected | **yes** |
 | Policy dispositions | the same-name analysis and the hash coverage (unit); applying a disposition inside the operation and its audit events (Postgres) | **yes**, in part |
+| Policy revision | two consecutive policy updates yield different `revision` values even when they land in the same millisecond — the case a timestamp cannot distinguish; a disposition carrying a stale revision affects zero rows and turns the apply into `failed` rather than skipping | **yes** |
 | UI | a personal owner sees the technical detail; first-install and upgrade `applying` render differently; `failed` offers "Переглянути й повторити"; the endpoint stays redacted | no |
 
 Ten groups touch Postgres — eight entirely, two in part. Their subject is an SQL
@@ -600,24 +830,39 @@ preference.
 The scope above is more than one implementation plan. Four phases, each independently
 shippable and each leaving the tree green:
 
-**A — The seam.** `buildPluginPlan` / `applyPlanResources`, plus the characterization
-fixtures that prove the split is behaviour-neutral. No user-visible change. Unblocks
-everything else, and is the only phase that touches the existing install path
-wholesale.
+**A — The seam.** `buildPluginPlan` / `observePluginPlan` / `applyPlanResources`, plus
+the characterization fixtures that prove the split is behaviour-neutral. All three:
+extracting the parser without also extracting the probes would leave `detectAuthKind`
+inside the parse loop, so the plan would still be non-reproducible and phase B would
+have to re-cut the same function. No user-visible change. Unblocks everything else, and
+is the only phase that touches the existing install path wholesale.
+
+`observePluginPlan` arrives in A carrying **only** the `detectAuthKind` call that
+`applyPlugin` already makes — relocated, not added. `preflightUrl` is new behaviour (a
+DNS resolution that does not happen today) and belongs to B, along with the rest of the
+observation surface. A phase that promises behaviour-neutrality cannot introduce a
+network call.
 
 **B — Surface, delta, review.** The three projections, canonicalization, fingerprints,
 delta classification, the typed `UnsafeUrlError` and `preflightUrl`, the versioned
 stored manifest and its central reader. Computed and stored; nothing is gated yet, so
 still no user-visible change.
 
-**C — Serialization.** Partial unique indexes with the migration pre-flight, the
-staging row, claim, lease, fence, `updated | missing | fenced`, the runtime committed
-view, the reconciler. This is where concurrent installs become correct. Operator-
-visible (the migration may halt), still no consent gate.
+**C — Serialization, *including* the minimal state UI.** Partial unique indexes with
+the migration pre-flight, the staging row, claim, lease, fence,
+`updated | missing | fenced`, the runtime committed view, the reconciler — **and** the
+per-resource `ready | applying | failed | orphaned` status rendered in the plugins and
+Connections lists, with the "Потребує уваги" affordance for `failed`.
 
-**D — The gate and the screen.** The apply barrier with both hash checks, the audit
-events and their localization, policy dispositions, and the UI. This is the phase that
-delivers the feature.
+The state UI cannot wait for D. C is the phase that starts hiding `applying` and
+`failed` resources from the agent; shipping that without a way to see why would leave a
+user whose plugin silently stopped working with no explanation — which §9 identifies as
+the worst state this feature can produce. A phase is only independently shippable if
+its own failure mode is legible to the person it happens to.
+
+**D — The gate and the screen.** The apply barrier with both hash checks, the review
+screen itself with its two registers, the audit events and their localization, and
+policy dispositions. This is the phase that delivers the consent gate.
 
 Phase A must land alone: a refactor of the largest function in `install.ts` mixed with
 new behaviour would make a regression impossible to attribute.
