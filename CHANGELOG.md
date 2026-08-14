@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-14
+
 > **⚠ Breaking — the plugin install/upgrade API moved.** `POST /api/extensions/install`, `POST /api/admin/marketplaces/install` and `POST /api/extensions` (upgrade) now return 410. Installs and upgrades go through `GET /api/extensions/review` followed by `POST` of the `reviewHash` it returns. Any script or integration calling the old endpoints must be updated.
 
 ### Security
