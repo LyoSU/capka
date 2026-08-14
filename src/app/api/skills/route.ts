@@ -2,25 +2,30 @@ import { apiHandler, requireSession, requireWriter } from "@/lib/auth";
 import { ingestSkillZip, MAX_SKILL_ZIP_BYTES, SkillZipError } from "@/lib/skills/ingest-zip";
 import { deleteSkill, getSkillMeta, listManagedSkills, setSkillEnabled } from "@/lib/skills/service";
 import { setMuted } from "@/lib/muted-resources";
+import { keepManageable } from "@/lib/marketplace/runtime-view";
 import { SkillParseError } from "@/lib/skills/types";
 
 export const GET = apiHandler(async () => {
   const { userId, role } = await requireSession();
   const list = await listManagedSkills(userId, role === "admin");
 
-  // Plugin-installed skills (source = catalog:*) are managed as a unit on the
-  // Extensions tab; the Library shows only hand-added skills so nothing appears twice.
+  // Plugin-installed skills (source = catalog:*) are managed as a unit on the Extensions
+  // tab; the Library shows only hand-added skills so nothing appears twice.
+  //
+  // Through `keepManageable` rather than a `startsWith` here, which is what this was: the
+  // same rule as the Connectors list, minus its ORPHAN exception. So a skill whose install
+  // vanished was hidden from the Library, hidden from every run by `keepRuntimeVisible`, and
+  // had no Extensions row left to be managed from — a row nothing could reach or remove.
   return Response.json({
-    skills: list
-      .filter((s) => !s.source.startsWith("catalog:"))
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        description: s.description,
-        scope: s.scope,
-        enabled: s.enabled,
-        mine: s.mine,
-      })),
+    skills: (await keepManageable(list)).map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      scope: s.scope,
+      enabled: s.enabled,
+      mine: s.mine,
+      orphaned: s.orphaned,
+    })),
   });
 });
 

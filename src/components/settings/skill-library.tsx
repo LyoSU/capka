@@ -41,7 +41,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { PluginIcon } from "@/components/plugin-icon";
 import { SettingsEmpty, SettingsError } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
@@ -54,17 +53,25 @@ interface Skill {
   scope: "system" | "user" | "project";
   enabled: boolean;
   mine: boolean;
-  plugin: { name: string; author: string | null; homepage: string | null } | null;
+  /** The plugin that installed this skill is gone: nothing can use it, and no Extensions row
+   *  manages it. It appears here only so it can be deleted — see `keepManageable`. */
+  orphaned?: boolean;
 }
 
 type SortKey = "name" | "status";
-type GroupKind = "personal" | "plugin" | "team";
+/**
+ * No `plugin` kind. There was one, with its own avatar, author line and delete warning, and
+ * `/api/skills` stopped sending the field that fed it when plugin-owned skills moved to the
+ * Extensions tab — so for several releases the Library carried a whole grouping mode that
+ * could not be reached, and reading the file suggested plugin skills still appeared here.
+ * The one plugin-sourced row this list does show is an orphan, whose plugin cannot be named:
+ * its install row is what went missing.
+ */
+type GroupKind = "personal" | "team";
 interface Group {
   key: string;
   kind: GroupKind;
   title: string;
-  author: string | null;
-  homepage: string | null;
   skills: Skill[];
 }
 
@@ -162,43 +169,26 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
       ? skills.filter(
           (s) =>
             s.name.toLowerCase().includes(q) ||
-            (s.description?.toLowerCase().includes(q) ?? false) ||
-            (s.plugin?.name.toLowerCase().includes(q) ?? false),
+            (s.description?.toLowerCase().includes(q) ?? false),
         )
       : skills;
 
     const personal: Skill[] = [];
     const team: Skill[] = [];
-    const byPlugin = new Map<string, Group>();
-    for (const s of filtered) {
-      if (s.mine) personal.push(s);
-      else if (s.plugin) {
-        const key = `plugin:${s.plugin.name}`;
-        const g = byPlugin.get(key) ?? {
-          key,
-          kind: "plugin" as const,
-          title: s.plugin.name,
-          author: s.plugin.author,
-          homepage: s.plugin.homepage,
-          skills: [],
-        };
-        g.skills.push(s);
-        byPlugin.set(key, g);
-      } else team.push(s);
-    }
+    for (const s of filtered) (s.mine ? personal : team).push(s);
 
+    // An orphan sorts to the top of its group whatever the sort key: it is the one row in this
+    // list that needs an action rather than a decision.
     const cmp = (a: Skill, b: Skill) =>
-      sort === "status" && a.enabled !== b.enabled ? (a.enabled ? -1 : 1) : a.name.localeCompare(b.name);
+      !!b.orphaned !== !!a.orphaned ? (a.orphaned ? -1 : 1)
+      : sort === "status" && a.enabled !== b.enabled ? (a.enabled ? -1 : 1)
+      : a.name.localeCompare(b.name);
 
     const out: Group[] = [];
     if (personal.length)
-      out.push({ key: "personal", kind: "personal", title: t("group.personal"), author: null, homepage: null, skills: personal.sort(cmp) });
-    for (const g of [...byPlugin.values()].sort((a, b) => a.title.localeCompare(b.title))) {
-      g.skills.sort(cmp);
-      out.push(g);
-    }
+      out.push({ key: "personal", kind: "personal", title: t("group.personal"), skills: personal.sort(cmp) });
     if (team.length)
-      out.push({ key: "team", kind: "team", title: t("group.team"), author: null, homepage: null, skills: team.sort(cmp) });
+      out.push({ key: "team", kind: "team", title: t("group.team"), skills: team.sort(cmp) });
     return out;
   }, [skills, query, sort, t]);
 
@@ -332,7 +322,6 @@ export default function SkillLibrary({ chrome = true }: { chrome?: boolean }) {
 }
 
 function GroupAvatar({ group }: { group: Group }) {
-  if (group.kind === "plugin") return <PluginIcon name={group.title} homepage={group.homepage} size={32} />;
   const Icon = group.kind === "personal" ? UserRound : Users;
   return (
     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.55rem] bg-muted">
@@ -376,9 +365,6 @@ function SkillGroup({
                   {group.kind === "personal" ? t("reach.personal") : t("reach.shared")}
                 </Badge>
               </div>
-              {group.kind === "plugin" && group.author && (
-                <p className="truncate text-xs text-muted-foreground">{t("by", { author: group.author })}</p>
-              )}
               {group.kind === "team" && <p className="text-xs text-muted-foreground">{t("group.teamHint")}</p>}
             </div>
             <ChevronDown className="chevron h-4 w-4 shrink-0 text-muted-foreground transition-transform" />
@@ -416,19 +402,27 @@ function SkillRow({
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-sm font-medium">{skill.name}</span>
-          {noDescription && (
+          {skill.orphaned && (
+            <Badge variant="outline" className="gap-1 border-warning-border text-warning-text">
+              <AlertTriangle className="h-3 w-3" /> {t("orphaned")}
+            </Badge>
+          )}
+          {/* One badge at a time: for an orphan, a missing description is not the problem
+              worth naming. */}
+          {!skill.orphaned && noDescription && (
             <Badge variant="outline" className="gap-1 border-warning-border text-warning-text">
               <AlertTriangle className="h-3 w-3" /> {t("noDescription")}
             </Badge>
           )}
         </div>
-        <p className="text-sm text-muted-foreground">
-          {skill.description?.trim() || t("noDescriptionHint")}
+        <p className={cn("text-sm", skill.orphaned ? "text-warning-text" : "text-muted-foreground")}>
+          {skill.orphaned ? t("orphanedHint") : skill.description?.trim() || t("noDescriptionHint")}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Switch
-          checked={skill.enabled}
+          checked={skill.enabled && !skill.orphaned}
+          disabled={skill.orphaned}
           onCheckedChange={(v) => onToggle(skill, v)}
           aria-label={t("toggleAria", { name: skill.name })}
         />
@@ -445,7 +439,9 @@ function SkillRow({
               <AlertDialogHeader>
                 <AlertDialogTitle>{t("deleteTitle", { name: skill.name })}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  {skill.plugin ? t("deletePluginWarn", { plugin: skill.plugin.name }) : t("deleteWarn")}
+                  {/* An orphan's warning is the opposite of the ordinary one: nothing will
+                      bring it back, because the plugin that would is already gone. */}
+                  {skill.orphaned ? t("orphanedDeleteWarn") : t("deleteWarn")}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

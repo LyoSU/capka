@@ -8,7 +8,7 @@ import { getMasterKey, getBlockPrivateProviderUrls } from "@/lib/settings";
 import { assertSafeUrl } from "@/lib/net/ssrf";
 import { ValidationError } from "@/lib/errors";
 import { mutedIds } from "@/lib/muted-resources";
-import { keepRuntimeVisible, ownerStates } from "@/lib/marketplace/runtime-view";
+import { keepManageable, keepRuntimeVisible } from "@/lib/marketplace/runtime-view";
 import { FencedWriteError, MANUAL, acquireFence, fencePredicate, outcomeOf, type MutationAuthority, type WriteOutcome } from "@/lib/marketplace/fence";
 import { clearCachedTools } from "./tool-cache";
 import { inferRemoteTransport, type McpAuthKind, type McpScope, type McpSecrets, type McpServerConfig, type McpServerInfo } from "./types";
@@ -113,20 +113,18 @@ export async function listServers(userId: string, projectId?: string | null): Pr
   // Effective per-user state: a shared connector the user muted shows as off
   // (and `mine` lets the UI choose a global toggle vs a personal mute).
   const muted = await mutedIds(userId, "mcp");
-  // Plugin-installed connectors are managed on the Extensions tab; the Connectors list
-  // shows only hand-added ones so nothing appears in two places. The exception is an
-  // ORPHAN — a `catalog:` row whose install is gone, which a failed install can leave
-  // behind. It has no Extensions entry to be managed from, so hiding it here made it
-  // unreachable from every screen: invisible, unusable by the agent, and impossible to
-  // remove. It is surfaced here precisely so it can be deleted by hand.
-  const owners = await ownerStates(rows.map((r) => r.source));
-  return rows
-    .filter((r) => !r.source.startsWith("catalog:") || owners.get(r.source) === "orphaned")
-    .map((r) => {
-      const info = toInfo(r);
-      const mine = r.scope === "user";
-      return { ...info, mine, enabled: mine ? info.enabled : info.enabled && !muted.has(r.id) };
-    });
+  // Plugin-installed connectors are managed on the Extensions tab; this list shows only
+  // hand-added ones, plus orphans so they can be deleted by hand. `keepManageable` states
+  // that rule once for both resource kinds — and reports the orphan, because a dead row
+  // rendered like a working one is the state §9 calls the worst this feature can produce.
+  return (await keepManageable(rows)).map((r) => {
+    const info = toInfo(r);
+    const mine = r.scope === "user";
+    return {
+      ...info, mine, orphaned: r.orphaned,
+      enabled: mine ? info.enabled : info.enabled && !muted.has(r.id),
+    };
+  });
 }
 
 export interface UpsertServerInput {

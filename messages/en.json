@@ -1190,7 +1190,6 @@
         "personal": "Just you",
         "shared": "Everyone"
       },
-      "by": "by {author}",
       "noMatches": "Nothing matches “{query}”",
       "emptyTitle": "No skills of your own yet",
       "emptyHint": "Skills are reusable instructions the assistant loads when they fit a task. Upload your own here — skills that come with plugins are managed on the Plugins tab.",
@@ -1203,7 +1202,6 @@
       "deleteAria": "Delete {name}",
       "deleteTitle": "Delete “{name}”?",
       "deleteWarn": "This removes the skill for everyone it's available to. This can't be undone.",
-      "deletePluginWarn": "This skill came from the “{plugin}” plugin and may return next time that plugin is installed or updated. To remove it for good, uninstall the plugin.",
       "cancel": "Cancel",
       "delete": "Delete",
       "installed": {
@@ -1297,7 +1295,10 @@
         "installed": "Installed",
         "browse": "Browse"
       },
-      "chatHint": "You can also add and manage extensions by asking the assistant in chat."
+      "chatHint": "You can also add and manage extensions by asking the assistant in chat.",
+      "orphaned": "Plugin removed",
+      "orphanedHint": "The plugin that installed this is gone, so nothing can use it. Delete it to tidy up.",
+      "orphanedDeleteWarn": "Delete “{name}”? Nothing will bring it back — the plugin that installed it is already gone."
     },
     "automations": {
       "title": "Automations",
@@ -1394,7 +1395,9 @@
       "envPlaceholder": "KEY=value (one per line)",
       "envHint": "Environment variables (e.g. access keys), if the package needs any. Optional.",
       "localBadge": "Local",
-      "localRuns": "Runs in the sandbox"
+      "localRuns": "Runs in the sandbox",
+      "orphaned": "Plugin removed",
+      "orphanedHint": "The plugin that installed this is gone, so nothing can use it. Delete it to tidy up."
     },
     "marketplace": {
       "title": "Marketplace",

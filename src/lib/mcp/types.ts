@@ -59,6 +59,10 @@ export interface McpServerInfo {
   authKind: McpAuthKind;
   /** The requesting user owns this (a personal, user-scope connector). */
   mine?: boolean;
+  /** The plugin that installed this connector is gone, so nothing can use it and no
+   *  Extensions row manages it — it appears in the list only to be deleted. Set by the
+   *  management listing; absent everywhere the question does not arise. */
+  orphaned?: boolean;
 }
 
 /** Forward-compat seam: connectors declare required secrets for the catalog. */

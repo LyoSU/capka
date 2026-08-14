@@ -77,3 +77,35 @@ export async function keepRuntimeVisible<T extends { source?: string | null }>(r
     return states.get(r.source!) === "ready";
   });
 }
+
+/**
+ * The MANAGEMENT-list counterpart: which rows a "Connectors" or "Skills" list shows, each
+ * tagged with whether its owning install is gone.
+ *
+ * A plugin-owned resource is managed as part of its plugin on the Extensions tab, so listing
+ * it here as well would put one thing in two places — with two enable switches disagreeing
+ * about which is authoritative. The exception is an ORPHAN: a `catalog:` row whose install no
+ * longer exists, which a failed install can leave behind. It has no Extensions entry to be
+ * managed from, so filtering it out here made it unreachable from every screen at once —
+ * invisible, unusable by the agent, impossible to delete.
+ *
+ * Why the flag is a boolean and not `OwnerState`: this filter is what makes `orphaned` the
+ * ONLY state a management list can display. `applying` and `failed` belong to an install that
+ * still exists, and are shown on its own row on the Extensions tab, where the state applies to
+ * every resource it routed at once; `ready` needs no marking. So a per-resource four-state
+ * badge has no second reachable value, and a field typed to promise four would be inviting one.
+ *
+ * Lives here, beside `keepRuntimeVisible`, because the two answer the same question for
+ * different audiences and the pair has to be read together. Written out per call site — as it
+ * was, in `listServers` only — the skills half was simply never written.
+ */
+export async function keepManageable<T extends { source?: string | null }>(rows: T[]): Promise<(T & { orphaned: boolean })[]> {
+  if (!rows.some((r) => installIdOf(r.source))) return rows.map((r) => ({ ...r, orphaned: false }));
+  const states = await ownerStates(rows.map((r) => r.source));
+  const out: (T & { orphaned: boolean })[] = [];
+  for (const r of rows) {
+    if (!installIdOf(r.source)) out.push({ ...r, orphaned: false });
+    else if (states.get(r.source!) === "orphaned") out.push({ ...r, orphaned: true });
+  }
+  return out;
+}

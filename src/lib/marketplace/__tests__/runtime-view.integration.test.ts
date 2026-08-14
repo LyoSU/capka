@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { pool } from "@/lib/db";
 import { listEnabledServerConfigs, listServers } from "@/lib/mcp/service";
-import { getSkillForRun, listAvailableSkills } from "@/lib/skills/service";
-import { ownerStates } from "../runtime-view";
+import { getSkillForRun, listAvailableSkills, listManagedSkills } from "@/lib/skills/service";
+import { keepManageable, ownerStates } from "../runtime-view";
 
 /**
  * Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run runtime-view.integration
@@ -111,11 +111,33 @@ run("runtime sees only a committed view", () => {
     // hid it too the row would be unreachable from every screen: unusable by the agent
     // and impossible to delete.
     await pool.query(`DELETE FROM plugin_installs WHERE id = $1`, [INSTALL]);
-    expect((await listServers(USER)).some((s) => s.id === CONNECTOR)).toBe(true);
+    const listed = (await listServers(USER)).find((s) => s.id === CONNECTOR);
+    expect(listed).toBeDefined();
+    // And says so. Reachable but rendered like a working connector is barely better than
+    // hidden: the user sees a row that looks fine, and no run will ever use it.
+    expect(listed?.orphaned).toBe(true);
   });
 
   it("keeps a ready plugin's connector OUT of Connections, since Extensions manages it", async () => {
     expect((await listServers(USER)).some((s) => s.id === CONNECTOR)).toBe(false);
+  });
+
+  it("does the SAME for skills, which is the half that was missing", async () => {
+    // The Library filtered every `catalog:` row with no orphan exception, so a skill whose
+    // install vanished was hidden here, hidden from every run, and had no Extensions row left
+    // — the one state where a row cannot be reached from any screen at all.
+    const library = async () => keepManageable(await listManagedSkills(USER, true));
+    expect((await library()).some((s) => s.id === SKILL)).toBe(false); // ready → Extensions owns it
+    await pool.query(`DELETE FROM plugin_installs WHERE id = $1`, [INSTALL]);
+    const orphan = (await library()).find((s) => s.id === SKILL);
+    expect(orphan?.orphaned).toBe(true);
+  });
+
+  it("marks a hand-added row not-orphaned rather than dropping the flag", async () => {
+    // `orphaned: false` on every row it keeps, so a consumer reads one field instead of
+    // inferring absence — the inference is what the connector list used to do inline.
+    await pool.query(`UPDATE mcp_servers SET source = 'manual' WHERE id = $1`, [CONNECTOR]);
+    expect((await listServers(USER)).find((s) => s.id === CONNECTOR)?.orphaned).toBe(false);
   });
 });
 

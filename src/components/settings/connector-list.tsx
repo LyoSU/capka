@@ -13,7 +13,7 @@ import { Segmented } from "@/components/settings/segmented";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { SettingsEmpty, SettingsSkeleton } from "@/components/settings/shell";
 
-interface Server { id: string; name: string; url: string | null; scope: "system" | "user" | "project"; enabled: boolean; authKind: "token" | "oauth"; transport: "http" | "sse" | "stdio" }
+interface Server { id: string; name: string; url: string | null; scope: "system" | "user" | "project"; enabled: boolean; authKind: "token" | "oauth"; transport: "http" | "sse" | "stdio"; orphaned?: boolean }
 type ProbeStatus = "ok" | "unauthorized" | "unreachable" | "needs_login";
 interface Health { status: ProbeStatus; toolCount?: number; detail?: string }
 
@@ -500,28 +500,48 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                   <span className="text-sm font-medium">{s.name}</span>
                   <Badge variant="secondary">{scopeLabel[s.scope]}</Badge>
                   {s.transport === "stdio" && <Badge variant="outline">{t("localBadge")}</Badge>}
+                  {/* Its plugin is gone, so this row does nothing at all — it is listed only
+                      to be deleted. Said before anything else about the connector, because
+                      every other line below (its URL, its health) invites reading it as a
+                      connector that merely needs fixing. */}
+                  {s.orphaned && (
+                    <Badge variant="outline" className="gap-1 border-warning-border text-warning-text">
+                      <AlertTriangle className="h-3 w-3" />{t("orphaned")}
+                    </Badge>
+                  )}
                   {/* At-a-glance "this connector is broken" flag — the detail still
                       streams in the HealthLine below. Only for genuine failures
                       (can't reach / token rejected); needs_login has its own Sign in. */}
-                  {s.enabled && (h?.status === "unreachable" || h?.status === "unauthorized") && (
+                  {!s.orphaned && s.enabled && (h?.status === "unreachable" || h?.status === "unauthorized") && (
                     <Badge variant="destructive" className="gap-1">
                       <AlertTriangle className="h-3 w-3" />{t("health.problem")}
                     </Badge>
                   )}
                 </div>
+                {s.orphaned && <p className="text-xs text-warning-text">{t("orphanedHint")}</p>}
                 {s.url && <p className="truncate text-xs text-muted-foreground">{s.url}</p>}
                 {s.transport === "stdio" && <p className="truncate text-xs text-muted-foreground">{t("localRuns")}</p>}
-                {s.enabled && <HealthLine h={h} loading={healthLoading} t={t} />}
+                {/* No probe for an orphan: a health line would report on a connector nothing
+                    can use, and "reachable" is the one answer that would mislead outright. */}
+                {!s.orphaned && s.enabled && <HealthLine h={h} loading={healthLoading} t={t} />}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              {isOauth && s.enabled && (h?.status === "needs_login" || h?.status === "unauthorized") && (
+              {!s.orphaned && isOauth && s.enabled && (h?.status === "needs_login" || h?.status === "unauthorized") && (
                 <Button size="xs" onClick={() => signIn(s.id)}><LogIn className="mr-1 h-3.5 w-3.5" />{t("signIn")}</Button>
               )}
-              {isOauth && s.enabled && h?.status === "ok" && (
+              {!s.orphaned && isOauth && s.enabled && h?.status === "ok" && (
                 <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => signOut(s.id)}>{t("signOut")}</Button>
               )}
-              <Switch checked={s.enabled} onCheckedChange={(v) => toggle(s, v)} aria-label={t("toggleAria", { name: s.name })} />
+              {/* Left in place but inert: the flag it writes is real, and nothing reads it for a
+                  row whose owner is gone. A switch that appears to work and changes nothing is
+                  worse than one that plainly cannot. Delete is the only action that applies. */}
+              <Switch
+                checked={s.enabled && !s.orphaned}
+                disabled={s.orphaned}
+                onCheckedChange={(v) => toggle(s, v)}
+                aria-label={t("toggleAria", { name: s.name })}
+              />
               {canManage(s) && (
                 <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-destructive" onClick={() => remove(s)} aria-label={t("delete")}>
                   <Trash2 className="h-4 w-4" />
