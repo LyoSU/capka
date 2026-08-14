@@ -224,6 +224,19 @@ export default function InstalledPlugins() {
   const stateVariant = (s: InstalledPlugin["enabledState"]) =>
     s === "on" ? "default" : s === "off" ? "secondary" : "outline";
 
+  /**
+   * Exhaustive, the way `scopeLabel` in the Connectors list already is — not `t(`state.${s}`)`.
+   *
+   * That template read fine and shipped a badge saying `settings.skills.installed.state.on`,
+   * because `next-intl` renders a missing key as its own path instead of throwing, and no site
+   * in the code listed the three values for a reviewer to check against the catalog. This
+   * `Record` is that site: a fourth state cannot be added to the union without the compiler
+   * demanding a label here.
+   */
+  const stateLabel: Record<InstalledPlugin["enabledState"], string> = {
+    on: tState("on"), off: tState("off"), mixed: tState("mixed"),
+  };
+
   return (
     <div className="space-y-3">
       {plugins.map((p) => {
@@ -276,7 +289,7 @@ export default function InstalledPlugins() {
                       #{p.commitSha.slice(0, 7)}
                     </code>
                   )}
-                  <Badge variant={stateVariant(p.enabledState)}>{t(`state.${p.enabledState}`)}</Badge>
+                  <Badge variant={stateVariant(p.enabledState)}>{stateLabel[p.enabledState]}</Badge>
                   {/* Every other tab in Settings > Skills marks shared vs personal — this
                       card was the one place that didn't, leaving members unable to tell
                       whether a plugin came from the admin or was their own install. */}

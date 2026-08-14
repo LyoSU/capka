@@ -1222,6 +1222,9 @@
         "updated": "Plugin updated",
         "uninstalled": "Plugin uninstalled",
         "state": {
+          "on": "On",
+          "off": "Off",
+          "mixed": "Partly on",
           "applying": "Updating",
           "installing": "Installing",
           "needsAttention": "Needs attention",
