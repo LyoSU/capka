@@ -344,6 +344,13 @@
       "when": 1785503422368,
       "tag": "0048_giant_eddie_brock",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786694773608,
+      "tag": "0049_known_chamber",
+      "breakpoints": true
     }
   ]
 }

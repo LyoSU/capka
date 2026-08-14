@@ -86,7 +86,17 @@ export async function setPolicy(input: {
       id: nanoid(), scope: input.scope, userId, projectId,
       capabilityType: input.capabilityType, capabilityKey: input.capabilityKey, effect: input.effect, createdBy: input.createdBy,
     })
-    .onConflictDoUpdate({ ...conflict, set: { effect: input.effect, updatedAt: new Date() } })
+    // `revision` bumps in the same statement that writes `effect`, so the two can
+    // never disagree. It is the compare-and-set token a plugin apply uses when it also
+    // moves a policy (docs/plugin-install-review-spec.md §6): one value covers every
+    // column, where a field-by-field predicate would have to be exhaustive to be safe.
+    // This module owns both write paths — here and `clearPolicy`, which needs no bump
+    // because the row goes — so "a writer forgot to bump it" has exactly one possible
+    // site, inside the module that owns the table.
+    .onConflictDoUpdate({
+      ...conflict,
+      set: { effect: input.effect, updatedAt: new Date(), revision: sql`${capabilityPolicies.revision} + 1` },
+    })
     .returning({ id: capabilityPolicies.id });
   return row.id;
 }

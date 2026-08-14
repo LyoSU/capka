@@ -576,6 +576,13 @@ export const pluginInstalls = pgTable("plugin_installs", {
 }, (table) => [
   index("idx_plugin_installs_marketplace").on(table.marketplaceId),
   index("idx_plugin_installs_user").on(table.userId),
+  // The staging insert IS the first-install claim. Without these, two parallel first
+  // installs both pass the existence check and both insert with different ids — the
+  // "idempotent per (marketplace, plugin, owner)" property held only in the absence of
+  // concurrency. Partial because `user_id IS NULL` for a system install and
+  // `NULL != NULL` in a plain unique index, so one index cannot cover both scopes.
+  uniqueIndex("uq_plugin_installs_system").on(table.marketplaceId, table.pluginName, table.scope).where(sql`user_id is null`),
+  uniqueIndex("uq_plugin_installs_user").on(table.marketplaceId, table.pluginName, table.scope, table.userId).where(sql`user_id is not null`),
 ]);
 
 // Bundled plugin files (servers/, scripts/, config) — base64 content, materialized
@@ -602,6 +609,19 @@ export const capabilityPolicies = pgTable("capability_policies", {
   createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  /**
+   * Compare-and-set token for a plugin apply that also moves a policy: one value covers
+   * every column at once, so the CAS cannot be under-specified the way a field list can
+   * (the policy's identity spans five columns plus `effect`, two of them nullable).
+   *
+   * Not `updated_at`, even though it already exists: `setPolicy` writes it as
+   * `new Date()` — millisecond precision, no monotonicity — so two updates inside one
+   * millisecond produce an identical value and the CAS sees no change. A database
+   * default would be WORSE, because `now()` is transaction-start time and two updates in
+   * one transaction would then be identical by construction. Bumped only in `setPolicy`;
+   * `clearPolicy` needs no bump because the row goes.
+   */
+  revision: bigint("revision", { mode: "number" }).notNull().default(0),
 }, (table) => [
   index("idx_capability_policies_type").on(table.capabilityType),
   index("idx_capability_policies_scope").on(table.scope),
