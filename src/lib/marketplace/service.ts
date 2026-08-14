@@ -149,7 +149,8 @@ export async function listInstalledPlugins(userId: string) {
     // Through the central reader, not an inline cast: under the V2 layout these fields
     // live under `inventory`, and a cast would have kept compiling while rendering
     // blanks for every upgraded plugin.
-    const m = readStoredManifest(i.manifest).inventory;
+    const stored = readStoredManifest(i.manifest);
+    const m = stored.inventory;
     return {
       id: i.id,
       pluginName: i.pluginName,
@@ -167,6 +168,16 @@ export async function listInstalledPlugins(userId: string) {
       mine: i.scope === "user" && i.userId === userId,
       mutedByMe,
       notes: Array.isArray(m.notes) ? m.notes : [],
+      /**
+       * Whether an apply is in flight or left unfinished.
+       *
+       * Load-bearing for legibility, not decoration: while an install is `applying` or
+       * `failed`, the runtime hides ALL of its connectors and skills from every run
+       * (marketplace/runtime-view.ts). Without this field the plugin would sit in the list
+       * looking normal while quietly doing nothing — which §9 of the design calls the worst
+       * state this feature can produce.
+       */
+      applyState: stored.applyState ? { status: stored.applyState.status, kind: stored.applyState.kind } : null,
       skills: pluginSkills,
       connectors,
     };

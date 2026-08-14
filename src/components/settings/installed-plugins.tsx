@@ -37,6 +37,10 @@ interface InstalledPlugin {
   /** This user has hidden the (shared) plugin for themselves. */
   mutedByMe: boolean;
   notes: string[];
+  /** Set while an apply is in flight or was left unfinished. While it is, NONE of this
+   *  plugin's connectors or skills reach a run — so the row must say so, or the plugin
+   *  sits here looking normal while quietly doing nothing. */
+  applyState: { status: "applying" | "failed"; kind: "install" | "upgrade" | "retry" } | null;
   skills: Item[];
   connectors: (Item & { transport: string })[];
 }
@@ -70,6 +74,7 @@ export default function InstalledPlugins() {
   // shared-vs-personal reads identically everywhere in Settings > Skills.
   const tReach = useTranslations("settings.skills");
   const tReview = useTranslations("settings.skills.installed.review");
+  const tState = useTranslations("settings.skills.installed.state");
   const isAdmin = useIsAdmin();
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [health, setHealth] = useState<Record<string, Health>>({});
@@ -227,8 +232,40 @@ export default function InstalledPlugins() {
     <div className="space-y-3">
       {plugins.map((p) => {
         const title = p.displayName || p.pluginName;
+        const unfinished = p.applyState?.status === "failed";
+        const inFlight = p.applyState?.status === "applying";
         return (
           <div key={p.id} className="space-y-3 rounded-xl border p-4">
+            {/* Above everything, because it explains why the rest of the row is inert. A
+                plugin whose apply did not finish is hidden from every run, and a user
+                staring at a connector that stopped answering has no other way to learn why. */}
+            {unfinished && (
+              <div className="rounded-lg bg-destructive/10 p-3 text-xs text-destructive-text">
+                <p className="font-medium">{tState("needsAttention")}</p>
+                <p className="mt-1">{tState("needsAttentionBody")}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {/* "Review and try again", never bare "Retry": the design requires a FRESH
+                      plan, observations, baselines and hash, so there is nothing to repeat. */}
+                  <Button size="sm" variant="outline" disabled={busy === p.id} onClick={() => checkUpdate(p)}>
+                    {tState("reviewAndRetry")}
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={busy === p.id} onClick={() => uninstall(p)}>
+                    {t("uninstall")}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {inFlight && (
+              <div className="flex items-start gap-2 rounded-lg bg-field p-3 text-xs text-muted-foreground">
+                <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+                <div>
+                  <p className="font-medium text-foreground">
+                    {tState(p.applyState?.kind === "install" ? "installing" : "applying")}
+                  </p>
+                  <p className="mt-0.5">{tState("applyingBody")}</p>
+                </div>
+              </div>
+            )}
             <div className="flex items-start gap-3">
               <PluginIcon name={title} homepage={p.homepage} />
               <div className="min-w-0 flex-1">

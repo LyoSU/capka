@@ -1222,9 +1222,12 @@
         "updated": "Plugin updated",
         "uninstalled": "Plugin uninstalled",
         "state": {
-          "on": "On",
-          "off": "Off",
-          "mixed": "Partly on"
+          "applying": "Updating",
+          "installing": "Installing",
+          "needsAttention": "Needs attention",
+          "needsAttentionBody": "The last update did not finish. The plugin is not in use for now — review the changes and try again, or remove it.",
+          "reviewAndRetry": "Review and try again",
+          "applyingBody": "While the update is running, the plugin is not in use."
         },
         "status": {
           "disabled": "Disabled",
