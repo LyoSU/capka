@@ -10,7 +10,7 @@ import { ghFetch, ghTree, diffTrees, resolveCommit, type TreeDiff } from "./fetc
 import { applyPlanResources } from "./apply";
 import { observePluginPlan } from "./observe";
 import { buildPluginPlan } from "./plan";
-import type { CatalogItem, CommitInfo, GitHubRef, InstallManifest } from "./types";
+import type { CatalogItem, CommitInfo, InstallManifest } from "./types";
 
 // A pin is a full 40-hex commit SHA. Anything else (a branch/tag/"HEAD") would
 // re-dereference to live upstream HEAD at apply time and defeat the review.
@@ -19,11 +19,6 @@ const FULL_SHA = /^[0-9a-f]{40}$/;
 /** Where a plugin's skills + connectors are routed: org-wide (system) or personal
  *  (user). A member install is `{ scope: "user", userId: <them> }`. */
 interface InstallTarget { scope: "system" | "user"; userId: string | null; projectId: string | null }
-
-/** What a single plugin pull produced: the public manifest + the bundled files to
- *  persist for runtime materialization (kept out of the manifest JSON, which is
- *  small + user-facing). */
-interface ApplyResult { manifest: InstallManifest; files: { path: string; content: string }[] }
 
 /**
  * Delete the skills/connectors this install owns that `keep*` no longer names —
@@ -73,21 +68,10 @@ async function resolvePlugin(marketplaceId: string, pluginName: string) {
   return { gh };
 }
 
-/** Pull a plugin's files from GitHub and route them into skills + connectors,
- *  tagging every row `catalog:<installId>`. Idempotent per name: ingestSkill /
- *  upsertServer upsert by name, so re-running with the same tag updates in place
- *  (the basis of upgrade). Returns what the current tree produced. */
-/** Exported ONLY for the characterization suite that guards the Phase A split
- *  (docs/plugin-install-review-plan-phase-a.md). Deleted in Task 5 along with the
- *  function itself — no production caller outside this module. */
-export async function applyPlugin(gh: GitHubRef, tag: string, target: InstallTarget, only?: string[]): Promise<ApplyResult> {
-  const plan = await buildPluginPlan(gh, only);
-  const obs = await observePluginPlan(plan);
-  return { manifest: await applyPlanResources(plan, obs, tag, target), files: plan.files };
-}
-
 /** Install one plugin from an added marketplace into A (skills) + B (connectors),
- *  tagging every routed row `catalog:<installId>` for clean uninstall. */
+ *  tagging every routed row `catalog:<installId>` for clean uninstall. Idempotent per
+ *  name: ingestSkill / upsertServer upsert by name, so re-running with the same tag
+ *  updates in place — the basis of upgrade. */
 export async function installPlugin(opts: {
   marketplaceId: string;
   pluginName: string;
@@ -123,7 +107,10 @@ export async function installPlugin(opts: {
   // (`pinSha`) when present, else live HEAD (`gh.ref`). Moving the pin is an explicit
   // upgrade (with a diff).
   const ref = existing?.commitSha || opts.pinSha || gh.ref;
-  const { manifest, files } = await applyPlugin({ ...gh, ref }, `catalog:${installId}`, target, opts.only);
+  const plan = await buildPluginPlan({ ...gh, ref }, opts.only);
+  const obs = await observePluginPlan(plan);
+  const manifest = await applyPlanResources(plan, obs, `catalog:${installId}`, target);
+  const files = plan.files;
 
   if (existing) {
     // re-install: drop rows removed upstream
@@ -213,7 +200,10 @@ export async function upgradePlugin(installId: string, toSha: string): Promise<I
   if (resolved.sha !== toSha) throw new Error(`Reviewed commit ${toSha} no longer resolves to itself (got ${resolved.sha}); re-review before upgrading`);
 
   // Apply (and pin to) EXACTLY the reviewed commit.
-  const { manifest, files } = await applyPlugin({ ...gh, ref: toSha }, tag, target);
+  const plan = await buildPluginPlan({ ...gh, ref: toSha });
+  const obs = await observePluginPlan(plan);
+  const manifest = await applyPlanResources(plan, obs, tag, target);
+  const files = plan.files;
   await persistPluginFiles(installId, files);
   await pruneRemoved(tag, new Set(manifest.skills), new Set(manifest.connectors));
 

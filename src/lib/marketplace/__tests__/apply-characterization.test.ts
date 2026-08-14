@@ -48,14 +48,18 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { applyPlugin } from "../install";
+import { applyPlanResources } from "../apply";
+import { observePluginPlan } from "../observe";
+import { buildPluginPlan } from "../plan";
 
 const GH = { owner: "acme", repo: "plug", ref: "main", subdir: "" };
 const TARGET = { scope: "system" as const, userId: null, projectId: null };
 const TAG = "catalog:inst1";
 const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
 
-/** Load a fixture tree + file map, then run the function under test. */
+/** Load a fixture tree + file map, then run the three functions the way the callers
+ *  do. Every expectation below is byte-identical to the version that ran against the
+ *  single `applyPlugin` — that equality is the whole point of this file. */
 async function runFixture(
   files: Record<string, string>,
   only?: string[],
@@ -64,7 +68,10 @@ async function runFixture(
   h.state.files = files;
   h.state.tree = Object.keys(files).map((path) => ({ path, type: "blob" as const, sha: "s" }));
   h.state.authKind = authKind;
-  return applyPlugin(GH, TAG, TARGET, only);
+  const plan = await buildPluginPlan(GH, only);
+  const obs = await observePluginPlan(plan);
+  const manifest = await applyPlanResources(plan, obs, TAG, TARGET);
+  return { manifest, files: plan.files };
 }
 
 beforeEach(() => {
