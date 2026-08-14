@@ -7,7 +7,7 @@ import { requireOwned } from "@/lib/db/ownership";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
-import { BudgetExceededError, ForbiddenError } from "@/lib/errors";
+import { BudgetExceededError } from "@/lib/errors";
 import { enqueueTask } from "@/lib/tasks/queue";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { FileRef } from "@/lib/constants";
@@ -17,14 +17,10 @@ import { chatRequestSchema } from "@/lib/chat/contracts";
 import { take } from "@/lib/rate-limit";
 
 export const POST = apiHandler(async (req: Request) => {
-  const ctx = await requireRole("admin", "user");
-  // A pending (awaiting-approval) account must never reach the model — this is
-  // the request that spends the shared key. The dashboard layout already keeps
-  // them off the UI; this is the matching gate on the only key-spending route.
-  if (ctx.status === "pending") {
-    throw new ForbiddenError("Your account is awaiting administrator approval.");
-  }
-  const { userId } = ctx;
+  // A pending (awaiting-approval) account must never reach the model — this is the request
+  // that spends the shared key. That gate is requireSession's now: it refuses every
+  // non-active status, so the check that used to stand here could no longer be reached.
+  const { userId } = await requireRole("admin", "user");
 
   // Cheap per-user flood guard (single-instance, in-memory). The client maps the
   // 429 to a friendly, localized message.

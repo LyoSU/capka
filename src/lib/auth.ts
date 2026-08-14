@@ -343,7 +343,10 @@ export function normalizeAccountStatus(raw: unknown): AccountStatus {
 export async function requireSession(): Promise<{
   userId: string;
   role: Role;
-  status: AccountStatus;
+  // Narrower than AccountStatus on purpose: every other value has already thrown by the time
+  // this returns, and a type that still promises them invites callers to re-check what cannot
+  // happen — which is exactly what requireActive and requireRole used to do below.
+  status: "active";
   session: Awaited<ReturnType<Awaited<ReturnType<typeof getAuth>>["api"]["getSession"]>>;
 }> {
   const { headers } = await import("next/headers");
@@ -377,24 +380,22 @@ export async function requireSession(): Promise<{
   return { userId: session.user.id, role, status, session };
 }
 
-/** Require a minimum role — throws ForbiddenError if insufficient. Also gates out
- *  pending (awaiting-approval) accounts: they carry the "user" role but must have NO
- *  app access until approved. Centralizing the pending check here covers every
- *  role-checked route, not just the key-spending chat route. (Admins are never
- *  pending — the bootstrap user is active, approval mode assigns role "user".) */
+/** Require a minimum role — throws ForbiddenError if insufficient. The non-active check
+ *  that used to live here as well now belongs to requireSession, which no longer returns
+ *  at all for a pending/suspended/rejected account. (Admins are never pending — the
+ *  bootstrap user is active, approval mode assigns role "user".) */
 export async function requireRole(...allowed: Role[]) {
   const ctx = await requireSession();
   if (!allowed.includes(ctx.role)) throw new ForbiddenError();
-  if (ctx.status !== "active") throw inactiveError(ctx.status);
   return ctx;
 }
 
-/** Require an approved (active) account — gates pending/rejected users out of any
- *  feature that spends the shared key or exposes data. Admins are always active. */
+/** Require an approved (active) account. Kept as a name rather than folded into
+ *  requireSession because the call sites say what they need — "this feature spends the
+ *  shared key or exposes data" — and that reads at the route. The gate itself is now
+ *  requireSession's, so this adds no check of its own. */
 export async function requireActive() {
-  const ctx = await requireSession();
-  if (ctx.status !== "active") throw inactiveError(ctx.status);
-  return ctx;
+  return requireSession();
 }
 
 /** The role-aware refusal for a non-active account. */
