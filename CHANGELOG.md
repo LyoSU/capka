@@ -8,6 +8,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Installing skills straight from a GitHub repo (a repo with no `marketplace.json`) now actually routes them; it previously reported success and installed nothing.
+
 - A single dropped realtime event no longer freezes a reply on screen for the rest of the turn: the client holds what it cannot apply yet and replays it once the reply's snapshot catches up, instead of discarding it and waiting for the turn to end. Previously any interruption of the event stream — an SSE reconnect, a Postgres `LISTEN` blip, a payload over the `NOTIFY` size limit — left the user watching a stalled answer while the agent kept working.
 - A turn that stalls *after* producing work now says the reply was cut off part-way and offers "Continue", instead of advising a retry — regenerating re-runs every tool and rewrites what the turn already wrote. Telegram gets the same wording, without the button.
 - A stalled provider no longer looks like a frozen chat: the "model is not responding — retrying" row now shows even after part of the reply has streamed, where it was previously suppressed (which is every turn on a reasoning model).
