@@ -1,4 +1,5 @@
-import { pool } from "@/lib/db";
+import { sql } from "drizzle-orm";
+import { db } from "@/lib/db";
 import type { ApplyKind, ApplyState } from "./manifest-store";
 
 /**
@@ -10,6 +11,17 @@ import type { ApplyKind, ApplyState } from "./manifest-store";
  * `LEASE_SECONDS`, a heartbeat CAS, `reconcileZombies` on expiry — reused rather than
  * reinvented, because the failure it prevents is the same one.
  */
+
+/**
+ * Any drizzle handle — the global one or a transaction.
+ *
+ * Every transition here takes one, because some of them must be ATOMIC WITH something
+ * else: the claim and its `accepted` journal entry are one transaction, so a journal write
+ * that cannot land rolls the claim back and no install is left claimed with no record of
+ * who claimed it (§10). Derived from `db.transaction` rather than spelled out, since
+ * drizzle's transaction type carries four inferred generics.
+ */
+export type OperationTx = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 
 /** Matches the task queue, for the same reason: long enough that a healthy but slow
  *  apply is not reaped, short enough that a dead one is noticed. */
@@ -51,42 +63,38 @@ export async function claimApply(input: {
   expectedRevision: number;
   targetSha: string;
   kind: ApplyKind;
-}): Promise<ClaimResult> {
+}, tx: OperationTx = db): Promise<ClaimResult> {
   // A non-finite expected revision means the row's counter could not be read; refuse
   // before touching the database rather than sending NaN into SQL, where it would
   // compare as NULL and could match nothing OR everything depending on the operator.
   if (!Number.isFinite(input.expectedRevision)) return { ok: false, reason: "conflict" };
 
-  const { rowCount } = await pool.query(
-    `UPDATE plugin_installs
-        SET manifest = coalesce(manifest, '{}'::jsonb) || jsonb_build_object('applyState', jsonb_build_object(
-              'operationId', $2::text,
-              'targetSha', $3::text,
-              'status', 'applying',
-              'kind', $4::text,
-              'startedAt', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-              'leaseExpiresAt', to_char((now() + ($5 || ' seconds')::interval) at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-            ))
-      WHERE id = $1
-        AND coalesce((manifest #>> '{committedRevision}')::bigint, 0) = $6::bigint
-        AND (manifest #>> '{applyState,status}' IS NULL OR manifest #>> '{applyState,status}' = 'failed')`,
-    [input.installId, input.operationId, input.targetSha, input.kind, String(APPLY_LEASE_SECONDS), String(input.expectedRevision)],
-  );
+  const { rowCount } = await tx.execute(sql`
+    UPDATE plugin_installs
+       SET manifest = coalesce(manifest, '{}'::jsonb) || jsonb_build_object('applyState', jsonb_build_object(
+             'operationId', ${input.operationId}::text,
+             'targetSha', ${input.targetSha}::text,
+             'status', 'applying',
+             'kind', ${input.kind}::text,
+             'startedAt', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+             'leaseExpiresAt', to_char((now() + (${String(APPLY_LEASE_SECONDS)} || ' seconds')::interval) at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+           ))
+     WHERE id = ${input.installId}
+       AND coalesce((manifest #>> '{committedRevision}')::bigint, 0) = ${String(input.expectedRevision)}::bigint
+       AND (manifest #>> '{applyState,status}' IS NULL OR manifest #>> '{applyState,status}' = 'failed')`);
   return (rowCount ?? 0) > 0 ? { ok: true, operationId: input.operationId } : { ok: false, reason: "conflict" };
 }
 
 /** Renew the lease. False means the operation is no longer ours — the reaper won, or it
  *  already finished — and the caller must stop mutating immediately. */
-export async function renewApplyLease(installId: string, operationId: string): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    `UPDATE plugin_installs
-        SET manifest = jsonb_set(manifest, '{applyState,leaseExpiresAt}',
-              to_jsonb(to_char((now() + ($3 || ' seconds')::interval) at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))
-      WHERE id = $1
-        AND manifest #>> '{applyState,operationId}' = $2
-        AND manifest #>> '{applyState,status}' = 'applying'`,
-    [installId, operationId, String(APPLY_LEASE_SECONDS)],
-  );
+export async function renewApplyLease(installId: string, operationId: string, tx: OperationTx = db): Promise<boolean> {
+  const { rowCount } = await tx.execute(sql`
+    UPDATE plugin_installs
+       SET manifest = jsonb_set(manifest, '{applyState,leaseExpiresAt}',
+             to_jsonb(to_char((now() + (${String(APPLY_LEASE_SECONDS)} || ' seconds')::interval) at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))
+     WHERE id = ${installId}
+       AND manifest #>> '{applyState,operationId}' = ${operationId}
+       AND manifest #>> '{applyState,status}' = 'applying'`);
   return (rowCount ?? 0) > 0;
 }
 
@@ -101,31 +109,27 @@ export async function finalizeApply(input: {
   installId: string;
   operationId: string;
   manifest: Record<string, unknown>;
-}): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    `UPDATE plugin_installs
-        SET manifest = $3::jsonb
-      WHERE id = $1
-        AND manifest #>> '{applyState,operationId}' = $2
-        AND manifest #>> '{applyState,status}' = 'applying'
-        AND (manifest #>> '{applyState,leaseExpiresAt}')::timestamptz > now()`,
-    [input.installId, input.operationId, JSON.stringify(input.manifest)],
-  );
+}, tx: OperationTx = db): Promise<boolean> {
+  const { rowCount } = await tx.execute(sql`
+    UPDATE plugin_installs
+       SET manifest = ${JSON.stringify(input.manifest)}::jsonb
+     WHERE id = ${input.installId}
+       AND manifest #>> '{applyState,operationId}' = ${input.operationId}
+       AND manifest #>> '{applyState,status}' = 'applying'
+       AND (manifest #>> '{applyState,leaseExpiresAt}')::timestamptz > now()`);
   return (rowCount ?? 0) > 0;
 }
 
 /** Record that resources were already changed and the apply did not finish. Only the
  *  owning operation may do this — a foreign id must not be able to mark someone else's
  *  apply failed. */
-export async function markApplyFailed(installId: string, operationId: string): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    `UPDATE plugin_installs
-        SET manifest = jsonb_set(manifest, '{applyState,status}', '"failed"'::jsonb)
-      WHERE id = $1
-        AND manifest #>> '{applyState,operationId}' = $2
-        AND manifest #>> '{applyState,status}' = 'applying'`,
-    [installId, operationId],
-  );
+export async function markApplyFailed(installId: string, operationId: string, tx: OperationTx = db): Promise<boolean> {
+  const { rowCount } = await tx.execute(sql`
+    UPDATE plugin_installs
+       SET manifest = jsonb_set(manifest, '{applyState,status}', '"failed"'::jsonb)
+     WHERE id = ${installId}
+       AND manifest #>> '{applyState,operationId}' = ${operationId}
+       AND manifest #>> '{applyState,status}' = 'applying'`);
   return (rowCount ?? 0) > 0;
 }
 
@@ -143,23 +147,16 @@ export async function markApplyFailed(installId: string, operationId: string): P
  * The row cannot infer which applies — a staging row and a claimed ready install look
  * identical once `applyState` is set — which is why the claim records its `kind`.
  */
-export async function releaseApplyClaim(installId: string, operationId: string, kind: ApplyKind): Promise<boolean> {
-  if (kind === "install") {
-    const { rowCount } = await pool.query(
-      `DELETE FROM plugin_installs
-        WHERE id = $1 AND manifest #>> '{applyState,operationId}' = $2 AND manifest #>> '{applyState,status}' = 'applying'`,
-      [installId, operationId],
-    );
-    return (rowCount ?? 0) > 0;
-  }
-  const { rowCount } = await pool.query(
-    kind === "retry"
-      ? `UPDATE plugin_installs SET manifest = jsonb_set(manifest, '{applyState,status}', '"failed"'::jsonb)
-          WHERE id = $1 AND manifest #>> '{applyState,operationId}' = $2 AND manifest #>> '{applyState,status}' = 'applying'`
-      : `UPDATE plugin_installs SET manifest = manifest - 'applyState'
-          WHERE id = $1 AND manifest #>> '{applyState,operationId}' = $2 AND manifest #>> '{applyState,status}' = 'applying'`,
-    [installId, operationId],
-  );
+export async function releaseApplyClaim(installId: string, operationId: string, kind: ApplyKind, tx: OperationTx = db): Promise<boolean> {
+  const mine = sql`id = ${installId}
+    AND manifest #>> '{applyState,operationId}' = ${operationId}
+    AND manifest #>> '{applyState,status}' = 'applying'`;
+  const { rowCount } = await tx.execute(
+    kind === "install"
+      ? sql`DELETE FROM plugin_installs WHERE ${mine}`
+      : kind === "retry"
+        ? sql`UPDATE plugin_installs SET manifest = jsonb_set(manifest, '{applyState,status}', '"failed"'::jsonb) WHERE ${mine}`
+        : sql`UPDATE plugin_installs SET manifest = manifest - 'applyState' WHERE ${mine}`);
   return (rowCount ?? 0) > 0;
 }
 
@@ -173,26 +170,22 @@ export async function releaseApplyClaim(installId: string, operationId: string, 
  * Racing the worker's own renewal through the same CAS is the point: whoever wins, the
  * loser can no longer mutate or finalize.
  */
-export async function reconcileStaleApplies(): Promise<{ installId: string; operationId: string; kind: ApplyKind }[]> {
-  const { rows } = await pool.query<{ install_id: string; operation_id: string; kind: ApplyKind }>(
-    `UPDATE plugin_installs
-        SET manifest = jsonb_set(manifest, '{applyState,status}', '"failed"'::jsonb)
-      WHERE manifest #>> '{applyState,status}' = 'applying'
-        AND (manifest #>> '{applyState,leaseExpiresAt}')::timestamptz < now() - ($1 || ' seconds')::interval
-      RETURNING id AS install_id,
-                manifest #>> '{applyState,operationId}' AS operation_id,
-                coalesce(manifest #>> '{applyState,kind}', 'upgrade') AS kind`,
-    [String(REAP_MARGIN_SECONDS)],
-  );
-  return rows.map((r) => ({ installId: r.install_id, operationId: r.operation_id, kind: r.kind }));
+export async function reconcileStaleApplies(tx: OperationTx = db): Promise<{ installId: string; operationId: string; kind: ApplyKind }[]> {
+  const res = await tx.execute(sql`
+    UPDATE plugin_installs
+       SET manifest = jsonb_set(manifest, '{applyState,status}', '"failed"'::jsonb)
+     WHERE manifest #>> '{applyState,status}' = 'applying'
+       AND (manifest #>> '{applyState,leaseExpiresAt}')::timestamptz < now() - (${String(REAP_MARGIN_SECONDS)} || ' seconds')::interval
+    RETURNING id AS install_id,
+              manifest #>> '{applyState,operationId}' AS operation_id,
+              coalesce(manifest #>> '{applyState,kind}', 'upgrade') AS kind`);
+  return (res.rows as { install_id: string; operation_id: string; kind: ApplyKind }[])
+    .map((r) => ({ installId: r.install_id, operationId: r.operation_id, kind: r.kind }));
 }
 
 /** Read an install's apply state without going through the whole manifest reader — for a
  *  status endpoint or a test. */
-export async function readApplyState(installId: string): Promise<ApplyState | null> {
-  const { rows } = await pool.query<{ apply_state: ApplyState | null }>(
-    `SELECT manifest -> 'applyState' AS apply_state FROM plugin_installs WHERE id = $1`,
-    [installId],
-  );
-  return rows[0]?.apply_state ?? null;
+export async function readApplyState(installId: string, tx: OperationTx = db): Promise<ApplyState | null> {
+  const res = await tx.execute(sql`SELECT manifest -> 'applyState' AS apply_state FROM plugin_installs WHERE id = ${installId}`);
+  return (res.rows as { apply_state: ApplyState | null }[])[0]?.apply_state ?? null;
 }
