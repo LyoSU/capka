@@ -69,13 +69,27 @@ function ipv6Bytes(ip: string): Uint8Array | null {
 }
 
 /**
+ * RFC 8215's local-use NAT64 prefix, `64:ff9b:1::/48`. Kept separate from the well-known
+ * `64:ff9b::/96` because the two carry their embedded v4 address in different bytes.
+ */
+function isLocalUseNat64(b: Uint8Array): boolean {
+  return b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && b[4] === 0x00 && b[5] === 0x01;
+}
+
+/**
  * An IPv4 address carried inside an IPv6 one, in dotted form — or null.
  *
- * Three encodings reach the same v4 host and every one of them used to sail past the guard
+ * Four encodings reach the same v4 host and every one of them used to sail past the guard
  * whenever it was spelled in hex: IPv4-mapped (`::ffff:a9fe:a9fe`), the deprecated
- * IPv4-compatible form (`::7f00:1`), and the NAT64 well-known prefix (`64:ff9b::a9fe:a9fe`).
- * A hostile hostname simply publishes an AAAA record in one of them, so the metadata service
- * and loopback were reachable through a check that believed it had covered them.
+ * IPv4-compatible form (`::7f00:1`), and the two NAT64 prefixes — well-known
+ * (`64:ff9b::a9fe:a9fe`) and local-use (`64:ff9b:1:a9fe:a9:fe00::`). A hostile hostname simply
+ * publishes an AAAA record in one of them, so the metadata service and loopback were reachable
+ * through a check that believed it had covered them.
+ *
+ * Which BYTES hold the address depends on the prefix length, not on taste: RFC 6052 packs the
+ * four octets into the 32 bits that follow the prefix and steps over the "u" octet at byte 8,
+ * which MUST be zero. A /96 prefix therefore leaves them in the last four bytes, while the /48
+ * local-use prefix splits them 6,7 | 9,10.
  */
 function embeddedIPv4(b: Uint8Array): string | null {
   const zeros = (from: number, to: number) => b.subarray(from, to).every((x) => x === 0);
@@ -84,6 +98,8 @@ function embeddedIPv4(b: Uint8Array): string | null {
   if (zeros(0, 10) && b[10] === 0xff && b[11] === 0xff) return dotted();
   // 64:ff9b::a.b.c.d
   if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && zeros(4, 12)) return dotted();
+  // 64:ff9b:1:a.b:0:c.d::
+  if (isLocalUseNat64(b) && b[8] === 0) return `${b[6]}.${b[7]}.${b[9]}.${b[10]}`;
   // ::a.b.c.d — but NOT `::` or `::1`, which are their own v6 cases below.
   if (zeros(0, 12) && !(b[12] === 0 && b[13] === 0 && b[14] === 0 && b[15] <= 1)) return dotted();
   return null;
@@ -124,6 +140,12 @@ export function isBlockedAddress(ip: string, blockPrivate: boolean): boolean {
   if (prefixIsZero(16)) return true;
   if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return true;
   if (bytes[0] === 0xff) return true;
+  // Whatever is left of 64:ff9b:1::/48 — the prefix carrying a non-zero "u" octet, which RFC 6052
+  // forbids, so `embeddedIPv4` refused to read an address out of it. RFC 8215 states the prefix is
+  // not globally reachable, so there is no destination behind it worth reaching by a spelling we
+  // cannot decode. Unconditional: a NAT64 translator answers for it regardless of the private-range
+  // policy, which is exactly what made the metadata service reachable through it.
+  if (isLocalUseNat64(bytes)) return true;
   if (!blockPrivate) return false;
   if (prefixIsZero(15) && bytes[15] === 1) return true;
   if ((bytes[0] & 0xfe) === 0xfc) return true; // fc00::/7 unique-local

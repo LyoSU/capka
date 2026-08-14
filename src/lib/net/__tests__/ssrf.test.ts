@@ -46,6 +46,24 @@ describe("isBlockedAddress", () => {
     expect(isBlockedAddress("::ffff:101:101", true)).toBe(false);
   });
 
+  it("reads the v4 address out of the local-use NAT64 prefix too", () => {
+    // `64:ff9b:1::/48` (RFC 8215) is a second, equally standard way to spell a translated v4
+    // address, and the guard only knew the well-known `64:ff9b::/96` one. Because the prefix is
+    // a /48, RFC 6052 lays the four octets out around the zero "u" octet at byte 8 rather than in
+    // the last four bytes — so the same host reads as an ordinary public address unless the
+    // encoding is actually decoded. `64:ff9b:1:a9fe:a9:fe00::` IS 169.254.169.254.
+    expect(isBlockedAddress("64:ff9b:1:a9fe:a9:fe00::", false)).toBe(true); // metadata
+    expect(isBlockedAddress("64:ff9b:1:a9fe:a9:fe00::", true)).toBe(true);
+    expect(isBlockedAddress("64:ff9b:1:7f00:0:100::", true)).toBe(true); // 127.0.0.1
+    expect(isBlockedAddress("64:ff9b:1:a00:0:100::", true)).toBe(true); // 10.0.0.1
+    expect(isBlockedAddress("64:ff9b:1:a00:0:100::", false)).toBe(false); // …allowed by policy
+    expect(isBlockedAddress("64:ff9b:1:101:1:100::", true)).toBe(false); // 1.1.1.1 stays reachable
+    // The prefix itself carries 0.0.0.0, and a non-zero "u" octet is not a v4 address at all —
+    // neither is a destination, and neither may be waved through for being unrecognizable.
+    expect(isBlockedAddress("64:ff9b:1::", false)).toBe(true);
+    expect(isBlockedAddress("64:ff9b:1:101:100:100::", false)).toBe(true);
+  });
+
   it("blocks loopback and the unspecified address written out in full", () => {
     // Neither matched the old `lower === "::1"` / `lower === "::"` equality tests.
     expect(isBlockedAddress("0:0:0:0:0:0:0:1", true)).toBe(true);
