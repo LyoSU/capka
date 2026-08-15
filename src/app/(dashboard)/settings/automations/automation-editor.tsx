@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -87,12 +87,12 @@ export function AutomationEditor({
     (schedule.freq !== "once" || schedule.at.length >= 16);
 
   return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full gap-0 sm:max-w-lg" side="right">
-        <SheetHeader className="gap-1 border-b pr-12">
-          <SheetTitle className="truncate">{t("editTitle")}</SheetTitle>
-          <SheetDescription className="truncate">{automation.title}</SheetDescription>
-        </SheetHeader>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 p-0 sm:max-w-xl">
+        <DialogHeader className="gap-1 border-b px-4 py-3 pr-12">
+          <DialogTitle className="truncate">{t("editTitle")}</DialogTitle>
+          <DialogDescription className="truncate">{automation.title}</DialogDescription>
+        </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 [scrollbar-gutter:stable]">
           <div className="space-y-1.5">
@@ -213,7 +213,7 @@ export function AutomationEditor({
             {t("save")}
           </Button>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

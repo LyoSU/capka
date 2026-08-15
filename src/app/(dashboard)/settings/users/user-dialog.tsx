@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
-import { Loader2, Send, Monitor, ShieldAlert, History, Trash2 } from "lucide-react";
+import { Loader2, ChevronRight, Trash2 } from "lucide-react";
 import { explainPolicy } from "@/lib/governance/matcher";
 import type { PolicyInfo, CapabilityType } from "@/lib/governance/types";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -56,7 +56,7 @@ type Detail = {
 
 const DEFAULT_TIER = "__default__";
 
-export function UserDrawer({
+export function UserDialog({
   user, tiers, onPatch, onRemoved, onClose,
 }: {
   user: AdminUser | null;
@@ -77,6 +77,7 @@ export function UserDrawer({
   // kill base-ui's exit transition and flash the panel away).
   const [shown, setShown] = useState<AdminUser | null>(user);
   useEffect(() => { if (user) setShown(user); }, [user]);
+  const [securityOpen, setSecurityOpen] = useState(false);
 
   const userId = user?.id ?? null;
 
@@ -139,24 +140,35 @@ export function UserDrawer({
   const tierValue = shown.tierId && tiers.some((x) => x.id === shown.tierId) ? shown.tierId : DEFAULT_TIER;
   const windowLabel: Record<WindowKey, string> = { h5: t("window5h"), d7: t("window7d"), d30: t("window30d") };
 
+  // The facts an admin reads but never acts on — when they joined, when they were
+  // last around, whether Telegram is linked — used to be three label/value rows
+  // each, competing with the two controls that actually do something. One dim
+  // line under the name says the same thing and takes a quarter of the space.
+  // Telegram appears only when it IS linked: "not connected" is the norm and
+  // stating the norm on every card is noise.
+  const meta = [
+    shown.lastActivityAt ? t("activePrefix", { when: relTime(locale, shown.lastActivityAt) }) : t("never"),
+    shortDate(locale, shown.createdAt) ? `${t("joinedLabel")}: ${shortDate(locale, shown.createdAt)}` : null,
+    shown.telegramConnected ? "Telegram" : null,
+  ].filter(Boolean).join(" · ");
+
   return (
-    <Sheet open={!!user} onOpenChange={(o) => !o && onClose()}>
-      {/* max-w-lg, not md: at 448px the label/value rows in here were fighting for
-          the same line — a tier name and its select, a window's spend and its
-          limit — and the first thing to give was the number the admin came for. */}
-      <SheetContent className="w-full gap-0 sm:max-w-lg" side="right">
-        {/* Only the body scrolls. When the panel itself was the scroll container,
-            everything anchored to it went with the content — the person's name and
-            the sheet's own close button both scrolled out of reach on an account
-            with a few sessions. `pr-12` keeps a long name clear of that button. */}
-        <SheetHeader className="gap-1 border-b pr-12">
-          <SheetTitle className="truncate">{shown.name || shown.email}</SheetTitle>
-          <SheetDescription className="truncate">{shown.email}</SheetDescription>
-        </SheetHeader>
+    <Dialog open={!!user} onOpenChange={(o) => !o && onClose()}>
+      {/* One card, two columns: who they are and what they may do on the left,
+          what they spent on the right. At sm:max-w-lg in a side panel this was a
+          single column two screens tall, so the tier control and the spend it
+          governs could never be read together. */}
+      <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 p-0 sm:max-w-3xl">
+        <DialogHeader className="gap-1 border-b px-4 py-3 pr-12">
+          <DialogTitle className="truncate">{shown.name || shown.email}</DialogTitle>
+          <DialogDescription className="truncate">{shown.email}</DialogDescription>
+          <p className="truncate text-xs text-muted-foreground">{meta}</p>
+        </DialogHeader>
 
         {/* scrollbar-gutter keeps the reserved track out of the numbers on the
-            right edge instead of overlapping them once the panel overflows. */}
-        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 [scrollbar-gutter:stable]">
+            right edge instead of overlapping them once the card overflows. */}
+        <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] md:grid-cols-2">
+          <div className="space-y-6">
           {/* Overview */}
           <section className="space-y-3">
             <Field label={t("drawerStatus")}>
@@ -179,25 +191,11 @@ export function UserDrawer({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label={t("lastActivity")}>
-              <span className="text-sm">{shown.lastActivityAt ? relTime(locale, shown.lastActivityAt) : <span className="text-muted-foreground">{t("never")}</span>}</span>
-            </Field>
-            <Field label="Telegram">
-              <span className="flex items-center gap-1.5 text-sm">
-                <Send className="h-3.5 w-3.5 text-muted-foreground" />
-                {shown.telegramConnected ? t("tgConnected") : <span className="text-muted-foreground">{t("tgNotConnected")}</span>}
-              </span>
-            </Field>
-            <Field label={t("joinedLabel")}>
-              <span className="text-sm">{shortDate(locale, shown.createdAt) || "—"}</span>
-            </Field>
           </section>
-
-          <Separator />
 
           {/* Access */}
           <section className="space-y-3">
-            <GroupTitle icon={ShieldAlert}>{t("accessTitle")}</GroupTitle>
+            <GroupTitle>{t("accessTitle")}</GroupTitle>
             {exceptions.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t("noExceptions")}</p>
             ) : (
@@ -237,9 +235,9 @@ export function UserDrawer({
               </Select>
             </Field>
           </section>
+          </div>
 
-          <Separator />
-
+          <div className="space-y-6">
           {/* Usage */}
           <section className="space-y-3">
             <GroupTitle>{t("usageTitle")}</GroupTitle>
@@ -295,45 +293,63 @@ export function UserDrawer({
 
           <Separator />
 
-          {/* Security & history */}
-          <section className="space-y-3">
-            <GroupTitle icon={Monitor}>{t("securityTitle")}</GroupTitle>
-            {detail && detail.sessions.length > 0 ? (
-              <>
-                <ul className="space-y-1.5">
-                  {detail.sessions.map((s) => (
-                    <li key={s.id} className="rounded-lg border px-3 py-2 text-xs">
-                      <div className="flex justify-between gap-2">
-                        <span className="text-muted-foreground">{t("sessionSeen", { when: relTime(locale, s.updatedAt) })}</span>
-                        <span className="tabular-nums text-muted-foreground">{shortDate(locale, s.createdAt)}</span>
-                      </div>
-                      <p className="mt-0.5 truncate text-muted-foreground/80">{[s.ipAddress, uaSummary(s.userAgent)].filter(Boolean).join(" · ") || t("sessionUnknown")}</p>
-                    </li>
-                  ))}
-                </ul>
-                <Button variant="outline" size="sm" onClick={revokeSessions} disabled={busy}>{t("revokeAll")}</Button>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">{t("noSessions")}</p>
-            )}
+          {/* Security & history — collapsed by default. Who signed in from which
+              browser, and who changed what when, is what an admin reaches for
+              during an incident: rare, and long enough to bury the tier control
+              and the spend an ordinary visit came for. */}
+          <section className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setSecurityOpen((v) => !v)}
+              aria-expanded={securityOpen}
+              className="flex w-full items-center gap-1.5 text-left text-sm font-medium"
+            >
+              <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${securityOpen ? "rotate-90" : ""}`} />
+              {t("securityTitle")}
+            </button>
+            {securityOpen && (
+              <div className="space-y-3 pt-1">
+                {detail && detail.sessions.length > 0 ? (
+                  <>
+                    <ul className="space-y-1.5">
+                      {detail.sessions.map((s) => (
+                        <li key={s.id} className="rounded-lg border px-3 py-2 text-xs">
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">{t("sessionSeen", { when: relTime(locale, s.updatedAt) })}</span>
+                            <span className="tabular-nums text-muted-foreground">{shortDate(locale, s.createdAt)}</span>
+                          </div>
+                          <p className="mt-0.5 truncate text-muted-foreground/80">{[s.ipAddress, uaSummary(s.userAgent)].filter(Boolean).join(" · ") || t("sessionUnknown")}</p>
+                        </li>
+                      ))}
+                    </ul>
+                    <Button variant="outline" size="sm" onClick={revokeSessions} disabled={busy}>{t("revokeAll")}</Button>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t("noSessions")}</p>
+                )}
 
-            {audit.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><History className="h-3.5 w-3.5" />{t("historyTitle")}</p>
-                <ul className="space-y-1">
-                  {audit.slice(0, 8).map((e) => (
-                    <li key={e.id} className="flex justify-between gap-2 text-xs">
-                      <span className="min-w-0 truncate">{historyLabel(e.action, e.detail, t)}{e.actorName ? ` — ${e.actorName}` : ""}</span>
-                      <span className="shrink-0 tabular-nums text-muted-foreground">{shortDate(locale, e.createdAt)}</span>
-                    </li>
-                  ))}
-                </ul>
+                {audit.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground">{t("historyTitle")}</p>
+                    <ul className="space-y-1">
+                      {audit.slice(0, 8).map((e) => (
+                        <li key={e.id} className="flex justify-between gap-2 text-xs">
+                          <span className="min-w-0 truncate">{historyLabel(e.action, e.detail, t)}{e.actorName ? ` — ${e.actorName}` : ""}</span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">{shortDate(locale, e.createdAt)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
+          </section>
+          </div>
+        </div>
 
-            <Separator />
-
-            <div className="flex flex-wrap gap-2">
+        {/* Acting on the person, pinned where actions live — not at the bottom of
+            a scroll that has to be travelled first. */}
+        <div className="flex shrink-0 flex-wrap gap-2 border-t px-4 py-3">
               {shown.status === "suspended" ? (
                 <Button variant="outline" size="sm" onClick={() => mutate({ status: "active" }, { status: "active" }, t("reactivated"))} disabled={busy}>
                   {t("reactivate")}
@@ -367,11 +383,9 @@ export function UserDrawer({
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
-            </div>
-          </section>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -388,13 +402,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function GroupTitle({ icon: Icon, children }: { icon?: React.ElementType; children: React.ReactNode }) {
-  return (
-    <h3 className="flex items-center gap-1.5 text-sm font-medium">
-      {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
-      {children}
-    </h3>
-  );
+function GroupTitle({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-sm font-medium">{children}</h3>;
 }
 
 function Bar({ pct }: { pct: number }) {

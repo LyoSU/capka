@@ -13,7 +13,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { SettingsEmpty, SettingsError, SettingsSkeleton, ShowMore, useShowMore } from "@/components/settings/shell";
-import { UserDrawer, type AdminUser, type Tier } from "./user-drawer";
+import { UserDialog, type AdminUser, type Tier } from "./user-dialog";
 import { money, relTime } from "./format";
 
 const roleConfig = {
@@ -270,7 +270,7 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
 
       <p className="text-xs text-muted-foreground/80">{t("spendHint")}</p>
 
-      <UserDrawer
+      <UserDialog
         user={openUser}
         tiers={tiers}
         onPatch={patchUser}

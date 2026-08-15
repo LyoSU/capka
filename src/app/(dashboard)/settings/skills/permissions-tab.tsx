@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -183,8 +183,8 @@ export function PermissionsTab() {
         </>
       )}
 
-      <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
-        <SheetContent className="w-full gap-0 sm:max-w-lg">
+      <Dialog open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
+        <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 p-0 sm:max-w-2xl">
           {open && (
             <CapabilityDrawer
               key={`${open.capabilityType}:${open.capabilityKey}`}
@@ -199,8 +199,8 @@ export function PermissionsTab() {
               onRemoveException={removeException}
             />
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -337,13 +337,13 @@ function CapabilityDrawer({
 
   return (
     <>
-      {/* Header pinned, body scrolled — same split as the people drawer, so the
+      {/* Header pinned, body scrolled — same split as the person card, so the
           capability's name and the close button stay reachable down a long
           exception list. */}
-      <SheetHeader className="border-b pr-10">
-        <SheetTitle className="truncate">{item.capabilityKey}</SheetTitle>
-        <SheetDescription>{t(item.capabilityType === "skill" ? "typeSkill" : "typeConnector")}</SheetDescription>
-      </SheetHeader>
+      <DialogHeader className="gap-1 border-b px-4 py-3 pr-12">
+        <DialogTitle className="truncate">{item.capabilityKey}</DialogTitle>
+        <DialogDescription>{t(item.capabilityType === "skill" ? "typeSkill" : "typeConnector")}</DialogDescription>
+      </DialogHeader>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]">
         {/* Global rule */}
