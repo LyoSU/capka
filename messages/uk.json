@@ -872,7 +872,8 @@
       "openUsage": "Показати витрати цієї людини",
       "workloadLabel": "Чатів і проєктів",
       "workloadValue": "{chats} · {projects}",
-      "tierIsDefault": "{name} — типовий"
+      "tierIsDefault": "{name} — типовий",
+      "callsN": "{count, plural, one {# запит} few {# запити} many {# запитів} other {# запиту}}"
     },
     "general": {
       "account": "Акаунт",

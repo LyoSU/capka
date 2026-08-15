@@ -26,7 +26,11 @@ async function userDetail(userId: string): Promise<Response> {
     db
       .select({ model: usage.model, cost: sql<number>`coalesce(sum(${usage.costUsd}), 0)::float8`, calls: sql<number>`count(*)::int` })
       .from(usage)
-      .where(and(eq(usage.userId, userId), eq(usage.pending, false), gte(usage.createdAt, since)))
+      // onSharedKey, like every other figure on this card: the windows above come
+      // from getLimitStatus, which counts only the org's key (a user's own key is
+      // their own money and is never enforced against). Without the same filter
+      // the models below could add up to more than the 30-day total beside them.
+      .where(and(eq(usage.userId, userId), eq(usage.pending, false), eq(usage.onSharedKey, true), gte(usage.createdAt, since)))
       .groupBy(usage.model)
       .orderBy(desc(sql`coalesce(sum(${usage.costUsd}), 0)`))
       .limit(4),
@@ -57,7 +61,7 @@ async function userDetail(userId: string): Promise<Response> {
         calls: sql<number>`count(*)::int`,
       })
       .from(usage)
-      .where(and(eq(usage.userId, userId), eq(usage.pending, false), gte(usage.createdAt, since)))
+      .where(and(eq(usage.userId, userId), eq(usage.pending, false), eq(usage.onSharedKey, true), gte(usage.createdAt, since)))
       .groupBy(sql`date_trunc('day', ${usage.createdAt})`)
       .orderBy(sql`date_trunc('day', ${usage.createdAt})`),
   ]);

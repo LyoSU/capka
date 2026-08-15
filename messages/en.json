@@ -872,7 +872,8 @@
       "openUsage": "See this person's usage",
       "workloadLabel": "Chats and projects",
       "workloadValue": "{chats} · {projects}",
-      "tierIsDefault": "{name} — the default"
+      "tierIsDefault": "{name} — the default",
+      "callsN": "{count, plural, one {# request} other {# requests}}"
     },
     "general": {
       "account": "Account",

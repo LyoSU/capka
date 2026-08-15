@@ -219,8 +219,13 @@ export function UserDialog({
                   two options with identical effect and no way to tell them apart.
                   There is nothing to choose until a second tier exists, so it says
                   what applies instead of asking. */}
+              {/* Localized, not the row's name: the shipped tier is called
+                  "Default" by a migration, so on a Ukrainian instance that name is
+                  an English word we put there ourselves — and with one tier it
+                  identifies nothing anyway. Once an admin has created tiers of
+                  their own, their names show as written. */}
               {tiers.length < 2 ? (
-                <span className="text-sm text-muted-foreground">{defaultTierName ?? t("defaultTier")}</span>
+                <span className="text-sm text-muted-foreground">{t("defaultTier")}</span>
               ) : (
                 <Select
                   value={tierValue}
