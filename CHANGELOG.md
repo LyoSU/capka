@@ -29,6 +29,8 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Picking a starter action on the new-chat screen now moves the caret into the composer, instead of leaving keyboard focus nowhere when the starters collapse.
+- The person card's spend trend and top models count shared-key spend only, matching the window totals beside them instead of exceeding them by the user's own-key usage.
+- A chart's hover readout no longer widens the page near the right edge, which had been putting a horizontal scrollbar on the whole window.
 
 ## [0.24.0] - 2026-08-15
 
