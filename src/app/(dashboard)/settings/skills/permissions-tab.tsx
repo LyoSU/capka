@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import { ShieldCheck, Sparkles, Plug, X } from "lucide-react";
+import { ShieldCheck, Sparkles, Plug, X, ChevronRight, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -13,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { SettingsEmpty, SettingsSkeleton } from "@/components/settings/shell";
+import { SettingsEmpty, SettingsSkeleton, ShowMore, useShowMore } from "@/components/settings/shell";
 import { authClient } from "@/lib/auth-client";
 import { explainPolicy } from "@/lib/governance/matcher";
 import type { PolicyScope } from "@/lib/governance/types";
@@ -26,7 +27,7 @@ interface Policy {
   userId: string | null; projectId: string | null;
   userName: string | null; userEmail: string | null; projectName: string | null;
 }
-interface InvItem { capabilityType: CapabilityType; capabilityKey: string }
+interface InvItem { capabilityType: CapabilityType; capabilityKey: string; description?: string | null }
 interface Member { id: string; name: string | null; email: string | null }
 interface RawProject { id: string; name: string; ownerId: string; ownerName: string | null }
 interface Project extends RawProject { label: string }
@@ -135,7 +136,11 @@ export function PermissionsTab() {
 
   if (!isAdmin) return <p className="text-sm text-muted-foreground">{t("adminOnly")}</p>;
 
-  const rows = inventory;
+  // What this page is actually about: the capabilities somebody has ruled on.
+  // Everything else is the default, and listing 140 identical "allowed" rows
+  // above the four that were decided buries the page's own content.
+  const configured = inventory.filter((i) => systemPolicy(i) || exceptionsFor(i).length > 0);
+  const defaults = inventory.filter((i) => !systemPolicy(i) && exceptionsFor(i).length === 0);
 
   return (
     <div className="space-y-6">
@@ -156,28 +161,25 @@ export function PermissionsTab() {
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            {rows.map((i) => {
-              const effect = globalEffect(i);
-              const nExceptions = exceptionsFor(i).length;
-              const Icon = i.capabilityType === "skill" ? Sparkles : Plug;
-              return (
-                <button
-                  key={`${i.capabilityType}:${i.capabilityKey}`}
-                  type="button"
-                  onClick={() => setOpen(i)}
-                  className="flex w-full items-center gap-3 rounded-md border p-2.5 text-left transition-colors hover:bg-hover"
-                >
-                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t(i.capabilityType === "skill" ? "skills" : "connectors")} />
-                  <span className="min-w-0 flex-1 truncate text-sm">{i.capabilityKey}</span>
-                  {nExceptions > 0 && (
-                    <span className="shrink-0 text-xs text-muted-foreground">{t("exceptions", { count: nExceptions })}</span>
-                  )}
-                  <EffectBadge effect={effect} label={t(`effect.${effect}`)} />
-                </button>
-              );
-            })}
-          </div>
+          <section className="space-y-2">
+            <h3 className="text-sm font-medium">{t("configuredTitle")}</h3>
+            {configured.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("configuredEmpty")}</p>
+            ) : (
+              <div className="space-y-1.5">
+                {configured.map((i) => (
+                  <CapabilityRow
+                    key={`${i.capabilityType}:${i.capabilityKey}`}
+                    item={i} t={t} onOpen={() => setOpen(i)}
+                    effect={globalEffect(i)}
+                    exceptionCount={exceptionsFor(i).length}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <DefaultsSection items={defaults} t={t} onOpen={setOpen} />
         </>
       )}
 
@@ -199,6 +201,106 @@ export function PermissionsTab() {
           )}
         </SheetContent>
       </Sheet>
+    </div>
+  );
+}
+
+/**
+ * One capability in a list.
+ *
+ * A row that is simply on the default carries NO badge: the green "Allow" chip
+ * sat where every table puts its action and read as a call to press it, and
+ * repeating it down a hundred untouched rows drowned the four that were actually
+ * decided. Colour is spent only where something was ruled.
+ */
+function CapabilityRow({
+  item, t, onOpen, effect, exceptionCount,
+}: {
+  item: InvItem; t: T; onOpen: () => void; effect: Effect; exceptionCount: number;
+}) {
+  const Icon = item.capabilityType === "skill" ? Sparkles : Plug;
+  const ruled = effect !== "allow" || exceptionCount > 0;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex w-full items-center gap-3 rounded-md border p-2.5 text-left transition-colors hover:bg-hover"
+    >
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={t(item.capabilityType === "skill" ? "skills" : "connectors")} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm">{item.capabilityKey}</span>
+        {item.description && (
+          <span className="block truncate text-xs text-muted-foreground">{item.description}</span>
+        )}
+      </span>
+      {exceptionCount > 0 && (
+        <span className="shrink-0 text-xs text-muted-foreground">{t("exceptions", { count: exceptionCount })}</span>
+      )}
+      {ruled ? (
+        <EffectBadge effect={effect} label={t(`effect.${effect}`)} />
+      ) : (
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40" aria-hidden />
+      )}
+    </button>
+  );
+}
+
+/** Everything nobody has ruled on: collapsed by default, searchable, and paged.
+ *  It is reference material — the inventory you go looking through to restrict
+ *  something — not a list to read top to bottom. */
+function DefaultsSection({ items, t, onOpen }: { items: InvItem[]; t: T; onOpen: (i: InvItem) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matches = items.filter((i) =>
+    !q || i.capabilityKey.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q));
+  const skillItems = matches.filter((i) => i.capabilityType === "skill");
+  const connectorItems = matches.filter((i) => i.capabilityType === "connector");
+
+  if (items.length === 0) return null;
+  return (
+    <section className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 text-left text-sm font-medium"
+      >
+        <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />
+        {t("defaultsTitle", { count: items.length })}
+      </button>
+
+      {expanded && (
+        <div className="space-y-4 pt-1">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchCapability")} className="h-9 pl-8" />
+          </div>
+          {matches.length === 0 && <p className="text-sm text-muted-foreground">{t("noMatches")}</p>}
+          <DefaultsGroup title={t("skills")} items={skillItems} t={t} onOpen={onOpen} />
+          <DefaultsGroup title={t("connectors")} items={connectorItems} t={t} onOpen={onOpen} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Skills and connectors are different kinds of thing to restrict, and mixed
+ *  into one alphabetical run they read as an undifferentiated wall. Each group
+ *  pages on its own, so opening one doesn't push the other out of reach. */
+function DefaultsGroup({ title, items, t, onOpen }: { title: string; items: InvItem[]; t: T; onOpen: (i: InvItem) => void }) {
+  const page = useShowMore(items, `${items.length}`);
+  if (items.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-medium text-muted-foreground">{title} · {items.length}</p>
+      {page.visible.map((i) => (
+        <CapabilityRow
+          key={`${i.capabilityType}:${i.capabilityKey}`}
+          item={i} t={t} onOpen={() => onOpen(i)} effect="allow" exceptionCount={0}
+        />
+      ))}
+      <ShowMore shown={page.visible.length} total={page.total} onMore={page.more} />
     </div>
   );
 }

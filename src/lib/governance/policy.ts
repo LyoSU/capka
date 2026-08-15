@@ -128,14 +128,24 @@ export async function clearPolicy(id: string): Promise<PolicyInfo | null> {
 }
 
 /** The set of governable capabilities (distinct skill + connector names) so the
- *  admin UI can show a row per capability with its current effect. */
-export async function listCapabilityInventory(): Promise<{ capabilityType: CapabilityType; capabilityKey: string }[]> {
+ *  admin UI can show a row per capability with its current effect.
+ *
+ *  Skills carry their description along: a governance list of bare slugs
+ *  ("_conventions", "aiq-deploy") asks an admin to decide who may use something
+ *  the page never says anything about. Grouped by name rather than selected
+ *  distinct — the same skill installed by several people is ONE capability, and
+ *  any of their descriptions describes it. Connectors have no description column,
+ *  so theirs stays null. */
+export async function listCapabilityInventory(): Promise<{ capabilityType: CapabilityType; capabilityKey: string; description: string | null }[]> {
   const [skillRows, serverRows] = await Promise.all([
-    db.selectDistinct({ name: skills.name }).from(skills),
+    db
+      .select({ name: skills.name, description: sql<string | null>`max(${skills.description})` })
+      .from(skills)
+      .groupBy(skills.name),
     db.selectDistinct({ name: mcpServers.name }).from(mcpServers),
   ]);
   return [
-    ...skillRows.map((r) => ({ capabilityType: "skill" as const, capabilityKey: r.name })),
-    ...serverRows.map((r) => ({ capabilityType: "connector" as const, capabilityKey: r.name })),
+    ...skillRows.map((r) => ({ capabilityType: "skill" as const, capabilityKey: r.name, description: r.description })),
+    ...serverRows.map((r) => ({ capabilityType: "connector" as const, capabilityKey: r.name, description: null })),
   ];
 }

@@ -1547,7 +1547,12 @@
       "histClear": "Removed the {effect} rule for {scope}",
       "add": "Add",
       "saveFailed": "Couldn't save that change",
-      "emptyHint": "Install a skill or a connector and it will appear here, ready to allow or deny."
+      "emptyHint": "Install a skill or a connector and it will appear here, ready to allow or deny.",
+      "configuredTitle": "Configured exceptions",
+      "configuredEmpty": "Nothing is restricted — everything runs on the default.",
+      "defaultsTitle": "Everything else is allowed by default · {count}",
+      "searchCapability": "Search skills and connectors",
+      "noMatches": "Nothing found"
     },
     "authentication": {
       "save": "Save changes",
