@@ -21,11 +21,14 @@ vi.mock("@/lib/db", () => ({
 
 import { GET } from "@/app/api/automations/route";
 import { PATCH, DELETE } from "@/app/api/automations/[id]/route";
+import { POST as RUN } from "@/app/api/automations/[id]/run/route";
 
 const params = Promise.resolve({ id: "a1" });
+const patchWith = (body: unknown) =>
+  PATCH(new Request("http://x", { method: "PATCH", body: JSON.stringify(body) }), { params });
 
 describe("automations routes — require an ACTIVE account (not just a session)", () => {
-  it("a pending/rejected account is refused (403) on list, enable/disable, and delete", async () => {
+  it("a pending/rejected account is refused (403) on list, enable/disable, delete, and manual run", async () => {
     // mockImplementation (not mockRejectedValue) so the rejected promise is created
     // per-call at await time — avoids vitest flagging an eager unhandled rejection.
     requireActive.mockImplementation(() => Promise.reject(new ForbiddenError("Your account is awaiting administrator approval.")));
@@ -33,11 +36,23 @@ describe("automations routes — require an ACTIVE account (not just a session)"
     const list = await GET();
     expect(list.status).toBe(403);
 
-    const patch = await PATCH(new Request("http://x", { method: "PATCH", body: JSON.stringify({ enabled: true }) }), { params });
+    const patch = await patchWith({ enabled: true });
     expect(patch.status).toBe(403);
 
     const del = await DELETE(new Request("http://x", { method: "DELETE" }), { params });
     expect(del.status).toBe(403);
+
+    // A manual run spends the shared key on demand — same gate as the rest.
+    const run = await RUN(new Request("http://x", { method: "POST" }), { params });
+    expect(run.status).toBe(403);
+  });
+
+  it("rejects an edit that asks for nothing rather than reporting a no-op as saved", async () => {
+    requireActive.mockImplementation(() => Promise.resolve({ userId: "u1", role: "user", status: "active" }));
+    expect((await patchWith({})).status).toBe(400);
+    expect((await patchWith(null)).status).toBe(400);
+    // A title is still a real edit; this one gets past validation to the row lookup.
+    expect((await patchWith({ title: "Weekly digest" })).status).toBe(404);
   });
 
   it("an active account passes the gate and reaches the handler", async () => {

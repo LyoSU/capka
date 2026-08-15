@@ -22,7 +22,7 @@ export const MAX_CONSECUTIVE_FAILURES = 3;
  * message becomes a turn. Returns { fired: false } when the previous run is
  * still live (overlap guard): the occurrence is skipped, not queued behind.
  */
-export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean }> {
+export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean; chatId?: string }> {
   if (a.lastTaskId) {
     const [prev] = await db.select({ status: tasks.status, chatId: tasks.chatId }).from(tasks).where(eq(tasks.id, a.lastTaskId));
     if (prev && (prev.status === "queued" || prev.status === "running")) {
@@ -95,7 +95,9 @@ export async function fireAutomation(a: AutomationRow): Promise<{ fired: boolean
     await db.update(automations)
       .set({ lastTaskId: taskId, lastRunAt: new Date(), updatedAt: new Date() })
       .where(eq(automations.id, a.id));
-    return { fired: true };
+    // The chat id goes back to the caller so a manual run can drop the user
+    // straight into the conversation it just opened.
+    return { fired: true, chatId };
   } catch (e) {
     await db.delete(chats).where(eq(chats.id, chatId)).catch(() => {});
     throw e;

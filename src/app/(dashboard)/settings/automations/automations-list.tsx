@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarClock, ExternalLink, Trash2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, ExternalLink, Pencil, Play, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -22,6 +23,7 @@ import {
 import { SettingsEmpty, SettingsError } from "@/components/settings/shell";
 import type { AutomationTrigger } from "@/lib/automations/schedule";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AutomationEditor } from "./automation-editor";
 
 interface Automation {
   id: string;
@@ -47,9 +49,12 @@ function statusOf(a: Automation): Status {
 export default function AutomationsList() {
   const t = useTranslations("settings.automations");
   const locale = useLocale();
+  const router = useRouter();
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState<Automation | null>(null);
+  const [running, setRunning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -79,6 +84,29 @@ export default function AutomationsList() {
     if (!res.ok) {
       setAutomations(prev);
       toast.error(t("toggleFailed"));
+    }
+  };
+
+  // Run once now, off-schedule. The whole point is being able to check what an
+  // automation does without waiting for its next occurrence, so a successful run
+  // hands the user the chat it opened rather than a toast about a chat elsewhere.
+  const runNow = async (a: Automation) => {
+    setRunning(a.id);
+    try {
+      const res = await fetch(`/api/automations/${a.id}/run`, { method: "POST" });
+      const body = await res.json().catch(() => null);
+      if (res.ok && body?.chatId) {
+        toast.success(t("runStarted"));
+        router.push(`/chat/${body.chatId}`);
+        return;
+      }
+      // 409 means the previous run is still working or waiting on an answer —
+      // that's a state to explain, not an error to apologize for.
+      toast.error(res.status === 409 ? t("runBusy") : t("runFailed"));
+    } catch {
+      toast.error(t("runFailed"));
+    } finally {
+      setRunning(null);
     }
   };
 
@@ -174,6 +202,12 @@ export default function AutomationsList() {
               ) : (nextRunText(a) || lastRunText(a)) ? (
                 <p className="text-xs text-muted-foreground">{nextRunText(a) ?? lastRunText(a)}</p>
               ) : null}
+              {/* An automation the platform switched off has to say why and what
+                  to do about it — a grey badge over a dead switch leaves the user
+                  guessing whether to flip it back or fix something first. */}
+              {status === "autoPaused" && (
+                <p className="text-xs text-warning-text">{t("autoPausedHint")}</p>
+              )}
               {a.lastChatId && (
                 <Link href={`/chat/${a.lastChatId}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
                   <ExternalLink className="h-3 w-3" /> {t("openLastRun")}
@@ -181,6 +215,22 @@ export default function AutomationsList() {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              {/* Run and edit sit before the switch: they are what someone came to
+                  do with an automation, while the switch is what they do to it. */}
+              <Button
+                variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                onClick={() => runNow(a)} disabled={running === a.id}
+                aria-label={t("runAria", { name: a.title })} title={t("runNow")}
+              >
+                <Play className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                onClick={() => setEditing(a)}
+                aria-label={t("editAria", { name: a.title })} title={t("edit")}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
               <Switch checked={a.enabled} onCheckedChange={(v) => toggle(a, v)} aria-label={t("toggleAria", { name: a.title })} />
               <AlertDialog>
                 <AlertDialogTrigger
@@ -207,6 +257,15 @@ export default function AutomationsList() {
           </div>
         );
       })}
+
+      {/* Keyed so switching between automations rebuilds the form from the new
+          row instead of carrying the previous one's draft across. */}
+      <AutomationEditor
+        key={editing?.id}
+        automation={editing}
+        onClose={() => setEditing(null)}
+        onSaved={load}
+      />
     </div>
   );
 }

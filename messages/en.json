@@ -1338,7 +1338,44 @@
       "deleted": "Deleted “{name}”",
       "deleteFailed": "Couldn't delete the automation",
       "cancel": "Cancel",
-      "delete": "Delete"
+      "delete": "Delete",
+      "edit": "Edit",
+      "editAria": "Edit “{name}”",
+      "editTitle": "Edit automation",
+      "nameLabel": "Name",
+      "promptLabel": "What to do",
+      "promptHint": "The instruction the assistant runs from scratch on every occurrence.",
+      "scheduleLabel": "When to run",
+      "freq": {
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+        "once": "Once"
+      },
+      "weekday": {
+        "w0": "Sunday",
+        "w1": "Monday",
+        "w2": "Tuesday",
+        "w3": "Wednesday",
+        "w4": "Thursday",
+        "w5": "Friday",
+        "w6": "Saturday"
+      },
+      "timeLabel": "Time",
+      "weekdayLabel": "Day of week",
+      "dayOfMonthLabel": "Day of month",
+      "dateLabel": "Date and time",
+      "tzNote": "Times are in {tz}",
+      "customScheduleHint": "This schedule was set up in chat. Pick a simple frequency below to replace it.",
+      "save": "Save",
+      "saved": "Changes saved",
+      "saveFailed": "Could not save the changes",
+      "runNow": "Run now",
+      "runAria": "Run “{name}” now",
+      "runStarted": "Run started",
+      "runBusy": "The previous run is still going — try again shortly",
+      "runFailed": "Could not start the run",
+      "autoPausedHint": "Stopped after three failed runs in a row. Check the last run, fix the instruction, then switch it back on."
     },
     "connectors": {
       "title": "Connectors",
@@ -1685,7 +1722,9 @@
           "add": "Added automation",
           "remove": "Removed automation",
           "enable": "Enabled automation",
-          "disable": "Disabled automation"
+          "disable": "Disabled automation",
+          "update": "Edited automation",
+          "run": "Ran automation manually"
         },
         "folder": {
           "add": "Added folder",
