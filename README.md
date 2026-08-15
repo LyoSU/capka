@@ -217,6 +217,11 @@ sudo sh scripts/install-gvisor.sh   # installs runsc, enables userns-remap
 SANDBOX_RUNTIME=runsc
 ```
 
+The default `runc` is the right answer while you know who runs code; gVisor is
+the answer when you don't. It is a trade, not a free upgrade — a root install on
+the host, slower syscall-heavy work, and a share of the sandbox's PID budget:
+[what gVisor costs](SECURITY.md#isolation-runtime-runc-by-default-gvisor-opt-in).
+
 For the strongest boundary, also run Docker rootless (a container escape then
 lands unprivileged); it needs one extra `DOCKER_SOCKET` setting —
 see [`SECURITY.md`](SECURITY.md).

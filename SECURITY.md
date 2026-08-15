@@ -31,20 +31,40 @@ controller itself. The platform never touches the Docker socket directly.
 
 ### Isolation runtime: runc by default, gVisor opt-in
 
-The hardening above always applies. The OCI **runtime** is a separate, explicit knob:
+The hardening above applies to both runtimes. What differs is the container↔host
+boundary itself, and that is the one choice worth making deliberately:
 
-- **`runc` (default)** — standard Docker isolation. The stack boots anywhere with
-  no host setup; suitable for single-operator and trusted-user deployments. The
-  controller logs an `isolation.unhardened` warning at boot so the posture is visible.
-- **`runsc` (gVisor, opt-in)** — a user-space kernel that intercepts container
-  syscalls, giving a far stronger container↔host boundary with **no KVM required**
-  (so it runs on ordinary VPS hosts, unlike Kata/Firecracker). Enable it with
-  `sudo sh scripts/install-gvisor.sh` on the host (also turns on `userns-remap`)
-  plus `SANDBOX_RUNTIME=runsc`. The resulting "secure" profile is **fail-closed**:
-  the controller refuses to boot if `runsc` isn't registered on the daemon — it
-  never silently falls back to `runc`.
+- **`runc` (default)** — the container shares the host kernel. Every syscall the
+  sandbox makes is served by that kernel, so a kernel bug reachable from a
+  syscall is the escape path and there is no second wall behind it. Boots
+  anywhere with no host setup, at native speed. The controller logs an
+  `isolation.unhardened` warning at boot so the posture stays visible.
+- **`runsc` (gVisor, opt-in)** — a user-space kernel intercepts those syscalls,
+  so untrusted code talks to gVisor instead of to the host kernel; a kernel bug
+  now has to be reachable *through* that layer first. **No KVM required** (unlike
+  Kata/Firecracker), so it runs on ordinary VPS hosts. Enable it with
+  `sudo sh scripts/install-gvisor.sh` on the host plus `SANDBOX_RUNTIME=runsc`.
+  The resulting "secure" profile is **fail-closed**: the controller refuses to
+  boot if `runsc` isn't registered on the daemon — it never silently falls back.
 
-For untrusted or multi-tenant code, combine gVisor with rootless Docker (below).
+**What gVisor costs.** None of these is a reason to skip it for untrusted code,
+but all of them are real and worth knowing before you flip the switch:
+
+| Cost | What it means in practice |
+|---|---|
+| Host setup, Linux only | Root install plus a Docker restart. The script also enables `userns-remap`, which shifts container uids on the host — a multi-tenant requirement, not an optional extra. |
+| Speed | Syscalls are serviced in user space, so syscall-heavy work (many small file operations, spawning processes) is slower; CPU-bound work much less so. |
+| Resource budget | gVisor's own processes are charged to the sandbox's `SANDBOX_PIDS_LIMIT` and to the same memory cgroup as the workload. This is why the PID default is 256 — under ~128, image and document rendering dies with a misleading `Cannot allocate memory`. |
+| Egress plumbing | Under gVisor the in-container firewall needs `CAP_NET_RAW` and the legacy iptables backend. `install-gvisor.sh` registers the runtime with `--net-raw=true` for exactly this reason; if you ever register `runsc` by hand, keep that flag or **every** sandbox dies at startup the moment egress is on. |
+| Upgrades | Fail-closed cuts both ways: anything that de-registers `runsc` on the daemon stops the controller from booting rather than quietly downgrading it to `runc`. That is the intended behavior — treat it as a deploy-time check, not a surprise. |
+
+**Choosing.** Stay on `runc` while you know who runs code — a single operator, or
+colleagues you would already trust with a shell on that box; the sandbox is then
+protecting you from mistakes, not from people. Move to `runsc` once that stops
+being true: strangers, customers, or code an agent wrote that nobody reviews. For
+untrusted or multi-tenant code, combine gVisor with rootless Docker (below) —
+gVisor hardens the container↔host boundary, rootless decides what an escape is
+*worth*, and neither substitutes for the other.
 
 ### This is defense-in-depth, not a hard boundary
 

@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- `SECURITY.md` now states what gVisor costs — host install, syscall speed, a share of `SANDBOX_PIDS_LIMIT`, the `--net-raw=true` egress requirement — next to what it buys, so `runc` vs `runsc` is a decision an operator can make without reading the install script.
 - Markdown tables in a reply scroll edge to edge on a phone instead of inside a narrow inset box, and carry a shadow on whichever side still has content off-screen; the frame around them is gone on every screen size.
 - Model and icon pickers now sit on the app's field scale, so forms holding them (Add provider, connection rows, project defaults) line up with their own inputs.
 - Builds no longer reach out to Google Fonts: Onest and Lora ship in the repo (OFL-1.1), so an air-gapped or slow-egress build box works unchanged.
