@@ -39,12 +39,13 @@ export function RecentChats({ initial }: { initial?: ChatRow[] }) {
           <Link
             key={c.id}
             href={`/chat/${c.id}`}
-            // No hover shadow: the row sits inside an `overflow-hidden` container,
-            // so a lift was clipped into a dark smear along one edge rather than
-            // reading as depth — and the background step already says "hover".
-            // `active:scale` stays: it shrinks inward, so nothing is clipped, and
-            // press feedback is the one thing a background change can't convey.
-            className={`flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition-micro hover:bg-hover active:scale-[0.99] ${
+            // Neither a hover shadow nor a press scale: the row sits inside an
+            // `overflow-hidden` container and spans its full width, so a lift was
+            // clipped into a dark smear, and a 1% shrink pulled the row's fill
+            // several pixels clear of the rounded frame on each side — it read as
+            // a cropped rectangle rather than as a press. `--hover-strong` is the
+            // pressed step above `--hover`, and it costs the row no geometry.
+            className={`flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition-micro hover:bg-hover active:bg-hover-strong ${
               i > 0 ? "border-t" : ""
             }`}
           >

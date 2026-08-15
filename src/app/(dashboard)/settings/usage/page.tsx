@@ -7,7 +7,7 @@ import {
   BarChart3, SearchX, Clock,
 } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { SettingsPage, SettingsEmpty } from "@/components/settings/shell";
+import { SettingsPage, SettingsEmpty, ShowMore, useShowMore } from "@/components/settings/shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -184,6 +184,14 @@ export default function UsagePage() {
     () => new Map((data?.memberTurns ?? []).map((m) => [m.userId, m])),
     [data?.memberTurns],
   );
+
+  // Filter first, page second, and only then build a row: mapping every member
+  // into JSX and throwing away all but the first 25 is work nobody sees.
+  const filteredMembers = (data?.byUser ?? []).filter((u) => {
+    const q = userQuery.trim().toLowerCase();
+    return !q || (u.name || u.email || "").toLowerCase().includes(q);
+  });
+  const memberPage = useShowMore(filteredMembers, userQuery);
 
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const hasActivity = !!data && (data.totals.calls > 0 || totalTurns > 0);
@@ -404,7 +412,7 @@ export default function UsagePage() {
               <section className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-sm font-medium">{t("byUser")}</h3>
-                  {data.byUser.length > 8 && (
+                  {data.byUser.length > 1 && (
                     <div className="relative w-44">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                       <Input value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder={t("searchUser")} className="h-8 pl-8 text-xs" />
@@ -412,26 +420,21 @@ export default function UsagePage() {
                   )}
                 </div>
                 <Breakdown
-                  rows={data.byUser
-                    .filter((u) => {
-                      const q = userQuery.trim().toLowerCase();
-                      return !q || (u.name || u.email || "").toLowerCase().includes(q);
-                    })
-                    .map((u) => {
-                      const mt = memberTurnMap.get(u.userId);
-                      const bits = [
-                        u.calls > 0 ? t("userMeta", { cost: moneyPrecise(u.cost / u.calls) }) : null,
-                        mt ? t("userTurns", { count: mt.turns }) : null,
-                        mt?.lastAt ? t("lastActive", { ago: relativeTime(mt.lastAt, locale) }) : null,
-                      ].filter(Boolean);
-                      return {
-                        key: u.userId,
-                        label: <span className="truncate">{u.name || u.email || t("unknownUser")}</span>,
-                        meta: bits.length ? bits.join(" · ") : undefined,
-                        calls: u.calls,
-                        cost: u.cost,
-                      };
-                    })}
+                  rows={memberPage.visible.map((u) => {
+                    const mt = memberTurnMap.get(u.userId);
+                    const bits = [
+                      u.calls > 0 ? t("userMeta", { cost: moneyPrecise(u.cost / u.calls) }) : null,
+                      mt ? t("userTurns", { count: mt.turns }) : null,
+                      mt?.lastAt ? t("lastActive", { ago: relativeTime(mt.lastAt, locale) }) : null,
+                    ].filter(Boolean);
+                    return {
+                      key: u.userId,
+                      label: <span className="truncate">{u.name || u.email || t("unknownUser")}</span>,
+                      meta: bits.length ? bits.join(" · ") : undefined,
+                      calls: u.calls,
+                      cost: u.cost,
+                    };
+                  })}
                   total={totalCost}
                   money={money}
                   pct={pct}
@@ -442,6 +445,7 @@ export default function UsagePage() {
                     setSelectedUser((cur) => (cur?.id === key ? null : { id: key, name: u?.name || u?.email || t("unknownUser") }));
                   }}
                 />
+                <ShowMore shown={memberPage.visible.length} total={memberPage.total} onMore={memberPage.more} />
               </section>
 
               {/* Recent activity (optionally filtered to the selected member) */}

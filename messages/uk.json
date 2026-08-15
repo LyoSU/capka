@@ -1754,6 +1754,8 @@
     },
     "searchPlaceholder": "Пошук",
     "searchEmpty": "Нічого не знайдено",
+    "showMore": "Показати ще",
+    "showingOf": "Показано {shown} із {total}",
     "people": {
       "title": "Люди",
       "subtitle": "Хто користується цією Capka і як заходить.",

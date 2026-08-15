@@ -1754,6 +1754,8 @@
     },
     "searchPlaceholder": "Search",
     "searchEmpty": "Nothing found",
+    "showMore": "Show more",
+    "showingOf": "Showing {shown} of {total}",
     "people": {
       "title": "People",
       "subtitle": "Who uses this Capka, and how they get in.",

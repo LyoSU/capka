@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Long member lists in Settings → People and Settings → Usage now render 25 at a time with a "Show more" step, and their search fields are visible from the first member instead of appearing past the seventh.
+
 ## [0.24.0] - 2026-08-15
 
 ### Changed

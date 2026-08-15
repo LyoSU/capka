@@ -12,7 +12,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { SettingsEmpty, SettingsError, SettingsSkeleton } from "@/components/settings/shell";
+import { SettingsEmpty, SettingsError, SettingsSkeleton, ShowMore, useShowMore } from "@/components/settings/shell";
 import { UserDrawer, type AdminUser, type Tier } from "./user-drawer";
 import { money, relTime } from "./format";
 
@@ -81,7 +81,15 @@ export function PeopleTab() {
   const active = filtered
     .filter((u) => u.status !== "pending")
     .filter((u) => roleFilter === "all" || u.role === roleFilter);
+  // Search is offered as soon as there is anyone to search: it used to appear
+  // only past the seventh member, so on the instance where it was first needed
+  // it had never been there before and read as a new control. The role toggles
+  // keep a threshold — four buttons over three people are noise, not a filter.
+  const showSearch = users.length > 0;
   const showFilters = users.length > 6;
+  // Long member lists render in pages; the count restarts whenever the search or
+  // the role filter changes what "the list" even means.
+  const activePage = useShowMore(active, `${query}|${roleFilter}`);
 
   // Effective month cap for the budget bar: the user's assigned tier, else the
   // instance default tier. null → no cap → plain spend, no bar.
@@ -102,7 +110,7 @@ export function PeopleTab() {
       {/* The page title lives on the host page now (see users/page.tsx); this tab
           keeps only the search field that belongs beside the list. */}
       <div className="flex items-start justify-end gap-4">
-        {showFilters && (
+        {showSearch && (
           <div className="relative w-48 shrink-0">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("searchPlaceholder")} className="h-9 pl-8" />
@@ -193,7 +201,7 @@ export function PeopleTab() {
           <span>{t("colBudget")}</span>
           <span>{t("colStatus")}</span>
         </div>
-        {active.map((user) => {
+        {activePage.visible.map((user) => {
           const cfg = roleConfig[user.role as keyof typeof roleConfig] || roleConfig.user;
           const Icon = cfg.icon;
           const cap = monthCapFor(user);
@@ -257,6 +265,8 @@ export function PeopleTab() {
         })}
       </div>
       )}
+
+      <ShowMore shown={activePage.visible.length} total={activePage.total} onMore={activePage.more} />
 
       <p className="text-xs text-muted-foreground/80">{t("spendHint")}</p>
 
