@@ -6,6 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `next` and `eslint-config-next` are now pinned to an exact version; 16.3 fails to fetch Google Fonts at build time on networks with slow egress, so the upgrade waits on self-hosted fonts.
+
+### Security
+
+- Dependency refresh closes three advisories reachable through transitive packages: `ip-address` (SSRF via octal/decimal octet confusion, via `@modelcontextprotocol/sdk`), `brace-expansion` (DoS), and `fast-uri` (host confusion).
+
 ## [0.25.0] - 2026-08-15
 
 ### Added
