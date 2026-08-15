@@ -88,6 +88,12 @@ interface ChatInputProps {
   /** PC-folder sync state + actions. When the user may attach a folder, the
    *  paperclip becomes a small menu (Upload files / Connect a folder). */
   folders?: ReturnType<typeof useFolderSync>;
+  /** Bumped when something outside the composer wrote into it (a starter action
+   *  on the home screen). Moves the caret here so the user can finish the
+   *  sentence — and, more importantly, catches the focus: filling the composer
+   *  collapses the block the starter button lives in, so without this the focused
+   *  button is removed from under the user and focus falls to `<body>`. */
+  focusSignal?: number;
 }
 
 export function ChatInput({
@@ -104,6 +110,7 @@ export function ChatInput({
   onRetryFile,
   blindModalities,
   contextUsage,
+  focusSignal,
   folders,
 }: ChatInputProps) {
   const t = useTranslations("chat.input");
@@ -130,6 +137,19 @@ export function ChatInput({
     const isMobileNow = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches;
     if (!isMobileNow) textareaRef.current?.focus();
   }, [chatId]);
+
+  // A starter filled the composer from outside. Take the focus and put the caret
+  // at the end of the scaffold, which is where the user has to keep typing. On
+  // mobile too: here the focus is the point (the button that had it is being
+  // unmounted), and the keyboard opening is the correct answer to "we just put
+  // half a sentence in your composer".
+  useEffect(() => {
+    if (!focusSignal) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [focusSignal]);
 
   // Something is uploading → hold the send until it settles, so we never send a
   // message whose attachment isn't in the sandbox yet.

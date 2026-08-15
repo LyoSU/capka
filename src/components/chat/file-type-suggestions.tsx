@@ -44,15 +44,18 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
   const { actions } = CATALOG[type];
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted-foreground">{t("header")}</span>
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        <h2 className="text-sm text-muted-foreground">{t("header")}</h2>
         {TYPES.map((ty) => (
           <button
             key={ty}
             type="button"
             onClick={() => setType(ty)}
-            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+            // A standalone chip, not a row in the clipped list below — so this is
+            // the one that keeps the project's `active:scale` press.
+            aria-pressed={ty === type}
+            className={`rounded-full border px-3 py-1 text-xs transition-micro active:scale-[0.97] ${
               ty === type
                 ? "border-foreground/20 bg-muted text-foreground"
                 : "border-transparent text-muted-foreground hover:bg-hover"
@@ -72,7 +75,10 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
             type="button"
             onClick={() => onPick(t(`${type}.${a}.prompt`))}
             style={{ animationDelay: `${i * 55}ms` }}
-            className={`group/sg animate-step-in flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-hover ${
+            // Same press rule as the recent-chats rows: a full-width row inside a
+            // clipped, rounded container darkens rather than shrinks — a scale
+            // pulls its fill clear of the frame and reads as a cropped rectangle.
+            className={`group/sg animate-step-in flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-hover active:bg-hover-strong ${
               i > 0 ? "border-t" : ""
             }`}
           >
@@ -82,6 +88,6 @@ export function FileTypeSuggestions({ onPick }: { onPick: (text: string) => void
           </button>
         ))}
       </div>
-    </div>
+    </section>
   );
 }

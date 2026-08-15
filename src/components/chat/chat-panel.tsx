@@ -305,6 +305,21 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // typed-but-unsent message survives a reload, a closed tab, or a failed send.
   const { draft: input, setDraft: setInput, clearDraft } = useChatDraft(chatId);
 
+  // A starter on the greeting screen writes a scaffold into the composer. Filling
+  // it collapses the whole starters block (see the grid-rows transition below),
+  // which unmounts the button that was just clicked — so the send of the text has
+  // to be paired with handing the composer the focus, or a keyboard user is
+  // dropped to `<body>` with nothing to tab back to and a mouse user has to click
+  // into a field they never left.
+  const [starterFocus, setStarterFocus] = useState(0);
+  const fillFromStarter = useCallback(
+    (text: string) => {
+      setInput(text);
+      setStarterFocus((n) => n + 1);
+    },
+    [setInput],
+  );
+
   // Pasting a public Claude/ChatGPT share link into the composer offers to import
   // that conversation as a fresh chat and continue it here. Detection is free
   // (pure, no tokens); the render+parse only runs when the user clicks Import.
@@ -625,6 +640,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       blindModalities={blindModalities}
       contextUsage={contextUsage}
       folders={folderSync}
+      focusSignal={starterFocus}
     />
   );
 
@@ -704,17 +720,14 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
           >
           <div className="flex min-h-full flex-col items-center justify-center py-10">
           <div className="relative z-10 w-full">
-            {/* The brand claw reveals on mount — the one signature flourish — with
-                a soft halo lifting it off the surface, then the greeting floats up
-                just behind it. */}
+            {/* The brand claw reveals on mount — the one signature flourish — and
+                the greeting floats up just behind it. No radial halo behind the
+                mark: on this near-white surface the 8% wash didn't read as light,
+                it read as a smudge the page had picked up, and a glow under the
+                logo is the single most generic thing an AI product can wear. The
+                mark holds the eye on its own. */}
             <div className="mb-8 flex flex-col items-center px-6">
-              <div className="relative">
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute left-1/2 top-1/2 h-44 w-44 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklch,var(--foreground)_8%,transparent),transparent_70%)]"
-                />
-                <ClawMark animated className="relative h-20 w-20 text-foreground md:h-24 md:w-24" />
-              </div>
+              <ClawMark animated className="h-20 w-20 text-foreground md:h-24 md:w-24" />
               <h1 className="animate-claw-greet mt-6 font-display text-balance text-center text-fluid-display font-medium tracking-tight text-foreground">
                 {greeting ?? t("panel.greeting")}
               </h1>
@@ -750,11 +763,15 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 inert={input ? true : undefined}
               >
                 <div className="overflow-hidden">
-                  <div className="animate-blur-rise pt-2.5 [animation-delay:200ms]">
+                  {/* pt-6, not pt-2.5: at the tighter spacing this line sat closer
+                      to the model pill than to anything else and read as a caption
+                      *for the pill* — a sentence about files filed under the model
+                      name. The gap is what says which block it belongs to. */}
+                  <div className="animate-blur-rise pt-6 [animation-delay:200ms]">
                     <p className="text-center text-xs text-muted-foreground">{t("panel.greetingHint")}</p>
-                    <div className="mt-8 space-y-6">
+                    <div className="mt-6 space-y-6">
                       <RecentChats initial={recentChats} />
-                      <FileTypeSuggestions onPick={setInput} />
+                      <FileTypeSuggestions onPick={fillFromStarter} />
                     </div>
                   </div>
                 </div>

@@ -46,8 +46,11 @@ const noop = async () => {};
  */
 function ChatRowLink({ chat, locale, fallback }: { chat: ChatRow; locale: string; fallback: string }) {
   return (
-    <Link href={`/chat/${chat.id}`} className="flex items-center gap-2 px-4 py-2.5 text-sm transition-colors hover:bg-hover">
-      <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    // Same row treatment as the home screen's recent list: no repeated leading
+    // glyph (identical on every row, so it distinguishes nothing and only indents
+    // the title), and a press that darkens rather than scales — inside
+    // `ChatList`'s clipped card a scale pulls the fill clear of the frame.
+    <Link href={`/chat/${chat.id}`} className="flex items-center gap-2 px-4 py-2.5 text-sm transition-colors hover:bg-hover active:bg-hover-strong">
       <span className="min-w-0 flex-1 truncate">{chat.title || fallback}</span>
       <span className="shrink-0 text-xs text-muted-foreground">
         {chat.updatedAt ? new Date(chat.updatedAt).toLocaleDateString(locale, { month: "short", day: "numeric" }) : ""}

@@ -3,12 +3,23 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
-import { MessageSquare } from "lucide-react";
 
 interface ChatRow {
   id: string;
   title: string | null;
   updatedAt: string | null;
+}
+
+/** "today" / "yesterday" / "3 days ago", then a plain date once the relative form
+ *  stops being the more useful one. A column of four identical "15 Aug"s is a
+ *  column carrying no information — the relative form is what actually tells the
+ *  rows apart, and `numeric: "auto"` gives the localized word rather than "0 days
+ *  ago". */
+function whenLabel(iso: string, locale: string): string {
+  const date = new Date(iso);
+  const days = Math.round((Date.now() - date.getTime()) / 86_400_000);
+  if (days < 7) return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(-days, "day");
+  return date.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
 /** Quick-resume list of the user's most recent chats on the empty home screen.
@@ -32,8 +43,8 @@ export function RecentChats({ initial }: { initial?: ChatRow[] }) {
   if (!chats || chats.length === 0) return null;
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-muted-foreground">{t("recent")}</p>
+    <section className="space-y-2">
+      <h2 className="px-1 text-sm text-muted-foreground">{t("recent")}</h2>
       <div className="overflow-hidden rounded-xl border">
         {chats.map((c, i) => (
           <Link
@@ -49,18 +60,17 @@ export function RecentChats({ initial }: { initial?: ChatRow[] }) {
               i > 0 ? "border-t" : ""
             }`}
           >
-            <span className="flex min-w-0 items-center gap-2.5">
-              <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">{c.title || tn("newChat")}</span>
-            </span>
+            {/* No leading icon. The same glyph on every row distinguishes nothing
+                — it only indents the one thing the eye is here for, the title. */}
+            <span className="truncate">{c.title || tn("newChat")}</span>
             {c.updatedAt && (
               <span className="shrink-0 text-xs text-muted-foreground" suppressHydrationWarning>
-                {new Date(c.updatedAt).toLocaleDateString(locale, { month: "short", day: "numeric" })}
+                {whenLabel(c.updatedAt, locale)}
               </span>
             )}
           </Link>
         ))}
       </div>
-    </div>
+    </section>
   );
 }

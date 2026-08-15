@@ -145,7 +145,7 @@
     },
     "panel": {
       "greeting": "What can I help with?",
-      "greetingHint": "Drop a file here, or just describe what you need",
+      "greetingHint": "You can drag a file straight into the window",
       "workspaceFiles": "Workspace files",
       "sendFailed": "Failed to send message",
       "recent": "Recent",

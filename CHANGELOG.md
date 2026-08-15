@@ -12,8 +12,14 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Pressing a row in a grouped list (recent chats, starter actions, projects, a project's chats) now darkens it instead of shrinking it, so the row no longer pulls clear of its frame and looks cropped.
+- The new-chat screen drops the repeated chat glyph and the halo behind the logo, and dates recent chats as "today"/"yesterday" instead of four identical dates.
 - Long member lists in Settings → People and Settings → Usage now render 25 at a time with a "Show more" step, and their search fields are visible from the first member instead of appearing past the seventh.
 - The person and capability detail panels are wider (448px → 512px), so tier names, spend and limits stop competing for one line.
+
+### Fixed
+
+- Picking a starter action on the new-chat screen now moves the caret into the composer, instead of leaving keyboard focus nowhere when the starters collapse.
 
 ## [0.24.0] - 2026-08-15
 

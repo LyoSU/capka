@@ -122,7 +122,9 @@ export default function ProjectsPage() {
                 key={project.id}
                 /* focus-within, not just hover: tabbing to a row's actions should
                    light the row the same way pointing at it does. */
-                className="group relative flex items-center gap-3 px-4 py-3 transition-colors hover:bg-hover focus-within:bg-hover"
+                /* Press darkens, never scales: the row spans a clipped, rounded
+                   card, and a shrink pulls its fill clear of the frame. */
+                className="group relative flex items-center gap-3 px-4 py-3 transition-colors hover:bg-hover focus-within:bg-hover active:bg-hover-strong"
               >
                 {/* The pseudo-element stretches the link over the WHOLE row. The row
                     already highlighted edge to edge on hover, but only this text
