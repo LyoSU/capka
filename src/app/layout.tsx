@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { GeistMono } from "geist/font/mono";
-import { Onest, Lora } from "next/font/google";
+import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Providers } from "@/components/providers";
@@ -8,13 +8,27 @@ import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
 
+// Onest and Lora are served from `fonts/`, not next/font/google. Fetching them
+// from Google made every build depend on reaching fonts.googleapis.com, which
+// self-hosters cannot assume — an air-gapped or slow-egress build box fails at
+// the font step with nothing wrong in the app. The committed files are the
+// upstream variable fonts (OFL-1.1, licences alongside them) subset to exactly
+// the codepoints Google's own `latin` + `cyrillic` slices cover, so rendering is
+// unchanged; Ukrainian is safe because ґ/є/і/ї live in that Cyrillic range.
+// Geist Mono was already local, via the `geist` package.
+//
+// One file per family rather than Google's per-subset split: next/font/local
+// applies a single set of @font-face descriptors per call, so two subset files
+// under one family would collide instead of dividing by unicode-range.
+
 // Body + UI face. Onest is a humanist sans drawn with Latin and Cyrillic as
 // equal first-class scripts, so Ukrainian prose reads in a native typeface
 // (not a fallback) and long AI answers stay comfortable. Replaces Geist Sans,
 // whose grotesque, engineering character read as a developer tool. Geist Mono
 // is kept for code; Lora carries the serif display headings.
-const onest = Onest({
-  subsets: ["latin", "cyrillic"],
+const onest = localFont({
+  src: "./fonts/onest-variable.woff2",
+  weight: "100 900",
   variable: "--font-onest",
   display: "swap",
 });
@@ -22,8 +36,12 @@ const onest = Onest({
 // Serif display face for hero headings. Cyrillic subset is required — the UI is
 // Ukrainian-first, and Latin-only display serifs (Instrument Serif, Fraunces)
 // would fall back to a generic serif for Cyrillic text.
-const lora = Lora({
-  subsets: ["latin", "cyrillic"],
+const lora = localFont({
+  src: [
+    { path: "./fonts/lora-variable.woff2", style: "normal" },
+    { path: "./fonts/lora-italic-variable.woff2", style: "italic" },
+  ],
+  weight: "400 700",
   variable: "--font-lora",
   display: "swap",
 });
