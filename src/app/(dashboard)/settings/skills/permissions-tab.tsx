@@ -182,7 +182,7 @@ export function PermissionsTab() {
       )}
 
       <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
-        <SheetContent className="w-full gap-0 sm:max-w-md">
+        <SheetContent className="w-full gap-0 sm:max-w-lg">
           {open && (
             <CapabilityDrawer
               key={`${open.capabilityType}:${open.capabilityKey}`}

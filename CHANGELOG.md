@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Long member lists in Settings → People and Settings → Usage now render 25 at a time with a "Show more" step, and their search fields are visible from the first member instead of appearing past the seventh.
+- The person and capability detail panels are wider (448px → 512px), so tier names, spend and limits stop competing for one line.
 
 ## [0.24.0] - 2026-08-15
 

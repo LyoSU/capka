@@ -141,7 +141,10 @@ export function UserDrawer({
 
   return (
     <Sheet open={!!user} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full gap-0 sm:max-w-md" side="right">
+      {/* max-w-lg, not md: at 448px the label/value rows in here were fighting for
+          the same line — a tier name and its select, a window's spend and its
+          limit — and the first thing to give was the number the admin came for. */}
+      <SheetContent className="w-full gap-0 sm:max-w-lg" side="right">
         {/* Only the body scrolls. When the panel itself was the scroll container,
             everything anchored to it went with the content — the person's name and
             the sheet's own close button both scrolled out of reach on an account
