@@ -15,7 +15,7 @@ const since30d = () => new Date(Date.now() - 30 * 86_400_000);
  */
 async function userDetail(userId: string): Promise<Response> {
   const since = since30d();
-  const [limits, turnRows, models, activeSessions] = await Promise.all([
+  const [limits, turnRows, models, activeSessions, workload, series] = await Promise.all([
     getLimitStatus(userId),
     db
       .select({ st: sql<string>`${messages.metadata}->>'status'`, n: sql<number>`count(*)::int` })
@@ -35,6 +35,31 @@ async function userDetail(userId: string): Promise<Response> {
       .from(sessions)
       .where(eq(sessions.userId, userId))
       .orderBy(desc(sessions.updatedAt)),
+    // How much of the instance this person uses — counted, never named. A list of
+    // their chat titles would hand an admin the subject of every conversation,
+    // which is precisely what /chat/[id] refuses them (it matches on the signed-in
+    // user's own id). Governance here is budgets and access, not reading along.
+    db
+      .select({
+        chats: sql<number>`count(*) filter (where ${chats.archived} is not true)::int`,
+        projects: sql<number>`count(distinct ${chats.projectId})::int`,
+        lastChatAt: sql<string | null>`max(${chats.updatedAt})`,
+      })
+      .from(chats)
+      .where(eq(chats.userId, userId)),
+    // Daily spend AND call count for the sparkline: money alone can't tell a quiet
+    // day from a cheap one, and both come from the same rows. Gaps are days with
+    // no activity and are filled client-side — grouping only returns days that exist.
+    db
+      .select({
+        day: sql<string>`to_char(date_trunc('day', ${usage.createdAt}), 'YYYY-MM-DD')`,
+        cost: sql<number>`coalesce(sum(${usage.costUsd}), 0)::float8`,
+        calls: sql<number>`count(*)::int`,
+      })
+      .from(usage)
+      .where(and(eq(usage.userId, userId), eq(usage.pending, false), gte(usage.createdAt, since)))
+      .groupBy(sql`date_trunc('day', ${usage.createdAt})`)
+      .orderBy(sql`date_trunc('day', ${usage.createdAt})`),
   ]);
 
   const completed = turnRows.find((r) => r.st === "completed")?.n ?? 0;
@@ -46,6 +71,8 @@ async function userDetail(userId: string): Promise<Response> {
     failed,
     topModels: models.filter((m) => m.model).slice(0, 3),
     sessions: activeSessions,
+    workload: workload[0] ?? { chats: 0, projects: 0, lastChatAt: null },
+    series,
   });
 }
 

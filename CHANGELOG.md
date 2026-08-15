@@ -8,6 +8,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- The person card shows 30 days of spend as a sparkline and how many chats and projects the account has (counted, never named — chat titles stay private to their owner), plus a link through to that person's filtered usage: `/settings/usage?userId=<id>`.
+- Charts in Settings answer to hover with a styled readout showing cost, calls and the date, replacing the browser's native `<title>` tooltip on the daily spend chart.
 - Automations can be created from Settings → Automations (`POST /api/automations`), through the same limits the chat-driven path enforces — the platform switch, the minimum interval and the per-user cap.
 - Automations can be edited in the UI — name, instruction and schedule (daily/weekly/monthly/once), via `PATCH /api/automations/<id>`. Schedules created in chat that the simple picker can't represent are shown as-is and left untouched until replaced.
 - "Run now" on an automation runs it once off-schedule and opens the resulting chat: `POST /api/automations/<id>/run`. Works on paused automations, refuses (409) while a previous run is still live, and leaves `next_run_at` alone.

@@ -821,7 +821,7 @@
       "tgNotConnected": "Not connected",
       "joinedLabel": "Joined",
       "accessTitle": "Access",
-      "noExceptions": "No exceptions — the default permissions apply.",
+      "noExceptions": "No exceptions — default permissions apply",
       "capType": {
         "skill": "Skill",
         "connector": "Connector"
@@ -868,7 +868,11 @@
       "suspended": "Access suspended",
       "reactivate": "Reactivate access",
       "reactivated": "Access reactivated",
-      "defaultTierNamed": "Instance default — currently {name}"
+      "defaultTierNamed": "Instance default — currently {name}",
+      "openUsage": "See this person's usage",
+      "workloadLabel": "Chats and projects",
+      "workloadValue": "{chats} · {projects}",
+      "tierIsDefault": "{name} — the default"
     },
     "general": {
       "account": "Account",

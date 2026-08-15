@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   TrendingDown, TrendingUp, Search, X, SlidersHorizontal, AlertTriangle,
   BarChart3, SearchX, Clock, ArrowUpRight,
@@ -10,6 +11,7 @@ import {
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SettingsPage, SettingsEmpty, ShowMore, useShowMore } from "@/components/settings/shell";
+import { ChartTooltip } from "@/components/shared/chart-tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -126,7 +128,13 @@ export default function UsagePage() {
   const isAdmin = useIsAdmin();
   const [days, setDays] = useState<number>(30);
   const [scope, setScope] = useState<Scope>("shared");
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  // ?userId=<id> arrives from a person's card, which is the other half of the
+  // link this page already offers back to it. Seeded once: the filter chip is
+  // live state afterwards, and re-reading the param on every render would make
+  // the chip's × impossible to honour.
+  const initialUserId = useSearchParams().get("userId");
+  const [filters, setFilters] = useState<Filters>(() =>
+    initialUserId ? { ...EMPTY_FILTERS, userId: initialUserId } : EMPTY_FILTERS);
   const [tab, setTab] = useState<Tab>("overview");
   const [data, setData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -834,19 +842,24 @@ function DailyChart({
   locale: string;
   t: T;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
   const buckets = useMemo(() => {
     const byDay = new Map(series.map((s) => [s.day, s]));
-    const out: { day: string; cost: number }[] = [];
+    const out: { day: string; cost: number; calls: number }[] = [];
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
-      out.push({ day: key, cost: Number(byDay.get(key)?.cost ?? 0) });
+      const found = byDay.get(key);
+      // Cost alone can't separate a quiet day from a cheap one — the call count
+      // rides along in the readout.
+      out.push({ day: key, cost: Number(found?.cost ?? 0), calls: Number(found?.calls ?? 0) });
     }
     return out;
   }, [series, days]);
 
   const max = Math.max(...buckets.map((b) => b.cost), 0);
+  const active = hover != null ? buckets[hover] : null;
   if (max <= 0) return null;
 
   const W = 720;
@@ -863,7 +876,18 @@ function DailyChart({
         <h3 className="text-sm font-medium">{t("dailyTrend")}</h3>
         <span className="text-xs text-muted-foreground">{t("peakDay", { cost: money(max) })}</span>
       </div>
-      <div className="rounded-lg border p-3">
+      {/* Pointer x decides the day, so the whole strip is a target — bar-by-bar
+          hover meant aiming at a 4px column on a 90-day window, and the browser's
+          own <title> tooltip took a second to appear and could not be styled. */}
+      <div
+        className="relative rounded-lg border p-3"
+        onPointerMove={(e) => {
+          const box = e.currentTarget.getBoundingClientRect();
+          const ratio = (e.clientX - box.left - 12) / (box.width - 24);
+          setHover(Math.max(0, Math.min(n - 1, Math.floor(ratio * n))));
+        }}
+        onPointerLeave={() => setHover(null)}
+      >
         <svg viewBox={`0 0 ${W} ${H}`} className="h-28 w-full" preserveAspectRatio="none" role="img">
           {buckets.map((b, i) => {
             const h = (b.cost / max) * (H - 4);
@@ -875,10 +899,8 @@ function DailyChart({
                 width={barW}
                 height={h}
                 rx={Math.min(2, barW / 2)}
-                className="fill-current text-primary/70 transition-colors hover:text-primary"
-              >
-                <title>{`${dateFmt.format(new Date(b.day))} — ${money(b.cost)}`}</title>
-              </rect>
+                className={cn("fill-current transition-colors", hover === i ? "text-primary" : "text-primary/70")}
+              />
             );
           })}
           {dailyAvg > 0 ? (
@@ -894,6 +916,13 @@ function DailyChart({
             />
           ) : null}
         </svg>
+        {active && (
+          <ChartTooltip pos={n > 1 ? hover! / (n - 1) : 0}>
+            <span className="tabular-nums">{money(active.cost)}</span>
+            <span className="ml-1.5 tabular-nums text-muted-foreground">{t("callsN", { count: active.calls })}</span>
+            <span className="ml-1.5 text-muted-foreground">{dateFmt.format(new Date(active.day))}</span>
+          </ChartTooltip>
+        )}
         <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
           <span>{dateFmt.format(new Date(buckets[0].day))}</span>
           <span>{t("avgLine", { cost: money(dailyAvg) })}</span>

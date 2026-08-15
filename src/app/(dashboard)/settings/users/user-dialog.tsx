@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
 import { Loader2, ChevronRight, Trash2 } from "lucide-react";
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { money, shortDate, relTime } from "./format";
 import { EffectBadge } from "@/components/shared/effect-badge";
+import { ChartTooltip } from "@/components/shared/chart-tooltip";
 
 export type Tier = {
   id: string;
@@ -52,6 +54,8 @@ type Detail = {
   failed: number;
   topModels: { model: string; cost: number; calls: number }[];
   sessions: { id: string; createdAt: string | null; updatedAt: string | null; ipAddress: string | null; userAgent: string | null }[];
+  workload: { chats: number; projects: number; lastChatAt: string | null };
+  series: { day: string; cost: number; calls: number }[];
 };
 
 const DEFAULT_TIER = "__default__";
@@ -147,6 +151,9 @@ export function UserDialog({
   const defaultTierLabel = defaultTierName
     ? t("defaultTierNamed", { name: defaultTierName })
     : t("defaultTier");
+  // The default tier is marked in the list too, so pinning it by name reads as a
+  // deliberate choice rather than a duplicate of the option above it.
+  const tierItemLabel = (x: Tier) => (x.isDefault ? t("tierIsDefault", { name: x.name }) : x.name);
   const windowLabel: Record<WindowKey, string> = { h5: t("window5h"), d7: t("window7d"), d30: t("window30d") };
 
   // The facts an admin reads but never acts on — when they joined, when they were
@@ -207,23 +214,43 @@ export function UserDialog({
               </Select>
             </Field>
             <Field label={t("tierLabel")}>
-              <Select
-                value={tierValue}
-                onValueChange={(v) => v && v !== tierValue && mutate({ tierId: v === DEFAULT_TIER ? null : v }, { tierId: v === DEFAULT_TIER ? null : v }, t("tierUpdated"))}
-                disabled={busy}
-                items={Object.fromEntries([[DEFAULT_TIER, defaultTierLabel], ...tiers.map((x) => [x.id, x.name])])}
-              >
-                <SelectTrigger className="h-8 w-44 text-xs" aria-label={t("tierLabel")}>
-                  <SelectValue className="truncate" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={DEFAULT_TIER}>{defaultTierLabel}</SelectItem>
-                  {tiers.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {/* With one tier configured — the shipped default, on most instances
+                  — a picker offers "follow the default" and that same tier by name:
+                  two options with identical effect and no way to tell them apart.
+                  There is nothing to choose until a second tier exists, so it says
+                  what applies instead of asking. */}
+              {tiers.length < 2 ? (
+                <span className="text-sm text-muted-foreground">{defaultTierName ?? t("defaultTier")}</span>
+              ) : (
+                <Select
+                  value={tierValue}
+                  onValueChange={(v) => v && v !== tierValue && mutate({ tierId: v === DEFAULT_TIER ? null : v }, { tierId: v === DEFAULT_TIER ? null : v }, t("tierUpdated"))}
+                  disabled={busy}
+                  items={Object.fromEntries([[DEFAULT_TIER, defaultTierLabel], ...tiers.map((x) => [x.id, tierItemLabel(x)])])}
+                >
+                  <SelectTrigger className="h-8 w-44 text-xs" aria-label={t("tierLabel")}>
+                    <SelectValue className="truncate" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={DEFAULT_TIER}>{defaultTierLabel}</SelectItem>
+                    {tiers.map((x) => <SelectItem key={x.id} value={x.id}>{tierItemLabel(x)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
             </Field>
+            {/* How much of the instance they use, counted — not what they talk
+                about. Titles would have told an admin the subject of every
+                conversation the chat route deliberately refuses them. */}
+            {detail && detail.workload.chats > 0 && (
+              <Field label={t("workloadLabel")}>
+                <span className="text-sm tabular-nums text-muted-foreground">
+                  {t("workloadValue", { chats: detail.workload.chats, projects: detail.workload.projects })}
+                </span>
+              </Field>
+            )}
+
             {exceptions.length === 0 ? (
-              <p className="pt-1 text-xs text-muted-foreground">{t("noExceptions")}</p>
+              <p className="pt-3 text-xs text-muted-foreground">{t("noExceptions")}</p>
             ) : (
               <ul className="space-y-1.5">
                 {exceptions.map((ex) => {
@@ -267,10 +294,15 @@ export function UserDialog({
                     {w.limit != null && <Bar pct={w.pct} />}
                   </div>
                 ))}
+                <Sparkline series={detail.series} days={30} locale={locale} t={t} />
                 <Field label={t("turnsCompleted")}>
                   <span className="text-sm tabular-nums">{detail.completed}</span>
                 </Field>
                 <Field label={t("turnsFailed")}>
+                  {/* Stays a number. Linking it would have led into someone else's
+                      chat — a 404 for the admin, and a promise the product does
+                      not keep. Failures worth investigating are on the Activity
+                      page, which is written for an admin to read. */}
                   <span className={`text-sm tabular-nums ${detail.failed > 0 ? "text-warning-text" : ""}`}>{detail.failed}</span>
                 </Field>
                 {detail.topModels.map((m) => (
@@ -278,6 +310,12 @@ export function UserDialog({
                     <span className="text-sm tabular-nums text-muted-foreground">{money(locale, m.cost)}</span>
                   </Field>
                 ))}
+                <Link
+                  href={`/settings/usage?userId=${encodeURIComponent(shown.id)}`}
+                  className="inline-block pt-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  {t("openUsage")}
+                </Link>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">{t("detailUnavailable")}</p>
@@ -399,6 +437,80 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function GroupTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="text-sm font-medium">{children}</h3>;
+}
+
+/**
+ * Thirty days of spend as one line.
+ *
+ * The three window figures say what was spent; they can't say whether it is
+ * climbing. Days with no spend are absent from the query (grouping returns only
+ * days that exist), so the series is re-laid onto a full calendar first —
+ * otherwise a quiet week would compress into a straight line and read as steady
+ * use. Renders nothing when there is no spend at all: a flat line at zero is a
+ * chart that says less than the empty space it occupies.
+ */
+function Sparkline({ series, days, locale, t }: { series: { day: string; cost: number; calls: number }[]; days: number; locale: string; t: ReturnType<typeof useTranslations> }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const byDay = new Map(series.map((p) => [p.day, p]));
+  const today = new Date();
+  const points = Array.from({ length: days }, (_, i) => {
+    const d = new Date(today.getTime() - (days - 1 - i) * 86_400_000);
+    const day = d.toISOString().slice(0, 10);
+    const found = byDay.get(day);
+    return { day, cost: found?.cost ?? 0, calls: found?.calls ?? 0 };
+  });
+  const max = Math.max(...points.map((p) => p.cost));
+  if (max <= 0) return null;
+
+  const w = 100;
+  const h = 24;
+  const step = w / Math.max(1, points.length - 1);
+  const line = points.map((p, i) => `${(i * step).toFixed(2)},${(h - (p.cost / max) * h).toFixed(2)}`).join(" ");
+  const active = hover != null ? points[hover] : null;
+
+  return (
+    // Hover reads the pointer's x against the box, so every pixel of the strip
+    // belongs to the nearest day — a 3px-wide invisible target per point would be
+    // a chart you have to aim at.
+    <div
+      className="relative h-6 w-full"
+      onPointerMove={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const ratio = (e.clientX - r.left) / r.width;
+        setHover(Math.max(0, Math.min(points.length - 1, Math.round(ratio * (points.length - 1)))));
+      }}
+      onPointerLeave={() => setHover(null)}
+    >
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full" aria-hidden>
+        <polyline points={line} fill="none" stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" className="text-primary/60" />
+      </svg>
+      {/* The marker and rule live in the HTML layer, not the SVG: the chart
+          stretches to its container with preserveAspectRatio="none", which scales
+          x and y unequally — a <circle> in there comes out an ellipse. Only the
+          polyline can survive that (its stroke is width-corrected); anything meant
+          to keep its shape has to be positioned in percentages outside it. */}
+      {active && (
+        <>
+          <div
+            className="pointer-events-none absolute inset-y-0 w-px bg-border"
+            style={{ left: `${(hover! / (points.length - 1)) * 100}%` }}
+          />
+          <div
+            className="pointer-events-none absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary"
+            style={{
+              left: `${(hover! / (points.length - 1)) * 100}%`,
+              top: `${(1 - active.cost / max) * 100}%`,
+            }}
+          />
+          <ChartTooltip pos={hover! / (points.length - 1)}>
+            <span className="tabular-nums">{money(locale, active.cost)}</span>
+            <span className="ml-1.5 tabular-nums text-muted-foreground">{t("callsN", { count: active.calls })}</span>
+            <span className="ml-1.5 text-muted-foreground">{shortDate(locale, active.day)}</span>
+          </ChartTooltip>
+        </>
+      )}
+    </div>
+  );
 }
 
 function Bar({ pct }: { pct: number }) {

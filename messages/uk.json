@@ -821,7 +821,7 @@
       "tgNotConnected": "Не підключено",
       "joinedLabel": "Приєднання",
       "accessTitle": "Доступ",
-      "noExceptions": "Без винятків — діють типові дозволи.",
+      "noExceptions": "Без винятків — діють типові дозволи",
       "capType": {
         "skill": "Навичка",
         "connector": "Конектор"
@@ -868,7 +868,11 @@
       "suspended": "Доступ призупинено",
       "reactivate": "Відновити доступ",
       "reactivated": "Доступ відновлено",
-      "defaultTierNamed": "Типовий для інстансу — зараз {name}"
+      "defaultTierNamed": "Типовий для інстансу — зараз {name}",
+      "openUsage": "Показати витрати цієї людини",
+      "workloadLabel": "Чатів і проєктів",
+      "workloadValue": "{chats} · {projects}",
+      "tierIsDefault": "{name} — типовий"
     },
     "general": {
       "account": "Акаунт",
