@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Settings, Link2, Puzzle, Brain, Users, BarChart3, Sparkles, Wallet, Lock, Download, CalendarClock, ScrollText, Bot, Search } from "lucide-react";
+import { Settings, Link2, Brain, Users, BarChart3, Sparkles, Wallet, Lock, Download, CalendarClock, ScrollText, Bot, Search } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { SETTINGS_DIRECTORY, searchSettings, visibleSettings } from "@/lib/settings-directory";
 import { cn } from "@/lib/utils";
@@ -37,7 +37,6 @@ const navSections: NavSection[] = [
       // tab of Extensions. Both old paths still resolve, as redirects.
       { key: "people", href: "/settings/users", icon: Users, adminOnly: true },
       { key: "billing", href: "/settings/billing", icon: Wallet, adminOnly: true },
-      { key: "integrations", href: "/settings/integrations", icon: Puzzle, adminOnly: true },
       { key: "security", href: "/settings/security", icon: Lock, adminOnly: true },
       { key: "usage", href: "/settings/usage", icon: BarChart3, adminOnly: true },
       { key: "activity", href: "/settings/activity", icon: ScrollText, adminOnly: true },

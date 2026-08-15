@@ -231,7 +231,7 @@ export function TelegramLinkCard() {
               {isAdmin ? (
                 <>
                   {t("link.configureFirstAdmin")}{" "}
-                  <Link href="/settings/integrations" className="font-medium text-foreground hover:underline">
+                  <Link href="/settings/agent#telegram-bot" className="font-medium text-foreground hover:underline">
                     {t("link.configureFirstAdminLink")}
                   </Link>
                 </>

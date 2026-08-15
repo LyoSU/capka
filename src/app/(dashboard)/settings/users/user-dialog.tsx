@@ -138,6 +138,15 @@ export function UserDialog({
   // Rows visible to this user (org + own) so explainPolicy resolves the winner.
   const visibleRows = policies.filter((p) => p.scope === "system" || (p.scope === "user" && p.userId === shown.id));
   const tierValue = shown.tierId && tiers.some((x) => x.id === shown.tierId) ? shown.tierId : DEFAULT_TIER;
+  // "Instance default" and the tier literally named "Default" looked like the
+  // same option twice. They are not: one FOLLOWS whichever tier is currently the
+  // default (and moves when an admin changes it), the other pins this person to
+  // that tier by name. Saying which one it follows right now is what makes the
+  // difference visible.
+  const defaultTierName = tiers.find((x) => x.isDefault)?.name;
+  const defaultTierLabel = defaultTierName
+    ? t("defaultTierNamed", { name: defaultTierName })
+    : t("defaultTier");
   const windowLabel: Record<WindowKey, string> = { h5: t("window5h"), d7: t("window7d"), d30: t("window30d") };
 
   // The facts an admin reads but never acts on — when they joined, when they were
@@ -167,10 +176,16 @@ export function UserDialog({
 
         {/* scrollbar-gutter keeps the reserved track out of the numbers on the
             right edge instead of overlapping them once the card overflows. */}
-        <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] md:grid-cols-2">
-          <div className="space-y-6">
-          {/* Overview */}
-          <section className="space-y-3">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]">
+          {/* Two columns, one question each: what an admin CHANGES about this
+              person, and what they came to READ. Both are the same plain
+              label-on-the-left row, with nothing boxed inside a card that is
+              already a card — a frame around three rows inside a dialog was one
+              border too many, and every extra frame is another level of hierarchy
+              the eye has to resolve before finding the tier control. */}
+          <div className="grid gap-6 md:grid-cols-2">
+          <section className="space-y-1">
+            <GroupTitle>{t("accessTitle")}</GroupTitle>
             <Field label={t("drawerStatus")}>
               <StatusBadge status={shown.status} t={t} />
             </Field>
@@ -181,7 +196,7 @@ export function UserDialog({
                 disabled={busy}
                 items={{ admin: t("roles.admin"), user: t("roles.user"), viewer: t("roles.viewer") }}
               >
-                <SelectTrigger className="h-8 max-w-52 text-xs" aria-label={t("changeRole")}>
+                <SelectTrigger className="h-8 w-40 text-xs" aria-label={t("changeRole")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -191,13 +206,24 @@ export function UserDialog({
                 </SelectContent>
               </Select>
             </Field>
-          </section>
-
-          {/* Access */}
-          <section className="space-y-3">
-            <GroupTitle>{t("accessTitle")}</GroupTitle>
+            <Field label={t("tierLabel")}>
+              <Select
+                value={tierValue}
+                onValueChange={(v) => v && v !== tierValue && mutate({ tierId: v === DEFAULT_TIER ? null : v }, { tierId: v === DEFAULT_TIER ? null : v }, t("tierUpdated"))}
+                disabled={busy}
+                items={Object.fromEntries([[DEFAULT_TIER, defaultTierLabel], ...tiers.map((x) => [x.id, x.name])])}
+              >
+                <SelectTrigger className="h-8 w-44 text-xs" aria-label={t("tierLabel")}>
+                  <SelectValue className="truncate" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_TIER}>{defaultTierLabel}</SelectItem>
+                  {tiers.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
             {exceptions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("noExceptions")}</p>
+              <p className="pt-1 text-xs text-muted-foreground">{t("noExceptions")}</p>
             ) : (
               <ul className="space-y-1.5">
                 {exceptions.map((ex) => {
@@ -218,85 +244,55 @@ export function UserDialog({
                 })}
               </ul>
             )}
-            <Field label={t("tierLabel")}>
-              <Select
-                value={tierValue}
-                onValueChange={(v) => v && v !== tierValue && mutate({ tierId: v === DEFAULT_TIER ? null : v }, { tierId: v === DEFAULT_TIER ? null : v }, t("tierUpdated"))}
-                disabled={busy}
-                items={Object.fromEntries([[DEFAULT_TIER, t("defaultTier")], ...tiers.map((x) => [x.id, x.name])])}
-              >
-                <SelectTrigger className="h-8 max-w-52 text-xs" aria-label={t("tierLabel")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={DEFAULT_TIER}>{t("defaultTier")}</SelectItem>
-                  {tiers.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
           </section>
-          </div>
 
-          <div className="space-y-6">
-          {/* Usage */}
-          <section className="space-y-3">
+          {/* Usage — the same rows as the left column, so the two read as one card
+              rather than as a settings panel beside a dashboard. The turn counts
+              were a pair of bordered tiles; as rows they line up with the spend
+              above them and lose two more frames. */}
+          <section className="space-y-1">
             <GroupTitle>{t("usageTitle")}</GroupTitle>
             {loading && !detail ? (
               <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
             ) : detail ? (
               <>
-                <div className="space-y-2">
-                  {detail.windows.map((w) => (
-                    <div key={w.window} className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">{windowLabel[w.window]}</span>
-                        <span className="tabular-nums">
-                          {money(locale, w.used)}
-                          {w.limit != null && <span className="text-muted-foreground"> / {money(locale, w.limit)}</span>}
-                        </span>
-                      </div>
-                      {w.limit != null && <Bar pct={w.pct} />}
-                    </div>
-                  ))}
-                </div>
-                {/* Two counts as a pair of tiles rather than one "label: 607  label: 92"
-                    line: the numbers are what an admin scans for, and inline they sat
-                    at whatever x the labels happened to end. */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border px-3 py-2">
-                    <p className="truncate text-xs text-muted-foreground">{t("turnsCompleted")}</p>
-                    <p className="text-sm font-medium tabular-nums">{detail.completed}</p>
+                {detail.windows.map((w) => (
+                  <div key={w.window}>
+                    <Field label={windowLabel[w.window]}>
+                      <span className="text-sm tabular-nums">
+                        {money(locale, w.used)}
+                        {w.limit != null && <span className="text-muted-foreground"> / {money(locale, w.limit)}</span>}
+                      </span>
+                    </Field>
+                    {w.limit != null && <Bar pct={w.pct} />}
                   </div>
-                  <div className="rounded-lg border px-3 py-2">
-                    <p className="truncate text-xs text-muted-foreground">{t("turnsFailed")}</p>
-                    <p className={`text-sm font-medium tabular-nums ${detail.failed > 0 ? "text-warning-text" : ""}`}>{detail.failed}</p>
-                  </div>
-                </div>
-                {detail.topModels.length > 0 && (
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">{t("topModels")}</p>
-                    <ul className="space-y-1">
-                      {detail.topModels.map((m) => (
-                        <li key={m.model} className="flex justify-between gap-2 text-xs">
-                          <span className="min-w-0 truncate">{m.model}</span>
-                          <span className="shrink-0 tabular-nums text-muted-foreground">{money(locale, m.cost)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                ))}
+                <Field label={t("turnsCompleted")}>
+                  <span className="text-sm tabular-nums">{detail.completed}</span>
+                </Field>
+                <Field label={t("turnsFailed")}>
+                  <span className={`text-sm tabular-nums ${detail.failed > 0 ? "text-warning-text" : ""}`}>{detail.failed}</span>
+                </Field>
+                {detail.topModels.map((m) => (
+                  <Field key={m.model} label={m.model}>
+                    <span className="text-sm tabular-nums text-muted-foreground">{money(locale, m.cost)}</span>
+                  </Field>
+                ))}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">{t("detailUnavailable")}</p>
             )}
           </section>
+          </div>
 
           <Separator />
 
-          {/* Security & history — collapsed by default. Who signed in from which
-              browser, and who changed what when, is what an admin reaches for
-              during an incident: rare, and long enough to bury the tier control
-              and the spend an ordinary visit came for. */}
+          {/* Security & history — collapsed, and spanning both columns rather than
+              hanging off the bottom of one: as the tail of the right-hand column it
+              left the card's floor ragged and made the sessions list read as part
+              of the spend above it. Who signed in from which browser, and who
+              changed what when, is what an admin opens during an incident — not on
+              the visit where they change somebody's tier. */}
           <section className="space-y-2">
             <button
               type="button"
@@ -344,7 +340,6 @@ export function UserDialog({
               </div>
             )}
           </section>
-          </div>
         </div>
 
         {/* Acting on the person, pinned where actions live — not at the bottom of

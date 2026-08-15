@@ -70,7 +70,7 @@ export const SETTINGS_DIRECTORY: SettingsEntry[] = [
   { href: "/settings/skills?tab=permissions", label: "settings.permissions.title", page: "settings.nav.skills", keywords: "дозволи permissions заборонити deny allow політика policy", adminOnly: true },
   { href: "/settings/billing", label: "settings.billing.mode.title", page: "settings.nav.billing", keywords: "спільний ключ shared key власний own", adminOnly: true },
   { href: "/settings/billing", label: "settings.billing.limits.title", page: "settings.nav.billing", keywords: "ліміт limit бюджет budget витрати spend гроші вимкнути змінити", adminOnly: true },
-  { href: "/settings/integrations", label: "settings.integrations.telegram.title", page: "settings.nav.integrations", keywords: "telegram телеграм бот bot токен token botfather", adminOnly: true },
+  { href: "/settings/agent#telegram-bot", label: "settings.integrations.telegram.title", page: "settings.nav.agent", keywords: "telegram телеграм бот bot токен token botfather інтеграції integrations", adminOnly: true },
   { href: "/settings/security", label: "settings.security.encryptionKey", page: "settings.nav.security", keywords: "шифрування encryption master key ключ", adminOnly: true },
   { href: "/settings/security#sandbox-network", label: "settings.security.sandboxNet", page: "settings.nav.security", keywords: "інтернет internet мережа network egress дозволити allow вимкнути off", adminOnly: true },
   { href: "/settings/security#block-private-urls", label: "settings.security.blockPrivate", page: "settings.nav.security", keywords: "ssrf приватні private localhost внутрішні", adminOnly: true },

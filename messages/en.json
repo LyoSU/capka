@@ -867,7 +867,8 @@
       "suspendWarn": "They'll be signed out everywhere and can't use the app until you reactivate them. Their chats and files are kept.",
       "suspended": "Access suspended",
       "reactivate": "Reactivate access",
-      "reactivated": "Access reactivated"
+      "reactivated": "Access reactivated",
+      "defaultTierNamed": "Instance default — currently {name}"
     },
     "general": {
       "account": "Account",

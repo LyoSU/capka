@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow, SettingsSkeleton } from "@/components/settings/shell";
 import { AgentModeSection } from "@/components/settings/agent-mode";
+import { TelegramBotSection } from "./telegram-bot-section";
 import { useSetting } from "@/hooks/use-setting";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { CAPABILITY_GROUPS, parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
@@ -179,6 +180,9 @@ export default function AgentSettingsPage() {
           />
         </div>
       </SettingsSection>
+
+      {/* How people reach the assistant, from the retired Integrations page. */}
+      <TelegramBotSection />
 
       <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
         <AlertDialogContent>
