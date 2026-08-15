@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
+import Link from "next/link";
 import {
   TrendingDown, TrendingUp, Search, X, SlidersHorizontal, AlertTriangle,
-  BarChart3, SearchX, Clock,
+  BarChart3, SearchX, Clock, ArrowUpRight,
 } from "lucide-react";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SettingsPage, SettingsEmpty, ShowMore, useShowMore } from "@/components/settings/shell";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -121,6 +123,7 @@ const EMPTY_FILTERS: Filters = { userId: null, model: null, projectId: null, cha
 export default function UsagePage() {
   const t = useTranslations("settings.usage");
   const locale = useLocale();
+  const isAdmin = useIsAdmin();
   const [days, setDays] = useState<number>(30);
   const [scope, setScope] = useState<Scope>("shared");
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -444,6 +447,14 @@ export default function UsagePage() {
                     const u = data.byUser.find((x) => x.userId === key);
                     setSelectedUser((cur) => (cur?.id === key ? null : { id: key, name: u?.name || u?.email || t("unknownUser") }));
                   }}
+                  // Admins only: the member card is an admin surface (roles, tiers,
+                  // sessions), and a regular user reading their own spend has no
+                  // card to open — theirs is the only row here.
+                  openHref={isAdmin ? (key) => `/settings/users?user=${encodeURIComponent(key)}` : undefined}
+                  openLabel={isAdmin ? (key) => {
+                    const u = data.byUser.find((x) => x.userId === key);
+                    return t("openMemberCard", { name: u?.name || u?.email || t("unknownUser") });
+                  } : undefined}
                 />
                 <ShowMore shown={memberPage.visible.length} total={memberPage.total} onMore={memberPage.more} />
               </section>
@@ -732,6 +743,8 @@ function Breakdown({
   t,
   onSelect,
   selectedKey,
+  openHref,
+  openLabel,
 }: {
   rows: { key: string; label: React.ReactNode; meta?: string; calls: number; cost: number }[];
   total: number;
@@ -740,6 +753,11 @@ function Breakdown({
   t: T;
   onSelect?: (key: string) => void;
   selectedKey?: string;
+  /** Where a row leads beyond this page. Rendered as a link BESIDE the row's
+   *  button, never inside it — an anchor nested in a button is neither valid
+   *  markup nor reachable by keyboard as its own thing. */
+  openHref?: (key: string) => string;
+  openLabel?: (key: string) => string;
 }) {
   const max = Math.max(...rows.map((r) => r.cost), 0);
   if (rows.length === 0) {
@@ -752,34 +770,48 @@ function Breakdown({
         const selected = selectedKey === r.key;
         const Tag = onSelect ? "button" : "div";
         return (
-          <Tag
-            key={r.key}
-            {...(onSelect ? { onClick: () => onSelect(r.key), type: "button" as const } : {})}
-            className={cn(
-              "relative block w-full px-3.5 py-2.5 text-left",
-              i > 0 && "border-t",
-              onSelect && "transition-colors hover:bg-hover",
-              selected && "bg-hover-strong",
+          <div key={r.key} className={cn("group relative flex items-stretch", i > 0 && "border-t")}>
+            <Tag
+              {...(onSelect ? { onClick: () => onSelect(r.key), type: "button" as const } : {})}
+              className={cn(
+                "relative block min-w-0 flex-1 px-3.5 py-2.5 text-left",
+                onSelect && "transition-colors hover:bg-hover",
+                selected && "bg-hover-strong",
+                openHref && "pr-1",
+              )}
+            >
+              {/* Proportional fill behind the row, scaled to the largest spender. */}
+              <div
+                className="absolute inset-y-0 left-0 bg-primary/[0.07]"
+                style={{ width: `${max > 0 ? (r.cost / max) * 100 : 0}%` }}
+                aria-hidden
+              />
+              <div className="relative flex items-center justify-between gap-3 text-sm">
+                <div className="flex min-w-0 items-center gap-2">
+                  {r.label}
+                  {r.meta ? <span className="shrink-0 text-xs text-muted-foreground">· {r.meta}</span> : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <span className="hidden text-muted-foreground sm:inline">{t("callsN", { count: r.calls })}</span>
+                  <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">{pct(share)}</span>
+                  <span className="w-20 text-right font-medium tabular-nums">{money(r.cost)}</span>
+                </div>
+              </div>
+            </Tag>
+            {openHref && (
+              <Link
+                href={openHref(r.key)}
+                aria-label={openLabel?.(r.key)}
+                title={openLabel?.(r.key)}
+                // Dimmed but always present, rather than appearing on hover: an
+                // action nobody can see until they happen to point at it is an
+                // action most people never find (and no action at all on touch).
+                className="flex shrink-0 items-center px-2.5 text-muted-foreground/40 transition-colors hover:text-foreground focus-visible:text-foreground"
+              >
+                <ArrowUpRight className="h-4 w-4" />
+              </Link>
             )}
-          >
-            {/* Proportional fill behind the row, scaled to the largest spender. */}
-            <div
-              className="absolute inset-y-0 left-0 bg-primary/[0.07]"
-              style={{ width: `${max > 0 ? (r.cost / max) * 100 : 0}%` }}
-              aria-hidden
-            />
-            <div className="relative flex items-center justify-between gap-3 text-sm">
-              <div className="flex min-w-0 items-center gap-2">
-                {r.label}
-                {r.meta ? <span className="shrink-0 text-xs text-muted-foreground">· {r.meta}</span> : null}
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <span className="hidden text-muted-foreground sm:inline">{t("callsN", { count: r.calls })}</span>
-                <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">{pct(share)}</span>
-                <span className="w-20 text-right font-medium tabular-nums">{money(r.cost)}</span>
-              </div>
-            </div>
-          </Tag>
+          </div>
         );
       })}
     </div>

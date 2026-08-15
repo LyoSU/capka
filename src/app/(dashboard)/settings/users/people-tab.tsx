@@ -22,7 +22,7 @@ const roleConfig = {
   viewer: { icon: Eye, variant: "outline" as const },
 };
 
-export function PeopleTab() {
+export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) {
   const t = useTranslations("settings.usersPage");
   const locale = useLocale();
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -32,7 +32,7 @@ export function PeopleTab() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "user" | "viewer">("all");
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialUserId ?? null);
 
   const load = useCallback(() =>
     fetch("/api/admin/users")
@@ -275,7 +275,17 @@ export function PeopleTab() {
         tiers={tiers}
         onPatch={patchUser}
         onRemoved={(id) => setUsers((p) => p.filter((u) => u.id !== id))}
-        onClose={() => setOpenId(null)}
+        onClose={() => {
+          setOpenId(null);
+          // Drop the deep-link param on close, or a reload reopens a panel the
+          // admin has already dismissed. replaceState, not the router: this is
+          // tidying the address, not a navigation worth a history entry.
+          const url = new URL(window.location.href);
+          if (url.searchParams.has("user")) {
+            url.searchParams.delete("user");
+            window.history.replaceState(null, "", url);
+          }
+        }}
       />
     </div>
   );

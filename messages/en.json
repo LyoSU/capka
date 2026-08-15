@@ -1161,7 +1161,8 @@
         "memberNearBudget": "{name} has used {used} — {pct} of their {cap} monthly limit.",
         "failureSpike": "Turn failures rose to {rate} (was {prev}) across {turns} turns this period.",
         "idleSeats": "{count, plural, one {# active member hasn't run a turn in two weeks} other {# active members haven't run a turn in two weeks}}: {names}."
-      }
+      },
+      "openMemberCard": "Open card: {name}"
     },
     "skills": {
       "title": "Extensions",

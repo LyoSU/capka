@@ -23,10 +23,17 @@ export default function PeoplePage() {
   const [tab, setTab] = useState<"people" | "signin">("people");
 
   // Honor ?tab=signin, which is where /settings/authentication now redirects.
-  const tabParam = useSearchParams().get("tab");
+  const params = useSearchParams();
+  const tabParam = params.get("tab");
   useEffect(() => {
     if (tabParam === "signin") setTab("signin");
   }, [tabParam]);
+
+  // ?user=<id> opens that person's card straight away — how the Usage page hands
+  // a spender over to the surface that can act on them. Read once per navigation:
+  // the tab keeps its own open/closed state afterwards, and re-applying the param
+  // on every render would make the panel impossible to close.
+  const userParam = params.get("user");
 
   return (
     // `wide` unconditionally: it is a property of the page, not of the tab —
@@ -40,7 +47,7 @@ export default function PeoplePage() {
           { key: "signin", label: t("tab.signin"), icon: KeyRound },
         ]}
       />
-      {tab === "people" ? <PeopleTab /> : <SignInTab />}
+      {tab === "people" ? <PeopleTab initialUserId={userParam} /> : <SignInTab />}
     </SettingsPage>
   );
 }

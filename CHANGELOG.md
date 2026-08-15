@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Usage → People: each member row carries a link to that person's card in Settings → People (admins only). `/settings/users?user=<id>` opens a card directly.
+
 ### Changed
 
 - Long member lists in Settings → People and Settings → Usage now render 25 at a time with a "Show more" step, and their search fields are visible from the first member instead of appearing past the seventh.
