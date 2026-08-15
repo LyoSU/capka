@@ -5,7 +5,7 @@ import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarClock, ExternalLink, Pencil, Play, Trash2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, ExternalLink, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -54,6 +54,7 @@ export default function AutomationsList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<Automation | null>(null);
+  const [creating, setCreating] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -159,12 +160,39 @@ export default function AutomationsList() {
 
   if (error) return <SettingsError message={error} />;
 
+  const editor = (
+    // Keyed so switching between automations rebuilds the form from the new row
+    // instead of carrying the previous one's draft across; "new" is its own key.
+    <AutomationEditor
+      key={editing?.id ?? (creating ? "new" : "closed")}
+      automation={editing}
+      open={creating}
+      onClose={() => { setEditing(null); setCreating(false); }}
+      onSaved={load}
+    />
+  );
+
   if (automations.length === 0) {
-    return <SettingsEmpty icon={CalendarClock} title={t("emptyTitle")} hint={t("emptyHint")} />;
+    return (
+      <>
+        <SettingsEmpty
+          icon={CalendarClock}
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
+          action={<Button size="sm" onClick={() => setCreating(true)}><Plus className="mr-1 h-3.5 w-3.5" />{t("create")}</Button>}
+        />
+        {editor}
+      </>
+    );
   }
 
   return (
     <div className="space-y-2">
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
+          <Plus className="mr-1 h-3.5 w-3.5" />{t("create")}
+        </Button>
+      </div>
       {automations.map((a) => {
         const status = statusOf(a);
         return (
@@ -258,14 +286,7 @@ export default function AutomationsList() {
         );
       })}
 
-      {/* Keyed so switching between automations rebuilds the form from the new
-          row instead of carrying the previous one's draft across. */}
-      <AutomationEditor
-        key={editing?.id}
-        automation={editing}
-        onClose={() => setEditing(null)}
-        onSaved={load}
-      />
+      {editor}
     </div>
   );
 }

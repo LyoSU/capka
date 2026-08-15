@@ -19,7 +19,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { GET } from "@/app/api/automations/route";
+import { GET, POST as CREATE } from "@/app/api/automations/route";
 import { PATCH, DELETE } from "@/app/api/automations/[id]/route";
 import { POST as RUN } from "@/app/api/automations/[id]/run/route";
 
@@ -45,6 +45,13 @@ describe("automations routes — require an ACTIVE account (not just a session)"
     // A manual run spends the shared key on demand — same gate as the rest.
     const run = await RUN(new Request("http://x", { method: "POST" }), { params });
     expect(run.status).toBe(403);
+
+    // Creating from the settings page is the same act as creating from chat.
+    const create = await CREATE(new Request("http://x", {
+      method: "POST",
+      body: JSON.stringify({ title: "t", prompt: "p", cron: "0 9 * * *", timezone: "Europe/Kyiv" }),
+    }));
+    expect(create.status).toBe(403);
   });
 
   it("rejects an edit that asks for nothing rather than reporting a no-op as saved", async () => {

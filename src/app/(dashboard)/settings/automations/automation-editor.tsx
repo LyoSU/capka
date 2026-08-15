@@ -21,9 +21,13 @@ export interface EditableAutomation {
 }
 
 export function AutomationEditor({
-  automation, onClose, onSaved,
+  automation, open, onClose, onSaved,
 }: {
+  /** null with `open` means "new one" — the same form, seeded with a plain
+   *  daily-at-09:00 schedule, because creating and editing ask for exactly the
+   *  same four things. */
   automation: EditableAutomation | null;
+  open?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -40,7 +44,7 @@ export function AutomationEditor({
   const [scheduleTouched, setScheduleTouched] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  if (!automation) return null;
+  if (!automation && !open) return null;
 
   const patchSchedule = (patch: Partial<ScheduleForm>) => {
     setScheduleTouched(true);
@@ -50,24 +54,27 @@ export function AutomationEditor({
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`/api/automations/${automation.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          prompt: prompt.trim(),
-          // An untouched custom schedule is left out of the body entirely — sending
-          // it back through the simple builder would flatten an expression this
-          // editor never claimed to understand.
-          ...(scheduleTouched && schedule.freq !== "custom" ? toTriggerArgs(schedule) : {}),
-        }),
-      });
+      const res = await fetch(
+        automation ? `/api/automations/${automation.id}` : "/api/automations",
+        {
+          method: automation ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title.trim(),
+            prompt: prompt.trim(),
+            // On edit, an untouched custom schedule is left out of the body
+            // entirely — sending it back through the simple builder would flatten
+            // an expression this editor never claimed to understand. On create
+            // there is always a schedule to send.
+            ...(!automation || (scheduleTouched && schedule.freq !== "custom") ? toTriggerArgs(schedule) : {}),
+          }),
+        });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         toast.error(body?.error || t("saveFailed"));
         return;
       }
-      toast.success(t("saved"));
+      toast.success(automation ? t("saved") : t("created"));
       onSaved();
       onClose();
     } catch {
@@ -90,8 +97,10 @@ export function AutomationEditor({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 p-0 sm:max-w-xl">
         <DialogHeader className="gap-1 border-b px-4 py-3 pr-12">
-          <DialogTitle className="truncate">{t("editTitle")}</DialogTitle>
-          <DialogDescription className="truncate">{automation.title}</DialogDescription>
+          <DialogTitle className="truncate">{automation ? t("editTitle") : t("createTitle")}</DialogTitle>
+          <DialogDescription className="truncate">
+            {automation ? automation.title : t("createHint")}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 [scrollbar-gutter:stable]">

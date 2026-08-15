@@ -1375,7 +1375,11 @@
       "runStarted": "Run started",
       "runBusy": "The previous run is still going — try again shortly",
       "runFailed": "Could not start the run",
-      "autoPausedHint": "Stopped after three failed runs in a row. Check the last run, fix the instruction, then switch it back on."
+      "autoPausedHint": "Stopped after three failed runs in a row. Check the last run, fix the instruction, then switch it back on.",
+      "create": "Create",
+      "createTitle": "New automation",
+      "createHint": "A scheduled task the assistant runs on its own.",
+      "created": "Automation created"
     },
     "connectors": {
       "title": "Connectors",
