@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-15
+
 ### Added
 
 - The person card shows 30 days of spend as a sparkline and how many chats and projects the account has (counted, never named — chat titles stay private to their owner), plus a link through to that person's filtered usage: `/settings/usage?userId=<id>`.
