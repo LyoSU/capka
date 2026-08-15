@@ -433,6 +433,11 @@ export function SetupWizard({
                     <Label>{t("provider.model")}</Label>
                     <ModelPicker
                       variant="field"
+                      // The wizard runs a larger field scale (h-11/rounded-xl)
+                      // than the rest of the app; without this the picker keeps
+                      // the standard h-8 and sits well short of the inputs
+                      // stacked directly above it.
+                      className={INPUT_CLASS}
                       value={defaultModel}
                       onChange={setDefaultModel}
                       provider={provider}

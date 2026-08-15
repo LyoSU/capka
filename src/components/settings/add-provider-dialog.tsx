@@ -174,7 +174,7 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
                   ])
                 )}
               >
-                <SelectTrigger className="h-9 w-full">
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="max-w-[calc(100vw-2rem)]">

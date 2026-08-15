@@ -104,12 +104,16 @@ export function AutomationEditor({
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 [scrollbar-gutter:stable]">
-          <div className="space-y-1.5">
+          {/* `flex flex-col`, not `space-y`: a bare <label> is inline, so it
+              would share a line with anything that isn't a block box — which is
+              exactly what an <Input> (inline-block) is. Flex items are
+              blockified, so the label always sits above its control. */}
+          <div className="flex flex-col gap-1.5">
             <label htmlFor="automation-title" className="text-sm font-medium">{t("nameLabel")}</label>
             <Input id="automation-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80} />
           </div>
 
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             <label htmlFor="automation-prompt" className="text-sm font-medium">{t("promptLabel")}</label>
             <Textarea
               id="automation-prompt"
@@ -147,7 +151,7 @@ export function AutomationEditor({
             {schedule.freq !== "custom" && (
               <div className="flex flex-wrap items-end gap-3 pt-1">
                 {schedule.freq === "once" ? (
-                  <div className="space-y-1.5">
+                  <div className="flex flex-col gap-1.5">
                     <label htmlFor="automation-at" className="text-xs text-muted-foreground">{t("dateLabel")}</label>
                     <Input
                       id="automation-at"
@@ -160,14 +164,14 @@ export function AutomationEditor({
                 ) : (
                   <>
                     {schedule.freq === "weekly" && (
-                      <div className="space-y-1.5">
+                      <div className="flex flex-col gap-1.5">
                         <label className="text-xs text-muted-foreground">{t("weekdayLabel")}</label>
                         <Select
                           value={schedule.weekday}
                           onValueChange={(v) => v && patchSchedule({ weekday: v as string })}
                           items={weekdayItems}
                         >
-                          <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {Object.entries(weekdayItems).map(([k, label]) => (
                               <SelectItem key={k} value={k}>{label}</SelectItem>
@@ -177,14 +181,14 @@ export function AutomationEditor({
                       </div>
                     )}
                     {schedule.freq === "monthly" && (
-                      <div className="space-y-1.5">
+                      <div className="flex flex-col gap-1.5">
                         <label className="text-xs text-muted-foreground">{t("dayOfMonthLabel")}</label>
                         <Select
                           value={schedule.dayOfMonth}
                           onValueChange={(v) => v && patchSchedule({ dayOfMonth: v as string })}
                           items={monthDayItems}
                         >
-                          <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {Object.keys(monthDayItems).map((k) => (
                               <SelectItem key={k} value={k}>{k}</SelectItem>
@@ -193,7 +197,7 @@ export function AutomationEditor({
                         </Select>
                       </div>
                     )}
-                    <div className="space-y-1.5">
+                    <div className="flex flex-col gap-1.5">
                       <label htmlFor="automation-time" className="text-xs text-muted-foreground">{t("timeLabel")}</label>
                       <Input
                         id="automation-time"

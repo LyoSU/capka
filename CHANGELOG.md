@@ -8,8 +8,13 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Model and icon pickers now sit on the app's field scale, so forms holding them (Add provider, connection rows, project defaults) line up with their own inputs.
 - Builds no longer reach out to Google Fonts: Onest and Lora ship in the repo (OFL-1.1), so an air-gapped or slow-egress build box works unchanged.
 - Upgraded to Next.js 16.3, which evicts Turbopack's in-memory cache during long `next dev` sessions instead of growing without bound.
+
+### Fixed
+
+- The automation editor's schedule row no longer puts the "Time" label beside its picker with the fields on mismatched baselines.
 
 ### Security
 

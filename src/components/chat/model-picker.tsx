@@ -11,6 +11,7 @@ import { parseModelId, splitModelRef, displayModelName, encodeModelRef, acceptsN
 import type { ModelInfo } from "@/app/api/models/route";
 import { customModelOption } from "@/lib/providers/custom-model";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 /** Brand glyph — resolves a slug to a stable icon component (dynamic select). */
 function BrandIcon({ slug, size, className }: { slug?: string | null; size?: number; className?: string }) {
@@ -946,6 +947,11 @@ interface ModelPickerProps {
   onChange: (modelId: string) => void;
   /** "pill" — the slim chat trigger; "field" — a form input. Default "field". */
   variant?: "pill" | "field";
+  /** Field variant only: re-scale the trigger for a host that isn't on the app's
+   *  standard field scale — the setup wizard runs a larger one (h-11/rounded-xl).
+   *  Merged with `cn`, so an override actually replaces the default height or
+   *  radius instead of both classes landing and CSS order deciding. */
+  className?: string;
   /**
    * Pill variant, icon + chevron only — no model name.
    *
@@ -1001,6 +1007,7 @@ export function ModelPicker({
   value,
   onChange,
   variant = "field",
+  className,
   compact = false,
   extra,
   provider,
@@ -1326,9 +1333,15 @@ export function ModelPicker({
           disabled={disabled}
           aria-haspopup="listbox"
           aria-expanded={open}
-          className={`flex h-9 w-full items-center gap-2 rounded-md border bg-transparent px-3 text-sm transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50 ${
-            clearable && value && !state.loading ? "pr-9" : ""
-          }`}
+          className={cn(
+            // The app's field scale, same as Input and SelectTrigger — h-8 and
+            // rounded-lg. It used to be h-9/rounded-md, which put every form
+            // holding a model picker 4px and one radius step out of line with
+            // its own inputs.
+            "flex h-8 w-full items-center gap-2 rounded-lg border bg-transparent px-3 text-sm transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50",
+            clearable && value && !state.loading && "pr-9",
+            className,
+          )}
         >
           <BrandIcon slug={currentModel?.icon} size={15} className="shrink-0 text-muted-foreground" />
           {state.loading && !currentModel ? (

@@ -25,7 +25,9 @@ export function IconPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label={t("changeIcon")}
-        className="flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50"
+        // Square on the field scale (h-8/rounded-lg): it always sits beside an
+        // Input, and at h-9/rounded-md it read as a taller, boxier neighbour.
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-muted-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         <ProviderGlyph slug={value ?? fallback} size={16} />
       </PopoverTrigger>
