@@ -15,11 +15,12 @@ const BASE_CSP = "object-src 'none'; base-uri 'self'; form-action 'self'";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  // Enables React's <ViewTransition>, so route navigations crossfade like an app
-  // instead of hard-cutting. Progressive enhancement: browsers without the View
-  // Transitions API just navigate instantly, no animation.
+  // React's <ViewTransition> — the crossfade on route navigation instead of a
+  // hard cut — needed an `experimental.viewTransition` opt-in through 16.2;
+  // 16.3 made it stable and removed the flag, so it is on with nothing to
+  // declare. Browsers without the View Transitions API still navigate
+  // instantly, no animation.
   experimental: {
-    viewTransition: true,
     // Uploads accept files up to 100 MiB in both the composer and sandbox
     // controller. Next's proxy buffers request bodies and otherwise truncates
     // them at its 10 MiB default before the route can read formData(); leave

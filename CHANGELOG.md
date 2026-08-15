@@ -8,7 +8,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
-- `next` and `eslint-config-next` are now pinned to an exact version; 16.3 fails to fetch Google Fonts at build time on networks with slow egress, so the upgrade waits on self-hosted fonts.
+- Builds no longer reach out to Google Fonts: Onest and Lora ship in the repo (OFL-1.1), so an air-gapped or slow-egress build box works unchanged.
+- Upgraded to Next.js 16.3, which evicts Turbopack's in-memory cache during long `next dev` sessions instead of growing without bound.
 
 ### Security
 

@@ -213,6 +213,9 @@ export default function InstalledPlugins() {
     act(() => fetch(`/api/extensions?installId=${encodeURIComponent(p.id)}`, { method: "DELETE" }), p.id, t("uninstalled"));
 
   // Per-user OAuth sign-in (every user does their own — not an admin action).
+  // Full document navigation, not router.push — the route redirects to the
+  // provider's origin, which a client-side navigation cannot follow.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   const signIn = (id: string) => { window.location.href = `/api/mcp/oauth/start?serverId=${encodeURIComponent(id)}`; };
 
   // Per-user hide of a shared plugin (members can't manage it, but can hide it).

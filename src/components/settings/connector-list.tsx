@@ -284,7 +284,10 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
         toast.success(t("added"));
         resetForm();
         await load();
-        // OAuth connector → walk the user straight into sign-in.
+        // OAuth connector → walk the user straight into sign-in. A full document
+        // navigation, not router.push: the route answers with a redirect to the
+        // provider's own origin, which client-side navigation cannot follow.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         if (data.authKind === "oauth" && data.id) window.location.href = `/api/mcp/oauth/start?serverId=${encodeURIComponent(data.id)}`;
       } else toast.error(t("addFailed"));
     } finally { setSaving(false); }
@@ -315,6 +318,9 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
     else toast.error(t("deleteFailed"));
   };
 
+  // Full document navigation, not router.push — the route redirects to the
+  // provider's origin, which a client-side navigation cannot follow.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   const signIn = (id: string) => { window.location.href = `/api/mcp/oauth/start?serverId=${encodeURIComponent(id)}`; };
 
   const signOut = async (id: string) => {
