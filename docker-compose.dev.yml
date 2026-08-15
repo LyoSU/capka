@@ -55,6 +55,19 @@ services:
     # "address already in use".
     ports: !override
       - "127.0.0.1:3000:3000"
+    # The base compose allows 4g, sized for a server running the production
+    # build. In dev on a 16 GB laptop that ceiling is the problem rather than a
+    # safety net: Turbopack's native arena is not returned to the OS once
+    # touched, so `next dev` drifts up to whatever it is allowed and parks
+    # there — measured 3.84 GiB anon against a 4 GiB limit, on an idle app.
+    # Handing it a smaller budget keeps the dev server honest and leaves room
+    # for the rest of the machine.
+    #
+    # 2500m was too tight: the cgroup hit its ceiling 19k times in minutes, and
+    # the resulting direct reclaim burned ~190% CPU while the app sat idle.
+    # Turbopack's native arena alone measured ~1.9 GiB with the heap at 512 MB,
+    # so the real floor is around 2.6 GiB — this leaves headroom above it.
+    mem_limit: 3200m
     volumes:
       - .:/app
       - /app/node_modules
@@ -67,3 +80,13 @@ services:
       # Experimental share-link import — enabled in dev so it can be exercised
       # locally; stays off by default in prod (operators opt in explicitly).
       - CAPKA_SHARE_IMPORT=true
+      # Node sizes V8's heap from the memory it *sees* — the whole OrbStack VM
+      # (7.8 GiB), not this container's 4 GiB cgroup. That lands the default cap
+      # at ~2.05 GiB, and `next dev` will happily drift right up to it: heap sat
+      # at 2051 MB with the app idle, so V8 was running full Mark-Compacts just
+      # to stay under the wall while RSS pinned at 3.7 GiB. Capping it lower
+      # makes V8 collect on its own schedule instead of at the ceiling, and hands
+      # the ~1.5 GiB back to a 16 GB Mac that is already deep in swap.
+      # Turbopack's own memory is native (outside the heap), so mem_limit must
+      # stay comfortably above this number.
+      - NODE_OPTIONS=--max-old-space-size=1024
