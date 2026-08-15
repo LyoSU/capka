@@ -81,11 +81,10 @@ export function PeopleTab({ initialUserId }: { initialUserId?: string | null }) 
   const active = filtered
     .filter((u) => u.status !== "pending")
     .filter((u) => roleFilter === "all" || u.role === roleFilter);
-  // Search is offered as soon as there is anyone to search: it used to appear
-  // only past the seventh member, so on the instance where it was first needed
-  // it had never been there before and read as a new control. The role toggles
-  // keep a threshold — four buttons over three people are noise, not a filter.
-  const showSearch = users.length > 0;
+  // A search field over a list you can take in at a glance is a control with
+  // nothing to do, so both thresholds stay — but search now arrives before the
+  // list outgrows a screen, rather than at the same moment the role filters do.
+  const showSearch = users.length > 5;
   const showFilters = users.length > 6;
   // Long member lists render in pages; the count restarts whenever the search or
   // the role filter changes what "the list" even means.

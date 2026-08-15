@@ -17,7 +17,7 @@ All notable changes to Capka are documented here. Format follows
 
 - Pressing a row in a grouped list (recent chats, starter actions, projects, a project's chats) now darkens it instead of shrinking it, so the row no longer pulls clear of its frame and looks cropped.
 - The new-chat screen drops the repeated chat glyph and the halo behind the logo, and dates recent chats as "today"/"yesterday" instead of four identical dates.
-- Long member lists in Settings → People and Settings → Usage now render 25 at a time with a "Show more" step, and their search fields are visible from the first member instead of appearing past the seventh.
+- Long member lists in Settings → People and Settings → Usage now render 25 at a time with a "Show more" step, and their search fields appear from the sixth member.
 - Person, capability and automation details open as a centred dialog instead of a right-hand panel. The person card is two columns, folds joined/last-seen/Telegram into one line under the name, collapses sessions and history, and pins Suspend/Remove to a footer.
 - Settings → Skills → Permissions leads with the capabilities that carry a rule or an exception; everything on the default moves into a collapsed, searchable, paged list grouped into skills and connectors. Default rows drop the green "Allow" badge, and skills show their description beside the slug.
 

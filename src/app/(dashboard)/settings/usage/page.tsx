@@ -415,7 +415,7 @@ export default function UsagePage() {
               <section className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-sm font-medium">{t("byUser")}</h3>
-                  {data.byUser.length > 1 && (
+                  {data.byUser.length > 5 && (
                     <div className="relative w-44">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                       <Input value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder={t("searchUser")} className="h-8 pl-8 text-xs" />
