@@ -2,7 +2,7 @@ import { type UIMessage } from "ai";
 import {
   Send, Download, Copy, Check, RotateCcw, Pencil,
   ChevronLeft, ChevronRight, GitBranch, X, Lightbulb, Info,
-  MoreHorizontal, ArrowRight,
+  MoreHorizontal, ArrowRight, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -21,6 +21,8 @@ import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { LLM_ERROR_CATEGORIES } from "@/lib/errors/friendly";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
+import { MessageEditor } from "./message-editor";
+import type { FileRef } from "@/lib/constants";
 import { describeStep, type StepDescriptor } from "./steps";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
@@ -879,6 +881,7 @@ function BranchSwitcher({
   );
 }
 
+
 /** Fork from this message into a new chat — explore an alternative path without
  *  disturbing the current conversation. */
 function ForkButton({ messageId, onFork, disabled }: { messageId: string; onFork: (messageId: string) => void; disabled?: boolean }) {
@@ -897,17 +900,13 @@ function ForkButton({ messageId, onFork, disabled }: { messageId: string; onFork
   );
 }
 
-function autoGrow(ta: HTMLTextAreaElement) {
-  ta.style.height = "auto";
-  // scrollHeight covers content + padding but not borders; with border-box that
-  // leaves the box a couple px short (and the last line clipped). Add the border.
-  const borders = ta.offsetHeight - ta.clientHeight;
-  ta.style.height = `${ta.scrollHeight + borders}px`;
+/** Same files, same order? Compared by sandbox name, which is what identifies a
+ *  file to the model — an edit that only reordered nothing shouldn't cost a turn. */
+function sameRefs(a: FileRef[], b?: { name: string; type: string }[]): boolean {
+  const other = b ?? [];
+  return a.length === other.length && a.every((r, i) => r.name === other[i].name);
 }
 
-/** A user message bubble. With `onEdit` it gains an inline editor: click the
- *  pencil to rewrite the message and re-run the conversation from that point
- *  (⌘/Ctrl+Enter saves, Esc cancels) — the familiar ChatGPT gesture. */
 /**
  * The files a user attached to a message, rendered with the same FileCard/FileRow
  * the AI uses for delivered files — visible name, real thumbnail, Quick Look on
@@ -928,8 +927,151 @@ function MessageAttachments({ chatId, files }: { chatId: string; files: { name: 
   );
 }
 
+/**
+ * A message the user has typed but that hasn't been sent yet — it's waiting for
+ * the running reply to finish. Drawn as the real bubble it is about to become,
+ * held at reduced opacity and without the `shadow-panel` that makes a landed
+ * message sit on the surface: in this system depth is what says "this is real",
+ * so removing it (rather than adding a dashed border, which would read as a
+ * developer tool) is what makes it read as not-yet-sent.
+ *
+ * The geometry, the file tiles and the files-only placeholder text are all
+ * deliberately identical to {@link UserBubble}, so when the queue drains nothing
+ * moves — the bubble just solidifies in place.
+ */
+export function QueuedBubble({
+  text, refs, chatId, editing, onCancel, onEdit, onEditingChange,
+}: {
+  text: string;
+  refs: { name: string; type: string }[];
+  chatId: string;
+  /** Owned by the panel, not by this bubble: the drain has to know that an edit
+   *  is open so it doesn't send the message out from under the editor. */
+  editing: boolean;
+  /** Absent while the message is actually being sent: it's already on its way,
+   *  so there is nothing left to cancel or rewrite. */
+  onCancel?: () => void;
+  onEdit?: (next: string, refs: FileRef[]) => void;
+  onEditingChange?: (open: boolean) => void;
+}) {
+  const t = useTranslations("chat");
+  const hasFiles = refs.length > 0;
+  // Exactly what sendMessage will put in the real bubble for a files-only turn,
+  // so the text doesn't change under the user at the moment it materialises.
+  const shown = text || (hasFiles ? t("hook.processFiles") : "");
+
+  if (editing) {
+    return (
+      // Full opacity while editing: you cannot ask someone to type into text
+      // that has been deliberately dimmed. The ghost look returns on save.
+      <div className="flex justify-end px-4 md:px-6 py-4">
+        <div className="w-full max-w-[85%]">
+          <MessageEditor
+            chatId={chatId}
+            initialText={text}
+            initialFiles={refs}
+            onSave={(next, nextRefs) => { onEdit?.(next, nextRefs); onEditingChange?.(false); }}
+            onCancel={() => onEditingChange?.(false)}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group/queued flex animate-message-in justify-end px-4 md:px-6 py-4">
+      <div className="flex max-w-[75%] items-center gap-1.5 lg:max-w-[65%]">
+        {onEdit && (
+          <button
+            type="button"
+            onClick={() => onEditingChange?.(true)}
+            aria-label={t("panel.editQueued")}
+            title={t("panel.editQueued")}
+            className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+        )}
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label={t("panel.cancelQueued")}
+            title={t("panel.cancelQueued")}
+            // Hover is the desktop affordance; touch has no hover, so coarse
+            // pointers get it permanently rather than hiding the only way out.
+            className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+        {/* 65%, not less. Opacity dims the text AND the surface under it, so
+            the two compound: measured against the real bubble's 18.6:1, this
+            text lands at 5.8:1 — still plainly a ghost, but WCAG AA legible.
+            At 55% it read beautifully and scored 4.1:1, which is a fail. */}
+        <div className="flex min-w-0 flex-col items-end opacity-65 transition-opacity duration-200 group-hover/queued:opacity-90 group-focus-within/queued:opacity-90">
+          {hasFiles && <MessageAttachments chatId={chatId} files={refs} />}
+          <div className="inline-block max-w-full rounded-2xl bg-card px-5 py-3 text-[15px] text-card-foreground">
+            {/* The clamp lives on the INNER box: `line-clamp` sets
+                `display:-webkit-box`, which would override the bubble's
+                `inline-block` and stretch it to the full column width instead
+                of hugging its text. Clamped at all because the composer strip
+                this replaced was a single truncated line — an unclamped paste
+                would push the very reply it is queued behind off the screen.
+                The full text shows the moment it's sent. */}
+            <div className="line-clamp-5 whitespace-pre-wrap break-words">{shown}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The one caption under a run of queued messages — what happens next, and the
+ * way out of waiting for it. It belongs to the GROUP, not to any one bubble:
+ * three pending messages share one turn and one explanation, not three.
+ *
+ * Kept outside the dimmed bubble on purpose — this is the app talking, and
+ * inside the ghost it measured 2.5:1 against a 4.5:1 bar.
+ */
+export function QueuedCaption({
+  count, held, onSendNow,
+}: {
+  count: number;
+  /** An editor is open, so the drain is deliberately parked. */
+  held: boolean;
+  /** Absent when there is nothing to interrupt (or when interrupting would be
+   *  wrong — see the panel: a turn awaiting an approval is waiting on the user,
+   *  and cancelling it would throw away the very question being asked). */
+  onSendNow?: () => void;
+}) {
+  const t = useTranslations("chat.panel");
+  return (
+    <div className="flex justify-end gap-2 px-4 md:px-6 pb-4 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        <Clock className="h-3 w-3 shrink-0" />
+        <span>{held ? t("queuedHeld") : t("queuedHint", { count })}</span>
+      </span>
+      {onSendNow && !held && (
+        <button
+          type="button"
+          onClick={onSendNow}
+          title={t("queuedSendNowTitle")}
+          className="rounded-md px-1.5 underline decoration-dotted underline-offset-4 transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          {t("queuedSendNow")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A user message bubble. With `onEdit` it gains an inline editor: the pencil
+ *  opens the shared {@link MessageEditor} — text and files together — and saving
+ *  re-runs the conversation from that point. */
 function UserBubble({
-  text, messageId, timestamp, isTelegram, siblingIndex, siblingCount, chatId, attachedFiles, onEdit, onSwitchBranch, onFork, actionsDisabled,
+  text, messageId, timestamp, isTelegram, siblingIndex, siblingCount, chatId, attachedFiles, onEdit, onSwitchBranch, onFork, actionsDisabled, enter,
 }: {
   text: string;
   messageId: string;
@@ -939,16 +1081,28 @@ function UserBubble({
   siblingCount: number;
   chatId?: string;
   attachedFiles?: { name: string; type: string }[];
-  onEdit?: (messageId: string, newText: string) => void;
+  onEdit?: (messageId: string, newText: string, refs: FileRef[]) => void;
   onSwitchBranch?: (messageId: string, direction: "prev" | "next") => void;
   onFork?: (messageId: string) => void;
   actionsDisabled?: boolean;
+  enter?: boolean;
 }) {
-  const tCommon = useTranslations("common");
   const tMsg = useTranslations("chat.message");
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(text);
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  // Opening and closing the editor changes this message's height, so the reader's
+  // place is handed to the scroll engine rather than left to the browser — the
+  // same treatment a reasoning block's disclosure gets.
+  const anchorDisclosure = useDisclosureAnchor();
+  const editTriggerRef = useRef<HTMLElement | null>(null);
+  const openEditor = (trigger?: HTMLElement | null) => {
+    editTriggerRef.current = trigger ?? null;
+    setEditing(true);
+    anchorDisclosure({ reason: "trigger-press", trigger: trigger ?? undefined });
+  };
+  const closeEditor = () => {
+    setEditing(false);
+    anchorDisclosure({ reason: "trigger-press", trigger: editTriggerRef.current ?? undefined });
+  };
 
   // The edit/fork actions sit hidden until hover on the web; touch has no hover,
   // so a long-press opens a labelled action menu anchored to the message (Base UI
@@ -957,41 +1111,24 @@ function UserBubble({
   const [menuOpen, setMenuOpen] = useState(false);
   const longPress = useLongPress(() => { setMenuOpen(true); haptic("tap"); });
 
-  useEffect(() => {
-    if (!editing) return;
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.focus();
-    ta.setSelectionRange(ta.value.length, ta.value.length);
-    autoGrow(ta);
-  }, [editing]);
-
-  const save = () => {
-    const v = draft.trim();
-    if (v && v !== text) onEdit?.(messageId, v);
-    setEditing(false);
-  };
-  const cancel = () => { setDraft(text); setEditing(false); };
-
   if (editing) {
     return (
       <div className="group/msg flex animate-message-in justify-end px-4 md:px-6 py-4">
         <div className="w-full max-w-[85%]">
-          <textarea
-            ref={taRef}
-            value={draft}
-            onChange={(e) => { setDraft(e.target.value); autoGrow(e.target); }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
-              if (e.key === "Escape") { e.preventDefault(); cancel(); }
+          <MessageEditor
+            chatId={chatId ?? ""}
+            initialText={text}
+            initialFiles={attachedFiles}
+            onSave={(next, refs) => {
+              // Unchanged in both text and files → nothing to re-run. Re-running
+              // would branch the conversation and spend a turn to arrive at the
+              // same question.
+              const same = next === text && sameRefs(refs, attachedFiles);
+              if (!same) onEdit?.(messageId, next, refs);
+              closeEditor();
             }}
-            rows={1}
-            className="w-full resize-none overflow-hidden rounded-2xl bg-card px-4 py-3 text-base shadow-panel focus:outline-none focus:ring-2 focus:ring-primary/40 md:text-[15px]"
+            onCancel={closeEditor}
           />
-          <div className="mt-2 flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={cancel}>{tCommon("cancel")}</Button>
-            <Button size="sm" onClick={save}>{tCommon("save")}</Button>
-          </div>
         </div>
       </div>
     );
@@ -1013,7 +1150,7 @@ function UserBubble({
       label: tMsg("edit"),
       hidden: !onEdit || !text,
       disabled: actionsDisabled,
-      onSelect: () => { setDraft(text); setEditing(true); },
+      onSelect: () => openEditor(),
     },
     {
       key: "fork",
@@ -1027,7 +1164,11 @@ function UserBubble({
 
   return (
     <div
-      className="group/msg flex animate-message-in justify-end px-4 md:px-6 py-4 pointer-coarse:select-none"
+      // `enter === false` for a message that was already on screen as a queued
+      // ghost. The entrance animation starts from opacity 0, so replaying it
+      // there would dip the bubble 0.55 → 0 → 1 at the exact moment it is
+      // supposed to read as solidifying — a blink, not an arrival.
+      className={`group/msg flex justify-end px-4 md:px-6 py-4 pointer-coarse:select-none ${enter === false ? "" : "animate-message-in"}`}
       {...longPress}
     >
       <ActionMenu
@@ -1071,7 +1212,7 @@ function UserBubble({
               <span className="opacity-0 transition group-hover/msg:opacity-100">
                 <button
                   type="button"
-                  onClick={() => { setDraft(text); setEditing(true); }}
+                  onClick={(e) => openEditor(e.currentTarget)}
                   disabled={actionsDisabled}
                   title={tMsg("edit")}
                   aria-label={tMsg("edit")}
@@ -1281,7 +1422,7 @@ interface ChatMessageProps {
   /** Provided only on the latest assistant reply — re-runs the same prompt. */
   onRegenerate?: () => void;
   /** Provided on user messages — replaces the text and re-runs from there. */
-  onEdit?: (messageId: string, newText: string) => void;
+  onEdit?: (messageId: string, newText: string, refs: FileRef[]) => void;
   /** Flip between alternative versions of this message (edits/regenerations). */
   onSwitchBranch?: (messageId: string, direction: "prev" | "next") => void;
   /** Fork the conversation from this message into a new chat. */
@@ -1293,6 +1434,10 @@ interface ChatMessageProps {
    *  so a config change is driven through the same chat turn (works in Telegram
    *  too, where the agent still holds the confirm/undo token in its context). */
   onSend?: (text: string) => void;
+  /** False for a user message that the transcript already showed as a queued
+   *  ghost — suppresses the entrance animation so it solidifies in place
+   *  instead of blinking out and sliding back in. */
+  enter?: boolean;
   /** Same sender as `onSend`, but provided only on the latest assistant reply, so
    *  the "continue" button on a part-way failure can't be offered on a turn the
    *  conversation has already moved past. */
@@ -1322,7 +1467,7 @@ function CompactionDivider({ summary }: { summary: string }) {
   );
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue, enter }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -1358,6 +1503,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
         onSwitchBranch={onSwitchBranch}
         onFork={onFork}
         actionsDisabled={actionsDisabled}
+        enter={enter}
       />
     );
   }

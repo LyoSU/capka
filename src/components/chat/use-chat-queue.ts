@@ -55,6 +55,38 @@ export function readQueue(key: string): QueuedMessage[] {
   }
 }
 
+/**
+ * The queue as the transcript should draw it: the item currently being sent
+ * first, then whatever is still lined up behind it.
+ *
+ * The in-flight item needs holding because the drain removes it from storage
+ * the moment it STARTS (so a reload mid-drain can't re-send it) — several
+ * hundred ms before its real bubble exists. Without this it would vanish from
+ * the transcript and reappear, leaving a hole across the folder-sync push.
+ *
+ * `messageIds` is what closes the hold: the drain passes the queued id straight
+ * through as the message id, so the optimistic bubble carries the SAME id — and
+ * that bubble is inserted synchronously, before the POST. The instant the id
+ * shows up in the transcript the ghost has been replaced by the real thing and
+ * must be dropped, or the same message renders twice for the whole round-trip.
+ *
+ * The `queued` filter guards the other direction: the same chat open in a second
+ * tab can re-observe the item in localStorage while this tab is sending it.
+ */
+export function visibleQueue({
+  queued,
+  sending,
+  messageIds,
+}: {
+  queued: QueuedMessage[];
+  sending: QueuedMessage | null;
+  messageIds: ReadonlySet<string>;
+}): QueuedMessage[] {
+  const held = sending && !messageIds.has(sending.id) ? sending : null;
+  const rest = queued.filter((q) => !messageIds.has(q.id) && q.id !== sending?.id);
+  return held ? [held, ...rest] : rest;
+}
+
 export function useChatQueue(chatId: string) {
   const key = QUEUE_PREFIX + chatId;
 

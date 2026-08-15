@@ -1,13 +1,14 @@
 "use client";
 
-import { useRef, useCallback, useMemo, useEffect, type KeyboardEvent } from "react";
+import { useRef, useEffect, type KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowUp, Info, Loader2, Paperclip, RotateCw, Square, X } from "lucide-react";
+import { ArrowUp, Info, Loader2, Paperclip, Square } from "lucide-react";
 import { ContextMeter } from "@/components/chat/context-meter";
 import { AttachFolderMenu } from "@/components/chat/attach-folder-menu";
 import { useIsMobile, MOBILE_BREAKPOINT } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
-import { BinaryFileThumb, FileTile, SandboxFileTile, type PreviewFile } from "./file-preview";
+import { AttachmentTray } from "@/components/chat/attachment-tray";
+import { useAutoGrow } from "@/components/chat/use-auto-grow";
 import type { FileRef } from "@/lib/constants";
 import type { Modality } from "@/lib/providers/registry";
 import type { useFolderSync } from "@/components/chat/use-folder-sync";
@@ -17,10 +18,10 @@ import type { useFolderSync } from "@/components/chat/use-folder-sync";
  * landing inline in the textarea — same as Claude. Keeps the composer readable
  * when someone dumps a log, a long doc, or a big code block.
  */
-const PASTE_AS_FILE_CHARS = 2000;
+export const PASTE_AS_FILE_CHARS = 2000;
 
 /** Turn a big paste into a named .txt File. Timestamped so repeat pastes don't collide. */
-function pastedTextFile(text: string): File {
+export function pastedTextFile(text: string): File {
   const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "-"); // HH-MM-SS
   return new File([text], `pasted-text-${stamp}.txt`, { type: "text/plain" });
 }
@@ -47,6 +48,10 @@ export function uniquelyNamedPaste(file: File): File {
  * its server `ref`), or `error` (retryable). `file` holds the local bytes for a
  * freshly-staged attachment; it's absent for one restored from a saved draft,
  * where only the `ref` survives and the thumbnail comes from the sandbox.
+ *
+ * `owned` marks a file THIS staging area uploaded, as opposed to one that came
+ * with a message being edited. Only an owned file is deleted from the sandbox
+ * when it's detached: the other kind is still referenced by the transcript.
  */
 export type AttachedFile = {
   id: string;
@@ -55,6 +60,7 @@ export type AttachedFile = {
   type: string;
   file?: File;
   ref?: FileRef;
+  owned?: boolean;
 };
 
 interface ChatInputProps {
@@ -106,39 +112,11 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Thumbnails for locally-staged image attachments (uploading / error), so a
-  // photo is obviously a photo before it lands in the sandbox. Ready chips render
-  // their thumbnail straight from the sandbox instead, so they need no object-URL.
-  const previews = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const af of files) {
-      if (af.file && af.file.type.startsWith("image/")) m.set(af.id, URL.createObjectURL(af.file));
-    }
-    return m;
-  }, [files]);
-  useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
+  // Bounded autogrow, shared with the message editor — it also re-measures on
+  // width changes, which is what a rotation or the sidebar opening does to a box
+  // whose height was computed for a different line count.
+  const resize = useAutoGrow(textareaRef, value);
 
-  const resize = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "0";
-    el.style.height = `${el.scrollHeight}px`;
-    // Only scroll once the content actually outgrows max-height. Below that the
-    // box always fits its text exactly, so `overflow-y-auto` must stay off:
-    // a single line's fractional height (e.g. 15px × 1.625 = 24.375px) rounds
-    // `scrollHeight` down to an integer smaller than the real content, which
-    // otherwise paints a phantom scrollbar in the empty/one-line composer.
-    const max = parseFloat(getComputedStyle(el).maxHeight);
-    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
-  }, []);
-
-  // Keep the textarea height in sync with `value` on EVERY change, not just on
-  // keystrokes. After a send the parent resets `value` to "" programmatically
-  // (and a restored draft sets it on mount) — neither fires the textarea's
-  // onChange, so without this the box stays stuck at its grown-out height.
-  useEffect(() => {
-    resize();
-  }, [value, resize]);
 
   // Land the caret in the composer when a chat opens — DESKTOP ONLY, where the
   // keyboard is physical so focus costs nothing. We never auto-focus on mobile,
@@ -190,16 +168,6 @@ export function ChatInput({
     }
   };
 
-  const removeButton = (af: AttachedFile) => (
-    <button
-      type="button"
-      onClick={() => onRemoveFile(af.id)}
-      className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shadow-sm ring-2 ring-card transition before:absolute before:-inset-2.5 before:content-[''] hover:bg-foreground/80"
-      aria-label={t("remove", { name: af.name })}
-    >
-      <X className="h-3 w-3" />
-    </button>
-  );
 
   return (
     // `data-print="hide"`: an empty input box is the one thing on this screen that
@@ -218,55 +186,15 @@ export function ChatInput({
               real sandbox thumbnail; one still uploading (or failed) shows its local
               preview with a status overlay. Wraps and scrolls so many files never
               push the textarea off-screen. */}
-          {files.length > 0 && (
-            <div className="flex max-h-44 flex-wrap gap-3 overflow-y-auto px-3 pt-3 scrollbar-thin">
-              {files.map((af) => {
-                // Ready & in the sandbox → real thumbnail tile (works for restored
-                // chips too, whose bytes are no longer in memory).
-                if (af.status === "ready" && af.ref) {
-                  const pf: PreviewFile = { path: af.ref.name, name: af.ref.name, chatId };
-                  return <SandboxFileTile key={af.id} file={pf} viewable={[pf]} overlay={removeButton(af)} />;
-                }
-
-                const preview = previews.get(af.id);
-                const thumb = preview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={preview} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <BinaryFileThumb name={af.name} className="h-full w-full" />
-                );
-
-                // Uploading → dim + spinner; error → dim + retry, with a red ring.
-                const overlay =
-                  af.status === "error" ? (
-                    <>
-                      {removeButton(af)}
-                      <button
-                        type="button"
-                        onClick={() => onRetryFile(af.id)}
-                        className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-destructive/25 text-destructive-foreground ring-1 ring-destructive transition hover:bg-destructive/35"
-                        aria-label={t("retryUpload", { name: af.name })}
-                        title={t("uploadFailed", { files: af.name })}
-                      >
-                        <RotateCw className="h-5 w-5" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {removeButton(af)}
-                      <div
-                        aria-hidden
-                        className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-background/55"
-                      >
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                      </div>
-                    </>
-                  );
-
-                return <FileTile key={af.id} thumb={thumb} name={af.name} overlay={overlay} />;
-              })}
-            </div>
-          )}
+          {/* Attached files preview — the same tray both message editors use, so
+              a file being attached looks identical wherever it is attached. */}
+          <AttachmentTray
+            files={files}
+            chatId={chatId}
+            onRemove={onRemoveFile}
+            onRetry={onRetryFile}
+            className="px-3 pt-3"
+          />
 
           {/* Quiet heads-up when the picked model can't read a staged file's
               media type natively. Deliberately understated — muted text, an info

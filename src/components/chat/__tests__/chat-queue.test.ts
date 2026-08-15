@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readQueue, QUEUE_PREFIX, type QueuedMessage } from "../use-chat-queue";
+import { readQueue, visibleQueue, QUEUE_PREFIX, type QueuedMessage } from "../use-chat-queue";
 
 // Minimal localStorage stand-in — the hook only ever touches get/set/removeItem.
 class MemoryStorage {
@@ -53,5 +53,55 @@ describe("readQueue", () => {
   it("falls back to empty on malformed JSON instead of throwing", () => {
     localStorage.setItem(KEY, "{not json");
     expect(readQueue(KEY)).toEqual([]);
+  });
+});
+
+describe("visibleQueue", () => {
+  const msg = (id: string): QueuedMessage => ({ id, text: id, refs: [] });
+
+  it("holds the in-flight item, ahead of what is still queued", () => {
+    // The drain dequeues an item as it STARTS, so without the hold the ghost
+    // disappears for the length of the folder-sync push and the transcript
+    // collapses by one bubble, then grows back.
+    const out = visibleQueue({
+      queued: [msg("b"), msg("c")],
+      sending: msg("a"),
+      messageIds: new Set(),
+    });
+    expect(out.map((m) => m.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("drops the in-flight item the moment its real bubble exists", () => {
+    // sendMessage inserts the optimistic bubble synchronously, BEFORE the POST,
+    // reusing the queued id — so holding until send() resolves would render the
+    // same message twice for the whole round-trip.
+    const out = visibleQueue({
+      queued: [msg("b")],
+      sending: msg("a"),
+      messageIds: new Set(["a"]),
+    });
+    expect(out.map((m) => m.id)).toEqual(["b"]);
+  });
+
+  it("never draws an item twice when a second tab still sees it queued", () => {
+    const out = visibleQueue({
+      queued: [msg("a"), msg("b")],
+      sending: msg("a"),
+      messageIds: new Set(),
+    });
+    expect(out.map((m) => m.id)).toEqual(["a", "b"]);
+  });
+
+  it("drops a queued item that already landed (drained by another tab)", () => {
+    const out = visibleQueue({
+      queued: [msg("a"), msg("b")],
+      sending: null,
+      messageIds: new Set(["a"]),
+    });
+    expect(out.map((m) => m.id)).toEqual(["b"]);
+  });
+
+  it("is empty when nothing is queued or in flight", () => {
+    expect(visibleQueue({ queued: [], sending: null, messageIds: new Set() })).toEqual([]);
   });
 });

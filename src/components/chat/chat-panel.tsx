@@ -17,15 +17,15 @@ function msgText(m: { parts?: { type: string; text?: string }[] }): string {
     .trim();
 }
 
-import { AlertCircle, FolderOpen, RefreshCw, Send, Clock, X, Square } from "lucide-react";
-import { ChatMessage } from "@/components/chat/message";
+import { AlertCircle, FolderOpen, RefreshCw, Send, Square } from "lucide-react";
+import { ChatMessage, QueuedBubble, QueuedCaption } from "@/components/chat/message";
 import { TaskStatus } from "@/components/chat/task-status";
 import { ChatInput } from "@/components/chat/chat-input";
 import { useFolderSync } from "@/components/chat/use-folder-sync";
 import { deriveContextFill } from "@/lib/chat/context/fill";
-import { useComposerAttachments } from "@/components/chat/use-composer-attachments";
+import { useAttachments, DRAFT_FILES_PREFIX } from "@/components/chat/use-attachments";
 import { useChatDraft } from "@/components/chat/use-chat-draft";
-import { useChatQueue } from "@/components/chat/use-chat-queue";
+import { useChatQueue, visibleQueue, type QueuedMessage } from "@/components/chat/use-chat-queue";
 import { useShareImport } from "@/components/chat/use-share-import";
 import { ImportCard } from "@/components/chat/import-card";
 import { SourceGlyph } from "@/components/chat/import-card";
@@ -155,6 +155,14 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     projectId,
   });
 
+  // Messages typed while a reply was streaming wait here and are dispatched one
+  // by one as the chat frees up — held client-side so they can be removed before
+  // they're sent, and drawn in the transcript as ghost bubbles where they will
+  // land. Persisted per-chat to localStorage so the queue survives the
+  // `key={chatId}` remount on a chat switch (the in-memory version was dropped
+  // on the floor). Read this high up because the greeting depends on it.
+  const { queued, setQueued } = useChatQueue(chatId);
+
   // Show the new-chat greeting ONLY for a genuinely fresh chat. `messages` start
   // empty until the hook's history fetch resolves, so `messages.length === 0`
   // alone can't tell a new chat from an existing one mid-load — that conflation
@@ -162,7 +170,9 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // server's authoritative answer (chat.activeLeafId != null), so an existing
   // chat renders the stream shell from first paint; the `messages.length` guard
   // keeps the greeting from lingering after the first send on a truly new chat.
-  const showGreeting = !initialHasHistory && messages.length === 0;
+  // A non-empty queue also ends it: the greeting has no transcript, so a ghost
+  // bubble would have nowhere to render and the message would look swallowed.
+  const showGreeting = !initialHasHistory && messages.length === 0 && queued.length === 0;
 
   // The message that starts the latest turn. A change here means a new turn
   // exists — the scroll engine decides what that means (our send pins it; a turn
@@ -185,7 +195,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // Composer attachments upload eagerly on attach (so send is instant and a
   // retry never re-uploads) and persist their refs per chat — they survive a
   // reload just like the text draft.
-  const attachments = useComposerAttachments({ chatId, ensureChat });
+  const attachments = useAttachments({ chatId, ensureChat, persistKey: DRAFT_FILES_PREFIX + chatId });
 
   // Media modalities among the staged attachments the current model can't read
   // natively — mirrors the server's `findBlindModalities`, but computed here so
@@ -230,9 +240,12 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // wait for. Both are the reader asking for a fresh answer, and both should put
   // the question they asked back on the reading line.
   const handleEdit = useCallback(
-    (id: string, text: string) => {
+    (id: string, text: string, refs: FileRef[]) => {
       scrollActions.armForSend();
-      return editMessage(id, text, model).catch((e) => toast.error(e instanceof Error ? e.message : t("panel.sendFailed")));
+      // `refs` is what the editor settled on, not what the message used to carry:
+      // an edit may have detached a file or attached a new one, and the re-run has
+      // to feed the model the current set.
+      return editMessage(id, text, model, refs).catch((e) => toast.error(e instanceof Error ? e.message : t("panel.sendFailed")));
     },
     [editMessage, model, t, scrollActions],
   );
@@ -291,12 +304,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // Composer text is a per-chat draft persisted to localStorage, so a
   // typed-but-unsent message survives a reload, a closed tab, or a failed send.
   const { draft: input, setDraft: setInput, clearDraft } = useChatDraft(chatId);
-  // Messages typed while a reply is streaming wait here (shown above the
-  // composer, each cancellable) and are dispatched one-by-one as the chat frees
-  // up — held client-side so they can be edited/removed before they're sent.
-  // Persisted per-chat to localStorage so the queue survives the `key={chatId}`
-  // remount on a chat switch (the in-memory version was dropped on the floor).
-  const { queued, setQueued } = useChatQueue(chatId);
 
   // Pasting a public Claude/ChatGPT share link into the composer offers to import
   // that conversation as a fresh chat and continue it here. Detection is free
@@ -390,6 +397,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
       // — and this id rides through the drain into the POST as the message id, so
       // a double-drain (same chat in two tabs) collapses server-side.
       setQueued((q) => [...q, { id: nanoid(), text, refs }]);
+      // The ghost lands at the very end of the transcript, which during a turn is
+      // below the pinned reading line and therefore off screen — the user just
+      // pressed Enter and has to see their message arrive. Mid-stream this hands
+      // the engine the `tail` role (follow the end), not a reader lock.
+      scrollActions.jumpToBottom();
       return;
     }
     // Hold the guard until the POST resolves — by then sendMessage's
@@ -403,30 +415,73 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     }
   };
 
+  // The item the drain is currently sending. It has already been taken out of
+  // localStorage (see below), so without holding it here its ghost would blink
+  // out of the transcript and back in — `visibleQueue` keeps it drawn until the
+  // real bubble carrying the same id exists.
+  const [sending, setSending] = useState<QueuedMessage | null>(null);
+
+  // What the transcript already holds. A ghost is dropped the instant its real
+  // bubble appears: the drain reuses the queued id as the message id, and
+  // sendMessage inserts that bubble synchronously — before the POST — so keying
+  // off ids (not off `send()` resolving) is what keeps the message from being
+  // drawn twice for the length of the round-trip.
+  const messageIds = useMemo(() => new Set(messages.map((m) => m.id)), [messages]);
+
+  // Ids this panel has drawn as a ghost, so the real bubble can skip its
+  // entrance animation and solidify in place instead of blinking. Bounded by how
+  // many messages the user queued in this chat — the same order as the transcript
+  // itself — and dropped entirely on the `key={chatId}` remount.
+  const ghostedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const q of queued) ghostedRef.current.add(q.id);
+    if (sending) ghostedRef.current.add(sending.id);
+  }, [queued, sending]);
+  const ghostGroupRef = useRef<HTMLDivElement>(null);
+
+  // The queued message whose editor is open, if any. It parks the drain: the
+  // reply can finish at any moment, and without this the turn would end mid-edit
+  // and post whatever half-written text happened to be stored. The ref is what
+  // the already-running drain loop reads — its closure was captured before the
+  // editor opened, so the state alone would not reach it.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editingIdRef = useRef<string | null>(null);
+  editingIdRef.current = editingId;
+
   // Drain the queue when the chat frees up: send each queued message as its own
   // message (separate bubbles, just as the user typed them) — the server folds
   // the whole burst into a single reply. Sent sequentially so they chain in
   // order; the ref guards the async gap before isLoading flips.
   useEffect(() => {
     if (!historyLoaded || isLoading || dispatchingRef.current || queued.length === 0) return;
+    // An open editor parks the whole queue, not just the message being edited:
+    // the user is mid-sentence about what they want to say next, and firing the
+    // messages around it would settle that question for them.
+    if (editingId) return;
     const batch = queued;
     dispatchingRef.current = true;
     void (async () => {
       for (const item of batch) {
+        // Re-checked every iteration, not just at the top: a burst takes a
+        // round-trip per message, which is plenty of time to click the pencil on
+        // one still waiting. Stop at this boundary — the rest stay queued and
+        // re-drain once the editor closes.
+        if (editingIdRef.current) break;
         // Dequeue this one as we start it — NOT the whole batch up-front. A reload
         // mid-drain then keeps the not-yet-started items in localStorage (the
         // whole point of persisting the queue), and the stable id keeps the
         // in-flight one idempotent if it raced through to the server.
         setQueued((q) => q.filter((m) => m.id !== item.id));
+        setSending(item);
         const ok = await send(item.text, item.refs, item.id);
         // A hard failure put the text back in the composer; stop the burst rather
         // than hammering a failing server — the rest stay queued and re-drain when
         // the chat is free, one attempt each (no retry loop: each is dequeued).
         if (!ok) break;
       }
-    })().finally(() => { dispatchingRef.current = false; });
+    })().finally(() => { dispatchingRef.current = false; setSending(null); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, queued, historyLoaded]);
+  }, [isLoading, queued, historyLoaded, editingId]);
 
   const [filesOpen, setFilesOpen] = useState(false);
 
@@ -573,29 +628,54 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
     />
   );
 
-  // Pending messages waiting their turn, shown just above the composer. The ×
-  // removes one before it's sent; the clock makes clear it runs later.
-  const queuedEl = queued.length > 0 ? (
-    <div className="mx-auto mb-2 flex max-w-3xl flex-col gap-1.5 px-4 md:px-6 lg:max-w-4xl">
-      {queued.map((q) => (
-        <div
-          key={q.id}
-          className="flex items-center gap-2 rounded-xl bg-card px-3 py-1.5 text-sm shadow-raised"
-        >
-          <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate text-foreground/90">
-            {q.text || t("panel.queuedFiles", { count: q.refs.length })}
-          </span>
-          <button
-            type="button"
-            onClick={() => setQueued((qq) => qq.filter((x) => x.id !== q.id))}
-            aria-label={t("panel.cancelQueued")}
-            className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ))}
+  // Pending messages, drawn at the tail of the transcript exactly where they
+  // will land — real-looking but held translucent until they're actually sent.
+  const ghosts = visibleQueue({ sending, queued, messageIds });
+  const ghostsEl = ghosts.length > 0 ? (
+    // `tabIndex={-1}`: removing a ghost unmounts the × that had focus, which
+    // would drop the caret to <body> and lose a keyboard user's place. The group
+    // takes the focus instead, next to whatever is left of the queue.
+    // `role="group"` because an aria-label on a bare div has no role to attach to
+    // and is dropped — the label is the whole point of focusing here.
+    <div ref={ghostGroupRef} tabIndex={-1} role="group" aria-label={t("panel.queuedPending")} className="focus:outline-none">
+      {ghosts.map((q) => {
+        // No way back once it's on the wire — the drain has already handed this
+        // one to the server, so it gets neither pencil nor ×.
+        const onWire = q.id === sending?.id;
+        return (
+          <QueuedBubble
+            key={q.id}
+            text={q.text}
+            refs={q.refs}
+            chatId={chatId}
+            editing={editingId === q.id}
+            onEditingChange={onWire ? undefined : (open) => setEditingId(open ? q.id : null)}
+            onEdit={onWire ? undefined : (next, nextRefs) => {
+              // Both halves, not just the text — the editor can detach a file or
+              // attach a new one, and dropping `refs` here would silently send
+              // the message with the files the user just changed.
+              // The id is deliberately kept: it's what makes the send idempotent
+              // and what ties this ghost to the bubble it becomes.
+              setQueued((qq) => qq.map((x) => (x.id === q.id ? { ...x, text: next, refs: nextRefs } : x)));
+            }}
+            onCancel={onWire ? undefined : () => {
+              setQueued((qq) => qq.filter((x) => x.id !== q.id));
+              if (editingId === q.id) setEditingId(null);
+              ghostGroupRef.current?.focus();
+            }}
+          />
+        );
+      })}
+      <QueuedCaption
+        count={ghosts.length}
+        held={editingId !== null}
+        // Only offered against a turn that is genuinely streaming. Two holds
+        // must NOT be interruptible: `awaitingInput` is a turn suspended on the
+        // user's own approval or answer — cancelling it throws away the question
+        // — and `!historyLoaded` means this client has no conversation to send
+        // yet, so "now" would reach the model with an empty context.
+        onSendNow={isLoading && !awaitingInput && historyLoaded && !readOnly ? () => { void stop(); } : undefined}
+      />
     </div>
   ) : null;
 
@@ -766,6 +846,9 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                       // Same gate as regenerate: continuing is only meaningful for
                       // the newest reply, since anything later has already moved on.
                       onContinue={i === lastAssistantIndex && !readOnly ? handleSendAsUser : undefined}
+                      // Already seen as a ghost — let it solidify where it stands
+                      // rather than replaying an entrance from opacity 0.
+                      enter={!ghostedRef.current.has(message.id)}
                     />
                   </div>
                 );
@@ -792,6 +875,11 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   </div>
                 ) : null;
               })()}
+              {/* Messages the user typed while this turn was running. They sit
+                  after the running indicator because that is where they belong in
+                  time — and INSIDE the content, above `contentEndRef`, so
+                  "scroll to the end" lands on them rather than stopping short. */}
+              {ghostsEl}
               {/* End of real content (used to detect/scroll to the latest), then
                   the spacer that lets the latest turn rise to the top. */}
               <div ref={scroll.contentEndRef} />
@@ -874,8 +962,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
             // Lift the composer above the on-screen keyboard (iOS; ~0 elsewhere).
             style={{ transform: "translateY(calc(-1 * var(--kb, 0px)))" }}
           >
-            {/* The composer, queue and error banner are the genuinely
-                interactive part of this otherwise click-through block. */}
+            {/* The composer and error banner are the genuinely interactive part
+                of this otherwise click-through block. */}
             <div className="pointer-events-auto">
               {error && !lastFailed && (
                 <div className="mx-auto max-w-3xl lg:max-w-4xl px-4 md:px-6 pb-2">
@@ -895,7 +983,6 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 </div>
               )}
               {importCardEl}
-              {queuedEl}
               {inputEl}
             </div>
           </div>

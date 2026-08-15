@@ -12,7 +12,14 @@ import { readFileSync } from "node:fs";
  */
 const HOOK = "src/components/chat/use-chat-scroll.ts";
 const PANEL = "src/components/chat/chat-panel.tsx";
-const TRANSCRIPT = [PANEL, "src/components/chat/message.tsx", "src/components/chat/chat-nav.tsx"];
+const TRANSCRIPT = [
+  PANEL,
+  "src/components/chat/message.tsx",
+  "src/components/chat/chat-nav.tsx",
+  // Opening an editor changes the transcript's height and sits inside it, which
+  // is exactly the shape of the four writers this guard was put up against.
+  "src/components/chat/message-editor.tsx",
+];
 
 describe("one writer", () => {
   it("nothing but the scroll engine moves the transcript", () => {

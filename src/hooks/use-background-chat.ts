@@ -742,17 +742,23 @@ export function useBackgroundChat({
   }, [rerun]);
 
   // Edit: replace a user message's text and re-run from there.
-  const editMessage = useCallback(async (messageId: string, newText: string, model?: string) => {
+  const editMessage = useCallback(async (messageId: string, newText: string, model?: string, files?: FileRef[]) => {
     const text = newText.trim();
-    if (!text) return;
     const msgs = msgRef.current;
     const idx = msgs.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
     const history = msgs.slice(0, idx);
-    // Editing rewrites the text but keeps whatever the user had attached — carry
-    // the refs into the new message's metadata (so the bubble shows thumbnails
-    // optimistically) and through rerun (so the server re-persists + re-feeds them).
-    const attachedFiles = (msgs[idx].metadata as { attachedFiles?: FileRef[] } | undefined)?.attachedFiles;
+    // An edit settles BOTH halves of the message. `files` is what the editor
+    // ended on — including "none left", which is why an explicit array has to
+    // win over the old metadata rather than being merged with it. Without an
+    // editor supplying one (a caller that only rewrites text) the message keeps
+    // what it had. The refs ride in metadata so the bubble shows its thumbnails
+    // optimistically, and through rerun so the server re-persists and re-feeds
+    // them to the model.
+    const attachedFiles = files ?? (msgs[idx].metadata as { attachedFiles?: FileRef[] } | undefined)?.attachedFiles;
+    // Nothing to say and nothing to show: an empty turn would burn a reply on a
+    // blank prompt.
+    if (!text && !attachedFiles?.length) return;
     const edited: Message = {
       id: nanoid(),
       role: "user",

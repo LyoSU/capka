@@ -6,6 +6,19 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A message sent while a reply is still running now appears in the chat right away, translucent and where it will land, instead of as a one-line strip above the composer. Each can be edited or cancelled before it goes, and "Send now" stops the running reply and sends the queue immediately.
+- Editing a message now edits its attachments too — remove one, add another, paste a file — in the composer, in a sent message and in one still queued, from the same editor.
+
+### Fixed
+
+- A file detached while it was still uploading no longer stays in the workspace, where the file browser and the model both still saw it.
+- A message editor no longer clips its own last line when the width changes without typing (rotating a phone, opening the sidebar), and a long paste no longer grows the box past the screen with its buttons below the fold.
+
+- A failed turn is no longer re-streamed three times because its payload happened to contain a number between 500 and 529 — retry now reads the response status, and falls back to the message text only when the provider sends none.
+- A tool call the provider mangled (argument fragments of parallel calls merged into one unparseable string) fails immediately instead of retrying the whole prompt three times.
+
 ## [0.23.0] - 2026-08-14
 
 ### Changed
