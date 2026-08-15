@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Markdown tables in a reply scroll edge to edge on a phone instead of inside a narrow inset box, and carry a shadow on whichever side still has content off-screen; the frame around them is gone on every screen size.
 - Model and icon pickers now sit on the app's field scale, so forms holding them (Add provider, connection rows, project defaults) line up with their own inputs.
 - Builds no longer reach out to Google Fonts: Onest and Lora ship in the repo (OFL-1.1), so an air-gapped or slow-egress build box works unchanged.
 - Upgraded to Next.js 16.3, which evicts Turbopack's in-memory cache during long `next dev` sessions instead of growing without bound.

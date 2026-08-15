@@ -895,12 +895,48 @@
   padding: 0;
   margin: 0.75rem 0;
 }
+/* The horizontal scroller Streamdown puts between the wrapper and the table.
+   It carries no data-attribute of its own, so it's addressed positionally: the
+   wrapper's children are an optional controls row and then this scroller, which
+   is therefore always last. (Deliberately not `:has(> [data-streamdown=table])`
+   — Tailwind v4 / Lightning CSS drops top-level rules whose selector nests a
+   child combinator inside a functional pseudo-class.) */
+[data-streamdown="table-wrapper"] > :last-child {
+  /* Full bleed on a phone: `--table-bleed` is set on the assistant message to
+     the exact sum of the gutters between the table and the screen edge (0
+     everywhere else, so changelog and file previews are untouched), and pulling
+     the box out by it lands the scroll strip on the edge. The first column
+     stays put because the inset moves onto the edge CELLS below — which also
+     runs the row rules edge to edge, and, unlike a padding-inline-end on a
+     horizontal scroller, reliably survives into the scrollable overflow. */
+  margin-inline: calc(-1 * var(--table-bleed, 0px));
+  /* Streamdown's rounded border, dropped: at full bleed it would butt into the
+     screen edge mid-radius, and a framed box inside the already-flattened
+     wrapper is the card-in-a-card this file removes from code blocks too. The
+     header band and row rules carry the structure. */
+  border: none;
+  border-radius: 0;
+  /* Without this a horizontal swipe over the table chains into the page — on
+     iOS that is the back gesture firing mid-scroll. */
+  overscroll-behavior-inline: contain;
+  /* Scrolling shadows, no JS and no measuring: the two `local` layers are
+     opaque covers that travel WITH the content and park exactly over a shadow
+     while that edge is at rest; the two `scroll` layers are the shadows,
+     pinned to the box. So a hint appears only on the side that still has
+     content, and fades out as that side runs out. */
+  background:
+    linear-gradient(to right, var(--background) 40%, transparent) left / 2rem 100% no-repeat local,
+    linear-gradient(to left, var(--background) 40%, transparent) right / 2rem 100% no-repeat local,
+    linear-gradient(to right, color-mix(in oklab, var(--foreground) 14%, transparent), transparent) left / 1.25rem 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in oklab, var(--foreground) 14%, transparent), transparent) right / 1.25rem 100% no-repeat scroll,
+    var(--background);
+}
 [data-streamdown="table"] {
-  /* max-content + min-width:100%: a short table fills the message width, a wide
-     one keeps its natural width and overflows the wrapper — which already has
-     overflow-x-auto from Streamdown — so it scrolls horizontally on a narrow
-     screen instead of crushing every column to fit the bubble. `width:100%`
-     (the old value) forced the squish. */
+  /* max-content + min-width:100%: a short table fills the scroller's width, a
+     wide one keeps its natural width and overflows it — the scroller above
+     already has overflow-x-auto from Streamdown — so it scrolls horizontally on
+     a narrow screen instead of crushing every column to fit the bubble.
+     `width:100%` (the old value) forced the squish. */
   width: max-content;
   min-width: 100%;
   font-size: 0.8125rem;
@@ -914,6 +950,21 @@
      cells it shatters values mid-word under width pressure. Cells size to their
      content — the table scrolls instead of the words breaking. */
   overflow-wrap: normal;
+}
+/* The bleed, given back as cell padding: the strip reaches the screen edge but
+   the first column starts on the answer's own text edge — and the last column
+   keeps that much room past its content once you scroll to the end. The edge
+   cells drop the 0.75rem they'd otherwise carry: that inset only ever made
+   sense against the frame removed above, and without it the first column would
+   sit 12px in from the paragraph over it for no visible reason. Between columns
+   the padding stays. */
+[data-streamdown="table-header-cell"]:first-child,
+[data-streamdown="table-cell"]:first-child {
+  padding-inline-start: var(--table-bleed, 0px);
+}
+[data-streamdown="table-header-cell"]:last-child,
+[data-streamdown="table-cell"]:last-child {
+  padding-inline-end: var(--table-bleed, 0px);
 }
 [data-streamdown="table-header-cell"] {
   font-weight: 600;

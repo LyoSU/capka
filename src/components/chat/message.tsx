@@ -1571,7 +1571,12 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
   }
 
   return (
-    <div className="group/msg px-4 md:px-6 py-4">
+    // `--table-bleed` is this element's own horizontal padding plus the list's
+    // (px-2 in chat-panel) — the full distance from an answer's text to the
+    // screen edge. A markdown table's scroll strip pulls itself out by exactly
+    // that (globals.css) so it runs edge to edge on a phone. Zeroed from md up,
+    // where the column is centred and that margin is deliberate empty space.
+    <div className="group/msg px-4 md:px-6 py-4 [--table-bleed:1.5rem] md:[--table-bleed:0px]">
       <div className="max-w-none">
         {groups.length > 0 ? (
           groups.map((g, gi) => {
