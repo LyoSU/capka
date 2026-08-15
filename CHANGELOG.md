@@ -15,6 +15,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- `.env.example` now states the sandbox defaults the code actually uses — `SANDBOX_MEMORY_MB` 512 (was documented as 1024), `MAX_SESSIONS_PER_USER` 5 (was 2), `GC_GRACE_MS` 1 hour (was 7 days) — and documents `SANDBOX_CPUS`, which was missing. Re-check host capacity planning done against the old figures.
 - The automation editor's schedule row no longer puts the "Time" label beside its picker with the fields on mismatched baselines.
 
 ### Security
