@@ -15,8 +15,16 @@ All notable changes to Capka are documented here. Format follows
 
 - A file detached while it was still uploading no longer stays in the workspace, where the file browser and the model both still saw it.
 - A message editor no longer clips its own last line when the width changes without typing (rotating a phone, opening the sidebar), and a long paste no longer grows the box past the screen with its buttons below the fold.
+- `manage skill add {repo}` no longer publishes a catalog to the whole organization: the marketplace row it creates as plumbing is marked `synthetic` and left out of Browse. Adds `plugin_marketplaces.synthetic` (migration applies itself at boot).
+- A marketplace apply now reports a genuine write failure as a failure instead of as a stale review, and a stale one carries the full review it was measured against.
+- `skill add {repo}` survives a restart or a second replica between the review card and the apply — the reviewed commit is durable, not held in process memory.
+- A tool call whose arguments arrive as several JSON objects run together is salvaged instead of failing the step on a parse error.
 
-- A failed turn is no longer re-streamed three times because its payload happened to contain a number between 500 and 529 — retry now reads the response status, and falls back to the message text only when the provider sends none.
+### Security
+
+- A hostname resolving into the second standard NAT64 prefix (`64:ff9b:1::/48`, RFC 8215) no longer bypasses the SSRF guard — an AAAA record in that range reached the cloud metadata service. Public IPv4 behind NAT64 still resolves.
+
+- A failed turn is no longer re-streamed three times because its payload happened to contain a number between 500 and 529 — retry now reads the response status, and falls back to the message text only when the provider sends none. Rate limits (429) are still retried.
 - A tool call the provider mangled (argument fragments of parallel calls merged into one unparseable string) fails immediately instead of retrying the whole prompt three times.
 
 ## [0.23.0] - 2026-08-14
