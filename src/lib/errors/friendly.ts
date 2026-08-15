@@ -294,15 +294,77 @@ export function isContextOverflowError(raw: unknown): boolean {
 }
 
 /**
+ * The gateway mangled the tool call itself — e.g. it merged the argument deltas
+ * of two PARALLEL calls into one buffer, so the JSON never parses. Deterministic
+ * by nature: the same request rebuilds the same broken string, and each retry
+ * pays for the whole prompt again. Never transient.
+ */
+const CORRUPT_TOOL_CALL =
+  /invalid arguments for (function|tool)|(could not|failed to|unable to) parse[^.]{0,24}(tool|function)/i;
+
+/**
+ * The HTTP status carried by the error OBJECT (AI SDK's `APICallError.statusCode`;
+ * some gateways nest it as `status`). Authoritative in a way the message text is
+ * NOT — see isTransientError.
+ */
+function httpStatus(raw: unknown): number | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { statusCode, status } = raw as Record<string, unknown>;
+  const n = typeof statusCode === "number" ? statusCode : typeof status === "number" ? status : undefined;
+  return n !== undefined && n >= 100 && n < 600 ? n : undefined;
+}
+
+/**
+ * Does this HTTP status earn a re-stream?
+ *
+ * Scoped to exactly what was retried before this function existed — 5xx and rate
+ * limits — because the change that introduced it was about not TRUSTING digits
+ * found in message text, and narrowing what gets retried is a separate decision
+ * with its own cost. Every "yes" here is a full prompt replay plus ~1s of backoff,
+ * up to MAX_RECOVERIES times.
+ *
+ * 429 is here, not because retrying a rate limit after a flat 1s is ideal — it
+ * can deepen the limit rather than clear it — but because it is what the previous
+ * behaviour did via `rate_limited`, and this check runs BEFORE that branch: left
+ * out, it would silently stop retrying the single most common transient failure a
+ * provider produces. Pairing it with Retry-After is the improvement worth making,
+ * and it belongs to the backoff, not here.
+ *
+ * The rest stay out deliberately: 408/425 usually repeat under the load that
+ * caused them, 409/423 are contention that a blind replay does not resolve, and a
+ * gateway reporting its own failure as 400 cannot be told apart from a genuinely
+ * malformed request.
+ */
+function isTransientStatus(status: number): boolean {
+  return status >= 500 || status === 429;
+}
+
+/**
  * A provider hiccup worth re-streaming (continuation), vs. a fatal config/auth
- * error re-streaming can't fix. classifyLLMError has no explicit 5xx rule (they
- * fall to "unknown"), so server-error shapes are matched directly here.
+ * error re-streaming can't fix.
+ *
+ * Order is the whole point. Everything below the status check reads TEXT, and the
+ * text of a provider error includes the request payload — a turn that wrote an
+ * HTML file shipped `wght@400;500;600;700` inside the message, which the 5xx regex
+ * read as a server error and re-streamed three times. So: the structured status
+ * wins when it exists, and the regex survives only as the fallback for providers
+ * that answer 200 and put the failure in a stream event.
  */
 export function isTransientError(raw: unknown): boolean {
+  const detail = errorText(raw);
+  if (CORRUPT_TOOL_CALL.test(detail)) return false;
+
+  const status = httpStatus(raw);
+  if (status !== undefined) return isTransientStatus(status);
+
   const { category } = classifyLLMError(raw);
   if (category === "network" || category === "rate_limited") return true;
-  return /\b(50\d|51\d|52\d|internal server error|bad gateway|service unavailable|temporarily unavailable|server error)\b/i.test(
-    errorText(raw),
+  // A bare three-digit number is NOT evidence — the detail carries the payload,
+  // where 500..529 shows up as a font weight, a price, or a gram count. The digits
+  // count only next to something that makes them a status; the named conditions
+  // stand on their own.
+  return /\b(?:status(?:\s*code)?|code|http|error)\W{0,4}(?:50\d|51\d|52\d)\b|\b(?:50\d|51\d|52\d)\s+(?:internal|bad gateway|service unavailable|server error)|\b(?:internal server error|bad gateway|service unavailable|temporarily unavailable|server error)\b/i.test(
+    detail,
   );
 }
 
