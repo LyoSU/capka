@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-15
+
 ### Changed
 
 - A message sent while a reply is still running now appears in the chat right away, translucent and where it will land, instead of as a one-line strip above the composer. Each can be edited or cancelled before it goes, and "Send now" stops the running reply and sends the queue immediately.
