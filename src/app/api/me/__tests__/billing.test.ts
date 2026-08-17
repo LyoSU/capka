@@ -49,7 +49,7 @@ const status = (blocked = false) => ({
   windows: [
     { window: "h5" as const, committed: 1, reserved: 0, used: 1, limit: 10, pct: 10 },
     { window: "d7" as const, committed: 1, reserved: 0, used: 1, limit: null, pct: 0 },
-    { window: "d30" as const, committed: 1, reserved: 0, used: 1, limit: null, pct: 0 },
+    { window: "m1" as const, committed: 1, reserved: 0, used: 1, limit: null, pct: 0 },
   ],
   blocked,
   blockedWindow: null,

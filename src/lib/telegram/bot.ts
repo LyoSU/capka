@@ -215,9 +215,11 @@ async function ingest(ctx: Context, text: string, files: TgFile[]): Promise<void
   // runner reconciles it to the real cost, or it's released if the turn folds.
   // Gated before any file download so a blocked user wastes no work.
   const tgTaskId = nanoid();
-  const { isShared: tgShared, modelId: tgModelId, provider: tgProvider } = await resolveUserModelInfo(link.userId, chat.model ?? undefined);
+  const { isShared: tgShared, modelId: tgModelId, provider: tgProvider, configId: tgConfigId } =
+    await resolveUserModelInfo(link.userId, chat.model ?? undefined);
   const reservation = await reserveBudget({
     userId: link.userId, taskId: tgTaskId, onSharedKey: tgShared, modelId: tgModelId, provider: tgProvider,
+    configId: tgConfigId,
   });
   if (!reservation.allowed) {
     await reply(ctx, "budgetReached");

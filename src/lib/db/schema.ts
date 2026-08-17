@@ -254,6 +254,12 @@ export const usage = pgTable("usage", {
   // user-owned table; the row is history that dies with the user.
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   provider: text("provider").notNull(),
+  // WHICH connection spent it. `provider` is only the kind (litellm / azure / …),
+  // so two configs of the same kind — two proxies, two departments' keys — are
+  // indistinguishable without this. set null (not cascade): the spend is history
+  // and must outlive the connection being disconnected; the breakdown just shows
+  // it as unattributed. Null is also every row written before this column existed.
+  configId: text("config_id").references(() => providerConfigs.id, { onDelete: "set null" }),
   model: text("model").notNull(),
   inputTokens: integer("input_tokens").default(0),
   outputTokens: integer("output_tokens").default(0),
@@ -274,6 +280,8 @@ export const usage = pgTable("usage", {
 }, (t) => [
   index("idx_usage_user_created").on(t.userId, t.createdAt),
   index("idx_usage_model").on(t.model),
+  // The admin "spend by connection" breakdown: group by config within a period.
+  index("idx_usage_config_created").on(t.configId, t.createdAt),
   // Reconcile/release look a hold up by task id; keep that lookup cheap.
   index("idx_usage_task_pending").on(t.taskId, t.pending),
   // At most ONE outstanding hold per task. reconcileUsage settles holds by task id,

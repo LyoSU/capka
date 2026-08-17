@@ -2,7 +2,7 @@ import { sql, gte, lt, and, desc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { requireAdmin, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { usage, users, messages, chats, projects, tiers } from "@/lib/db/schema";
+import { usage, users, messages, chats, projects, tiers, providerConfigs } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
 import { getDefaultTier } from "@/lib/billing/limits";
 import { computeAttention, type AttentionMember } from "@/lib/usage/attention";
@@ -43,6 +43,7 @@ export const GET = apiHandler(async (req: Request) => {
   const fUser = clean(url.searchParams.get("userId"));
   const fModel = clean(url.searchParams.get("model"));
   const fProject = clean(url.searchParams.get("projectId"));
+  const fConfig = clean(url.searchParams.get("configId"));
   const rawChannel = clean(url.searchParams.get("channel"));
   const fChannel = rawChannel === "web" || rawChannel === "telegram" || rawChannel === "automation" ? rawChannel : null;
 
@@ -76,6 +77,7 @@ export const GET = apiHandler(async (req: Request) => {
     base,
     fUser ? eq(usage.userId, fUser) : undefined,
     fModel ? eq(usage.model, fModel) : undefined,
+    fConfig ? eq(usage.configId, fConfig) : undefined,
     dimSubquery,
   );
   const inWindow = and(gte(usage.createdAt, since), usageFilters);
@@ -144,6 +146,7 @@ export const GET = apiHandler(async (req: Request) => {
     byUser,
     recent,
     byProject,
+    byConnection,
     byChannel,
     turnRows,
     prevTurnRows,
@@ -154,11 +157,12 @@ export const GET = apiHandler(async (req: Request) => {
     // popover always offers the full set).
     optProjects,
     optModels,
+    optConnections,
     // Attention inputs (instance-wide, independent of the ad-hoc filters AND the
     // key-scope toggle — an alert must not vanish because of what's on screen).
     allUsers,
     allTiers,
-    sharedSpend30d,
+    sharedSpendMonth,
     lastTurnAll,
     attnSpendRow,
     attnTurnRows,
@@ -213,6 +217,18 @@ export const GET = apiHandler(async (req: Request) => {
       .where(inWindow)
       .groupBy(chats.projectId, projects.name)
       .orderBy(desc(cost)),
+    // Spend by CONNECTION. `provider` alone can't tell two configs of the same kind
+    // apart (two LiteLLM proxies, two Azure keys), and that is exactly the question
+    // "which key ran up this bill" asks. Rows whose connection was deleted — or that
+    // predate the column — carry a null id and group as unattributed; the label is
+    // resolved in the UI, which owns the copy.
+    db
+      .select({ configId: usage.configId, label: providerConfigs.label, provider: providerConfigs.provider, cost, calls })
+      .from(usage)
+      .leftJoin(providerConfigs, eq(providerConfigs.id, usage.configId))
+      .where(inWindow)
+      .groupBy(usage.configId, providerConfigs.label, providerConfigs.provider)
+      .orderBy(desc(cost)),
     // Spend by channel = platform of the turn's parent user message.
     db
       .select({ channel: sql<string>`coalesce(${um.platform}, 'web')`, cost, calls })
@@ -252,13 +268,21 @@ export const GET = apiHandler(async (req: Request) => {
       .orderBy(projects.name),
     // Models with spend in the period + scope, for the filter popover (unfiltered).
     db.selectDistinct({ model: usage.model }).from(usage).where(and(gte(usage.createdAt, since), base)).orderBy(usage.model),
+    // Connections with spend in the period + scope, for the filter popover.
+    db
+      .selectDistinct({ id: usage.configId, label: providerConfigs.label, provider: providerConfigs.provider })
+      .from(usage)
+      .leftJoin(providerConfigs, eq(providerConfigs.id, usage.configId))
+      .where(and(gte(usage.createdAt, since), base)),
     // ── Attention: instance-wide, no ad-hoc filters. ──
     db.select({ id: users.id, name: users.name, status: users.status, tierId: users.tierId, createdAt: users.createdAt }).from(users),
     db.select({ id: tiers.id, limitMonth: tiers.limitMonth }).from(tiers),
+    // Calendar month, matching the window the monthly cap is enforced over — an
+    // alert about someone's month must count the same spend the gate counts.
     db
       .select({ userId: usage.userId, spend: sql<number>`coalesce(sum(${usage.costUsd}), 0)::float8` })
       .from(usage)
-      .where(and(eq(usage.pending, false), eq(usage.onSharedKey, true), sql`${usage.createdAt} >= now() - interval '30 days'`))
+      .where(and(eq(usage.pending, false), eq(usage.onSharedKey, true), sql`${usage.createdAt} >= date_trunc('month', now())`))
       .groupBy(usage.userId),
     db
       .select({ userId: chats.userId, lastAt: sql<string>`max(${am.createdAt})` })
@@ -293,14 +317,14 @@ export const GET = apiHandler(async (req: Request) => {
   // the default tier), 30-day shared-key spend, and last-ever turn timestamp.
   const tierCap = new Map(allTiers.map((t) => [t.id, t.limitMonth == null ? null : Number(t.limitMonth)]));
   const defaultCap = defaultTier.limitMonth == null ? null : Number(defaultTier.limitMonth);
-  const spendMap = new Map(sharedSpend30d.map((r) => [r.userId, Number(r.spend)]));
+  const spendMap = new Map(sharedSpendMonth.map((r) => [r.userId, Number(r.spend)]));
   const lastMap = new Map(lastTurnAll.map((r) => [r.userId, r.lastAt]));
   const members: AttentionMember[] = allUsers.map((u) => ({
     userId: u.id,
     name: u.name,
     status: u.status,
     monthCap: u.tierId && tierCap.has(u.tierId) ? tierCap.get(u.tierId)! : defaultCap,
-    sharedSpend30d: spendMap.get(u.id) ?? 0,
+    sharedSpendMonth: spendMap.get(u.id) ?? 0,
     lastTurnAt: lastMap.get(u.id) ?? null,
     createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : null,
   }));
@@ -321,7 +345,7 @@ export const GET = apiHandler(async (req: Request) => {
   return Response.json({
     days,
     scope,
-    filters: { userId: fUser, model: fModel, projectId: fProject, channel: fChannel },
+    filters: { userId: fUser, model: fModel, projectId: fProject, channel: fChannel, configId: fConfig },
     totals,
     prev,
     series,
@@ -329,6 +353,7 @@ export const GET = apiHandler(async (req: Request) => {
     byUser,
     recent,
     byProject,
+    byConnection,
     byChannel,
     turns,
     prevTurns,
@@ -341,6 +366,11 @@ export const GET = apiHandler(async (req: Request) => {
       members: allUsers.map((u) => ({ id: u.id, name: u.name })),
       projects: optProjects.filter((p) => p.id).map((p) => ({ id: p.id as string, name: p.name })),
       models: optModels.map((m) => m.model).filter(Boolean),
+      // Only real connections are selectable; the unattributed bucket is a
+      // breakdown row, not something to filter down to.
+      connections: optConnections
+        .filter((c) => c.id)
+        .map((c) => ({ id: c.id as string, label: c.label, provider: c.provider })),
     },
   });
 });

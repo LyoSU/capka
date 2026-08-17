@@ -842,7 +842,7 @@
       "usageTitle": "Використання",
       "window5h": "Останні 5 год",
       "window7d": "Останні 7 днів",
-      "window30d": "Останні 30 днів",
+      "windowMonth": "Цього місяця",
       "turnsCompleted": "Завершено",
       "turnsFailed": "Помилок",
       "topModels": "Топ моделей",
@@ -969,7 +969,7 @@
       "window": {
         "h5": "За 5 годин",
         "d7": "За 7 днів",
-        "d30": "За 30 днів"
+        "m1": "Цього місяця"
       },
       "turns30d": "За останні 30 днів у вас {turns, plural, one {# звернення} few {# звернення} many {# звернень} other {# звернення}} до асистента."
     },
@@ -1003,7 +1003,7 @@
         "window": {
           "h5": "За 5 годин",
           "d7": "За 7 днів",
-          "d30": "За 30 днів"
+          "m1": "Цього місяця"
         }
       },
       "budget": {
@@ -1104,6 +1104,7 @@
       "filterMember": "Учасник",
       "filterModel": "Модель",
       "filterProject": "Проєкт",
+      "filterConnection": "Конекція",
       "filterChannel": "Канал",
       "clearFilters": "Скинути всі",
       "channel": {
@@ -1129,7 +1130,10 @@
       "byUser": "За учасниками",
       "byProject": "За проєктами",
       "byProjectHint": "За поточним проєктом чату.",
+      "byConnection": "За конекцією",
+      "byConnectionHint": "Через яке підключення провайдера пройшли витрати.",
       "noProject": "Без проєкту",
+      "noConnection": "Без атрибуції",
       "byChannel": "За каналами",
       "callsN": "{count, plural, one {# запит} few {# запити} many {# запитів} other {# запиту}}",
       "userTurns": "{count, plural, one {# хід} few {# ходи} many {# ходів} other {# ходу}}",

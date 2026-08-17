@@ -102,7 +102,8 @@ export const POST = apiHandler(async (req: Request) => {
 
   // Validate the provider/model up front so the user gets immediate feedback
   // instead of a task that fails in the background. The worker re-resolves it.
-  const { isShared, modelId: resolvedModelId, provider: resolvedProvider } = await resolveUserModelInfo(userId, effectiveModel);
+  const { isShared, modelId: resolvedModelId, provider: resolvedProvider, configId: resolvedConfigId } =
+    await resolveUserModelInfo(userId, effectiveModel);
 
   // Budget gate: reserve an estimated hold for this turn up front, atomically.
   // The turn's own cost is counted before it runs (no single-turn free pass) and
@@ -111,9 +112,10 @@ export const POST = apiHandler(async (req: Request) => {
   const taskId = nanoid();
   const reservation = await reserveBudget({
     userId, taskId, onSharedKey: isShared, modelId: resolvedModelId, provider: resolvedProvider,
+    configId: resolvedConfigId,
   });
   if (!reservation.allowed) {
-    throw new BudgetExceededError(reservation.window ?? "d30");
+    throw new BudgetExceededError(reservation.window ?? "m1");
   }
 
   // The hold reserved above must be released on EVERY path that doesn't hand it to

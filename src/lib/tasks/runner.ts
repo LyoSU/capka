@@ -218,6 +218,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // until prepareRun resolves; the catch reconciles only when there's real usage.
   let runProvider: string | undefined;
   let runModelId: string | undefined;
+  let runConfigId: string | undefined;
   let runShared = false;
   const liveUsage = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
   // What an approval continuation's FIRST half already billed. A continuation reuses
@@ -311,6 +312,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // real spend (H6) on an abort/throw mid-stream.
     runProvider = provider;
     runModelId = modelId;
+    runConfigId = configId;
     runShared = isShared;
 
 
@@ -319,7 +321,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // and budget as the main turn. These fire-and-forget calls used to go
     // entirely unbilled, so cost analytics under-reported every turn.
     const recordAuxUsage = (u: TokenUsage) =>
-      void recordUsage({ taskId, messageId: msgId, userId, provider, model: modelId, onSharedKey: isShared, usage: u });
+      void recordUsage({ taskId, messageId: msgId, userId, provider, configId, model: modelId, onSharedKey: isShared, usage: u });
 
     // Prompt caching, three tiers of system messages (see buildSystemPrompt):
     //  1. stable  — persona+sandbox+project+skills, identical for everyone →
@@ -1438,7 +1440,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           ? undefined // recompute from combined tokens below
           : costMeta;
       await reconcileUsage({
-        taskId, messageId: msgId, userId, provider, model: modelId, onSharedKey: isShared,
+        taskId, messageId: msgId, userId, provider, configId, model: modelId, onSharedKey: isShared,
         usage: {
           inputTokens: usageMeta.input + discarded.input,
           outputTokens: usageMeta.output + discarded.output,
@@ -1771,7 +1773,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const orServed = orLive.generationId != null || orLive.upstreamProvider != null;
       const realCost = orServed || discardedOrServed ? orLive.cost + discarded.cost : undefined;
       await reconcileUsage({
-        taskId, messageId: msgId, userId, provider: runProvider ?? "shared", model: runModelId, onSharedKey: runShared,
+        taskId, messageId: msgId, userId, provider: runProvider ?? "shared", configId: runConfigId, model: runModelId, onSharedKey: runShared,
         usage: { inputTokens: spentInput, outputTokens: spentOutput, cachedInputTokens: spentCached },
         costUsd: realCost,
       }).catch(() => {});

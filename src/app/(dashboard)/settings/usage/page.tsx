@@ -73,6 +73,15 @@ interface ChannelRow {
   cost: number;
   calls: number;
 }
+interface ConnectionRow {
+  /** Null once the connection is deleted, and on every row written before spend
+   *  was attributed at all — both read as "unattributed", never as a real key. */
+  configId: string | null;
+  label: string | null;
+  provider: string | null;
+  cost: number;
+  calls: number;
+}
 interface TurnCounts {
   completed: number;
   failed: number;
@@ -100,6 +109,7 @@ interface UsageData {
   byUser: UserRow[];
   recent: RecentRow[];
   byProject: ProjectRow[];
+  byConnection: ConnectionRow[];
   byChannel: ChannelRow[];
   turns: TurnCounts;
   prevTurns: TurnCounts;
@@ -108,19 +118,24 @@ interface UsageData {
   memberTurns: MemberTurn[];
   budget: { monthly: number | null };
   attention: AttentionTrigger[];
-  options: { members: { id: string; name: string | null }[]; projects: { id: string; name: string | null }[]; models: string[] };
+  options: {
+    members: { id: string; name: string | null }[];
+    projects: { id: string; name: string | null }[];
+    models: string[];
+    connections: { id: string; label: string | null; provider: string | null }[];
+  };
 }
 
 type T = ReturnType<typeof useTranslations>;
 type Scope = "shared" | "own";
 type Tab = "overview" | "models" | "people";
-type Filters = { userId: string | null; model: string | null; projectId: string | null; channel: string | null };
+type Filters = { userId: string | null; model: string | null; projectId: string | null; channel: string | null; configId: string | null };
 
 const RANGES = [7, 30, 90] as const;
 const SCOPES: Scope[] = ["shared", "own"];
 const TABS: Tab[] = ["overview", "models", "people"];
 const CHANNELS = ["web", "telegram", "automation"] as const;
-const EMPTY_FILTERS: Filters = { userId: null, model: null, projectId: null, channel: null };
+const EMPTY_FILTERS: Filters = { userId: null, model: null, projectId: null, channel: null, configId: null };
 
 export default function UsagePage() {
   const t = useTranslations("settings.usage");
@@ -149,12 +164,13 @@ export default function UsagePage() {
     if (filters.model) params.set("model", filters.model);
     if (filters.projectId) params.set("projectId", filters.projectId);
     if (filters.channel) params.set("channel", filters.channel);
+    if (filters.configId) params.set("configId", filters.configId);
     fetch(`/api/admin/usage?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [days, scope, filters.userId, filters.model, filters.projectId, filters.channel]);
+  }, [days, scope, filters.userId, filters.model, filters.projectId, filters.channel, filters.configId]);
 
   const money = (n: number) =>
     new Intl.NumberFormat(locale, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(n || 0);
@@ -275,6 +291,9 @@ export default function UsagePage() {
           {filters.projectId && (
             <Chip label={labelForProject(data, filters.projectId)} onClear={() => setFilter({ projectId: null })} t={t} />
           )}
+          {filters.configId && (
+            <Chip label={labelForConnection(data, filters.configId)} onClear={() => setFilter({ configId: null })} t={t} />
+          )}
           {filters.channel && (
             <Chip label={t(`channel.${filters.channel}`)} onClear={() => setFilter({ channel: null })} t={t} />
           )}
@@ -355,6 +374,23 @@ export default function UsagePage() {
                     label: <span className="truncate">{p.name ?? t("noProject")}</span>,
                     calls: p.calls,
                     cost: p.cost,
+                  }))}
+                  total={totalCost}
+                  money={money}
+                  pct={pct}
+                  t={t}
+                />
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-medium">{t("byConnection")}</h3>
+                <p className="text-xs text-muted-foreground">{t("byConnectionHint")}</p>
+                <Breakdown
+                  rows={data.byConnection.map((c) => ({
+                    key: c.configId ?? "__none__",
+                    label: <span className="truncate">{connectionLabel(t, c)}</span>,
+                    calls: c.calls,
+                    cost: c.cost,
                   }))}
                   total={totalCost}
                   money={money}
@@ -518,6 +554,17 @@ function labelForProject(data: UsageData, id: string) {
   const p = data.options.projects.find((x) => x.id === id);
   return p?.name || id;
 }
+/** A connection's name: the label its owner gave it, else the provider it speaks
+ *  to. A null id is spend whose connection is gone (or predates attribution) —
+ *  never blamed on a surviving key. */
+function connectionLabel(t: T, c: { configId: string | null; label: string | null; provider: string | null }) {
+  if (!c.configId) return t("noConnection");
+  return c.label || c.provider || c.configId;
+}
+function labelForConnection(data: UsageData, id: string) {
+  const c = data.options.connections.find((x) => x.id === id);
+  return c?.label || c?.provider || id;
+}
 
 /** The "Filters" popover: member / model / project / channel selects. Options are
  *  server-provided and stable across the dimension filters (they ignore them), so
@@ -574,6 +621,13 @@ function FiltersControl({
           placeholder={t("filterAll")}
           items={(opts?.projects ?? []).map((p) => ({ value: p.id, label: p.name || p.id }))}
           onChange={(v) => setFilter({ projectId: v })}
+        />
+        <FilterSelect
+          label={t("filterConnection")}
+          value={filters.configId}
+          placeholder={t("filterAll")}
+          items={(opts?.connections ?? []).map((c) => ({ value: c.id, label: c.label || c.provider || c.id }))}
+          onChange={(v) => setFilter({ configId: v })}
         />
         <FilterSelect
           label={t("filterChannel")}

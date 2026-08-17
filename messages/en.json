@@ -842,7 +842,7 @@
       "usageTitle": "Usage",
       "window5h": "Last 5 hours",
       "window7d": "Last 7 days",
-      "window30d": "Last 30 days",
+      "windowMonth": "This month",
       "turnsCompleted": "Completed",
       "turnsFailed": "Failed",
       "topModels": "Top models",
@@ -969,7 +969,7 @@
       "window": {
         "h5": "Last 5 hours",
         "d7": "Last 7 days",
-        "d30": "Last 30 days"
+        "m1": "This month"
       },
       "turns30d": "You've had {turns, plural, one {# exchange} other {# exchanges}} with the assistant in the last 30 days."
     },
@@ -1003,7 +1003,7 @@
         "window": {
           "h5": "Last 5 hours",
           "d7": "Last 7 days",
-          "d30": "Last 30 days"
+          "m1": "This month"
         }
       },
       "budget": {
@@ -1104,6 +1104,7 @@
       "filterMember": "Member",
       "filterModel": "Model",
       "filterProject": "Project",
+      "filterConnection": "Connection",
       "filterChannel": "Channel",
       "clearFilters": "Clear all",
       "channel": {
@@ -1129,7 +1130,10 @@
       "byUser": "By member",
       "byProject": "By project",
       "byProjectHint": "By the chat's current project.",
+      "byConnection": "By connection",
+      "byConnectionHint": "Which provider connection the spend went through.",
       "noProject": "No project",
+      "noConnection": "Unattributed",
       "byChannel": "By channel",
       "callsN": "{count, plural, one {# request} other {# requests}}",
       "userTurns": "{count, plural, one {# turn} other {# turns}}",

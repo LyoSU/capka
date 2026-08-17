@@ -23,8 +23,10 @@ export interface AttentionMember {
   /** Effective monthly cap in USD on the shared key (their tier, else the default
    *  tier). null = unlimited — never a near-budget candidate. */
   monthCap: number | null;
-  /** Settled shared-key spend over the last 30 days. */
-  sharedSpend30d: number;
+  /** Settled shared-key spend in the CURRENT CALENDAR MONTH — the same window
+   *  `monthCap` is enforced over (see billing/limits.ts), so the alert fires on the
+   *  same arithmetic the gate uses. */
+  sharedSpendMonth: number;
   /** ISO timestamp of this user's most recent assistant turn, or null if never. */
   lastTurnAt: string | null;
   /** When the account was created. A seat younger than the idle window can't be
@@ -78,14 +80,14 @@ export function computeAttention(input: AttentionInput): AttentionTrigger[] {
   // Members past 80% of their effective monthly cap (shared key only).
   if (scope === "shared") {
     for (const m of members) {
-      if (m.monthCap != null && m.monthCap > 0 && m.sharedSpend30d > NEAR_BUDGET_FRAC * m.monthCap) {
+      if (m.monthCap != null && m.monthCap > 0 && m.sharedSpendMonth > NEAR_BUDGET_FRAC * m.monthCap) {
         out.push({
           type: "member-near-budget",
           userId: m.userId,
           name: m.name ?? m.userId,
-          used: m.sharedSpend30d,
+          used: m.sharedSpendMonth,
           cap: m.monthCap,
-          pct: m.sharedSpend30d / m.monthCap,
+          pct: m.sharedSpendMonth / m.monthCap,
         });
       }
     }

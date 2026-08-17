@@ -10,6 +10,8 @@ export interface RecordUsageInput {
   messageId?: string | null;
   userId: string;
   provider: string;
+  /** The provider CONNECTION this spend went through — null when unknown. */
+  configId?: string | null;
   model: string;
   usage: TokenUsage;
   /** True when this spend hit the shared (admin) key — counts toward budgets. */
@@ -33,6 +35,7 @@ export async function recordUsage(input: RecordUsageInput): Promise<void> {
       messageId: input.messageId ?? null,
       userId: input.userId,
       provider: input.provider,
+      configId: input.configId ?? null,
       model: input.model,
       inputTokens: input.usage.inputTokens ?? 0,
       outputTokens: input.usage.outputTokens ?? 0,
@@ -60,6 +63,7 @@ export async function reconcileUsage(input: RecordUsageInput): Promise<void> {
       .update(usage)
       .set({
         provider: input.provider,
+        configId: input.configId ?? null,
         model: input.model,
         inputTokens: input.usage.inputTokens ?? 0,
         outputTokens: input.usage.outputTokens ?? 0,

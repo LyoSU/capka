@@ -169,7 +169,7 @@ export default function BillingPage() {
               {([
                 ["limit5h", limit5h, setLimit5h, t("limits.window.h5")],
                 ["limitWeek", limitWeek, setLimitWeek, t("limits.window.d7")],
-                ["limitMonth", limitMonth, setLimitMonth, t("limits.window.d30")],
+                ["limitMonth", limitMonth, setLimitMonth, t("limits.window.m1")],
               ] as const).map(([key, val, set, lbl]) => (
                 <div key={key} className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">{lbl}</label>

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 
-export type WindowKey = "h5" | "d7" | "d30";
+// Mirrors the server's WindowKey (src/lib/billing/limits.ts): "m1" is the
+// calendar month, not a rolling 30 days.
+export type WindowKey = "h5" | "d7" | "m1";
 
 export interface WindowStatus {
   window: WindowKey;

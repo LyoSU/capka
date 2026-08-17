@@ -6,8 +6,13 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Usage breaks spend down by provider connection and can filter by one (`?configId=`), so two keys of the same provider are told apart. Spend recorded before this release, and spend whose connection was deleted, groups as "Unattributed".
+
 ### Changed
 
+- The monthly spend cap (`tiers.limit_month`) is now the calendar month and resets on the 1st, instead of a rolling 30 days; the "near their monthly budget" alert counts the same window. Existing caps keep their value.
 - `SECURITY.md` now states what gVisor costs — host install, syscall speed, a share of `SANDBOX_PIDS_LIMIT`, the `--net-raw=true` egress requirement — next to what it buys, so `runc` vs `runsc` is a decision an operator can make without reading the install script.
 - Markdown tables in a reply scroll edge to edge on a phone instead of inside a narrow inset box, and carry a shadow on whichever side still has content off-screen; the frame around them is gone on every screen size.
 - Model and icon pickers now sit on the app's field scale, so forms holding them (Add provider, connection rows, project defaults) line up with their own inputs.

@@ -46,7 +46,7 @@ export type AdminUser = {
   telegramConnected: boolean;
 };
 
-type WindowKey = "h5" | "d7" | "d30";
+type WindowKey = "h5" | "d7" | "m1";
 type Detail = {
   tierName: string;
   windows: { window: WindowKey; used: number; limit: number | null; pct: number }[];
@@ -154,7 +154,7 @@ export function UserDialog({
   // The default tier is marked in the list too, so pinning it by name reads as a
   // deliberate choice rather than a duplicate of the option above it.
   const tierItemLabel = (x: Tier) => (x.isDefault ? t("tierIsDefault", { name: x.name }) : x.name);
-  const windowLabel: Record<WindowKey, string> = { h5: t("window5h"), d7: t("window7d"), d30: t("window30d") };
+  const windowLabel: Record<WindowKey, string> = { h5: t("window5h"), d7: t("window7d"), m1: t("windowMonth") };
 
   // The facts an admin reads but never acts on — when they joined, when they were
   // last around, whether Telegram is linked — used to be three label/value rows

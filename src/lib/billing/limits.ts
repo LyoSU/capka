@@ -12,7 +12,10 @@ import { log } from "@/lib/log";
  * the `usage` table (rows tagged `on_shared_key`) over three rolling windows.
  */
 
-export type WindowKey = "h5" | "d7" | "d30";
+// "m1" is the CALENDAR month (resets on the 1st), not a rolling 30 days: a budget
+// is set per accounting month, and "spent this month" has to mean the same thing
+// to us as it does to whoever signed off on the number.
+export type WindowKey = "h5" | "d7" | "m1";
 
 export interface WindowStatus {
   window: WindowKey;
@@ -44,7 +47,11 @@ export interface Tier {
   isDefault: boolean | null;
 }
 
-const ORDER: WindowKey[] = ["h5", "d7", "d30"];
+const ORDER: WindowKey[] = ["h5", "d7", "m1"];
+
+// Start of the current calendar month, in the database's timezone (UTC in our
+// images). Also the floor of the whole spend scan — see spendWindows.
+const MONTH_START = sql`date_trunc('month', now())`;
 
 /** The user's assigned tier, falling back to the instance default tier. */
 export async function getTierForUser(userId: string): Promise<Tier> {
@@ -93,11 +100,17 @@ export interface SpendSplit {
 
 /**
  * Shared-key spend for one user across all three windows in a single query,
- * bounded to the widest window (30d). Settled rows (pending=false) and holds
+ * bounded to the widest window. Settled rows (pending=false) and holds
  * (pending=true) are summed SEPARATELY: their total drives enforcement (a
  * concurrent reserve must see another in-flight turn's hold), while the split
  * lets the UI distinguish real spend from estimates. Single source of truth for
  * both the UI status and the enforcement gate, so the two can never drift.
+ *
+ * The scan floor is the EARLIER of the month boundary and 7 days ago — not a flat
+ * 30 days. On the last day of a 31-day month the month started more than 30 days
+ * ago, so a flat bound would drop its first hours and under-count the cap on the
+ * one day it matters most; on the 1st, the 7-day window still needs last month's
+ * tail.
  */
 async function spendWindows(exec: Executor, userId: string): Promise<SpendSplit> {
   const [row] = await exec
@@ -106,20 +119,20 @@ async function spendWindows(exec: Executor, userId: string): Promise<SpendSplit>
       h5r: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = true and ${usage.createdAt} >= now() - interval '5 hours'), 0)`,
       d7c: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = false and ${usage.createdAt} >= now() - interval '7 days'), 0)`,
       d7r: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = true and ${usage.createdAt} >= now() - interval '7 days'), 0)`,
-      d30c: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = false), 0)`,
-      d30r: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = true), 0)`,
+      m1c: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = false and ${usage.createdAt} >= ${MONTH_START}), 0)`,
+      m1r: sql<string>`coalesce(sum(${usage.costUsd}) filter (where ${usage.pending} = true and ${usage.createdAt} >= ${MONTH_START}), 0)`,
     })
     .from(usage)
     .where(
       and(
         eq(usage.userId, userId),
         eq(usage.onSharedKey, true),
-        sql`${usage.createdAt} >= now() - interval '30 days'`,
+        sql`${usage.createdAt} >= least(${MONTH_START}, now() - interval '7 days')`,
       ),
     );
   return {
-    committed: { h5: Number(row?.h5c ?? 0), d7: Number(row?.d7c ?? 0), d30: Number(row?.d30c ?? 0) },
-    reserved: { h5: Number(row?.h5r ?? 0), d7: Number(row?.d7r ?? 0), d30: Number(row?.d30r ?? 0) },
+    committed: { h5: Number(row?.h5c ?? 0), d7: Number(row?.d7c ?? 0), m1: Number(row?.m1c ?? 0) },
+    reserved: { h5: Number(row?.h5r ?? 0), d7: Number(row?.d7r ?? 0), m1: Number(row?.m1r ?? 0) },
   };
 }
 
@@ -129,6 +142,8 @@ async function sharedSpendWindows(userId: string): Promise<SpendSplit> {
 
 function capFor(tier: Tier, w: WindowKey): number | null {
   const raw = w === "h5" ? tier.limit5h : w === "d7" ? tier.limitWeek : tier.limitMonth;
+  // `limitMonth` is the same column as before; only its window changed (rolling
+  // 30 days → calendar month), so no migration and no re-entry of existing caps.
   // Unset (null/absent) means unlimited. A CONFIGURED value — including an
   // explicit 0 (a hard "no shared-key budget" deny) — is the cap, so 0 must
   // block spend, not be misread as "no limit". Only a non-finite/negative
@@ -204,6 +219,9 @@ export async function reserveBudget(input: {
   onSharedKey: boolean;
   modelId?: string;
   provider?: string;
+  /** The connection this turn will run on. Carried onto the hold so a turn that
+   *  never reconciles (crash, released hold) is still attributable. */
+  configId?: string | null;
 }): Promise<{ allowed: boolean; window: WindowKey | null; reason: ReserveReason | null }> {
   // Own-key turns pay their own provider — never gated, never held.
   if (!input.onSharedKey) return { allowed: true, window: null, reason: null };
@@ -247,6 +265,7 @@ export async function reserveBudget(input: {
       taskId: input.taskId,
       userId: input.userId,
       provider: input.provider ?? "shared",
+      configId: input.configId ?? null,
       model: input.modelId ?? "",
       costUsd: String(estimate),
       onSharedKey: true,
