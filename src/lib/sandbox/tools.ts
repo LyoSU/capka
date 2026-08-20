@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { execCommand, deleteFile } from "./client";
+import { execCommand, deleteFile, markBusy } from "./client";
 import { clampOutput, MAX_TOOL_OUTPUT_CHARS, DEFAULT_READ_LINES } from "@/lib/tool-output";
 
 /** Recovery hint baked into the truncation marker so the model narrows next time.
@@ -155,6 +155,14 @@ export async function loadSandboxTools(
   ensureSession: () => Promise<unknown>,
   networkMode: "none" | "bridge" = "none",
 ) {
+  // Best-effort lease: a job that outlives the turn keeps the container alive only
+  // while the controller knows it's there. A failed lease is not a failed job — it
+  // just falls back to plain idle eviction — so this never rejects into a tool call.
+  const holdSandbox = () =>
+    markBusy(sessionKey).catch((e) => {
+      console.warn("[sandbox] busy lease failed:", e instanceof Error ? e.message : e);
+    });
+
   const run = async (cmd: string, timeout?: number) => {
     await ensureSession();
     try {
@@ -196,16 +204,16 @@ export async function loadSandboxTools(
           const jobId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
           const result = await run(backgroundWrapper(command, jobId));
           if (result.exitCode !== 0) return { started: false, error: result.stderr || "Failed to start job" };
+          await holdSandbox();
           return {
             started: true,
             jobId,
             logPath: `${JOBS_DIR}/${jobId}/log`,
             note:
-              "Job started and keeps running after your reply ends (the sandbox persists between turns). " +
-              "Get the result with check_job when you next need it — don't block waiting. " +
-              "Note: if the chat sits idle ~15 min with no sandbox activity the container is reclaimed and the " +
-              "job stops; its log and exit code (if written) survive. For a job that may run that long, keep the " +
-              "chat active or check back within that window.",
+              "Job started and keeps running after your reply ends — the sandbox is held open for it even " +
+              "while the chat sits idle. Get the result with check_job when you next need it; don't block " +
+              "waiting. Each check extends the hold, so a job only loses its sandbox after several hours " +
+              "with no check at all — its log and exit code (if written) survive that.",
           };
         }
         return captureResult(await run(withCapture(command), timeout));
@@ -248,6 +256,8 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
           return { running: false, exitCode, success: exitCode === 0, logTail: clampOutput(logTail).text };
         }
         if (statusPart.includes("__RUNNING__")) {
+          // Still working — renew the lease so the reaper keeps its hands off.
+          await holdSandbox();
           return { running: true, logTail: clampOutput(logTail).text };
         }
         return {

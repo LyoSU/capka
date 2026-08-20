@@ -28,6 +28,11 @@ export class PostgresSessionStore {
     // {hostPath, name, ro}. Drives drift detection: a create request whose mount
     // set differs from the stored one recreates the container. Idempotent.
     await this.pool.query("ALTER TABLE sandbox_sessions ADD COLUMN IF NOT EXISTS mounts text");
+    // Background-job lease (see nextBusyUntil in session-policy.js): `busy_until`
+    // holds the idle reaper off, `busy_since` anchors the absolute ceiling so a
+    // job that keeps renewing can't pin a container forever. Idempotent.
+    await this.pool.query("ALTER TABLE sandbox_sessions ADD COLUMN IF NOT EXISTS busy_since bigint");
+    await this.pool.query("ALTER TABLE sandbox_sessions ADD COLUMN IF NOT EXISTS busy_until bigint");
   }
 
   #map(row) {
@@ -40,9 +45,14 @@ export class PostgresSessionStore {
       mounts: row.mounts ? JSON.parse(row.mounts) : [],
       lastActivity: Number(row.last_activity),
       createdAt: Number(row.created_at),
+      busySince: row.busy_since == null ? null : Number(row.busy_since),
+      busyUntil: row.busy_until == null ? null : Number(row.busy_until),
     };
   }
 
+  /** Called only when a container was actually created (see the create/revive path
+   *  in server.js), so any lease on the row belonged to a job that died with the
+   *  previous container — clear it, or a dead job pins the new one for its window. */
   async upsert(rec) {
     await this.pool.query(
       `INSERT INTO sandbox_sessions (session_id, user_id, handle, network_mode, mounts, last_activity, created_at)
@@ -50,7 +60,8 @@ export class PostgresSessionStore {
        ON CONFLICT (session_id) DO UPDATE SET
          user_id = EXCLUDED.user_id, handle = EXCLUDED.handle,
          network_mode = EXCLUDED.network_mode, mounts = EXCLUDED.mounts,
-         last_activity = EXCLUDED.last_activity`,
+         last_activity = EXCLUDED.last_activity,
+         busy_since = NULL, busy_until = NULL`,
       [rec.sessionId, rec.userId, rec.handle, rec.networkMode,
        JSON.stringify(rec.mounts || []), rec.lastActivity, rec.createdAt],
     );
@@ -64,6 +75,15 @@ export class PostgresSessionStore {
   async delete(sessionId) {
     this._activity.delete(sessionId);
     await this.pool.query("DELETE FROM sandbox_sessions WHERE session_id = $1", [sessionId]);
+  }
+
+  /** Persist a background-job lease. The window itself is computed by
+   *  `nextBusyUntil` (pure, in session-policy.js) — this only writes it. */
+  async setBusy(sessionId, { busySince, busyUntil }) {
+    await this.pool.query(
+      "UPDATE sandbox_sessions SET busy_since = $2, busy_until = $3 WHERE session_id = $1",
+      [sessionId, busySince, busyUntil],
+    );
   }
 
   /** Reclaim compute: the container is gone, but the workspace row (and its disk)

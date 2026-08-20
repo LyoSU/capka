@@ -4,8 +4,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // real controller. The point of these tests: the model's core file/code tools
 // must NOT depend on writable /tmp scratch space — a sibling process filling the
 // 64 MB /tmp tmpfs must never break editing files that live in /workspace.
-const { execCommand, deleteFile } = vi.hoisted(() => ({ execCommand: vi.fn(), deleteFile: vi.fn() }));
-vi.mock("../client", () => ({ execCommand, deleteFile }));
+const { execCommand, deleteFile, markBusy } = vi.hoisted(() => ({
+  execCommand: vi.fn(), deleteFile: vi.fn(),
+  // Always thenable, like the real client call — tools await the lease.
+  markBusy: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../client", () => ({ execCommand, deleteFile, markBusy }));
 
 import { loadSandboxTools } from "../tools";
 
@@ -315,5 +319,48 @@ describe("sandbox tools — delete_path", () => {
     const res = (await tools.delete_path.execute!({ path: "x" }, opts)) as { success: boolean; error: string };
     expect(res.success).toBe(false);
     expect(res.error).toBe("nope");
+  });
+});
+
+// A detached job runs with nobody calling the controller, so without a lease the
+// idle reaper reclaims the container mid-work and the job dies silently.
+describe("background jobs lease the sandbox against idle eviction", () => {
+  beforeEach(() => {
+    execCommand.mockReset();
+    markBusy.mockReset();
+    markBusy.mockResolvedValue(undefined);
+    execCommand.mockResolvedValue({ stdout: "started", stderr: "", exitCode: 0 });
+  });
+
+  it("takes a lease when a detached job starts", async () => {
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "sleep 600", background: true }, opts)) as {
+      started: boolean;
+    };
+    expect(res.started).toBe(true);
+    expect(markBusy).toHaveBeenCalledWith("sess1");
+  });
+
+  it("starts the job even when the lease call fails", async () => {
+    markBusy.mockRejectedValue(new Error("controller unreachable"));
+    const { tools } = await load();
+    const res = (await tools.execute_bash.execute!({ command: "sleep 600", background: true }, opts)) as {
+      started: boolean;
+    };
+    expect(res.started).toBe(true); // best-effort: a lease failure must not lose the job
+  });
+
+  it("renews the lease while check_job still reports the job running", async () => {
+    execCommand.mockResolvedValue({ stdout: "__RUNNING__\n__LOG__\nworking", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    await tools.check_job.execute!({ jobId: "j1" }, opts);
+    expect(markBusy).toHaveBeenCalledWith("sess1");
+  });
+
+  it("stops renewing once the job has finished", async () => {
+    execCommand.mockResolvedValue({ stdout: "__EXIT__0\n__LOG__\ndone", stderr: "", exitCode: 0 });
+    const { tools } = await load();
+    await tools.check_job.execute!({ jobId: "j1" }, opts);
+    expect(markBusy).not.toHaveBeenCalled(); // nothing left to protect
   });
 });

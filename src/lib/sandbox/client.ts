@@ -142,6 +142,15 @@ export async function validateMount(hostPath: string) {
   return request("/mounts/validate", "POST", { hostPath }) as Promise<{ ok: boolean; code?: string }>;
 }
 
+/** Lease the session so the controller's idle reaper doesn't reclaim the container
+ *  while a detached job is still running. Renewable — the controller caps the total
+ *  window on its side, so callers just re-take it while the job lives. */
+export async function markBusy(sessionId: string, ms?: number) {
+  return request(`/sessions/${sanitizeId(sessionId)}/busy`, "POST", ms === undefined ? {} : { ms }) as Promise<{
+    busyUntil: number;
+  }>;
+}
+
 export async function execCommand(sessionId: string, command: string, timeout?: number) {
   // The client abort must OUTLIVE the controller's own exec cap, or a long exec is
   // killed here (fetch abort) before the controller returns its result. The controller

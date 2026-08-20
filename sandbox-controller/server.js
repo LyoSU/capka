@@ -18,7 +18,7 @@ import { resolveRuntimeProfile } from "./profile.js";
 import { reconcile } from "./reconcile.js";
 import { gcOrphanWorkspaces, findOverQuota, reapStaleWorkspaces, quotaWarnings, reclaimRegenerable } from "./gc.js";
 import { createQuotaTracker } from "./workspace-quota.js";
-import { pickLruVictim } from "./session-policy.js";
+import { pickLruVictim, nextBusyUntil } from "./session-policy.js";
 import { notReadyGuard } from "./readiness.js";
 import { withRetry } from "./retry.js";
 import { createMcpBridge } from "./mcp-bridge.js";
@@ -93,6 +93,12 @@ const PIDS_LIMIT = posIntEnv("SANDBOX_PIDS_LIMIT", 256);
 const CPU_LIMIT = posFloatEnv("SANDBOX_CPUS", 1.0) * 1e9;
 const EXEC_TIMEOUT = posIntEnv("SANDBOX_EXEC_TIMEOUT_MS", 30000);
 const IDLE_TTL = posIntEnv("SANDBOX_IDLE_TTL_MS", 900000); // 15 min — stop idle CONTAINER (files stay)
+// A background job runs with nobody calling the controller, so it would look idle
+// and get reaped mid-work. The platform leases the session for LEASE_MS and renews
+// while the job lives; MAX_MS caps the whole window so a stuck job can't hold a
+// container indefinitely.
+const BUSY_LEASE_MS = posIntEnv("SANDBOX_BUSY_LEASE_MS", 3600000); // 1h per lease
+const BUSY_MAX_MS = posIntEnv("SANDBOX_BUSY_MAX_MS", 21600000); // 6h ceiling per window
 const WORKSPACE_TTL_MS = posIntEnv("WORKSPACE_TTL_MS", 2592000000); // 30d — delete a workspace (row + disk) unused this long
 const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 // Optional hard perimeter for host folder mounts: when set (`:`-separated roots),
@@ -426,6 +432,25 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /sessions/:id/busy — hold the idle reaper off while a detached job runs.
+    // The platform takes a lease when it starts one and renews it while the job is
+    // alive; `ms` is advisory and bounded, and the ceiling in nextBusyUntil caps the
+    // total window regardless of how often it's renewed.
+    const busyMatch = path.match(/^\/sessions\/([^/]+)\/busy$/);
+    if (method === "POST" && busyMatch) {
+      const session = await store.get(busyMatch[1]);
+      if (!session) return jsonRes(res, 404, { error: "Session not found" });
+      const { ms } = await parseBody(req);
+      const leaseMs = Number.isFinite(ms) ? Math.min(Math.max(ms, 1000), BUSY_MAX_MS) : BUSY_LEASE_MS;
+      const lease = nextBusyUntil({
+        busySince: session.busySince, busyUntil: session.busyUntil,
+        now: Date.now(), leaseMs, maxMs: BUSY_MAX_MS,
+      });
+      await store.setBusy(session.sessionId, lease);
+      store.touch(session.sessionId);
+      return jsonRes(res, 200, { busyUntil: lease.busyUntil });
+    }
+
     // POST /sessions/:id/mcp/:name/start — launch a stdio MCP server in the sandbox
     const mcpStartMatch = path.match(/^\/sessions\/([^/]+)\/mcp\/([^/]+)\/start$/);
     if (method === "POST" && mcpStartMatch) {
@@ -678,6 +703,7 @@ async function idleSweep() {
     const now = Date.now();
     for (const s of await store.all()) {
       if (s.handle == null) continue; // already stopped — no compute to reclaim
+      if (s.busyUntil > now) continue; // a background job is using this container
       if (now - s.lastActivity > IDLE_TTL) {
         // Reclaim the container, KEEP the workspace (files + row survive). The dir
         // is only deleted later by the TTL reaper if it stays unused for 30d.
@@ -828,7 +854,7 @@ async function boot() {
 // HTTP app can be exercised over real sockets against a throwaway Postgres + a
 // fake backend (see server.http.test.js). Inert in production. `store` is the
 // real PostgresSessionStore bound to DATABASE_URL.
-export { server, store };
+export { server, store, idleSweep };
 export function __setTestState(s = {}) {
   if (s.workspace !== undefined) workspace = s.workspace;
   if (s.backend !== undefined) backend = s.backend;

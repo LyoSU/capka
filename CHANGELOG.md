@@ -24,6 +24,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- A background job (`execute_bash` with `background: true`) no longer dies when the chat sits idle: the sandbox is leased while the job runs, and each `check_job` renews it. Tune with `SANDBOX_BUSY_LEASE_MS` (default 1h) and `SANDBOX_BUSY_MAX_MS` (default 6h ceiling per job).
+- A session running a background job is now evicted last when a user hits `MAX_SESSIONS_PER_USER`, instead of by plain idle order.
 - `.env.example` now states the sandbox defaults the code actually uses — `SANDBOX_MEMORY_MB` 512 (was documented as 1024), `MAX_SESSIONS_PER_USER` 5 (was 2), `GC_GRACE_MS` 1 hour (was 7 days) — and documents `SANDBOX_CPUS`, which was missing. Re-check host capacity planning done against the old figures.
 - The automation editor's schedule row no longer puts the "Time" label beside its picker with the fields on mismatched baselines.
 

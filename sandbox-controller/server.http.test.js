@@ -18,7 +18,7 @@ const UID = process.getuid?.() ?? 1000;
 const GID = process.getgid?.() ?? 1000;
 
 d("controller HTTP API (lifecycle)", () => {
-  let server, store, LocalFsStore, base;
+  let server, store, LocalFsStore, base, idleSweep;
   const containers = new Map();
   let nextId = 1;
   let execCalls = 0;
@@ -43,10 +43,11 @@ d("controller HTTP API (lifecycle)", () => {
     process.env.MAX_SESSIONS_PER_USER = "2";
     process.env.MAX_WORKSPACE_MB = "1"; // tiny cap so a 2MB file trips the quota gate
     process.env.QUOTA_CACHE_TTL_MS = "0"; // no caching in tests — measure every exec
+    process.env.SANDBOX_IDLE_TTL_MS = "1"; // every session is instantly "idle" when swept
     await mkdir(DATA_ROOT, { recursive: true });
 
     const mod = await import("./server.js");
-    ({ server, store } = mod);
+    ({ server, store, idleSweep } = mod);
     ({ LocalFsStore } = await import("./stores/local-fs-store.js"));
     await store.init();
     await store.pool.query("DELETE FROM sandbox_sessions");
@@ -228,6 +229,47 @@ d("controller HTTP API (lifecycle)", () => {
     const h2 = (await store.get("sdrift")).handle;
     expect(h2).not.toBe(h1);
     expect(containers.has(h1)).toBe(false); // old container torn down
+  });
+
+  it("404s a busy lease for an unknown session", async () => {
+    const r = await fetch(`${base}/sessions/nope/busy`, { method: "POST", headers: auth, body: "{}" });
+    expect(r.status).toBe(404);
+  });
+
+  it("spares a session holding a busy lease from the idle sweep, but not a free one", async () => {
+    // One sweep, two sessions: the lease is the ONLY difference between them, so a
+    // surviving container can't be explained by anything else. IDLE_TTL is 1ms in
+    // this suite, so both are long past idle.
+    expect((await post("sbusy", "uidle")).status).toBe(201);
+    expect((await post("sfree", "uidle")).status).toBe(201);
+    const busyHandle = (await store.get("sbusy")).handle;
+    const freeHandle = (await store.get("sfree")).handle;
+
+    const lease = await fetch(`${base}/sessions/sbusy/busy`, { method: "POST", headers: auth, body: "{}" });
+    expect(lease.status).toBe(200);
+
+    await idleSweep();
+
+    expect(containers.has(busyHandle)).toBe(true);
+    expect((await store.get("sbusy")).handle).toBe(busyHandle);
+    expect(containers.has(freeHandle)).toBe(false);
+    expect((await store.get("sfree")).handle).toBeNull(); // stopped, workspace kept
+  });
+
+  it("does not let a recreated container inherit the previous lease", async () => {
+    // The job the lease was taken for died with the old container, so the new one
+    // must start unleased — otherwise a dead job pins compute for the full window.
+    const m = [{ hostPath: "/srv/share", name: "share", ro: true }];
+    expect((await postMounts("sinherit", "uinherit", m)).status).toBe(201);
+    expect((await fetch(`${base}/sessions/sinherit/busy`, { method: "POST", headers: auth, body: "{}" })).status).toBe(200);
+
+    // Mount drift forces destroy + recreate.
+    await postMounts("sinherit", "uinherit", [{ hostPath: "/srv/share", name: "share", ro: false }]);
+    const fresh = (await store.get("sinherit")).handle;
+
+    await idleSweep();
+    expect(containers.has(fresh)).toBe(false);
+    expect((await store.get("sinherit")).handle).toBeNull();
   });
 
   it("lists files by HMAC token without a live container, honoring depth", async () => {
