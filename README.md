@@ -3,13 +3,13 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Images on GHCR](https://img.shields.io/badge/images-ghcr-green.svg)](docs/DEPLOY.md)
 [![Website](https://img.shields.io/badge/website-capka.app-22190f.svg)](https://capka.app/)
-[![Live demo](https://img.shields.io/badge/live%20demo-capka.yuri.ly-ff6f3c.svg)](https://capka.yuri.ly/)
+[![Live demo](https://img.shields.io/badge/live%20demo-demo.capka.app-ff6f3c.svg)](https://demo.capka.app/)
 
 <p align="center"><img src="./docs/assets/logo.webp" alt="Capka" width="180"></p>
 <p align="center"><strong>Self-hosted AI coworker. Give it the work, get the finished files.</strong></p>
 <p align="center">
   <a href="https://capka.app/">Website</a> |
-  <a href="https://capka.yuri.ly/">Live demo</a> |
+  <a href="https://demo.capka.app/">Live demo</a> |
   <a href="#run-locally">Run locally</a> |
   <a href="#deploy">Deploy</a> |
   <a href="SECURITY.md">Security</a>
@@ -44,7 +44,7 @@ This is a solo project, built seriously. I am trying to make the AI tool I
 actually want to use.
 
 There is a longer walkthrough on the [website](https://capka.app/), or you
-can [try the live demo](https://capka.yuri.ly/) and hand it a real task right now.
+can [try the live demo](https://demo.capka.app/) and hand it a real task right now.
 
 ![Capka turning uploaded files into a PDF report and Excel workbook](./docs/assets/demo.webp)
 
