@@ -696,7 +696,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Roll the current visible-answer usage into `discarded` when a retry wipes
     // `parts`. Stall/transient resumes KEEP their output, so they don't fold.
     const foldDiscarded = () => {
-      if (liveUsage.input || liveUsage.output || liveUsage.cached) hadDiscard = true;
+      if (liveUsage.input || liveUsage.output || liveUsage.cached || liveUsage.cacheWrite) hadDiscard = true;
       discarded.input += liveUsage.input;
       discarded.output += liveUsage.output;
       discarded.cached += liveUsage.cached;
@@ -1342,7 +1342,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // is the TOTAL input incl. cached reads, so split it — non-cached at the
     // input rate, cached reads at the discounted rate (avoids double-counting).
     // Usage from the live accumulator (robust to cancel/abort), not result.totalUsage.
-    const usageMeta = liveUsage.input || liveUsage.output || liveUsage.cached
+    const usageMeta = liveUsage.input || liveUsage.output || liveUsage.cached || liveUsage.cacheWrite
       ? {
           input: liveUsage.input, output: liveUsage.output, cached: liveUsage.cached,
           // Display-only splits — omitted when zero so old/simple turns stay clean.
@@ -1490,6 +1490,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           inputTokens: usageMeta.input + discarded.input,
           outputTokens: usageMeta.output + discarded.output,
           cachedInputTokens: usageMeta.cached + discarded.cached,
+          // The fourth billable bucket, and the one the ledger silently lost: the
+          // SDK's noCacheTokens EXCLUDES cache writes, so they are in neither
+          // `input` nor `cached`. Omitting it here both under-stated the stored
+          // token total and — on the catalog-recompute branch below, where
+          // `folded` is undefined — re-derived the cost from a bucket short of
+          // every write token, undoing the pricing fix for direct providers.
+          cacheWriteTokens: (usageMeta.cacheWrite ?? 0) + discarded.cacheWrite,
         },
         costUsd: folded,
       });

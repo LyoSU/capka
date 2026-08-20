@@ -17,8 +17,15 @@ vi.mock("@/lib/providers/resolve", () => ({
             {
               type: "finish",
               finishReason: "stop",
-              // AI SDK 6 V3 nested usage shape.
-              usage: { inputTokens: { total: 10 }, outputTokens: { total: 5 } },
+              // AI SDK 6 V3 nested usage shape. The input split is deliberate:
+              // 6 fresh + 1 cache read + 3 cache WRITE = 10 total. Cache writes
+              // are billed above base input and live in NEITHER `noCache` nor
+              // `cacheRead`, so a ledger that folds only those two silently drops
+              // them — which is exactly what the reconcile below asserts it doesn't.
+              usage: {
+                inputTokens: { total: 10, noCache: 6, cacheRead: 1, cacheWrite: 3 },
+                outputTokens: { total: 5 },
+              },
             },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ] as any,
@@ -107,10 +114,17 @@ run("runAgentTask end-to-end (mock model, real queue/realtime/DB)", () => {
     const t = await pool.query(`SELECT status FROM tasks WHERE id='e2e1'`);
     expect(t.rows[0].status).toBe("completed");
 
-    // Usage row written (cost null — mock-model not in catalog — but tokens captured)
-    const usageRows = await pool.query(`SELECT input_tokens, output_tokens FROM usage WHERE user_id=$1`, [U]);
-    expect(usageRows.rows[0].input_tokens).toBe(10);
+    // Usage row written (cost null — mock-model not in catalog — but tokens captured).
+    // `input_tokens` is the fresh input PLUS the cache writes (6 + 3): the ledger has
+    // no separate write column, so folding them here is what keeps the token total
+    // whole, while the cost above already charged them at their own rate.
+    const usageRows = await pool.query(
+      `SELECT input_tokens, output_tokens, cached_input_tokens FROM usage WHERE user_id=$1`,
+      [U],
+    );
+    expect(usageRows.rows[0].input_tokens).toBe(9);
     expect(usageRows.rows[0].output_tokens).toBe(5);
+    expect(usageRows.rows[0].cached_input_tokens).toBe(1);
 
     unsub();
   }, 30_000);
