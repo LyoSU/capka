@@ -409,7 +409,11 @@ async function buildBot(): Promise<Bot | null> {
       const ok = await approveManageForUser(link.userId, { messageId: ctx.match![1], approved });
       const msg = !ok ? t("confirmExpired") : approved ? t("confirmApplied") : t("confirmCancelled");
       await ctx.answerCallbackQuery({ text: msg });
-      await ctx.editMessageReplyMarkup().catch(() => {}); // drop the buttons so it can't be re-tapped
+      // Drop the buttons only once the decision actually stuck. A refusal (the call
+      // was already decided, or its continuation could not be queued) leaves them in
+      // place so the tap is retryable — removing them there would strand the card
+      // exactly as the web button did when it stayed disabled on a 200 + {ok:false}.
+      if (ok) await ctx.editMessageReplyMarkup().catch(() => {});
     });
   }
 

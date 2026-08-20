@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { users, messages, chats, tasks } from "@/lib/db/schema";
 import { enqueueTask } from "@/lib/tasks/queue";
+import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import { buildRegistry } from "./controls";
@@ -103,6 +104,9 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
 
   const meta = (msg.metadata ?? {}) as MessageMeta;
   const parts = (meta.parts ?? []) as StoredPart[];
+  // Snapshot BEFORE the mutation below, so the decision can be un-recorded if the
+  // continuation turns out to be unqueueable (see the enqueue guard at the end).
+  const metaBefore = structuredClone(msg.metadata ?? {});
   // A message has at most one call awaiting approval at a time (the composer
   // blocks while it's pending), so a channel that can't cheaply carry the
   // toolCallId (Telegram's 64-byte callback) may omit it and match the sole one.
@@ -131,7 +135,14 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
   const orig = meta.taskId
     ? ((await db.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)
     : null;
-  await enqueueTask({
+  // A chat holds at most one QUEUED turn, so this insert folds into an existing
+  // one when the chat already has a pending turn (a Telegram follow-up typed while
+  // the approval sat unanswered). Folding is right for user messages — they all
+  // ride one reply — but fatal here: the incumbent carries no `resumeMessageId`, so
+  // the approved call would never run while the card reported success. `created`
+  // says which happened, so honor it: un-record the decision and report failure,
+  // leaving the card live for a retry rather than swallowing the approval.
+  const { created } = await enqueueTask({
     id: nanoid(),
     chatId: msg.chatId,
     userId,
@@ -143,5 +154,14 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
       origin: orig?.origin,
     } satisfies TaskPayload,
   });
+  if (!created) {
+    // Safe to write unconditionally: the CAS above means we are the only writer of
+    // this decision, and a suspended message has no running turn snapshotting over it.
+    await db.update(messages).set({ metadata: metaBefore }).where(eq(messages.id, d.messageId));
+    log.warn("approval continuation folded into a pending turn — decision rolled back", {
+      messageId: d.messageId, chatId: msg.chatId,
+    });
+    return false;
+  }
   return true;
 }

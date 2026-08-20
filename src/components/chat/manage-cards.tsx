@@ -408,8 +408,17 @@ export function ApprovalCard({
       // optimistically ahead of the response. The resume turn now runs; its
       // realtime updates (and the finish reload) flip this part to its resolved
       // state, which re-renders the card. No local phase.
-      if (!r.ok) haptic("error");
-      else if (approved) haptic("success");
+      //
+      // A logical refusal arrives as 200 + {ok:false} (the call was already decided,
+      // or its continuation could not be queued), so the HTTP status alone can't be
+      // the test: without reading the body the button would sit disabled forever on
+      // a decision the server never recorded. Re-enable so the user can retry; when
+      // the call really was already decided, `awaiting` flips and the card resolves.
+      const { ok } = (await r.json().catch(() => ({ ok: r.ok }))) as { ok?: boolean };
+      if (!r.ok || !ok) {
+        haptic("error");
+        setSubmitting(false);
+      } else if (approved) haptic("success");
     } catch {
       haptic("error");
       setSubmitting(false); // let the user retry the click

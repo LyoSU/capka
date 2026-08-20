@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { messages, chats, tasks, pendingElicitations } from "@/lib/db/schema";
 import { enqueueTask } from "@/lib/tasks/queue";
+import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import type { AskAnswer } from "./types";
@@ -26,6 +27,9 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
 
   const meta = (msg.metadata ?? {}) as MessageMeta;
   const parts = (meta.parts ?? []) as StoredPart[];
+  // Snapshot BEFORE the mutations below, so the answer can be un-recorded if the
+  // continuation turns out to be unqueueable (see the enqueue guard at the end).
+  const metaBefore = structuredClone(msg.metadata ?? {});
   const call = parts.find(
     (p): p is Extract<StoredPart, { type: "tool-call" }> =>
       p.type === "tool-call" && !!p.answer && p.answer.value === undefined && (!d.toolCallId || p.id === d.toolCallId),
@@ -51,13 +55,25 @@ export async function answerAskForUser(userId: string, d: AskDecision): Promise<
   const orig = meta.taskId
     ? ((await db.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)
     : null;
-  await enqueueTask({
+  // Same guard as the manage approval path: a chat holds at most one QUEUED turn,
+  // so this insert folds into a pending one when the user typed a follow-up while
+  // the question sat unanswered. The incumbent carries no `resumeMessageId`, so the
+  // suspended `ask` would never resume while the card reported success — un-record
+  // the answer and report failure so the card stays live for a retry.
+  const { created } = await enqueueTask({
     id: nanoid(), chatId: msg.chatId, userId,
     payload: {
       resumeMessageId: d.messageId, uiMessages: [],
       requestModel: orig?.requestModel, projectId: msg.projectId ?? undefined, origin: orig?.origin,
     } satisfies TaskPayload,
   });
+  if (!created) {
+    await db.update(messages).set({ metadata: metaBefore }).where(eq(messages.id, d.messageId));
+    log.warn("ask continuation folded into a pending turn — answer rolled back", {
+      messageId: d.messageId, chatId: msg.chatId,
+    });
+    return false;
+  }
   return true;
 }
 

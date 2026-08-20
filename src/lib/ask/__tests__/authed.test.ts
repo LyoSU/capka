@@ -24,7 +24,11 @@ vi.mock("@/lib/db", () => ({
 import { answerAskForUser, answerElicitationForUser } from "../authed";
 
 describe("answerAskForUser", () => {
-  beforeEach(() => { enqueueTask.mockClear(); rows.updated = undefined; rows.updateReturn = undefined; });
+  beforeEach(() => {
+    enqueueTask.mockReset().mockResolvedValue({ id: "task-new", created: true });
+    rows.updated = undefined;
+    rows.updateReturn = undefined;
+  });
 
   const pendingAsk = () => ({
     chatId: "chat1", ownerId: "u1", projectId: null,
@@ -53,6 +57,22 @@ describe("answerAskForUser", () => {
     const ok = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "late" } });
     expect(ok).toBe(false);
     expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it("rolls the answer back when the continuation folds into a pending turn", async () => {
+    // The chat's single queued slot is taken by a follow-up the user typed while the
+    // question sat open, so the resume insert folds into it and loses resumeMessageId.
+    // Keeping the answer recorded would strand the suspended call — take it back off.
+    rows.msg = pendingAsk();
+    rows.task = { payload: {} };
+    rows.updateReturn = [{ id: "m1" }];
+    enqueueTask.mockResolvedValue({ id: "incumbent", created: false });
+    const ok = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
+    expect(ok).toBe(false);
+    // The LAST write is the rollback: no tool-result, and the ask is unanswered again.
+    const meta = rows.updated as { metadata: { parts: { type: string; answer?: { value?: unknown } }[] } };
+    expect(meta.metadata.parts.some((p) => p.type === "tool-result")).toBe(false);
+    expect(meta.metadata.parts[0].answer?.value).toBeUndefined();
   });
 
   it("returns false when the message isn't the caller's", async () => {

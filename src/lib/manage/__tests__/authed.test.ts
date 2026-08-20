@@ -30,7 +30,11 @@ const pendingApproval = () => ({
 });
 
 describe("approveManageForUser — atomic single-use approval", () => {
-  beforeEach(() => { enqueueTask.mockClear(); rows.updated = undefined; rows.updateReturn = undefined; });
+  beforeEach(() => {
+    enqueueTask.mockReset().mockResolvedValue({ id: "task-new", created: true });
+    rows.updated = undefined;
+    rows.updateReturn = undefined;
+  });
 
   it("records the decision and enqueues a resume when the guarded update matches", async () => {
     rows.msg = pendingApproval();
@@ -51,6 +55,22 @@ describe("approveManageForUser — atomic single-use approval", () => {
     const ok = await approveManageForUser("u1", { messageId: "m1", approved: false });
     expect(ok).toBe(false);
     expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it("rolls the decision back when the continuation folds into a pending turn", async () => {
+    // A chat holds one queued turn; a follow-up typed while the approval sat
+    // unanswered owns that slot, so the resume insert folds into it and carries no
+    // resumeMessageId. Recording the approval anyway would strand the call while
+    // the card claimed success — so the decision must come back off the message.
+    rows.msg = pendingApproval();
+    rows.task = { payload: {} };
+    rows.updateReturn = [{ id: "m1" }];
+    enqueueTask.mockResolvedValue({ id: "incumbent", created: false });
+    const ok = await approveManageForUser("u1", { messageId: "m1", approved: true });
+    expect(ok).toBe(false);
+    // `updated` holds the LAST write — the rollback — so the call reads undecided again.
+    const parts = (rows.updated as { metadata: { parts: { approval?: { approved?: boolean } }[] } }).metadata.parts;
+    expect(parts[0].approval?.approved).toBeUndefined();
   });
 
   it("returns false when the message isn't the caller's (no write, no resume)", async () => {

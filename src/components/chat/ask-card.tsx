@@ -67,12 +67,18 @@ export function AskCard({
     setSubmitting(true);
     haptic(action === "submit" ? "success" : "tap");
     try {
-      await fetch("/api/ask/answer", {
+      const r = await fetch("/api/ask/answer", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageId, toolCallId, action, values: action === "submit" ? values : {}, kind }),
       });
       // The resume turn (ask) or the unblocked MCP tool (elicitation) now runs; its
       // realtime updates + the finish reload settle this card. No local phase.
+      //
+      // A refusal comes back as 200 + {ok:false} (already answered, or the
+      // continuation could not be queued), so read the body: otherwise the buttons
+      // stay disabled on an answer the server never kept.
+      const { ok } = (await r.json().catch(() => ({ ok: r.ok }))) as { ok?: boolean };
+      if (!ok) setSubmitting(false);
     } catch {
       setSubmitting(false); // let the user retry the click
     }
