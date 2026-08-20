@@ -1066,12 +1066,25 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             if (typeof event.response?.id === "string" && event.response.id.startsWith("gen-")) {
               orLive.generationId = event.response.id;
             }
-            // Flush buffered text, force a snapshot (streamSeq + parts) + renew
-            // the lease per step. force=true bypasses the ~1s throttle so each
-            // step boundary is durably persisted.
+            // Renew the lease BEFORE persisting anything. The renewal is refused
+            // once the lease has expired (a GC pause, a frozen event loop, a DB
+            // stall longer than LEASE_SECONDS), and by then the zombie reconciler
+            // has already declared this turn interrupted and another worker may own
+            // the workspace. Writing the snapshot first would put this run's state
+            // on a message row it no longer owns — the same two-writers hazard the
+            // lease exists to prevent, just one step earlier than the CAS at the
+            // end catches it. So: stand down exactly like the monitor does, and let
+            // the terminal path report `leaseLost`.
+            if (!(await heartbeat(taskId, workerId))) {
+              leaseLost = true;
+              ac.abort();
+              break;
+            }
+            // Flush buffered text and force a snapshot (streamSeq + parts).
+            // force=true bypasses the ~1s throttle so each step boundary is
+            // durably persisted.
             await flushBuffers();
             await saveSnapshot(true);
-            await heartbeat(taskId, workerId);
             break;
           }
         }
