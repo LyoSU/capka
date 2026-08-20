@@ -453,8 +453,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // turn. The marker travels with the message OBJECT, so the compaction/memory
     // aux calls that reuse this array (buildAuxRequest) hit the same cache.
     // Implicit-caching providers (OpenAI/DeepSeek/Gemini) ignore the namespace.
-    // Breakpoint budget (Anthropic max 4): stable + session + this + the
-    // top-level auto one in makeStream = 4 — don't add a fifth.
+    // Breakpoint budget (Anthropic max 4): stable + session + this + the moving
+    // step tail in prepareStep = 4 — don't add a fifth.
     const markCacheTail = (msgs: ModelMessage[]) => {
       const last = msgs.at(-1);
       if (last) last.providerOptions = { ...last.providerOptions, ...ephemeral };
@@ -581,12 +581,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const providerOptions = mergeProviderOptions(
         useReasoning ? (reasoning as Record<string, Record<string, unknown>>) : undefined,
         ctxMgmt as Record<string, Record<string, unknown>> | undefined,
-        // Call-level cacheControl = Anthropic's TOP-LEVEL auto-breakpoint: the API
-        // places it on the LAST block of each request, so every step of a tool
-        // loop reads the previous step's cache instead of re-paying the growing
-        // tail (the message-level tail marker above stays fixed at the last user
-        // message all turn). Anthropic-only; other providers ignore the namespace.
-        ephemeral as unknown as Record<string, Record<string, unknown>>,
       );
       return streamText({
         model,
@@ -621,6 +615,28 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 if (viewFileBridge) {
                   const inject = await buildViewFileInjection(messages, sessionKey, userId);
                   if (inject) msgs = [...base, inject];
+                }
+                // Moving cache breakpoint on the step tail. The message-level marker
+                // above is pinned to the last user message for the whole turn, so
+                // everything a tool loop appends after it sits BEYOND the last
+                // breakpoint — and Anthropic bills exactly that remainder as fresh
+                // input on every step. Over a 25-step loop the same tool results are
+                // re-paid at full price ~25 times. Marking the tail each step makes
+                // step N read at the cache rate what step N-1 wrote; the write covers
+                // only the new tokens, so it pays for itself after one reuse.
+                //
+                // The last message is CLONED rather than mutated: the SDK hands us
+                // the same objects each step, so an in-place marker would accumulate
+                // and blow the 4-breakpoint ceiling (stable + session + user tail +
+                // this one is already exactly 4). Skipped at step 0, where the tail
+                // is still the already-marked user message. Anthropic-only namespace;
+                // implicit-caching providers ignore it.
+                const tail = stepNumber > 0 ? msgs.at(-1) : undefined;
+                if (tail) {
+                  msgs = [
+                    ...msgs.slice(0, -1),
+                    { ...tail, providerOptions: { ...tail.providerOptions, ...ephemeral } } as ModelMessage,
+                  ];
                 }
                 return {
                   ...stepSettings(stepNumber),
