@@ -90,6 +90,33 @@ export function contextManagementOptions(
   }
 }
 
+/**
+ * Return `messages` with the cache breakpoint moved onto the step tail.
+ *
+ * The turn's message-level marker is pinned to the last USER message, so
+ * everything a tool loop appends after it sits beyond the last breakpoint and is
+ * billed as fresh input on every step — the same tool results re-paid ~25 times
+ * over a long loop. Marking the tail each step makes step N read at the cache rate
+ * what step N-1 wrote.
+ *
+ * The tail is CLONED, never mutated, and that is the whole point: the SDK hands
+ * back the same message objects each step, so an in-place marker would accumulate
+ * one breakpoint per step and blow Anthropic's ceiling of four (stable + session +
+ * user tail + this one is already exactly four). Step 0 is skipped — its tail is
+ * the already-marked user message.
+ */
+export function markStepTail<T extends { providerOptions?: Record<string, Record<string, unknown>> }>(
+  messages: T[],
+  stepNumber: number,
+  marker: Record<string, Record<string, unknown>>,
+): T[] {
+  const tail = stepNumber > 0 ? messages.at(-1) : undefined;
+  if (!tail) return messages;
+  // The cast is the price of staying generic over the SDK's message union: the
+  // spread produces the same shape, TypeScript just can't say so for an open T.
+  return [...messages.slice(0, -1), { ...tail, providerOptions: { ...tail.providerOptions, ...marker } } as T];
+}
+
 /** A provider-options object: a map of provider name → that provider's options. */
 type ProviderOptions = Record<string, Record<string, unknown>>;
 

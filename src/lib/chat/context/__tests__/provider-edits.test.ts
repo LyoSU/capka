@@ -4,6 +4,7 @@ import {
   mergeProviderOptions,
   clearsToolResultsClientSide,
   shouldClearToolResults,
+  markStepTail,
   TOOL_CLEAR_TRIGGER_FRACTION,
   TOOL_CLEAR_KEEP_LAST,
 } from "@/lib/chat/context/provider-edits";
@@ -96,6 +97,47 @@ describe("shouldClearToolResults", () => {
       turn({ contextTokens: half + 1 }),
     ];
     expect(shouldClearToolResults("openai", path, LIMIT)).toBe(true);
+  });
+});
+
+describe("markStepTail", () => {
+  type Msg = { role: string; providerOptions?: Record<string, Record<string, unknown>> };
+  const marker = { anthropic: { cacheControl: { type: "ephemeral" } } };
+
+  it("leaves step 0 alone — its tail is the already-marked user message", () => {
+    const msgs: Msg[] = [{ role: "user" }, { role: "assistant" }];
+    expect(markStepTail(msgs, 0, marker)).toBe(msgs);
+  });
+
+  it("marks only the tail, and only the tail", () => {
+    const msgs: Msg[] = [{ role: "user" }, { role: "assistant" }, { role: "tool" }];
+    const out = markStepTail(msgs, 3, marker);
+    expect(out.at(-1)?.providerOptions).toEqual(marker);
+    expect(out.slice(0, -1).every((m) => m.providerOptions === undefined)).toBe(true);
+  });
+
+  it("does NOT mutate the messages it was given", () => {
+    // The ceiling bug this guards: the SDK hands back the SAME objects each step, so
+    // an in-place marker accumulates one breakpoint per step. Anthropic allows four
+    // (stable + session + user tail + this), and a 25-step tool loop would blow past
+    // it — the request fails outright rather than degrading.
+    const msgs: Msg[] = [{ role: "user" }, { role: "tool" }];
+    const before = JSON.stringify(msgs);
+    const out = markStepTail(msgs, 1, marker);
+    expect(JSON.stringify(msgs)).toBe(before);
+    expect(out).not.toBe(msgs);
+    expect(out.at(-1)).not.toBe(msgs.at(-1));
+  });
+
+  it("marking step after step never accumulates markers", () => {
+    let msgs: Msg[] = [{ role: "user" }];
+    for (let step = 1; step <= 5; step++) {
+      msgs = [...markStepTail(msgs, step, marker), { role: "tool" }];
+    }
+    // One breakpoint per step would be five; the moving marker leaves exactly the
+    // ones still sitting at a tail position of some earlier prefix — never a fifth
+    // live marker on the message the current step actually sends.
+    expect(msgs.at(-1)?.providerOptions).toBeUndefined();
   });
 });
 

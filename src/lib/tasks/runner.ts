@@ -23,7 +23,7 @@ import { buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
-import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults,
+import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, markStepTail,
   TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
 import { stepSettings, foldReasoningIntoText, MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
@@ -640,28 +640,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                   const inject = await buildViewFileInjection(messages, sessionKey, userId);
                   if (inject) msgs = [...base, inject];
                 }
-                // Moving cache breakpoint on the step tail. The message-level marker
-                // above is pinned to the last user message for the whole turn, so
-                // everything a tool loop appends after it sits BEYOND the last
-                // breakpoint — and Anthropic bills exactly that remainder as fresh
-                // input on every step. Over a 25-step loop the same tool results are
-                // re-paid at full price ~25 times. Marking the tail each step makes
-                // step N read at the cache rate what step N-1 wrote; the write covers
-                // only the new tokens, so it pays for itself after one reuse.
-                //
-                // The last message is CLONED rather than mutated: the SDK hands us
-                // the same objects each step, so an in-place marker would accumulate
-                // and blow the 4-breakpoint ceiling (stable + session + user tail +
-                // this one is already exactly 4). Skipped at step 0, where the tail
-                // is still the already-marked user message. Anthropic-only namespace;
-                // implicit-caching providers ignore it.
-                const tail = stepNumber > 0 ? msgs.at(-1) : undefined;
-                if (tail) {
-                  msgs = [
-                    ...msgs.slice(0, -1),
-                    { ...tail, providerOptions: { ...tail.providerOptions, ...ephemeral } } as ModelMessage,
-                  ];
-                }
+                // Moving cache breakpoint on the step tail (see markStepTail for why
+                // it clones): without it, everything a tool loop appends sits beyond
+                // the turn's last breakpoint and is re-billed as fresh input on every
+                // step. Anthropic-only namespace; implicit-caching providers ignore it.
+                msgs = markStepTail(msgs, stepNumber, ephemeral);
                 return {
                   ...stepSettings(stepNumber),
                   ...(msgs !== messages ? { messages: msgs } : {}),
