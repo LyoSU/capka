@@ -50,6 +50,49 @@ describe("reconcile (compute vs. workspace lifecycle)", () => {
     expect(backend.destroy).not.toHaveBeenCalled();
   });
 
+  it("recreates a running container built by an older spec", async () => {
+    // The rollout half of a hardening fix: mount options and caps are fixed at
+    // CREATE time, so a container started before the fix keeps the weak posture
+    // until something tears it down. Compute goes, the workspace row stays.
+    const store = fakeStore([{ sessionId: "s1", handle: "c1" }]);
+    const destroy = vi.fn();
+    const backend = {
+      list: async () => [{ sessionId: "s1", handle: "c1", running: true, spec: "old", networkMode: "none" }],
+      destroy,
+    };
+    const out = await reconcile({ store, backend, currentSpec: () => "new" });
+    expect(out.outdated).toContain("s1");
+    expect(out.kept).not.toContain("s1");
+    expect(destroy).toHaveBeenCalledWith("c1");
+    expect(store._m.has("s1")).toBe(true);        // workspace survives
+    expect(store._m.get("s1").handle).toBeNull(); // compute reclaimed
+  });
+
+  it("treats a container with NO spec label as outdated", async () => {
+    // It predates the label, which is precisely the container a posture fix has to
+    // reach — adopting it would keep the weakest sandboxes alive the longest.
+    const store = fakeStore([{ sessionId: "s1", handle: "c1" }]);
+    const destroy = vi.fn();
+    const backend = { list: async () => [{ sessionId: "s1", handle: "c1", running: true }], destroy };
+    const out = await reconcile({ store, backend, currentSpec: () => "new" });
+    expect(out.outdated).toContain("s1");
+    expect(destroy).toHaveBeenCalledWith("c1");
+  });
+
+  it("keeps a running container whose spec matches, per network mode", async () => {
+    // Egress adds NET_ADMIN/NET_RAW, so the two modes are different postures and the
+    // fingerprint is asked for the mode the container was actually built with.
+    const store = fakeStore([{ sessionId: "s1", handle: "c1" }]);
+    const destroy = vi.fn();
+    const backend = {
+      list: async () => [{ sessionId: "s1", handle: "c1", running: true, spec: "hash-bridge", networkMode: "bridge" }],
+      destroy,
+    };
+    const out = await reconcile({ store, backend, currentSpec: (net) => `hash-${net}` });
+    expect(out.kept).toContain("s1");
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("destroys orphan container with no DB record", async () => {
     const store = fakeStore([]);
     const destroy = vi.fn();

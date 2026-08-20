@@ -168,6 +168,23 @@ if (!(MCP_UID > 0 && MCP_UID !== SANDBOX_UID)) {
   process.exit(1);
 }
 const mcpBridge = createMcpBridge(docker, { user: `${MCP_UID}:${MCP_GID}` });
+
+// Every container knob this deployment's configuration decides, in ONE object.
+// Session creation spreads it, and boot reconciliation hashes the posture it
+// produces — one source, so a knob can never be tracked by one and missed by the
+// other (which would leave containers running under a spec nobody checks).
+const SPEC_ENV = {
+  memoryBytes: MEMORY_LIMIT,
+  nanoCpus: CPU_LIMIT,
+  pidsLimit: PIDS_LIMIT,
+  tmpMb: TMP_MB,
+  mcpTmpMb: MCP_TMP_MB,
+  // Same uid the bridge execs connectors under, so /opt/mcp is created owned by
+  // them and closed (0700) to the agent's uid.
+  mcpUid: MCP_UID,
+  mcpGid: MCP_GID,
+  fsizeBytes: MAX_FILE_MB * 1024 * 1024,
+};
 let workspace;
 let backend;
 let hostDataRoot; // real host path of DATA_ROOT, resolved at boot; used by mount validation
@@ -358,14 +375,7 @@ const server = createServer(async (req, res) => {
         }
         const { handle } = await backend.create({
           sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
-          networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
-          pidsLimit: PIDS_LIMIT,
-          tmpMb: TMP_MB, mcpTmpMb: MCP_TMP_MB,
-          // Same uid the bridge execs connectors under, so /opt/mcp is created
-          // owned by them and closed (0700) to the agent's uid.
-          mcpUid: MCP_UID, mcpGid: MCP_GID,
-          fsizeBytes: MAX_FILE_MB * 1024 * 1024,
-          mounts: reqMounts,
+          networkMode: net, mounts: reqMounts, ...SPEC_ENV,
         });
         const now = Date.now();
         await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, mounts: reqMounts, lastActivity: now, createdAt: existing?.createdAt ?? now });
@@ -796,7 +806,11 @@ async function boot() {
   // the install scripts. A transient blip here shouldn't crash-loop the process:
   // retry with backoff while readiness stays false (so /health reports 503 and
   // the orchestrator holds traffic), giving up only after the budget.
-  const summary = await withRetry(() => reconcile({ store, backend }),
+  // Containers built by an older spec are recreated rather than adopted: a
+  // hardening change (mount options, caps, rootfs) is fixed at create time, so
+  // adopting them would leave the weaker sandbox running until it idled out.
+  const summary = await withRetry(
+    () => reconcile({ store, backend, currentSpec: (net) => backend.fingerprint(SPEC_ENV, net) }),
     { attempts: 5, baseMs: 3000, label: "recover", log });
   liveCount = summary.kept.length;
   log("recover", summary);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSandboxConfig, resolveNetworkMode } from "./sandbox-spec.js";
+import { specFingerprint, buildSandboxConfig, resolveNetworkMode } from "./sandbox-spec.js";
 
 const base = {
   image: "capka-sandbox",
@@ -207,5 +207,43 @@ describe("resolveNetworkMode — platform decides; only bridge grants network", 
     expect(resolveNetworkMode("none")).toBe("none");
     expect(resolveNetworkMode("host")).toBe("none");
     expect(resolveNetworkMode(undefined)).toBe("none");
+  });
+});
+
+describe("specFingerprint (posture label)", () => {
+  it("is identical for two sessions on the same deployment", () => {
+    // Otherwise reconcile could never compare it to anything and every container
+    // would look outdated at every boot.
+    const a = buildSandboxConfig({ ...base, sessionId: "a", userId: "ua", wsHostPath: "/data/a" });
+    const b = buildSandboxConfig({ ...base, sessionId: "b", userId: "ub", wsHostPath: "/data/b" });
+    expect(a.Labels["capka.spec"]).toBe(b.Labels["capka.spec"]);
+    expect(a.Labels["capka.spec"]).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("moves when the posture weakens or hardens", () => {
+    const now = buildSandboxConfig(base).Labels["capka.spec"];
+    // The very change this label exists to roll out: /opt/mcp ownership.
+    expect(buildSandboxConfig({ ...base, mcpUid: 1500 }).Labels["capka.spec"]).not.toBe(now);
+    // …and the rest of the isolation boundary.
+    expect(buildSandboxConfig({ ...base, readonlyRootfs: false }).Labels["capka.spec"]).not.toBe(now);
+    expect(buildSandboxConfig({ ...base, runtime: "runsc" }).Labels["capka.spec"]).not.toBe(now);
+    expect(buildSandboxConfig({ ...base, tmpMb: 128 }).Labels["capka.spec"]).not.toBe(now);
+    expect(buildSandboxConfig({ ...base, pidsLimit: 64 }).Labels["capka.spec"]).not.toBe(now);
+  });
+
+  it("distinguishes the egress posture from the closed one", () => {
+    // Bridge grants NET_ADMIN/NET_RAW for the firewall install, so the two modes are
+    // genuinely different postures — reconcile asks for the mode each container
+    // carries rather than assuming one answer.
+    expect(buildSandboxConfig({ ...base, networkMode: "bridge" }).Labels["capka.spec"])
+      .not.toBe(buildSandboxConfig({ ...base, networkMode: "none" }).Labels["capka.spec"]);
+  });
+
+  it("ignores everything that varies per session", () => {
+    // A fingerprint that moved with the workspace path or the mount list would make
+    // every container unique and the whole comparison meaningless.
+    const now = buildSandboxConfig(base).Labels["capka.spec"];
+    expect(specFingerprint(buildSandboxConfig({ ...base, sessionId: "zzz", userId: "zzz", wsHostPath: "/elsewhere" }))).toBe(now);
+    expect(specFingerprint(buildSandboxConfig({ ...base, mounts: [{ hostPath: "/srv/x", name: "x", ro: true }] }))).toBe(now);
   });
 });

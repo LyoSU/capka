@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 // The sandbox container's security posture lives here as a pure builder, so the
 // guarantees (never privileged, no-new-privileges, all caps dropped, non-root,
 // no host binds beyond the session workspace — except operator-confirmed
@@ -60,7 +62,7 @@ export function buildSandboxConfig({
   // machinery never touches the operator's files. Empty by default (zero-config).
   mounts = [],
 }) {
-  return {
+  const config = {
     Image: image,
     name: `sandbox-${sessionId}`,
     // When egress is on (bridge), tell the entrypoint to install the egress
@@ -166,4 +168,41 @@ export function buildSandboxConfig({
       "capka.network": networkMode,
     },
   };
+  // Stamped last, from the config above: the posture this container was actually
+  // built with, so boot reconciliation can spot one built by an older, weaker spec.
+  config.Labels["capka.spec"] = specFingerprint(config);
+  return config;
+}
+
+/**
+ * A short, stable hash of the container's SECURITY POSTURE — everything that makes
+ * a sandbox a sandbox, and nothing that differs between two sessions on the same
+ * deployment.
+ *
+ * It exists because these settings are fixed at CREATE time: mount options, caps,
+ * the read-only rootfs and the runtime cannot be changed on a live container. A
+ * hardening fix therefore reaches an already-running sandbox only if something
+ * notices that sandbox predates it — this label is how reconcile notices. A
+ * container with no `capka.spec` label at all predates the mechanism itself, and
+ * counts as outdated for exactly the same reason.
+ *
+ * Anything added to the posture belongs in this list. Session-varying fields (name,
+ * labels, binds, network mode, workspace paths) are deliberately out: including one
+ * would make every container's fingerprint unique and the comparison meaningless.
+ */
+export function specFingerprint(config) {
+  const posture = {
+    Image: config.Image,
+    User: config.User,
+    ReadonlyRootfs: config.HostConfig.ReadonlyRootfs,
+    Privileged: config.HostConfig.Privileged,
+    SecurityOpt: config.HostConfig.SecurityOpt,
+    CapDrop: config.HostConfig.CapDrop,
+    CapAdd: config.HostConfig.CapAdd,
+    Tmpfs: config.HostConfig.Tmpfs,
+    Runtime: config.HostConfig.Runtime ?? null,
+    PidsLimit: config.HostConfig.PidsLimit,
+    Ulimits: config.HostConfig.Ulimits,
+  };
+  return createHash("sha256").update(JSON.stringify(posture)).digest("hex").slice(0, 16);
 }

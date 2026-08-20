@@ -10,8 +10,15 @@
  *
  *  `backend.list()` throwing (daemon unreachable) propagates BEFORE any record is
  *  touched, so the caller (boot's withRetry) retries with readiness still false —
- *  we never mutate records on a transient backend failure. */
-export async function reconcile({ store, backend, destroy, markStopped }) {
+ *  we never mutate records on a transient backend failure.
+ *
+ *  `currentSpec(networkMode)` — optional — returns the posture fingerprint a
+ *  container created right now would carry. A running container whose own
+ *  `capka.spec` label differs is torn down rather than kept: caps, mount options
+ *  and the read-only rootfs are fixed at CREATE time, so a hardening change reaches
+ *  an already-running sandbox only by rebuilding it. Omit it and nothing is
+ *  recreated on posture grounds. */
+export async function reconcile({ store, backend, destroy, markStopped, currentSpec }) {
   const doDestroy = destroy || ((handle) => backend.destroy(handle));
   const doStop = markStopped || ((id) => store.setStopped(id));
   const records = await store.all();
@@ -22,19 +29,26 @@ export async function reconcile({ store, backend, destroy, markStopped }) {
 
   const kept = [];
   const stopped = [];
+  const outdated = [];
   const destroyedOrphans = [];
 
   // DB-driven rows
   for (const rec of records) {
     const b = bySession.get(rec.sessionId);
-    if (b && b.running) {
+    // Built by a different spec than we build today — including by no recorded spec
+    // at all, which means it predates the label and is exactly the container a
+    // posture fix needs to reach. Treated like a dead container: compute goes, the
+    // workspace row and its files stay, and the next request rebuilds it hardened.
+    const stale = b != null && currentSpec != null && b.spec !== currentSpec(b.networkMode);
+    if (b && b.running && !stale) {
       kept.push(rec.sessionId); // live container — leave it running
     } else {
-      // No live container for this workspace. Tear down a stopped/dead container
-      // if one lingers, then mark the workspace stopped (handle → null). Row stays.
+      // No live container for this workspace (or one we won't keep). Tear down a
+      // stopped/dead/outdated container if one lingers, then mark the workspace
+      // stopped (handle → null). Row stays.
       if (b) await doDestroy(b.handle);
       if (rec.handle != null) await doStop(rec.sessionId);
-      stopped.push(rec.sessionId);
+      (stale ? outdated : stopped).push(rec.sessionId);
     }
   }
 
@@ -46,5 +60,5 @@ export async function reconcile({ store, backend, destroy, markStopped }) {
     }
   }
 
-  return { kept, stopped, destroyedOrphans };
+  return { kept, stopped, outdated, destroyedOrphans };
 }

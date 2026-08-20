@@ -25,6 +25,7 @@ All notable changes to Capka are documented here. Format follows
 ### Security
 
 - The sandbox's `/opt/mcp` tmpfs (the MCP connectors' `HOME`) is mounted `0700` owned by `SANDBOX_MCP_UID` instead of world-writable, so agent code can no longer plant a shell profile there that the next connector start would source with that connector's secrets in its environment.
+- Sandbox containers now carry a `capka.spec` label with their security posture, and the controller recreates any running container whose posture differs from the current build on start — without it a hardening fix like the one above would never reach sandboxes that were already up. On the first start after upgrading, every existing sandbox is torn down (files are kept; a background job running in one is lost).
 
 ### Fixed
 

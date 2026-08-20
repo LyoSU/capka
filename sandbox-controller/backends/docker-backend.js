@@ -1,4 +1,4 @@
-import { buildSandboxConfig } from "../sandbox-spec.js";
+import { buildSandboxConfig, specFingerprint } from "../sandbox-spec.js";
 import { createFrameDemux } from "../docker-frames.js";
 
 /** ComputeBackend implementation over the Docker daemon (via dockerode).
@@ -160,7 +160,10 @@ export class DockerBackend {
     } catch { /* already gone */ }
   }
 
-  /** Sandboxes labeled by the controller, keyed by sessionId for reconcile. */
+  /** Sandboxes labeled by the controller, keyed by sessionId for reconcile.
+   *  `spec` is the posture fingerprint the container was BUILT with (absent on
+   *  containers created before the label existed) and `networkMode` the mode it
+   *  was built for — reconcile needs both to compare against `fingerprint()`. */
   async list() {
     const containers = await this.docker.listContainers({
       all: true,
@@ -169,8 +172,27 @@ export class DockerBackend {
     return containers.map((c) => ({
       sessionId: c.Labels["capka.session"],
       userId: c.Labels["capka.user"],
+      spec: c.Labels["capka.spec"],
+      networkMode: c.Labels["capka.network"],
       handle: c.Id,
       running: c.State === "running",
+    }));
+  }
+
+  /** The posture fingerprint a container created NOW would carry, for the given
+   *  deployment knobs and network mode. Session fields are placeholders on purpose:
+   *  specFingerprint ignores them, which is what makes the value comparable across
+   *  every session. Network mode is NOT ignored — egress adds NET_ADMIN/NET_RAW, so
+   *  the two modes are genuinely different postures. */
+  fingerprint(env, networkMode) {
+    return specFingerprint(buildSandboxConfig({
+      image: this.image,
+      runtime: this.runtime,
+      sessionId: "fingerprint",
+      userId: "fingerprint",
+      wsHostPath: "/fingerprint",
+      networkMode,
+      ...env,
     }));
   }
 }
