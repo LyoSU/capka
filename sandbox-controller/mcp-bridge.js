@@ -65,7 +65,9 @@ export function createMcpBridge(docker, { user, rpcTimeoutMs = 60000 } = {}) {
     const container = docker.getContainer(handle);
     // /opt/mcp is the dedicated exec-allowed tmpfs (see sandbox-spec.js): writable,
     // ephemeral, and outside the agent's /workspace so it never pollutes the user's
-    // files. npx/uvx install + run the server here.
+    // files. npx/uvx install + run the server here. It is mounted 0700 owned by THIS
+    // uid, which is what makes the login shell below safe: `-l` sources the profile
+    // files under HOME, and the agent's uid cannot create them.
     const MCP_HOME = "/opt/mcp";
     const Env = Object.entries({
       HOME: MCP_HOME,

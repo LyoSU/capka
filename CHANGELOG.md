@@ -22,6 +22,10 @@ All notable changes to Capka are documented here. Format follows
 - Builds no longer reach out to Google Fonts: Onest and Lora ship in the repo (OFL-1.1), so an air-gapped or slow-egress build box works unchanged.
 - Upgraded to Next.js 16.3, which evicts Turbopack's in-memory cache during long `next dev` sessions instead of growing without bound.
 
+### Security
+
+- The sandbox's `/opt/mcp` tmpfs (the MCP connectors' `HOME`) is mounted `0700` owned by `SANDBOX_MCP_UID` instead of world-writable, so agent code can no longer plant a shell profile there that the next connector start would source with that connector's secrets in its environment.
+
 ### Fixed
 
 - A background job (`execute_bash` with `background: true`) no longer dies when the chat sits idle: the sandbox is leased while the job runs, and each `check_job` renews it. Tune with `SANDBOX_BUSY_LEASE_MS` (default 1h) and `SANDBOX_BUSY_MAX_MS` (default 6h ceiling per job).

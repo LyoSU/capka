@@ -49,6 +49,11 @@ export function buildSandboxConfig({
   // under the memory budget. Tunable via SANDBOX_TMP_MB / SANDBOX_MCP_TMP_MB.
   tmpMb = 64,
   mcpTmpMb = 256,
+  // The uid/gid the MCP bridge execs stdio connectors under (server.js resolves
+  // them from SANDBOX_MCP_UID/GID; the `mcp` user baked into the image is 1001).
+  // They own /opt/mcp — see the Tmpfs block for why that ownership is load-bearing.
+  mcpUid = 1001,
+  mcpGid = 1001,
   // Operator-confirmed host folders, bind-mounted at /folders/<name>. Each entry
   // is {hostPath, name, ro}; hostPath has already passed mount-safety validation
   // in server.js. Deliberately OUTSIDE /workspace so the quota/prune/delete_path
@@ -109,7 +114,16 @@ export function buildSandboxConfig({
         "/tmp": `rw,nosuid,nodev,noexec,size=${tmpMb}m`,
         // `exec` is REQUIRED and explicit — Docker adds noexec to tmpfs by default,
         // which would stop npx/uvx-installed server binaries from running here.
-        "/opt/mcp": `rw,nosuid,nodev,exec,size=${mcpTmpMb}m,mode=1777`,
+        //
+        // Owned by the MCP uid, mode 0700 — NOT world-writable. This is the other
+        // half of the uid split server.js enforces: /opt/mcp is the connectors'
+        // HOME, so a world-writable mount let the agent (uid 1000) plant a
+        // ~/.bash_profile that the next connector start would source AS the MCP
+        // user, with its decoded secrets in the environment — walking straight
+        // around the boundary /proc hardening is there to protect. uid/gid/mode are
+        // ordinary tmpfs mount options, so the kernel applies them at mount time
+        // and no entrypoint step (or extra capability) can forget to.
+        "/opt/mcp": `rw,nosuid,nodev,exec,size=${mcpTmpMb}m,mode=0700,uid=${mcpUid},gid=${mcpGid}`,
       },
       // Hard, non-negotiable isolation. Privileged is set explicitly so the
       // test pins it and a future edit can't omit it into a truthy default.

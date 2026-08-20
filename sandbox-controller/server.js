@@ -361,6 +361,9 @@ const server = createServer(async (req, res) => {
           networkMode: net, memoryBytes: MEMORY_LIMIT, nanoCpus: CPU_LIMIT,
           pidsLimit: PIDS_LIMIT,
           tmpMb: TMP_MB, mcpTmpMb: MCP_TMP_MB,
+          // Same uid the bridge execs connectors under, so /opt/mcp is created
+          // owned by them and closed (0700) to the agent's uid.
+          mcpUid: MCP_UID, mcpGid: MCP_GID,
           fsizeBytes: MAX_FILE_MB * 1024 * 1024,
           mounts: reqMounts,
         });

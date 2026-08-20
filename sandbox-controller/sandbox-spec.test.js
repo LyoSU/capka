@@ -178,6 +178,26 @@ describe("buildSandboxConfig — tunable tmpfs sizing", () => {
   });
 });
 
+describe("buildSandboxConfig — /opt/mcp belongs to the MCP uid, not to everyone", () => {
+  // /opt/mcp is the connectors' HOME. World-writable (the old mode=1777) let the
+  // agent's uid plant a shell rc file there that the next connector start would
+  // source with the connector's decoded secrets in its environment — defeating
+  // the whole point of running connectors under a separate uid.
+  it("mounts /opt/mcp 0700 owned by the MCP uid", () => {
+    const t = buildSandboxConfig(base).HostConfig.Tmpfs;
+    expect(t["/opt/mcp"]).toContain("mode=0700");
+    expect(t["/opt/mcp"]).toContain("uid=1001");
+    expect(t["/opt/mcp"]).toContain("gid=1001");
+    expect(t["/opt/mcp"]).not.toContain("1777");
+  });
+
+  it("follows the operator's SANDBOX_MCP_UID instead of assuming 1001", () => {
+    const t = buildSandboxConfig({ ...base, mcpUid: 1500, mcpGid: 1500 }).HostConfig.Tmpfs;
+    expect(t["/opt/mcp"]).toContain("uid=1500");
+    expect(t["/opt/mcp"]).toContain("gid=1500");
+  });
+});
+
 describe("resolveNetworkMode — platform decides; only bridge grants network", () => {
   it("grants bridge when the platform requests it", () => {
     expect(resolveNetworkMode("bridge")).toBe("bridge");
