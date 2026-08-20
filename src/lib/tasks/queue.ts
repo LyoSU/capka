@@ -190,13 +190,29 @@ export async function absorbQueuedTasks(chatId: string, exceptId: string): Promi
   return rows;
 }
 
-/** Renew a running task's lease. Returns false if the task is no longer ours. */
+/**
+ * Renew a running task's lease. Returns false if the task is no longer ours —
+ * which the runner's monitor treats as "lost lease" and aborts on.
+ *
+ * `lease_expires_at > now()` is part of the guard, not decoration: an EXPIRED
+ * lease may never be renewed. `claimNextTask` excludes a workspace only while
+ * some running task there still holds an unexpired lease, so the instant ours
+ * lapses another worker is free to start a turn in the same workspace. A worker
+ * that froze past expiry (a long GC pause, a DB outage) and then resurrected its
+ * own lease would silently un-do that mutual exclusion after the fact and write
+ * into files a second turn is already using. Refusing the renewal makes the
+ * frozen worker stand down instead, which is the only safe direction.
+ *
+ * Losing the lease costs a full minute of missed renewals (LEASE_SECONDS) while
+ * the monitor retries every 5s, so this is not tripped by one hiccup.
+ */
 export async function heartbeat(id: string, workerId: string): Promise<boolean> {
   const { rowCount } = await pool.query(
     `UPDATE tasks
         SET heartbeat_at = now(),
             lease_expires_at = now() + ($2 || ' seconds')::interval
-      WHERE id = $1 AND status = 'running' AND worker_id = $3`,
+      WHERE id = $1 AND status = 'running' AND worker_id = $3
+        AND lease_expires_at > now()`,
     [id, String(LEASE_SECONDS), workerId],
   );
   return (rowCount ?? 0) > 0;

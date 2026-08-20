@@ -87,6 +87,24 @@ run("durable queue", () => {
     expect(rows[0].status).toBe("completed");
   });
 
+  it("refuses to renew an EXPIRED lease — a frozen worker must stand down, not resurrect", async () => {
+    // The moment a lease lapses, claimNextTask lets another worker start a turn in
+    // the same workspace. A worker that stalled past expiry and then heartbeated
+    // successfully would revoke that exclusion after the fact, putting two turns in
+    // one workspace. Simulate the stall by backdating the lease.
+    await enqueueTask({ id: "qt-lease", chatId: C, userId: U, payload: {} });
+    const claimed = await claimNextTask("frozen-worker");
+    expect(claimed?.id).toBe("qt-lease");
+    expect(await heartbeat("qt-lease", "frozen-worker")).toBe(true);
+
+    await pool.query(`UPDATE tasks SET lease_expires_at = now() - interval '1 second' WHERE id = 'qt-lease'`);
+    expect(await heartbeat("qt-lease", "frozen-worker")).toBe(false);
+    // …and the refusal must not have quietly extended it anyway.
+    const { rows } = await pool.query(`SELECT lease_expires_at < now() AS expired FROM tasks WHERE id='qt-lease'`);
+    expect(rows[0].expired).toBe(true);
+    await finalizeTask("qt-lease", "failed");
+  });
+
   it("requests and reads cancellation", async () => {
     await enqueueTask({ id: "qt2", chatId: C, userId: U, payload: {} });
     expect(await isCancelRequested("qt2")).toBe(false);
