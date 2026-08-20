@@ -12,6 +12,26 @@
  * the single cross-provider mechanism, so the conversation tree and UX stay
  * identical regardless of provider.
  */
+
+/**
+ * The tool-result clearing policy, in ONE place. Anthropic enforces it
+ * server-side through the edit below; every other provider gets the same policy
+ * applied to the context we build (`buildModelContext`'s `clearToolsKeepLast` —
+ * see the runner). Kept shared so the behaviour can't fork by provider, and so
+ * moving the threshold moves both halves at once.
+ *
+ * Fires well before the 75% compaction threshold: shedding stale tool bodies is
+ * the cheap relief, and compaction handles whatever is left.
+ */
+export const TOOL_CLEAR_TRIGGER_FRACTION = 0.5;
+/** How many of the most recent tool results keep their bodies. */
+export const TOOL_CLEAR_KEEP_LAST = 3;
+
+/** True when the provider has no server-side tool-result clearing, so we must
+ *  apply the policy ourselves when building the model's view of the context. */
+export function clearsToolResultsClientSide(provider: string): boolean {
+  return contextManagementOptions(provider, 0) === undefined;
+}
 export function contextManagementOptions(
   provider: string,
   effectiveLimit: number,
@@ -24,10 +44,8 @@ export function contextManagementOptions(
             edits: [
               {
                 type: "clear_tool_uses_20250919",
-                // Fire well before our 75% compaction threshold so stale tool
-                // bodies are shed cheaply first; compaction handles the rest.
-                trigger: { type: "input_tokens", value: Math.round(effectiveLimit * 0.5) },
-                keep: { type: "tool_uses", value: 3 },
+                trigger: { type: "input_tokens", value: Math.round(effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION) },
+                keep: { type: "tool_uses", value: TOOL_CLEAR_KEEP_LAST },
                 clearAtLeast: { type: "input_tokens", value: 1000 },
               },
             ],

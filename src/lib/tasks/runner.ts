@@ -23,7 +23,8 @@ import { buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
-import { contextManagementOptions, mergeProviderOptions } from "@/lib/chat/context/provider-edits";
+import { contextManagementOptions, mergeProviderOptions, clearsToolResultsClientSide,
+  TOOL_CLEAR_TRIGGER_FRACTION, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
 import { stepSettings, foldReasoningIntoText, MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
@@ -430,6 +431,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // snapshotted at enqueue): a queued/batched turn then sees the previous
     // reply's final content and every message folded into this turn. The path is
     // anchored at replyParentId, so regenerate/edit still answer their own leaf.
+    // The model's real context ceiling (model window, narrowed by any admin cap).
+    // Computed once here because two things downstream need it: the provider's own
+    // context-management trigger below, and the tool-clearing threshold just under.
+    const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
     let uiMessages = payload.uiMessages ?? [];
     if (replyParentId) {
       const path = await loadActivePath(chatId, replyParentId);
@@ -437,7 +442,26 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // compaction checkpoint into its summary (cache-stable — the checkpoint
       // doesn't move, so the prefix stays a cache hit between turns). The DB and
       // the UI transcript keep the full history; only the model's view is trimmed.
-      if (path.length) uiMessages = toUIMessages(buildModelContext(path.map((p) => p.node) as ContextRow[], {}));
+      // …and, on providers WITHOUT server-side tool-result clearing, shed the
+      // bodies of tool results the agent already acted on. Anthropic does this
+      // itself (ctxMgmt below), cache-coherently; everywhere else those bodies —
+      // a whole file read, a loaded skill — were replayed in full on every turn
+      // until compaction finally fired, because this option was never passed and
+      // the clearing code was unreachable. Same shared policy on both paths.
+      //
+      // Gated on the conversation actually being deep: below the threshold the
+      // prefix stays byte-stable and the prompt cache keeps hitting, which is
+      // worth more than the tokens. The signal is the prompt size the previous
+      // turn already measured and persisted — nothing new to compute or store.
+      const lastMeasured = path
+        .map((p) => (p.node.metadata as MessageMeta | null)?.contextTokens)
+        .findLast((t): t is number => typeof t === "number");
+      const clearTools =
+        clearsToolResultsClientSide(provider) &&
+        (lastMeasured ?? 0) >= effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION
+          ? { clearToolsKeepLast: TOOL_CLEAR_KEEP_LAST }
+          : {};
+      if (path.length) uiMessages = toUIMessages(buildModelContext(path.map((p) => p.node) as ContextRow[], clearTools));
     }
     // Seal any tool call left dangling by an interrupted earlier turn (deadline,
     // lost worker, cancel — or a fork that COPIED such a turn). Without this the
@@ -538,7 +562,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let useReasoning = reasoning !== undefined;
     // Effective window (model ∩ admin cap) drives the provider-native edit's
     // trigger. Reused from the budget logic so the cap is honored here too.
-    const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
     const ctxMgmt = contextManagementOptions(provider, effectiveLimit);
     // Stall detection runs per-attempt: `ac` is the task-wide signal (deadline,
     // cancel, lost lease); `attemptAc` aborts only the CURRENT stream when the
