@@ -406,14 +406,16 @@ async function buildBot(): Promise<Bot | null> {
       const link = await findLink(ctx.from!.id);
       if (!link) { await ctx.answerCallbackQuery(); return; }
       const { approveManageForUser } = await import("@/lib/manage/authed");
-      const ok = await approveManageForUser(link.userId, { messageId: ctx.match![1], approved });
-      const msg = !ok ? t("confirmExpired") : approved ? t("confirmApplied") : t("confirmCancelled");
+      const outcome = await approveManageForUser(link.userId, { messageId: ctx.match![1], approved });
+      const msg = outcome === "busy" ? t("confirmBusy")
+        : outcome === "gone" ? t("confirmExpired")
+        : approved ? t("confirmApplied") : t("confirmCancelled");
       await ctx.answerCallbackQuery({ text: msg });
-      // Drop the buttons only once the decision actually stuck. A refusal (the call
-      // was already decided, or its continuation could not be queued) leaves them in
-      // place so the tap is retryable — removing them there would strand the card
-      // exactly as the web button did when it stayed disabled on a 200 + {ok:false}.
-      if (ok) await ctx.editMessageReplyMarkup().catch(() => {});
+      // Buttons come off unless tapping again could still do something. "busy" is
+      // the one retryable refusal (the chat is finishing another turn), so its card
+      // stays live; "gone" is final, and leaving buttons on a card that will answer
+      // "expired" forever is its own small lie.
+      if (outcome !== "busy") await ctx.editMessageReplyMarkup().catch(() => {});
     });
   }
 

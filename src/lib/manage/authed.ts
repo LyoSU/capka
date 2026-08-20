@@ -1,8 +1,8 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, TransactionRollbackError } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { users, messages, chats, tasks } from "@/lib/db/schema";
-import { enqueueTask } from "@/lib/tasks/queue";
+import { enqueueTask, notifyTaskEnqueued } from "@/lib/tasks/queue";
 import { log } from "@/lib/log";
 import type { MessageMeta, StoredPart } from "@/lib/chat/contracts";
 import type { TaskPayload } from "@/lib/tasks/runner";
@@ -91,22 +91,23 @@ export type ApprovalDecision = { messageId: string; toolCallId?: string; approve
  * persisted tool-call part with `{approved}` (so a reload reflects the decision)
  * then queues a resume task that re-opens the SAME assistant message — the AI SDK
  * re-runs the tool (approved) or the model sees the denial, and finishes the turn.
- * Returns false when the message isn't the caller's, or has no such pending call.
+ * Three outcomes, because the two refusals are not the same to a user: "gone" —
+ * not the caller's message, no pending call, or a racing tap already decided it
+ * (nothing to retry); "busy" — the decision stuck nowhere because the chat's one
+ * queued slot is taken, which IS worth tapping again. Callers that show buttons
+ * must keep them alive only for "busy".
  */
-export async function approveManageForUser(userId: string, d: ApprovalDecision): Promise<boolean> {
+export async function approveManageForUser(userId: string, d: ApprovalDecision): Promise<"applied" | "gone" | "busy"> {
   const [msg] = await db
     .select({ chatId: messages.chatId, ownerId: chats.userId, projectId: chats.projectId, metadata: messages.metadata })
     .from(messages)
     .innerJoin(chats, eq(messages.chatId, chats.id))
     .where(eq(messages.id, d.messageId))
     .limit(1);
-  if (!msg || msg.ownerId !== userId) return false;
+  if (!msg || msg.ownerId !== userId) return "gone";
 
   const meta = (msg.metadata ?? {}) as MessageMeta;
   const parts = (meta.parts ?? []) as StoredPart[];
-  // Snapshot BEFORE the mutation below, so the decision can be un-recorded if the
-  // continuation turns out to be unqueueable (see the enqueue guard at the end).
-  const metaBefore = structuredClone(msg.metadata ?? {});
   // A message has at most one call awaiting approval at a time (the composer
   // blocks while it's pending), so a channel that can't cheaply carry the
   // toolCallId (Telegram's 64-byte callback) may omit it and match the sole one.
@@ -114,54 +115,73 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
     (p): p is Extract<StoredPart, { type: "tool-call" }> =>
       p.type === "tool-call" && !!p.approval && p.approval.approved === undefined && (!d.toolCallId || p.id === d.toolCallId),
   );
-  if (!call || !call.approval) return false;
+  if (!call || !call.approval) return "gone";
+
+  // Which rollback happened, for the caller's message. Set only on the retryable one.
+  let refusal: "gone" | "busy" = "gone";
 
   call.approval = { id: call.approval.id, approved: d.approved, ...(d.reason ? { reason: d.reason } : {}) };
-  // Single-use, atomic transition: the guard only matches while SOME approval part
-  // is still undecided, so two racing approve/reject clicks (double-tap, or web +
-  // Telegram at once) can't both win — the first flips it, the second matches 0
-  // rows and bails WITHOUT enqueuing a duplicate resume. (answerElicitationForUser
-  // already had this shape via isNull(answer); this brings approve in line.)
-  const applied = await db.update(messages).set({ metadata: { ...meta, parts } })
-    .where(and(
-      eq(messages.id, d.messageId),
-      sql`${messages.metadata} @? ${'$.parts[*] ? (exists(@.approval) && !exists(@.approval.approved))'}::jsonpath`,
-    ))
-    .returning({ id: messages.id });
-  if (applied.length === 0) return false;
+  // The decision and the turn that acts on it are ONE transaction. Recording the
+  // decision first and queuing after left a window — a throw from either statement,
+  // a dropped connection, a restart landing between them — where the approval was
+  // durable but its continuation never existed. That message then sits in
+  // `awaiting_approval` forever and no retry can rescue it, because the CAS below
+  // matches only while the call is still undecided. Inside a transaction, "the
+  // continuation can't be queued" is simply a rollback.
+  try {
+    const taskId = await db.transaction(async (tx) => {
+      // Single-use, atomic transition: the guard only matches while SOME approval part
+      // is still undecided, so two racing approve/reject clicks (double-tap, or web +
+      // Telegram at once) can't both win — the first flips it, the second matches 0
+      // rows and bails WITHOUT enqueuing a duplicate resume. (answerElicitationForUser
+      // already had this shape via isNull(answer); this brings approve in line.)
+      const applied = await tx.update(messages).set({ metadata: { ...meta, parts } })
+        .where(and(
+          eq(messages.id, d.messageId),
+          sql`${messages.metadata} @? ${'$.parts[*] ? (exists(@.approval) && !exists(@.approval.approved))'}::jsonpath`,
+        ))
+        .returning({ id: messages.id });
+      if (applied.length === 0) tx.rollback();
 
-  // Carry the original turn's model/project/origin so the continuation runs with
-  // the same identity and delivers to the same channel (Telegram).
-  const orig = meta.taskId
-    ? ((await db.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)
-    : null;
-  // A chat holds at most one QUEUED turn, so this insert folds into an existing
-  // one when the chat already has a pending turn (a Telegram follow-up typed while
-  // the approval sat unanswered). Folding is right for user messages — they all
-  // ride one reply — but fatal here: the incumbent carries no `resumeMessageId`, so
-  // the approved call would never run while the card reported success. `created`
-  // says which happened, so honor it: un-record the decision and report failure,
-  // leaving the card live for a retry rather than swallowing the approval.
-  const { created } = await enqueueTask({
-    id: nanoid(),
-    chatId: msg.chatId,
-    userId,
-    payload: {
-      resumeMessageId: d.messageId,
-      uiMessages: [],
-      requestModel: orig?.requestModel,
-      projectId: msg.projectId ?? undefined,
-      origin: orig?.origin,
-    } satisfies TaskPayload,
-  });
-  if (!created) {
-    // Safe to write unconditionally: the CAS above means we are the only writer of
-    // this decision, and a suspended message has no running turn snapshotting over it.
-    await db.update(messages).set({ metadata: metaBefore }).where(eq(messages.id, d.messageId));
-    log.warn("approval continuation folded into a pending turn — decision rolled back", {
-      messageId: d.messageId, chatId: msg.chatId,
+      // Carry the original turn's model/project/origin so the continuation runs with
+      // the same identity and delivers to the same channel (Telegram).
+      const orig = meta.taskId
+        ? ((await tx.select({ payload: tasks.payload }).from(tasks).where(eq(tasks.id, meta.taskId)).limit(1))[0]?.payload as TaskPayload | null)
+        : null;
+      // A chat holds at most one QUEUED turn, so this insert folds into an existing
+      // one when the chat already has a pending turn (a Telegram follow-up typed while
+      // the approval sat unanswered). Folding is right for user messages — they all
+      // ride one reply — but fatal here: the incumbent carries no `resumeMessageId`, so
+      // the approved call would never run while the card reported success.
+      const { id, created } = await enqueueTask({
+        id: nanoid(),
+        chatId: msg.chatId,
+        userId,
+        payload: {
+          resumeMessageId: d.messageId,
+          uiMessages: [],
+          requestModel: orig?.requestModel,
+          projectId: msg.projectId ?? undefined,
+          origin: orig?.origin,
+        } satisfies TaskPayload,
+      }, tx);
+      if (!created) {
+        refusal = "busy";
+        log.warn("approval continuation folded into a pending turn — decision rolled back", {
+          messageId: d.messageId, chatId: msg.chatId,
+        });
+        tx.rollback();
+      }
+      return id;
     });
-    return false;
+    // Committed — only now does the row exist for anyone else, so only now is a
+    // worker worth waking (enqueueTask holds the NOTIFY back inside a transaction).
+    await notifyTaskEnqueued(taskId);
+    return "applied";
+  } catch (e) {
+    // Our own rollback: nothing was recorded either way, so the card is safe to
+    // leave live — `refusal` says whether tapping it again could ever help.
+    if (e instanceof TransactionRollbackError) return refusal;
+    throw e;
   }
-  return true;
 }

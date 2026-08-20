@@ -20,8 +20,9 @@ const bodySchema = z.object({
 export const POST = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
   const d = bodySchema.parse(await req.json());
-  const ok = await approveManageForUser(userId, d);
+  const outcome = await approveManageForUser(userId, d);
   // 200 even when the pending call is gone (already decided, or expired): the card
-  // reconciles to its resolved state — this isn't an HTTP-level failure.
-  return Response.json({ ok });
+  // reconciles to its resolved state — this isn't an HTTP-level failure. `outcome`
+  // rides along so the card can say WHY it refused; `ok` stays the plain gate.
+  return Response.json({ ok: outcome === "applied", outcome });
 });

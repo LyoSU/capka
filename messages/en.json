@@ -393,6 +393,7 @@
       "answered": "Answered",
       "skipped": "Skipped",
       "expired": "That question is no longer active — your answer wasn't saved.",
+      "busy": "This chat is still finishing another message — please answer again in a moment.",
       "yes": "Yes",
       "no": "No"
     },
@@ -2013,6 +2014,7 @@
     "confirmApplied": "✓ Done.",
     "confirmCancelled": "Cancelled.",
     "confirmExpired": "This confirmation expired — just ask again.",
+    "confirmBusy": "This chat is still finishing another message — tap again in a moment.",
     "confirmDetails": "Details"
   },
   "updateBanner": {

@@ -94,8 +94,15 @@ async function finish(bot: Bot, chatId: number, c: Collection, action: AskAnswer
   const t = getTranslator(c.locale, "chat.ask");
   const d = { messageId: c.messageId, action, values: action === "submit" ? c.collected : {} };
   const { answerAskForUser, answerElicitationForUser } = await import("@/lib/ask/authed");
-  const ok = c.kind === "elicitation" ? await answerElicitationForUser(c.userId, d) : await answerAskForUser(c.userId, d);
-  const msg = !ok ? t("expired") : action === "skip" ? t("skipped") : t("answered");
+  const outcome = c.kind === "elicitation"
+    ? ((await answerElicitationForUser(c.userId, d)) ? "applied" : "gone")
+    : await answerAskForUser(c.userId, d);
+  // "busy" is not "expired": the question is still live, the chat is just finishing
+  // another turn. Saying "expired" there would tell the user their answer is gone
+  // when the right move is to answer again.
+  const msg = outcome === "busy" ? t("busy")
+    : outcome === "gone" ? t("expired")
+    : action === "skip" ? t("skipped") : t("answered");
   await bot.api.sendMessage(chatId, msg).catch(() => {});
 }
 

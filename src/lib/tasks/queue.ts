@@ -1,4 +1,5 @@
-import { pool } from "@/lib/db";
+import { sql } from "drizzle-orm";
+import { db, pool } from "@/lib/db";
 import { realtime } from "@/lib/realtime";
 import type { MessageMeta } from "@/lib/chat/contracts";
 
@@ -55,6 +56,26 @@ export interface TaskRow {
 }
 
 /**
+ * A drizzle transaction, or the pool-backed `db` when there isn't one. Mirrors
+ * the marketplace's `OperationTx` — the way this codebase lets a caller pull a
+ * module's own write into a wider transaction without the module growing a
+ * second implementation of it.
+ */
+export type QueueTx = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
+
+/** Wake a worker for a turn enqueued inside a transaction. Call it AFTER the
+ *  commit: before it, the row the woken worker goes looking for isn't visible to
+ *  any other connection, and the wake is wasted. */
+export async function notifyTaskEnqueued(id: string): Promise<void> {
+  await realtime.publish("task_enqueued", { id });
+}
+
+/** Wake now, unless we're inside a caller's transaction (see notifyTaskEnqueued). */
+async function wake(id: string, tx?: QueueTx): Promise<void> {
+  if (!tx) await realtime.publish("task_enqueued", { id });
+}
+
+/**
  * Enqueue a turn for a chat, coalescing instead of duplicating.
  *
  * A chat holds at most one pending (queued) turn — enforced in the DB by the
@@ -70,34 +91,40 @@ export interface TaskRow {
  * client a taskId that maps to a real, cancellable turn (never a phantom).
  * `created` says which happened; we only wake a worker when a turn was truly
  * created (a folded message rides a turn a worker will already pick up).
+ *
+ * Pass `tx` to enqueue inside a caller's transaction — the resume paths do, so
+ * that recording a decision and queuing the turn that acts on it either both
+ * happen or neither does (see manage/ask `authed.ts`). In that mode the wake-up
+ * NOTIFY is NOT sent: it rides a separate connection, so a worker woken before
+ * the commit would look for a row that isn't visible yet and fall back to its
+ * 5s poll. The caller must call `notifyTaskEnqueued` AFTER it commits.
  */
 export async function enqueueTask(input: {
   id: string;
   chatId: string;
   userId: string;
   payload: unknown;
-}): Promise<{ id: string; created: boolean }> {
+}, tx?: QueueTx): Promise<{ id: string; created: boolean }> {
+  const exec = tx ?? db;
   // One round-trip: try the insert; if the partial unique index rejects it,
   // fall through to the chat's existing pending turn. Exactly one row comes back
   // — the inserted row (created=true) OR the incumbent (created=false) — because
   // the second arm is gated on the insert having produced nothing.
-  const { rows } = await pool.query<{ id: string; created: boolean }>(
-    `WITH ins AS (
+  const first = await exec.execute(sql`
+     WITH ins AS (
        INSERT INTO tasks (id, chat_id, user_id, status, payload)
-       VALUES ($1, $2, $3, 'queued', $4)
+       VALUES (${input.id}, ${input.chatId}, ${input.userId}, 'queued', ${JSON.stringify(input.payload)}::jsonb)
        ON CONFLICT (chat_id) WHERE status = 'queued' DO NOTHING
        RETURNING id
      )
      SELECT id, true AS created FROM ins
      UNION ALL
      SELECT id, false AS created FROM tasks
-      WHERE chat_id = $2 AND status = 'queued' AND NOT EXISTS (SELECT 1 FROM ins)
-      LIMIT 1`,
-    [input.id, input.chatId, input.userId, JSON.stringify(input.payload)],
-  );
-  const row = rows[0];
+      WHERE chat_id = ${input.chatId} AND status = 'queued' AND NOT EXISTS (SELECT 1 FROM ins)
+      LIMIT 1`);
+  const row = (first.rows as { id: string; created: boolean }[])[0];
   if (row) {
-    if (row.created) await realtime.publish("task_enqueued", { id: row.id });
+    if (row.created) await wake(row.id, tx);
     return row;
   }
   // Neither arm returned a row: the incumbent was claimed (queued → running)
@@ -111,22 +138,20 @@ export async function enqueueTask(input: {
   //     real id so the caller's stop button targets the turn that will answer.
   // Either way we return a real, cancellable task id — never our own uninserted id.
   for (let attempt = 0; attempt < 5; attempt++) {
-    const retry = await pool.query<{ id: string }>(
-      `INSERT INTO tasks (id, chat_id, user_id, status, payload)
-       VALUES ($1, $2, $3, 'queued', $4)
+    const retry = await exec.execute(sql`
+      INSERT INTO tasks (id, chat_id, user_id, status, payload)
+       VALUES (${input.id}, ${input.chatId}, ${input.userId}, 'queued', ${JSON.stringify(input.payload)}::jsonb)
        ON CONFLICT (chat_id) WHERE status = 'queued' DO NOTHING
-       RETURNING id`,
-      [input.id, input.chatId, input.userId, JSON.stringify(input.payload)],
-    );
-    if (retry.rows[0]) {
-      await realtime.publish("task_enqueued", { id: retry.rows[0].id });
-      return { id: retry.rows[0].id, created: true };
+       RETURNING id`);
+    const inserted = (retry.rows as { id: string }[])[0];
+    if (inserted) {
+      await wake(inserted.id, tx);
+      return { id: inserted.id, created: true };
     }
-    const incumbent = await pool.query<{ id: string }>(
-      `SELECT id FROM tasks WHERE chat_id = $1 AND status = 'queued' LIMIT 1`,
-      [input.chatId],
-    );
-    if (incumbent.rows[0]) return { id: incumbent.rows[0].id, created: false };
+    const incumbent = await exec.execute(sql`
+      SELECT id FROM tasks WHERE chat_id = ${input.chatId} AND status = 'queued' LIMIT 1`);
+    const existing = (incumbent.rows as { id: string }[])[0];
+    if (existing) return { id: existing.id, created: false };
     // Raced again (the incumbent was claimed before we read it): loop and retry.
   }
   // Sustained churn kept flipping the slot for every attempt (not seen in practice

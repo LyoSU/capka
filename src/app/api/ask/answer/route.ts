@@ -23,8 +23,11 @@ export const POST = apiHandler(async (req: Request) => {
   );
   if (limited) return limited;
   const d = bodySchema.parse(await req.json());
-  const ok = d.kind === "elicitation"
-    ? await answerElicitationForUser(userId, d)
+  // Elicitation answers a polled DB row (one boolean outcome); `ask` answers a
+  // suspended turn and can also refuse retryably ("busy"). Normalize to the same
+  // shape so the card reads one field either way.
+  const outcome = d.kind === "elicitation"
+    ? ((await answerElicitationForUser(userId, d)) ? "applied" : "gone")
     : await answerAskForUser(userId, d);
-  return Response.json({ ok });
+  return Response.json({ ok: outcome === "applied", outcome });
 });

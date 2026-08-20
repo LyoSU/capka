@@ -1,9 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TransactionRollbackError } from "drizzle-orm";
 
 const enqueueTask = vi.fn();
-vi.mock("@/lib/tasks/queue", () => ({ enqueueTask: (...a: unknown[]) => enqueueTask(...a) }));
+const notifyTaskEnqueued = vi.fn();
+vi.mock("@/lib/tasks/queue", () => ({
+  enqueueTask: (...a: unknown[]) => enqueueTask(...a),
+  notifyTaskEnqueued: (...a: unknown[]) => notifyTaskEnqueued(...a),
+}));
 
 const rows: Record<string, unknown> = {};
+// Both answerAskForUser and answerElicitationForUser guard the write and read its
+// rowCount via `.set().where().returning()` — `updateReturn` is the rows the guarded
+// update matched (empty = the pending item was already resolved). `answerAskForUser`
+// additionally writes inside a TRANSACTION together with its resume task, so `tx`
+// mirrors drizzle: `rollback()` throws, and `db.transaction` rethrows after undoing.
+const writeApi = {
+  select: () => ({ from: () => ({ where: () => ({ limit: () => [rows.task] }) }) }),
+  update: () => ({
+    set: (v: unknown) => { rows.updated = v; return { where: () => ({ returning: () => rows.updateReturn ?? [] }) }; },
+  }),
+};
+const tx = { ...writeApi, rollback: () => { throw new TransactionRollbackError(); } };
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
@@ -12,12 +29,15 @@ vi.mock("@/lib/db", () => ({
         where: () => ({ limit: () => [rows.task] }),
       }),
     }),
-    // Both answerAskForUser and answerElicitationForUser now guard the write and read
-    // its rowCount via `.set().where().returning()` — `updateReturn` is the rows the
-    // guarded update matched (empty = the pending item was already resolved).
-    update: () => ({
-      set: (v: unknown) => { rows.updated = v; return { where: () => ({ returning: () => rows.updateReturn ?? [] }) }; },
-    }),
+    update: () => writeApi.update(),
+    transaction: async (cb: (t: typeof tx) => Promise<unknown>) => {
+      try {
+        return await cb(tx);
+      } catch (e) {
+        rows.rolledBack = true;
+        throw e;
+      }
+    },
   },
 }));
 
@@ -26,8 +46,10 @@ import { answerAskForUser, answerElicitationForUser } from "../authed";
 describe("answerAskForUser", () => {
   beforeEach(() => {
     enqueueTask.mockReset().mockResolvedValue({ id: "task-new", created: true });
+    notifyTaskEnqueued.mockReset();
     rows.updated = undefined;
     rows.updateReturn = undefined;
+    rows.rolledBack = false;
   });
 
   const pendingAsk = () => ({
@@ -41,10 +63,13 @@ describe("answerAskForUser", () => {
     rows.msg = pendingAsk();
     rows.task = { payload: { requestModel: "m", origin: undefined } };
     rows.updateReturn = [{ id: "m1" }]; // the guarded update matched — this caller won
-    const ok = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
-    expect(ok).toBe(true);
+    const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
+    expect(outcome).toBe("applied");
     expect(enqueueTask).toHaveBeenCalledOnce();
     expect(enqueueTask.mock.calls[0][0].payload.resumeMessageId).toBe("m1");
+    // Enqueued inside the transaction, so the wake-up NOTIFY only fires after commit.
+    expect(enqueueTask.mock.calls[0][1]).toBe(tx);
+    expect(notifyTaskEnqueued).toHaveBeenCalledWith("task-new");
     // The tool-result was appended so the resume sees a complete call→result pair.
     const parts = (rows.updated as { metadata: { parts: { type: string }[] } }).metadata.parts;
     expect(parts.some((p) => p.type === "tool-result")).toBe(true);
@@ -54,8 +79,8 @@ describe("answerAskForUser", () => {
     rows.msg = pendingAsk(); // still looks pending in this caller's read…
     rows.task = { payload: {} };
     rows.updateReturn = []; // …but the conditional update matched nothing — someone already answered
-    const ok = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "late" } });
-    expect(ok).toBe(false);
+    const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "late" } });
+    expect(outcome).toBe("gone");
     expect(enqueueTask).not.toHaveBeenCalled();
   });
 
@@ -66,26 +91,41 @@ describe("answerAskForUser", () => {
     rows.msg = pendingAsk();
     rows.task = { payload: {} };
     rows.updateReturn = [{ id: "m1" }];
+    // "busy", not "gone" — the question is still live, so Telegram says "try again"
+    // instead of "expired", and the web card stays open.
     enqueueTask.mockResolvedValue({ id: "incumbent", created: false });
-    const ok = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
-    expect(ok).toBe(false);
-    // The LAST write is the rollback: no tool-result, and the ask is unanswered again.
-    const meta = rows.updated as { metadata: { parts: { type: string; answer?: { value?: unknown } }[] } };
-    expect(meta.metadata.parts.some((p) => p.type === "tool-result")).toBe(false);
-    expect(meta.metadata.parts[0].answer?.value).toBeUndefined();
+    const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } });
+    expect(outcome).toBe("busy");
+    expect(rows.rolledBack).toBe(true);
+    expect(notifyTaskEnqueued).not.toHaveBeenCalled();
   });
 
-  it("returns false when the message isn't the caller's", async () => {
+  it("rolls the answer back when queuing the continuation THROWS", async () => {
+    // The window a transaction closes and a compensating write cannot: the answer is
+    // recorded, then the insert fails. Without the rollback the question reads as
+    // answered with no turn to resume it, and the guarded update refuses every retry.
+    rows.msg = pendingAsk();
+    rows.task = { payload: {} };
+    rows.updateReturn = [{ id: "m1" }];
+    enqueueTask.mockRejectedValue(new Error("could not settle a turn"));
+    await expect(
+      answerAskForUser("u1", { messageId: "m1", action: "submit", values: { q: "Kyiv" } }),
+    ).rejects.toThrow("could not settle");
+    expect(rows.rolledBack).toBe(true);
+    expect(notifyTaskEnqueued).not.toHaveBeenCalled();
+  });
+
+  it("refuses as gone when the message isn't the caller's", async () => {
     rows.msg = { chatId: "chat1", ownerId: "someone-else", metadata: { parts: [] } };
-    const ok = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: {} });
-    expect(ok).toBe(false);
+    const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: {} });
+    expect(outcome).toBe("gone");
     expect(enqueueTask).not.toHaveBeenCalled();
   });
 
-  it("returns false when there is no pending ask call", async () => {
+  it("refuses as gone when there is no pending ask call", async () => {
     rows.msg = { chatId: "chat1", ownerId: "u1", projectId: null, metadata: { parts: [{ type: "text", text: "hi" }] } };
-    const ok = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: {} });
-    expect(ok).toBe(false);
+    const outcome = await answerAskForUser("u1", { messageId: "m1", action: "submit", values: {} });
+    expect(outcome).toBe("gone");
   });
 });
 
