@@ -23,8 +23,8 @@ import { buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
-import { contextManagementOptions, mergeProviderOptions, clearsToolResultsClientSide,
-  TOOL_CLEAR_TRIGGER_FRACTION, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
+import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults,
+  TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
 import { stepSettings, foldReasoningIntoText, MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
@@ -436,6 +436,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // context-management trigger below, and the tool-clearing threshold just under.
     const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
     let uiMessages = payload.uiMessages ?? [];
+    // Whether this turn's context was built with tool bodies cleared — persisted
+    // on the message below, because the decision for the NEXT turn depends on it
+    // (see shouldClearToolResults).
+    let toolsCleared = false;
     if (replyParentId) {
       const path = await loadActivePath(chatId, replyParentId);
       // Shape the path into the model's view: collapse history at the newest
@@ -453,15 +457,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // prefix stays byte-stable and the prompt cache keeps hitting, which is
       // worth more than the tokens. The signal is the prompt size the previous
       // turn already measured and persisted — nothing new to compute or store.
-      const lastMeasured = path
-        .map((p) => (p.node.metadata as MessageMeta | null)?.contextTokens)
-        .findLast((t): t is number => typeof t === "number");
-      const clearTools =
-        clearsToolResultsClientSide(provider) &&
-        (lastMeasured ?? 0) >= effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION
-          ? { clearToolsKeepLast: TOOL_CLEAR_KEEP_LAST }
-          : {};
-      if (path.length) uiMessages = toUIMessages(buildModelContext(path.map((p) => p.node) as ContextRow[], clearTools));
+      const nodes = path.map((p) => p.node);
+      toolsCleared = shouldClearToolResults(provider, nodes, effectiveLimit);
+      if (path.length) {
+        uiMessages = toUIMessages(buildModelContext(nodes as ContextRow[],
+          toolsCleared ? { clearToolsKeepLast: TOOL_CLEAR_KEEP_LAST } : {}));
+      }
     }
     // Seal any tool call left dangling by an interrupted earlier turn (deadline,
     // lost worker, cancel — or a fork that COPIED such a turn). Without this the
@@ -1452,6 +1453,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // bare "Reasoning", which reads as if nothing had happened at all.
         reasoningMs: turn.reasoningMs,
         ...(touchedFiles ? { touchedFiles } : {}),
+        // On EVERY outcome, not just the successful ones: a failed turn's message
+        // still sits on the path the next turn reads, and this is how that turn
+        // learns clearing is already on (see shouldClearToolResults).
+        ...(toolsCleared ? { toolsCleared: true } : {}),
         // Tech details for the (i) popover. A manual cancel still did real work
         // (it has a model, elapsed time, and billed tokens), so carry them too —
         // otherwise the stopped turn loses its (i) affordance. A failed turn owns

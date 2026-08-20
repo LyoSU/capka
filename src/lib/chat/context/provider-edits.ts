@@ -13,6 +13,8 @@
  * identical regardless of provider.
  */
 
+import type { MessageMeta } from "@/lib/chat/contracts";
+
 /**
  * The tool-result clearing policy, in ONE place. Anthropic enforces it
  * server-side through the edit below; every other provider gets the same policy
@@ -31,6 +33,37 @@ export const TOOL_CLEAR_KEEP_LAST = 3;
  *  apply the policy ourselves when building the model's view of the context. */
 export function clearsToolResultsClientSide(provider: string): boolean {
   return contextManagementOptions(provider, 0) === undefined;
+}
+
+/**
+ * Whether to build this turn's context with tool-result bodies cleared, for a
+ * provider that has no server-side edit of its own.
+ *
+ * The measurement is the previous turn's persisted prompt size — nothing new to
+ * compute — but it can't be read naively, because clearing CHANGES what it
+ * measures. Two rules keep that from turning into a loop:
+ *
+ *  • Sticky. A cleared turn is a smaller turn, so the very success of clearing
+ *    pushes the next measurement back under the threshold. Deciding afresh each
+ *    time gives full → cleared → full → cleared, replaying every tool body on
+ *    every other turn and handing the prompt cache a different prefix each time —
+ *    strictly worse than either steady state. Once it's on it stays on.
+ *  • …until the next compaction checkpoint, where the history collapses into a
+ *    summary and the model's view genuinely restarts small. Messages before the
+ *    checkpoint are not part of that view, so they don't get a vote — which is
+ *    also what stops "sticky" from meaning "forever".
+ */
+export function shouldClearToolResults(
+  provider: string,
+  path: { metadata: unknown }[],
+  effectiveLimit: number,
+): boolean {
+  if (!clearsToolResultsClientSide(provider)) return false;
+  const metas = path.map((r) => r.metadata as MessageMeta | null);
+  const live = metas.slice(metas.findLastIndex((m) => m?.compaction) + 1);
+  if (live.some((m) => m?.toolsCleared)) return true;
+  const lastMeasured = live.map((m) => m?.contextTokens).findLast((t): t is number => typeof t === "number");
+  return (lastMeasured ?? 0) >= effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION;
 }
 export function contextManagementOptions(
   provider: string,

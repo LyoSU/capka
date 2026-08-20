@@ -107,6 +107,12 @@ export type MessageMeta = {
   // window fill once the turn made more than one call — this is the number the
   // "context full" meter should divide by contextWindow, not the turn total.
   contextTokens?: number;
+  // Set when this turn's context was built with stale tool-result bodies cleared
+  // (providers with no server-side edit of their own). It has to be persisted
+  // because clearing shrinks the very measurement that triggers it: without a
+  // record, the next turn would read a small `contextTokens`, decide not to
+  // clear, and replay every tool body again. See `shouldClearToolResults`.
+  toolsCleared?: boolean;
   // Files the user attached to THIS message — reference metadata only (name +
   // type, no bytes). Same shape as FileRef / chatRequestSchema.attachedFiles.
   // Lets the chat history show what was attached; the bytes live in the sandbox

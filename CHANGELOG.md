@@ -28,7 +28,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
-- Deep conversations on providers other than Anthropic (OpenAI, Google, local models) no longer replay the full bodies of old tool results on every turn. The clearing policy that Anthropic applies server-side now also runs when building the context for providers that lack one — same threshold (50% of the window) and same keep count (3).
+- Deep conversations on providers other than Anthropic (OpenAI, Google, local models) no longer replay the full bodies of old tool results on every turn. The clearing policy that Anthropic applies server-side now also runs when building the context for providers that lack one — same threshold (50% of the window), same keep count (3), and once it engages it stays on until the next compaction checkpoint.
 - Long tool-calling turns on Anthropic no longer re-pay for the tool results accumulated during the turn: the cache breakpoint now follows the step tail instead of staying pinned to the last user message.
 - Prompt-cache WRITE tokens are now billed instead of priced at zero, which under-reported the cost of every turn on a provider with Anthropic-style explicit caching. The exact rate syncs from the price books into `cache_write_price`; until the next catalog sync those writes are charged at the model's base input rate.
 - Approving a tool call (or answering an `ask`) now records the decision and queues its continuation in one transaction, so neither a follow-up already queued in that chat nor a failure between the two steps can leave a decided call that never resumes. A refusal worth retrying keeps the card and its Telegram buttons live; one that isn't (already decided, expired) retires them.
