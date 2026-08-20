@@ -3,6 +3,7 @@ import {
   classifyLLMError,
   isVisionUnsupportedError,
   PROVIDER_UNRESPONSIVE_ERROR,
+  RESPONSE_TRUNCATED_ERROR,
   LLM_ERROR_CATEGORIES,
 } from "@/lib/errors/friendly";
 import en from "../../../messages/en.json";
@@ -59,6 +60,21 @@ describe("PROVIDER_UNRESPONSIVE_ERROR", () => {
     expect(PROVIDER_UNRESPONSIVE_ERROR.userMessage).toMatch(/respond|model|try/i);
     expect(PROVIDER_UNRESPONSIVE_ERROR.userMessage).not.toMatch(/stall|idle|abort|signal/i);
     expect(PROVIDER_UNRESPONSIVE_ERROR.adminDetail.length).toBeGreaterThan(0);
+  });
+});
+
+describe("RESPONSE_TRUNCATED_ERROR", () => {
+  it("tells the user to continue, not to retry, and names the lever for admins", () => {
+    // Continue, because the reply above stands: regenerating would throw away work
+    // the turn already did (and re-run its tools), which is the same reason the
+    // partial-stall message exists next to it.
+    expect(RESPONSE_TRUNCATED_ERROR.category).toBe("response_truncated");
+    expect(RESPONSE_TRUNCATED_ERROR.userMessage).toMatch(/continue/i);
+    expect(RESPONSE_TRUNCATED_ERROR.userMessage).not.toMatch(/try again|regenerate/i);
+    // No jargon in the user's half — "finishReason", "max_tokens" and friends belong
+    // in the admin detail, which is where the fix actually is.
+    expect(RESPONSE_TRUNCATED_ERROR.userMessage).not.toMatch(/token|finishReason|max_tokens/i);
+    expect(RESPONSE_TRUNCATED_ERROR.adminDetail).toMatch(/max_tokens|output tokens/i);
   });
 });
 

@@ -32,7 +32,7 @@ import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { maintainMemoryDoc } from "@/lib/memory/store";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, providerUnresponsiveError, INTERRUPTED_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, providerUnresponsiveError, INTERRUPTED_ERROR, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
 import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
 import { rememberModelEfforts } from "@/lib/models/catalog";
@@ -156,6 +156,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // Distinguishes an abort caused by losing our lease (crash/reconciliation —
   // finalize as "failed") from a cooperative user cancel (finalize "cancelled").
   let leaseLost = false;
+  // Why the model stopped, per the provider. Only "length" is acted on (see
+  // RESPONSE_TRUNCATED_ERROR); the rest are normal endings or already covered by
+  // their own signals.
+  let lastFinishReason: string | undefined;
   // Whether this turn ran on the user's OWN provider key (vs a shared admin key).
   // Drives error-detail visibility: an end user must see WHY their own key failed
   // (only they can fix it), while a shared-key failure's raw detail stays
@@ -700,6 +704,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       liveUsage.cached = 0;
       liveUsage.cacheWrite = 0;
       liveUsage.reasoning = 0;
+      // The discarded attempt's ending says nothing about the one replacing it. Left
+      // standing, a discarded "length" would report the NEXT attempt as cut off even
+      // when that one ended cleanly (or died before emitting any step at all).
+      lastFinishReason = undefined;
       // The discarded attempt's real cost is now banked in `discarded.cost`; the
       // next attempt re-reports its own. Reset routing too so the popover reflects
       // only the final generation.
@@ -1028,6 +1036,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             liveUsage.output += event.usage.outputTokens ?? 0;
             liveUsage.cached += cached;
             lastStepContextTokens = event.usage.inputTokens ?? 0;
+            // The LAST step's reason is the turn's: intermediate steps of a tool loop
+            // all finish as "tool-calls", so only the final assignment survives to say
+            // how the turn actually ended.
+            lastFinishReason = event.finishReason;
             stepCount++;
             // Generic splits via the AI SDK's normalized usage (every provider):
             // cache WRITE is distinct from read, reasoning is a slice of output.
@@ -1322,7 +1334,18 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    const finalStatus = deadlineHit ? "failed" : leaseLost ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : "completed";
+    // The model stopped because it ran out of output room, not because it was done.
+    // Ranked LAST in both chains below: every other condition is a stronger statement
+    // about the same turn — a cancel, a lost lease or a provider error explains the
+    // short reply better than the length limit does. A suspended turn is excluded
+    // outright: it stopped to ask, and its final step is a tool call, not a cut-off.
+    const truncated = lastFinishReason === "length" && !awaitingApproval && !awaitingAnswer;
+    if (truncated) {
+      tlog.warn("model output hit the length limit; the reply is cut off", {
+        model: modelId, provider, steps: stepCount,
+      });
+    }
+    const finalStatus = deadlineHit ? "failed" : leaseLost ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : truncated ? "failed" : "completed";
     // Map any provider error to a friendly, role-aware shape: users see
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
     // A stall-out gets its own category (distinct from a clean timeout) so the
@@ -1330,7 +1353,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // and a two-way split within it, because a stall that hit mid-work must not
     // advise "try again": regenerating re-runs every tool and rewrites what this
     // turn already wrote. `parts` is what the turn is keeping, so it decides.
-    const failure = deadlineHit ? TIMED_OUT_ERROR : leaseLost ? INTERRUPTED_ERROR : stalledOut ? providerUnresponsiveError(parts) : streamError ? classifyLLMError(streamError) : undefined;
+    const failure = deadlineHit ? TIMED_OUT_ERROR : leaseLost ? INTERRUPTED_ERROR : stalledOut ? providerUnresponsiveError(parts) : streamError ? classifyLLMError(streamError) : truncated ? RESPONSE_TRUNCATED_ERROR : undefined;
 
     // Token usage + cost, computed once. Needed BOTH for the persisted message
     // metadata (so the (i) details survive a reload — elapsedMs and the usage

@@ -49,6 +49,7 @@
       "timed_out": "This task took too long and was stopped. Please try again, or break it into smaller steps.",
       "provider_unresponsive": "The model never responded. Please try again, or switch to a different model.",
       "provider_unresponsive_partial": "The reply broke off part-way — the model went quiet. What it already did is kept; ask it to continue.",
+      "response_truncated": "The reply reached the model's length limit and stops part-way. What's above is kept — ask it to continue.",
       "interrupted": "The task was interrupted before it finished. Please try again.",
       "unknown": "Something went wrong while generating a response. Please try again. If it keeps happening, let your administrator know."
     }

@@ -27,6 +27,7 @@ export const LLM_ERROR_CATEGORIES = [
   "timed_out",
   "provider_unresponsive",
   "provider_unresponsive_partial",
+  "response_truncated",
   "interrupted",
   "unknown",
 ] as const;
@@ -427,6 +428,29 @@ export function providerUnresponsiveError(
   );
   return producedWork ? PROVIDER_UNRESPONSIVE_PARTIAL_ERROR : PROVIDER_UNRESPONSIVE_ERROR;
 }
+
+/**
+ * The model stopped because it hit its own output-length limit, not because it
+ * had finished — the provider's `finishReason` says "length". The reply on screen
+ * is whatever fitted, and it can stop mid-sentence or mid-code.
+ *
+ * Reported rather than swallowed because a truncated turn is otherwise
+ * indistinguishable from a finished one: the user reads an answer that just stops,
+ * and — when the cut lands inside a tool call's arguments — watches the sandbox run
+ * a program missing its last line, with only the interpreter's syntax error to show
+ * for it. Same shape as the partial-stall message above: the work stands, and the
+ * move is to continue rather than regenerate.
+ *
+ * The adminDetail names the lever, because this one is almost always configuration:
+ * a gateway or local server with a small default `max_tokens`.
+ */
+export const RESPONSE_TRUNCATED_ERROR: FriendlyError = {
+  category: "response_truncated",
+  userMessage:
+    "The reply reached the model's length limit and stops part-way. What's above is kept — ask it to continue.",
+  adminDetail:
+    "Provider finished with reason \"length\": the model reached its maximum output tokens. Raise the model's output limit (or the gateway's default max_tokens) if replies keep being cut off.",
+};
 
 /**
  * The worker running this turn lost its lease — the server restarted, or the

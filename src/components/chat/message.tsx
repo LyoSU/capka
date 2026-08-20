@@ -1646,7 +1646,10 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
             ownsResource={metadata.errorOwned ?? undefined}
-            partial={metadata.errorCategory === "provider_unresponsive_partial"}
+            // Both of these mean "the reply stops mid-way but stands" — the notice
+            // offers Continue instead of the retry advice a real failure gets.
+            partial={metadata.errorCategory === "provider_unresponsive_partial"
+              || metadata.errorCategory === "response_truncated"}
             onContinue={onContinue}
           />
         )}
