@@ -234,7 +234,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // of the two questions asked of a slow turn (the other is retries/stalls), and
   // neither was answerable from the trace before.
   let stepCount = 0;
-  const discarded = { input: 0, output: 0, cached: 0, cost: 0 };
+  const discarded = { input: 0, output: 0, cached: 0, cacheWrite: 0, cost: 0 };
   const orLive: { cost: number; upstreamProvider?: string; generationId?: string } = { cost: 0 };
   let discardedOrServed = false;
 
@@ -661,6 +661,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       discarded.input += liveUsage.input;
       discarded.output += liveUsage.output;
       discarded.cached += liveUsage.cached;
+      // Banked like the rest: the tokens a discarded attempt wrote to the cache were
+      // billed, so dropping them here would under-charge the reconciliation below.
+      discarded.cacheWrite += liveUsage.cacheWrite;
       // Capture the discarded attempt's real provider cost BEFORE the reset below
       // zeroes it — otherwise this spend is recomputed from the catalog and the
       // provider's authoritative figure is lost. Only meaningful when OpenRouter
@@ -1326,6 +1329,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       try {
         costMeta = await costUsd(modelId, {
           inputTokens: usageMeta.input, outputTokens: usageMeta.output, cachedInputTokens: usageMeta.cached,
+          // Billed above base input, and NOT part of `usageMeta.input` (the SDK's
+          // noCacheTokens excludes them) — so this is the charge, not a duplicate.
+          cacheWriteTokens: usageMeta.cacheWrite,
         });
         if (costMeta != null) costSource = "catalog";
       } catch (e) {
@@ -1766,7 +1772,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const spentInput = liveUsage.input + discarded.input;
     const spentOutput = liveUsage.output + discarded.output;
     const spentCached = liveUsage.cached + discarded.cached;
-    if (runModelId && (spentInput || spentOutput || spentCached)) {
+    const spentCacheWrite = liveUsage.cacheWrite + discarded.cacheWrite;
+    if (runModelId && (spentInput || spentOutput || spentCached || spentCacheWrite)) {
       // Prefer the provider's authoritative real charge whenever one was reported
       // (this attempt's orLive, plus any discarded attempts'); else let
       // reconcileUsage recompute from the catalog over the combined tokens.
@@ -1774,7 +1781,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       const realCost = orServed || discardedOrServed ? orLive.cost + discarded.cost : undefined;
       await reconcileUsage({
         taskId, messageId: msgId, userId, provider: runProvider ?? "shared", configId: runConfigId, model: runModelId, onSharedKey: runShared,
-        usage: { inputTokens: spentInput, outputTokens: spentOutput, cachedInputTokens: spentCached },
+        usage: {
+          inputTokens: spentInput, outputTokens: spentOutput, cachedInputTokens: spentCached,
+          cacheWriteTokens: spentCacheWrite,
+        },
         costUsd: realCost,
       }).catch(() => {});
     }

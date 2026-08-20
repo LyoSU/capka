@@ -25,6 +25,7 @@ export interface CatalogModel {
   inputPrice: number | null; // USD per token
   outputPrice: number | null;
   cacheReadPrice: number | null;
+  cacheWritePrice: number | null;
   capabilities: Capabilities;
   enabled: boolean; // default curation; admin choice overrides on re-sync
 }
@@ -47,7 +48,7 @@ interface ORModel {
   name?: string;
   context_length?: number;
   architecture?: { input_modalities?: string[] };
-  pricing?: { prompt?: string; completion?: string; input_cache_read?: string };
+  pricing?: { prompt?: string; completion?: string; input_cache_read?: string; input_cache_write?: string };
   supported_parameters?: string[];
 }
 
@@ -59,6 +60,9 @@ export function parseOpenRouterModels(raw: unknown): CatalogModel[] {
     const input = num(m.pricing?.prompt);
     const output = num(m.pricing?.completion);
     const cacheRead = num(m.pricing?.input_cache_read);
+    // OpenRouter also publishes `input_cache_write_1h`; we price the default
+    // (5-minute) TTL because that's the only one we ever ask for.
+    const cacheWrite = num(m.pricing?.input_cache_write);
     const ctx = m.context_length ?? null;
     const params = m.supported_parameters ?? [];
     const group = groupFromName(m.name, m.id);
@@ -85,6 +89,7 @@ export function parseOpenRouterModels(raw: unknown): CatalogModel[] {
       inputPrice: input,
       outputPrice: output,
       cacheReadPrice: cacheRead,
+      cacheWritePrice: cacheWrite,
       capabilities: {
         vision: inputMods.includes("image"),
         tools: params.includes("tools") || params.includes("tool_choice"),
@@ -103,6 +108,7 @@ interface LLEntry {
   input_cost_per_token?: number;
   output_cost_per_token?: number;
   cache_read_input_token_cost?: number;
+  cache_creation_input_token_cost?: number;
   max_input_tokens?: number;
   supports_vision?: boolean;
   supports_function_calling?: boolean;
@@ -152,6 +158,7 @@ export function parseLiteLLMModels(raw: unknown): CatalogModel[] {
       inputPrice: numv(e.input_cost_per_token),
       outputPrice: numv(e.output_cost_per_token),
       cacheReadPrice: numv(e.cache_read_input_token_cost),
+      cacheWritePrice: numv(e.cache_creation_input_token_cost),
       capabilities: {
         vision: !!e.supports_vision,
         tools: !!e.supports_function_calling,
@@ -240,6 +247,7 @@ async function upsertModels(list: CatalogModel[], opts?: { deferToOtherSources?:
     inputPrice: m.inputPrice === null ? null : String(m.inputPrice),
     outputPrice: m.outputPrice === null ? null : String(m.outputPrice),
     cacheReadPrice: m.cacheReadPrice === null ? null : String(m.cacheReadPrice),
+    cacheWritePrice: m.cacheWritePrice === null ? null : String(m.cacheWritePrice),
     capabilities: m.capabilities,
     enabled: m.enabled,
     updatedAt: now,
@@ -257,6 +265,7 @@ async function upsertModels(list: CatalogModel[], opts?: { deferToOtherSources?:
     inputPrice: sql`excluded.input_price`,
     outputPrice: sql`excluded.output_price`,
     cacheReadPrice: sql`excluded.cache_read_price`,
+    cacheWritePrice: sql`excluded.cache_write_price`,
     // Refresh the synced capabilities but PRESERVE `efforts` — the reasoning-effort
     // enum we learned from a provider rejection (rememberModelEfforts). No source
     // reports it, so a plain `excluded.capabilities` would wipe it on every sync
@@ -328,6 +337,7 @@ export interface ModelPrice {
   input: number;
   output: number;
   cacheRead: number;
+  cacheWrite: number;
 }
 
 // Read-through caches. Bounded (a flood of distinct/mistyped ids can't grow them
@@ -365,6 +375,7 @@ export async function getModelPrice(modelId: string): Promise<ModelPrice | null>
       inputPrice: models.inputPrice,
       outputPrice: models.outputPrice,
       cacheReadPrice: models.cacheReadPrice,
+      cacheWritePrice: models.cacheWritePrice,
     })
     .from(models)
     .where(or(eq(models.id, modelId), eq(models.id, stripped), like(models.id, `%/${stripped}`)))
@@ -377,6 +388,13 @@ export async function getModelPrice(modelId: string): Promise<ModelPrice | null>
         input: parseFloat(exact.inputPrice),
         output: parseFloat(exact.outputPrice ?? "0"),
         cacheRead: parseFloat(exact.cacheReadPrice ?? "0"),
+        // No multiplier is assumed anywhere: both price books publish the real
+        // cache-write rate. When a source omits it, fall back to the BASE INPUT
+        // rate — a cache write is never cheaper than plain input, so that
+        // under-states rather than invents, and it is strictly better than the
+        // zero these tokens used to be charged.
+        cacheWrite:
+          exact.cacheWritePrice != null ? parseFloat(exact.cacheWritePrice) : parseFloat(exact.inputPrice),
       }
     : null;
   cacheSet(priceCache, modelId, price, price === null);
@@ -401,7 +419,12 @@ export async function getLiveModelPrice(modelId: string): Promise<ModelPrice | n
       const byId = new Map<string, ModelPrice>();
       for (const m of parseOpenRouterModels(await fetchJson(OPENROUTER_MODELS_URL))) {
         if (m.inputPrice == null) continue; // no usable price — skip
-        byId.set(m.id, { input: m.inputPrice, output: m.outputPrice ?? 0, cacheRead: m.cacheReadPrice ?? 0 });
+        byId.set(m.id, {
+          input: m.inputPrice,
+          output: m.outputPrice ?? 0,
+          cacheRead: m.cacheReadPrice ?? 0,
+          cacheWrite: m.cacheWritePrice ?? m.inputPrice,
+        });
       }
       livePriceBook = { at: Date.now(), byId };
     }

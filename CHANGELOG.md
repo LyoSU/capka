@@ -28,6 +28,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- Prompt-cache WRITE tokens are now billed. They were counted and shown in the (i) details but priced at zero, so turns on Anthropic-style explicit caching under-reported cost — most on chats paced slowly enough to miss the cache TTL, where the whole prefix is rewritten each turn. The rate is synced from the price books (`cache_write_price`); models keep costing zero for writes until the next catalog sync refreshes them.
 - Approving a tool call (or answering an `ask`) while a follow-up message is already queued in that chat no longer reports success while silently dropping the continuation — the decision is refused, and the card and its Telegram buttons stay live for a retry.
 - A worker whose lease already expired can no longer renew it, which previously let a stalled turn resume alongside the turn that had replaced it in the same project workspace.
 - A background job (`execute_bash` with `background: true`) no longer dies when the chat sits idle: the sandbox is leased while the job runs, and each `check_job` renews it. Tune with `SANDBOX_BUSY_LEASE_MS` (default 1h) and `SANDBOX_BUSY_MAX_MS` (default 6h ceiling per job).

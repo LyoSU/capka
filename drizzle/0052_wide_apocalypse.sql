@@ -1,0 +1,1 @@
+ALTER TABLE "models" ADD COLUMN "cache_write_price" numeric(20, 12);

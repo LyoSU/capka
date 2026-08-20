@@ -10,12 +10,22 @@ import {
 import { parseOpenRouterModels, parseLiteLLMModels } from "../models/catalog";
 
 describe("computeCost", () => {
+  const OPUS = { input: 0.000015, output: 0.000075, cacheRead: 0.0000015, cacheWrite: 0.00001875 };
+
   it("sums input, output and cached reads at per-token rates", () => {
-    const got = computeCost(
-      { input: 0.000015, output: 0.000075, cacheRead: 0.0000015 },
-      { inputTokens: 1_000_000, outputTokens: 500_000, cachedInputTokens: 200_000 },
-    );
+    const got = computeCost(OPUS, {
+      inputTokens: 1_000_000, outputTokens: 500_000, cachedInputTokens: 200_000,
+    });
     expect(got).toBeCloseTo(15 + 37.5 + 0.3, 6);
+  });
+
+  it("charges cache WRITES at their own rate — they used to cost nothing", () => {
+    // A chat at a human pace misses the 5-minute cache TTL between turns, so the
+    // whole prefix is re-written each turn. Those tokens are real money at the
+    // provider and were priced at zero here.
+    const got = computeCost(OPUS, { inputTokens: 0, outputTokens: 0, cacheWriteTokens: 100_000 });
+    expect(got).toBeCloseTo(1.875, 6);
+    expect(computeCost(OPUS, { cacheWriteTokens: 0 })).toBe(0);
   });
 });
 
@@ -32,6 +42,26 @@ describe("toTokenUsage", () => {
       outputTokens: 200,
       cachedInputTokens: 300,
     });
+  });
+
+  it("keeps the three buckets disjoint when the provider reports a cache-write split", () => {
+    // `noCacheTokens` already excludes reads AND writes, so it wins over the
+    // subtraction; without splitting them out, a write would be billed as plain
+    // input at the base rate instead of the higher cache-write rate.
+    expect(
+      toTokenUsage({
+        inputTokens: 1000, outputTokens: 200, cachedInputTokens: 300,
+        inputTokenDetails: { noCacheTokens: 500, cacheWriteTokens: 200 },
+      }),
+    ).toEqual({ inputTokens: 500, outputTokens: 200, cachedInputTokens: 300, cacheWriteTokens: 200 });
+  });
+
+  it("subtracts a reported cache-write share when the provider gives no noCache total", () => {
+    expect(
+      toTokenUsage({
+        inputTokens: 1000, cachedInputTokens: 300, inputTokenDetails: { cacheWriteTokens: 200 },
+      }),
+    ).toEqual({ inputTokens: 500, outputTokens: 0, cachedInputTokens: 300, cacheWriteTokens: 200 });
   });
 
   it("defaults missing fields to zero and never goes negative", () => {
@@ -86,7 +116,10 @@ describe("parseOpenRouterModels", () => {
         name: "Anthropic: Claude Opus 4.1",
         context_length: 200000,
         architecture: { input_modalities: ["text", "image", "file"] },
-        pricing: { prompt: "0.000015", completion: "0.000075", input_cache_read: "0.0000015" },
+        pricing: {
+          prompt: "0.000015", completion: "0.000075",
+          input_cache_read: "0.0000015", input_cache_write: "0.00001875",
+        },
         supported_parameters: ["tools", "reasoning"],
       },
       {
@@ -105,6 +138,8 @@ describe("parseOpenRouterModels", () => {
     expect(opus.group).toBe("Anthropic");
     expect(opus.icon).toBe("anthropic");
     expect(opus.inputPrice).toBeCloseTo(0.000015, 12);
+    // Cache-write comes from the price book, never from a multiplier in our code.
+    expect(opus.cacheWritePrice).toBeCloseTo(0.00001875, 12);
     // `input` carries the native attachment modalities: image + file→pdf.
     expect(opus.capabilities).toEqual({ vision: true, tools: true, reasoning: true, input: ["image", "pdf"] });
     expect(opus.enabled).toBe(true);
@@ -125,6 +160,7 @@ describe("parseLiteLLMModels", () => {
       input_cost_per_token: 0.000015,
       output_cost_per_token: 0.000075,
       cache_read_input_token_cost: 0.0000015,
+      cache_creation_input_token_cost: 0.00001875,
       max_input_tokens: 200000,
       supports_vision: true,
       supports_function_calling: true,
@@ -143,6 +179,7 @@ describe("parseLiteLLMModels", () => {
     expect(m.group).toBe("Anthropic");
     expect(m.icon).toBe("anthropic");
     expect(m.outputPrice).toBeCloseTo(0.000075, 12);
+    expect(m.cacheWritePrice).toBeCloseTo(0.00001875, 12);
     expect(m.capabilities.vision).toBe(true);
     expect(m.enabled).toBe(false); // litellm rows are price coverage, off by default
   });

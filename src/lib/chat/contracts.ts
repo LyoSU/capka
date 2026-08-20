@@ -79,9 +79,11 @@ export type MessageMeta = {
   // for …" label reflects thinking time rather than the whole turn.
   reasoningMs?: number;
   model?: string;
-  // cacheWrite + reasoning are display-only splits (reasoning is already part of
-  // `output`); present only when non-zero. Captured generically from the AI SDK's
-  // normalized usage, so they work for every provider, not just OpenRouter.
+  // `reasoning` is a display-only split (it is already part of `output`).
+  // `cacheWrite` is NOT: it is a fourth billable bucket, disjoint from `input`
+  // (the SDK's noCacheTokens excludes it) and priced at its own higher rate.
+  // Both are present only when non-zero, and are captured generically from the AI
+  // SDK's normalized usage, so they work for every provider, not just OpenRouter.
   usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number };
   costUsd?: number;
   // Where `costUsd` came from: "provider" = the gateway's real billed charge

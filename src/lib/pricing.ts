@@ -1,9 +1,16 @@
 import { getModelPrice, type ModelPrice } from "./models/catalog";
 
 export interface TokenUsage {
+  /** Uncached input. EXCLUDES both `cachedInputTokens` and `cacheWriteTokens`. */
   inputTokens?: number;
   outputTokens?: number;
+  /** Prompt-cache READS, billed at the discounted cacheRead rate. */
   cachedInputTokens?: number;
+  /** Prompt-cache WRITES, billed ABOVE base input. Distinct from both of the
+   *  above: a provider that reports them (Anthropic-style explicit caching) has
+   *  already excluded them from `inputTokens`, so pricing them here adds the
+   *  charge that was missing rather than double-counting one that was there. */
+  cacheWriteTokens?: number;
 }
 
 /** Pure cost math from per-token prices. */
@@ -11,7 +18,13 @@ export function computeCost(price: ModelPrice, usage: TokenUsage): number {
   const input = usage.inputTokens ?? 0;
   const output = usage.outputTokens ?? 0;
   const cached = usage.cachedInputTokens ?? 0;
-  return input * price.input + output * price.output + cached * price.cacheRead;
+  const cacheWrite = usage.cacheWriteTokens ?? 0;
+  return (
+    input * price.input +
+    output * price.output +
+    cached * price.cacheRead +
+    cacheWrite * price.cacheWrite
+  );
 }
 
 /**
@@ -23,14 +36,28 @@ export function computeCost(price: ModelPrice, usage: TokenUsage): number {
  * provider reported no usage (e.g. a mocked call in tests).
  */
 export function toTokenUsage(
-  usage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } | undefined,
+  usage:
+    | {
+        inputTokens?: number;
+        outputTokens?: number;
+        cachedInputTokens?: number;
+        /** The SDK's normalized split, when the provider reported one. `noCache`
+         *  already excludes BOTH cache reads and cache writes, so preferring it
+         *  keeps the three buckets disjoint; the subtraction below is the fallback
+         *  for providers that report only a total. */
+        inputTokenDetails?: { noCacheTokens?: number; cacheWriteTokens?: number };
+      }
+    | undefined,
 ): TokenUsage | undefined {
   if (!usage) return undefined;
   const cached = usage.cachedInputTokens ?? 0;
+  const cacheWrite = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
   return {
-    inputTokens: Math.max(0, (usage.inputTokens ?? 0) - cached),
+    inputTokens:
+      usage.inputTokenDetails?.noCacheTokens ?? Math.max(0, (usage.inputTokens ?? 0) - cached - cacheWrite),
     outputTokens: usage.outputTokens ?? 0,
     cachedInputTokens: cached,
+    ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
   };
 }
 

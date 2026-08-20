@@ -321,6 +321,10 @@ export const models = pgTable("models", {
   inputPrice: numeric("input_price", { precision: 20, scale: 12 }), // USD per token (tiny — needs deep scale)
   outputPrice: numeric("output_price", { precision: 20, scale: 12 }),
   cacheReadPrice: numeric("cache_read_price", { precision: 20, scale: 12 }),
+  // Writing a prompt-cache entry is billed ABOVE base input (Anthropic: 1.25x at
+  // the 5-minute TTL, 2x at one hour). Both price books report the real figure, so
+  // it is synced like any other price rather than derived from a multiplier here.
+  cacheWritePrice: numeric("cache_write_price", { precision: 20, scale: 12 }),
   capabilities: jsonb("capabilities"), // { vision, tools, reasoning }
   cutoff: text("cutoff"), // knowledge cutoff, e.g. "2025-03" (from Models.dev)
   openWeights: boolean("open_weights"), // open-weights model? (from Models.dev)

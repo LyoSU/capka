@@ -37,7 +37,11 @@ export async function recordUsage(input: RecordUsageInput): Promise<void> {
       provider: input.provider,
       configId: input.configId ?? null,
       model: input.model,
-      inputTokens: input.usage.inputTokens ?? 0,
+      // Cache WRITES are input tokens billed at their own (higher) rate: `cost`
+      // above already priced them separately, so folding them into the stored
+      // input count here keeps the ledger's token totals complete without
+      // charging them twice. Only cache READS stay in their own column.
+      inputTokens: (input.usage.inputTokens ?? 0) + (input.usage.cacheWriteTokens ?? 0),
       outputTokens: input.usage.outputTokens ?? 0,
       cachedInputTokens: input.usage.cachedInputTokens ?? 0,
       costUsd: cost === null ? null : String(cost),
@@ -65,7 +69,9 @@ export async function reconcileUsage(input: RecordUsageInput): Promise<void> {
         provider: input.provider,
         configId: input.configId ?? null,
         model: input.model,
-        inputTokens: input.usage.inputTokens ?? 0,
+        // Same fold as recordUsage: cache writes count as input tokens here, and
+        // were already priced at their own rate in `cost`.
+        inputTokens: (input.usage.inputTokens ?? 0) + (input.usage.cacheWriteTokens ?? 0),
         outputTokens: input.usage.outputTokens ?? 0,
         cachedInputTokens: input.usage.cachedInputTokens ?? 0,
         costUsd: cost === null ? null : String(cost),
