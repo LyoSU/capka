@@ -18,10 +18,16 @@ Calm focus, short sessions, low tolerance for jargon or things that look broken.
 
 ## Product Purpose
 
-Capka is a self-hosted, extensible AI work platform a company runs itself. It gives
-non-technical staff a safe, shared way to use frontier AI on real work — chat with
-file attachments, a per-project workspace, and the same assistant reachable from
-Telegram — without each person needing their own API key or any setup knowledge.
+Capka is a self-hosted AI coworker a company runs on its own server. Someone hands
+it a task and some files; it does the work in an isolated Linux sandbox and hands
+back the finished file — a report, a cleaned-up spreadsheet, a converted document.
+Nobody needs their own API key or any setup knowledge, and the same coworker is
+reachable from Telegram.
+
+Two things follow from *coworker*, and both are load-bearing. The result is an
+artifact, not a reply: if something can be produced, the product produces it. And
+the work happens on the company's machine, not the employee's — a closed laptop
+does not stop a task, and no agent is reaching into anyone's own filesystem.
 
 Success looks like: a staff member finishes a real task on the first try without
 asking IT what a "provider" or "model" is; an admin connects a key once and never

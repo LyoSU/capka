@@ -2,21 +2,23 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Images on GHCR](https://img.shields.io/badge/images-ghcr-green.svg)](docs/DEPLOY.md)
-[![Website](https://img.shields.io/badge/website-capka.vercel.app-22190f.svg)](https://capka.vercel.app/)
+[![Website](https://img.shields.io/badge/website-capka.app-22190f.svg)](https://capka.app/)
 [![Live demo](https://img.shields.io/badge/live%20demo-capka.yuri.ly-ff6f3c.svg)](https://capka.yuri.ly/)
 
 <p align="center"><img src="./docs/assets/logo.webp" alt="Capka" width="180"></p>
-<p align="center"><strong>Self-hosted AI workspace with a sandbox and file storage for every chat</strong></p>
+<p align="center"><strong>Self-hosted AI coworker. Give it the work, get the finished files.</strong></p>
 <p align="center">
-  <a href="https://capka.vercel.app/">Website</a> |
+  <a href="https://capka.app/">Website</a> |
   <a href="https://capka.yuri.ly/">Live demo</a> |
   <a href="#run-locally">Run locally</a> |
   <a href="#deploy">Deploy</a> |
   <a href="SECURITY.md">Security</a>
 </p>
 
-Capka is a self-hosted AI workspace where every chat gets its own Linux sandbox
-and file storage
+You hand Capka a task and some files, and it hands back the finished thing: a
+report, a cleaned-up spreadsheet, a converted document, a patch. It runs on your
+own server, so the work happens in an isolated Linux sandbox there, not on the
+laptop of whoever asked.
 
 I wanted something I could run myself, connect to my own models and API keys, and
 share with a small team. Not another hosted chat product locked to one vendor.
@@ -34,16 +36,14 @@ The workflow is intentionally simple:
 2. Each chat gets its own Linux sandbox and its own file storage
 3. The agent works inside that workspace and returns files you can use.
 
-That covers a lot of real work: reports, spreadsheets, PDFs, research, document
-conversion, file cleanup, small code changes, and other tasks where the useful
-output is not just a message.
-
-You can close the tab while it works. The task keeps running.
+Nothing depends on your browser staying open. Every turn is a queued job on the
+server, saved after each step, so a closed tab, a dropped connection, or a
+restart of Capka itself resumes where it left off instead of losing the reply.
 
 This is a solo project, built seriously. I am trying to make the AI tool I
 actually want to use.
 
-There is a longer walkthrough on the [website](https://capka.vercel.app/), or you
+There is a longer walkthrough on the [website](https://capka.app/), or you
 can [try the live demo](https://capka.yuri.ly/) and hand it a real task right now.
 
 ![Capka turning uploaded files into a PDF report and Excel workbook](./docs/assets/demo.webp)
@@ -52,32 +52,32 @@ can [try the live demo](https://capka.yuri.ly/) and hand it a real task right no
 
 | | |
 |---|---|
+| **What you get back** | Files: reports, spreadsheets, PDFs, converted documents, patches |
+| **Where the work happens** | An isolated Linux sandbox on your server, one per chat or project |
 | **Runs on** | Your Linux server with Docker |
-| **Works with** | Files uploaded by the user, plus files the agent downloads or creates inside the chat |
-| **Isolation** | One sandbox and one file workspace per chat |
+| **Files** | What people upload, plus what the agent downloads or creates during the chat |
 | **Models** | Cloud providers or local models through Ollama |
 | **Users** | Multi-user, registration closed by default |
 | **Admin** | Users, auth, providers, MCP, skills, policies, security, usage, updates |
 
-## What It Is For
+## What People Use It For
 
-Use Capka when the result should be a file, a code change, or a checked piece of
-work, not only a chat reply:
+The tasks where the useful output is not a message:
 
 - reports and spreadsheet work
 - PDFs and document conversion
-- research over provided or downloaded files
+- research over uploaded or downloaded files
 - file organization and cleanup
-- repetitive office tasks
-- small coding and debugging jobs
+- repetitive office jobs nobody wants to do by hand
+- small coding and debugging work
 - workflows through MCP tools and connectors
 
 ## Is Capka for you?
 
 **Reach for Capka if:**
 
-- you want a finished file back — a report, a patch, a clean dataset — not just a chat reply
 - your files should not leave your own infrastructure
+- the people using it are not developers, and should not have to think about providers or keys
 - you would rather choose models and pay for tokens than pay a per-seat subscription
 - you have a small Linux server, or do not mind renting one
 
@@ -89,8 +89,12 @@ work, not only a chat reply:
 
 ## For teams
 
-Capka works well for small teams that want shared models, tools, and admin
-control without putting everyone in the same workspace.
+One person sets Capka up: connects a provider key, picks which models everyone
+may use, decides who gets in. After that nobody else has to know what a provider
+is. That split runs through the whole product, not just the setup screen.
+
+Starting alone is the normal way in. Install it for yourself, use it on your own
+work, and invite people to the same server when you are ready.
 
 Admins get one place to manage the instance:
 

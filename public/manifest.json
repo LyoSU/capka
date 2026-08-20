@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Capka",
   "short_name": "Capka",
-  "description": "Personal AI Platform",
+  "description": "Self-hosted AI coworker. Give it the work, get the finished files.",
   "start_url": "/",
   "scope": "/",
   "categories": ["productivity"],

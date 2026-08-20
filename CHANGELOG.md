@@ -13,6 +13,9 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - The monthly spend cap (`tiers.limit_month`) is now the calendar month and resets on the 1st, instead of a rolling 30 days; the "near their monthly budget" alert counts the same window. Existing caps keep their value.
+
+- The app's metadata `description` and the PWA manifest now read "Self-hosted AI coworker. Give it the work, get the finished files." instead of "Personal AI Platform", matching the website; search snippets and the install prompt change on the next deploy.
+- `README.md` and `PRODUCT.md` lead with what comes out (finished files) and where the work runs (an isolated sandbox on your server) instead of "workspace, sandbox, file storage". `docs/POSITIONING.md` holds the canonical wording for all four surfaces, including the website in its own repo.
 - `SECURITY.md` now states what gVisor costs — host install, syscall speed, a share of `SANDBOX_PIDS_LIMIT`, the `--net-raw=true` egress requirement — next to what it buys, so `runc` vs `runsc` is a decision an operator can make without reading the install script.
 - Markdown tables in a reply scroll edge to edge on a phone instead of inside a narrow inset box, and carry a shadow on whichever side still has content off-screen; the frame around them is gone on every screen size.
 - Model and icon pickers now sit on the app's field scale, so forms holding them (Add provider, connection rows, project defaults) line up with their own inputs.

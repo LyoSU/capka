@@ -48,7 +48,7 @@ const lora = localFont({
 
 export const metadata: Metadata = {
   title: "Capka",
-  description: "Personal AI Platform",
+  description: "Self-hosted AI coworker. Give it the work, get the finished files.",
   // iOS ignores the manifest's `display: standalone`; this is what makes the
   // app launch full-screen (no Safari chrome) once added to the home screen.
   // statusBarStyle "default" keeps content below the status bar — safe-area
