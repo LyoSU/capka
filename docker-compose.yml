@@ -131,19 +131,32 @@ services:
     # service — pulls a controller image that has no egress-proxy.js inside it. That
     # exits 1 on MODULE_NOT_FOUND and, with restart: unless-stopped, crash-loops,
     # which reads as a broken stack to everything watching container state (a
-    # Coolify deploy gate, up.sh's diagnose) even though the app itself is fine.
-    # Say it once and idle instead. Nothing is lost by idling: an image that predates
-    # the proxy also predates the controller that routes sandboxes through it, so no
-    # sandbox is pointed here in the first place.
+    # Coolify deploy gate) even though the app itself is fine.
+    #
+    # So probe for the file — but what to do when it is missing depends on whether
+    # the operator asked for egress restriction, and the two answers are opposite:
+    #
+    #  * Allowlist EMPTY: idle. Nothing is gated (this image's controller predates
+    #    egress routing — same image, so it cannot know the variable), so nothing is
+    #    left unprotected, and idling keeps the deployment from reading as failed.
+    #  * Allowlist SET: exit non-zero, loudly. The operator believes sandbox egress
+    #    is restricted to those hosts and it is not, because that same old controller
+    #    ignores SANDBOX_EGRESS_ALLOW entirely. A silently missing security control
+    #    is worse than a visibly failed deploy, so fail the deploy.
+    #
+    # `$$` is compose's escape for a literal `$`: the value is read from the
+    # container's environment at start, not interpolated when compose parses this.
     command:
       - sh
       - -c
       - |
-        if [ ! -f /app/egress-proxy.js ]; then
-          echo "egress-proxy: this controller image predates the egress proxy — pull current images (docker compose pull) before using SANDBOX_EGRESS_ALLOW"
-          exec tail -f /dev/null
+        if [ -f /app/egress-proxy.js ]; then exec node egress-proxy.js; fi
+        if [ -n "$$SANDBOX_EGRESS_ALLOW" ]; then
+          echo "egress-proxy: SANDBOX_EGRESS_ALLOW is set, but this controller image predates the egress proxy, so sandbox egress is NOT restricted. Run 'docker compose pull' to get current images, then redeploy." >&2
+          exit 1
         fi
-        exec node egress-proxy.js
+        echo "egress-proxy: inactive — this controller image predates the egress proxy. Nothing is gated (SANDBOX_EGRESS_ALLOW is empty); pull current images before setting it."
+        exec tail -f /dev/null
     environment:
       - SANDBOX_EGRESS_ALLOW=${SANDBOX_EGRESS_ALLOW:-}
       - EGRESS_PROXY_PORT=3128
@@ -219,10 +232,18 @@ services:
       # gVisor runtime threads count against this budget. 256 leaves enough
       # headroom for image/document rendering while still containing fork bombs.
       - SANDBOX_PIDS_LIMIT=${SANDBOX_PIDS_LIMIT:-256}
+      # Passed through empty rather than with a default repeated here: the
+      # controller treats an empty value as unset and applies its own default, so
+      # there is only ever one number to keep in sync (see posFloatEnv/posIntEnv).
+      - SANDBOX_CPUS=${SANDBOX_CPUS:-}
       - MAX_SESSIONS_PER_USER=${MAX_SESSIONS_PER_USER:-2}
       # Stop an idle CONTAINER after this (files + row survive, revived on the
       # next tool call).
       - SANDBOX_IDLE_TTL_MS=${SANDBOX_IDLE_TTL_MS:-900000}
+      # How long a background job may hold its sandbox past the idle cutoff, and
+      # the ceiling on that hold. Empty ⇒ the controller's defaults (1h / 6h).
+      - SANDBOX_BUSY_LEASE_MS=${SANDBOX_BUSY_LEASE_MS:-}
+      - SANDBOX_BUSY_MAX_MS=${SANDBOX_BUSY_MAX_MS:-}
       # Delete a WORKSPACE (row + disk) unused this long — the real "how long do
       # my files live" knob.
       - WORKSPACE_TTL_MS=${WORKSPACE_TTL_MS:-2592000000}

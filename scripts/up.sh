@@ -84,10 +84,18 @@ ensure_secret CAPKA_MASTER_KEY
 # to require it when claiming the admin account (see .env.example).
 
 # Pin the image tag so later runs pull the same version that was installed here
-# (the installer passes the release tag it checked out). Compose reads this from
+# (the installer/updater passes the ref it checked out). Compose reads this from
 # .env for ${CAPKA_VERSION} substitution; unset → defaults to :latest.
-if [ "${CAPKA_VERSION:-}" != "" ] && ! grep -q '^CAPKA_VERSION=' "$ENV_FILE"; then
-  printf 'CAPKA_VERSION=%s\n' "$CAPKA_VERSION" >>"$ENV_FILE"
+#
+# Rewrite, don't only add: a caller that names a version has just checked out the
+# matching code, so an older pin left in .env would keep deploying THAT release's
+# images against it — and since nothing else touches the line, forever.
+if [ "${CAPKA_VERSION:-}" != "" ]; then
+  if grep -q '^CAPKA_VERSION=' "$ENV_FILE"; then
+    sed -i.bak "s|^CAPKA_VERSION=.*|CAPKA_VERSION=$CAPKA_VERSION|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+  else
+    printf 'CAPKA_VERSION=%s\n' "$CAPKA_VERSION" >>"$ENV_FILE"
+  fi
   echo "  pinned CAPKA_VERSION=$CAPKA_VERSION"
 fi
 
@@ -215,11 +223,19 @@ echo
 # would masquerade as "just slow" forever. Everything else running-but-not
 # (exited non-zero, restarting, dead) is a real problem. Fields are pipe-
 # delimited so an empty Health column can't shift the others under awk.
+# Services that are MEANT to run once and exit 0 — the ones compose gives
+# `restart: "no"`. Every other service that exits, even cleanly, is a failure:
+# forgiving exit 0 across the board would silently pass a service that decided to
+# give up instead of crash. src/lib/__tests__/deploy-contract.test.ts keeps this
+# list in step with the compose files, so a new one-shot can't quietly drift.
+ONE_SHOTS="db-init sandbox"
+
 unhealthy_services() {
-  docker compose $COMPOSE ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}' 2>/dev/null | awk -F'|' '
+  docker compose $COMPOSE ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}' 2>/dev/null | awk -F'|' -v oneshots="$ONE_SHOTS" '
+    BEGIN { n = split(oneshots, a, " "); for (i = 1; i <= n; i++) expected[a[i]] = 1 }
     $2 == "running" && $3 == "unhealthy" { print $1; next }
     $2 == "running" { next }
-    $2 == "exited" && $4 == "0" { next }
+    $2 == "exited" && $4 == "0" && expected[$1] { next }
     { print $1 }'
 }
 
@@ -313,7 +329,20 @@ while [ "$i" -lt 60 ]; do
 done
 
 echo
-if [ "$READY" -eq 1 ]; then
+# A healthy platform is not a healthy stack. Every sibling is checked too, on the
+# success path as well: a crash-looping or exited neighbour (an egress proxy from
+# an image that predates it, a controller that cannot reach the socket proxy)
+# leaves the web app perfectly usable while a feature is silently dead — and
+# printing only the link would report that as a clean install.
+BROKEN="$(unhealthy_services)"
+
+if [ "$READY" -eq 1 ] && [ -n "$BROKEN" ]; then
+  echo "  Capka's web app is up at $LINK — but part of the stack is not:" >&2
+  for svc in $BROKEN; do echo "    * $svc" >&2; done
+  echo "  Features that depend on those services will fail until this is fixed." >&2
+  diagnose
+  exit 1
+elif [ "$READY" -eq 1 ]; then
   # The platform is healthy — but on the HTTPS path the site is only truly
   # reachable once Caddy has the certificate, which silently fails when inbound
   # 80/443 are firewalled (a shared/cloud footgun the port probe can't see). So
@@ -343,7 +372,7 @@ if [ "$READY" -eq 1 ]; then
     echo "  (Certificate issued — HTTPS is live.)"
   fi
   echo "  Lost this address later? Run:  cd \"$(pwd)\" && sh scripts/up.sh"
-elif [ -n "$(unhealthy_services)" ]; then
+elif [ -n "$BROKEN" ]; then
   # A service actually failed (not just slow) — show why, then repeat the link.
   diagnose
   echo >&2

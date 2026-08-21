@@ -21,6 +21,20 @@ Local development is separate: `npm run docker:dev`; see
 
 Pin a release with `CAPKA_VERSION=vX.Y.Z` in `.env`; unset ⇒ `:latest`.
 
+## Which git ref to deploy
+
+Images are published on release tags only, so **the compose file on `master` is
+always newer than any image you can pull.** A deployment that follows `master`
+without building from source therefore runs new compose against the last
+release's images — and a service the compose file added but the image does not
+contain yet cannot start at all.
+
+| Ref | Use it for | Images |
+|---|---|---|
+| `stable` | **Pull-only deployments** (Coolify, `update.sh`). CI moves it to each release after its images are published, so compose and images always match. | `:latest` |
+| `vX.Y.Z` | Pinning one exact release. | that tag |
+| `master` | Development tip. Requires `CAPKA_BUILD=1` — the scripts refuse to pair it with prebuilt images. | built locally |
+
 ## Path A — self-host installer (curl \| sh)
 
 On a fresh Linux box, one command installs Docker (if missing), fetches Capka,
@@ -41,7 +55,10 @@ the installer upgrades in place. Environment variables are listed in
 Coolify runs the full stack (including the Docker-socket sandbox) since it
 deploys onto a host with a Docker daemon.
 
-1. **New Resource → Docker Compose**, point it at this repo.
+1. **New Resource → Docker Compose**, point it at this repo and set the branch to
+   **`stable`** — not `master`. See [Which git ref to deploy](#which-git-ref-to-deploy):
+   `master` carries compose changes for images that are not published yet, so a
+   `master`-tracking stack breaks on the release that introduces a new service.
 2. Set **docker_compose_location** to `/docker-compose.yml` (the canonical
    pull-only stack — Coolify pulls the release images, no source build).
 3. Set environment variables:

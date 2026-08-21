@@ -26,7 +26,9 @@
 #   ACME_EMAIL    ACME account email (enables the ZeroSSL cert fallback)
 #   CAPKA_DIR     install location           (default: /opt/capka)
 #   CAPKA_REPO    git remote                 (default: https://github.com/LyoSU/capka.git)
-#   CAPKA_BRANCH  git ref to install         (default: newest release tag, else master)
+#   CAPKA_BRANCH  git ref to install         (default: newest release tag, else master;
+#                 `stable` tracks the newest release as a branch. A development
+#                 branch needs CAPKA_BUILD=1 — images exist for releases only.)
 #   CAPKA_VERSION image tag to pull          (default: matches the installed ref)
 #   CAPKA_BUILD=1 compile from source instead of pulling prebuilt images
 #
@@ -41,6 +43,12 @@ set -eu
 main() {
   CAPKA_DIR="${CAPKA_DIR:-/opt/capka}"
   CAPKA_REPO="${CAPKA_REPO:-https://github.com/LyoSU/capka.git}"
+  # Whether the operator ASKED for a ref, as opposed to us defaulting to one.
+  # resolve_version below redirects the default to the newest release; without
+  # this flag it cannot tell an explicit CAPKA_BRANCH=master — the very thing its
+  # own message tells people to set for the development tip — from the default,
+  # and silently installs a release instead.
+  CAPKA_BRANCH_EXPLICIT="${CAPKA_BRANCH:+1}"
   CAPKA_BRANCH="${CAPKA_BRANCH:-master}"
 
   setup_colors
@@ -234,21 +242,50 @@ preflight_disk() {
   fi
 }
 
-# Keep the cloned code and the pulled images on the same version: install the
-# newest published release tag by default. Skipped if the operator pinned a
-# version or a non-default branch — then they've explicitly chosen what to run.
+# Keep the cloned code and the pulled images from the SAME release: they are one
+# unit. Compose is tracked in git and images are published only on release tags,
+# so pairing a ref with images from a different commit is how a stack ends up
+# running a service its image does not contain.
 resolve_version() {
   CAPKA_VERSION="${CAPKA_VERSION:-}"
-  if [ -n "$CAPKA_VERSION" ] || [ "$CAPKA_BRANCH" != "master" ]; then return 0; fi
-  latest=$(git ls-remote --tags --refs "$CAPKA_REPO" 'v*' 2>/dev/null \
-    | awk -F/ '{ print $NF }' | sort -V | tail -n1)
-  if [ -n "$latest" ]; then
-    info "Newest release is $latest — installing it (set CAPKA_BRANCH=master for the development tip)."
-    CAPKA_BRANCH="$latest"
-    CAPKA_VERSION="$latest"
-  else
-    info "No tagged release yet — installing the development tip (master + :latest images)."
+
+  # Nothing named at all: install the newest published release.
+  if [ -z "$CAPKA_BRANCH_EXPLICIT" ] && [ -z "$CAPKA_VERSION" ]; then
+    latest=$(git ls-remote --tags --refs "$CAPKA_REPO" 'v*' 2>/dev/null \
+      | awk -F/ '{ print $NF }' | sort -V | tail -n1)
+    if [ -n "$latest" ]; then
+      info "Newest release is $latest — installing it (set CAPKA_BRANCH=master CAPKA_BUILD=1 for the development tip)."
+      CAPKA_BRANCH="$latest"
+      CAPKA_VERSION="$latest"
+    else
+      info "No tagged release yet — installing the development tip (master + :latest images)."
+    fi
+    return 0
   fi
+
+  # `CAPKA_VERSION=vX.Y.Z` with no ref named means "install that release" — take
+  # the code from the same tag instead of pairing those images with master.
+  if [ -z "$CAPKA_BRANCH_EXPLICIT" ]; then
+    case "$CAPKA_VERSION" in
+      v*) CAPKA_BRANCH="$CAPKA_VERSION" ;;
+    esac
+  fi
+
+  # A ref was named: derive its image tag, so "which code" also answers "which
+  # images". An operator's explicit CAPKA_VERSION still wins.
+  case "$CAPKA_BRANCH" in
+    v*)     CAPKA_VERSION="${CAPKA_VERSION:-$CAPKA_BRANCH}" ;;
+    stable) CAPKA_VERSION="${CAPKA_VERSION:-latest}" ;;
+    *)
+      # A development branch. No published image matches its compose, and pinning
+      # CAPKA_VERSION does not fix that — it names images from some OTHER commit,
+      # which is the same mismatch stated explicitly. Source build or nothing.
+      if [ "${CAPKA_BUILD:-}" != "1" ]; then
+        err "CAPKA_BRANCH=$CAPKA_BRANCH is a development branch, and images are published for releases only — no image tag matches its compose. Set CAPKA_BUILD=1 to compile from source, or CAPKA_BRANCH=stable to track the newest release."
+      fi
+      CAPKA_VERSION="latest"
+      ;;
+  esac
 }
 
 fetch_repo() {

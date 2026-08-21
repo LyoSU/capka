@@ -12,6 +12,11 @@ services:
       context: .
       dockerfile: Dockerfile.sandbox
     image: ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
+    # This service exists to guarantee a locally built sandbox image, so it must
+    # never satisfy itself with a pull: with both `image` and `build` set and no
+    # policy, a bare `up` (no --build) uses whatever is already local or fetches
+    # it, and the from-source stack silently runs the published sandbox instead.
+    pull_policy: build
     entrypoint: ["echo", "sandbox image built"]
 
   # The egress proxy is the controller package under a different command, so it is
@@ -26,6 +31,10 @@ services:
 
   sandbox-controller:
     build: ./sandbox-controller
+    # Same override as egress-proxy: without it, correctness depends on the caller
+    # passing `--build`, and a bare `up` on this overlay pulls a released image
+    # over the one just built here.
+    pull_policy: build
     # Merges with the base controller's depends_on (postgres, socket-proxy) — wait
     # for the local sandbox build to finish before starting.
     depends_on:
@@ -36,3 +45,4 @@ services:
     build:
       context: .
       target: runner
+    pull_policy: build

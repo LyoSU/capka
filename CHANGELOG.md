@@ -6,6 +6,31 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+> **⚠ Breaking — a pull-only deployment must follow the new `stable` branch, not `master`.** Coolify: change the branch to `stable`. `CAPKA_BRANCH=master` now requires `CAPKA_BUILD=1`, because images are published for releases only.
+
+### Added
+
+- CI moves a `stable` branch to each release once its images are published, so a pull-only stack gets its compose from the same release as `:latest`, instead of from a commit no published image matches.
+
+### Changed
+
+- `install.sh` and `scripts/update.sh` refuse to pair a development branch with prebuilt images, instead of deploying compose that is newer than anything pullable.
+- `install.sh` derives the image tag from the ref it installs (and installs the matching ref for a bare `CAPKA_VERSION=vX.Y.Z`), so code and images can no longer come from different releases.
+- `scripts/up.sh` rewrites an existing `CAPKA_VERSION` pin when the caller names a version, instead of only adding a missing one — an upgrade no longer keeps deploying the previous release's images.
+- An explicit `CAPKA_BRANCH=master` is no longer silently redirected to the newest release by `install.sh`.
+
+### Fixed
+
+- `scripts/update.sh` no longer leaves a previous release's `CAPKA_VERSION` pin in `.env` when switching refs, which pinned old images against newer compose permanently.
+- `scripts/up.sh` no longer prints a successful install while a non-platform service is crash-looping; it checks every service, and forgives a clean exit only from a declared one-shot (`db-init`, `sandbox`).
+- `SANDBOX_CPUS`, `SANDBOX_BUSY_LEASE_MS` and `SANDBOX_BUSY_MAX_MS` now reach the controller — they were documented in `.env.example` but never passed through, so setting them did nothing.
+- Building from source no longer pulls released `platform`, `sandbox-controller` or `sandbox` images over the ones it just built.
+
+### Security
+
+- With `SANDBOX_EGRESS_ALLOW` set, `egress-proxy` now fails the deployment on a controller image that predates it, instead of idling — an operator can no longer believe sandbox egress is restricted when it is not.
+- A manual (`workflow_dispatch`) image build no longer moves `:latest` or the `stable` branch, even when aimed at a tag; it publishes a `sha-<commit>` tag instead, so only a release tag push changes what unpinned deployments pull.
+
 ## [0.27.0] - 2026-08-21
 
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading.

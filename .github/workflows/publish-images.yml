@@ -29,6 +29,14 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# One run at a time, across every ref: `:latest` and the `stable` branch are two
+# halves of one channel, so two overlapping runs (a re-run of an older tag, two
+# releases pushed minutes apart) could finish in opposite orders and leave the
+# channel pointing at different releases — or roll it backwards. Queue instead.
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write
@@ -156,14 +164,25 @@ jobs:
       # Keep the `v` prefix so image tags match the git tag (v0.1.0): the default
       # {{version}} pattern strips it, which would make the scripts' `:v0.1.0`
       # pull 404 and fall back to a local build.
+      #
+      # `latest` means "the newest RELEASE", and every pull-only deployment that
+      # sets no CAPKA_VERSION resolves to it — so only a tag push may move it. A
+      # manual workflow_dispatch (any branch, any commit) publishes a `sha-` tag
+      # instead: still pullable for debugging, but it cannot make every `:latest`
+      # stack jump to an unreleased build.
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.img.outputs.ref }}
+          # latest=false because the default (`auto`) attaches `latest` to any
+          # semver tag by itself — including a workflow_dispatch aimed at a tag,
+          # which would move it behind the explicit entry below.
+          flavor: latest=false
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=raw,value=latest
+            type=semver,pattern=v{{version}},enable=${{ github.event_name == 'push' }}
+            type=semver,pattern=v{{major}}.{{minor}},enable=${{ github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=sha,format=long,prefix=sha-,enable=${{ github.event_name != 'push' }}
 
       # Stitch the per-arch digests into one manifest list per tag. jq builds the
       # `-t ref:tag` flags from metadata's JSON; the trailing loop appends each
@@ -180,6 +199,36 @@ jobs:
       - name: Inspect image
         run: docker buildx imagetools inspect ${{ steps.img.outputs.ref }}:${{ steps.meta.outputs.version }}
 
+  # Point the `stable` branch at the commit whose images were just published.
+  #
+  # This closes the class of break that forced v0.27.0: a compose file tracked
+  # from git is always newer than images published only on release tags, so a
+  # pull-only stack following `master` runs new compose against the last
+  # release's images — a service the compose file added but the image does not
+  # have yet crash-loops, and reads as a failed deployment. `stable` always names
+  # a commit whose compose and images match, so that is what a pull-only
+  # deployment (Coolify, scripts/update.sh) follows; `master` stays the
+  # development tip and requires building from source.
+  stable:
+    runs-on: ubuntu-latest
+    needs: merge
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Move stable to this release
+        env:
+          # github.sha IS the commit the tag points at, so nothing has to resolve
+          # the tag object — one less way for this to fail after the images are
+          # already published, which would strand the whole channel silently.
+          SHA: ${{ github.sha }}
+        run: |
+          # Forced: a release need not be a descendant of the previous one (a
+          # hotfix cut from another line), and this branch is machine-owned — its
+          # only meaning is "the newest release", never someone's work in progress.
+          git push origin "+${SHA}:refs/heads/stable"
+
   # Publish the GitHub Release LAST — after merge has pushed every image tag — so
   # the in-app update banner (which watches /releases/latest) can never point at a
   # version whose images aren't pullable yet. Runs only on a real tag push, never
@@ -187,8 +236,11 @@ jobs:
   # release procedure is just: bump CHANGELOG, commit, push a vX.Y.Z tag.
   release:
     runs-on: ubuntu-latest
-    needs: merge
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Also needs `stable`: a Release announcing a version whose deploy channel
+    # never moved would send everyone tracking `stable` to update to code they
+    # cannot get. If the branch push fails, no Release is published either.
+    needs: [merge, stable]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
