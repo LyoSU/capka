@@ -6,6 +6,17 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+> **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading.
+
+### Fixed
+
+- `SANDBOX_EGRESS_ALLOW` now has any effect at all: the proxy endpoint never reached the container, so a gated sandbox came up with the open-egress firewall — which, on a network with no route off it, means no internet whatsoever — and was rebuilt on every controller start.
+- The sandbox execution image is now refreshed on controller start when it came from a registry, instead of only being pulled when absent — an upgraded controller no longer keeps applying the previous release's sandbox firewall rules. A locally built image (`CAPKA_BUILD=1`) is never pulled over.
+
+### Security
+
+- The container posture fingerprint now covers the resolved execution-image id, so a moved `:latest` counts as a posture change and boot reconciliation stops adopting sandboxes built from the previous execution image.
+
 ## [0.28.0] - 2026-08-21
 
 > **⚠ Breaking — a pull-only deployment must follow the new `stable` branch, not `master`.** Coolify: change the branch to `stable`. `CAPKA_BRANCH=master` now requires `CAPKA_BUILD=1`, because images are published for releases only.
