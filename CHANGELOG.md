@@ -13,6 +13,10 @@ All notable changes to Capka are documented here. Format follows
 - Turning sandbox egress off now applies to sandboxes that are already running: a live container whose network no longer matches the request is rebuilt instead of reused. Files survive; processes inside it do not.
 - Long-term memory no longer spends a full-context model call on a pleasantry ("thanks" → "you're welcome") in a long chat, and no longer skips a short prompt whose answer was substantial. Cuts per-turn aux spend on long chats; memory quality is unchanged or better.
 
+### Security
+
+- An MCP connector's `env` can no longer set `HOME`, `npm_config_*`, or the XDG/UV cache dirs. A spec pointing `HOME` at the agent-writable `/workspace` got its planted shell profile executed as the `mcp` uid, which holds every connector's secrets.
+
 ## [0.26.0] - 2026-08-21
 
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading.

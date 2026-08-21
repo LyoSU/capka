@@ -9,11 +9,23 @@ const ENV_BLOCK = new Set([
   "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
   "BASH_ENV", "ENV", "IFS", "PS4", "SHELLOPTS", "BASHOPTS",
   "PATH", "PYTHONPATH", "PYTHONSTARTUP", "NODE_OPTIONS", "NODE_PATH", "PERL5LIB", "RUBYOPT", "RUBYLIB",
+  // Names the CONTROLLER owns (set below). HOME is the sharp one: the server starts
+  // through a LOGIN shell — needed so npx/uvx find node tooling — and a login shell
+  // SOURCES profile files out of $HOME. /opt/mcp is a 0700 tmpfs owned by the mcp
+  // uid, where the agent cannot plant one; point HOME at /workspace instead and the
+  // agent's own .bash_profile runs as the mcp uid with this connector's secrets in
+  // its environment, which is precisely the separation that uid exists to create.
+  // The cache/config dirs are the same trick one step milder — a planted npm or uv
+  // cache is executable content too.
+  "HOME", "UV_CACHE_DIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
 ]);
 export function sanitizeEnv(env = {}) {
   const out = {};
   for (const [k, v] of Object.entries(env)) {
     if (!ENV_NAME.test(k) || k.startsWith("LD_") || k.startsWith("DYLD_") || ENV_BLOCK.has(k.toUpperCase())) continue;
+    // npm reads its whole config surface from npm_config_* (case-insensitively),
+    // including which .npmrc to load — too wide to enumerate name by name.
+    if (k.toLowerCase().startsWith("npm_config_")) continue;
     out[k] = v;
   }
   return out;
@@ -69,14 +81,17 @@ export function createMcpBridge(docker, { user, rpcTimeoutMs = 60000 } = {}) {
     // uid, which is what makes the login shell below safe: `-l` sources the profile
     // files under HOME, and the agent's uid cannot create them.
     const MCP_HOME = "/opt/mcp";
+    // Caller env FIRST, ours LAST: sanitizeEnv already refuses these names, and this
+    // ordering means a gap in that filter still can't win — the two together are why
+    // a connector spec cannot redirect HOME (see ENV_BLOCK).
     const Env = Object.entries({
+      ...sanitizeEnv(env),
       HOME: MCP_HOME,
       npm_config_cache: `${MCP_HOME}/.npm`,
       npm_config_update_notifier: "false",
       NPM_CONFIG_FUND: "false",
       UV_CACHE_DIR: `${MCP_HOME}/.uv`,
       XDG_CACHE_HOME: `${MCP_HOME}/.cache`,
-      ...sanitizeEnv(env),
     }).map(([k, v]) => `${k}=${v}`);
     const exec = await container.exec({
       Cmd: ["bash", "-lc", `mkdir -p ${MCP_HOME} && exec ${shellJoin([command, ...args])}`],
