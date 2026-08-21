@@ -862,6 +862,14 @@ async function boot() {
   // Containers built by an older spec are recreated rather than adopted: a
   // hardening change (mount options, caps, rootfs) is fixed at create time, so
   // adopting them would leave the weaker sandbox running until it idled out.
+  // Which image bytes are here, before comparing anything against them. A local
+  // inspect, so it costs nothing and keeps the property above (readiness does not
+  // wait on a multi-GB pull) — but without it the posture below is keyed on the
+  // TAG, and a `:latest` that moved in a release leaves every sandbox built from
+  // the previous execution image looking current. Best-effort: a daemon hiccup
+  // here must not stop recovery, it only widens what reconcile can notice.
+  await backend.resolveImage().catch((e) => log("image.resolve_failed", { err: e.message }, "warn"));
+
   const summary = await withRetry(
     () => reconcile({
       store, backend,

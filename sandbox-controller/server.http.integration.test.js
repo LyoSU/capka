@@ -24,6 +24,9 @@ d("controller HTTP API (lifecycle)", () => {
   let execCalls = 0;
   const backend = {
     async ensureRuntime() {},
+    // Boot resolves the running image so the posture can key on its bytes, not on
+    // a mutable tag; a backend without it would crash recovery.
+    async resolveImage() { return null; },
     async create(spec) { const handle = `h${nextId++}`; containers.set(handle, { sessionId: spec.sessionId, running: true }); return { handle }; },
     async exec(_handle, cmd) { execCalls++; return { stdout: `ran:${cmd}`, stderr: "", exitCode: 0 }; },
     async destroy(handle) { containers.delete(handle); },

@@ -53,22 +53,74 @@ export class DockerBackend {
     this.sandboxUser = sandboxUser;
     this._ensured = false;
     this._ensuring = null;
+    // Resolved by resolveImage()/ensureRuntime(); null until then.
+    this._imageId = null;
   }
 
-  /** Guarantee the sandbox image exists before create. Idempotent; dedups
-   *  concurrent calls into one pull. Self-heals after an image prune. */
+  /** Local inspect only — no registry traffic. Records which image bytes this
+   *  deployment is actually running, so the posture fingerprint can key on them.
+   *
+   *  Separate from ensureRuntime because boot reconciliation runs BEFORE the
+   *  (possibly multi-GB) prewarm on purpose, and it still has to compare live
+   *  containers against the real current image. Absent image ⇒ keep the tag: a box
+   *  with no image has no sandboxes to reconcile either. */
+  async resolveImage() {
+    try {
+      const info = await this.docker.getImage(this.image).inspect();
+      this._imageId = info?.Id ?? null;
+      return this._imageId;
+    } catch (e) {
+      if (e.statusCode !== 404) throw e;
+      return null;
+    }
+  }
+
+  /** What create() runs and what the posture is keyed on: the resolved image ID
+   *  once known, else the configured reference. The ID is content-addressed, so a
+   *  moved tag becomes a different posture and reconcile stops adopting sandboxes
+   *  built from the previous execution image. */
+  imageRef() {
+    return this._imageId ?? this.image;
+  }
+
+  /** Guarantee the sandbox image exists AND is current before create. Idempotent;
+   *  dedups concurrent calls into one pull. Self-heals after an image prune.
+   *
+   *  "Exists" was not enough: the sandbox's default-deny firewall lives in this
+   *  image's entrypoint, and nearly every deployment names it by a mutable tag, so
+   *  an upgraded controller kept applying the previous release's rules — silently,
+   *  which SECURITY.md had to document rather than fix.
+   *
+   *  The pull is conditional on the image having come FROM a registry. A
+   *  from-source stack builds this same tag locally, where a pull would replace the
+   *  operator's build with the published image — the same class of bug in the
+   *  opposite direction. A locally built image has no RepoDigests. */
   async ensureRuntime() {
     if (this._ensured) return;
     if (this._ensuring) return this._ensuring;
     this._ensuring = (async () => {
+      let info = null;
       try {
-        await this.docker.getImage(this.image).inspect();
+        info = await this.docker.getImage(this.image).inspect();
       } catch (e) {
         if (e.statusCode !== 404) throw e;
-        const stream = await this.docker.pull(this.image);
-        await new Promise((res, rej) =>
-          this.docker.modem.followProgress(stream, (err) => (err ? rej(err) : res())));
       }
+      const fromRegistry = (info?.RepoDigests?.length ?? 0) > 0;
+      if (!info || fromRegistry) {
+        try {
+          const stream = await this.docker.pull(this.image);
+          await new Promise((res, rej) =>
+            this.docker.modem.followProgress(stream, (err) => (err ? rej(err) : res())));
+          info = await this.docker.getImage(this.image).inspect();
+        } catch (e) {
+          // Nothing to fall back on: a create would fail anyway, so don't report the
+          // runtime as prepared. With an image already here, a registry outage must
+          // not take a working stack's sandboxes down — keep it and say so.
+          if (!info) throw e;
+          console.error(`[sandbox-controller] could not refresh ${this.image} (${e.message}) — continuing on the image already present, which may predate this release`);
+        }
+      }
+      this._imageId = info?.Id ?? null;
       this._ensured = true;
     })().finally(() => { this._ensuring = null; });
     return this._ensuring;
@@ -102,7 +154,7 @@ export class DockerBackend {
   async create(spec) {
     await this.ensureRuntime();
     const config = buildSandboxConfig({
-      image: this.image,
+      image: this.imageRef(),
       runtime: this.runtime,
       sessionId: spec.sessionId,
       userId: spec.userId,
@@ -258,7 +310,7 @@ export class DockerBackend {
    *  the two modes are genuinely different postures. */
   fingerprint(env, networkMode, egressProxy = null) {
     return specFingerprint(buildSandboxConfig({
-      image: this.image,
+      image: this.imageRef(),
       runtime: this.runtime,
       sessionId: "fingerprint",
       userId: "fingerprint",
