@@ -40,6 +40,39 @@ function killGroup(container, pidFile, user) {
     }));
 }
 
+/**
+ * Why a container is not running, in the words of its own entrypoint — or null when
+ * it is alive.
+ *
+ * Docker's `start` resolves once PID 1 has been CREATED, not once it has survived,
+ * so a container whose entrypoint refuses to run is "started" and then instantly
+ * dead. That is not hypothetical here: the sandbox firewall is deliberately
+ * fail-closed and exits non-zero when it cannot install or verify its rules, which
+ * is what a misconfigured allowlist looks like from the inside. Without this the
+ * only symptom is a 409 on some later exec — a message that names none of the cause,
+ * while the reason sits in the container's log until the husk is reaped.
+ */
+async function exitReason(container) {
+  let state;
+  try {
+    ({ State: state } = await container.inspect());
+  } catch {
+    return null; // can't tell; whatever failed next will have to speak for itself
+  }
+  if (state?.Running) return null;
+  let message = "";
+  try {
+    // No TTY, so these are multiplexed frames exactly like an exec's output.
+    const raw = await container.logs({ stdout: true, stderr: true, tail: 20 });
+    const demux = createFrameDemux();
+    demux.push(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
+    const { stdout, stderr } = demux.result();
+    message = `${stderr}\n${stdout}`.split("\n").map((l) => l.trim()).filter(Boolean)
+      .slice(-3).join("; ").slice(0, 400);
+  } catch { /* the log is a courtesy; the exit code is the fact */ }
+  return { exitCode: state?.ExitCode ?? null, message };
+}
+
 /** ComputeBackend implementation over the Docker daemon (via dockerode).
  *  Lifts createSandbox/execInSandbox/destroySandbox/recoverSessions out of the
  *  old server.js. The workspace bind paths arrive already host-resolved in the
@@ -200,6 +233,17 @@ export class DockerBackend {
       }
     }
     await container.start();
+    // A handle to a dead container is worse than a failed create: the session row
+    // would point at it and every tool call after would answer 409 with no reason.
+    // The husk goes with it — nothing else reaps a container that never ran.
+    const dead = await exitReason(container);
+    if (dead) {
+      await container.remove({ force: true }).catch(() => {});
+      throw new Error(
+        `sandbox container exited immediately (code ${dead.exitCode})` +
+        (dead.message ? `: ${dead.message}` : ""),
+      );
+    }
     return { handle: container.id };
   }
 
@@ -229,13 +273,32 @@ export class DockerBackend {
       `rm -f ${pidFile} 2>/dev/null; ` +
       `exit $__rc`;
 
-    const execObj = await container.exec({
-      Cmd: ["bash", "-c", wrapper],
-      AttachStdout: true,
-      AttachStderr: true,
-      User: this.sandboxUser,
-      WorkingDir: "/workspace",
-    });
+    let execObj;
+    try {
+      execObj = await container.exec({
+        Cmd: ["bash", "-c", wrapper],
+        AttachStdout: true,
+        AttachStderr: true,
+        User: this.sandboxUser,
+        WorkingDir: "/workspace",
+      });
+    } catch (e) {
+      // The container died after create() checked it — an OOM kill, or an entrypoint
+      // slower to fail than create() was to ask. Docker says only "is not running";
+      // add what it said on the way out. That phrase is load-bearing: server.js
+      // matches it to invalidate the session and rebuild, so it has to survive being
+      // made more specific.
+      if (/is not running/i.test(e.message)) {
+        const dead = await exitReason(container);
+        if (dead) {
+          throw new Error(
+            `sandbox container is not running (exit ${dead.exitCode})` +
+            (dead.message ? `: ${dead.message}` : ""),
+          );
+        }
+      }
+      throw e;
+    }
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Command timed out after ${timeoutMs}ms`)), timeoutMs + 5000);

@@ -156,3 +156,62 @@ describe("DockerBackend (mocked dockerode)", () => {
     expect(cmds.length).toBe(1);
   });
 });
+
+// Docker multiplexes container logs the same way it multiplexes an exec stream:
+// an 8-byte header (stream id, then a big-endian length) before each payload.
+function logFrame(stream, text) {
+  const payload = Buffer.from(text);
+  const header = Buffer.alloc(8);
+  header[0] = stream;
+  header.writeUInt32BE(payload.length, 4);
+  return Buffer.concat([header, payload]);
+}
+
+describe("DockerBackend — a started container is not yet a live one", () => {
+  const spec = {
+    sessionId: "s1", userId: "u1", wsHostPath: "/w", sharedHostPath: "/s",
+    networkMode: "capka-sandbox-egress", egressProxy: "capka-egress-proxy:3128",
+  };
+
+  // Docker's `start` resolves once PID 1 exists, not once it survives — and the
+  // sandbox firewall exits non-zero by design when it cannot verify its rules.
+  it("create() refuses to hand back a handle for a container that died at startup", async () => {
+    const remove = vi.fn().mockResolvedValue();
+    const container = {
+      id: "c9", start: vi.fn().mockResolvedValue(), remove,
+      inspect: async () => ({ State: { Running: false, ExitCode: 1 } }),
+      logs: async () => logFrame(2, "sandbox-entrypoint: cannot resolve the egress proxy (capka-egress-proxy) — refusing to run\n"),
+    };
+    const docker = { ...imagePresent, createContainer: vi.fn().mockResolvedValue(container) };
+    const b = new DockerBackend({ docker, image: "img:1", runtime: "runc" });
+    await expect(b.create(spec)).rejects.toThrow(/cannot resolve the egress proxy/);
+    // The husk is reaped: nothing else reaps a container that never ran, and its
+    // fixed name would block the next attempt.
+    expect(remove).toHaveBeenCalledWith({ force: true });
+  });
+
+  it("create() is unchanged for a container that is actually running", async () => {
+    const container = {
+      id: "c1", start: vi.fn().mockResolvedValue(),
+      inspect: async () => ({ State: { Running: true } }),
+    };
+    const docker = { ...imagePresent, createContainer: vi.fn().mockResolvedValue(container) };
+    const b = new DockerBackend({ docker, image: "img:1", runtime: "runc" });
+    expect(await b.create(spec)).toEqual({ handle: "c1" });
+  });
+
+  it("exec() says why the container is gone, in the phrase the server invalidates on", async () => {
+    const container = {
+      exec: vi.fn().mockRejectedValue(new Error("(HTTP code 409) unexpected - Container abc is not running")),
+      inspect: async () => ({ State: { Running: false, ExitCode: 137 } }),
+      logs: async () => logFrame(2, "Killed"),
+    };
+    const b = new DockerBackend({ docker: { ...imagePresent, getContainer: () => container }, image: "img:1", runtime: "runc" });
+    const err = await b.exec("abc", "echo hi").catch((e) => e);
+    expect(err.message).toMatch(/exit 137/);
+    expect(err.message).toMatch(/Killed/);
+    // server.js matches this to drop the stale session and rebuild — enriching the
+    // message must not break that.
+    expect(/no such container|is not running/i.test(err.message)).toBe(true);
+  });
+});
