@@ -247,3 +247,51 @@ describe("specFingerprint (posture label)", () => {
     expect(specFingerprint(buildSandboxConfig({ ...base, mounts: [{ hostPath: "/srv/x", name: "x", ro: true }] }))).toBe(now);
   });
 });
+
+describe("buildSandboxConfig — the three egress states", () => {
+  const PROXY = "capka-egress-proxy:3128";
+  const envOf = (over) => buildSandboxConfig({ ...base, ...over }).Env;
+
+  it("no network: no firewall, no caps for one, no proxy", () => {
+    const cfg = buildSandboxConfig({ ...base, networkMode: "none" });
+    expect(cfg.Env.some((e) => e.startsWith("SANDBOX_EGRESS"))).toBe(false);
+    expect(cfg.HostConfig.CapAdd).not.toContain("NET_ADMIN");
+  });
+
+  // The condition used to be `networkMode === "bridge"`. With an allowlist the mode
+  // is a named Docker network, so string equality would have shipped a NETWORKED
+  // container with neither the firewall nor the capability to install one.
+  it("a named network is still a network: firewall + NET_ADMIN", () => {
+    const cfg = buildSandboxConfig({ ...base, networkMode: "capka-sandbox-egress", egressProxy: PROXY });
+    expect(cfg.Env).toContain("SANDBOX_EGRESS_FILTER=1");
+    expect(cfg.HostConfig.CapAdd).toEqual(expect.arrayContaining(["NET_ADMIN", "NET_RAW"]));
+    expect(cfg.HostConfig.NetworkMode).toBe("capka-sandbox-egress");
+  });
+
+  it("allowlist mode teaches the toolchain the proxy, in every form a tool reads", () => {
+    const env = envOf({ networkMode: "capka-sandbox-egress", egressProxy: PROXY });
+    expect(env).toContain(`SANDBOX_EGRESS_PROXY=${PROXY}`);
+    // Uppercase for most tools, lowercase because curl reads only that form.
+    expect(env).toContain(`HTTPS_PROXY=http://${PROXY}`);
+    expect(env).toContain(`https_proxy=http://${PROXY}`);
+    // Node's built-in fetch ignores proxy env without this.
+    expect(env).toContain("NODE_USE_ENV_PROXY=1");
+    // The JVM reads no proxy environment variable at all.
+    expect(env.find((e) => e.startsWith("JAVA_TOOL_OPTIONS="))).toContain("-Dhttps.proxyHost=capka-egress-proxy");
+    // NOT set, on purpose: the proxy speaks CONNECT only, so an http:// request
+    // must die on the firewall instead of arriving as a shape it cannot handle.
+    expect(env.some((e) => e.toUpperCase().startsWith("HTTP_PROXY="))).toBe(false);
+  });
+
+  // The staleness that matters: a container built before the allowlist existed must
+  // NOT look posture-identical to one built after it, or it keeps its open egress
+  // until something unrelated happens to recreate it.
+  it("fingerprints legacy bridge and allowlisted egress differently", () => {
+    const legacy = buildSandboxConfig({ ...base, networkMode: "bridge" }).Labels["capka.spec"];
+    const gated = buildSandboxConfig({ ...base, networkMode: "capka-sandbox-egress", egressProxy: PROXY }).Labels["capka.spec"];
+    expect(gated).not.toBe(legacy);
+    // And moving the proxy is a posture change too.
+    expect(buildSandboxConfig({ ...base, networkMode: "capka-sandbox-egress", egressProxy: "other:3128" }).Labels["capka.spec"])
+      .not.toBe(gated);
+  });
+});

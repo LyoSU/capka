@@ -17,8 +17,16 @@
  *  `capka.spec` label differs is torn down rather than kept: caps, mount options
  *  and the read-only rootfs are fixed at CREATE time, so a hardening change reaches
  *  an already-running sandbox only by rebuilding it. Omit it and nothing is
- *  recreated on posture grounds. */
-export async function reconcile({ store, backend, destroy, markStopped, currentSpec }) {
+ *  recreated on posture grounds.
+ *
+ *  `desiredMode(recordedMode)` — optional — returns the network a container should
+ *  be on TODAY. It exists because the fingerprint alone cannot answer this: it is
+ *  computed from the mode each container carries, so a container whose mode is
+ *  simply the wrong one is compared against its own posture and agrees with itself.
+ *  That is the shape of a stale-posture hole rather than a drift one — an admin
+ *  turning egress off, or turning an allowlist on, changes which network a sandbox
+ *  belongs to, and a self-consistent old container would keep the old one. */
+export async function reconcile({ store, backend, destroy, markStopped, currentSpec, desiredMode }) {
   const doDestroy = destroy || ((handle) => backend.destroy(handle));
   const doStop = markStopped || ((id) => store.setStopped(id));
   const records = await store.all();
@@ -39,7 +47,11 @@ export async function reconcile({ store, backend, destroy, markStopped, currentS
     // at all, which means it predates the label and is exactly the container a
     // posture fix needs to reach. Treated like a dead container: compute goes, the
     // workspace row and its files stay, and the next request rebuilds it hardened.
-    const stale = b != null && currentSpec != null && b.spec !== currentSpec(b.networkMode);
+    const stale = b != null && (
+      (currentSpec != null && b.spec !== currentSpec(b.networkMode))
+      // Right posture FOR the network it is on, but the wrong network.
+      || (desiredMode != null && b.networkMode !== desiredMode(b.networkMode))
+    );
     if (b && b.running && !stale) {
       kept.push(rec.sessionId); // live container — leave it running
     } else {

@@ -18,6 +18,12 @@ const ENV_BLOCK = new Set([
   // The cache/config dirs are the same trick one step milder — a planted npm or uv
   // cache is executable content too.
   "HOME", "UV_CACHE_DIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+  // The egress proxy the container was built with. A connector overriding these
+  // cannot escape the firewall — the rules permit one endpoint whatever the
+  // environment says — but it CAN silently lose its only route out and fail in a
+  // way that looks like the connector being broken. `docker exec` inherits the
+  // container's environment, so the right values are already there.
+  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
 ]);
 export function sanitizeEnv(env = {}) {
   const out = {};

@@ -79,6 +79,43 @@ describe("reconcile (compute vs. workspace lifecycle)", () => {
     expect(destroy).toHaveBeenCalledWith("c1");
   });
 
+  // The hole the fingerprint alone cannot close: it is computed FROM the mode each
+  // container carries, so one on the wrong network is compared against its own
+  // posture and agrees with itself.
+  it("destroys a container that is on the wrong network, even with a matching spec", async () => {
+    const store = fakeStore([{ sessionId: "s1", handle: "c1" }]);
+    const destroy = vi.fn();
+    const backend = {
+      list: async () => [{ sessionId: "s1", handle: "c1", running: true, spec: "hash-bridge", networkMode: "bridge" }],
+      destroy,
+    };
+    // An allowlist was turned on: a networked sandbox now belongs on the gated
+    // network, so the one still sitting on the open bridge has to go.
+    const out = await reconcile({
+      store, backend,
+      currentSpec: (net) => `hash-${net}`,
+      desiredMode: (recorded) => (recorded === "none" ? "none" : "capka-sandbox-egress"),
+    });
+    expect(out.outdated).toContain("s1");
+    expect(destroy).toHaveBeenCalledWith("c1");
+  });
+
+  it("leaves a closed sandbox alone when egress is off for everyone", async () => {
+    const store = fakeStore([{ sessionId: "s1", handle: "c1" }]);
+    const destroy = vi.fn();
+    const backend = {
+      list: async () => [{ sessionId: "s1", handle: "c1", running: true, spec: "hash-none", networkMode: "none" }],
+      destroy,
+    };
+    const out = await reconcile({
+      store, backend,
+      currentSpec: (net) => `hash-${net}`,
+      desiredMode: () => "none",
+    });
+    expect(out.kept).toContain("s1");
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("keeps a running container whose spec matches, per network mode", async () => {
     // Egress adds NET_ADMIN/NET_RAW, so the two modes are different postures and the
     // fingerprint is asked for the mode the container was actually built with.

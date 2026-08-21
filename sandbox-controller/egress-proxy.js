@@ -168,16 +168,23 @@ if (process.argv[1] && process.argv[1].endsWith("egress-proxy.js")) {
    *  The outward network has no other members and no published ports, which is what
    *  makes the default safe rather than merely convenient. */
   const bind = process.env.EGRESS_PROXY_BIND || "0.0.0.0";
-  const { entries, rejected } = parseAllowlist(process.env.SANDBOX_EGRESS_ALLOW);
+  const raw = process.env.SANDBOX_EGRESS_ALLOW ?? "";
+  const { entries, rejected } = parseAllowlist(raw);
   createEgressProxy(entries).listen(port, bind, () => {
     log("egress.listening", {
       port, bind, allowed: entries.length,
-      // Say the policy out loud at boot: "configured but empty" denies everything,
-      // and an operator who mistyped every entry should learn that here rather than
-      // from a wall of refusals.
+      // Say the policy out loud at boot, so an operator who mistyped an entry finds
+      // out here rather than from a wall of refusals later.
       hosts: entries.map((e) => `${e.wildcard ? "*." : ""}${e.host}:${e.port}`),
     });
     if (rejected.length) log("egress.allowlist_rejected", { entries: rejected }, "warn");
-    if (!entries.length) log("egress.empty_allowlist", { note: "no host is reachable from any sandbox" }, "warn");
+    if (!raw.trim()) {
+      // The feature is simply off: this process runs anyway so the sandbox network
+      // exists, and no sandbox is routed through it. Not a warning.
+      log("egress.inactive", { note: "SANDBOX_EGRESS_ALLOW is empty — sandboxes are not routed through this proxy" });
+    } else if (!entries.length) {
+      // Configured, yet nothing survived parsing — every request will be refused.
+      log("egress.empty_allowlist", { note: "allowlist is set but no entry parsed — no host is reachable" }, "warn");
+    }
   });
 }

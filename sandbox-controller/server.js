@@ -138,6 +138,34 @@ const REGEN_REAP_IDLE_MS = posIntEnv("REGEN_REAP_IDLE_MS", 86400000); // 1d
 // egress a deployment meant to forbid. Off by default = fail-closed.
 const ALLOW_NETWORK = process.env.SANDBOX_ALLOW_NETWORK === "true";
 
+// Opt-in default-deny egress. A NON-BLANK allowlist switches every networked
+// sandbox off Docker's default bridge and onto an `internal` network whose only
+// other member is the egress proxy, which permits these hosts and nothing else
+// (see egress-policy.js / egress-proxy.js). Blank keeps today's behaviour exactly:
+// the public internet minus the private ranges.
+//
+// The controller only needs to know WHETHER a list exists; the proxy is what reads
+// it, from the same variable, so the two cannot disagree. A list whose every entry
+// is malformed still counts as configured — the proxy then refuses everything,
+// which is the safe direction to be wrong in.
+const EGRESS_GATED = (process.env.SANDBOX_EGRESS_ALLOW ?? "").trim() !== "";
+const EGRESS_NETWORK = process.env.SANDBOX_EGRESS_NETWORK || "capka-sandbox-egress";
+const EGRESS_PROXY = process.env.SANDBOX_EGRESS_PROXY_ENDPOINT || "capka-egress-proxy:3128";
+
+/** The Docker network a request's logical mode maps to. The platform's vocabulary
+ *  stays "bridge" / "none" — a caller can never name a network directly. */
+function egressNetworkFor(logicalMode) {
+  return logicalMode === "bridge" && EGRESS_GATED ? EGRESS_NETWORK : logicalMode;
+}
+
+/** The proxy endpoint a container on `dockerNet` must be built with, or null. Both
+ *  container creation and the fingerprint read it here, so they cannot drift apart
+ *  — a fingerprint computed without the proxy env would mark every gated container
+ *  stale on every boot, forever. */
+function egressProxyFor(dockerNet) {
+  return dockerNet === EGRESS_NETWORK ? EGRESS_PROXY : null;
+}
+
 // Isolation: gVisor is OPT-IN. Default runtime is runc (boots on any Docker host);
 // set SANDBOX_RUNTIME=runsc to opt into the fail-closed "secure" profile.
 const { runtime: RUNTIME, profile: PROFILE } = resolveRuntimeProfile({
@@ -316,7 +344,7 @@ const server = createServer(async (req, res) => {
       // downgrade is logged where a container is actually built, so a reuse
       // doesn't repeat it every turn.)
       const requestedNet = resolveNetworkMode(networkMode);
-      const net = ALLOW_NETWORK ? requestedNet : "none";
+      const net = egressNetworkFor(ALLOW_NETWORK ? requestedNet : "none");
 
       const pre = await store.get(sid);
       if (pre && pre.userId !== uid) return jsonRes(res, 403, { error: "Session belongs to another user" });
@@ -394,7 +422,7 @@ const server = createServer(async (req, res) => {
         }
         const { handle } = await backend.create({
           sessionId: sid, userId: uid, wsHostPath, sharedHostPath,
-          networkMode: net, mounts: reqMounts, ...SPEC_ENV,
+          networkMode: net, egressProxy: egressProxyFor(net), mounts: reqMounts, ...SPEC_ENV,
         });
         const now = Date.now();
         await store.upsert({ sessionId: sid, userId: uid, handle, networkMode: net, mounts: reqMounts, lastActivity: now, createdAt: existing?.createdAt ?? now });
@@ -835,7 +863,16 @@ async function boot() {
   // hardening change (mount options, caps, rootfs) is fixed at create time, so
   // adopting them would leave the weaker sandbox running until it idled out.
   const summary = await withRetry(
-    () => reconcile({ store, backend, currentSpec: (net) => backend.fingerprint(SPEC_ENV, net) }),
+    () => reconcile({
+      store, backend,
+      currentSpec: (net) => backend.fingerprint(SPEC_ENV, net, egressProxyFor(net)),
+      // Which network a sandbox belongs to is a DEPLOYMENT decision, and the
+      // fingerprint cannot catch a change in it: that value is computed from the
+      // mode each container already carries, so a container on the wrong network is
+      // compared against its own posture and agrees with itself. Turning egress off,
+      // or turning an allowlist on, has to reach containers already running.
+      desiredMode: (recorded) => (recorded === "none" ? "none" : egressNetworkFor(ALLOW_NETWORK ? "bridge" : "none")),
+    }),
     { attempts: 5, baseMs: 3000, label: "recover", log });
   liveCount = summary.kept.length;
   log("recover", summary);

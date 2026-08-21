@@ -110,6 +110,45 @@ services:
     mem_limit: ${SOCKET_PROXY_MEM_LIMIT:-128m}
     pids_limit: ${SOCKET_PROXY_PIDS_LIMIT:-128}
 
+  # Opt-in default-deny egress. Sandboxes that may reach the internet are put on
+  # `sandbox-egress` — an INTERNAL network, so Docker installs no route off the
+  # bridge for them — and this is the one member that is also on an outward
+  # network. It speaks HTTP CONNECT, resolves each requested host itself, and
+  # tunnels only to SANDBOX_EGRESS_ALLOW. See SECURITY.md.
+  #
+  # It runs even with an empty allowlist, so the network exists and the sandbox
+  # spec is stable; nothing is routed through it until the list is non-empty.
+  #
+  # Same image as the controller (it is the same package), but deliberately NOT the
+  # same environment: no Docker socket, no database, no CONTROLLER_SECRET, no
+  # volumes, and never on `default` or `docker-proxy`. A compromise here must reach
+  # neither Postgres nor the Docker API.
+  egress-proxy:
+    image: ghcr.io/lyosu/capka-controller:${CAPKA_VERSION:-latest}
+    pull_policy: always
+    command: ["node", "egress-proxy.js"]
+    environment:
+      - SANDBOX_EGRESS_ALLOW=${SANDBOX_EGRESS_ALLOW:-}
+      - EGRESS_PROXY_PORT=3128
+    networks:
+      sandbox-egress:
+        # Explicit, because this name is a CONTRACT: the controller hands it to
+        # sandboxes as SANDBOX_EGRESS_PROXY_ENDPOINT and their firewall resolves it
+        # at startup. Compose would otherwise only alias the service name, so
+        # renaming the service would silently cut every sandbox's route out.
+        aliases:
+          - capka-egress-proxy
+      egress-out:
+    user: "65534:65534"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    mem_limit: ${EGRESS_PROXY_MEM_LIMIT:-128m}
+    pids_limit: ${EGRESS_PROXY_PIDS_LIMIT:-128}
+
   sandbox-controller:
     image: ghcr.io/lyosu/capka-controller:${CAPKA_VERSION:-latest}
     # `up -d`'s default pull policy only fetches an image that's missing
@@ -144,6 +183,14 @@ services:
       # egress is still firewalled off private/metadata ranges). Set false to
       # hard-forbid egress regardless of the in-app toggle (untrusted tenants).
       - SANDBOX_ALLOW_NETWORK=${SANDBOX_ALLOW_NETWORK:-true}
+      # Non-blank turns egress into default-deny: a networked sandbox joins
+      # `sandbox-egress` and reaches only these hosts, through egress-proxy above.
+      # Blank (the default) keeps today's behaviour — public internet minus the
+      # private ranges. Read here only to decide WHICH network a sandbox joins; the
+      # proxy reads the same variable to decide what it permits.
+      - SANDBOX_EGRESS_ALLOW=${SANDBOX_EGRESS_ALLOW:-}
+      - SANDBOX_EGRESS_NETWORK=capka-sandbox-egress
+      - SANDBOX_EGRESS_PROXY_ENDPOINT=capka-egress-proxy:3128
       # Optional perimeter for host folder mounts (folder access is off by default;
       # server folders are admin-only + confirm-gated). When set (colon-separated
       # roots), only subpaths of these may be mounted, on top of the system-path
@@ -186,6 +233,10 @@ services:
       db-init:
         condition: service_completed_successfully
       socket-proxy:
+        condition: service_started
+      # A sandbox in allowlist mode resolves the proxy at startup and refuses to run
+      # if it cannot — so the proxy has to exist before any sandbox is created.
+      egress-proxy:
         condition: service_started
     restart: unless-stopped
     # Graceful controller shutdown allows up to 8s for active HTTP requests,
@@ -290,6 +341,25 @@ networks:
   # Isolated controller↔socket-proxy link; the (restricted) Docker API isn't
   # reachable from the rest of the stack.
   docker-proxy:
+
+  # Where sandboxes live when an allowlist is configured. `internal` is doing real
+  # work: Docker installs NO default route for its members, so a sandbox has no
+  # path off this bridge and cannot resolve a public name either — every lookup and
+  # every connection has to go through the proxy. The name is fixed (not
+  # compose-prefixed) because the controller passes it to the Docker API as a
+  # NetworkMode.
+  #
+  # It is not a complete boundary on its own, which is why the sandbox still runs
+  # its own default-deny firewall: members of an internal network can still reach
+  # the Docker host's gateway and each other.
+  sandbox-egress:
+    name: capka-sandbox-egress
+    internal: true
+
+  # The proxy's own way out. Its own network so that reaching the internet never
+  # means sharing a network with Postgres or the platform.
+  egress-out:
+    name: capka-egress-out
 
 volumes:
   postgres-data:

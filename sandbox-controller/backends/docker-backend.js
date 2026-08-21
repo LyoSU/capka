@@ -249,7 +249,7 @@ export class DockerBackend {
    *  specFingerprint ignores them, which is what makes the value comparable across
    *  every session. Network mode is NOT ignored — egress adds NET_ADMIN/NET_RAW, so
    *  the two modes are genuinely different postures. */
-  fingerprint(env, networkMode) {
+  fingerprint(env, networkMode, egressProxy = null) {
     return specFingerprint(buildSandboxConfig({
       image: this.image,
       runtime: this.runtime,
@@ -257,6 +257,10 @@ export class DockerBackend {
       userId: "fingerprint",
       wsHostPath: "/fingerprint",
       networkMode,
+      // Must be supplied the same way create() supplies it, or a gated container is
+      // compared against an ungated posture and looks stale forever — reconcile
+      // would rebuild every sandbox on every boot, permanently.
+      egressProxy,
       ...env,
     }));
   }

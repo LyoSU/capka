@@ -112,6 +112,50 @@ widens the blast radius of any sandbox compromise. Whenever egress is on, the
 in-container firewall additionally blocks private and cloud-metadata ranges and
 refuses to start if its rules can't be verified.
 
+### Restricting egress to an allowlist of hosts
+
+`SANDBOX_EGRESS_ALLOW` (blank by default) narrows egress from "the public internet"
+to a named set of hosts. It is what closes the exfiltration path that open egress
+leaves: an agent that can read a token can also post it anywhere.
+
+Set it, and a sandbox with network access is built differently — it joins the
+`capka-sandbox-egress` network, which is `internal`, so Docker installs **no route
+off that bridge and no public DNS**, and its own firewall permits exactly one
+destination: the `egress-proxy` service. That proxy speaks HTTP CONNECT, resolves
+each requested host **itself**, checks the resolved address, and tunnels only to
+what the allowlist names.
+
+Syntax: `example.com` (that host, port 443), `*.example.com` (its subdomains, not
+the apex — list both if you want both), `example.com:8443` (that port only). A
+malformed entry is dropped, and a list that parses to nothing reaches **nothing**.
+
+Enabling or disabling it rebuilds sandbox containers: the network a container joins
+is fixed when it is created, so the change reaches a running sandbox only by
+replacing it. Files survive; processes inside do not.
+
+**What this does not do**, stated plainly because the gaps matter more than the
+guarantees:
+
+- **Plain `http://` and non-HTTP protocols stop working.** The proxy tunnels TLS
+  and nothing else — no SOCKS, so `git+ssh`, database clients and raw sockets fail
+  closed. Tools that ignore proxy environment variables (notably `urllib3` used
+  directly) also fail; the JVM is handled via `JAVA_TOOL_OPTIONS`.
+- **An allowlisted host that fronts other origins allows them too.** A CONNECT
+  tunnel is opaque, so a request inside it can name a different virtual host on the
+  same address. Nothing short of TLS interception (which would mean a CA in the
+  container — deliberately not done) prevents this. Prefer narrow, single-purpose
+  hostnames over a CDN apex.
+- **An allowlisted host that accepts uploads is still an exfiltration route.**
+  Allowing `github.com` allows a gist; allowing a package registry allows a publish.
+  The allowlist limits *where* data can go, not *whether* it can.
+- **It needs the current sandbox image.** The firewall lives in the image's
+  entrypoint, so a deployment pinned to an older `capka-sandbox` tag silently keeps
+  the old rules. Pull the sandbox image when enabling this.
+- Under gVisor the in-container firewall is one of three layers rather than the
+  only one, which is the reason for the `internal` network: that runtime's netfilter
+  support is partial, and an `internal` network still reaches the Docker host's own
+  gateway and sibling containers — both of which the firewall is what blocks.
+
 ## Disk / workspace quota
 
 Each workspace has a byte budget (`MAX_WORKSPACE_MB`, default 500). It is

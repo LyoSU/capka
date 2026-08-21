@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `SANDBOX_EGRESS_ALLOW` restricts sandbox egress to named hosts (`example.com`, `*.example.com`, `example.com:8443`) instead of the whole public internet. Blank keeps current behaviour; setting it adds an `egress-proxy` service and rebuilds sandbox containers, and needs a current `capka-sandbox` image (the firewall lives in its entrypoint). See SECURITY.md for what it does not cover.
+
 ### Fixed
 
 - Stopping a reply now also stops the command running in its sandbox, instead of leaving it to burn CPU and write files until the 300s exec cap. Background jobs (`execute_bash(background:true)`) are unaffected — they are meant to outlive the turn.
@@ -15,6 +19,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Security
 
+- Sandbox containers are now rebuilt when the network they should be on changes, so boot reconciliation no longer keeps a container whose posture matches its own (old) network.
 - An MCP connector's `env` can no longer set `HOME`, `npm_config_*`, or the XDG/UV cache dirs. A spec pointing `HOME` at the agent-writable `/workspace` got its planted shell profile executed as the `mcp` uid, which holds every connector's secrets.
 
 ## [0.26.0] - 2026-08-21

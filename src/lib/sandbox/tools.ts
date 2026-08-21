@@ -191,7 +191,9 @@ export async function loadSandboxTools(
         "running command-line tools, and installing packages (pip/npm). Common runtimes and CLI " +
         "tools are preinstalled. " +
         (networkMode === "bridge"
-          ? "Network access is available. "
+          // Deliberately not a promise of open access: a deployment may run a host
+          // allowlist, in which case anything off it fails as a proxy refusal.
+          ? "Network access is available, though this deployment may allow only certain hosts. "
           : "No network access — package installs and internet requests will fail. ") +
         "Set background:true for work that won't finish inside the 300s limit (bulk conversion, a " +
         "long scrape): it starts the command detached and returns a jobId immediately — the job " +

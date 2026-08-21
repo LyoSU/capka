@@ -61,6 +61,10 @@ export function buildSandboxConfig({
   // in server.js. Deliberately OUTSIDE /workspace so the quota/prune/delete_path
   // machinery never touches the operator's files. Empty by default (zero-config).
   mounts = [],
+  // `host:port` of the egress proxy when an allowlist is configured, else null.
+  // Its presence — not the network mode's name — is what switches this container
+  // from "public internet minus the private ranges" to "nothing but the proxy".
+  egressProxy = null,
 }) {
   const config = {
     Image: image,
@@ -77,7 +81,33 @@ export function buildSandboxConfig({
       // but the rootfs is read-only and /run isn't a writable mount — so the lock
       // open fails and the fail-closed egress firewall kills the container. Point
       // it at the writable /tmp tmpfs. (Only meaningful alongside the firewall.)
-      ...(networkMode === "bridge" ? ["SANDBOX_EGRESS_FILTER=1", "XTABLES_LOCKFILE=/tmp/xtables.lock"] : []),
+      ...(networkMode !== "none" ? ["SANDBOX_EGRESS_FILTER=1", "XTABLES_LOCKFILE=/tmp/xtables.lock"] : []),
+      // Default-deny mode. SANDBOX_EGRESS_PROXY tells the entrypoint to permit
+      // nothing but this endpoint; the rest teaches the toolchain to use it.
+      //
+      // HTTPS_PROXY only, and deliberately no HTTP_PROXY: the proxy speaks CONNECT
+      // and nothing else, so an http:// request must fail on the firewall rather
+      // than arrive there as a shape it does not handle. Both cases are set because
+      // curl reads only the lowercase form (a deliberate httpoxy defence) while
+      // most other tools read the uppercase one.
+      //
+      // NODE_USE_ENV_PROXY is what makes Node's BUILT-IN fetch honour it (the
+      // image ships Node 22.23, which has it; older 22.x does not) — without it
+      // every fetch() in execute_node would just hit the firewall. The paired
+      // --disable-warning keeps its experimental notice out of every tool result.
+      // The JVM reads no proxy env var at all, hence JAVA_TOOL_OPTIONS.
+      ...(egressProxy
+        ? [
+            `SANDBOX_EGRESS_PROXY=${egressProxy}`,
+            `HTTPS_PROXY=http://${egressProxy}`,
+            `https_proxy=http://${egressProxy}`,
+            "NO_PROXY=localhost,127.0.0.1",
+            "no_proxy=localhost,127.0.0.1",
+            "NODE_USE_ENV_PROXY=1",
+            "NODE_OPTIONS=--disable-warning=UNDICI-EHPA",
+            `JAVA_TOOL_OPTIONS=-Dhttps.proxyHost=${egressProxy.split(":")[0]} -Dhttps.proxyPort=${egressProxy.split(":")[1] ?? "3128"}`,
+          ]
+        : []),
     ],
     HostConfig: {
       Memory: memoryBytes,
@@ -142,7 +172,7 @@ export function buildSandboxConfig({
       // (NET_RAW is honored only when runsc itself runs with --net-raw=true; see
       // scripts/install-gvisor.sh.) After the setpriv-drop, and for every agent
       // command (exec runs as uid 1000 with no caps), these buy nothing.
-      CapAdd: ["CHOWN", "SETUID", "SETGID", ...(networkMode === "bridge" ? ["NET_ADMIN", "NET_RAW"] : [])],
+      CapAdd: ["CHOWN", "SETUID", "SETGID", ...(networkMode !== "none" ? ["NET_ADMIN", "NET_RAW"] : [])],
       NetworkMode: networkMode,
       Binds: [`${wsHostPath}:/workspace`, `${sharedHostPath}:/shared`],
       // Host folders use Mounts (not Binds): Mounts fails on a missing source
@@ -203,6 +233,15 @@ export function specFingerprint(config) {
     Runtime: config.HostConfig.Runtime ?? null,
     PidsLimit: config.HostConfig.PidsLimit,
     Ulimits: config.HostConfig.Ulimits,
+    // Both belong here, and their absence was a hole: the whole egress posture
+    // lives in Env (SANDBOX_EGRESS_FILTER, SANDBOX_EGRESS_PROXY) and in which
+    // network the container joined. Two different networks can carry identical
+    // caps, so without these a container built before an allowlist existed looks
+    // posture-identical to one built after it, and keeps its open egress until
+    // something else happens to recreate it. Env holds no session-specific value
+    // (see the Env block), so this stays comparable across sessions.
+    Env: config.Env,
+    NetworkMode: config.HostConfig.NetworkMode,
   };
   return createHash("sha256").update(JSON.stringify(posture)).digest("hex").slice(0, 16);
 }
