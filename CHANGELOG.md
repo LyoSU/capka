@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-21
+
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading.
 >
 > **⚠ Breaking — a reply the model cuts off at its own output-length limit now finalizes as `failed`, not `completed`.** A deployment whose gateway or local model server has a small default `max_tokens` will see ordinary turns marked failed and automations auto-disable after three of them; raise that limit before upgrading.
