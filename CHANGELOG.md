@@ -13,6 +13,7 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - A sandbox whose entrypoint refuses to start now fails immediately with that entrypoint's own message in the controller log, instead of being handed out as a working session and surfacing later as an unexplained failure on the first tool call.
+- The egress proxy now holds a fixed address (`SANDBOX_EGRESS_SUBNET`, `SANDBOX_EGRESS_PROXY_IP`), so recreating it no longer leaves every already-running sandbox permitting the address it used to have — silently, with no egress and no error. A deployment that already set `SANDBOX_EGRESS_ALLOW` must `docker compose down` before `up`, because Docker cannot change a network's subnet in place.
 - `SANDBOX_EGRESS_ALLOW` now has any effect at all: the proxy endpoint never reached the container, so a gated sandbox came up with the open-egress firewall — which, on a network with no route off it, means no internet whatsoever — and was rebuilt on every controller start.
 - The sandbox execution image is now refreshed on controller start when it came from a registry, instead of only being pulled when absent — an upgraded controller no longer keeps applying the previous release's sandbox firewall rules. A locally built image (`CAPKA_BUILD=1`) is never pulled over.
 

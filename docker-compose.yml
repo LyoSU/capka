@@ -168,6 +168,14 @@ services:
         # renaming the service would silently cut every sandbox's route out.
         aliases:
           - capka-egress-proxy
+        # And a FIXED address, because a sandbox's firewall pins the address it
+        # resolved at ITS startup — a rule has to name an address. Left to Docker's
+        # allocator, recreating this container (a `pull`, an image change, an
+        # `up --force-recreate`) hands it a different one, and every already-running
+        # sandbox keeps permitting the old address: no egress, no error, until each
+        # one is rebuilt. Must sit inside SANDBOX_EGRESS_SUBNET below; the two are
+        # one setting in two places.
+        ipv4_address: ${SANDBOX_EGRESS_PROXY_IP:-10.201.7.2}
       egress-out:
     user: "65534:65534"
     read_only: true
@@ -393,6 +401,12 @@ networks:
   sandbox-egress:
     name: capka-sandbox-egress
     internal: true
+    # Fixed subnet so the proxy can hold a fixed address (see ipv4_address above).
+    # Override both together if 10.201.7.0/24 collides with a route on the host —
+    # Docker refuses to create an overlapping network, so a collision is loud.
+    ipam:
+      config:
+        - subnet: ${SANDBOX_EGRESS_SUBNET:-10.201.7.0/24}
 
   # The proxy's own way out. Its own network so that reaching the internet never
   # means sharing a network with Postgres or the platform.
