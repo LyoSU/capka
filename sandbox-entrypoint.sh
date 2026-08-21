@@ -77,15 +77,17 @@ if [ -n "${SANDBOX_EGRESS_PROXY:-}" ]; then
   # So probe it, on a port of the proxy that was not granted. Enforced => the SYN goes
   # nowhere, the connect hangs and timeout kills it (124). Not enforced => nothing is
   # listening there, the kernel answers RST and bash fails at once (1); a live listener
-  # would connect (0). 124 is the only acceptable answer, which is why the other two
-  # are fatal. The one thing this cannot see is a proxy that is down: an address with
+  # would connect (0). 124 is the only acceptable answer, which is why every other
+  # one is fatal. The one thing this cannot see is a proxy that is down: an address with
   # nothing behind it also times out, so the probe proves enforcement whenever the
   # target is live and is merely silent when it is not.
-  command -v timeout >/dev/null 2>&1 || die "timeout(1) is unavailable, so the default-deny cannot be verified — refusing to run"
   probe_ip=$(echo "$proxy_ips" | head -n1)
   timeout 1 bash -c "exec 3<>/dev/tcp/$probe_ip/9" 2>/dev/null
   probe_rc=$?
-  [ "$probe_rc" -eq 124 ] || die "egress default-deny is in the table but not enforced (probe of $probe_ip:9 exited $probe_rc, expected a timeout) — refusing to run"
+  # Only 124 passes — including the case where the probe could not run at all (a
+  # missing timeout(1) makes bash report 127), because "we could not check" and "the
+  # check failed" have to end the same way for a control that has to fail closed.
+  [ "$probe_rc" -eq 124 ] || die "cannot confirm the egress default-deny is enforced (probe of $probe_ip:9 exited $probe_rc; only a timeout proves it) — refusing to run"
   # IPv6 has no proxy path, so it is closed completely. FATAL here, unlike the
   # best-effort v6 handling in the open-egress branch below: a v6-capable host with
   # an unfiltered v6 stack would route straight around the allowlist.

@@ -113,22 +113,23 @@ describe("sandbox egress firewall — default-deny (allowlist mode)", () => {
     expect(probe).not.toContain("/3128"); // the granted port would prove nothing
   });
 
-  it("refuses to run when the probe shows the DROP is not enforced", () => {
-    // Refused immediately: the SYN reached a live host, so nothing filtered it.
-    const refused = runEntrypoint({ env: PROXY, stubs: { timeout: "exit 1" } });
-    expect(refused.status).not.toBe(0);
-    expect(refused.stderr).toMatch(/not enforced/);
-    // Connected: worse, and equally not a filtered path.
-    const open = runEntrypoint({ env: PROXY, stubs: { timeout: "exit 0" } });
-    expect(open.status).not.toBe(0);
-    expect(open.stderr).toMatch(/not enforced/);
-  });
-
-  it("refuses to run when it cannot run the probe at all", () => {
-    const { status, stderr } = runEntrypoint({ env: PROXY, omit: ["timeout"] });
-    expect(status).not.toBe(0);
-    expect(stderr).toMatch(/timeout\(1\) is unavailable/);
-  });
+  // Only a timeout passes. Everything else is fatal, including not being able to
+  // run the probe: "the check failed" and "we could not check" have to end the same
+  // way, or the control is only enforced where it happens to be checkable.
+  it("refuses to run on any probe answer but a timeout", () => {
+    for (const [rc, why] of [
+      ["1", "refused: the SYN reached a live host, so nothing filtered it"],
+      ["0", "connected: worse, and equally not a filtered path"],
+      ["127", "could not run the probe at all (no timeout(1) in the image)"],
+    ]) {
+      const { status, stderr } = runEntrypoint({ env: PROXY, stubs: { timeout: `exit ${rc}` } });
+      expect(status, why).not.toBe(0);
+      expect(stderr, why).toMatch(/cannot confirm the egress default-deny is enforced/);
+      expect(stderr, why).toContain(`exited ${rc}`);
+    }
+    // Each case spawns a real bash against real stub binaries, so three of them do
+    // not fit the default 5s budget on a loaded machine or a CI runner.
+  }, 30_000);
 
   it("refuses to run when the proxy cannot be resolved", () => {
     const { status, stderr, rules } = runEntrypoint({ env: PROXY, stubs: { getent: "exit 2" } });
