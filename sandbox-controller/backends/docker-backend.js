@@ -118,6 +118,13 @@ export class DockerBackend {
       mcpGid: spec.mcpGid,
       fsizeBytes: spec.fsizeBytes,
       mounts: spec.mounts,
+      // Listing every field by name (rather than spreading `spec`) is deliberate —
+      // it keeps a caller from smuggling arbitrary container config through — but it
+      // means a new field is inert until it is named HERE. Forgetting this one made
+      // the allowlist a no-op end to end: the container got no proxy env, so its
+      // entrypoint took the open-egress branch, and its posture label disagreed with
+      // fingerprint() forever after.
+      egressProxy: spec.egressProxy,
     });
 
     let container;

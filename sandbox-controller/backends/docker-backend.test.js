@@ -23,6 +23,27 @@ describe("DockerBackend (mocked dockerode)", () => {
     expect(cfg.Labels["capka.user"]).toBe("u1");
   });
 
+  // The whole allowlist feature rides on this one line of plumbing: the endpoint is
+  // handed to create() by the server, and if create() drops it the container takes
+  // the OPEN-egress branch of the entrypoint instead — on a network whose proxy sits
+  // in a private range those rules DROP, so the sandbox ends up with no egress at
+  // all and no explanation. The label check is the load-bearing half: a created
+  // container whose posture label disagrees with fingerprint() looks stale to
+  // reconcile forever, which recreates every gated sandbox on every boot.
+  it("create() carries the egress proxy into the container, and labels it what reconcile expects", async () => {
+    const start = vi.fn().mockResolvedValue();
+    const createContainer = vi.fn().mockResolvedValue({ id: "c1", start });
+    const docker = { ...imagePresent, createContainer };
+    const b = new DockerBackend({ docker, image: "img:1", runtime: "runc" });
+    await b.create({
+      sessionId: "s1", userId: "u1", wsHostPath: "/w", sharedHostPath: "/s",
+      networkMode: "capka-sandbox-egress", egressProxy: "capka-egress-proxy:3128",
+    });
+    const cfg = createContainer.mock.calls[0][0];
+    expect(cfg.Env).toContain("SANDBOX_EGRESS_PROXY=capka-egress-proxy:3128");
+    expect(cfg.Labels["capka.spec"]).toBe(b.fingerprint({}, "capka-sandbox-egress", "capka-egress-proxy:3128"));
+  });
+
   it("create() self-heals a stale name conflict — force-removes the leftover container and retries", async () => {
     const start = vi.fn().mockResolvedValue();
     // A prior container crashed and was never reaped; its fixed name blocks the new one.
