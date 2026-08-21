@@ -252,6 +252,10 @@ function parseBody(req) {
   });
 }
 function jsonRes(res, status, data) {
+  // A caller can vanish mid-request (a cancelled turn aborts its fetch), and the
+  // work it was waiting on still finishes and tries to answer. Writing to a dead
+  // response raises on the stream, so treat "nobody there" as done.
+  if (res.writableEnded || res.destroyed) return;
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }
@@ -426,8 +430,14 @@ const server = createServer(async (req, res) => {
         ? Math.min(Math.max(timeout, 1000), 300000)
         : EXEC_TIMEOUT;
       store.touch(session.sessionId);
+      // The platform aborts this request when the turn it belongs to is cancelled.
+      // Node reports that as the response closing before we answered — forward it
+      // so the command dies with the turn instead of running to its 300s cap in a
+      // container nobody is listening to any more.
+      const cancel = new AbortController();
+      res.on("close", () => { if (!res.writableEnded) cancel.abort(); });
       try {
-        const result = await backend.exec(session.handle, command, execTimeout);
+        const result = await backend.exec(session.handle, command, execTimeout, cancel.signal);
         return jsonRes(res, 200, result);
       } catch (e) {
         if (/no such container|is not running/i.test(e.message)) {

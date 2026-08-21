@@ -1,5 +1,44 @@
+import { randomUUID } from "node:crypto";
 import { buildSandboxConfig, specFingerprint } from "../sandbox-spec.js";
 import { createFrameDemux } from "../docker-frames.js";
+
+/** Where a running exec publishes its process-group id. On the sandbox's own
+ *  tmpfs /tmp, written and read as the sandbox user — the same user whose
+ *  processes we signal, so this grants nothing that user couldn't already do to
+ *  its own processes. */
+const PID_DIR = "/tmp/.capka-exec";
+
+/** Kill a running exec's process group, from a SECOND exec.
+ *
+ *  Closing the HTTP connection the platform was waiting on does nothing to a
+ *  process already running inside the container — a cancelled turn would leave it
+ *  burning CPU (and writing to the workspace) until its 300s cap. There is no
+ *  Docker API for "signal an exec", so the kill has to come from inside: read the
+ *  pgid the wrapper published and signal the whole group, exactly what the
+ *  timeout killer does, just earlier.
+ *
+ *  It WAITS for the pid file (up to ~2s) instead of reading it once: a cancel can
+ *  land in the milliseconds before the wrapper got that far, and a single read
+ *  would find nothing and silently leave the command running — the very bug this
+ *  exists to fix. Pure shell builtins + sleep, so it can't fail on a missing tool.
+ */
+function killGroup(container, pidFile, user) {
+  const script =
+    `__i=0; while [ ! -s ${pidFile} ] && [ "$__i" -lt 40 ]; do __i=$((__i+1)); sleep 0.05; done; ` +
+    `__p=$(cat ${pidFile} 2>/dev/null); ` +
+    `if [ -n "$__p" ]; then kill -KILL -"$__p" 2>/dev/null; fi; ` +
+    `rm -f ${pidFile} 2>/dev/null; exit 0`;
+  return container
+    .exec({ Cmd: ["bash", "-c", script], AttachStdout: false, AttachStderr: false, User: user })
+    .then((ex) => new Promise((resolve) => {
+      ex.start({ hijack: true }, (err, stream) => {
+        if (err || !stream) return resolve();
+        stream.on("end", resolve);
+        stream.on("error", () => resolve());
+        stream.resume();
+      });
+    }));
+}
 
 /** ComputeBackend implementation over the Docker daemon (via dockerode).
  *  Lifts createSandbox/execInSandbox/destroySandbox/recoverSessions out of the
@@ -105,19 +144,30 @@ export class DockerBackend {
     return { handle: container.id };
   }
 
-  async exec(handle, command, timeoutMs = this.execTimeoutMs) {
+  /** Run `command` in the session container. `signal` aborts it EARLY — the
+   *  caller's HTTP request went away (a cancelled turn), and the command must go
+   *  with it. */
+  async exec(handle, command, timeoutMs = this.execTimeoutMs, signal) {
     const container = this.docker.getContainer(handle);
 
     // Run the command in its own session so a timeout kills the whole process
     // group (forked children included). base64 keeps the command verbatim.
     const secs = Math.max(1, Math.ceil(timeoutMs / 1000));
     const b64 = Buffer.from(command).toString("base64");
+    // Where the wrapper publishes its process-group id, so a cancel can reach the
+    // same group the timeout killer would. Random per exec: unique across
+    // concurrent execs, and not derived from anything the caller controls.
+    const pidFile = `${PID_DIR}/${randomUUID()}`;
     const wrapper =
       `__cmd=$(echo ${b64} | base64 -d); ` +
       `setsid bash -c "$__cmd" & __pid=$!; ` +
+      // Best-effort, like everything touching the small shared /tmp: if this fails
+      // (full tmpfs) the command still runs — it just can't be cancelled early.
+      `mkdir -p ${PID_DIR} 2>/dev/null; echo "$__pid" > ${pidFile} 2>/dev/null; ` +
       `( sleep ${secs}; kill -KILL -"$__pid" 2>/dev/null ) & __killer=$!; ` +
       `wait "$__pid"; __rc=$?; ` +
       `kill "$__killer" 2>/dev/null; wait "$__killer" 2>/dev/null; ` +
+      `rm -f ${pidFile} 2>/dev/null; ` +
       `exit $__rc`;
 
     const execObj = await container.exec({
@@ -130,13 +180,28 @@ export class DockerBackend {
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Command timed out after ${timeoutMs}ms`)), timeoutMs + 5000);
+      const onAbort = () => {
+        // Deliberately not awaited and never fatal: the caller is already gone, so
+        // there is nobody to report a failed kill to. The exec's own stream ends on
+        // its own once the group dies.
+        killGroup(container, pidFile, this.sandboxUser).catch(() => {});
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener("abort", onAbort);
+      };
+      if (signal) {
+        // An abort that already happened fires no event — check, don't just listen.
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }
       execObj.start({ hijack: true }, (err, stream) => {
-        if (err) { clearTimeout(timer); return reject(err); }
+        if (err) { cleanup(); return reject(err); }
         // Buffer frames across 'data' events — they are NOT chunk-aligned.
         const demux = createFrameDemux();
         stream.on("data", (chunk) => demux.push(chunk));
         stream.on("end", async () => {
-          clearTimeout(timer);
+          cleanup();
           // The demux already bounds what it keeps (RAM guard) and flags an
           // overflow as `truncated` — so no post-hoc .slice() is needed here.
           const { stdout, stderr, truncated } = demux.result();
@@ -147,7 +212,7 @@ export class DockerBackend {
             resolve({ stdout, stderr, exitCode: -1, truncated });
           }
         });
-        stream.on("error", (e) => { clearTimeout(timer); reject(e); });
+        stream.on("error", (e) => { cleanup(); reject(e); });
       });
     });
   }

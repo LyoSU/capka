@@ -57,20 +57,25 @@ async function sandboxFetch(input: RequestInfo, init?: RequestInit): Promise<Res
  * user-chosen MCP server names, and on DELETE a `workspaceToken` in the query
  * string. `sanitizeRoute` reduces it to a template with the query dropped.
  */
-async function request(path: string, method: string, body?: unknown, timeoutMs?: number) {
+async function request(path: string, method: string, body?: unknown, timeoutMs?: number, signal?: AbortSignal) {
   return withChildSpan(
     "capka.sandbox.request",
     { "capka.sandbox.route": sanitizeRoute(path), "capka.sandbox.method": method },
-    (span) => sendRequest(path, method, body, timeoutMs, span),
+    (span) => sendRequest(path, method, body, timeoutMs, span, signal),
   );
 }
 
-async function sendRequest(path: string, method: string, body: unknown, timeoutMs: number | undefined, span: Span) {
+async function sendRequest(path: string, method: string, body: unknown, timeoutMs: number | undefined, span: Span, signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(timeoutMs ?? (method === "POST" ? 150_000 : 10_000));
   const res = await sandboxFetch(`${CONTROLLER_URL}${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(timeoutMs ?? (method === "POST" ? 150_000 : 10_000)),
+    // `signal` is the CALLER's cancellation (a turn the user stopped), unioned with
+    // our own timeout. Aborting the request is not just a local give-up: the
+    // controller treats the closed connection as "kill the command", so this is the
+    // wire that carries a cancel all the way into the container.
+    signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
   });
 
   span.setAttribute("capka.sandbox.status", res.status);
@@ -151,14 +156,16 @@ export async function markBusy(sessionId: string, ms?: number) {
   }>;
 }
 
-export async function execCommand(sessionId: string, command: string, timeout?: number) {
+export async function execCommand(sessionId: string, command: string, timeout?: number, signal?: AbortSignal) {
   // The client abort must OUTLIVE the controller's own exec cap, or a long exec is
   // killed here (fetch abort) before the controller returns its result. The controller
   // clamps exec to ≤300s, so budget that ceiling + a 15s buffer regardless of what the
   // caller asked for (an unset timeout falls back to the controller's env default, which
   // is itself ≤300s). Previously the fixed 150s POST abort silently truncated any exec >150s.
   const clientTimeout = Math.min(timeout ?? 300_000, 300_000) + 15_000;
-  return request(`/sessions/${sanitizeId(sessionId)}/exec`, "POST", { command, timeout }, clientTimeout) as Promise<{
+  // `signal` is the turn's: a cancelled turn must not leave a command running in
+  // the sandbox for the rest of that budget (see the abort note in sendRequest).
+  return request(`/sessions/${sanitizeId(sessionId)}/exec`, "POST", { command, timeout }, clientTimeout, signal) as Promise<{
     stdout: string;
     stderr: string;
     exitCode: number;

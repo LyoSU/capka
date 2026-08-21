@@ -163,10 +163,15 @@ export async function loadSandboxTools(
       console.warn("[sandbox] busy lease failed:", e instanceof Error ? e.message : e);
     });
 
-  const run = async (cmd: string, timeout?: number) => {
+  // `signal` is the turn's abort signal, which the AI SDK hands to every tool
+  // execution. Passing it on is what makes a cancelled turn stop the work inside
+  // the container instead of only on screen: the controller kills the command's
+  // process group when this request's connection goes away. A detached background
+  // job is deliberately NOT given it — it is meant to outlive the turn.
+  const run = async (cmd: string, timeout?: number, signal?: AbortSignal) => {
     await ensureSession();
     try {
-      return await execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000));
+      return await execCommand(sessionKey, cmd, Math.min(timeout || 30000, 300000), signal);
     } catch (e) {
       // The disk-quota block (HTTP 413) is the one exec failure the agent can fix
       // on its own — by freeing space with delete_path. Surface it as a normal
@@ -199,9 +204,11 @@ export async function loadSandboxTools(
           .optional()
           .describe("Run detached and return a jobId at once, for commands longer than 300s"),
       }),
-      execute: async ({ command, timeout, background }) => {
+      execute: async ({ command, timeout, background }, { abortSignal }) => {
         if (background) {
           const jobId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+          // No abort signal on purpose: the job is detached and leased, so it
+          // survives the turn by design — a cancel must not take it down with it.
           const result = await run(backgroundWrapper(command, jobId));
           if (result.exitCode !== 0) return { started: false, error: result.stderr || "Failed to start job" };
           await holdSandbox();
@@ -216,7 +223,7 @@ export async function loadSandboxTools(
               "with no check at all — its log and exit code (if written) survive that.",
           };
         }
-        return captureResult(await run(withCapture(command), timeout));
+        return captureResult(await run(withCapture(command), timeout, abortSignal));
       },
     }),
 
@@ -227,7 +234,7 @@ export async function loadSandboxTools(
       inputSchema: z.object({
         jobId: z.string().describe("The jobId returned by execute_bash(background:true)"),
       }),
-      execute: async ({ jobId }) => {
+      execute: async ({ jobId }, { abortSignal }) => {
         const j = `${JOBS_DIR}/${jobId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
         // One round-trip: exit code (source of truth for "finished"), then pid
         // liveness (distinguishes still-running from killed-without-recording, e.g.
@@ -239,7 +246,7 @@ elif [ -f "$__j/pid" ] && kill -0 "$(cat "$__j/pid")" 2>/dev/null; then echo __R
 else echo __DEAD__; fi
 echo __LOG__
 tail -c 4000 "$__j/log" 2>/dev/null || true`;
-        const result = await run(cmd);
+        const result = await run(cmd, undefined, abortSignal);
         const out = result.stdout;
         // Split the status record from the log BEFORE parsing: the log tail is
         // arbitrary job output and could itself contain "__EXIT__0"/"__RUNNING__",
@@ -278,14 +285,14 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         code: z.string().describe("Python code to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
       }),
-      execute: async ({ code, timeout }) => {
+      execute: async ({ code, timeout }, { abortSignal }) => {
         // Pipe the program straight into the interpreter's stdin instead of staging
         // it in /tmp. The sandbox's /tmp is a small (64 MB) tmpfs shared by every
         // process; a sibling that fills it must never break code execution or file
         // editing. Base64 still guards against shell-escaping/delimiter collisions.
         const encoded = Buffer.from(code).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | python3 -`;
-        return captureResult(await run(withCapture(cmd), timeout));
+        return captureResult(await run(withCapture(cmd), timeout, abortSignal));
       },
     }),
 
@@ -297,12 +304,12 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         code: z.string().describe("JavaScript code to execute"),
         timeout: z.number().optional().describe("Timeout in ms (default 30s, max 300s)"),
       }),
-      execute: async ({ code, timeout }) => {
+      execute: async ({ code, timeout }, { abortSignal }) => {
         // Pipe through node's stdin (ESM, matching the previous .mjs staging) so
         // execution never depends on writable /tmp. See execute_python above.
         const encoded = Buffer.from(code).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | node --input-type=module`;
-        return captureResult(await run(withCapture(cmd), timeout));
+        return captureResult(await run(withCapture(cmd), timeout, abortSignal));
       },
     }),
 
@@ -317,7 +324,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         max_lines: z.number().optional().describe(`Max lines to return (default: ${DEFAULT_READ_LINES})`),
         offset: z.number().optional().describe("1-based line to start from (default: 1) — use to page through a large file"),
       }),
-      execute: async ({ path, max_lines, offset }) => {
+      execute: async ({ path, max_lines, offset }, { abortSignal }) => {
         const safePath = path.replace(/'/g, "'\\''");
         const start = Math.max(1, offset ?? 1);
         const count = Math.max(1, max_lines ?? DEFAULT_READ_LINES);
@@ -326,7 +333,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         // sed (not `tail|head`) keeps the exit code reflecting a missing file and
         // sidesteps the head-closes-the-pipe SIGPIPE trap.
         const last = start + count;
-        const result = await run(`sed -n '${start},${last}p;${last}q' '${safePath}'`);
+        const result = await run(`sed -n '${start},${last}p;${last}q' '${safePath}'`, undefined, abortSignal);
         if (result.exitCode !== 0) return { error: friendlyFsError(result.stderr, path), content: null };
         // A NUL byte means this is binary, not text. Returning the raw bytes
         // would (a) feed the model useless mojibake that bloats context and
@@ -334,7 +341,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         // rejects on persist (the runner's stripNul is the safety net for that).
         // Report it instead — as the tool's own description already advises.
         if (result.stdout.includes("\u0000")) {
-          const sz = await run(`wc -c < '${safePath}'`);
+          const sz = await run(`wc -c < '${safePath}'`, undefined, abortSignal);
           const bytes = sz.exitCode === 0 ? sz.stdout.trim() : "unknown";
           return {
             error: `Binary file (${bytes} bytes) — not text. Inspect it with execute_bash (e.g. \`file\`, \`xxd\`) or process it in execute_python.`,
@@ -365,13 +372,13 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         path: z.string().describe("File path relative to /workspace"),
         content: z.string().describe("File content"),
       }),
-      execute: async ({ path, content }) => {
+      execute: async ({ path, content }, { abortSignal }) => {
         const safePath = path.replace(/'/g, "'\\''");
         // Base64 the payload so an arbitrary content (including a line equal to a
         // heredoc delimiter) is written verbatim, never truncated.
         const encoded = Buffer.from(content).toString("base64");
         const cmd = `mkdir -p "$(dirname '${safePath}')" && echo '${encoded}' | base64 -d > '${safePath}'`;
-        const result = await run(cmd);
+        const result = await run(cmd, undefined, abortSignal);
         if (result.exitCode !== 0) return { error: result.stderr || "Write failed", success: false };
         return { success: true, path };
       },
@@ -386,7 +393,7 @@ tail -c 4000 "$__j/log" 2>/dev/null || true`;
         old_str: z.string().describe("Exact text to find (must match exactly)"),
         new_str: z.string().describe("Text to replace it with"),
       }),
-      execute: async ({ path, old_str, new_str }) => {
+      execute: async ({ path, old_str, new_str }, { abortSignal }) => {
         const pyCode = `import sys
 p = ${JSON.stringify(path)}
 old = ${JSON.stringify(old_str)}
@@ -401,7 +408,7 @@ print('OK')`;
         // are baked into the script, so it needs no stdin of its own.
         const encoded = Buffer.from(pyCode).toString("base64");
         const cmd = `echo '${encoded}' | base64 -d | python3 -`;
-        const result = await run(cmd);
+        const result = await run(cmd, undefined, abortSignal);
         if (result.exitCode !== 0) {
           // The script's own "text not found" signal (stdout) is the common case;
           // spell out that the match must be exact. Anything else is a shell/OS
@@ -421,9 +428,9 @@ print('OK')`;
       inputSchema: z.object({
         path: z.string().optional().describe("Directory path (default: /workspace)"),
       }),
-      execute: async ({ path }) => {
+      execute: async ({ path }, { abortSignal }) => {
         const target = (path || ".").replace(/'/g, "'\\''");
-        const result = await run(`ls -la '${target}'`);
+        const result = await run(`ls -la '${target}'`, undefined, abortSignal);
         const clamped = clampOutput(result.stdout, {
           mode: "head",
           note: "Narrow it: pass a subdirectory, or use search_files by name.",
@@ -463,13 +470,13 @@ print('OK')`;
         path: z.string().optional().describe("Directory to search (default: /workspace)"),
         glob: z.string().optional().describe("File glob filter (e.g. '*.py')"),
       }),
-      execute: async ({ pattern, path, glob }) => {
+      execute: async ({ pattern, path, glob }, { abortSignal }) => {
         const safePattern = pattern.replace(/'/g, "'\\''");
         const target = (path || ".").replace(/'/g, "'\\''");
         const globFlag = glob ? `--glob '${glob.replace(/'/g, "'\\''")}'` : "";
         // One past the cap so we can tell the model whether matches were hidden —
         // a silent `| head -100` makes it believe there are exactly ≤100 matches.
-        const result = await run(`rg --no-heading -n '${safePattern}' '${target}' ${globFlag} | head -101`);
+        const result = await run(`rg --no-heading -n '${safePattern}' '${target}' ${globFlag} | head -101`, undefined, abortSignal);
         const body = result.stdout.endsWith("\n") ? result.stdout.slice(0, -1) : result.stdout;
         const all = body === "" ? [] : body.split("\n");
         const capped = all.length > 100;

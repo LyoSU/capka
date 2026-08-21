@@ -6,6 +6,10 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopping a reply now also stops the command running in its sandbox, instead of leaving it to burn CPU and write files until the 300s exec cap. Background jobs (`execute_bash(background:true)`) are unaffected — they are meant to outlive the turn.
+
 ## [0.26.0] - 2026-08-21
 
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading.
