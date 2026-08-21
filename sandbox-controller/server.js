@@ -879,7 +879,7 @@ async function boot() {
 
 // Test seam: with CONTROLLER_NO_BOOT set, skip the Docker-dependent boot so the
 // HTTP app can be exercised over real sockets against a throwaway Postgres + a
-// fake backend (see server.http.test.js). Inert in production. `store` is the
+// fake backend (see server.http.integration.test.js). Inert in production. `store` is the
 // real PostgresSessionStore bound to DATABASE_URL.
 export { server, store, idleSweep };
 export function __setTestState(s = {}) {

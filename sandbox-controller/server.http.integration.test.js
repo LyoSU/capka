@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createHmac } from "node:crypto";
 import { rm, mkdir } from "node:fs/promises";
 import { realpathSync } from "node:fs";
@@ -8,7 +8,7 @@ import { join } from "node:path";
 // Boots the REAL controller HTTP server (no Docker) against a throwaway Postgres
 // and a fake compute backend, then drives the full session lifecycle over real
 // sockets — the coverage the unit tests of reconcile/gc/session-policy can't give.
-// Gated on TEST_DATABASE_URL (like session-store.test.js).
+// Gated on TEST_DATABASE_URL (like session-store.integration.test.js).
 const dbUrl = process.env.TEST_DATABASE_URL;
 const d = dbUrl ? describe : describe.skip;
 
@@ -84,6 +84,35 @@ d("controller HTTP API (lifecycle)", () => {
     const r = await fetch(`${base}/sessions/s1/exec`, { method: "POST", headers: auth, body: JSON.stringify({ command: "echo hi" }) });
     expect(r.status).toBe(200);
     expect((await r.json()).stdout).toBe("ran:echo hi");
+  });
+
+  it("a caller that hangs up mid-exec cancels the command it was waiting on", async () => {
+    expect((await post("sabort", "uabort")).status).toBe(201);
+    const orig = backend.exec;
+    let seen;
+    // Stay in flight like a real long command, and report what the controller
+    // handed down. Closing the connection is the ONLY cancel signal there is — the
+    // platform aborts this request when the user stops the turn — so if it doesn't
+    // arrive as an aborted signal here, the container works on for a turn that
+    // already ended.
+    backend.exec = (_h, _cmd, _t, signal) => new Promise((resolve) => {
+      seen = signal;
+      const done = () => resolve({ stdout: "", stderr: "", exitCode: 137 });
+      signal?.addEventListener("abort", done, { once: true });
+      setTimeout(done, 3000); // never hang the suite if the wiring broke
+    });
+    try {
+      const ac = new AbortController();
+      const inflight = fetch(`${base}/sessions/sabort/exec`, {
+        method: "POST", headers: auth, body: JSON.stringify({ command: "sleep 300" }), signal: ac.signal,
+      });
+      await vi.waitFor(() => expect(seen).toBeTruthy());
+      ac.abort();
+      await expect(inflight).rejects.toThrow();
+      await vi.waitFor(() => expect(seen.aborted).toBe(true));
+    } finally {
+      backend.exec = orig;
+    }
   });
 
   it("409s exec on a stopped workspace, then revives it (resumed)", async () => {

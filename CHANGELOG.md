@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Stopping a reply now also stops the command running in its sandbox, instead of leaving it to burn CPU and write files until the 300s exec cap. Background jobs (`execute_bash(background:true)`) are unaffected — they are meant to outlive the turn.
+- CI now runs the sandbox-controller's two database-backed suites (session store, controller HTTP API); they were skipping silently because `TEST_DATABASE_URL` was set nowhere.
 
 ## [0.26.0] - 2026-08-21
 

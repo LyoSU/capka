@@ -64,6 +64,12 @@ jobs:
     env:
       DATABASE_URL: postgresql://Capka:Capka@localhost:5432/Capka
       RUN_INTEGRATION: "1"
+      # The sandbox-controller's own DB-backed suites gate on this instead of
+      # DATABASE_URL, so a developer running them can never point them at a real
+      # database by accident (they truncate tables). The service above IS
+      # throwaway, so CI sets it and those suites finally run: before this, both
+      # were green in CI only because they always skipped.
+      TEST_DATABASE_URL: postgresql://Capka:Capka@localhost:5432/Capka
       # Deliberately NOT UTC. Every timestamp column is `timestamp without time
       # zone`, so a client that encodes dates in the process timezone silently
       # shifts them — invisible on a UTC runner, and it shipped a scheduler that
@@ -77,8 +83,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            sandbox-controller/package-lock.json
 
       - run: npm ci
+      # The controller's HTTP suite boots the real server, which imports dockerode
+      # — a dep of the controller package, not the root one.
+      - run: npm ci --prefix sandbox-controller
 
       - name: Apply database migrations
         run: npm run db:migrate
