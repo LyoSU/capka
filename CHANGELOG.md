@@ -19,7 +19,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Security
 
-- Sandbox containers are now rebuilt when the network they should be on changes, so boot reconciliation no longer keeps a container whose posture matches its own (old) network.
+- Sandbox containers are now rebuilt when the network they should be on changes, so boot reconciliation no longer keeps a container whose posture matches its own (old) network. The container posture fingerprint now covers environment and network too, so the first controller start after upgrading recreates every sandbox once: workspaces survive, background jobs running inside them do not.
 - An MCP connector's `env` can no longer set `HOME`, `npm_config_*`, or the XDG/UV cache dirs. A spec pointing `HOME` at the agent-writable `/workspace` got its planted shell profile executed as the `mcp` uid, which holds every connector's secrets.
 
 ## [0.26.0] - 2026-08-21
