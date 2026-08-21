@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-21
+
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading.
 
 ### Added
