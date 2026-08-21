@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-08-21
+
 > **⚠ Breaking — a pull-only deployment must follow the new `stable` branch, not `master`.** Coolify: change the branch to `stable`. `CAPKA_BRANCH=master` now requires `CAPKA_BUILD=1`, because images are published for releases only.
 
 ### Added
