@@ -149,12 +149,27 @@ guarantees:
   Allowing `github.com` allows a gist; allowing a package registry allows a publish.
   The allowlist limits *where* data can go, not *whether* it can.
 - **It needs the current sandbox image.** The firewall lives in the image's
-  entrypoint, so a deployment pinned to an older `capka-sandbox` tag silently keeps
-  the old rules. Pull the sandbox image when enabling this.
-- Under gVisor the in-container firewall is one of three layers rather than the
-  only one, which is the reason for the `internal` network: that runtime's netfilter
-  support is partial, and an `internal` network still reaches the Docker host's own
-  gateway and sibling containers — both of which the firewall is what blocks.
+  entrypoint. The controller refreshes a registry-sourced image on every start, so
+  an upgrade normally picks up the new rules by itself — but a deployment building
+  from source that has not rebuilt, or one whose refresh pull failed (logged as a
+  warning; it keeps serving the image it has), still runs the previous release's
+  rules. `CAPKA_VERSION` pinned to an older tag is that older tag, deliberately.
+- **One sandbox reaching another is blocked by the sandbox's own firewall, not by
+  the network.** Every gated sandbox shares one `internal` network, and `internal`
+  isolates it from the outside world, not from its siblings — nor from the Docker
+  host's own gateway, which is why the in-container default-deny is load-bearing
+  rather than defence in depth. Because a rule present in the table is not
+  necessarily a rule being applied (gVisor's netfilter is partial), the entrypoint
+  probes its own DROP before dropping privileges and refuses to run if a connection
+  it must not be able to make is answered. A per-session network would remove the
+  shared bridge entirely; it is not implemented, because deleting one needs Docker
+  API access the socket proxy deliberately withholds.
+- **The proxy's address is pinned per sandbox.** A firewall rule names an address,
+  resolved when that sandbox started. The proxy therefore holds a fixed address
+  (`SANDBOX_EGRESS_PROXY_IP`); if you override it, or run two Capka stacks on one
+  host — they share the un-prefixed `capka-sandbox-egress` network and the
+  `capka-egress-proxy` alias — expect the second stack's proxy to collide loudly
+  rather than take over quietly.
 
 ## Disk / workspace quota
 
