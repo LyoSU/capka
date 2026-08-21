@@ -14,6 +14,16 @@ services:
     image: ghcr.io/lyosu/capka-sandbox:${CAPKA_VERSION:-latest}
     entrypoint: ["echo", "sandbox image built"]
 
+  # The egress proxy is the controller package under a different command, so it is
+  # built here too. Without this it stays a pull of the published controller image —
+  # which, on a from-source stack, is both stale (images are published on release
+  # tags only, so the file the command runs may not exist in it yet) and a pull over
+  # the tag the sandbox-controller build below just produced locally.
+  egress-proxy:
+    build: ./sandbox-controller
+    # Overrides the base `always`: this tag is built here, never fetched.
+    pull_policy: build
+
   sandbox-controller:
     build: ./sandbox-controller
     # Merges with the base controller's depends_on (postgres, socket-proxy) — wait

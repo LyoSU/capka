@@ -126,7 +126,24 @@ services:
   egress-proxy:
     image: ghcr.io/lyosu/capka-controller:${CAPKA_VERSION:-latest}
     pull_policy: always
-    command: ["node", "egress-proxy.js"]
+    # Not a bare `node egress-proxy.js`: images are published only on release tags,
+    # so a deployment tracking master — or one pinned to a release older than this
+    # service — pulls a controller image that has no egress-proxy.js inside it. That
+    # exits 1 on MODULE_NOT_FOUND and, with restart: unless-stopped, crash-loops,
+    # which reads as a broken stack to everything watching container state (a
+    # Coolify deploy gate, up.sh's diagnose) even though the app itself is fine.
+    # Say it once and idle instead. Nothing is lost by idling: an image that predates
+    # the proxy also predates the controller that routes sandboxes through it, so no
+    # sandbox is pointed here in the first place.
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -f /app/egress-proxy.js ]; then
+          echo "egress-proxy: this controller image predates the egress proxy — pull current images (docker compose pull) before using SANDBOX_EGRESS_ALLOW"
+          exec tail -f /dev/null
+        fi
+        exec node egress-proxy.js
     environment:
       - SANDBOX_EGRESS_ALLOW=${SANDBOX_EGRESS_ALLOW:-}
       - EGRESS_PROXY_PORT=3128

@@ -6,12 +6,16 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+> **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading.
+
 ### Added
 
 - `SANDBOX_EGRESS_ALLOW` restricts sandbox egress to named hosts (`example.com`, `*.example.com`, `example.com:8443`) instead of the whole public internet. Blank keeps current behaviour; setting it adds an `egress-proxy` service and rebuilds sandbox containers, and needs a current `capka-sandbox` image (the firewall lives in its entrypoint). See SECURITY.md for what it does not cover.
 
 ### Fixed
 
+- The `egress-proxy` service no longer crash-loops on a controller image that predates it, which made a stack tracking `master` against the published `:latest` images look like a failed deploy; it logs the mismatch and idles instead.
+- Building from source (`CAPKA_BUILD=1`, `npm run docker:dev`) now builds `egress-proxy` as well, instead of pulling a released controller image over the one it just built.
 - Stopping a reply now also stops the command running in its sandbox, instead of leaving it to burn CPU and write files until the 300s exec cap. Background jobs (`execute_bash(background:true)`) are unaffected — they are meant to outlive the turn.
 - CI now runs the sandbox-controller's two database-backed suites (session store, controller HTTP API); they were skipping silently because `TEST_DATABASE_URL` was set nowhere.
 - Turning sandbox egress off now applies to sandboxes that are already running: a live container whose network no longer matches the request is rebuilt instead of reused. Files survive; processes inside it do not.
