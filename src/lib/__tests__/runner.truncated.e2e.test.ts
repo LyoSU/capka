@@ -20,7 +20,14 @@ vi.mock("@/lib/providers/resolve", () => ({
             { type: "text-end", id: "1" },
             {
               type: "finish",
-              finishReason: "length",
+              // A V3 finish reason is an OBJECT, not a string: `unified` is the
+              // cross-provider verdict the SDK normalizes onto `finish-step`, `raw`
+              // is what this provider actually said. Passing a bare "length" here
+              // leaves `unified` undefined, so the step reports NO finish reason and
+              // the truncation check can never fire — a mock that quietly asserts
+              // nothing. (The chunk list is cast `as any` for the stream helper, so
+              // the compiler can't catch the wrong shape either.)
+              finishReason: { unified: "length", raw: "max_tokens" },
               usage: { inputTokens: { total: 10 }, outputTokens: { total: 5 } },
             },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

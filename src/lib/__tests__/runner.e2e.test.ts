@@ -16,7 +16,7 @@ vi.mock("@/lib/providers/resolve", () => ({
             { type: "text-end", id: "1" },
             {
               type: "finish",
-              finishReason: "stop",
+              finishReason: { unified: "stop", raw: "end_turn" },
               // AI SDK 6 V3 nested usage shape. The input split is deliberate:
               // 6 fresh + 1 cache read + 3 cache WRITE = 10 total. Cache writes
               // are billed above base input and live in NEITHER `noCache` nor
