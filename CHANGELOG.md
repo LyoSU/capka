@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-08-21
+
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading. A deployment that already set `SANDBOX_EGRESS_ALLOW` must also `docker compose down` before `up`, because the sandbox network now has a fixed subnet and Docker cannot change one in place.
 
 > **⚠ Breaking — a container with IPv6 but no usable `ip6tables` now refuses to start.** Those rules were previously skipped in silence; if this bites, enable `ip6_tables` on the host kernel.
