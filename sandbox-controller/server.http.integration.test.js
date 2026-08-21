@@ -34,6 +34,7 @@ d("controller HTTP API (lifecycle)", () => {
   const token = (uid, sid) => createHmac("sha256", SECRET).update(`${uid}|${sid}`).digest("hex");
   const post = (sid, uid) => fetch(`${base}/sessions`, { method: "POST", headers: auth, body: JSON.stringify({ sessionId: sid, userId: uid }) });
   const postMounts = (sid, uid, mounts) => fetch(`${base}/sessions`, { method: "POST", headers: auth, body: JSON.stringify({ sessionId: sid, userId: uid, mounts }) });
+  const postNet = (sid, uid, networkMode) => fetch(`${base}/sessions`, { method: "POST", headers: auth, body: JSON.stringify({ sessionId: sid, userId: uid, networkMode }) });
 
   beforeAll(async () => {
     process.env.CONTROLLER_NO_BOOT = "1";
@@ -44,6 +45,7 @@ d("controller HTTP API (lifecycle)", () => {
     process.env.MAX_WORKSPACE_MB = "1"; // tiny cap so a 2MB file trips the quota gate
     process.env.QUOTA_CACHE_TTL_MS = "0"; // no caching in tests — measure every exec
     process.env.SANDBOX_IDLE_TTL_MS = "1"; // every session is instantly "idle" when swept
+    process.env.SANDBOX_ALLOW_NETWORK = "true"; // raise the ceiling so a "bridge" request isn't downgraded
     await mkdir(DATA_ROOT, { recursive: true });
 
     const mod = await import("./server.js");
@@ -258,6 +260,27 @@ d("controller HTTP API (lifecycle)", () => {
     const h2 = (await store.get("sdrift")).handle;
     expect(h2).not.toBe(h1);
     expect(containers.has(h1)).toBe(false); // old container torn down
+  });
+
+  // NetworkMode is fixed when a container is CREATED, so reusing one whose network
+  // no longer matches the request silently keeps the OLD network. That made an
+  // admin turning egress off a no-op for every live sandbox until it was reaped.
+  it("recreates the container when the requested network mode changed", async () => {
+    expect((await postNet("snet", "unet", "bridge")).status).toBe(201);
+    const withNet = await store.get("snet");
+    expect(withNet.networkMode).toBe("bridge");
+
+    // Same mode → hot reuse, same container.
+    const same = await postNet("snet", "unet", "bridge");
+    expect((await same.json()).status).toBe("reused");
+    expect((await store.get("snet")).handle).toBe(withNet.handle);
+
+    // Egress turned off for this session → the networked container cannot serve it.
+    const off = await postNet("snet", "unet", "none");
+    expect((await off.json()).status).toBe("resumed");
+    const rebuilt = await store.get("snet");
+    expect(rebuilt.handle).not.toBe(withNet.handle);
+    expect(rebuilt.networkMode).toBe("none");
   });
 
   it("404s a busy lease for an unknown session", async () => {

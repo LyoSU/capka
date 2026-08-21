@@ -310,14 +310,22 @@ const server = createServer(async (req, res) => {
       const mountKey = (m) => JSON.stringify([...m].sort((a, b) => a.name.localeCompare(b.name)));
       const reqKey = mountKey(reqMounts);
 
+      // The effective network mode, resolved here rather than at create time
+      // because it is part of a container's IDENTITY: a live container built with
+      // egress cannot serve a request that asks for none. (The kill-switch
+      // downgrade is logged where a container is actually built, so a reuse
+      // doesn't repeat it every turn.)
+      const requestedNet = resolveNetworkMode(networkMode);
+      const net = ALLOW_NETWORK ? requestedNet : "none";
+
       const pre = await store.get(sid);
       if (pre && pre.userId !== uid) return jsonRes(res, 403, { error: "Session belongs to another user" });
 
-      // Hot path — a live container is already up with the SAME mounts → reuse
-      // without taking the lock. (Mid-op invalidation on the next exec handles a
-      // container that vanished.) Different mounts fall through to the lock path,
-      // which tears the container down and recreates it with the new set.
-      if (pre && pre.handle && mountKey(pre.mounts || []) === reqKey) {
+      // Hot path — a live container is already up with the SAME mounts and the
+      // SAME network → reuse without taking the lock. (Mid-op invalidation on the
+      // next exec handles a container that vanished.) Anything else falls through
+      // to the lock path, which tears the container down and rebuilds it.
+      if (pre && pre.handle && mountKey(pre.mounts || []) === reqKey && pre.networkMode === net) {
         await workspace.ensure(uid, sid);
         store.touch(sid);
         return jsonRes(res, 200, { sessionId: sid, status: "reused" });
@@ -345,18 +353,28 @@ const server = createServer(async (req, res) => {
       const out = await store.withSessionLock(sid, async () => {
         const existing = await store.get(sid);
         if (existing && existing.handle) {
-          if (mountKey(existing.mounts || []) === reqKey) {
+          if (mountKey(existing.mounts || []) === reqKey && existing.networkMode === net) {
             await workspace.ensure(uid, sid);
             store.touch(sid);
             return { code: 200, body: { sessionId: sid, status: "reused" } };
           }
-          // Mount set changed since the container came up → destroy and recreate
-          // with the new mounts. Workspace files live on the host and survive;
-          // running processes die (the confirm card warns about this).
+          // Mounts or network changed since the container came up → destroy and
+          // recreate against the new spec. Workspace files live on the host and
+          // survive; running processes die (the confirm card warns about this).
+          //
+          // The network half is security-relevant, not cosmetic: NetworkMode is
+          // fixed when a container is CREATED, so an admin turning egress off left
+          // every live sandbox on the network until it happened to be reaped —
+          // exactly the stale-posture gap the capka.spec fingerprint closes for the
+          // rest of the container's shape.
           await backend.destroy(existing.handle).catch(() => {});
           await store.setStopped(sid);
           liveCount = Math.max(0, liveCount - 1);
-          log("session.mounts.changed", { sessionId: sid, userId: uid });
+          log("session.spec.changed", {
+            sessionId: sid, userId: uid,
+            mounts: mountKey(existing.mounts || []) !== reqKey,
+            network: existing.networkMode !== net,
+          });
         }
 
         // The per-user cap limits CONCURRENT LIVE containers (RAM), not stored
@@ -370,10 +388,7 @@ const server = createServer(async (req, res) => {
         }
 
         const { wsHostPath, sharedHostPath } = await workspace.ensure(uid, sid);
-        // Honor the deployment kill-switch: a bridge request is downgraded to
-        // "none" unless the operator opted the whole deployment into egress.
-        const requestedNet = resolveNetworkMode(networkMode);
-        const net = ALLOW_NETWORK ? requestedNet : "none";
+        // The deployment kill-switch downgraded a bridge request to "none" above.
         if (requestedNet === "bridge" && net === "none") {
           log("session.network.denied", { sessionId: sid, userId: uid, reason: "SANDBOX_ALLOW_NETWORK not set" });
         }
