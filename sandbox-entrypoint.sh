@@ -68,6 +68,24 @@ if [ -n "${SANDBOX_EGRESS_PROXY:-}" ]; then
   done
   iptables -A OUTPUT -j DROP || die "iptables default-deny rule failed"
   iptables -C OUTPUT -j DROP 2>/dev/null || die "egress default-deny did not install — refusing to run"
+  # `-C` proves the rule is in the TABLE. It does not prove the table is consulted:
+  # gVisor's netfilter is partial, and a rule it accepted can still not filter. That
+  # distinction matters most for the one guarantee nothing else covers — this DROP is
+  # all that keeps one sandbox off its NEIGHBOURS on the shared egress network, which
+  # `internal` does not isolate.
+  #
+  # So probe it, on a port of the proxy that was not granted. Enforced => the SYN goes
+  # nowhere, the connect hangs and timeout kills it (124). Not enforced => nothing is
+  # listening there, the kernel answers RST and bash fails at once (1); a live listener
+  # would connect (0). 124 is the only acceptable answer, which is why the other two
+  # are fatal. The one thing this cannot see is a proxy that is down: an address with
+  # nothing behind it also times out, so the probe proves enforcement whenever the
+  # target is live and is merely silent when it is not.
+  command -v timeout >/dev/null 2>&1 || die "timeout(1) is unavailable, so the default-deny cannot be verified — refusing to run"
+  probe_ip=$(echo "$proxy_ips" | head -n1)
+  timeout 1 bash -c "exec 3<>/dev/tcp/$probe_ip/9" 2>/dev/null
+  probe_rc=$?
+  [ "$probe_rc" -eq 124 ] || die "egress default-deny is in the table but not enforced (probe of $probe_ip:9 exited $probe_rc, expected a timeout) — refusing to run"
   # IPv6 has no proxy path, so it is closed completely. FATAL here, unlike the
   # best-effort v6 handling in the open-egress branch below: a v6-capable host with
   # an unfiltered v6 stack would route straight around the allowlist.
@@ -101,18 +119,26 @@ else
   # Verify the cloud-metadata block actually took. gVisor's netfilter is partial,
   # so a rule can be "accepted" yet not enforced — probe it explicitly.
   iptables -C OUTPUT -d 169.254.0.0/16 -j DROP 2>/dev/null || die "egress firewall did not install (metadata DROP missing) — refusing to run"
-  # IPv6 best-effort: drop private/link-local when the stack is present. (Public
-  # IPv6 egress without these rules is the residual gap; v4 metadata is the must-have.)
-  if command -v ip6tables >/dev/null 2>&1; then
-    ip6tables -F OUTPUT 2>/dev/null || true
-    ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+  # IPv6, with the same fail-closed stance as the v4 rules above. It used to be
+  # best-effort — every rule `|| true`, the whole block skipped when ip6tables was
+  # missing — which is the worst shape a security control can take: on a v6-capable
+  # host the container kept an unfiltered v6 path to the LAN and to the link-local
+  # and ULA metadata addresses, while the v4 rules made it look protected. The
+  # trigger is the container HAVING v6 (not ip6tables being installed), because
+  # that is the condition under which the gap exists.
+  if [ -e /proc/net/if_inet6 ]; then
+    command -v ip6tables >/dev/null 2>&1 || die "IPv6 is present but ip6tables is not — refusing to run with unfiltered IPv6 egress"
+    ip6tables -F OUTPUT || die "ip6tables flush failed"
+    ip6tables -A OUTPUT -o lo -j ACCEPT || die "ip6tables loopback rule failed"
     # Same DNS exception as v4, for hosts whose resolver is an IPv6 ULA/link-local.
     for ns in $(awk '$1 == "nameserver" && $2 ~ /^[0-9a-fA-F:]+$/ { print $2 }' /etc/resolv.conf 2>/dev/null); do
-      ip6tables -A OUTPUT -d "$ns" -p udp --dport 53 -j ACCEPT 2>/dev/null || true
-      ip6tables -A OUTPUT -d "$ns" -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+      ip6tables -A OUTPUT -d "$ns" -p udp --dport 53 -j ACCEPT || die "ip6tables DNS rule for $ns failed"
+      ip6tables -A OUTPUT -d "$ns" -p tcp --dport 53 -j ACCEPT || die "ip6tables DNS rule for $ns failed"
     done
-    for net in ::1/128 fc00::/7 fe80::/10; do ip6tables -A OUTPUT -d "$net" -j DROP 2>/dev/null || true; done
-    ip6tables -A OUTPUT -j ACCEPT 2>/dev/null || true
+    for net in ::1/128 fc00::/7 fe80::/10; do ip6tables -A OUTPUT -d "$net" -j DROP || die "ip6tables DROP $net failed"; done
+    ip6tables -A OUTPUT -j ACCEPT || die "ip6tables accept rule failed"
+    # Verified the same way as v4 metadata: accepted is not enforced.
+    ip6tables -C OUTPUT -d fe80::/10 -j DROP 2>/dev/null || die "IPv6 egress firewall did not install (link-local DROP missing) — refusing to run"
   fi
 fi
 fi

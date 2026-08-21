@@ -56,6 +56,10 @@ function runEntrypoint({ env = {}, stubs = {}, omit = [] } = {}) {
     iptables: "exit 0",
     ip6tables: "exit 0",
     getent: 'echo "10.88.7.2 STREAM capka-egress-proxy"; exit 0',
+    // 124 is what a killed connect reports, i.e. "the DROP is being enforced".
+    // Stubbed rather than left real so the suite runs on a macOS dev box (no
+    // coreutils `timeout`) and never spends a second per case waiting on a socket.
+    timeout: "exit 124",
   };
   for (const [name, body] of Object.entries({ ...defaults, ...stubs })) {
     if (omit.includes(name)) continue;
@@ -95,6 +99,35 @@ describe("sandbox egress firewall — default-deny (allowlist mode)", () => {
     // and no UDP at all means no DNS tunnelling and no QUIC.
     expect(rules.some((r) => r.includes("--dport 53"))).toBe(false);
     expect(rules.some((r) => r.includes("-A OUTPUT -j ACCEPT"))).toBe(false);
+  });
+
+  // `-C` says the rule is in the table; under gVisor's partial netfilter that is
+  // not the same as the table being consulted, and this DROP is the only thing
+  // keeping a sandbox off its neighbours on the shared egress network.
+  it("probes the DROP for enforcement, at the resolved address and a port it did not grant", () => {
+    const { status, log } = runEntrypoint({ env: PROXY });
+    expect(status).toBe(0);
+    const probe = log.find((l) => l.startsWith("timeout "));
+    expect(probe).toBeDefined();
+    expect(probe).toContain("/dev/tcp/10.88.7.2/9");
+    expect(probe).not.toContain("/3128"); // the granted port would prove nothing
+  });
+
+  it("refuses to run when the probe shows the DROP is not enforced", () => {
+    // Refused immediately: the SYN reached a live host, so nothing filtered it.
+    const refused = runEntrypoint({ env: PROXY, stubs: { timeout: "exit 1" } });
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toMatch(/not enforced/);
+    // Connected: worse, and equally not a filtered path.
+    const open = runEntrypoint({ env: PROXY, stubs: { timeout: "exit 0" } });
+    expect(open.status).not.toBe(0);
+    expect(open.stderr).toMatch(/not enforced/);
+  });
+
+  it("refuses to run when it cannot run the probe at all", () => {
+    const { status, stderr } = runEntrypoint({ env: PROXY, omit: ["timeout"] });
+    expect(status).not.toBe(0);
+    expect(stderr).toMatch(/timeout\(1\) is unavailable/);
   });
 
   it("refuses to run when the proxy cannot be resolved", () => {
@@ -153,6 +186,25 @@ describe("sandbox egress firewall — the open-egress mode is unchanged", () => 
     expect(rules.some((r) => r.includes("-A OUTPUT -j ACCEPT"))).toBe(true);
     // No proxy rule anywhere near it.
     expect(rules.some((r) => r.includes("--dport 3128"))).toBe(false);
+  });
+
+  // It used to be every-rule-`|| true`, skipped entirely when ip6tables was absent:
+  // a v6-capable host kept an unfiltered v6 path to the LAN and to the ULA/link-local
+  // metadata addresses while the v4 rules made the container look protected.
+  it.runIf(existsSync("/proc/net/if_inet6"))("fails closed on IPv6 too, instead of best-effort", () => {
+    const { status, log } = runEntrypoint();
+    expect(status).toBe(0);
+    const v6 = log.filter((l) => l.startsWith("ip6tables "));
+    expect(v6.some((r) => r.includes("-d fe80::/10 -j DROP"))).toBe(true);
+    expect(v6.some((r) => r.includes("-C OUTPUT -d fe80::/10 -j DROP"))).toBe(true);
+
+    const missing = runEntrypoint({ omit: ["ip6tables"] });
+    expect(missing.status).not.toBe(0);
+    expect(missing.stderr).toMatch(/IPv6 is present but ip6tables is not/);
+
+    const broken = runEntrypoint({ stubs: { ip6tables: 'case "$*" in *"fc00::/7"*) exit 1 ;; esac\nexit 0' } });
+    expect(broken.status).not.toBe(0);
+    expect(broken.stderr).toMatch(/ip6tables DROP fc00::\/7 failed/);
   });
 
   it("installs no firewall at all when egress is off", () => {

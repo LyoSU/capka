@@ -8,6 +8,8 @@ All notable changes to Capka are documented here. Format follows
 
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading.
 
+> **⚠ Breaking — a container with IPv6 but no usable `ip6tables` now refuses to start.** Those rules were previously skipped in silence; if this bites, enable `ip6_tables` on the host kernel.
+
 ### Fixed
 
 - `SANDBOX_EGRESS_ALLOW` now has any effect at all: the proxy endpoint never reached the container, so a gated sandbox came up with the open-egress firewall — which, on a network with no route off it, means no internet whatsoever — and was rebuilt on every controller start.
@@ -15,6 +17,8 @@ All notable changes to Capka are documented here. Format follows
 
 ### Security
 
+- Sandbox egress now verifies that its default-deny rule is *enforced*, not merely present in the table, and refuses to run otherwise — under a partial netfilter (gVisor) a rule can be accepted and still not filter, and that rule is what separates one sandbox from its neighbours on the shared egress network.
+- IPv6 egress rules in the default (open-egress) mode are now fail-closed like the IPv4 ones, instead of best-effort: a v6-capable container that cannot install and verify them refuses to run rather than keeping an unfiltered v6 path to the LAN and to link-local/ULA metadata addresses.
 - The container posture fingerprint now covers the resolved execution-image id, so a moved `:latest` counts as a posture change and boot reconciliation stops adopting sandboxes built from the previous execution image.
 
 ## [0.28.0] - 2026-08-21
