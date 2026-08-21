@@ -118,6 +118,27 @@ export interface ConversationTurn {
   assistantText?: string;
 }
 
+/** Below this, a prompt on its own carries no durable fact. */
+const TRIVIAL_USER_CHARS = 20;
+/** Below this, a reply carries none either. Far higher than the prompt bound
+ *  because the two sides are not symmetric: "продовжуй" is a nine-character
+ *  prompt that can pull a page of facts, while a reply this short is an
+ *  acknowledgement. */
+const TRIVIAL_ASSISTANT_CHARS = 200;
+
+/**
+ * Whether a finished turn is too small to be worth an LLM call — a pleasantry
+ * exchange ("дякую" → "Будь ласка"), not new information.
+ *
+ * Judges the whole exchange, not just the prompt. A gate on the user's text alone
+ * threw away the most valuable turns it saw: a two-word "продовжуй" with a long,
+ * fact-dense answer is exactly what memory is for.
+ */
+export function isTrivialTurn(turn: ConversationTurn): boolean {
+  return (turn.userText ?? "").trim().length < TRIVIAL_USER_CHARS
+    && (turn.assistantText ?? "").trim().length < TRIVIAL_ASSISTANT_CHARS;
+}
+
 const SCOPE_TARGET: Record<MemoryScope, string> = {
   user: "durable facts, preferences, and work context about the USER",
   project: "durable facts, decisions, conventions, and gotchas about THIS project and the work in it",
@@ -155,7 +176,12 @@ export async function reconcileMemoryDoc(
   hotContext?: { systemMessages: ModelMessage[]; modelMessages: ModelMessage[] },
 ): Promise<MemoryOp[]> {
   const userText = (turn.userText ?? "").trim();
-  if (!hotContext && userText.length < 20) return [];
+  // Unconditional, and that is the fix: the gate used to apply only WITHOUT a hot
+  // context, so it skipped the cheap standalone call and let the expensive one
+  // through. Every long chat has a hot context, so the most costly call in the
+  // system — the whole conversation re-read at cache-read price, on every turn —
+  // was the one firing on "ok".
+  if (isTrivialTurn(turn)) return [];
 
   const instruction = reconcileInstruction(scope, doc);
   try {

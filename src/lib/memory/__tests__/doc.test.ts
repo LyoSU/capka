@@ -12,6 +12,7 @@ import {
   needsConsolidation,
   reconcileMemoryDoc,
   consolidateMemoryDoc,
+  isTrivialTurn,
 } from "@/lib/memory/doc";
 import { MEMORY_DOC_MAX_CHARS, MEMORY_CONSOLIDATE_EVERY } from "@/lib/constants";
 
@@ -75,11 +76,45 @@ describe("clampDoc / needsConsolidation", () => {
   });
 });
 
+describe("isTrivialTurn", () => {
+  it("is trivial only when BOTH sides are small", () => {
+    expect(isTrivialTurn({ userText: "дякую", assistantText: "Будь ласка!" })).toBe(true);
+    expect(isTrivialTurn({ userText: "ok" })).toBe(true);
+    // A short prompt with a real answer is the turn worth mining, not a pleasantry.
+    expect(isTrivialTurn({ userText: "продовжуй", assistantText: "y".repeat(250) })).toBe(false);
+    // A long prompt stands on its own, whatever came back.
+    expect(isTrivialTurn({ userText: "Just so you know, I work at Acme Corp.", assistantText: "ok" })).toBe(false);
+  });
+});
+
 describe("reconcileMemoryDoc", () => {
   it("does not call the model for a trivially short standalone turn", async () => {
     const out = await reconcileMemoryDoc(model, "anthropic", "user", "", { userText: "ok" });
     expect(out).toEqual([]);
     expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
+  // The regression: the length gate used to hang off `!hotContext`, so it skipped
+  // the CHEAP call and waved the expensive one through. A long chat always has a
+  // hot context, which made "ok" re-read the whole conversation at cache-read
+  // price — every turn, for nothing.
+  it("does not call the model for a trivial turn WITH a hot context either", async () => {
+    const out = await reconcileMemoryDoc(model, "anthropic", "user", "", { userText: "ok", assistantText: "Sure!" }, undefined, {
+      systemMessages: [{ role: "system", content: "sys" }],
+      modelMessages: [{ role: "user", content: "earlier" }],
+    });
+    expect(out).toEqual([]);
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
+  it("still mines a two-word prompt that pulled a substantial answer", async () => {
+    generateTextMock.mockResolvedValue({ text: '[{"op":"add","text":"Deploys on Fridays"}]' });
+    const out = await reconcileMemoryDoc(model, "anthropic", "user", "", {
+      userText: "go on",
+      assistantText: "x".repeat(400),
+    });
+    expect(out).toEqual([{ op: "add", text: "Deploys on Fridays" }]);
+    expect(generateTextMock).toHaveBeenCalled();
   });
 
   it("parses ops from the model output", async () => {
