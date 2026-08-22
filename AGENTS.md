@@ -86,7 +86,24 @@ commit. Print `git status --porcelain` before **and** after any verification run
 a peer's write mid-run makes the result describe a tree that no longer exists.
 Before moving a branch or cutting a tag, check the commit itself:
 `git worktree add --detach /tmp/v <sha>`, symlink `node_modules`, then
-`npx tsc --noEmit && npx vitest run`.
+`npx tsc --noEmit && npx vitest run`. Symlink **two** module trees, not one:
+`sandbox-controller/` has its own `package.json`, so a single root symlink leaves
+its suites failing with `Cannot find package 'dockerode'`. And the integration
+suites are gated on `RUN_INTEGRATION=1`, which the npm script does not set —
+without it they skip.
+
+Read a run's **skip** count, not only its failures. A jump in skips (1 → 23, or
+3 passed / 193 skipped) means a precondition collapsed — an unset gate, a
+`beforeAll` that threw, a database with no schema — and reporting it as a result
+sends the next hour somewhere useless. Likewise a suite that "failed" with 0
+failed tests is a module that would not load, not a broken assertion. Assert
+preconditions explicitly instead of inferring them: after migrating, require the
+table count to be what the schema says.
+
+Authorship cannot be inferred, only reported. Every session commits as the same
+git user, so `%an`, `%ae` and `%cn` are identical for all of them and no git field
+separates two agents; absence from your own record is not evidence of someone
+else's authorship. Ask the other session.
 
 Release note: the version is decided by what is *in the range*, not by intent — a
 peer's `feat` landing in the range makes it a minor even if a patch was requested.
