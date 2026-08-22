@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { checkConfig, KNOB_SHAPES, NUMERIC_KNOBS } from "../config/check";
 import { readRetentionConfig } from "@/lib/db/retention";
 
@@ -207,6 +208,56 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
       return !pattern[shape](key).test(source);
     });
     expect(drifted).toEqual([]);
+  });
+
+  /**
+   * The INVERSE of the test above, and the gap it cannot cover. A source-shape check
+   * iterates the table, so it catches a knob that MOVED to a different helper — but a
+   * knob nobody ever listed is invisible to it, and that omission is exactly what let
+   * MCP_DEFER_TOKEN_PCT sit in the wrong rule for two releases.
+   *
+   * So: scan the platform's own sources for reads whose enclosing expression is one of
+   * the numeric shapes, and require every name found to be accounted for. The
+   * discriminator is the SHAPE, not the name — a knob is numeric because it is read
+   * through Number/parseInt/parseFloat or one of the validating helpers.
+   *
+   * Scoped to `src/` on purpose: the sandbox controller validates its own env in its
+   * own process, which is the boundary checkConfig's docblock already draws.
+   */
+  const CHECKED_ELSEWHERE = new Set(["FORCE_TEXT_AFTER_STEPS", "WRAP_UP_AFTER_FRACTION"]);
+
+  it("has no numeric knob that no rule covers", () => {
+    const files = readdirSync("src", { recursive: true, encoding: "utf8" })
+      .filter((p) => /\.tsx?$/.test(p))
+      .filter((p) => !p.includes("__tests__") && !p.includes(".test."))
+      .map((p) => join("src", p));
+    const source = files.map((f) => readFileSync(f, "utf8")).join("\n");
+
+    const numeric = new Set<string>();
+    for (const re of [
+      /\bNumber\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
+      /\bparseInt\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
+      /\bparseFloat\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
+      /\b(?:posInt|positiveInt|nonNegativeInt|envNumber)\(\s*(?:process\.)?env\.([A-Z][A-Z0-9_]*)/g,
+    ]) {
+      for (const m of source.matchAll(re)) numeric.add(m[1]);
+    }
+
+    // A sanity floor: if the scan finds almost nothing the regexes have drifted, and a
+    // vacuous pass here would read exactly like coverage.
+    expect(numeric.size).toBeGreaterThan(20);
+
+    const listed = new Set(NUMERIC_KNOBS.map((k) => k.key));
+    const unaccounted = [...numeric].filter((k) => !listed.has(k) && !CHECKED_ELSEWHERE.has(k)).sort();
+    expect(unaccounted).toEqual([]);
+  });
+
+  it("keeps the two exemptions earning their place", () => {
+    // An exemption that stops being true keeps passing silently, so assert the reason
+    // rather than the name: both are checked, just not by the table, because each has a
+    // range the table cannot express — one derived from another knob, one a clamp.
+    expect(keysOf({ ...VALID, FORCE_TEXT_AFTER_STEPS: "0" })).toContain("FORCE_TEXT_AFTER_STEPS");
+    expect(keysOf({ ...VALID, WRAP_UP_AFTER_FRACTION: "1.5" })).toContain("WRAP_UP_AFTER_FRACTION");
   });
 });
 
