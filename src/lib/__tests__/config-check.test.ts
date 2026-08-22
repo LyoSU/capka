@@ -162,6 +162,38 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
     expect(nonNegInt("1.5", 3)).toBe(3);
   });
 
+  it("keeps MAX_STREAM_RECOVERIES=0 silent as well as effective", () => {
+    // `nonNegInt` returning 0 is necessary and NOT sufficient. Three facts hide behind
+    // this one knob: the reader honours 0 (asserted just above), the stall loop then
+    // performs no recovery, and no `task:notice` with kind "retrying" is published.
+    // The third is the one an operator sees — the chat's status row renders it — so
+    // without it someone who switched recovery off would still watch "повторна
+    // спроба…" for a policy they disabled. A validator that returns 0 while the UI
+    // narrates retries is a guard sitting next to the thing it was believed to
+    // protect.
+    //
+    // Asserted on runner.ts's SOURCE, and the reason is not convenience: the
+    // behavioural version needs the runner itself, whose suites are
+    // RUN_INTEGRATION-gated and would not run in this job at all. Same route
+    // chat/context/__tests__/step-control.test.ts already takes on this same file.
+    // Comments are stripped first, because prose citing `kind: "retrying"` is
+    // documentation, not a publish.
+    //
+    // NAMED WEAKNESS, so nobody reads this as more than it is: it pins the ORDER, not
+    // the outcome. The exhaustion break precedes the publish, so at 0 the loop leaves
+    // before a notice can exist — but a refactor that preserves the order while
+    // changing the loop's shape could still break the consequence. The behavioural
+    // assertion belongs in the gated runner suite when someone gets there.
+    const runner = readFileSync(new URL("../tasks/runner.ts", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    const exhausted = runner.indexOf("recoveries >= MAX_RECOVERIES");
+    const retryNotice = runner.indexOf('kind: "retrying"');
+    expect(exhausted).toBeGreaterThan(-1);
+    expect(retryNotice).toBeGreaterThan(-1);
+    expect(exhausted).toBeLessThan(retryNotice);
+  });
+
   it("names each knob's own default, now that one typo has one answer", () => {
     // This test used to document a divergence: `10g` ran at 10 through parseInt in
     // worker.ts and fell back to 20 through Number() in db/index.ts — same typo, two
