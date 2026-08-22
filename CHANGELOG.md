@@ -10,11 +10,13 @@ All notable changes to Capka are documented here. Format follows
 
 - The live status row on a running turn now names which wait it is (in queue, connecting to the model, setting up the workspace) instead of always saying "Thinking…", and its clock starts when the message is sent rather than when the model call begins.
 - Durations in chat read in the interface language (`8 с`, `1 хв 32 с`) instead of latin `8s` and the ambiguous `1:32`.
+- `MAX_STREAM_RECOVERIES`, `JOBS_KEEP_DIRS`, `OUTPUT_KEEP_FILES`, `VIEW_KEEP_DIRS` and `MAX_MCP_MEDIA_BYTES` now accept `0` as the policy it reads as — no re-streaming, keep nothing, always spill connector media to a file — where zero was previously replaced by the default.
 
 ### Fixed
 
 - A turn whose model emits no reasoning no longer looks dead between a finished tool call and the next step: the status row returns for that gap instead of leaving the Stop button as the only sign of life.
-- Boot config warnings now name what actually happens to a rejected numeric value instead of always claiming a fallback: twelve knobs including `TASK_TIMEOUT_MINUTES`, `PG_POOL_MAX` and `MAX_AGENT_STEPS` are reported as used as written when the value survives (`TASK_TIMEOUT_MINUTES=-1` aborts every turn immediately), and `WORKER_MAX_CONCURRENCY=10g` as running at 10.
+- A negative, fractional or mistyped value for twelve numeric knobs now falls back to the built-in default instead of being used as written: `TASK_TIMEOUT_MINUTES`, `STREAM_IDLE_SECONDS`, `MAX_STREAM_RECOVERIES`, `MAX_AGENT_STEPS`, `PG_POOL_MAX`, `JOBS_KEEP_DIRS`, `JOB_LOG_CAP_MB`, `OUTPUT_KEEP_FILES`, `OUTPUT_FILE_CAP_MB`, `VIEW_KEEP_DIRS`, `MAX_MCP_MEDIA_BYTES` and `MAX_MCP_TOOL_DESC_CHARS`. `TASK_TIMEOUT_MINUTES=-1` aborted every turn within milliseconds.
+- Boot config warnings name the value that will actually run for each knob rather than always claiming a fallback — `WORKER_MAX_CONCURRENCY=10g` is reported as running at 10, `PG_POOL_MAX=10g` as falling back to 20.
 - `MCP_DEFER_TOKEN_PCT` and `MCP_DEFER_TOKEN_MAX` no longer warn at boot for `0` or a fractional value; both are honoured, and only the warning said otherwise.
 - `FORCE_TEXT_AFTER_STEPS` is validated against the ceiling `MAX_AGENT_STEPS` sets rather than as a standalone integer, so a value above that ceiling is reported instead of silently clamped.
 - A model that rejects reasoning outright is remembered, so it stops paying a rejected provider request and a full stream restart on every turn.

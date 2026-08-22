@@ -1,4 +1,5 @@
 import { isValidMasterKey } from "@/lib/crypto";
+import { nonNegInt, posInt } from "@/lib/config/env";
 
 export type ConfigIssue = { level: "error" | "warn"; key: string; message: string };
 
@@ -29,18 +30,22 @@ const isNonNegInt = (n: number) => Number.isInteger(n) && n >= 0;
 const isFiniteNonNeg = (n: number) => Number.isFinite(n) && n >= 0;
 
 export const KNOB_SHAPES = {
-  /** `posInt(...)` in tool-output.ts, `positiveInt(...)` in db/retention.ts. */
-  posInt: { used: (raw: string, d: number) => (isPosInt(Number(raw)) ? Number(raw) : d), ok: isPosInt, domain: "a positive integer" },
-  /** `nonNegativeInt(...)` in db/retention.ts — 0 days means keep forever. */
-  nonNegInt: { used: (raw: string, d: number) => (isNonNegInt(Number(raw)) ? Number(raw) : d), ok: isNonNegInt, domain: "a non-negative integer" },
-  /** `envNumber(...)` in mcp/tool-search.ts — 0 and fractions are DELIBERATE. */
+  /** THE reader, not a copy of it: `posInt` from config/env is the function the read
+   *  sites now call, so for these knobs the message cannot drift from the behaviour
+   *  at all. Same for `nonNegInt`. That is also why the bare-`||` shape is gone from
+   *  this table — its twelve knobs go through these two functions now, and the two
+   *  entries below are still mirrors only because their readers are module-local. */
+  posInt: { used: posInt, ok: isPosInt, domain: "a positive integer" },
+  /** `nonNegInt` here, `nonNegativeInt(...)` in db/retention.ts. Zero is honoured
+   *  wherever it selects a different working behaviour rather than no output. */
+  nonNegInt: { used: nonNegInt, ok: isNonNegInt, domain: "a non-negative integer" },
+  /** Mirror of `envNumber(...)` in mcp/tool-search.ts — 0 and fractions are
+   *  DELIBERATE there, and that reader is module-local. */
   finiteNonNeg: { used: (raw: string, d: number) => (isFiniteNonNeg(Number(raw)) ? Number(raw) : d), ok: isFiniteNonNeg, domain: "a non-negative number" },
-  /** Bare `Number(env.X) || default`: NO guard. Every negative, every fraction and
-   *  Infinity is truthy, so it survives and runs as written. */
-  truthy: { used: (raw: string, d: number) => Number(raw) || d, ok: isPosInt, domain: "a positive integer" },
-  /** `Math.max(1, parseInt(env.X || "3", 10) || 3)` in worker.ts: prefix-parsed, so
-   *  `10g` becomes 10 and RUNS, `2.7` truncates to 2, a negative clamps to 1 — three
-   *  outcomes, none of them the built-in default. */
+  /** Mirror of `Math.max(1, parseInt(env.X || "3", 10) || 3)` in worker.ts:
+   *  prefix-parsed, so `10g` becomes 10 and RUNS, `2.7` truncates to 2, a negative
+   *  clamps to 1 — three outcomes, none of them the built-in default. The last read
+   *  site in the platform that uses a value it never validated. */
   parseIntClamped: { used: (raw: string, d: number) => Math.max(1, parseInt(raw, 10) || d), ok: isPosInt, domain: "a positive integer" },
 } as const;
 
@@ -66,18 +71,18 @@ export const NUMERIC_KNOBS: {
   { key: "AUDIT_RETENTION_DAYS", fallback: 365, shape: "nonNegInt", site: "src/lib/db/retention.ts" },
   { key: "MCP_DEFER_TOKEN_PCT", fallback: 10, shape: "finiteNonNeg", site: "src/lib/mcp/tool-search.ts" },
   { key: "MCP_DEFER_TOKEN_MAX", fallback: 8192, shape: "finiteNonNeg", site: "src/lib/mcp/tool-search.ts" },
-  { key: "PG_POOL_MAX", fallback: 20, shape: "truthy", site: "src/lib/db/index.ts" },
-  { key: "TASK_TIMEOUT_MINUTES", fallback: 20, shape: "truthy", site: "src/lib/tasks/runner.ts" },
-  { key: "STREAM_IDLE_SECONDS", fallback: 60, shape: "truthy", site: "src/lib/tasks/runner.ts" },
-  { key: "MAX_STREAM_RECOVERIES", fallback: 3, shape: "truthy", site: "src/lib/tasks/runner.ts" },
-  { key: "MAX_AGENT_STEPS", fallback: 25, shape: "truthy", site: "src/lib/chat/context/step-control.ts" },
-  { key: "JOBS_KEEP_DIRS", fallback: 20, shape: "truthy", site: "src/lib/sandbox/tools.ts" },
-  { key: "JOB_LOG_CAP_MB", fallback: 10, shape: "truthy", site: "src/lib/sandbox/tools.ts" },
-  { key: "OUTPUT_KEEP_FILES", fallback: 5, shape: "truthy", site: "src/lib/sandbox/tools.ts" },
-  { key: "OUTPUT_FILE_CAP_MB", fallback: 10, shape: "truthy", site: "src/lib/sandbox/tools.ts" },
-  { key: "VIEW_KEEP_DIRS", fallback: 4, shape: "truthy", site: "src/lib/sandbox/view-file.ts" },
-  { key: "MAX_MCP_MEDIA_BYTES", fallback: 5 * 1024 * 1024, shape: "truthy", site: "src/lib/mcp/adapt.ts" },
-  { key: "MAX_MCP_TOOL_DESC_CHARS", fallback: 1024, shape: "truthy", site: "src/lib/mcp/adapt.ts" },
+  { key: "PG_POOL_MAX", fallback: 20, shape: "posInt", site: "src/lib/db/index.ts" },
+  { key: "TASK_TIMEOUT_MINUTES", fallback: 20, shape: "posInt", site: "src/lib/tasks/runner.ts" },
+  { key: "STREAM_IDLE_SECONDS", fallback: 60, shape: "posInt", site: "src/lib/tasks/runner.ts" },
+  { key: "MAX_STREAM_RECOVERIES", fallback: 3, shape: "nonNegInt", site: "src/lib/tasks/runner.ts" },
+  { key: "MAX_AGENT_STEPS", fallback: 25, shape: "posInt", site: "src/lib/chat/context/step-control.ts" },
+  { key: "JOBS_KEEP_DIRS", fallback: 20, shape: "nonNegInt", site: "src/lib/sandbox/tools.ts" },
+  { key: "JOB_LOG_CAP_MB", fallback: 10, shape: "posInt", site: "src/lib/sandbox/tools.ts" },
+  { key: "OUTPUT_KEEP_FILES", fallback: 5, shape: "nonNegInt", site: "src/lib/sandbox/tools.ts" },
+  { key: "OUTPUT_FILE_CAP_MB", fallback: 10, shape: "posInt", site: "src/lib/sandbox/tools.ts" },
+  { key: "VIEW_KEEP_DIRS", fallback: 4, shape: "nonNegInt", site: "src/lib/sandbox/view-file.ts" },
+  { key: "MAX_MCP_MEDIA_BYTES", fallback: 5 * 1024 * 1024, shape: "nonNegInt", site: "src/lib/mcp/adapt.ts" },
+  { key: "MAX_MCP_TOOL_DESC_CHARS", fallback: 1024, shape: "posInt", site: "src/lib/mcp/adapt.ts" },
   { key: "WORKER_MAX_CONCURRENCY", fallback: 3, shape: "parseIntClamped", site: "src/lib/tasks/worker.ts" },
 ];
 
@@ -167,8 +172,12 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
     issues.push(
       effective === n
         ? {
-            // The read site has no guard, so this value survives and runs. This is the
-            // half the old single message actively denied.
+            // The read site used the value without validating it, so it survives and
+            // runs. Currently UNREACHABLE: every knob in the table now goes through
+            // posInt/nonNegInt/envNumber, and parseIntClamped always rewrites what it
+            // rejects. It stays because the branch is a condition on data, not dead
+            // code — reintroduce a bare `Number(env.X) || d` read (the inverse test
+            // will make you list it) and this is the only message that would be true.
             level: "error",
             key,
             message: `set to "${raw}", which is not ${domain} — it will be used AS WRITTEN, not replaced by the default. Set a valid value or unset it.`,
@@ -188,7 +197,7 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
   {
     const raw = env.FORCE_TEXT_AFTER_STEPS?.trim();
     if (raw !== undefined && raw !== "") {
-      const maxSteps = Number(env.MAX_AGENT_STEPS) || 25;
+      const maxSteps = posInt(env.MAX_AGENT_STEPS, 25);
       const n = Number(raw);
       if (!Number.isInteger(n) || n < 1 || n > maxSteps) {
         const effective = Math.min(maxSteps, Math.max(1, n || maxSteps - 5));

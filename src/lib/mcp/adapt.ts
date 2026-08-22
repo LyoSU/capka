@@ -1,15 +1,16 @@
 import { dynamicTool, jsonSchema } from "ai";
 import { clampOutput, MAX_TOOL_OUTPUT_CHARS } from "@/lib/tool-output";
 import { spillToWorkspace } from "./spill";
+import { nonNegInt, posInt } from "@/lib/config/env";
 
 /** Ceiling for a single MCP media/blob block, measured on the base64 STRING
  *  length — that is what lands in Postgres and re-enters the model context every
  *  turn, so it is the figure that actually costs. Over it, the blob is parked in
  *  the workspace and replaced by a text pointer (see spillMedia). */
-const MAX_MCP_MEDIA_BYTES = Number(process.env.MAX_MCP_MEDIA_BYTES) || 5 * 1024 * 1024;
+const MAX_MCP_MEDIA_BYTES = nonNegInt(process.env.MAX_MCP_MEDIA_BYTES, 5 * 1024 * 1024);
 /** Cap on an MCP tool's DESCRIPTION. Untrusted servers ship enormous descriptions
  *  that tax the context of EVERY call before any tool even runs (the "menu tax"). */
-const MAX_MCP_TOOL_DESC_CHARS = Number(process.env.MAX_MCP_TOOL_DESC_CHARS) || 1024;
+const MAX_MCP_TOOL_DESC_CHARS = posInt(process.env.MAX_MCP_TOOL_DESC_CHARS, 1024);
 
 /** Where spill writes and who owns the workspace — threaded from loadMcpTools.
  *  Absent (e.g. no sandbox session) means spill degrades to a plain clamp. */

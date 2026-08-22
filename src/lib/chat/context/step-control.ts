@@ -1,13 +1,14 @@
 import { pruneMessages, type ModelMessage } from "ai";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
 import { outputBytes } from "@/lib/tool-output";
+import { posInt } from "@/lib/config/env";
 
 /**
  * Hard cap on tool-calling steps in one turn (streamText's `stopWhen`). Prevents a
  * model that keeps calling tools from looping forever. Raise MAX_AGENT_STEPS for
  * workflows that legitimately chain many tool calls.
  */
-export const MAX_STEPS = Number(process.env.MAX_AGENT_STEPS) || 25;
+export const MAX_STEPS = posInt(process.env.MAX_AGENT_STEPS, 25);
 
 /**
  * After this many tool steps WITHIN a single turn, force the model to answer in

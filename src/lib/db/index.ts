@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool, defaults as pgDefaults, types as pgTypes } from "pg";
 import * as schema from "./schema";
+import { posInt } from "@/lib/config/env";
 
 // Every timestamp column in the schema is `timestamp without time zone`, and the
 // two clients that share this pool disagreed about what that means: Drizzle reads
@@ -26,7 +27,7 @@ export const DATABASE_URL =
 // starved them, so the floor is 20. Raise PG_POOL_MAX alongside concurrency.
 export const pool = new Pool({
   connectionString: DATABASE_URL,
-  max: Number(process.env.PG_POOL_MAX) || 20,
+  max: posInt(process.env.PG_POOL_MAX, 20),
   idleTimeoutMillis: 30_000,
 });
 

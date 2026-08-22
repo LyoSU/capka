@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { checkConfig, KNOB_SHAPES, NUMERIC_KNOBS } from "../config/check";
+import { nonNegInt, posInt } from "@/lib/config/env";
 import { readRetentionConfig } from "@/lib/db/retention";
 
 // A fully-valid environment as the baseline; each case overrides one var so the
@@ -120,13 +121,42 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
     }
   });
 
-  it("says a value will be USED when its read site has no guard", () => {
-    // `Number(env.X) || default` lets every negative through. The old message told the
-    // operator the default was running, so they went looking for the fault elsewhere.
+  it("no longer has a knob whose value runs unvalidated, except the one that does", () => {
+    // TASK_TIMEOUT_MINUTES=-1 was the case that proved the class: truthy, so it passed
+    // `Number(env.X) || default` and ran, aborting every turn at ~1ms. Its read site is
+    // now posInt, so the value falls back and the message says which number runs.
     const issue = checkConfig({ ...VALID, TASK_TIMEOUT_MINUTES: "-1" }).find((i) => i.key === "TASK_TIMEOUT_MINUTES");
-    expect(issue?.level).toBe("error");
-    expect(issue?.message).toContain("AS WRITTEN");
-    expect(issue?.message).not.toContain("will be used instead");
+    expect(issue?.level).toBe("warn");
+    expect(issue?.message).toContain("20 will be used");
+    expect(issue?.message).not.toContain("AS WRITTEN");
+    // And the reader agrees, rather than the message merely claiming so.
+    expect(posInt(" -1 ", 20)).toBe(20);
+    expect(posInt("45", 20)).toBe(45);
+
+    // WORKER_MAX_CONCURRENCY is the exception, and stays reported as such: parseInt
+    // prefix-parses, so `10g` genuinely runs at 10 and no fallback is involved.
+    expect(checkConfig({ ...VALID, WORKER_MAX_CONCURRENCY: "10g" }).find((i) => i.key === "WORKER_MAX_CONCURRENCY")?.message)
+      .toContain("10 will be used");
+  });
+
+  it("honours a zero where zero is a policy, and rejects it where it is not", () => {
+    // The trap in doing this conversion with ONE helper: a positive-only floor would
+    // silently rewrite five knobs where zero means something, which is the same defect
+    // one layer down. Zero is a policy when it selects a different working behaviour.
+    for (const key of ["MAX_STREAM_RECOVERIES", "JOBS_KEEP_DIRS", "OUTPUT_KEEP_FILES", "VIEW_KEEP_DIRS", "MAX_MCP_MEDIA_BYTES"]) {
+      expect(keysOf({ ...VALID, [key]: "0" })).not.toContain(key);
+    }
+    // ...and a mistake when it removes the output entirely: JOB_LOG_CAP_MB=0 is
+    // `head -c 0`, an empty log rather than a smaller one.
+    for (const key of ["JOB_LOG_CAP_MB", "OUTPUT_FILE_CAP_MB", "TASK_TIMEOUT_MINUTES", "PG_POOL_MAX", "MAX_AGENT_STEPS"]) {
+      expect(keysOf({ ...VALID, [key]: "0" })).toContain(key);
+    }
+    // The readers themselves, so this is a property of the code and not of the table.
+    expect(nonNegInt("0", 3)).toBe(0);
+    expect(posInt("0", 10)).toBe(10);
+    expect(nonNegInt("-1", 3)).toBe(3);
+    expect(nonNegInt("", 3)).toBe(3);
+    expect(nonNegInt("1.5", 3)).toBe(3);
   });
 
   it("names the value that will actually run when the site rewrites it", () => {
@@ -198,9 +228,8 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
     // exact failure this whole file exists to prevent, one level up.
     const pattern: Record<string, (k: string) => RegExp> = {
       posInt: (k) => new RegExp(`(posInt|positiveInt)\\(\\s*(process\\.)?env\\.${k}\\b`),
-      nonNegInt: (k) => new RegExp(`nonNegativeInt\\(\\s*(process\\.)?env\\.${k}\\b`),
+      nonNegInt: (k) => new RegExp(`(nonNegInt|nonNegativeInt)\\(\\s*(process\\.)?env\\.${k}\\b`),
       finiteNonNeg: (k) => new RegExp(`envNumber\\(\\s*(process\\.)?env\\.${k}\\b`),
-      truthy: (k) => new RegExp(`Number\\(process\\.env\\.${k}\\)\\s*\\|\\|`),
       parseIntClamped: (k) => new RegExp(`parseInt\\(process\\.env\\.${k}\\b`),
     };
     const drifted = NUMERIC_KNOBS.filter(({ key, shape, site }) => {
@@ -231,14 +260,21 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
       .filter((p) => /\.tsx?$/.test(p))
       .filter((p) => !p.includes("__tests__") && !p.includes(".test."))
       .map((p) => join("src", p));
-    const source = files.map((f) => readFileSync(f, "utf8")).join("\n");
+    // Comments are stripped first: a docblock that CITES the old `Number(process.env.X)`
+    // shape is documentation, not a read, and counting it made this test report a knob
+    // named "X". Prose about code must not register as code.
+    const source = files
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
 
     const numeric = new Set<string>();
     for (const re of [
       /\bNumber\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
       /\bparseInt\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
       /\bparseFloat\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
-      /\b(?:posInt|positiveInt|nonNegativeInt|envNumber)\(\s*(?:process\.)?env\.([A-Z][A-Z0-9_]*)/g,
+      /\b(?:posInt|nonNegInt|positiveInt|nonNegativeInt|envNumber)\(\s*(?:process\.)?env\.([A-Z][A-Z0-9_]*)/g,
     ]) {
       for (const m of source.matchAll(re)) numeric.add(m[1]);
     }

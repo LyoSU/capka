@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { execCommand, deleteFile, markBusy } from "./client";
 import { clampOutput, MAX_TOOL_OUTPUT_CHARS, DEFAULT_READ_LINES } from "@/lib/tool-output";
+import { nonNegInt, posInt } from "@/lib/config/env";
 
 /** Recovery hint baked into the truncation marker so the model narrows next time.
  *  Steers toward grep / redirect-to-file rather than a blind `| head`/`| tail`,
@@ -15,8 +16,8 @@ const NARROW_NOTE =
 // inline view still streams back normally (and is clamped as before); the log is
 // the recovery path. A byte cap bounds one runaway, and rotation bounds the dir.
 const CAPTURE_DIR = "/workspace/.capka/output";
-const CAPTURE_FILE_BYTES = (Number(process.env.OUTPUT_FILE_CAP_MB) || 10) * 1024 * 1024;
-const CAPTURE_KEEP = Number(process.env.OUTPUT_KEEP_FILES) || 5;
+const CAPTURE_FILE_BYTES = posInt(process.env.OUTPUT_FILE_CAP_MB, 10) * 1024 * 1024;
+const CAPTURE_KEEP = nonNegInt(process.env.OUTPUT_KEEP_FILES, 5);
 /** RS-delimited trailer the wrapper prints on stderr: \x1e<bytes>\x1e<path|->.
  *  stderr is otherwise empty (the command's own stderr is merged into the log via
  *  2>&1), so this never collides with real output. */
@@ -49,12 +50,12 @@ const kbBytes = (n: number) => `${Math.round(n / 1024)} KB`;
 // running because the container persists between turns. Output + exit code land
 // in the workspace so a later check_job (or read_file) can recover them.
 const JOBS_DIR = "/workspace/.capka/jobs";
-const JOBS_KEEP = Number(process.env.JOBS_KEEP_DIRS) || 20;
+const JOBS_KEEP = nonNegInt(process.env.JOBS_KEEP_DIRS, 20);
 /** Per-job stdout+stderr log ceiling. A runaway job that spews past this is
  *  truncated (and stops, via SIGPIPE) so it can't fill the workspace quota — the
  *  same protection the foreground tee-capture gives. Generous: real progress logs
  *  are tiny; JOBS_KEEP × this stays well under the 500 MB workspace cap. */
-const JOB_LOG_CAP_BYTES = (Number(process.env.JOB_LOG_CAP_MB) || 10) * 1024 * 1024;
+const JOB_LOG_CAP_BYTES = posInt(process.env.JOB_LOG_CAP_MB, 10) * 1024 * 1024;
 
 /** Launch `command` detached in its OWN session and return at once. The
  *  controller already runs our exec under `setsid … & wait`, so nesting another

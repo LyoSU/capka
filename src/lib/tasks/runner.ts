@@ -49,6 +49,7 @@ import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 import { prepareRun } from "./run-context";
 import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
 import { MAX_TURN_TOOL_OUTPUT_CHARS, outputChars } from "@/lib/tool-output";
+import { nonNegInt, posInt } from "@/lib/config/env";
 
 const errMsg = (e: unknown) => errorText(e);
 
@@ -113,7 +114,7 @@ const MAX_REALTIME_RESULT_BYTES = 6000;
  * minute, leaving this deadline to do the one job it is good at — bounding a slow
  * but LIVE run so it can't hold a worker slot forever.
  */
-const MAX_TASK_MS = (Number(process.env.TASK_TIMEOUT_MINUTES) || 20) * 60_000;
+const MAX_TASK_MS = posInt(process.env.TASK_TIMEOUT_MINUTES, 20) * 60_000;
 
 /**
  * Stream stall ceiling. A provider can accept the request and then go silent —
@@ -126,11 +127,11 @@ const MAX_TASK_MS = (Number(process.env.TASK_TIMEOUT_MINUTES) || 20) * 60_000;
  * the FIRST attempt's window; every retry gets twice it (see `consume`), so the
  * knob scales the whole progression.
  */
-const STREAM_IDLE_MS = (Number(process.env.STREAM_IDLE_SECONDS) || 60) * 1000;
+const STREAM_IDLE_MS = posInt(process.env.STREAM_IDLE_SECONDS, 60) * 1000;
 /** Max recovery attempts (stall + transient) per turn before giving up with a
  *  clear "provider didn't respond" message. A transient gateway hiccup usually
  *  clears on the first retry; past 3 the model/provider is genuinely unhealthy. */
-const MAX_RECOVERIES = Number(process.env.MAX_STREAM_RECOVERIES) || 3;
+const MAX_RECOVERIES = nonNegInt(process.env.MAX_STREAM_RECOVERIES, 3);
 
 /** Reactive context-overflow fallback: how many of the most recent conversation
  *  messages to keep when mechanically trimming a prompt the model rejected as too

@@ -25,9 +25,10 @@ import { tool, type ModelMessage, type JSONValue } from "ai";
 import { z } from "zod";
 import { execCommand, downloadFile } from "./client";
 import { log } from "@/lib/log";
+import { nonNegInt } from "@/lib/config/env";
 
 const VIEW_DIR = "/workspace/.capka/view";
-const VIEW_KEEP = Number(process.env.VIEW_KEEP_DIRS) || 4;
+const VIEW_KEEP = nonNegInt(process.env.VIEW_KEEP_DIRS, 4);
 const MAX_PAGES = 4;
 const RENDER_PX = 1536; // long-edge target — a document page at this size is well under the cap
 // ImageMagick defaults its worker pool from the host CPU count. Keep this
