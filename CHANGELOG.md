@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-08-22
+
 ### Added
 
 - `WRAP_UP_AFTER_FRACTION` (default `0.8`): a turn stops calling tools once it has spent this much of its run-time budget and answers with what it has, instead of being cut off mid-tool when the deadline fires.
