@@ -89,8 +89,11 @@ Before moving a branch or cutting a tag, check the commit itself:
 `npx tsc --noEmit && npx vitest run`. Symlink **two** module trees, not one:
 `sandbox-controller/` has its own `package.json`, so a single root symlink leaves
 its suites failing with `Cannot find package 'dockerode'`. And the integration
-suites are gated on `RUN_INTEGRATION=1`, which the npm script does not set —
-without it they skip.
+suites are gated on `RUN_INTEGRATION=1`, which you must set by hand — the npm
+script deliberately does not. Do not "fix" that: the gate is what stops those
+suites, which truncate tables, from ever being pointed at a real database by
+accident. CI supplies it as a job-level env in `.github/workflows/ci.yml`
+alongside a throwaway Postgres service, so CI is not silently skipping them.
 
 Read a run's **skip** count, not only its failures. A jump in skips (1 → 23, or
 3 passed / 193 skipped) means a precondition collapsed — an unset gate, a
