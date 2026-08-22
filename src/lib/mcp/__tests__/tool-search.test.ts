@@ -97,6 +97,33 @@ describe("defer thresholds from the environment", () => {
     const plan = await freshPlan({ MCP_DEFER_TOKEN_MAX: "0" }, tools, 1_000_000);
     expect(plan.defer).toBe(false);
   });
+
+  /** The budget straight from the module constants, so the ENV read is what is
+   *  measured rather than an argument the test supplies itself. */
+  async function freshBudget(env: Record<string, string>, effectiveLimit: number) {
+    vi.resetModules();
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+    return (await import("../tool-search")).deferTokenBudget(effectiveLimit);
+  }
+
+  it("keeps a fractional MCP_DEFER_TOKEN_PCT fractional", async () => {
+    // This knob is a PERCENTAGE, and `envNumber` accepts a non-integer on purpose.
+    // A shared validator that required an integer would hand back 10 and re-gate the
+    // connector block at 100_000 instead of 105_000 — a behaviour change wearing a
+    // refactor's clothes, since nothing would report it: the boot diagnostic would
+    // still call the value valid and honoured. The ceiling is lifted out of the way
+    // so the percentage is the only thing this measures.
+    await expect(freshBudget({ MCP_DEFER_TOKEN_PCT: "10.5", MCP_DEFER_TOKEN_MAX: "1000000" }, 1_000_000))
+      .resolves.toBe(105_000);
+  });
+
+  it("falls back on a negative MCP_DEFER_TOKEN_PCT rather than reading it as 'always defer'", async () => {
+    // The other half of the same contract: `>= 0` must keep rejecting a negative.
+    // If one ever survived, `thresholdPct <= 0` returns a budget of 0 and every
+    // connector set defers — the loudest possible misreading of a typo.
+    await expect(freshBudget({ MCP_DEFER_TOKEN_PCT: "-5", MCP_DEFER_TOKEN_MAX: "1000000" }, 1_000_000))
+      .resolves.toBe(100_000);
+  });
 });
 
 describe("MCP_ALWAYS_LOAD — connectors exempt from deferral", () => {
