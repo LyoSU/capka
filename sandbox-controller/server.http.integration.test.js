@@ -100,11 +100,20 @@ d("controller HTTP API (lifecycle)", () => {
     // platform aborts this request when the user stops the turn — so if it doesn't
     // arrive as an aborted signal here, the container works on for a turn that
     // already ended.
+    // Settles the mocked exec however the test ends, so a broken wiring leaves no
+    // in-flight request for afterAll's close() to wait on (see the detached-socket
+    // note above). Called from `finally`, not from a timer: `setTimeout(done, 3000)`
+    // was invisible to vitest's budget — `testTimeout` governs how long an `it()` may
+    // take and cannot govern a timer inside one — so under load it resolved the mock
+    // BEFORE the abort arrived, and the failure landed on `rejects.toThrow()`,
+    // pointing at cancellation when the real cause was the clock. `finally` runs on
+    // every exit and needs no number at all.
+    let release;
     backend.exec = (_h, _cmd, _t, signal) => new Promise((resolve) => {
       seen = signal;
       const done = () => resolve({ stdout: "", stderr: "", exitCode: 137 });
+      release = done;
       signal?.addEventListener("abort", done, { once: true });
-      setTimeout(done, 3000); // never hang the suite if the wiring broke
     });
     try {
       const ac = new AbortController();
@@ -117,6 +126,7 @@ d("controller HTTP API (lifecycle)", () => {
       await vi.waitFor(() => expect(seen.aborted).toBe(true));
     } finally {
       backend.exec = orig;
+      release?.(); // no-op once the abort path already resolved it
     }
   });
 
