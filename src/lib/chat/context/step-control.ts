@@ -1,4 +1,5 @@
-import type { ModelMessage } from "ai";
+import { pruneMessages, type ModelMessage } from "ai";
+import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
 
 /**
  * Hard cap on tool-calling steps in one turn (streamText's `stopWhen`). Prevents a
@@ -12,12 +13,21 @@ export const MAX_STEPS = Number(process.env.MAX_AGENT_STEPS) || 25;
  * text. Kept a few steps BELOW the hard cap, so a long tool loop produces a real
  * reply instead of being cut off mid-tool at the ceiling.
  *
- * Derived, not fixed: a hardcoded threshold above a lowered MAX_AGENT_STEPS would
- * never fire, and the turn would hit the ceiling mid-tool — the very failure this
- * exists to prevent. The floor of 1 keeps the wrap-up step meaningful even at a
- * cap of 1 or 2.
+ * Derived by default, not fixed: a hardcoded threshold above a lowered
+ * MAX_AGENT_STEPS would never fire, and the turn would hit the ceiling mid-tool —
+ * the very failure this exists to prevent. The floor of 1 keeps the wrap-up step
+ * meaningful even at a cap of 1 or 2.
+ *
+ * But `cap - 5` is only a sane default while the cap is small. An operator who
+ * raises MAX_AGENT_STEPS to 200 for legitimate bulk work also pushes wrap-up to
+ * step 195 — deferring it past the point where it could do any good, since the
+ * turn's context is long since spent. FORCE_TEXT_AFTER_STEPS is therefore its own
+ * knob, clamped to the cap so a too-high value can't disable it outright.
  */
-export const FORCE_TEXT_AFTER_STEPS = Math.max(1, MAX_STEPS - 5);
+export const FORCE_TEXT_AFTER_STEPS = Math.min(
+  MAX_STEPS,
+  Math.max(1, Number(process.env.FORCE_TEXT_AFTER_STEPS) || MAX_STEPS - 5),
+);
 
 /**
  * Fold `reasoning` parts of assistant messages INTO their text (returns a fresh
@@ -73,4 +83,34 @@ export function foldReasoningIntoText(messages: ModelMessage[]): ModelMessage[] 
  */
 export function stepSettings(stepNumber: number): { toolChoice?: "none" } {
   return stepNumber >= FORCE_TEXT_AFTER_STEPS ? { toolChoice: "none" } : {};
+}
+
+/**
+ * Shed the tool traffic this turn has already accumulated, keeping the freshest
+ * exchanges. Applied ONCE per turn, mid-flight, when the last step's measured
+ * prompt crossed the clear trigger.
+ *
+ * This is the hole the rest of the context machinery left open. Compaction is
+ * evaluated at a turn BOUNDARY and buildModelContext clears at turn BUILD, so a
+ * single turn that keeps calling tools had exactly one thing standing between it
+ * and the ceiling: Anthropic's server-side edit, which no other provider gets.
+ * A turn that starts at 74% of the window sails past 75% and on to the hard limit
+ * with nothing but the reactive `context_too_long` retry to catch it — and that
+ * retry re-streams from a blind mechanical trim, which is a far worse outcome
+ * than shedding some old tool bodies here.
+ *
+ * Once, not per step, and that is the whole design. Rewriting the prompt every
+ * step is the cache-thrash the `prepareStep` note warns about; rewriting it once
+ * costs a single cache write and hands every later step a stable prefix again
+ * (the SDK carries a returned `messages` forward as the base for what follows).
+ *
+ * Message-scoped rather than tool-scoped: the SDK counts messages, and a tool loop
+ * appends roughly one assistant + one tool message per exchange, so keeping the
+ * last `TOOL_CLEAR_KEEP_LAST` messages keeps the last one or two exchanges whole.
+ * Near enough to the same policy the other two sites enforce, and it is the SDK's
+ * own pruner, so tool calls and their results are dropped as pairs and nothing is
+ * left orphaned.
+ */
+export function pruneTurnToolTraffic(messages: ModelMessage[]): ModelMessage[] {
+  return pruneMessages({ messages, toolCalls: `before-last-${TOOL_CLEAR_KEEP_LAST}-messages` });
 }

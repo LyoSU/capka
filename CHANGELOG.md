@@ -6,6 +6,16 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `FORCE_TEXT_AFTER_STEPS` sets when a long tool loop is told to stop calling tools and answer, independently of `MAX_AGENT_STEPS` (default: five below the cap, clamped to it). Raising the step cap for bulk work used to push the wrap-up step along with it.
+
+### Fixed
+
+- Clearing a stale tool call now drops its arguments as well as its result, on every provider. A turn that writes a hundred rows carries those rows in the arguments and gets an id back, so clearing results alone shed almost nothing and the window kept filling.
+- Tool-result clearing now triggers at `min(50% of the context window, 120k tokens)`. On a 1M-context model nothing was shed until half a million tokens of tool traffic had accumulated.
+- A long tool-calling turn now sheds its own accumulated tool traffic mid-turn on providers without a server-side context edit — once, when the last step's prompt crosses that trigger. Nothing trimmed inside a turn before: compaction is evaluated at a turn boundary, and only Anthropic served directly had an edit of its own.
+
 ## [0.29.0] - 2026-08-21
 
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading. A deployment that already set `SANDBOX_EGRESS_ALLOW` must also `docker compose down` before `up`, because the sandbox network now has a fixed subnet and Docker cannot change one in place.

@@ -24,8 +24,8 @@ import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, markStepTail,
-  TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
-import { stepSettings, foldReasoningIntoText, MAX_STEPS } from "@/lib/chat/context/step-control";
+  clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
+import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
@@ -568,6 +568,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // Effective window (model ∩ admin cap) drives the provider-native edit's
     // trigger. Reused from the budget logic so the cap is honored here too.
     const ctxMgmt = contextManagementOptions(provider, effectiveLimit);
+    // Intra-turn relief for providers with no server-side edit of their own. Same
+    // trigger as the other two enforcement sites, measured off the live per-step
+    // prompt size, and applied at most once per turn (see pruneTurnToolTraffic).
+    const intraTurnPruneAt = clearsToolResultsClientSide(provider) ? toolClearTrigger(effectiveLimit) : 0;
+    let intraTurnPruned = false;
     // Stall detection runs per-attempt: `ac` is the task-wide signal (deadline,
     // cancel, lost lease); `attemptAc` aborts only the CURRENT stream when the
     // provider goes silent, so a retry can re-stream without the whole task
@@ -643,6 +648,21 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 if (viewFileBridge) {
                   const inject = await buildViewFileInjection(messages, sessionKey, userId);
                   if (inject) msgs = [...base, inject];
+                }
+                // RELIEF: shed the tool traffic this turn already accumulated, once,
+                // when the last step's measured prompt crossed the trigger. Everything
+                // else in the context machinery works at a turn boundary, so without
+                // this a single long tool loop has no brake at all on any provider
+                // Anthropic doesn't serve directly. Deliberately before the cache
+                // marker below, so the marker lands on the pruned tail.
+                if (intraTurnPruneAt && !intraTurnPruned && lastStepContextTokens >= intraTurnPruneAt) {
+                  const pruned = pruneTurnToolTraffic(msgs);
+                  intraTurnPruned = true;
+                  tlog.info("pruned tool traffic mid-turn", {
+                    stepNumber, contextTokens: lastStepContextTokens, triggerAt: intraTurnPruneAt,
+                    messagesBefore: msgs.length, messagesAfter: pruned.length,
+                  });
+                  msgs = pruned;
                 }
                 // Moving cache breakpoint on the step tail (see markStepTail for why
                 // it clones): without it, everything a tool loop appends sits beyond

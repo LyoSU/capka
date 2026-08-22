@@ -5,7 +5,9 @@ import {
   clearsToolResultsClientSide,
   shouldClearToolResults,
   markStepTail,
+  toolClearTrigger,
   TOOL_CLEAR_TRIGGER_FRACTION,
+  TOOL_CLEAR_TRIGGER_MAX,
   TOOL_CLEAR_KEEP_LAST,
 } from "@/lib/chat/context/provider-edits";
 
@@ -26,6 +28,41 @@ describe("contextManagementOptions", () => {
   it("returns undefined for providers without a native edit yet (extension point)", () => {
     expect(contextManagementOptions("openai", 128_000)).toBeUndefined();
     expect(contextManagementOptions("google", 1_000_000)).toBeUndefined();
+  });
+
+  it("clears the CALL's arguments too, not just its result", () => {
+    // Results-only aims the mechanism at the lighter half: a bulk upsert carries the
+    // row in its arguments and gets an id back. Without this the edit fires, sheds a
+    // few hundred tokens, and a long write turn still rides to the ceiling.
+    const opts = contextManagementOptions("anthropic", 200_000) as {
+      anthropic: { contextManagement: { edits: Array<{ clearToolInputs?: boolean }> } };
+    };
+    expect(opts.anthropic.contextManagement.edits[0].clearToolInputs).toBe(true);
+  });
+});
+
+describe("toolClearTrigger", () => {
+  it("scales with small windows, where a flat ceiling would never fire", () => {
+    expect(toolClearTrigger(32_000)).toBe(16_000);
+    expect(toolClearTrigger(200_000)).toBe(100_000);
+  });
+
+  it("caps what 'half the window' may mean on a very large one", () => {
+    // Half of 1M is half a MILLION tokens of accumulated tool traffic before
+    // anything is shed — past where recall degrades and absurd to replay per step.
+    expect(toolClearTrigger(1_000_000)).toBe(TOOL_CLEAR_TRIGGER_MAX);
+    expect(toolClearTrigger(1_000_000)).toBeLessThan(1_000_000 * TOOL_CLEAR_TRIGGER_FRACTION);
+  });
+
+  it("is the single source both enforcement sites read", () => {
+    const opts = contextManagementOptions("anthropic", 1_000_000) as {
+      anthropic: { contextManagement: { edits: Array<{ trigger: { value: number } }> } };
+    };
+    expect(opts.anthropic.contextManagement.edits[0].trigger.value).toBe(toolClearTrigger(1_000_000));
+    // …and the client-side gate agrees, at the same number, on a provider without
+    // a native edit.
+    expect(shouldClearToolResults("openai", [{ metadata: { contextTokens: toolClearTrigger(1_000_000) } }], 1_000_000)).toBe(true);
+    expect(shouldClearToolResults("openai", [{ metadata: { contextTokens: toolClearTrigger(1_000_000) - 1 } }], 1_000_000)).toBe(false);
   });
 });
 

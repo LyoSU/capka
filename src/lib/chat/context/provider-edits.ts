@@ -28,6 +28,21 @@ import type { MessageMeta } from "@/lib/chat/contracts";
 export const TOOL_CLEAR_TRIGGER_FRACTION = 0.5;
 /** How many of the most recent tool results keep their bodies. */
 export const TOOL_CLEAR_KEEP_LAST = 3;
+/**
+ * Absolute ceiling on the trigger, in tokens. The fraction alone scales the wrong
+ * way: on a 1M-window model "half" is HALF A MILLION tokens of accumulated tool
+ * traffic before anything is shed — long past where recall starts degrading, and
+ * long past what it costs to replay that prefix on every step of a long tool loop.
+ * The fraction still governs small windows (a flat 120k would never fire on 32k);
+ * this only caps what "half" is allowed to mean on a large one.
+ */
+export const TOOL_CLEAR_TRIGGER_MAX = 120_000;
+
+/** The clear trigger for a window, in tokens. The ONE place both enforcement
+ *  sites read it from, so the threshold can't fork by provider. */
+export function toolClearTrigger(effectiveLimit: number): number {
+  return Math.min(Math.round(effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION), TOOL_CLEAR_TRIGGER_MAX);
+}
 
 /** True when the provider has no server-side tool-result clearing, so we must
  *  apply the policy ourselves when building the model's view of the context. */
@@ -63,7 +78,7 @@ export function shouldClearToolResults(
   const live = metas.slice(metas.findLastIndex((m) => m?.compaction) + 1);
   if (live.some((m) => m?.toolsCleared)) return true;
   const lastMeasured = live.map((m) => m?.contextTokens).findLast((t): t is number => typeof t === "number");
-  return (lastMeasured ?? 0) >= effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION;
+  return (lastMeasured ?? 0) >= toolClearTrigger(effectiveLimit);
 }
 export function contextManagementOptions(
   provider: string,
@@ -77,9 +92,17 @@ export function contextManagementOptions(
             edits: [
               {
                 type: "clear_tool_uses_20250919",
-                trigger: { type: "input_tokens", value: Math.round(effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION) },
+                trigger: { type: "input_tokens", value: toolClearTrigger(effectiveLimit) },
                 keep: { type: "tool_uses", value: TOOL_CLEAR_KEEP_LAST },
                 clearAtLeast: { type: "input_tokens", value: 1000 },
+                // Clear the CALL's arguments too, not just its result. Defaulting to
+                // results-only quietly aims the whole mechanism at the lighter half of
+                // the data: on a bulk-write turn (a hundred upserts, each carrying a
+                // full row) the result is an id and a status while the arguments ARE
+                // the payload. Without this the edit fires, sheds a few hundred tokens,
+                // and the window keeps filling — which is exactly how a turn reaches
+                // 1M with the edit enabled the whole time.
+                clearToolInputs: true,
               },
             ],
           },

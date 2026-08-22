@@ -84,6 +84,7 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
     "STREAM_IDLE_SECONDS",
     "MAX_STREAM_RECOVERIES",
     "MAX_AGENT_STEPS",
+    "FORCE_TEXT_AFTER_STEPS",
   ] as const) {
     const raw = env[key]?.trim();
     if (raw === undefined || raw === "") continue;
