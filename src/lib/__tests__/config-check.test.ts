@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { checkConfig } from "../config/check";
+import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { checkConfig, KNOB_SHAPES, NUMERIC_KNOBS } from "../config/check";
+import { readRetentionConfig } from "@/lib/db/retention";
 
 // A fully-valid environment as the baseline; each case overrides one var so the
 // assertions stay about that var alone.
@@ -98,6 +100,113 @@ describe("checkConfig", () => {
     // Listing it alongside TASK_TIMEOUT_MINUTES would warn on every valid value.
     const issues = checkConfig({ ...VALID, WRAP_UP_AFTER_FRACTION: "0.8" });
     expect(issues.map((i) => i.message).join(" ")).not.toContain("positive integer");
+  });
+});
+
+// The half that was missing, and the reason this file could stay green while the
+// diagnostic lied for two releases: nothing asserted that checkConfig's rule was
+// the SAME rule the read site implements. A default-only test cannot cover it —
+// every knob's default satisfies both rules, so the divergence exists only at
+// non-default values, and a rule that breaks only there has no self-check.
+describe("checkConfig — the diagnostic matches the mechanism", () => {
+  it("stays silent on a value its read site genuinely honours", () => {
+    // 0 and a fractional percent are documented, test-guaranteed policies in
+    // mcp/tool-search.ts (`0` = always defer / no ceiling; see tool-search.test.ts).
+    // Boot used to announce both as discarded while envNumber honoured them.
+    for (const raw of ["0", "10.5", "0.5"]) {
+      expect(keysOf({ ...VALID, MCP_DEFER_TOKEN_PCT: raw })).not.toContain("MCP_DEFER_TOKEN_PCT");
+      expect(keysOf({ ...VALID, MCP_DEFER_TOKEN_MAX: raw })).not.toContain("MCP_DEFER_TOKEN_MAX");
+    }
+  });
+
+  it("says a value will be USED when its read site has no guard", () => {
+    // `Number(env.X) || default` lets every negative through. The old message told the
+    // operator the default was running, so they went looking for the fault elsewhere.
+    const issue = checkConfig({ ...VALID, TASK_TIMEOUT_MINUTES: "-1" }).find((i) => i.key === "TASK_TIMEOUT_MINUTES");
+    expect(issue?.level).toBe("error");
+    expect(issue?.message).toContain("AS WRITTEN");
+    expect(issue?.message).not.toContain("will be used instead");
+  });
+
+  it("names the value that will actually run when the site rewrites it", () => {
+    // Same typo, three different mechanisms — which is why no single sentence about
+    // the class can be accurate.
+    const worker = checkConfig({ ...VALID, WORKER_MAX_CONCURRENCY: "10g" }).find((i) => i.key === "WORKER_MAX_CONCURRENCY");
+    expect(worker?.level).toBe("warn");
+    expect(worker?.message).toContain("10 will be used"); // parseInt stops at the g
+    const pool = checkConfig({ ...VALID, PG_POOL_MAX: "10g" }).find((i) => i.key === "PG_POOL_MAX");
+    expect(pool?.message).toContain("20 will be used"); // Number() -> NaN -> default
+    const clamped = checkConfig({ ...VALID, WORKER_MAX_CONCURRENCY: "-4" }).find((i) => i.key === "WORKER_MAX_CONCURRENCY");
+    expect(clamped?.message).toContain("1 will be used"); // Math.max(1, -4)
+  });
+
+  it("reads FORCE_TEXT_AFTER_STEPS against the ceiling MAX_AGENT_STEPS sets", () => {
+    // Its default is derived (`MAX_STEPS - 5`) and it is clamped to [1, MAX_STEPS], so
+    // its valid range moves when the other knob does. 30 is out of range by default
+    // and fine once the ceiling is raised.
+    expect(keysOf({ ...VALID, FORCE_TEXT_AFTER_STEPS: "30" })).toContain("FORCE_TEXT_AFTER_STEPS");
+    expect(keysOf({ ...VALID, FORCE_TEXT_AFTER_STEPS: "30", MAX_AGENT_STEPS: "200" })).not.toContain("FORCE_TEXT_AFTER_STEPS");
+    expect(checkConfig({ ...VALID, FORCE_TEXT_AFTER_STEPS: "30" })[0]?.message).toContain("1–25");
+  });
+
+  it("agrees with db/retention.ts on every value, not just its defaults", () => {
+    // A true differential: readRetentionConfig takes env, so the real reader and the
+    // mirror can be run side by side. If they disagree the message is fiction.
+    const probes = ["0", "-1", "1.5", "abc", "", "90", "Infinity"];
+    for (const raw of probes) {
+      for (const [key, field, fallback] of [
+        ["TASK_RETENTION_DAYS", "taskDays", 30],
+        ["USAGE_RETENTION_DAYS", "usageDays", 365],
+        ["AUDIT_RETENTION_DAYS", "auditDays", 365],
+        ["DB_RETENTION_BATCH_SIZE", "batchSize", 1000],
+      ] as const) {
+        const real = readRetentionConfig({ [key]: raw })[field];
+        const knob = NUMERIC_KNOBS.find((k) => k.key === key)!;
+        const mirrored = raw === "" ? fallback : KNOB_SHAPES[knob.shape].used(raw, knob.fallback);
+        expect({ key, raw, mirrored }).toEqual({ key, raw, mirrored: real });
+        // And the diagnostic must be silent exactly when the value survives intact.
+        const quiet = !keysOf({ ...VALID, [key]: raw }).includes(key);
+        expect({ key, raw, quiet }).toEqual({ key, raw, quiet: raw === "" || real === Number(raw) });
+      }
+    }
+  });
+
+  it("agrees with tool-output.ts on every value", async () => {
+    // Same differential for the module whose three knobs were fixed at their read
+    // site; here the constants are baked at import, so the env has to be stubbed and
+    // the module re-imported per probe.
+    for (const [key, exported] of [
+      ["MAX_TOOL_OUTPUT_CHARS", "MAX_TOOL_OUTPUT_CHARS"],
+      ["MAX_TOOL_OUTPUT_LINES", "DEFAULT_READ_LINES"],
+      ["MAX_TURN_TOOL_OUTPUT_CHARS", "MAX_TURN_TOOL_OUTPUT_CHARS"],
+    ] as const) {
+      for (const raw of ["-1", "0", "1.5", "abc", "700"]) {
+        vi.resetModules();
+        vi.stubEnv(key, raw);
+        const mod = (await import("@/lib/tool-output")) as unknown as Record<string, number>;
+        const knob = NUMERIC_KNOBS.find((k) => k.key === key)!;
+        expect({ key, raw, v: KNOB_SHAPES[knob.shape].used(raw, knob.fallback) }).toEqual({ key, raw, v: mod[exported] });
+        vi.unstubAllEnvs();
+      }
+    }
+  });
+
+  it("still finds every knob read in the shape the table claims", () => {
+    // The table's `site` is load-bearing. Move a knob onto a different helper and the
+    // messages here silently start describing a mechanism that no longer runs — the
+    // exact failure this whole file exists to prevent, one level up.
+    const pattern: Record<string, (k: string) => RegExp> = {
+      posInt: (k) => new RegExp(`(posInt|positiveInt)\\(\\s*(process\\.)?env\\.${k}\\b`),
+      nonNegInt: (k) => new RegExp(`nonNegativeInt\\(\\s*(process\\.)?env\\.${k}\\b`),
+      finiteNonNeg: (k) => new RegExp(`envNumber\\(\\s*(process\\.)?env\\.${k}\\b`),
+      truthy: (k) => new RegExp(`Number\\(process\\.env\\.${k}\\)\\s*\\|\\|`),
+      parseIntClamped: (k) => new RegExp(`parseInt\\(process\\.env\\.${k}\\b`),
+    };
+    const drifted = NUMERIC_KNOBS.filter(({ key, shape, site }) => {
+      const source = readFileSync(new URL(`../../../${site}`, import.meta.url), "utf8");
+      return !pattern[shape](key).test(source);
+    });
+    expect(drifted).toEqual([]);
   });
 });
 
