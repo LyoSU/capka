@@ -16,12 +16,34 @@
  * chatty connector is bounded the same way a chatty shell command is.
  */
 
+/**
+ * A positive integer from the environment, or the built-in default.
+ *
+ * `Number(env.X) || fallback` reads as if it did this, and does not: a NEGATIVE
+ * value is truthy and survives, as do a fraction and `Infinity`. That is not
+ * academic for the three knobs below — `MAX_TURN_TOOL_OUTPUT_CHARS=-1` makes the
+ * turn's output ceiling true at zero characters, so every turn stops calling tools
+ * on its first step and the agent silently becomes a chat box with a sandbox it
+ * never touches.
+ *
+ * checkConfig already reports such a value at boot, in the words "the built-in
+ * default will be used instead". This is the half that makes that sentence true.
+ * Same pairing as WRAP_UP_AFTER_FRACTION, which is clamped at its own read site
+ * AND reported at boot: a diagnostic that names a mechanism which does not exist
+ * is worse than no diagnostic, because the operator believes the default is
+ * running and goes looking for the missing tools somewhere else.
+ */
+function posInt(raw: string | undefined, fallback: number): number {
+  const n = Number(raw?.trim());
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
 /** Per-call output budget (characters ≈ the cost knob — chars map to tokens).
  *  Operators tune it without a redeploy. Exported so the capture-to-file path can
  *  use the same threshold to decide a result is small enough to skip the log file. */
-export const MAX_TOOL_OUTPUT_CHARS = Number(process.env.MAX_TOOL_OUTPUT_CHARS) || 30_000;
+export const MAX_TOOL_OUTPUT_CHARS = posInt(process.env.MAX_TOOL_OUTPUT_CHARS, 30_000);
 /** Default line budget for file reads (mirrors Claude Code's 2000-line Read). */
-export const DEFAULT_READ_LINES = Number(process.env.MAX_TOOL_OUTPUT_LINES) || 1500;
+export const DEFAULT_READ_LINES = posInt(process.env.MAX_TOOL_OUTPUT_LINES, 1500);
 
 const kb = (n: number) => `${Math.round(n / 1024)} KB`;
 
@@ -134,5 +156,4 @@ export function outputBytes(v: unknown): number {
  * none of those: nothing is refused, nothing is rewritten, and it reuses the path
  * FORCE_TEXT_AFTER_STEPS already proves.
  */
-export const MAX_TURN_TOOL_OUTPUT_CHARS = Number(process.env.MAX_TURN_TOOL_OUTPUT_CHARS) || 400_000;
-
+export const MAX_TURN_TOOL_OUTPUT_CHARS = posInt(process.env.MAX_TURN_TOOL_OUTPUT_CHARS, 400_000);
