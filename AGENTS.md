@@ -50,6 +50,14 @@ git diff HEAD -- <path> | grep '^+' | grep -E '<their tokens>'   # theirs?
 git show HEAD:<path>    | grep -c '<their tokens>'               # or already committed?
 ```
 
+**Assert positively; a clean pre-check is not a guarantee.** "I confirmed the
+index was empty first" fails open — a peer can stage between your check and your
+commit, and two such alarms have already turned out to be a peer's commit landing
+between two of one session's own commands. Since `git commit -- <paths>` never
+stages, make the assertion on the *result*: `git show --stat --format="" HEAD`
+must list exactly the paths you intended, and `git diff --cached --name-only`
+must still be empty. That fails closed.
+
 A session once reported two files as jointly held — blocking another session for
 half an hour — because it read the file while the other half was already in
 `HEAD`. Classifying hunks by a keyword list fails the same way and worse: the
