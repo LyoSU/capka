@@ -13,7 +13,7 @@ import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
-import { buildRecoveryNote, effectsFromParts, type TurnEffect } from "@/lib/tasks/effect-ledger";
+import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEffects, EffectLedgerError, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
 import { listFiles } from "@/lib/sandbox/client";
@@ -24,9 +24,9 @@ import { buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
-import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, markStepTail,
+import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, contextIsDeep, markStepTail,
   clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
-import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary,
+import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
@@ -48,6 +48,7 @@ import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 import { prepareRun } from "./run-context";
 import { foldTurnHalves, type TurnHalf } from "./turn-accounting";
+import { MAX_TURN_TOOL_OUTPUT_CHARS, outputChars } from "@/lib/tool-output";
 
 const errMsg = (e: unknown) => errorText(e);
 
@@ -296,6 +297,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // completed ones move to the list — a call still open at finish (cancel, crash)
   // simply contributes no window, which errs toward showing less.
   const toolStartedAt = new Map<string, number>();
+  // Calls the SDK rejected before running them (unparseable arguments, unknown
+  // tool). It synthesizes a `tool-error` for these WITHOUT invoking execute, so that
+  // error is not evidence anything happened — and ledgering it would tell a
+  // restarted turn "this already ran, do not repeat" about work that never ran.
+  // That is an omission, which is worse than the duplication the ledger prevents.
+  const invalidCalls = new Set<string>();
+  // Characters of tool output this turn has produced, summed across every call.
+  // MAX_TOOL_OUTPUT_CHARS bounds ONE result; nothing bounded the sum, so a turn
+  // making a hundred calls had no ceiling at all. Enforced by stopping (see the
+  // toolChoice override in prepareStep), never by rewriting a result.
+  let turnOutputChars = 0;
   let toolWindows: ToolWindow[] = [];
   const closeToolWindow = (toolCallId: string) => {
     const start = toolStartedAt.get(toolCallId);
@@ -394,7 +406,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // process), so its executed tool calls exist only here. Without this, a
       // continuation that later overflows would report an empty ledger and re-run
       // the first half's writes — the exact failure the ledger exists to prevent.
-      turnEffects.push(...effectsFromParts(meta.parts ?? []));
+      // Both sources, unioned by tool-call id with the ledger winning — not one or
+      // the other. An emergency trim clears `parts`, so the ledger is the stronger
+      // record; but during a rolling upgrade the half that ran before the table
+      // existed lives ONLY in `parts`, and an empty ledger is also what a failed
+      // write leaves behind. Choosing a source would drop the other's entries, and a
+      // dropped effect is precisely the one that gets done twice. See mergeEffects.
+      turnEffects.push(...mergeEffects(await loadEffects(resumeMessageId), effectsFromParts(meta.parts ?? [])));
       seq = meta.streamSeq ?? 0;
       // The suspended half's accounting, carried so the finalize below reports the
       // WHOLE turn. A suspended turn finalizes as `completed` (only its metadata
@@ -470,6 +488,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // on the message below, because the decision for the NEXT turn depends on it
     // (see shouldClearToolResults).
     let toolsCleared = false;
+    // The provider-blind half of the same decision: whether the conversation has
+    // grown deep enough that shedding beats keeping. `toolsCleared` records what WE
+    // did about it, which is always false on a provider that sheds server-side — so
+    // the server-side edits need this one instead. Persisted for the same reason:
+    // shedding shrinks the next measurement, so the answer has to be sticky.
+    let contextDeep = false;
     if (replyParentId) {
       const path = await loadActivePath(chatId, replyParentId);
       // Shape the path into the model's view: collapse history at the newest
@@ -488,6 +512,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // worth more than the tokens. The signal is the prompt size the previous
       // turn already measured and persisted — nothing new to compute or store.
       const nodes = path.map((p) => p.node);
+      contextDeep = contextIsDeep(nodes, effectiveLimit);
       toolsCleared = shouldClearToolResults(provider, nodes, effectiveLimit);
       if (path.length) {
         uiMessages = toUIMessages(buildModelContext(nodes as ContextRow[],
@@ -593,7 +618,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     let useReasoning = reasoning !== undefined;
     // Effective window (model ∩ admin cap) drives the provider-native edit's
     // trigger. Reused from the budget logic so the cap is honored here too.
-    const ctxMgmt = contextManagementOptions(provider, effectiveLimit);
+    const ctxMgmt = contextManagementOptions(provider, effectiveLimit, contextDeep);
     // Intra-turn relief for providers with no server-side edit of their own. Same
     // trigger as the other two enforcement sites, measured off the live per-step
     // prompt size, and re-applied on every step once armed (see pruneTurnToolTraffic).
@@ -716,7 +741,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 if (intraTurnPruneAt) {
                   const next = armPruneBoundary({
                     triggerAt: intraTurnPruneAt, boundary: pruneBoundary,
-                    lastStepContextTokens, messageCount: msgs.length, stepNumber,
+                    // `base`, not `msgs`: the boundary is an ABSOLUTE index into the
+                    // list the SDK rebuilds each step, and the bridge appended above
+                    // belongs to ONE step. Measuring the injected list armed the cut
+                    // one message deeper than intended for the rest of the stream.
+                    // Pruning still runs on `msgs` — that difference is what keeps the
+                    // injection itself outside the shed zone.
+                    // The measured figure when the provider reports one; a local
+                    // estimate when it does not. Without the fallback an endpoint
+                    // that rejects `stream_options` leaves this at 0 for the rest of
+                    // the connection, so the trigger is never crossed and this whole
+                    // brake stays disengaged — on exactly the providers that have no
+                    // server-side edit to fall back on either.
+                    lastStepContextTokens: lastStepContextTokens || estimatePromptTokens(base),
+                    messageCount: base.length, stepNumber,
                   });
                   if (next !== pruneBoundary) {
                     tlog.info("pruning tool traffic mid-turn", {
@@ -730,10 +768,20 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 // Moving cache breakpoint on the step tail (see markStepTail for why
                 // it clones): without it, everything a tool loop appends sits beyond
                 // the turn's last breakpoint and is re-billed as fresh input on every
-                // step. Anthropic-only namespace; implicit-caching providers ignore it.
+                // step. The namespace is Anthropic's, so other providers ignore this
+                // marker — and on OpenAI there is nothing to add: implicit caching is on
+                // by default and already places a breakpoint on the latest user or tool
+                // message, which is exactly the moving tail hand-rolled here. (GPT-5.6+
+                // does expose explicit `prompt_cache_breakpoint` and
+                // `prompt_cache_options.ttl`, 1024-token minimum, if that stops holding.)
                 msgs = markStepTail(msgs, stepNumber, ephemeral);
                 return {
                   ...stepSettings(stepNumber, 1 - (deadlineAt - Date.now()) / MAX_TASK_MS),
+                  // The output-side twin of that wrap-up: a turn whose results have
+                  // already added up past the ceiling answers with what it has
+                  // instead of gathering more. Same lever, so a turn that hits both
+                  // is not told two different things.
+                  ...(turnOutputChars >= MAX_TURN_TOOL_OUTPUT_CHARS ? { toolChoice: "none" as const } : {}),
                   ...(msgs !== messages ? { messages: msgs } : {}),
                   ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
                 };
@@ -1037,6 +1085,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           }
           case "tool-call": {
             toolCount += 1;
+            if ("invalid" in event && event.invalid) invalidCalls.add(event.toolCallId);
             // Strip NUL from the model-generated args before they enter `parts`
             // (a model can emit a literal NUL escape in a JSON string arg, which
             // is valid JSON but breaks the jsonb write). Completes the "parts never
@@ -1116,12 +1165,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // the realtime publish below can choke. See stripNul.
             const output = stripNul(event.output);
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output });
+            turnOutputChars += outputChars(output);
             // Ledger of what this turn has actually DONE — recorded on the result,
             // so it means "ran", not "was asked for". Unlike `parts` it survives a
             // discard, because the emergency context-overflow retry re-streams from
             // settled history and would otherwise restart blind to live side
             // effects. See effect-ledger.
-            turnEffects.push({ name: event.toolName, input: event.input });
+            turnEffects.push({ id: event.toolCallId, name: event.toolName, input: event.input });
+            // In memory for a restart inside this process; in the table so a restart
+            // in ANOTHER task still sees it. Awaited, because a restart that begins
+            // before the write lands starts blind — the one thing this prevents.
+            await recordEffect({ messageId: msgId, toolCallId: event.toolCallId, taskId, name: event.toolName, input: event.input });
             // The full output is in `parts` (saved to the DB at finish-step). Over
             // realtime we ship it only if it fits NOTIFY's budget; an oversized
             // body (e.g. a loaded skill) is dropped here so the small state-flip
@@ -1144,12 +1198,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // an error whose message embeds raw binary, which would otherwise break
             // the jsonb metadata write the same way a binary tool-result would.
             const toolErr = stripNul(errMsg(event.error));
-            parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: toolErr });
+            const neverRan = invalidCalls.has(event.toolCallId);
+            parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: toolErr, ...(neverRan ? { invalid: true } : {}) });
+            turnOutputChars += toolErr.length;
             // Ledgered too, and marked failed. Same reason the window counts above:
             // a tool that throws may have written first, so this is the entry a
             // restarted turn most needs — "did this land?" cannot be answered from
             // the transcript and has to be verified.
-            turnEffects.push({ name: event.toolName, input: event.input, failed: true });
+            if (!invalidCalls.has(event.toolCallId)) {
+              turnEffects.push({ id: event.toolCallId, name: event.toolName, input: event.input, failed: true });
+              await recordEffect({ messageId: msgId, toolCallId: event.toolCallId, taskId, name: event.toolName, input: event.input, failed: true });
+            }
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: { error: toolErr }, isError: true, seq: ++seq,
@@ -1419,6 +1478,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
           }
         }
       } catch (e) {
+        // A lost ledger write must not be re-read as a provider hiccup: a Postgres
+        // blip classifies as `network`, so the transient branch below would
+        // re-stream and carry on with an executed call unrecorded — losing the
+        // durability this is all for. recordEffect already retried; fail the turn.
+        if (e instanceof EffectLedgerError) throw e;
         if (!(await retryOnCapabilityError(e)) && !(await retryOnContextOverflow(e))) {
           if (isTransientError(e)) transient = e;
           else throw e;
@@ -1603,6 +1667,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // still sits on the path the next turn reads, and this is how that turn
         // learns clearing is already on (see shouldClearToolResults).
         ...(toolsCleared ? { toolsCleared: true } : {}),
+        ...(contextDeep ? { contextDeep: true } : {}),
         // Tech details for the (i) popover. A manual cancel still did real work
         // (it has a model, elapsed time, and billed tokens), so carry them too —
         // otherwise the stopped turn loses its (i) affordance. A failed turn owns
@@ -1712,6 +1777,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       ...(hadDiscard ? { discardedUsage: discarded } : {}),
       ...(costMeta != null ? { costUsd: costMeta } : {}),
       ...(streamError ? { error: streamError } : {}),
+      // The shape a provider will not tell us, and the reason an opaque 400 used to
+      // be undiagnosable: the raw text landed in the DB, but nothing said how deep
+      // the turn was when it arrived. On the same record rather than a second one —
+      // this line already carries the error, so a separate log would only duplicate.
+      contextTokens: lastStepContextTokens,
+      messages: modelMessages.length,
+      ...(recoveries ? { recoveries } : {}),
+      ...(turnOutputChars ? { toolOutputChars: turnOutputChars } : {}),
     });
     // Same facts onto the turn span (the worker owns its lifecycle; we only report).
     // Cost is passed but NOT exported by default — the `usage` ledger is the money

@@ -141,6 +141,7 @@ export function toUIMessages(rows: {
         error: meta?.error,
         errorDetail: meta?.errorDetail,
         errorCategory: meta?.errorCategory,
+        errorOwned: meta?.errorOwned,
         parentId: m.parentId ?? null,
         siblingIndex: m.siblingIndex ?? 0,
         siblingCount: m.siblingCount ?? 1,

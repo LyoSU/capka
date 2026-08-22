@@ -47,10 +47,13 @@ export interface BuildOptions {
  *   1. collapse history at the newest compaction checkpoint into a summary, then
  *   2. (optionally) clear stale tool-result bodies in the surviving tail.
  *
- * Both steps run ONLY at a compaction event (the runner passes
- * `clearToolsKeepLast` only then), never per turn — so between events the prefix
- * is byte-stable and the prompt cache keeps hitting. The DB and the UI transcript
- * keep the full history regardless; this only trims the model's view.
+ * Step 1 collapses at the NEWEST checkpoint, which doesn't move between
+ * compaction events, so that stretch of the prefix stays byte-stable. Step 2 is
+ * gated per turn: the runner passes `clearToolsKeepLast` on every turn where
+ * `shouldClearToolResults` finds the conversation already deep — and that gate is
+ * STICKY precisely so the answer can't flip turn to turn and re-shape the prefix.
+ * The DB and the UI transcript keep the full history regardless; this only trims
+ * the model's view.
  */
 export function buildModelContext(rows: ContextRow[], opts: BuildOptions): ContextRow[] {
   const byId = new Map(rows.map((r) => [r.id, r]));

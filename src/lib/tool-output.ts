@@ -81,3 +81,44 @@ export function clampOutput(
   const marker = `\n\n[… Capka: OUTPUT TRUNCATED — middle omitted (~${kb(text.length)} total). This is NOT the program's real output here.${hint} …]\n\n`;
   return { text: clipMiddle(text, maxChars, marker), clipped: true };
 }
+
+/**
+ * Total tool output one turn may produce, in characters. `MAX_TOOL_OUTPUT_CHARS`
+ * bounds a single call; nothing bounded the sum, so a turn making hundreds of calls
+ * had no ceiling at all — at the step cap that is over half a million characters of
+ * fresh context, re-sent on every subsequent step.
+ *
+ * Unlike the mid-turn brake this holds unconditionally: it needs no reported usage,
+ * no estimate, and no server-side edit, which is exactly why both exist.
+ *
+ * ENFORCED BY STOPPING, not by rewriting: once a turn's results add up past this,
+ * `prepareStep` sets `toolChoice: "none"` and the model answers with what it has.
+ * The first cut wrapped every tool's `execute` and refused the call past the
+ * ceiling, which was the wrong layer four different ways — it broke tools returning
+ * an async iterable (the SDK inspects the IMMEDIATE return value, and an async
+ * wrapper hands it a promise), it could not reserve budget safely when the SDK runs
+ * a batch of calls concurrently, its plain-string refusal went through each tool's
+ * own `toModelOutput` and came out of the MCP converter as an empty result, and the
+ * refusal was recorded in the effect ledger as a call that RAN. Forcing text has
+ * none of those: nothing is refused, nothing is rewritten, and it reuses the path
+ * FORCE_TEXT_AFTER_STEPS already proves.
+ */
+/**
+ * Serialized size of a tool's output, in characters — the unit both output budgets
+ * are denominated in. One place, because a size that is measured two slightly
+ * different ways is two different budgets.
+ *
+ * A non-serializable value (a cycle, a BigInt) counts as zero: the call still
+ * happened, but guessing high would spend a budget on an artifact of the encoding.
+ */
+export function outputChars(v: unknown): number {
+  if (typeof v === "string") return v.length;
+  try {
+    return JSON.stringify(v)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+export const MAX_TURN_TOOL_OUTPUT_CHARS = Number(process.env.MAX_TURN_TOOL_OUTPUT_CHARS) || 400_000;
+

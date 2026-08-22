@@ -243,6 +243,76 @@ describe("every documented knob reaches the container that reads it", () => {
     expect(controllerSources.length).toBeGreaterThan(5);
   });
 
+  /**
+   * The platform's own sources. Same rule as the controller below — and the service
+   * that had NO such test, which is why a knob could be documented, read at runtime,
+   * and still never reach the container that reads it.
+   */
+  const platformSources = readdirSync("src", { recursive: true, encoding: "utf8" })
+    .filter((p) => /\.tsx?$/.test(p))
+    .filter((p) => !p.includes("__tests__") && !p.includes(".test."))
+    .map((p) => join("src", p));
+
+  it("collects platform sources", () => {
+    expect(platformSources.length).toBeGreaterThan(50);
+  });
+
+  /**
+   * Documented, read by the platform, and deliberately NOT passed into the container.
+   * An exemption has to be argued here rather than being the silent default.
+   *
+   * `CAPKA_VERSION` is a compose-level knob that selects the image TAG, while inside
+   * the container CI bakes the real version in at build time. Passing it through
+   * would let an operator's `.env` override the stamp, so the About panel and the
+   * update check would report a version that is not what is running.
+   */
+  const NOT_PASSED_ON_PURPOSE = new Set(["CAPKA_VERSION"]);
+
+  it("keeps CAPKA_VERSION earning its exemption — it must still select the image", () => {
+    // The exemption is only justified while the variable does that job. Without this
+    // the reasoning could stop being true and the exemption would keep passing.
+    expect(COMPOSE).toMatch(/image:.*capka.*:\$\{CAPKA_VERSION/);
+  });
+
+  /**
+   * Read by the platform and deliberately NOT an operator knob. Every name here is
+   * an argued exemption, which is the point: the mirror test below is what makes
+   * "documented" the default and silence the exception. Before it existed,
+   * nineteen live knobs were read at runtime and reachable from nowhere — because
+   * `environment:` is a whitelist and the contract could only see what the docs
+   * already mentioned.
+   */
+  const INTERNAL = new Set<string>([
+    // Set by the runtime / the framework, not by anyone deploying this.
+    "NODE_ENV",
+    "NEXT_RUNTIME",
+    // Stamped into the image by CI.
+    "CAPKA_GIT_SHA",
+    // Not a knob at all: the platform SETS this to hand base64 arguments to the
+    // import script it runs inside the sandbox.
+    "CAPKA_IMPORT_ARGS",
+    // Gates a dev-only route that refuses to exist in production.
+    "CAPKA_SCROLL_HARNESS",
+    // Service wiring, fixed to the compose network's internal hostname. An operator
+    // moving the controller elsewhere is changing the topology, not tuning a value.
+    "SANDBOX_CONTROLLER_URL",
+  ]);
+
+  it("documents every platform knob it reads, or names it internal", () => {
+    const undocumented = [...envRead(platformSources)]
+      .filter((n) => !documented.has(n) && !INTERNAL.has(n))
+      .sort();
+    expect(undocumented, `read by the platform but neither documented nor internal: ${undocumented.join(", ")}`).toEqual([]);
+  });
+
+  it("passes every documented platform knob into platform", () => {
+    const passed = serviceBlock(COMPOSE, "platform");
+    const missing = [...envRead(platformSources)]
+      .filter((n) => documented.has(n) && !NOT_PASSED_ON_PURPOSE.has(n))
+      .filter((n) => !new RegExp(`^\\s*- ${n}=`, "m").test(passed));
+    expect(missing, `documented in .env.example but not passed to platform: ${missing.join(", ")}`).toEqual([]);
+  });
+
   it("passes every documented controller knob into sandbox-controller", () => {
     const passed = serviceBlock(COMPOSE, "sandbox-controller");
     const missing = [...envRead(controllerSources)]

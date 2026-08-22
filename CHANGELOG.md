@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Added
 
 - `WRAP_UP_AFTER_FRACTION` (default `0.8`): a turn stops calling tools once it has spent this much of its run-time budget and answers with what it has, instead of being cut off mid-tool when the deadline fires.
+- `MAX_TURN_TOOL_OUTPUT_CHARS` (default `400000`) caps the total tool output one turn may produce. Past it the turn stops calling tools and answers with what it has, bounding both context growth and spend regardless of what the provider reports.
 
 ### Changed
 
@@ -18,9 +19,24 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Download filenames taken from a project name or chat title are now valid on every OS: `Q4: plan` was unsaveable on Windows, and a title ending in a dot saved under a different name than the one served.
-- A turn that times out or loses its worker after producing work now offers "Continue" instead of advising a retry, matching what a stalled turn already did — retrying re-runs every tool and rewrites what the turn already wrote Covers a turn reaped after a crash or restart, whose verdict comes from the zombie reconciler rather than the worker.
+- A turn that times out or loses its worker after producing work now offers "Continue" instead of advising a retry, matching what a stalled turn already did — retrying re-runs every tool and rewrites what the turn already wrote. Covers a turn reaped after a crash or restart, whose verdict comes from the zombie reconciler rather than the worker.
 - A tool call that ran and then threw now counts as work worth keeping, so a turn cut short right after one is no longer reported as a total loss — a script can write three files before it fails.
 - A malformed `WRAP_UP_AFTER_FRACTION` is reported at boot instead of being clamped in silence.
+- A deep conversation on Anthropic now also sheds old thinking blocks server-side, not just old tool results. Only past the same depth threshold: the strategy has no trigger of its own, so applying it to every request would cost more cache than it saves.
+- Nineteen tuning knobs the platform reads at runtime are now settable under Compose and documented in `.env.example` — `MAX_TOOL_OUTPUT_CHARS`, `MAX_TOOL_OUTPUT_LINES`, `STREAM_IDLE_SECONDS`, `MAX_STREAM_RECOVERIES`, `WORKER_MAX_CONCURRENCY`, `PG_POOL_MAX`, five workspace-retention caps, five MCP caps, `CAPKA_STREAM_USAGE`, `CAPKA_SHARE_IMPORT` and `OTEL_SERVICE_NAME`. None of them could be set before.
+- `BETTER_AUTH_URL` reaches the platform container again; the documented `PUBLIC_URL` fallback had become a silent no-op under Compose.
+- Twelve newly reachable numeric knobs are validated at boot, so a negative or mistyped value is reported instead of silently falling back — or, for `MAX_TURN_TOOL_OUTPUT_CHARS`, silently stopping every turn from using tools.
+- `ALLOW_DB_MASTER_KEY` now reaches the platform container, so the documented escape hatch for accepting a DB-stored key in production actually works.
+- The mid-turn tool-traffic trim now keeps the three most recent tool exchanges it promises, instead of roughly one and a half.
+- The mid-turn trim now also engages on endpoints that report no token usage, using a local estimate of the prompt rather than staying disengaged for the whole turn.
+- A turn no longer finishes as successful when its reply row was deleted while the turn sat queued; it stands down instead.
+- The per-run log line now also carries the prompt size, message count, recovery count and total tool output, so an opaque provider error is diagnosable from the logs and not only from the stored message.
+- Admins keep seeing the raw failure detail for a turn that ran on their own key after the chat history is reloaded.
+- A tool call the model malformed no longer appears in a restarted turn's recovery note as work that already ran, which could make the model skip it entirely.
+- A turn interrupted right after a malformed tool call no longer tells the user that work was kept and can be continued, when nothing had run.
+- A tool call that already ran is now recorded in its own `message_effects` table, so a turn that restarts or resumes no longer repeats a non-idempotent write whose record an emergency context trim had erased from the reply row. Migration applies at boot; no action required.
+- `MAX_AGENT_STEPS` now reaches the platform container in `docker-compose.yml` and is documented in `.env.example`; it has never been settable in a Compose deployment.
+- The mid-turn tool-traffic cut no longer sheds one message more than intended on a turn where a `view_file` image bridge is injected.
 
 ## [0.30.0] - 2026-08-22
 

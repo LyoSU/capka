@@ -469,11 +469,15 @@ export const PROVIDER_UNRESPONSIVE_PARTIAL_ERROR: FriendlyError = {
  * is the only thing left that knows the workspace was written.
  */
 function producedWork(
-  parts: ReadonlyArray<{ type: string; text?: string }>,
+  parts: ReadonlyArray<{ type: string; text?: string; invalid?: boolean }>,
   executedWork = false,
 ): boolean {
   return executedWork || parts.some(
-    (p) => (p.type === "text" && !!p.text?.trim()) || p.type === "tool-result" || p.type === "tool-error",
+    // A `tool-error` the SDK synthesized for a call it REJECTED before running is
+    // not work: telling the user "what it finished above is kept" when nothing ran
+    // sends them to continue a turn that produced nothing. Excluded here and in the
+    // SQL twin together, since the two must agree on one definition.
+    (p) => (p.type === "text" && !!p.text?.trim()) || p.type === "tool-result" || (p.type === "tool-error" && !p.invalid),
   );
 }
 

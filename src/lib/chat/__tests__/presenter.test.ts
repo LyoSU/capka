@@ -17,6 +17,20 @@ function row(over: Partial<Row> & { metadata?: MessageMeta | null }): Row {
 }
 
 describe("toUIMessages", () => {
+  // The runner persists `errorOwned` so an admin sees whose key produced the
+  // failure. It was written and read but never declared or forwarded, so the flag
+  // silently vanished the moment history was reloaded from the DB.
+  it("forwards which key owns a failure, so it survives a history reload", () => {
+    const meta: MessageMeta = {
+      error: "Something went wrong",
+      errorDetail: "raw provider text",
+      errorCategory: "unknown",
+      errorOwned: true,
+    };
+    const [msg] = toUIMessages([row({ metadata: meta })]);
+    expect(msg.metadata).toMatchObject({ errorOwned: true, errorCategory: "unknown" });
+  });
+
   it("renders the parts format preserving text → tools → text order", () => {
     const meta: MessageMeta = {
       parts: [

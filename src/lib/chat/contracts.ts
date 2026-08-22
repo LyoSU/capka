@@ -49,7 +49,11 @@ export const storedPartSchema = z.discriminatedUnion("type", [
     answer: z.object({ form: askFormSchema, value: askAnswerSchema.optional() }).optional(),
   }),
   z.object({ type: z.literal("tool-result"), id: z.string(), name: z.string(), output: z.unknown() }),
-  z.object({ type: z.literal("tool-error"), id: z.string(), name: z.string(), error: z.string() }),
+  // `invalid` = the SDK rejected the call before running it (unparseable arguments,
+  // unknown tool) and synthesized this error itself. The part is still recorded —
+  // dropping it would orphan the call, which is a hard 400 — but nothing may read it
+  // as evidence that work happened. See producedWork and its SQL twin.
+  z.object({ type: z.literal("tool-error"), id: z.string(), name: z.string(), error: z.string(), invalid: z.boolean().optional() }),
 ]);
 export type StoredPart = z.infer<typeof storedPartSchema>;
 
@@ -64,6 +68,11 @@ export type MessageMeta = {
   error?: string;
   errorDetail?: string;
   errorCategory?: string;
+  /** Whether the failing turn ran on the USER's own provider key. Decides whether
+   *  the raw detail is theirs to see, so it has to survive a history reload — it is
+   *  written by the runner and read by the message component, and was for a while
+   *  neither declared here nor forwarded by the presenter. */
+  errorOwned?: boolean;
   parts?: StoredPart[];
   // Highest realtime `seq` reflected in `parts` at the moment this snapshot was
   // persisted. A client that (re)mounts mid-stream seeds its applied-seq from
@@ -113,6 +122,11 @@ export type MessageMeta = {
   // record, the next turn would read a small `contextTokens`, decide not to
   // clear, and replay every tool body again. See `shouldClearToolResults`.
   toolsCleared?: boolean;
+  /** The turn decided this conversation had grown deep enough to shed. Persisted so
+   *  the decision is STICKY: shedding makes the next measurement smaller, so a fresh
+   *  answer each turn would oscillate and re-shape the prompt every other turn.
+   *  Provider-blind, unlike `toolsCleared` — the server-side edits need it too. */
+  contextDeep?: boolean;
   // Files the user attached to THIS message — reference metadata only (name +
   // type, no bytes). Same shape as FileRef / chatRequestSchema.attachedFiles.
   // Lets the chat history show what was attached; the bytes live in the sandbox

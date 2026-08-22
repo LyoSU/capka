@@ -4,6 +4,7 @@ import {
   mergeProviderOptions,
   clearsToolResultsClientSide,
   shouldClearToolResults,
+  contextIsDeep,
   markStepTail,
   toolClearTrigger,
   TOOL_CLEAR_TRIGGER_FRACTION,
@@ -23,6 +24,29 @@ describe("contextManagementOptions", () => {
     expect(edit.trigger.value).toBeGreaterThan(0);
     expect(edit.trigger.value).toBeLessThan(200_000); // fires before the hard limit
     expect(edit.keep.value).toBeGreaterThan(0);
+  });
+
+  it("does NOT clear thinking while the conversation is shallow", () => {
+    // The strategy has no `trigger` of its own — it applies on EVERY request — and
+    // clearing invalidates the cache from the clearing point. In a tool loop each
+    // step adds a thinking turn, so the cleared SET changes every step and the cache
+    // never settles. Attaching it unconditionally would cost more than it saves.
+    const opts = contextManagementOptions("anthropic", 200_000) as {
+      anthropic: { contextManagement: { edits: Array<{ type: string }> } };
+    };
+    expect(opts.anthropic.contextManagement.edits.map((e) => e.type)).toEqual(["clear_tool_uses_20250919"]);
+  });
+
+  it("clears thinking once the conversation is deep, and lists it FIRST", () => {
+    // Deep is where window headroom, not cache economy, is the binding constraint —
+    // the same point the tool-clearing trigger is set at. And the docs require
+    // clear_thinking to come first in `edits` when strategies are combined.
+    const opts = contextManagementOptions("anthropic", 200_000, true) as {
+      anthropic: { contextManagement: { edits: Array<{ type: string; keep?: { type: string; value: number } }> } };
+    };
+    const edits = opts.anthropic.contextManagement.edits;
+    expect(edits.map((e) => e.type)).toEqual(["clear_thinking_20251015", "clear_tool_uses_20250919"]);
+    expect(edits[0].keep).toEqual({ type: "thinking_turns", value: TOOL_CLEAR_KEEP_LAST });
   });
 
   it("returns undefined for providers without a native edit yet (extension point)", () => {
@@ -192,5 +216,39 @@ describe("mergeProviderOptions", () => {
     expect(mergeProviderOptions({ openrouter: { reasoning: {} } }, undefined)).toEqual({
       openrouter: { reasoning: {} },
     });
+  });
+});
+
+describe("contextIsDeep", () => {
+  const LIMIT = 200_000;
+  const half = LIMIT * TOOL_CLEAR_TRIGGER_FRACTION;
+  const turn = (m: Record<string, unknown>) => ({ metadata: m });
+
+  it("is the provider-blind half of the decision, so Anthropic gets an answer too", () => {
+    // shouldClearToolResults returns false for Anthropic by design — it asks whether
+    // WE should clear. The depth question is separate, and the server-side edits need
+    // it: without it the thinking edit has no gate on the one provider that has one.
+    expect(contextIsDeep([turn({ contextTokens: half })], LIMIT)).toBe(true);
+    expect(contextIsDeep([turn({ contextTokens: half - 1 })], LIMIT)).toBe(false);
+  });
+
+  it("stays on once decided, so the answer cannot oscillate turn to turn", () => {
+    const path = [turn({ contextTokens: half }), turn({ contextTokens: 1_000, contextDeep: true })];
+    expect(contextIsDeep(path, LIMIT)).toBe(true);
+  });
+
+  it("still honours the older marker, so a chat mid-flight does not flip", () => {
+    // `toolsCleared` was this signal's only name before it had a provider-blind one.
+    const path = [turn({ contextTokens: half }), turn({ contextTokens: 1_000, toolsCleared: true })];
+    expect(contextIsDeep(path, LIMIT)).toBe(true);
+  });
+
+  it("resets at a compaction checkpoint", () => {
+    const path = [
+      turn({ contextTokens: half, contextDeep: true }),
+      turn({ compaction: { summary: "…", summarizedUpTo: "m1" } }),
+      turn({ contextTokens: 2_000 }),
+    ];
+    expect(contextIsDeep(path, LIMIT)).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildRecoveryNote,
   effectsFromParts,
+  mergeEffects,
   EFFECT_ARG_CHARS,
   RECOVERY_NOTE_BUDGET,
   type TurnEffect,
@@ -123,9 +124,11 @@ describe("effectsFromParts", () => {
       failed("2", "wp_upload_image"),
     ]);
 
+    // The id rides along so this source can be merged with the durable ledger
+    // without one call being counted from both.
     expect(effects).toEqual([
-      { name: "zak_upsert_product", input: { sku: "CLR-001" } },
-      { name: "wp_upload_image", input: { file: "a.jpg" }, failed: true },
+      { id: "1", name: "zak_upsert_product", input: { sku: "CLR-001" } },
+      { id: "2", name: "wp_upload_image", input: { file: "a.jpg" }, failed: true },
     ]);
   });
 
@@ -141,7 +144,7 @@ describe("effectsFromParts", () => {
     // The evidence that it ran is the result, so the entry has to stand without its
     // arguments rather than be dropped.
     const effects = effectsFromParts([result("9", "wp_publish_product")]);
-    expect(effects).toEqual([{ name: "wp_publish_product", input: undefined }]);
+    expect(effects).toEqual([{ id: "9", name: "wp_publish_product", input: undefined }]);
   });
 
   it("feeds straight into the note the restarted turn reads", () => {
@@ -149,5 +152,27 @@ describe("effectsFromParts", () => {
       effectsFromParts([call("1", "zak_upsert_product", { sku: "CLR-777" }), result("1", "zak_upsert_product")]),
     )!;
     expect(note).toContain("CLR-777");
+  });
+});
+
+describe("mergeEffects", () => {
+  // During a rolling upgrade one message can hold effects in BOTH places: the half
+  // that ran before the table existed is only in `parts`, the half after it only in
+  // the ledger. Choosing one source drops the other, and a dropped effect is
+  // precisely the one that gets done twice.
+  it("keeps an effect that exists only in the rebuilt parts", () => {
+    const ledger = [{ id: "c2", name: "second", input: 2 }];
+    const fromParts = [{ id: "c1", name: "first", input: 1 }];
+
+    expect(mergeEffects(ledger, fromParts).map((e) => e.id)).toEqual(["c1", "c2"]);
+  });
+
+  // The ledger is the stronger record: `parts` cannot say whether a call errored
+  // once and then succeeded, and it is what an emergency trim erases.
+  it("lets the ledger win when both sources describe the same call", () => {
+    const ledger = [{ id: "c1", name: "upsert_row", input: { sku: "A" }, failed: true }];
+    const fromParts = [{ id: "c1", name: "upsert_row", input: { sku: "A" } }];
+
+    expect(mergeEffects(ledger, fromParts)).toEqual(ledger);
   });
 });

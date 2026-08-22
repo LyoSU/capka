@@ -184,6 +184,39 @@ export const messages = pgTable("messages", {
   index("idx_messages_chat_role_created").on(table.chatId, table.role, table.createdAt),
 ]);
 
+/**
+ * What a reply has ALREADY DONE — one row per tool call that actually ran.
+ *
+ * Deliberately NOT in `messages.metadata`: that blob is replaced wholesale by
+ * every snapshot and by finalization, so an emergency trim which clears `parts`
+ * erases the only evidence a call ran, and the task that continues the reply then
+ * repeats a write that is not idempotent.
+ *
+ * Keyed by MESSAGE, not by task, because the message is the ledger's real
+ * lifetime: an approval or `ask` continuation is a second task writing this same
+ * row, so keying by task would split one turn's ledger in half. `producer_task_id`
+ * keeps that provenance without claiming ownership.
+ *
+ * Bound: the cascade IS the inverse. An entry cannot outlive the reply it
+ * describes, so pruning a message — or its chat — prunes its effects with it, and
+ * the table needs no retention pass of its own.
+ */
+export const messageEffects = pgTable("message_effects", {
+  messageId: text("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  /** The SDK's tool-call id. What makes re-running one approved call idempotent
+   *  here: the second outcome replaces the first instead of adding an entry. */
+  toolCallId: text("tool_call_id").notNull(),
+  producerTaskId: text("producer_task_id"),
+  toolName: text("tool_name").notNull(),
+  input: jsonb("input"),
+  /** The call threw. It still RAN — a tool that writes before it fails has already
+   *  written — which makes this the entry a restarted turn most needs to verify. */
+  failed: boolean("failed").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.messageId, table.toolCallId] }),
+]);
+
 export const telegramLinks = pgTable("telegram_links", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

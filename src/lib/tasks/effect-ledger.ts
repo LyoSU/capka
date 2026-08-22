@@ -21,11 +21,18 @@
  * to avoid doing it twice.
  */
 
+import { asc, eq, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { messageEffects } from "@/lib/db/schema";
+import { stripNul } from "@/lib/tasks/sanitize";
 import type { StoredPart } from "@/lib/chat/contracts";
 
 /** One executed tool call. Recorded when its result — or its error — arrives, so
  *  it means "this ran", not "this was requested". */
 export interface TurnEffect {
+  /** The SDK's tool-call id. Present on both sources so the two can be merged
+   *  without counting one call twice. */
+  id?: string;
   name: string;
   input: unknown;
   /** The call threw instead of returning. It still RAN, and a tool that writes
@@ -149,10 +156,107 @@ export function effectsFromParts(parts: StoredPart[]): TurnEffect[] {
     if (p.type !== "tool-result" && p.type !== "tool-error") continue;
     const call = calls.get(p.id);
     out.push({
+      id: p.id,
       name: call?.name ?? p.name,
       input: call?.input,
       ...(p.type === "tool-error" ? { failed: true } : {}),
     });
   }
   return out;
+}
+
+/**
+ * A ledger write that did not land after its retries.
+ *
+ * A distinct type because the alternative is worse than failing: a Postgres blip
+ * reads as `network` to `isTransientError`, so the stream loop would treat it as a
+ * provider hiccup, re-stream, and carry on with the call unrecorded — losing
+ * exactly the durability this module exists to provide. The runner checks for this
+ * before its transient classification, so the turn fails closed instead.
+ */
+export class EffectLedgerError extends Error {}
+
+/** A blip should cost a moment, not a turn; a dead database should fail the turn. */
+const LEDGER_WRITE_ATTEMPTS = 3;
+
+/**
+ * Record one executed call, durably, against the reply it belongs to.
+ *
+ * Called on the result or the error — never on the request — so a row means "this
+ * ran". Awaited rather than fired off, because the whole point is that the record
+ * outlives the process: a restart that begins before the write lands is a restart
+ * that starts blind, which is the failure this exists to prevent.
+ *
+ * Upsert, not insert: an approved call re-runs under the SAME tool-call id, and
+ * its second outcome should replace the first rather than appear twice in a note
+ * whose only job is to say what happened once.
+ */
+export async function recordEffect(e: {
+  messageId: string;
+  toolCallId: string;
+  taskId: string;
+  name: string;
+  input: unknown;
+  failed?: boolean;
+}): Promise<void> {
+  // Sanitized HERE, not at the call sites: a model can emit a literal NUL escape
+  // inside a valid JSON string argument, Postgres rejects it in jsonb, and a caller
+  // that forgets would turn "this call ran" into a failed write. One place cannot
+  // be forgotten in the next one.
+  const row = { toolName: e.name, input: stripNul(e.input) ?? null, failed: e.failed ?? false };
+  let last: unknown;
+  for (let attempt = 1; attempt <= LEDGER_WRITE_ATTEMPTS; attempt++) {
+    try {
+      await db.insert(messageEffects)
+        .values({ messageId: e.messageId, toolCallId: e.toolCallId, producerTaskId: e.taskId, ...row })
+        .onConflictDoUpdate({
+          target: [messageEffects.messageId, messageEffects.toolCallId],
+          // `failed` is sticky: "it threw" is the conservative reading, because a tool
+          // that writes before it fails has already written. A later success under the
+          // same id must not erase the one entry the note most needs to flag.
+          set: { ...row, failed: sql`${messageEffects.failed} or excluded.failed` },
+        });
+      return;
+    } catch (err) {
+      last = err;
+      if (attempt < LEDGER_WRITE_ATTEMPTS) await new Promise((r) => setTimeout(r, 150 * attempt));
+    }
+  }
+  throw new EffectLedgerError(`could not record executed tool call ${e.toolCallId}: ${String(last)}`);
+}
+
+/**
+ * The ledger for one reply, oldest first.
+ *
+ * Ordered by `created_at` then tool-call id: `now()` is transaction time, so two
+ * calls recorded inside one transaction would tie, and a note that reorders itself
+ * between reads is a note nobody can diff. Chronology is what the model reads
+ * ("continue from where they stopped"), so the tie-break exists to make the order
+ * total, not to be meaningful on its own.
+ */
+export async function loadEffects(messageId: string): Promise<TurnEffect[]> {
+  const rows = await db
+    .select({ id: messageEffects.toolCallId, name: messageEffects.toolName, input: messageEffects.input, failed: messageEffects.failed })
+    .from(messageEffects)
+    .where(eq(messageEffects.messageId, messageId))
+    .orderBy(asc(messageEffects.createdAt), asc(messageEffects.toolCallId));
+  return rows.map((r) => ({ id: r.id, name: r.name, input: r.input, ...(r.failed ? { failed: true } : {}) }));
+}
+
+
+/**
+ * Union the durable ledger with what could be rebuilt from `parts`, ledger winning.
+ *
+ * Not either/or, which was the first cut and was wrong: during a rolling upgrade one
+ * message can hold effects in BOTH places — the half that ran before this table
+ * existed is only in `parts`, the half after it only in the ledger — and an empty
+ * ledger is also what a failed write leaves behind. Preferring one source silently
+ * drops the other, and a dropped effect is precisely the one that gets done twice.
+ *
+ * Parts-only entries come first: an effect the ledger has never heard of predates
+ * the ledger for this message, so that order is also the chronological one.
+ */
+export function mergeEffects(ledger: TurnEffect[], fromParts: TurnEffect[]): TurnEffect[] {
+  const known = new Set(ledger.map((e) => e.id).filter((id): id is string => !!id));
+  return [...fromParts.filter((e) => !e.id || !known.has(e.id)), ...ledger];
 }

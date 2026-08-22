@@ -1,5 +1,6 @@
 import { pruneMessages, type ModelMessage } from "ai";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
+import { outputChars } from "@/lib/tool-output";
 
 /**
  * Hard cap on tool-calling steps in one turn (streamText's `stopWhen`). Prevents a
@@ -176,6 +177,23 @@ export function pruneTurnToolTraffic(messages: ModelMessage[], boundary: number)
  * that starts a stream knows the list was replaced. This decides where to cut, and
  * refuses to move the cut without a measurement from the stream it is cutting.
  */
+/**
+ * How many messages one tool exchange occupies — the conversion the cut was missing.
+ *
+ * `TOOL_CLEAR_KEEP_LAST` counts tool USES, which is the unit Anthropic's server-side
+ * edit takes. The SDK's pruner counts trailing MESSAGES, and a tool loop appends one
+ * assistant message carrying the call(s) plus one tool message carrying the
+ * result(s). Passing the use-count straight through therefore kept three MESSAGES —
+ * about one and a half exchanges — where the shared policy says three exchanges, so
+ * the mid-turn cut was roughly twice as destructive as the policy it claims to
+ * share.
+ *
+ * 2 is exact for the sequential loop, not a rounding: one assistant + one tool
+ * message per step. Parallel calls share a single pair, so six messages then keeps
+ * MORE than three tool uses — conservative in the direction that shortens nothing.
+ */
+const MESSAGES_PER_TOOL_EXCHANGE = 2;
+
 export function armPruneBoundary(input: {
   triggerAt: number;
   boundary: number;
@@ -186,5 +204,41 @@ export function armPruneBoundary(input: {
   if (input.triggerAt <= 0) return 0;
   if (input.stepNumber === 0) return input.boundary;
   if (input.lastStepContextTokens < input.triggerAt) return input.boundary;
-  return Math.max(input.boundary, input.messageCount - TOOL_CLEAR_KEEP_LAST);
+  return Math.max(input.boundary, input.messageCount - TOOL_CLEAR_KEEP_LAST * MESSAGES_PER_TOOL_EXCHANGE);
+}
+
+/**
+ * Roughly how many tokens the prompt we are about to send is worth.
+ *
+ * Exists for one job: arming the mid-turn brake on an endpoint that reports no
+ * usage. A gateway that rejects `stream_options` makes the runner re-stream with
+ * usage reporting off for the rest of that connection, so the measured figure stays
+ * 0 and can never cross a positive trigger — leaving the brake permanently
+ * disengaged on precisely the providers that have no server-side edit either.
+ *
+ * Deliberately NOT written to `contextTokens`: that stays the one measured number
+ * the (i) popover and the context meter report, and an estimate standing next to it
+ * would make the two disagree for no gain.
+ *
+ * Text, reasoning and tool traffic only. A file part carries base64 whose LENGTH is
+ * nothing like its token cost — an image is ~1.5k tokens and ~200k characters — so
+ * counting it would arm the brake off an artifact of the encoding. Undercounting
+ * attachments is also the safe direction: the brake sheds TOOL traffic, which is
+ * not what an attachment is.
+ */
+export function estimatePromptTokens(messages: ModelMessage[]): number {
+  let chars = 0;
+  for (const m of messages) {
+    if (typeof m.content === "string") {
+      chars += m.content.length;
+      continue;
+    }
+    if (!Array.isArray(m.content)) continue;
+    for (const p of m.content) {
+      if (p.type === "text" || p.type === "reasoning") chars += p.text.length;
+      else if (p.type === "tool-call") chars += outputChars(p.input);
+      else if (p.type === "tool-result") chars += outputChars(p.output);
+    }
+  }
+  return Math.ceil(chars / 4);
 }

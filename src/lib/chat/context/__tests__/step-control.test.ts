@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stepSettings, pruneTurnToolTraffic, armPruneBoundary,
+import { stepSettings, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   FORCE_TEXT_AFTER_STEPS, MAX_STEPS, WRAP_UP_AFTER_FRACTION } from "@/lib/chat/context/step-control";
 import type { ModelMessage } from "ai";
 
@@ -112,7 +112,7 @@ describe("armPruneBoundary", () => {
   const at = 120_000;
 
   it("arms once the last step's measured prompt reaches the trigger", () => {
-    expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: at, messageCount: 20, stepNumber: 4 })).toBe(17);
+    expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: at, messageCount: 20, stepNumber: 4 })).toBe(14);
     expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: at - 1, messageCount: 20, stepNumber: 4 })).toBe(0);
   });
 
@@ -130,7 +130,7 @@ describe("armPruneBoundary", () => {
   });
 
   it("only ever moves the cut forward, when genuinely new traffic crosses again", () => {
-    expect(armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: at, messageCount: 60, stepNumber: 8 })).toBe(57);
+    expect(armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: at, messageCount: 60, stepNumber: 8 })).toBe(54);
     // A shorter list cannot drag the cut backwards and un-shed what was shed.
     expect(armPruneBoundary({ triggerAt: at, boundary: 57, lastStepContextTokens: at, messageCount: 20, stepNumber: 9 })).toBe(57);
   });
@@ -158,5 +158,43 @@ describe("armPruneBoundary", () => {
     expect(
       armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: 40_000, messageCount: 30, stepNumber: 0 }),
     ).toBe(17);
+  });
+});
+
+describe("estimatePromptTokens", () => {
+  // The brake reads per-step usage, and an endpoint that rejects `stream_options`
+  // reports none for the rest of the connection — leaving the figure at 0, forever
+  // under any positive trigger. A local estimate is what lets the brake arm at all
+  // on exactly the providers that have no server-side edit either.
+  it("counts text, reasoning, and tool traffic", () => {
+    const n = estimatePromptTokens([
+      { role: "user", content: "a".repeat(400) },
+      { role: "assistant", content: [
+        { type: "text", text: "b".repeat(400) },
+        { type: "reasoning", text: "c".repeat(400) },
+        { type: "tool-call", toolCallId: "t1", toolName: "x", input: "d".repeat(400) },
+      ] },
+      { role: "tool", content: [
+        { type: "tool-result", toolCallId: "t1", toolName: "x", output: "e".repeat(400) },
+      ] },
+    ] as never);
+
+    // 400 each: user text, assistant text, reasoning, the call's input, the result.
+    // A string input counts raw, not JSON-quoted — outputChars short-circuits on it.
+    expect(n).toBe(Math.ceil(2000 / 4));
+  });
+
+  // An image is ~1.5k tokens and ~200k characters of base64. Counting its length
+  // would arm the brake off an artifact of the encoding — and attachments are not
+  // what the brake can shed anyway, so undercounting them is the safe direction.
+  it("ignores a file part's encoded bytes", () => {
+    const n = estimatePromptTokens([
+      { role: "user", content: [
+        { type: "text", text: "c".repeat(40) },
+        { type: "file", mediaType: "image/png", data: "Z".repeat(200_000) },
+      ] },
+    ] as never);
+
+    expect(n).toBe(10);
   });
 });

@@ -85,6 +85,22 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
     "MAX_STREAM_RECOVERIES",
     "MAX_AGENT_STEPS",
     "FORCE_TEXT_AFTER_STEPS",
+    // Reachable under Compose as of this release. `Number(env.X) || default` swallows
+    // a negative or non-numeric value silently — and a negative ceiling is not merely
+    // ignored: MAX_TURN_TOOL_OUTPUT_CHARS=-1 would stop every turn from calling a
+    // tool at all. Surface the typo at boot instead.
+    "MAX_TOOL_OUTPUT_CHARS",
+    "MAX_TOOL_OUTPUT_LINES",
+    "MAX_TURN_TOOL_OUTPUT_CHARS",
+    "JOBS_KEEP_DIRS",
+    "JOB_LOG_CAP_MB",
+    "VIEW_KEEP_DIRS",
+    "OUTPUT_KEEP_FILES",
+    "OUTPUT_FILE_CAP_MB",
+    "MAX_MCP_MEDIA_BYTES",
+    "MAX_MCP_TOOL_DESC_CHARS",
+    "MCP_DEFER_TOKEN_MAX",
+    "MCP_DEFER_TOKEN_PCT",
   ] as const) {
     const raw = env[key]?.trim();
     if (raw === undefined || raw === "") continue;

@@ -73,16 +73,53 @@ export function shouldClearToolResults(
   path: { metadata: unknown }[],
   effectiveLimit: number,
 ): boolean {
-  if (!clearsToolResultsClientSide(provider)) return false;
+  return clearsToolResultsClientSide(provider) && contextIsDeep(path, effectiveLimit);
+}
+
+/**
+ * Has this conversation grown deep enough that shedding is worth its cost?
+ *
+ * The provider-blind half of the question above, split out because the SERVER-side
+ * edits need it too: `shouldClearToolResults` answers "should WE clear", and returns
+ * false for Anthropic by design — so asking it about depth on Anthropic answers the
+ * wrong question and always says no. The two rules described above (sticky until the
+ * next checkpoint) live here, since they are properties of the measurement, not of
+ * who acts on it.
+ *
+ * Reads the newer `contextDeep` marker and the older `toolsCleared` one: before this
+ * split, the decision's only name was the client-side action it caused, and a chat
+ * already mid-flight must not flip when its marker changes name.
+ */
+export function contextIsDeep(path: { metadata: unknown }[], effectiveLimit: number): boolean {
   const metas = path.map((r) => r.metadata as MessageMeta | null);
   const live = metas.slice(metas.findLastIndex((m) => m?.compaction) + 1);
-  if (live.some((m) => m?.toolsCleared)) return true;
+  if (live.some((m) => m?.contextDeep || m?.toolsCleared)) return true;
   const lastMeasured = live.map((m) => m?.contextTokens).findLast((t): t is number => typeof t === "number");
   return (lastMeasured ?? 0) >= toolClearTrigger(effectiveLimit);
 }
+/**
+ * Whether to also clear old thinking blocks, and why it needs a gate of OUR own.
+ *
+ * Opus 4.5+ and Sonnet 4.6+ keep ALL prior thinking by default, so reasoning
+ * accumulates for the life of a conversation. But `clear_thinking_20251015` takes no
+ * `trigger` — unlike tool clearing it applies on EVERY request — and per the docs
+ * the cache is invalidated at the point where clearing occurs. Inside a tool loop
+ * every step adds a thinking turn, so the cleared SET changes each step and the
+ * cache never settles: attaching it unconditionally pays a transition per step to
+ * shed tokens that were being read at cache rate anyway.
+ *
+ * So it is attached only once the conversation is deep — the same threshold tool
+ * clearing uses, which is where window headroom rather than cache economy is the
+ * binding constraint, and where the alternative to shedding is not a bigger bill but
+ * a turn that doesn't fit. The win over carrying thinking has NOT been measured; if
+ * it turns out negative, the honest fix is to stop attaching this, not to widen it.
+ */
+export const THINKING_KEEP_TURNS = TOOL_CLEAR_KEEP_LAST;
+
 export function contextManagementOptions(
   provider: string,
   effectiveLimit: number,
+  deep = false,
 ): Record<string, unknown> | undefined {
   switch (provider) {
     case "anthropic":
@@ -90,6 +127,14 @@ export function contextManagementOptions(
         anthropic: {
           contextManagement: {
             edits: [
+              // FIRST when present — the docs require clear_thinking to lead the
+              // array when strategies are combined.
+              ...(deep
+                ? [{
+                    type: "clear_thinking_20251015",
+                    keep: { type: "thinking_turns", value: THINKING_KEEP_TURNS },
+                  }]
+                : []),
               {
                 type: "clear_tool_uses_20250919",
                 trigger: { type: "input_tokens", value: toolClearTrigger(effectiveLimit) },

@@ -311,6 +311,12 @@ services:
       - SANDBOX_CONTROLLER_URL=http://sandbox-controller:3001
       - CONTROLLER_SECRET=${CONTROLLER_SECRET}
       - CAPKA_MASTER_KEY=${CAPKA_MASTER_KEY}
+      # The documented escape hatch for accepting the insecure DB-stored key in
+      # production. It was read but never passed, so setting it did nothing.
+      - ALLOW_DB_MASTER_KEY=${ALLOW_DB_MASTER_KEY:-}
+      # Deprecated alias for PUBLIC_URL, still read at runtime and still validated at
+      # boot — so leaving it unpassed made a documented fallback a silent no-op.
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-}
       # Public origin. Set it (recommended in prod) so it can't be spoofed via
       # proxy headers; unset → derived from X-Forwarded-*.
       - PUBLIC_URL=${PUBLIC_URL:-}
@@ -326,6 +332,8 @@ services:
       # Step at which a long tool loop is told to stop calling tools and answer.
       # Unset ⇒ five below the agent step cap.
       - FORCE_TEXT_AFTER_STEPS=${FORCE_TEXT_AFTER_STEPS:-}
+      # Hard ceiling on tool-calling steps in one turn. Unset ⇒ 25.
+      - MAX_AGENT_STEPS=${MAX_AGENT_STEPS:-}
       # Wall-clock ceiling for one turn, tool calls included. Unset ⇒ 20 minutes.
       - TASK_TIMEOUT_MINUTES=${TASK_TIMEOUT_MINUTES:-}
       # Fraction of that budget after which the turn answers instead of calling
@@ -366,6 +374,26 @@ services:
       # token counts on a stream. Only for a gateway that breaks on the parameter
       # without saying so — the cost of switching it off is turns billed as zero.
       - CAPKA_STREAM_USAGE=${CAPKA_STREAM_USAGE:-}
+      # Every knob below was read at runtime but never named here, so an operator
+      # could set it and nothing would happen. `environment:` is a whitelist.
+      - MAX_TOOL_OUTPUT_CHARS=${MAX_TOOL_OUTPUT_CHARS:-}
+      - MAX_TURN_TOOL_OUTPUT_CHARS=${MAX_TURN_TOOL_OUTPUT_CHARS:-}
+      - MAX_TOOL_OUTPUT_LINES=${MAX_TOOL_OUTPUT_LINES:-}
+      - STREAM_IDLE_SECONDS=${STREAM_IDLE_SECONDS:-}
+      - MAX_STREAM_RECOVERIES=${MAX_STREAM_RECOVERIES:-}
+      - WORKER_MAX_CONCURRENCY=${WORKER_MAX_CONCURRENCY:-}
+      - PG_POOL_MAX=${PG_POOL_MAX:-}
+      - JOBS_KEEP_DIRS=${JOBS_KEEP_DIRS:-}
+      - JOB_LOG_CAP_MB=${JOB_LOG_CAP_MB:-}
+      - VIEW_KEEP_DIRS=${VIEW_KEEP_DIRS:-}
+      - OUTPUT_KEEP_FILES=${OUTPUT_KEEP_FILES:-}
+      - OUTPUT_FILE_CAP_MB=${OUTPUT_FILE_CAP_MB:-}
+      - MAX_MCP_MEDIA_BYTES=${MAX_MCP_MEDIA_BYTES:-}
+      - MAX_MCP_TOOL_DESC_CHARS=${MAX_MCP_TOOL_DESC_CHARS:-}
+      - MCP_ALWAYS_LOAD=${MCP_ALWAYS_LOAD:-}
+      - MCP_DEFER_TOKEN_PCT=${MCP_DEFER_TOKEN_PCT:-}
+      - MCP_DEFER_TOKEN_MAX=${MCP_DEFER_TOKEN_MAX:-}
+      - CAPKA_SHARE_IMPORT=${CAPKA_SHARE_IMPORT:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

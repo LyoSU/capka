@@ -35,6 +35,66 @@ run("durable queue", () => {
     await pool.query(`DELETE FROM "user" WHERE id = $1`, [U]);
   });
 
+  // A message can be deleted between a task being enqueued and reaching
+  // finalization (an edit prunes the subtree, a chat is cleaned up). The UPDATE then
+  // matches nothing; before the row-count check it still COMMITTED, so the task went
+  // terminal-completed with no reply anywhere in the chat.
+  it("refuses the outcome when the reply row is gone, instead of reporting success", async () => {
+    await pool.query(
+      `INSERT INTO tasks (id, chat_id, user_id, status, worker_id) VALUES ($1,$2,$3,'running',$4)`,
+      ["qt-orphan", C, U, "w-orphan"],
+    );
+
+    const ok = await commitTurnOutcome({
+      taskId: "qt-orphan",
+      workerId: "w-orphan",
+      status: "completed",
+      message: { id: "qt-orphan-no-such-message", content: "done", metadata: {} },
+    });
+
+    expect(ok).toBe(false);
+    // The whole transaction must roll back — otherwise the task still reads as
+    // completed while nothing was written, which is the half-state that hides it.
+    const { rows } = await pool.query(`SELECT status FROM tasks WHERE id = $1`, ["qt-orphan"]);
+    expect(rows[0].status).toBe("running");
+  });
+
+  // The SQL twin of `producedWork` in friendly.ts. It had no test, which is how a
+  // predicate and its SQL copy drift: one gets the exclusion and the other keeps
+  // reporting partial work for a call the SDK rejected before running it.
+  describe("reconciling a stranded reply splits on whether real work survived", () => {
+    const strand = async (taskId: string, parts: unknown[]) => {
+      await pool.query(
+        `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at)
+         VALUES ($1,$2,$3,'running','w-zomb', now() - interval '2 minutes')`,
+        [taskId, C, U],
+      );
+      await pool.query(
+        `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','',$3)`,
+        [`msg-${taskId}`, C, JSON.stringify({ taskId, status: "running", parts })],
+      );
+      const reaped = await reconcileZombies();
+      return reaped.find((r) => r.id === taskId);
+    };
+
+    it("does not call a call the SDK rejected before running it 'partial work'", async () => {
+      const row = await strand("qt-zomb-invalid", [
+        { type: "tool-error", id: "c1", name: "x", error: "invalid arguments", invalid: true },
+      ]);
+      expect(row).toBeDefined();
+      const { rows } = await pool.query(`SELECT metadata->>'errorCategory' AS c FROM messages WHERE id = $1`, ["msg-qt-zomb-invalid"]);
+      expect(rows[0].c).toBe("interrupted");
+    });
+
+    it("does call a tool that ran and then threw 'partial work'", async () => {
+      await strand("qt-zomb-ran", [
+        { type: "tool-error", id: "c1", name: "x", error: "disk full" },
+      ]);
+      const { rows } = await pool.query(`SELECT metadata->>'errorCategory' AS c FROM messages WHERE id = $1`, ["msg-qt-zomb-ran"]);
+      expect(rows[0].c).toBe("interrupted_partial");
+    });
+  });
+
   it("claims a queued task atomically and only once", async () => {
     await enqueueTask({ id: "qt1", chatId: C, userId: U, payload: { hello: "world" } });
     const a = await claimNextTask("w1");

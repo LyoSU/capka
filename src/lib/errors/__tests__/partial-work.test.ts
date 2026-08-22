@@ -70,3 +70,23 @@ describe("interruptedError", () => {
     expect(interruptedError([{ type: "text", text: "x" }]).userMessage).toMatch(/continue/i);
   });
 });
+
+describe("a tool call the SDK rejected before running it", () => {
+  // The SDK synthesizes a `tool-error` for an unparseable call or an unknown tool
+  // WITHOUT invoking execute, and that part still gets recorded so the call is not
+  // left orphaned. Counting it as work tells the user "what it finished above is
+  // kept — ask it to continue" when nothing ran at all.
+  it("is not work worth keeping", () => {
+    const parts = [{ type: "tool-error", id: "c1", name: "x", error: "invalid arguments", invalid: true }];
+
+    expect(timedOutError(parts).category).toBe("timed_out");
+    expect(interruptedError(parts).category).toBe("interrupted");
+  });
+
+  it("still counts when the call actually ran and then threw", () => {
+    const parts = [{ type: "tool-error", id: "c1", name: "x", error: "disk full" }];
+
+    expect(timedOutError(parts).category).toBe("timed_out_partial");
+    expect(interruptedError(parts).category).toBe("interrupted_partial");
+  });
+});

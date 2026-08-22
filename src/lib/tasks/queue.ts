@@ -344,7 +344,25 @@ export async function commitTurnOutcome(input: {
       );
       await client.query(`UPDATE chats SET active_leaf_id = $1 WHERE id = $2`, [id, insert.chatId]);
     } else {
-      await client.query(`UPDATE messages SET content = $2, metadata = $3::jsonb WHERE id = $1`, [id, content, meta]);
+      const { rowCount } = await client.query(
+        `UPDATE messages SET content = $2, metadata = $3::jsonb WHERE id = $1`,
+        [id, content, meta],
+      );
+      // The reply row is gone — deleted (or its subtree pruned) between this task
+      // being enqueued and reaching here. Without this check the UPDATE matched
+      // nothing, the transaction committed, and the task reported COMPLETED with no
+      // reply anywhere in the chat: a turn that both succeeded and left no trace.
+      // Roll back and answer like any other lost race, so the caller stands down
+      // instead of claiming an outcome it did not write.
+      if (rowCount === 0) {
+        await client.query("ROLLBACK");
+        // `false` otherwise means "another actor owns this outcome", and the callers
+        // log exactly that. This case is different and must not hide inside it: the
+        // task WAS ours and the reply is simply gone. Named here so a genuinely lost
+        // reply is greppable rather than reading as an ordinary lost race.
+        console.warn(`[queue] reply row ${id} is gone; standing down instead of reporting an outcome for task ${input.taskId}`);
+        return false;
+      }
     }
     await client.query("COMMIT");
     return true;
@@ -405,7 +423,11 @@ const PRODUCED_WORK_SQL = `EXISTS (
           SELECT 1 FROM jsonb_array_elements(
             CASE WHEN jsonb_typeof(m.metadata->'parts') = 'array'
                  THEN m.metadata->'parts' ELSE '[]'::jsonb END) AS p
-           WHERE p->>'type' IN ('tool-result', 'tool-error')
+           WHERE p->>'type' = 'tool-result'
+              -- Excluded: a tool-error the SDK synthesized for a call it rejected
+              -- BEFORE running it. Mirrors producedWork in errors/friendly.ts; the
+              -- two are one definition in two languages and must move together.
+              OR (p->>'type' = 'tool-error' AND p->>'invalid' IS DISTINCT FROM 'true')
               OR (p->>'type' = 'text' AND btrim(COALESCE(p->>'text', '')) <> ''))`;
 
 /** What to merge into a stranded message, split on the evidence above. $1 is the
