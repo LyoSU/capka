@@ -18,6 +18,12 @@ export interface Capabilities {
    *  rather than reported by any source (see rememberModelEfforts). Absent until
    *  the first negotiation; the thinking control then offers exactly these. */
   efforts?: string[];
+  /** True when the model rejected reasoning outright (not just at one level),
+   *  LEARNED from that rejection like `efforts`. Absent until the first attempt.
+   *  Distinct from `reasoning: false`, which is what a SOURCE claims — keeping
+   *  them apart is what stops a catalog re-sync from overwriting what we saw the
+   *  model actually do. */
+  noReasoning?: boolean;
   /** True when nothing is actually known about this model (an off-catalog id from
    *  a custom endpoint) and these values are the optimistic default. Lets the UI
    *  distinguish "cannot reason" from "we have no idea". */

@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   availableAmounts,
   clampAmount,
@@ -151,5 +153,62 @@ describe("reasoningParams", () => {
 
   it("sends nothing for a provider with no knob", () => {
     expect(reasoningParams("ollama", "deep")).toBeUndefined();
+  });
+});
+
+// ── Learned capabilities survive a catalog re-sync ───────────
+//
+// `efforts` — the enum the tests above consume — is LEARNED from a provider
+// rejection rather than reported by any source, so a catalog re-sync must carry
+// it forward or the model pays the negotiation request again on every turn,
+// forever and silently. It lives here because it is a reasoning capability; the
+// clause that preserves it is SQL inside a module-private `upsertModels`, so
+// this asserts on the source.
+//
+// Not hypothetical: that clause shipped carrying `efforts` alone and dropped any
+// other learned key in BOTH branches, so the next such key would have survived
+// only until the first resync. The rule was in a comment; the guard covered one
+// key.
+const modelsSrc = (f: string) => readFileSync(join(process.cwd(), "src/lib/models", f), "utf8");
+
+function learnedKeys(): string[] {
+  // Each entry is a docblock (which may say LEARNED) followed by `name?: type;`.
+  const keys: string[] = [];
+  for (const m of modelsSrc("normalize.ts").matchAll(/\/\*\*([\s\S]*?)\*\/\s*(\w+)\??:/g)) {
+    if (m[1].includes("LEARNED")) keys.push(m[2]);
+  }
+  return keys;
+}
+
+describe("learned capabilities survive a catalog re-sync", () => {
+  it("marks at least the two keys we know are learned", () => {
+    // Guards the guard: rename the LEARNED marker convention away and the key
+    // list empties, which would make the assertions below pass vacuously.
+    expect(learnedKeys()).toEqual(expect.arrayContaining(["efforts", "noReasoning"]));
+  });
+
+  it("names every learned key in the upsert preserve clause", () => {
+    const clause = modelsSrc("catalog.ts").match(/jsonb_strip_nulls\(jsonb_build_object\(([\s\S]*?)\)\)/);
+    expect(clause, "the preserve clause in upsertModels moved or was rewritten").not.toBeNull();
+    // The keys the clause BUILDS, not every quoted string in it. Each pair reads
+    // `'key', <expr>` and the expr repeats the name (`capabilities -> 'key'`), so
+    // a substring check passes even when the built key has been renamed away — it
+    // matches the extraction half. Written that weaker way first, it survived
+    // deleting the very key it was added to protect.
+    const built = [...clause![1].matchAll(/'(\w+)',/g)].map((m) => m[1]);
+    for (const key of learnedKeys()) {
+      expect(built, `re-sync would wipe the learned '${key}'`).toContain(key);
+    }
+  });
+
+  it("drops the read cache for every learned key after a sync", () => {
+    // Same failure one layer up: the row keeps the key but a warm cache serves
+    // the pre-sync answer.
+    const catalog = modelsSrc("catalog.ts");
+    const sync = catalog.slice(catalog.indexOf("priceCache.clear()"), catalog.indexOf("return { openrouter: or"));
+    for (const key of learnedKeys()) {
+      const cache = key === "efforts" ? "effortsCache" : "noReasoningCache";
+      expect(sync, `${cache} is not cleared on sync`).toContain(`${cache}.clear()`);
+    }
   });
 });

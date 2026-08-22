@@ -228,6 +228,7 @@ export async function syncModelCatalog(): Promise<{ openrouter: number; litellm:
   livePriceBook = null; // fresh catalog supersedes the live-fetched fallback book
   contextCache.clear(); // was never cleared on sync — context windows could go stale
   effortsCache.clear(); // the merge above keeps them, but re-read rather than trust
+  noReasoningCache.clear();
   console.log(`[catalog] synced ${or} OpenRouter + ${ll} LiteLLM models, enriched ${md} from Models.dev`);
   return { openrouter: or, litellm: ll, modelsdev: md };
 }
@@ -266,13 +267,18 @@ async function upsertModels(list: CatalogModel[], opts?: { deferToOtherSources?:
     outputPrice: sql`excluded.output_price`,
     cacheReadPrice: sql`excluded.cache_read_price`,
     cacheWritePrice: sql`excluded.cache_write_price`,
-    // Refresh the synced capabilities but PRESERVE `efforts` — the reasoning-effort
-    // enum we learned from a provider rejection (rememberModelEfforts). No source
-    // reports it, so a plain `excluded.capabilities` would wipe it on every sync
-    // and make every model pay the negotiation retry again.
-    capabilities: sql`case when ${models.capabilities} ? 'efforts'
-      then coalesce(excluded.capabilities, '{}'::jsonb) || jsonb_build_object('efforts', ${models.capabilities} -> 'efforts')
-      else excluded.capabilities end`,
+    // Refresh the synced capabilities but PRESERVE everything we LEARNED from a
+    // provider rejection — no source reports these, so a plain
+    // `excluded.capabilities` would wipe them on every sync and make every model
+    // pay the negotiation retry again. Listed once, here: the previous version
+    // carried `efforts` alone and dropped a second learned key in BOTH branches,
+    // so such a memo held only until the next resync. `jsonb_strip_nulls` turns
+    // an absent key into nothing, so a model that has taught us neither merges
+    // `{}` and keeps `excluded.capabilities` verbatim.
+    capabilities: sql`coalesce(excluded.capabilities, '{}'::jsonb) || coalesce(jsonb_strip_nulls(jsonb_build_object(
+      'efforts', ${models.capabilities} -> 'efforts',
+      'noReasoning', ${models.capabilities} -> 'noReasoning'
+    )), '{}'::jsonb)`,
     updatedAt: sql`excluded.updated_at`,
   };
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -538,4 +544,61 @@ export async function rememberModelEfforts(modelId: string, source: string, effo
       .onConflictDoNothing();
   }
   effortsCache.delete(modelId);
+}
+
+// ── Learned "this model cannot reason at all" ────────────────
+
+const noReasoningCache = new Map<string, CacheEntry<boolean>>();
+
+/**
+ * True when this model has already told us it does not accept reasoning knobs at
+ * all. Read before the first request of a turn so a model that cannot reason
+ * never pays the rejected round-trip again.
+ */
+export async function getModelCannotReason(modelId: string): Promise<boolean> {
+  const cached = cacheGet(noReasoningCache, modelId);
+  if (cached.hit) return cached.v;
+  const rows = await db
+    .select({ id: models.id, capabilities: models.capabilities })
+    .from(models)
+    .where(idMatch(modelId))
+    .limit(5);
+  // Same shape as getModelEfforts: an id can resolve to rows from several
+  // sources, so prefer the exact id and otherwise take whichever row learned it.
+  const withFlag = rows.filter((r) => (r.capabilities as { noReasoning?: unknown })?.noReasoning === true);
+  const flag = (withFlag.find((r) => r.id === modelId) ?? withFlag[0]) !== undefined;
+  cacheSet(noReasoningCache, modelId, flag, !flag);
+  return flag;
+}
+
+/**
+ * Remember that a model rejected reasoning outright, so the discovery costs ONE
+ * request per model instead of one per turn — the same bargain as
+ * rememberModelEfforts, whose neighbouring branch made it and this one did not.
+ *
+ * Written as a learned-only key so it cannot be confused with the `reasoning`
+ * flag a source reports, and preserved across a catalog re-sync by the merge in
+ * upsertModels.
+ */
+export async function rememberModelCannotReason(modelId: string, source: string): Promise<void> {
+  const merge = sql`coalesce(${models.capabilities}, '{}'::jsonb) || ${JSON.stringify({ noReasoning: true })}::jsonb`;
+  const updated = await db
+    .update(models)
+    .set({ capabilities: merge, updatedAt: new Date() })
+    .where(idMatch(modelId))
+    .returning({ id: models.id });
+  if (!updated.length) {
+    await db
+      .insert(models)
+      .values({
+        id: modelId,
+        source,
+        displayName: modelId,
+        // It just refused to reason, so `reasoning: false` is a fact here.
+        capabilities: { vision: false, tools: true, reasoning: false, noReasoning: true },
+        enabled: false,
+      })
+      .onConflictDoNothing();
+  }
+  noReasoningCache.delete(modelId);
 }
