@@ -895,6 +895,35 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // (capability/empty-response retries reset `parts`). Tells the client to drop
     // the abandoned attempt and resync, so retry deltas land on a clean slate
     // instead of being appended to the thrown-away text.
+    // The ledger's other half: recording an executed call is useless if the restart
+    // never reads it. Owned here rather than repeated at each retry, because there
+    // are FIVE restart branches and three of them had re-derived nothing at all —
+    // a turn could run a write, hit a rejected `reasoning_content` echo on the next
+    // step, and start over blind to the write it had just made.
+    //
+    // Idempotent by identity: a second restart REPLACES its predecessor's note
+    // instead of stacking another copy of a list that only grows. It survives the
+    // echo branch's `foldReasoningIntoText` rewrite for free — that maps assistant
+    // messages and returns every other message unchanged, so this user turn comes
+    // back as the same object.
+    let effectNote: ModelMessage | null = null;
+    const carryEffectsIntoRestart = () => {
+      if (effectNote) {
+        const i = modelMessages.indexOf(effectNote);
+        if (i >= 0) modelMessages.splice(i, 1);
+        effectNote = null;
+      }
+      const note = buildRecoveryNote(turnEffects);
+      if (!note) return;
+      // A user turn, not an assistant prefill: it is state the model must read, and
+      // a prefill 400s on modern Anthropic anyway.
+      effectNote = { role: "user", content: note };
+      modelMessages.push(effectNote);
+      tlog.info("carrying executed effects into the restart", {
+        effects: turnEffects.length, noteChars: note.length,
+      });
+    };
+
     const discardPartial = async () => {
       // NOT cleared here: `turnEffects`. Everything else in this function is about
       // the abandoned attempt's PRESENTATION — text, timings, tool counts the user
@@ -918,6 +947,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       toolWindows = [];
       currentStatus = { kind: "thinking" };
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      // Wiping `parts` is exactly what blinds the next stream to this turn's own
+      // writes, so the statement of what already ran goes in at the same moment.
+      carryEffectsIntoRestart();
       await publishTaskEvent(userId, { type: "task:reset", taskId, chatId, messageId: msgId, seq: ++seq });
     };
 
@@ -1325,19 +1357,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the very failure this path exists to recover from.
       const trimmedUi = trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT);
       modelMessages = await convertToModelMessages(sealOrphanToolCalls(trimmedUi));
-      // Carry the turn's live side effects across the restart. The trim keeps
-      // SETTLED turns, so by construction it drops everything this turn just did —
-      // and the restarted model would repeat it. A create or an upload is not
-      // idempotent, so this note is the only thing between an overflow and a
-      // duplicate. Appended as a user turn: it is state the model must read, not a
-      // request, and an assistant prefill 400s on modern Anthropic anyway.
-      const recoveryNote = buildRecoveryNote(turnEffects);
-      if (recoveryNote) {
-        modelMessages.push({ role: "user", content: recoveryNote });
-        tlog.info("context overflow — carrying executed effects into the retry", {
-          effects: turnEffects.length, noteChars: recoveryNote.length,
-        });
-      }
+      // Again, because the line above REPLACED the list discardPartial had just put
+      // the note on. The trim keeps SETTLED turns, so by construction it drops
+      // everything this turn did — and this note is the only thing between an
+      // overflow and a duplicate create.
+      carryEffectsIntoRestart();
       markCacheTail(modelMessages); // fresh objects — re-mark the cache tail
       // Re-attach the turn's native files (the trim+reconvert produced fresh
       // model messages, dropping the bytes injected into the original set).

@@ -1,14 +1,20 @@
 /**
  * What this turn has ALREADY DONE, in a form that survives a restart of the turn.
  *
- * The emergency context-overflow path re-streams the turn from a mechanically
- * trimmed history (`trimToRecent`), and everything the turn had done so far lived
- * only in the discarded stream: `discardPartial` empties `parts`, and the trimmed
- * history is settled turns, which by definition don't contain the in-flight one.
- * So the restarted model came back with no idea that ninety products were already
- * in the catalogue. It never LOST a write — it lost the record of writes whose
- * effects are live, which is the worse half: the next thing it does is repeat
- * them, and an upload or a create is not idempotent.
+ * Every restart path re-streams from history that cannot contain the in-flight
+ * turn: `discardPartial` empties `parts`, and the historical messages are settled
+ * turns by definition. So the restarted model came back with no idea that ninety
+ * products were already in the catalogue. It never LOST a write — it lost the
+ * record of writes whose effects are live, which is the worse half: the next thing
+ * it does is repeat them, and an upload or a create is not idempotent.
+ *
+ * The context overflow is the LOUDEST of those paths, not the only one. The
+ * capability retries (an unsupported modality, a rejected reasoning effort,
+ * reasoning that can't be echoed back) restart the same way, and the echoed-
+ * reasoning rejection is definitionally a step-1+ event — there is no prior
+ * reasoning to echo on step 0 — so it fires precisely when a tool call has already
+ * run. Hence the note's wording names no cause: it is the same statement of fact
+ * whichever restart produced it.
  *
  * A ledger, not a rollback: we cannot undo someone else's catalogue. What we can
  * do is tell the model what it already did, which is also the only thing it needs
@@ -44,11 +50,11 @@ export const RECOVERY_NOTE_BUDGET = 6000;
 
 const HEADER =
   "[Recovery note — read before acting]\n" +
-  "This turn ran out of context and was restarted, so the transcript above is " +
-  "incomplete. The tool calls listed below ALREADY RAN in this same turn and " +
-  "their effects are live. Do NOT repeat them. Continue from where they stopped, " +
-  "and if you are unsure whether a specific item landed, check it before writing " +
-  "it again.\n";
+  "This turn was restarted part-way through, so the transcript above no longer " +
+  "shows everything that happened in it. The tool calls listed below ALREADY RAN " +
+  "in this same turn and their effects are live. Do NOT repeat them. Continue from " +
+  "where they stopped, and if you are unsure whether a specific item landed, check " +
+  "it before writing it again.\n";
 
 /** Compact one call's arguments to something identifying. */
 function renderArgs(input: unknown): string {
@@ -90,11 +96,32 @@ export function buildRecoveryNote(effects: TurnEffect[]): string | null {
     if (e.failed) c.failed++;
     counts.set(e.name, c);
   }
-  const summary = [...counts]
-    .sort((a, b) => b[1].ran - a[1].ran)
-    .map(([name, c]) => `- ${name} ×${c.ran}${c.failed ? ` (${c.failed} errored — verify those)` : ""}`)
-    .join("\n");
-  return `${HEADER}(too many to list individually — counts only)\n${summary}`;
+  // Bounded, not just shorter. One line per distinct tool name is only small while
+  // the tool COUNT is — a few busy MCP connectors put hundreds in reach, and this
+  // note rides in the prompt of a retry that just died of an oversized one. So the
+  // budget gates the RESULT here too, with the rarest tools collapsing into a
+  // remainder line rather than being dropped: a tool the model can't see is the one
+  // it runs again.
+  const ordered = [...counts].sort((a, b) => b[1].ran - a[1].ran);
+  const lead = `${HEADER}(too many to list individually — counts only)\n`;
+  const lines: string[] = [];
+  let used = lead.length;
+  let restTools = 0;
+  let restCalls = 0;
+  for (const [name, c] of ordered) {
+    const line = `- ${name} ×${c.ran}${c.failed ? ` (${c.failed} errored — verify those)` : ""}`;
+    // Leave room for the remainder line itself, or a long tail would push the note
+    // over the budget in the act of admitting it has one.
+    if (lines.length > 0 && used + line.length + 60 > RECOVERY_NOTE_BUDGET) {
+      restTools++;
+      restCalls += c.ran;
+      continue;
+    }
+    lines.push(line);
+    used += line.length + 1;
+  }
+  if (restTools > 0) lines.push(`- …and ${restTools} more tools, ${restCalls} calls — verify before rerunning any of them`);
+  return lead + lines.join("\n");
 }
 
 /**

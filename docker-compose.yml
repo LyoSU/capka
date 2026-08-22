@@ -323,6 +323,9 @@ services:
       - USAGE_RETENTION_DAYS=${USAGE_RETENTION_DAYS:-365}
       - AUDIT_RETENTION_DAYS=${AUDIT_RETENTION_DAYS:-365}
       - DB_RETENTION_BATCH_SIZE=${DB_RETENTION_BATCH_SIZE:-1000}
+      # Step at which a long tool loop is told to stop calling tools and answer.
+      # Unset ⇒ five below the agent step cap.
+      - FORCE_TEXT_AFTER_STEPS=${FORCE_TEXT_AFTER_STEPS:-}
       # OPTIONAL agent tracing over OTLP. Unset ⇒ off. These must be listed here:
       # the prod image has no mounted repo and no .env of its own, so a variable set
       # on the host (or in a Coolify service) reaches compose but NOT the container

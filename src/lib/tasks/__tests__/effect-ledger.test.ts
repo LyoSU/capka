@@ -80,6 +80,22 @@ describe("buildRecoveryNote", () => {
     expect(note).toMatch(/8 errored/);
   });
 
+  it("bounds the collapsed form itself, not just the switch into it", () => {
+    // The budget used to gate only the DECISION to collapse; the result was one line
+    // per distinct tool name, unbounded. A deployment with a few busy MCP connectors
+    // puts hundreds of names in reach, and this note rides in the prompt of a retry
+    // that just died of an oversized one.
+    const effects: TurnEffect[] = Array.from({ length: 400 }, (_, i) => ({
+      name: `mcp_connector_${i}_do_a_thing_with_a_long_name`,
+      input: { sku: `S-${i}` },
+    }));
+    const note = buildRecoveryNote(effects)!;
+    expect(note.length).toBeLessThanOrEqual(RECOVERY_NOTE_BUDGET);
+    // Collapsed, but the tail is accounted for rather than dropped — an invisible
+    // tool is the one that gets run twice.
+    expect(note).toMatch(/and \d+ more tools, \d+ calls/);
+  });
+
   it("keeps a call whose arguments cannot be serialized", () => {
     // The call ran. Losing the entry because its input has a cycle would trade a
     // missing argument for a repeated write.
