@@ -139,25 +139,40 @@ anything you intend to report, get the bytes another way (`rtk proxy <cmd>`,
 control is what exposes the substitution, since the distorted output is
 internally consistent.
 
-Worst for bulk output: it **truncates a pipe**, and the piece it hands back is a
-valid artifact. Measured on one release range, same command, same shell:
+Bulk output can come back **silently short**, and the piece you get is a valid
+artifact. On one release range a `git diff` of 8150 lines / 338373 bytes arrived
+as 572 lines of well-formed hunks, exit 0 — a fourteenth of the change looking
+exactly like the whole change. An audit fed that reviews 7% of a release and
+reports on all of it.
 
-```
-git --no-pager diff v0.30.0..v0.31.0 > file    # 338373 bytes, 8150 lines, 57 files
-git --no-pager diff v0.30.0..v0.31.0 | wc -l   #                  572 lines
-```
+**Do not encode a safe invocation shape; there isn't one.** Two sessions each
+inferred a boundary from two measurements and each was refuted by the other's:
+one saw a redirect truncate while a pipe was complete, the other the exact
+reverse. Then the byte-identical commands that had truncated came back complete
+six times running for both of us. It is non-deterministic, so any "this form is
+safe" rule reads as true for a while and then does not.
 
-Exit 0 both times, no marker, and the 572 lines are well-formed hunks — a
-fourteenth of the change looking exactly like the whole change. An audit fed
-that pipe reviews 7% of a release and reports on all of it. **Redirect to a file
-and measure the file; never pipe bulk output into the thing that consumes it.**
-Then confirm the size against a second, independent measure — `--shortstat` said
-6822 insertions here, which cannot fit in 572 lines, and that contradiction is
-the only signal available.
+What does work, and is cheaper than either theory:
 
-The general rule covering all three: **never let the proxy be the only witness to
-a number, a body, or a size you are about to act on.** Corollary, from an agent
-who lost ten minutes to it the same night: never write `2>/dev/null` while
-establishing a fact. It turned a missing binary into an empty file with exit 0,
-which then read as evidence.
+1. **Read the artifact's tail.** The truncated file announces itself — one
+   session found `... (more changes truncated)` and `[full diff: rtk git diff
+   --no-compact]` at the end of it. Neither of us saw that for hours, because we
+   measured the file with `wc -l` and compared against `--stat` instead of
+   opening it. A truncation marker is worthless to an agent that only ever
+   measures.
+2. **Check the size against an independent control.** `--shortstat` said 57
+   files / 6822 insertions, which cannot fit in 572 lines.
+
+The general rule: **never let the proxy be the only witness to a number, a body,
+or a size you are about to act on.** And note how both wrong mechanisms were
+produced — by inferring from measurements without looking at the thing measured,
+which is the very failure this section is about. A caveat asserting a cause it
+has not checked belongs here as much as a log line does.
+
+Corollary, from an agent who lost ten minutes to it the same night: never write
+`2>/dev/null` while establishing a fact. It turned a missing binary into an empty
+file with exit 0, which then read as evidence. The same night another session
+survived the mirror image of it only because stderr was *not* suppressed — it had
+`cd`'d out of the repo, and "not a git repository" is what stopped five silent
+zeros from becoming findings.
 <!-- END:shared-worktree-rules -->
