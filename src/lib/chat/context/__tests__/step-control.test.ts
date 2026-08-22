@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { stepSettings, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   FORCE_TEXT_AFTER_STEPS, MAX_STEPS, WRAP_UP_AFTER_FRACTION } from "@/lib/chat/context/step-control";
 import type { ModelMessage } from "ai";
+import { readFileSync } from "node:fs";
 
 describe("stepSettings", () => {
   it("does not override anything for normal early steps", () => {
@@ -184,6 +185,31 @@ describe("estimatePromptTokens", () => {
     expect(n).toBe(Math.ceil(2000 / 4));
   });
 
+  it("does not undercount Cyrillic, where a per-character ratio would", () => {
+    // The defect this replaced: four characters per token is an ENGLISH ratio, and
+    // Cyrillic runs closer to two. On a character count a real 120k-token Ukrainian
+    // conversation measured 60k and never crossed the trigger, so the brake was
+    // absent for precisely the locale this product calls first-class.
+    const ukrainian = "розрахунок".repeat(40); // 400 characters, 800 UTF-8 bytes
+    const latin = "a".repeat(400);
+
+    expect(estimatePromptTokens([{ role: "user", content: ukrainian }] as never)).toBe(200);
+    // Same character count, half the estimate — that gap IS the bug, now visible.
+    expect(estimatePromptTokens([{ role: "user", content: latin }] as never)).toBe(100);
+  });
+
+  it("counts Cyrillic inside tool arguments too, not only in prose", () => {
+    // Where it actually bites: the turn that started all this wrote product rows
+    // whose names are Ukrainian, so the mass was in tool-call arguments.
+    const n = estimatePromptTokens([
+      { role: "assistant", content: [
+        { type: "tool-call", toolCallId: "t1", toolName: "upsert", input: { name: "Ковдра" } },
+      ] },
+    ] as never);
+    // {"name":"Ковдра"} — 17 characters, 23 bytes once the six Cyrillic ones double.
+    expect(n).toBe(Math.ceil(23 / 4));
+  });
+
   // An image is ~1.5k tokens and ~200k characters of base64. Counting its length
   // would arm the brake off an artifact of the encoding — and attachments are not
   // what the brake can shed anyway, so undercounting them is the safe direction.
@@ -196,5 +222,25 @@ describe("estimatePromptTokens", () => {
     ] as never);
 
     expect(n).toBe(10);
+  });
+});
+
+describe("the estimate's boundary", () => {
+  // `estimatePromptTokens` may arm the brake and must never become the number the
+  // (i) popover and the context meter report — an estimate rendered to an admin as a
+  // measurement is a different defect from the one it fixes. What keeps those apart
+  // is a single character: the runner passes it as an ARGUMENT
+  // (`lastStepContextTokens || estimatePromptTokens(base)`), and `||=` there would
+  // feed contextBudget and three `contextTokens` writes at once. A boundary that
+  // survives only because nobody typed one extra character is not a boundary, so it
+  // is asserted here rather than described in a comment.
+  const runner = readFileSync(new URL("../../../tasks/runner.ts", import.meta.url), "utf8");
+
+  it("never lets the estimate become the measured figure", () => {
+    const writes = [...runner.matchAll(/lastStepContextTokens\s*(\|\|=|\?\?=|\+=|=(?!=))/g)].map((m) => m[1]);
+    // Exactly two plain assignments: the declaration, and the write from usage.
+    // Any compound form shows up here as itself and fails with a readable diff.
+    expect(writes).toEqual(["=", "="]);
+    expect(runner).toMatch(/lastStepContextTokens = event\.usage\.inputTokens/);
   });
 });

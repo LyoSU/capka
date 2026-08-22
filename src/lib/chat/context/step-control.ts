@@ -1,6 +1,6 @@
 import { pruneMessages, type ModelMessage } from "ai";
 import { TOOL_CLEAR_KEEP_LAST } from "./provider-edits";
-import { outputChars } from "@/lib/tool-output";
+import { outputBytes } from "@/lib/tool-output";
 
 /**
  * Hard cap on tool-calling steps in one turn (streamText's `stopWhen`). Prevents a
@@ -207,6 +207,11 @@ export function armPruneBoundary(input: {
   return Math.max(input.boundary, input.messageCount - TOOL_CLEAR_KEEP_LAST * MESSAGES_PER_TOOL_EXCHANGE);
 }
 
+/** UTF-8 bytes per token. Four is the Latin ratio, which is also the floor: every
+ *  other script packs more bytes into a character, so the same divisor over- rather
+ *  than under-counts them. See estimatePromptTokens for why that direction. */
+const BYTES_PER_TOKEN = 4;
+
 /**
  * Roughly how many tokens the prompt we are about to send is worth.
  *
@@ -225,20 +230,35 @@ export function armPruneBoundary(input: {
  * counting it would arm the brake off an artifact of the encoding. Undercounting
  * attachments is also the safe direction: the brake sheds TOOL traffic, which is
  * not what an attachment is.
+ *
+ * UTF-8 BYTES, not characters, and that is the whole reason this is not `/4` over
+ * `.length`. Four characters per token is an English ratio; Cyrillic runs closer to
+ * two, so a character-based estimate undercounts a Ukrainian conversation by 2–4×
+ * and a real 120k-token chat measures as 60k — never crossing the trigger, leaving
+ * the brake absent exactly where this product treats the locale as first-class.
+ * Bytes fix it without a locale to detect: Latin is one byte per character (so this
+ * stays ~chars/4 and every ASCII estimate is unchanged), Cyrillic is two (~chars/2),
+ * CJK three, which over-counts slightly.
+ *
+ * Over-counting is the direction to err in, and the errors are not symmetric:
+ * arming early sheds tool bodies a step or two sooner and costs one cache
+ * transition, while arming late costs the TURN — the prompt reaches the ceiling, the
+ * emergency trim fires, and the restart is the blind one this whole mechanism exists
+ * to avoid.
  */
 export function estimatePromptTokens(messages: ModelMessage[]): number {
-  let chars = 0;
+  let bytes = 0;
   for (const m of messages) {
     if (typeof m.content === "string") {
-      chars += m.content.length;
+      bytes += Buffer.byteLength(m.content, "utf8");
       continue;
     }
     if (!Array.isArray(m.content)) continue;
     for (const p of m.content) {
-      if (p.type === "text" || p.type === "reasoning") chars += p.text.length;
-      else if (p.type === "tool-call") chars += outputChars(p.input);
-      else if (p.type === "tool-result") chars += outputChars(p.output);
+      if (p.type === "text" || p.type === "reasoning") bytes += Buffer.byteLength(p.text, "utf8");
+      else if (p.type === "tool-call") bytes += outputBytes(p.input);
+      else if (p.type === "tool-result") bytes += outputBytes(p.output);
     }
   }
-  return Math.ceil(chars / 4);
+  return Math.ceil(bytes / BYTES_PER_TOKEN);
 }

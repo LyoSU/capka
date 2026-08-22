@@ -83,20 +83,34 @@ export function clampOutput(
 }
 
 /**
- * Serialized size of a tool's output, in characters — the unit both output budgets
- * are denominated in. One place, because a size that is measured two slightly
- * different ways is two different budgets.
+ * ONE serialization, two units. What must not fork is how a value becomes text —
+ * a size measured two slightly different ways is two different budgets — but the
+ * unit legitimately differs by purpose: the output ceiling is denominated in
+ * characters, and a token estimate needs UTF-8 bytes (see estimatePromptTokens).
  *
  * A non-serializable value (a cycle, a BigInt) counts as zero: the call still
  * happened, but guessing high would spend a budget on an artifact of the encoding.
  */
-export function outputChars(v: unknown): number {
-  if (typeof v === "string") return v.length;
+function sizeOf(v: unknown, measure: (s: string) => number): number {
+  if (typeof v === "string") return measure(v);
   try {
-    return JSON.stringify(v)?.length ?? 0;
+    const s = JSON.stringify(v);
+    return s === undefined ? 0 : measure(s);
   } catch {
     return 0;
   }
+}
+
+/** Serialized size in characters — the unit both output budgets are denominated in. */
+export function outputChars(v: unknown): number {
+  return sizeOf(v, (s) => s.length);
+}
+
+/** Serialized size in UTF-8 bytes. Latin text is one byte per character and
+ *  Cyrillic is two, which is what makes a byte-based token estimate hold across
+ *  scripts instead of only across English. */
+export function outputBytes(v: unknown): number {
+  return sizeOf(v, (s) => Buffer.byteLength(s, "utf8"));
 }
 
 /**
