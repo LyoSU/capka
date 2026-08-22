@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-08-22
+
 ### Added
 
 - `FORCE_TEXT_AFTER_STEPS` pins the step at which a long tool loop is told to stop calling tools and answer, instead of it tracking five below the agent step cap. Clamped to the cap, and passed through to the platform container in `docker-compose.yml`.
