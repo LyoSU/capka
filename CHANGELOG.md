@@ -37,6 +37,11 @@ All notable changes to Capka are documented here. Format follows
 - A tool call that already ran is now recorded in its own `message_effects` table, so a turn that restarts or resumes no longer repeats a non-idempotent write whose record an emergency context trim had erased from the reply row. Migration applies at boot; no action required.
 - `MAX_AGENT_STEPS` now reaches the platform container in `docker-compose.yml` and is documented in `.env.example`; it has never been settable in a Compose deployment.
 - The mid-turn tool-traffic cut no longer sheds one message more than intended on a turn where a `view_file` image bridge is injected.
+- A workspace file the agent merely mentioned no longer shows up in the log as a `sandbox download failed` error; a missing file is logged as a warning, and every sandbox download failure now names the session, the path and the status.
+
+### Security
+
+- The workspace access token no longer reaches the platform log. Any failed file listing or delete recorded the raw controller URL, whose query string carries the HMAC that authorizes access to that workspace.
 
 ## [0.30.0] - 2026-08-22
 

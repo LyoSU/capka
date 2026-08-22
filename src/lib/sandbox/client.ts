@@ -87,7 +87,11 @@ async function sendRequest(path: string, method: string, body: unknown, timeoutM
     // The controller's `code` values are a closed set (WORKSPACE_FULL,
     // IMAGE_PULLING, …), so they are safe to record; `raw` is not.
     if (typeof data.code === "string") span.setAttribute("capka.sandbox.error_code", data.code);
-    log.error("sandbox request failed", { method, path, status: res.status, err: String(raw) });
+    // `sanitizeRoute`, not `path` — the promise three doc-lines up was being broken
+    // right here: the raw string carries the query, and on DELETE that query holds a
+    // live `workspaceToken`. Any failed listing or delete wrote a valid
+    // workspace-access HMAC into the platform log, where it outlives the request.
+    log.error("sandbox request failed", { method, path: sanitizeRoute(path), status: res.status, err: String(raw) });
     // The workspace-full block is an actionable condition the agent must SEE and
     // act on (free space, then retry), so its message passes through verbatim.
     // Everything else collapses to a generic message — we don't leak controller
@@ -237,7 +241,20 @@ export async function downloadFile(sessionId: string, filePath: string, userId?:
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Download failed" }));
-    log.error("sandbox download failed", { err: String(err.error) });
+    // A 404 here is an ordinary outcome, not a fault. `collectReferencedFiles` asks
+    // for every /workspace/… path the model MENTIONED, and a mention is not a file:
+    // it can be a directory, a path the agent invented, or one it deleted in the
+    // same turn — its own caller calls that "skip it quietly". Reporting it as an
+    // error, with no session, no path and no status, produced an operator-facing
+    // "sandbox download failed" that named nothing and could not be told apart from
+    // a broken download path. The status picks the level; the context makes either
+    // one actionable.
+    log[res.status >= 500 ? "error" : "warn"]("sandbox download failed", {
+      sessionId: id,
+      path: filePath,
+      status: res.status,
+      err: String(err.error),
+    });
     // Pass a client condition (e.g. 404 missing file) through unchanged; collapse a
     // real upstream failure (5xx) into 502 so it reads as a gateway error, not the
     // controller's raw internal status.
