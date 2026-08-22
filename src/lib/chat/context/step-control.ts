@@ -114,3 +114,22 @@ export function stepSettings(stepNumber: number): { toolChoice?: "none" } {
 export function pruneTurnToolTraffic(messages: ModelMessage[]): ModelMessage[] {
   return pruneMessages({ messages, toolCalls: `before-last-${TOOL_CLEAR_KEEP_LAST}-messages` });
 }
+
+/**
+ * Whether this step should shed the turn's accumulated tool traffic — the gate in
+ * front of pruneTurnToolTraffic, split out because it is the load-bearing part and
+ * the runner it lives in has no test of its own.
+ *
+ * `triggerAt` is 0 for a provider that clears server-side: the two mechanisms would
+ * otherwise fight over the same history and each pay a cache invalidation for it.
+ * `alreadyPruned` is what makes it once-per-turn — and it has to be a latch, not a
+ * re-measurement, because a successful prune drops the next step's prompt back under
+ * the trigger and would silently re-arm the whole thing.
+ */
+export function shouldPruneTurnMidFlight(input: {
+  triggerAt: number;
+  alreadyPruned: boolean;
+  lastStepContextTokens: number;
+}): boolean {
+  return input.triggerAt > 0 && !input.alreadyPruned && input.lastStepContextTokens >= input.triggerAt;
+}

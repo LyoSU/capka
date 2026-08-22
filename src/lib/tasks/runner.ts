@@ -25,7 +25,8 @@ import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/con
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, markStepTail,
   clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
-import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, MAX_STEPS } from "@/lib/chat/context/step-control";
+import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, shouldPruneTurnMidFlight,
+  MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
@@ -655,7 +656,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 // this a single long tool loop has no brake at all on any provider
                 // Anthropic doesn't serve directly. Deliberately before the cache
                 // marker below, so the marker lands on the pruned tail.
-                if (intraTurnPruneAt && !intraTurnPruned && lastStepContextTokens >= intraTurnPruneAt) {
+                if (shouldPruneTurnMidFlight({ triggerAt: intraTurnPruneAt, alreadyPruned: intraTurnPruned, lastStepContextTokens })) {
                   const pruned = pruneTurnToolTraffic(msgs);
                   intraTurnPruned = true;
                   tlog.info("pruned tool traffic mid-turn", {

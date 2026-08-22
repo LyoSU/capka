@@ -32,6 +32,17 @@ export const CLEARED_TOOL_INPUT =
  * the call's `name` and `id` stay, so the timeline still reads. `tool-error` is
  * never touched (small and high-signal). Pure and non-mutating — the DB keeps
  * everything; only what we feed the model is trimmed.
+ *
+ * Clearing inputs has a real cost, and this is the deliberate trade: for a call
+ * whose arguments ARE the payload (a row being written) the input is the whole
+ * point of clearing, but for one whose arguments merely name the result (a file
+ * path, a search term) the model loses the record of what it already looked at,
+ * and an agent that can't see that re-does it. The bound on the damage is
+ * `keepLast`: the freshest exchanges keep everything, so what's lost is only the
+ * detail of work the agent has long since acted on. If re-reading ever shows up
+ * in traces, the lever is a per-tool exemption here — NOT reverting to
+ * results-only, which is what let a bulk-write turn ride to the context ceiling
+ * with clearing switched on the whole time.
  */
 export function clearStaleToolResults<T extends { parts?: StoredPart[] }>(
   messages: T[],
