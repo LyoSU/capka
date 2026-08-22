@@ -645,7 +645,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // Cheap, not free: those three messages still carry the whole loop's TOKENS
       // (only the count collapsed — 30 exchanges measured 12.9k chars), so the next
       // measurement is still over the trigger and the cut re-arms at step 1. One
-      // unbraked step and one cache transition, not a lost turn. And that is why
+      // unbraked step and one cache transition, not a lost turn. What the collapse
+      // does cost is granularity: N calls in ONE message means the pruner, which
+      // works per message, sheds the resumed loop's traffic all at once or not at
+      // all. Inherent to the missing `step-start`, not to the cut. And that is why
       // `lastStepContextTokens` is deliberately NOT reset alongside it: it is the
       // (i) popover's and the context meter's figure too, so zeroing it would report
       // an empty window on a turn that died of a full one. armPruneBoundary's
