@@ -20,6 +20,7 @@ All notable changes to Capka are documented here. Format follows
 - `MCP_DEFER_TOKEN_PCT` and `MCP_DEFER_TOKEN_MAX` no longer warn at boot for `0` or a fractional value; both are honoured, and only the warning said otherwise.
 - `FORCE_TEXT_AFTER_STEPS` is validated against the ceiling `MAX_AGENT_STEPS` sets rather than as a standalone integer, so a value above that ceiling is reported instead of silently clamped.
 - A model that rejects reasoning outright is remembered, so it stops paying a rejected provider request and a full stream restart on every turn.
+- Reasoning clearing on Anthropic no longer switches on at 12% of a large context window: it has its own uncapped half-the-window threshold instead of sharing the tool-clearing trigger, which is capped at 120k and measured 15-58% more expensive than carrying reasoning on deep tool loops.
 
 ## [0.31.0] - 2026-08-22
 

@@ -24,7 +24,7 @@ import { buildViewFileInjection } from "@/lib/sandbox/view-file";
 import { askFormSchema, type AskForm } from "@/lib/ask/types";
 import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/context/build";
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
-import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, contextIsDeep, markStepTail,
+import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, thinkingIsDeep, markStepTail,
   clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
 import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   MAX_STEPS } from "@/lib/chat/context/step-control";
@@ -521,7 +521,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // worth more than the tokens. The signal is the prompt size the previous
       // turn already measured and persisted — nothing new to compute or store.
       const nodes = path.map((p) => p.node);
-      contextDeep = contextIsDeep(nodes, effectiveLimit);
+      contextDeep = thinkingIsDeep(nodes, effectiveLimit);
       toolsCleared = shouldClearToolResults(provider, nodes, effectiveLimit);
       if (path.length) {
         uiMessages = toUIMessages(buildModelContext(nodes as ContextRow[],

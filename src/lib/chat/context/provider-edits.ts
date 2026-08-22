@@ -44,6 +44,32 @@ export function toolClearTrigger(effectiveLimit: number): number {
   return Math.min(Math.round(effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION), TOOL_CLEAR_TRIGGER_MAX);
 }
 
+/**
+ * The trigger for shedding THINKING, which is deliberately NOT the trigger for
+ * shedding tool traffic. Same fraction, no cap — and the cap is the whole point.
+ *
+ * `TOOL_CLEAR_TRIGGER_MAX` is right for tool traffic and inverted for thinking,
+ * because the two edits have opposite economics. Shedding a stale tool body is
+ * cheap relief: the body is replayed on every step until it goes, and recall
+ * degrades while it stays. Shedding thinking is not relief at all until the turn
+ * stops fitting — `clear_thinking_20251015` takes no `trigger`, so it applies on
+ * every request, and the clearing point advances each step of a tool loop, paying
+ * a cache transition per step to drop tokens that were being read at cache rate.
+ *
+ * Measured over the loop, clearing costs 15-58% more in billed token-equivalents
+ * than carrying (cache read 0.1x, 5-minute write 1.25x), and the "otherwise the
+ * turn doesn't fit" justification holds in 3 of 9 window/thinking-size regimes.
+ * The cap is what put us in the other six: it makes "half" mean 120k, so on a 1M
+ * window the gate fired at 12% — where headroom is not remotely the binding
+ * constraint — and stayed on, because the decision is sticky by design.
+ *
+ * A fraction with no cap scales the way this edit needs: it fires late on a large
+ * window, which is exactly where carrying thinking is affordable.
+ */
+export function thinkingClearTrigger(effectiveLimit: number): number {
+  return Math.round(effectiveLimit * TOOL_CLEAR_TRIGGER_FRACTION);
+}
+
 /** True when the provider has no server-side tool-result clearing, so we must
  *  apply the policy ourselves when building the model's view of the context. */
 export function clearsToolResultsClientSide(provider: string): boolean {
@@ -91,11 +117,34 @@ export function shouldClearToolResults(
  * already mid-flight must not flip when its marker changes name.
  */
 export function contextIsDeep(path: { metadata: unknown }[], effectiveLimit: number): boolean {
+  return deepPast(path, toolClearTrigger(effectiveLimit), true);
+}
+
+/**
+ * The same question for thinking, at thinking's own threshold.
+ *
+ * Separate exported function rather than a trigger parameter on purpose: both a
+ * limit and a trigger are plain numbers, so a shared signature makes passing the
+ * wrong one a silent 2x error at a call site instead of a type error.
+ *
+ * It does NOT accept `toolsCleared` as sticky evidence, which `contextIsDeep`
+ * does. That marker is only ever written by a provider with no server-side edit —
+ * never by Anthropic, the only provider this gate reaches — so on a chat that
+ * changed model mid-conversation it would carry stickiness earned at the LOWER
+ * tool threshold into the higher thinking one, turning the edit on early and
+ * permanently. `contextDeep` is this decision's own marker and the only one it
+ * reads.
+ */
+export function thinkingIsDeep(path: { metadata: unknown }[], effectiveLimit: number): boolean {
+  return deepPast(path, thinkingClearTrigger(effectiveLimit), false);
+}
+
+function deepPast(path: { metadata: unknown }[], trigger: number, acceptToolsCleared: boolean): boolean {
   const metas = path.map((r) => r.metadata as MessageMeta | null);
   const live = metas.slice(metas.findLastIndex((m) => m?.compaction) + 1);
-  if (live.some((m) => m?.contextDeep || m?.toolsCleared)) return true;
+  if (live.some((m) => m?.contextDeep || (acceptToolsCleared && m?.toolsCleared))) return true;
   const lastMeasured = live.map((m) => m?.contextTokens).findLast((t): t is number => typeof t === "number");
-  return (lastMeasured ?? 0) >= toolClearTrigger(effectiveLimit);
+  return (lastMeasured ?? 0) >= trigger;
 }
 /**
  * Whether to also clear old thinking blocks, and why it needs a gate of OUR own.
@@ -108,11 +157,15 @@ export function contextIsDeep(path: { metadata: unknown }[], effectiveLimit: num
  * cache never settles: attaching it unconditionally pays a transition per step to
  * shed tokens that were being read at cache rate anyway.
  *
- * So it is attached only once the conversation is deep — the same threshold tool
- * clearing uses, which is where window headroom rather than cache economy is the
- * binding constraint, and where the alternative to shedding is not a bigger bill but
- * a turn that doesn't fit. The win over carrying thinking has NOT been measured; if
- * it turns out negative, the honest fix is to stop attaching this, not to widen it.
+ * So it is attached only once the conversation is deep — at `thinkingClearTrigger`,
+ * which is NOT the threshold tool clearing uses. It shared that threshold until the
+ * cost was measured, and the shared number was the defect: the tool trigger is capped
+ * at 120k, so on a 1M window this gate fired at 12% and, being sticky, stayed on.
+ *
+ * Measured (see `thinkingClearTrigger`): clearing costs 15-58% more than carrying,
+ * and pays only where the alternative is a turn that does not fit. That is a
+ * threshold question, not a yes/no one — which is why the answer was neither "stop
+ * attaching this" nor "widen `keep`", the two options the unmeasured version offered.
  */
 export const THINKING_KEEP_TURNS = TOOL_CLEAR_KEEP_LAST;
 

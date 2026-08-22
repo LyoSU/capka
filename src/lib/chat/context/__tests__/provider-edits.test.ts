@@ -5,6 +5,8 @@ import {
   clearsToolResultsClientSide,
   shouldClearToolResults,
   contextIsDeep,
+  thinkingIsDeep,
+  thinkingClearTrigger,
   markStepTail,
   toolClearTrigger,
   TOOL_CLEAR_TRIGGER_FRACTION,
@@ -158,6 +160,62 @@ describe("shouldClearToolResults", () => {
       turn({ contextTokens: half + 1 }),
     ];
     expect(shouldClearToolResults("openai", path, LIMIT)).toBe(true);
+  });
+});
+
+describe("the thinking gate has its own threshold", () => {
+  const turn = (m: Record<string, unknown>) => ({ metadata: m });
+
+  it("does NOT inherit the tool trigger's cap", () => {
+    // The cap is right for tool traffic and inverted for thinking. Sharing one
+    // number made this gate fire at 12% of a 1M window — and it is sticky, so it
+    // then stayed on for the rest of the conversation, paying a cache transition
+    // per step to shed tokens that were being read at cache rate.
+    expect(toolClearTrigger(1_000_000)).toBe(TOOL_CLEAR_TRIGGER_MAX);
+    expect(thinkingClearTrigger(1_000_000)).toBe(500_000);
+    expect(thinkingClearTrigger(1_000_000)).toBeGreaterThan(toolClearTrigger(1_000_000));
+  });
+
+  it("still scales down, so a large flat number could not replace it", () => {
+    // The fraction is what makes this fire at all on a small window.
+    expect(thinkingClearTrigger(32_000)).toBe(16_000);
+    expect(thinkingIsDeep([turn({ contextTokens: 16_000 })], 32_000)).toBe(true);
+  });
+
+  it("stays off on a large window where tool clearing has already turned on", () => {
+    // 120k is half of a 240k window's trigger and 12% of this one: deep enough to
+    // shed tool bodies, nowhere near where carrying thinking stops fitting.
+    const path = [turn({ contextTokens: 120_000 })];
+    expect(contextIsDeep(path, 1_000_000)).toBe(true);
+    expect(thinkingIsDeep(path, 1_000_000)).toBe(false);
+  });
+
+  it("turns on at its own threshold, and stays on once it has", () => {
+    expect(thinkingIsDeep([turn({ contextTokens: 500_000 })], 1_000_000)).toBe(true);
+    // Sticky for the same reason tool clearing is: shedding shrinks the very
+    // measurement that triggered it, so a fresh answer each turn would oscillate
+    // and hand the cache a different prefix every other turn.
+    const after = [turn({ contextTokens: 500_000, contextDeep: true }), turn({ contextTokens: 9_000 })];
+    expect(thinkingIsDeep(after, 1_000_000)).toBe(true);
+  });
+
+  it("does NOT take `toolsCleared` as evidence, though contextIsDeep does", () => {
+    // `toolsCleared` is only ever written by a provider with no server-side edit,
+    // and is earned at the LOWER tool threshold. A chat that changed model
+    // mid-conversation would otherwise carry that stickiness into this gate and
+    // turn the edit on early and permanently.
+    const path = [turn({ contextTokens: 1_000, toolsCleared: true })];
+    expect(contextIsDeep(path, 1_000_000)).toBe(true);
+    expect(thinkingIsDeep(path, 1_000_000)).toBe(false);
+  });
+
+  it("resets at a compaction checkpoint, like every other shed decision", () => {
+    const path = [
+      turn({ contextTokens: 500_000, contextDeep: true }),
+      turn({ compaction: { summary: "…", summarizedUpTo: "m1" } }),
+      turn({ contextTokens: 20_000 }),
+    ];
+    expect(thinkingIsDeep(path, 1_000_000)).toBe(false);
   });
 });
 
