@@ -17,6 +17,7 @@ All notable changes to Capka are documented here. Format follows
 - Boot config warnings now name what actually happens to a rejected numeric value instead of always claiming a fallback: twelve knobs including `TASK_TIMEOUT_MINUTES`, `PG_POOL_MAX` and `MAX_AGENT_STEPS` are reported as used as written when the value survives (`TASK_TIMEOUT_MINUTES=-1` aborts every turn immediately), and `WORKER_MAX_CONCURRENCY=10g` as running at 10.
 - `MCP_DEFER_TOKEN_PCT` and `MCP_DEFER_TOKEN_MAX` no longer warn at boot for `0` or a fractional value; both are honoured, and only the warning said otherwise.
 - `FORCE_TEXT_AFTER_STEPS` is validated against the ceiling `MAX_AGENT_STEPS` sets rather than as a standalone integer, so a value above that ceiling is reported instead of silently clamped.
+- A model that rejects reasoning outright is remembered, so it stops paying a rejected provider request and a full stream restart on every turn.
 
 ## [0.31.0] - 2026-08-22
 

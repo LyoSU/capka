@@ -37,7 +37,7 @@ import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
 import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
-import { rememberModelEfforts } from "@/lib/models/catalog";
+import { rememberModelCannotReason, rememberModelEfforts } from "@/lib/models/catalog";
 import { buildResumeMessages, stitchOverlap } from "./resume";
 import { StallWatchdog } from "./stall-watchdog";
 import { repairToolCall } from "./tool-repair";
@@ -349,7 +349,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
-    const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
@@ -619,10 +619,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // models/thinking.ts). `modelEfforts` is the enum this model has previously
     // told us it accepts; null until the negotiation below learns it.
     //
-    // Still applied optimistically: a model that can't reason at all rejects the
-    // request and we re-stream without it, and a model that only accepts OTHER
-    // effort values teaches us its enum on the way (retryOnCapabilityError).
-    let reasoning = reasoningParams(provider, thinkAmount, modelEfforts);
+    // Applied optimistically ONLY while the model has not already refused: a model
+    // that only accepts OTHER effort values teaches us its enum on the way
+    // (retryOnCapabilityError), but one that rejects reasoning outright told us so
+    // once and `modelCannotReason` remembers it — otherwise every turn paid that
+    // rejection plus a full stream restart, forever.
+    let reasoning = modelCannotReason ? undefined : reasoningParams(provider, thinkAmount, modelEfforts);
     let useReasoning = reasoning !== undefined;
     // Effective window (model ∩ admin cap) drives the provider-native edit's
     // trigger. Reused from the budget logic so the cap is honored here too.
@@ -1364,6 +1366,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // Model can't reason — re-stream without the reasoning knobs. Reset parts
         // defensively so a retry can't duplicate output.
         tlog.info("reasoning unsupported — retrying without it");
+        // Remember it, so this costs ONE request per model rather than one per
+        // turn — the same bargain the effort-enum branch above makes. Fire and
+        // forget: the retry below must not wait on a write, and a failed write
+        // only means the next turn re-learns it.
+        void rememberModelCannotReason(modelId, provider).catch((e) =>
+          tlog.warn("could not persist that the model cannot reason", { error: errMsg(e) }),
+        );
         useReasoning = false;
         streamError = undefined;
         await discardPartial();

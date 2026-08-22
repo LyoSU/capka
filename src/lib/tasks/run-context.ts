@@ -20,7 +20,7 @@ import { readMemoryDocs } from "@/lib/memory/store";
 import { resolvePolicies, isUsable } from "@/lib/governance/policy";
 import { resolveAgentProfile, capProfile, parseAgentProfile } from "@/lib/agents/profile";
 import { getSandboxNetworkDefault, getMaxContextTokens, getOrgAgentProfile, getOrgInstructions, getSetting, setSetting } from "@/lib/settings";
-import { getModelContextLength, getModelEfforts } from "@/lib/models/catalog";
+import { getModelCannotReason, getModelContextLength, getModelEfforts } from "@/lib/models/catalog";
 import { availableAmounts, clampAmount, parseThinkAmount } from "@/lib/models/thinking";
 import { contextBudget } from "@/lib/chat/context/budget";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
@@ -263,12 +263,16 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // admin cap (which only ever tightens it). Fetched up front — the effective
     // window drives both the deferral decision below and the NEXT-turn compaction
     // check (which reuses contextLength/adminCap after the turn).
-    const [contextLength, adminCap, modelEfforts] = await Promise.all([
+    const [contextLength, adminCap, modelEfforts, modelCannotReason] = await Promise.all([
       getModelContextLength(modelId),
       getMaxContextTokens(),
       // The `reasoning_effort` enum this model has taught us, so the very first
       // request of this turn already carries a value it accepts.
       getModelEfforts(modelId),
+      // Whether it told us it accepts no reasoning knobs at all — so a model that
+      // cannot reason stops paying a rejected request and a stream restart every
+      // turn. Rides this wave rather than costing a serial round-trip.
+      getModelCannotReason(modelId),
     ]);
     const effectiveLimit = contextBudget({ usedTokens: 0, modelContextLength: contextLength, adminCap: adminCap || null }).effectiveLimit;
     // Progressive tool disclosure: when the connector tools would tax the window,
@@ -306,7 +310,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       availableAmounts(provider, modelEfforts),
     );
 
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts };
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason };
   } catch (e) {
     await closeAll();
     throw e;

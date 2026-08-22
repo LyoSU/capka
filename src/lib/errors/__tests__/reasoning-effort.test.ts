@@ -66,6 +66,20 @@ describe("parseAllowedEfforts", () => {
     expect(isReasoningUnsupportedError(err)).toBe(true);
   });
 
+  it("recognizes LiteLLM's gateway phrasing, verbatim from the demo", () => {
+    // The exact message that made a demo model pay a rejected request and a full
+    // stream restart on every turn. Pinned because the phrasing is the gateway's,
+    // not the provider's: no quoted parameter, the name inside a list, and the
+    // verb split across "UnsupportedParamsError" and "does not support".
+    const err = new Error(
+      "litellm.UnsupportedParamsError: openrouter does not support parameters: ['reasoning_effort'], for model=stealth/ox-alpha. To drop these, set `litellm.drop_params=True`",
+    );
+    expect(isReasoningUnsupportedError(err)).toBe(true);
+    // No enum on offer, so there is nothing to negotiate — it must take the
+    // drop-reasoning branch, which is the one that now remembers.
+    expect(parseAllowedEfforts(err)).toBeNull();
+  });
+
   it("catches what the old classifier misses — the bug this fixes", () => {
     // The reason a Kimi turn showed a red error panel instead of an answer: the
     // enum rejection matches NEITHER of the existing classifiers, so no retry ran.
