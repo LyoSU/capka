@@ -51,9 +51,11 @@ git show HEAD:<path>    | grep -c '<their tokens>'               # or already co
 ```
 
 **Assert positively; a clean pre-check is not a guarantee.** "I confirmed the
-index was empty first" fails open — a peer can stage between your check and your
-commit, and two such alarms have already turned out to be a peer's commit landing
-between two of one session's own commands. Since `git commit -- <paths>` never
+index was empty first" fails open: it asserts a *moment*, and a commit is an
+*object*. That holds whichever way the moment gets falsified — a peer staging
+between your check and your commit, or a bad count from the tooling caveat below.
+Two such alarms did occur and proved unreproducible a minute later, cause
+undetermined between exactly those two. Since `git commit -- <paths>` never
 stages, make the assertion on the *result*: `git show --stat --format="" HEAD`
 must list exactly the paths you intended, and `git diff --cached --name-only`
 must still be empty. That fails closed.
