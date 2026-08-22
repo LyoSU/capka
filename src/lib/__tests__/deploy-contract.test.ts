@@ -225,7 +225,15 @@ describe("every documented knob reaches the container that reads it", () => {
 
   /** Env names read by a set of source files. */
   function envRead(files: string[]): Set<string> {
-    const src = files.map((f) => readFileSync(f, "utf8")).join("\n");
+    // Comments stripped first: a docblock that CITES a read — config/env.ts explains
+    // the `Number(process.env.X) || fallback` footgun by writing it out — is prose, not
+    // a read, and counting it reported a knob named "X" as undocumented. Prose about
+    // code must not register as code.
+    const src = files
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
     const names = [
       ...[...src.matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1]),
       // The env helpers take the name as a string: posIntEnv("SANDBOX_CPUS", …).
