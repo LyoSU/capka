@@ -3,6 +3,12 @@ import { createServer, connect } from "node:net";
 import { createEgressProxy, pinnedAddress } from "./egress-proxy.js";
 import { parseAllowlist } from "./egress-policy.js";
 
+// Every case here drives real sockets through a real HTTP server, so the default
+// 5s budget is a measure of the machine, not of the proxy. Raised so a loaded run
+// reports what it means: green in isolation and red in a full suite is the shape
+// that costs the most time to diagnose.
+vi.setConfig({ testTimeout: 15_000 });
+
 // Real sockets, no Docker, no network: the DNS answer and the dialer are injected,
 // so a policy decision can be driven end to end against a local echo server.
 const ALLOW = parseAllowlist("pypi.org, *.githubusercontent.com, internal.example.com:8080").entries;
@@ -51,7 +57,11 @@ function sendConnect(port, authority) {
       }
     });
     sock.on("error", reject);
-    setTimeout(() => reject(new Error("no response")), 4000);
+    // No racing timer here on purpose. A 4s reject inside the test body is invisible
+    // to vitest's own budget, and under load it fired first and failed the test with
+    // "no response" — a message that reads as the egress proxy not answering, i.e. a
+    // product defect that did not exist. Let the runner own the deadline: a hang then
+    // reports as a timeout, which is the one thing actually known.
   });
 }
 

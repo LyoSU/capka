@@ -29,6 +29,18 @@ function workspaceToken(userId: string, sessionId: string): string {
     .digest("hex");
 }
 
+/** Which level a controller failure deserves, from its status alone.
+ *
+ *  A 4xx is a condition the CALLER has to handle — a file that isn't there, a full
+ *  workspace, a session that has gone — not a fault of the deployment. Reporting
+ *  those as errors is what made a workspace path the agent merely mentioned look
+ *  like a broken download path. A 5xx is the deployment's problem and stays an
+ *  error. Every failure site in this file uses this, so no one site's level reads
+ *  as a deliberate exception to the others. */
+function failureLevel(status: number): "warn" | "error" {
+  return status >= 500 ? "error" : "warn";
+}
+
 /** Wrap fetch — rethrow ECONNREFUSED/ENOTFOUND as user-friendly SandboxError */
 async function sandboxFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
   try {
@@ -91,7 +103,7 @@ async function sendRequest(path: string, method: string, body: unknown, timeoutM
     // right here: the raw string carries the query, and on DELETE that query holds a
     // live `workspaceToken`. Any failed listing or delete wrote a valid
     // workspace-access HMAC into the platform log, where it outlives the request.
-    log.error("sandbox request failed", { method, path: sanitizeRoute(path), status: res.status, err: String(raw) });
+    log[failureLevel(res.status)]("sandbox request failed", { method, path: sanitizeRoute(path), status: res.status, err: String(raw) });
     // The workspace-full block is an actionable condition the agent must SEE and
     // act on (free space, then retry), so its message passes through verbatim.
     // Everything else collapses to a generic message — we don't leak controller
@@ -249,7 +261,7 @@ export async function downloadFile(sessionId: string, filePath: string, userId?:
     // "sandbox download failed" that named nothing and could not be told apart from
     // a broken download path. The status picks the level; the context makes either
     // one actionable.
-    log[res.status >= 500 ? "error" : "warn"]("sandbox download failed", {
+    log[failureLevel(res.status)]("sandbox download failed", {
       sessionId: id,
       path: filePath,
       status: res.status,
@@ -286,7 +298,7 @@ export async function archiveWorkspace(sessionId: string, userId: string): Promi
     signal: AbortSignal.timeout(300_000),
   });
   if (!res.ok) {
-    log.error("sandbox archive failed", { status: res.status });
+    log[failureLevel(res.status)]("sandbox archive failed", { sessionId: id, status: res.status });
     const status = res.status >= 500 ? 502 : res.status;
     throw new SandboxError("Archive failed", "archive", res.status >= 500, status);
   }
@@ -323,7 +335,7 @@ export async function uploadFile(sessionId: string, path: string, file: File, us
   });
   const data = await res.json();
   if (!res.ok) {
-    log.error("sandbox upload failed", { err: String(data.error) });
+    log[failureLevel(res.status)]("sandbox upload failed", { sessionId: id, status: res.status, err: String(data.error) });
     throw new SandboxError("File upload failed", "upload", false);
   }
   return data;

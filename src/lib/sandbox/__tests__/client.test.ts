@@ -67,9 +67,30 @@ describe("what a failed sandbox call writes to the operator's log", () => {
 
     await expect(listFiles("chat1", ".", "user1")).rejects.toBeTruthy();
 
-    expect(logged.error).toHaveBeenCalledTimes(1);
-    const fields = logged.error.mock.calls[0][1] as Record<string, unknown>;
+    const fields = logged.warn.mock.calls[0][1] as Record<string, unknown>;
     expect(fields.path).toBe("/sessions/{id}/files");
     expect(JSON.stringify(fields)).not.toContain("token");
+  });
+
+  // The level is one rule for the whole file, not a judgement per call site: a
+  // listing of a path that isn't there is the caller's business, a 500 is the
+  // deployment's. Asserted on `request()` as well as on the download path, because
+  // a rule that holds at one site and not its neighbours reads as an exception.
+  it("picks the level from the status on the shared request path too", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Session not found" }), { status: 404 }),
+    );
+    await expect(listFiles("chat1", ".", "user1")).rejects.toBeTruthy();
+    expect(logged.warn).toHaveBeenCalledWith("sandbox request failed", expect.objectContaining({ status: 404 }));
+    expect(logged.error).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+    logged.warn.mockReset();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "boom" }), { status: 500 }),
+    );
+    await expect(listFiles("chat1", ".", "user1")).rejects.toBeTruthy();
+    expect(logged.error).toHaveBeenCalledWith("sandbox request failed", expect.objectContaining({ status: 500 }));
+    expect(logged.warn).not.toHaveBeenCalled();
   });
 });
