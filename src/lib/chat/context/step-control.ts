@@ -30,6 +30,21 @@ export const FORCE_TEXT_AFTER_STEPS = Math.min(
 );
 
 /**
+ * The wall-clock twin of FORCE_TEXT_AFTER_STEPS: the fraction of a task's run-time
+ * budget after which the turn stops calling tools and answers with what it has.
+ *
+ * 0.8 leaves a fifth of the budget to write the answer in — at the default deadline
+ * that is two minutes, comfortably more than a wrap-up reply needs, and short enough
+ * that the brake doesn't cost a turn much of its working time. Clamped BELOW 1
+ * because a fraction of 1 would arm the brake at the same instant the deadline
+ * aborts the run, which is no brake at all.
+ */
+export const WRAP_UP_AFTER_FRACTION = Math.min(
+  0.95,
+  Math.max(0.1, Number(process.env.WRAP_UP_AFTER_FRACTION) || 0.8),
+);
+
+/**
  * Fold `reasoning` parts of assistant messages INTO their text (returns a fresh
  * array; inputs without reasoning pass through). Used REACTIVELY after a backend
  * rejects the model's own echoed `reasoning_content`
@@ -80,9 +95,23 @@ export function foldReasoningIntoText(messages: ModelMessage[]): ModelMessage[] 
  * `toolChoice` does invalidate the cache once — but only on this single late
  * step, where the turn is wrapping up anyway, so the cost is one-off, not
  * per-step. Hence the only lever here is a late `toolChoice: 'none'`.
+ *
+ * TWO ceilings arm it, because a turn can run out of either budget first. The step
+ * count is the one a chatty model exhausts; the wall clock is the one heavy sandbox
+ * work exhausts, and it usually gets there first — MAX_STEPS tool calls at the
+ * controller's per-exec timeout can exceed the task deadline on their own, so a turn
+ * doing real work hits the clock with steps to spare. Left to the deadline alone,
+ * that turn is aborted mid-tool and the reply is a hard cut; braking a little early
+ * turns the same run into a real answer that says what it got done.
  */
-export function stepSettings(stepNumber: number): { toolChoice?: "none" } {
-  return stepNumber >= FORCE_TEXT_AFTER_STEPS ? { toolChoice: "none" } : {};
+export function stepSettings(
+  stepNumber: number,
+  /** How much of the task's wall-clock budget is spent, 0..1. Zero = no clock pressure. */
+  elapsedFraction = 0,
+): { toolChoice?: "none" } {
+  return stepNumber >= FORCE_TEXT_AFTER_STEPS || elapsedFraction >= WRAP_UP_AFTER_FRACTION
+    ? { toolChoice: "none" }
+    : {};
 }
 
 /**

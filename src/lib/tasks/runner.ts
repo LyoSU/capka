@@ -34,7 +34,7 @@ import { releaseHold } from "@/lib/billing/limits";
 import { costUsd, type TokenUsage } from "@/lib/pricing";
 import { maintainMemoryDoc } from "@/lib/memory/store";
 import { generateChatTitle } from "@/lib/chat/title";
-import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, TIMED_OUT_ERROR, providerUnresponsiveError, INTERRUPTED_ERROR, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
+import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
 import { availableAmounts, clampAmount, reasoningParams } from "@/lib/models/thinking";
 import { rememberModelEfforts } from "@/lib/models/catalog";
@@ -98,12 +98,21 @@ const MAX_REALTIME_RESULT_BYTES = 6000;
  * lease forever and would hold a concurrency slot indefinitely. This deadline
  * aborts such a run so the slot frees and the user gets a clear failure.
  *
- * Operator knob: the 10-minute default covers ordinary turns, but it bounds the
- * WHOLE turn including every tool call, so heavy sandbox work (a batch document
- * conversion, a long Playwright scrape, video transcoding) can legitimately need
- * more. Raise TASK_TIMEOUT_MINUTES rather than letting such turns fail as timeouts.
+ * Operator knob: the default covers ordinary turns, but it bounds the WHOLE turn
+ * including every tool call, so heavy sandbox work (a batch document conversion, a
+ * long Playwright scrape, video transcoding) can legitimately need more. Raise
+ * TASK_TIMEOUT_MINUTES rather than letting such turns fail as timeouts.
+ *
+ * 20 minutes, not the 10 this started at, because 10 was smaller than the OTHER
+ * ceiling on the same turn: MAX_STEPS tool calls at the controller's per-exec
+ * timeout is 12.5 minutes of sandbox time alone, before a token of model latency.
+ * A turn doing legitimate heavy work therefore hit the clock with step budget still
+ * unspent — the clock was capping work, not catching runaways. It is also no longer
+ * the hang detector it once was: STREAM_IDLE_MS catches a silent provider inside a
+ * minute, leaving this deadline to do the one job it is good at — bounding a slow
+ * but LIVE run so it can't hold a worker slot forever.
  */
-const MAX_TASK_MS = (Number(process.env.TASK_TIMEOUT_MINUTES) || 10) * 60_000;
+const MAX_TASK_MS = (Number(process.env.TASK_TIMEOUT_MINUTES) || 20) * 60_000;
 
 /**
  * Stream stall ceiling. A provider can accept the request and then go silent —
@@ -172,6 +181,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     deadlineHit = true;
     ac.abort();
   }, MAX_TASK_MS);
+  // When the abort above will fire. Read per step so the turn can brake into a text
+  // answer before the deadline cuts it mid-tool (see stepSettings / WRAP_UP_AFTER_FRACTION).
+  const deadlineAt = Date.now() + MAX_TASK_MS;
   // A native-approval continuation reuses the SUSPENDED assistant message (append
   // the execute-result + follow-up text to it); a normal turn mints a fresh reply.
   const resumeMessageId = payload.resumeMessageId ?? null;
@@ -721,7 +733,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 // step. Anthropic-only namespace; implicit-caching providers ignore it.
                 msgs = markStepTail(msgs, stepNumber, ephemeral);
                 return {
-                  ...stepSettings(stepNumber),
+                  ...stepSettings(stepNumber, 1 - (deadlineAt - Date.now()) / MAX_TASK_MS),
                   ...(msgs !== messages ? { messages: msgs } : {}),
                   ...(toolSearch.defer ? { activeTools: toolSearch.activeToolNames() } : {}),
                 };
@@ -1477,7 +1489,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // and a two-way split within it, because a stall that hit mid-work must not
     // advise "try again": regenerating re-runs every tool and rewrites what this
     // turn already wrote. `parts` is what the turn is keeping, so it decides.
-    const failure = deadlineHit ? TIMED_OUT_ERROR : leaseLost ? INTERRUPTED_ERROR : stalledOut ? providerUnresponsiveError(parts) : streamError ? classifyLLMError(streamError) : truncated ? RESPONSE_TRUNCATED_ERROR : undefined;
+    const failure = deadlineHit ? timedOutError(parts) : leaseLost ? interruptedError(parts) : stalledOut ? providerUnresponsiveError(parts) : streamError ? classifyLLMError(streamError) : truncated ? RESPONSE_TRUNCATED_ERROR : undefined;
 
     // Token usage + cost, computed once. Needed BOTH for the persisted message
     // metadata (so the (i) details survive a reload — elapsedMs and the usage
@@ -1871,7 +1883,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const isAbort = e instanceof Error && e.name === "AbortError";
     // A lost lease aborts by throwing — it must NOT read as a clean user cancel.
     const status = isAbort && !deadlineHit && !leaseLost ? "cancelled" : "failed";
-    const failure = deadlineHit ? TIMED_OUT_ERROR : leaseLost ? INTERRUPTED_ERROR : isAbort ? undefined : classifyLLMError(e);
+    const failure = deadlineHit ? timedOutError(parts) : leaseLost ? interruptedError(parts) : isAbort ? undefined : classifyLLMError(e);
     // This catch swallows the error to finalize gracefully, so the worker's
     // crash log never fires — record it here instead. A clean cancel is info.
     tlog[status === "cancelled" ? "info" : "error"]("task ended", {

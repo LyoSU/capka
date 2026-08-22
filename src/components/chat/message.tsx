@@ -19,7 +19,7 @@ import { extractWorkspacePaths, splitTouchedByMention } from "@/lib/chat/artifac
 import { cleanReasoning } from "@/lib/chat/reasoning";
 import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
-import { LLM_ERROR_CATEGORIES } from "@/lib/errors/friendly";
+import { LLM_ERROR_CATEGORIES, type LLMErrorCategory } from "@/lib/errors/friendly";
 import { SandboxFileTile, type PreviewFile } from "./file-preview";
 import { MessageEditor } from "./message-editor";
 import type { FileRef } from "@/lib/constants";
@@ -58,6 +58,16 @@ function isReaderEngaged(root: HTMLElement): boolean {
 // can't quietly lose its localized copy — the catalog parity test guards the
 // other half.
 const LOCALIZED_ERROR_CATEGORIES = new Set<string>(LLM_ERROR_CATEGORIES);
+
+/** Failures that left work standing: the turn stopped part-way, so the move is to
+ *  carry on, not to regenerate and rewrite what is already on screen. Each is the
+ *  partial half of a two-way split the runner makes from the turn's saved parts. */
+const PARTIAL_ERROR_CATEGORIES = new Set<string>([
+  "provider_unresponsive_partial",
+  "response_truncated",
+  "timed_out_partial",
+  "interrupted_partial",
+] satisfies LLMErrorCategory[]);
 
 type TimeTranslator = (key: string, values?: Record<string, string | number>) => string;
 
@@ -1646,10 +1656,9 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
             detail={metadata.errorDetail || undefined}
             isAdmin={isAdmin}
             ownsResource={metadata.errorOwned ?? undefined}
-            // Both of these mean "the reply stops mid-way but stands" — the notice
-            // offers Continue instead of the retry advice a real failure gets.
-            partial={metadata.errorCategory === "provider_unresponsive_partial"
-              || metadata.errorCategory === "response_truncated"}
+            // Every one of these means "the reply stops mid-way but stands" — the
+            // notice offers Continue instead of the retry advice a real failure gets.
+            partial={PARTIAL_ERROR_CATEGORIES.has(metadata.errorCategory ?? "")}
             onContinue={onContinue}
           />
         )}

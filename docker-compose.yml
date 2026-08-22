@@ -326,6 +326,11 @@ services:
       # Step at which a long tool loop is told to stop calling tools and answer.
       # Unset ⇒ five below the agent step cap.
       - FORCE_TEXT_AFTER_STEPS=${FORCE_TEXT_AFTER_STEPS:-}
+      # Wall-clock ceiling for one turn, tool calls included. Unset ⇒ 20 minutes.
+      - TASK_TIMEOUT_MINUTES=${TASK_TIMEOUT_MINUTES:-}
+      # Fraction of that budget after which the turn answers instead of calling
+      # more tools, so a run that will time out still lands on a reply. Unset ⇒ 0.8.
+      - WRAP_UP_AFTER_FRACTION=${WRAP_UP_AFTER_FRACTION:-}
       # OPTIONAL agent tracing over OTLP. Unset ⇒ off. These must be listed here:
       # the prod image has no mounted repo and no .env of its own, so a variable set
       # on the host (or in a Coolify service) reaches compose but NOT the container

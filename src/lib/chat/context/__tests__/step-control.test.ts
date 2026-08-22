@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stepSettings, pruneTurnToolTraffic, armPruneBoundary,
-  FORCE_TEXT_AFTER_STEPS, MAX_STEPS } from "@/lib/chat/context/step-control";
+  FORCE_TEXT_AFTER_STEPS, MAX_STEPS, WRAP_UP_AFTER_FRACTION } from "@/lib/chat/context/step-control";
 import type { ModelMessage } from "ai";
 
 describe("stepSettings", () => {
@@ -12,6 +12,31 @@ describe("stepSettings", () => {
   it("forces a text answer once a tool loop runs long, so it can't spin to the hard step cap", () => {
     expect(stepSettings(FORCE_TEXT_AFTER_STEPS)).toEqual({ toolChoice: "none" });
     expect(stepSettings(FORCE_TEXT_AFTER_STEPS + 3)).toEqual({ toolChoice: "none" });
+  });
+
+  // The step budget and the wall-clock budget are separate ceilings, and a turn
+  // doing heavy sandbox work hits the clock first — with tool time alone able to
+  // exceed the deadline before the step cap is anywhere near. Without a clock-side
+  // wrap-up the deadline lands mid-tool and the reply is a hard cut.
+  it("leaves an early step alone however little of the clock has run", () => {
+    expect(stepSettings(0, 0)).toEqual({});
+    expect(stepSettings(0, WRAP_UP_AFTER_FRACTION / 2)).toEqual({});
+  });
+
+  it("forces a text answer once the turn has spent most of its wall-clock budget", () => {
+    expect(stepSettings(0, WRAP_UP_AFTER_FRACTION)).toEqual({ toolChoice: "none" });
+    expect(stepSettings(0, 1.5)).toEqual({ toolChoice: "none" });
+  });
+
+  it("defaults to no clock pressure, so a caller that passes only the step is unchanged", () => {
+    expect(stepSettings(0)).toEqual({});
+  });
+
+  it("leaves room to answer after the wrap-up fires", () => {
+    // A fraction of 1 would arm the brake exactly when the deadline aborts the
+    // run — the wrap-up needs a slice of the budget left to write the answer in.
+    expect(WRAP_UP_AFTER_FRACTION).toBeGreaterThan(0);
+    expect(WRAP_UP_AFTER_FRACTION).toBeLessThan(1);
   });
 
   it("keeps the wrap-up step inside the hard cap, so it always gets a chance to fire", () => {

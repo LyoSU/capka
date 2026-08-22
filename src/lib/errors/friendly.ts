@@ -25,10 +25,12 @@ export const LLM_ERROR_CATEGORIES = [
   "content_blocked",
   "network",
   "timed_out",
+  "timed_out_partial",
   "provider_unresponsive",
   "provider_unresponsive_partial",
   "response_truncated",
   "interrupted",
+  "interrupted_partial",
   "unknown",
 ] as const;
 
@@ -382,6 +384,27 @@ export const TIMED_OUT_ERROR: FriendlyError = {
 };
 
 /**
+ * The same deadline, hit by a turn that had already written files or streamed an
+ * answer. This is the COMMON case for the run-time ceiling, not the exotic one: the
+ * clock runs out on heavy sandbox work precisely because the work was happening.
+ * Advising "try again" there means regenerate — re-run every tool and rewrite what
+ * is already on screen — so the advice inverts exactly as it does for a stall.
+ */
+export const TIMED_OUT_PARTIAL_ERROR: FriendlyError = {
+  category: "timed_out_partial",
+  userMessage:
+    "This task ran out of time and stopped part-way. What it finished above is kept — ask it to continue.",
+  adminDetail: "Task exceeded the maximum run time and was aborted by the server.",
+};
+
+/** Pick which of the two timeout messages a run earns, from what it left behind. */
+export function timedOutError(
+  parts: ReadonlyArray<{ type: string; text?: string }>,
+): FriendlyError {
+  return producedWork(parts) ? TIMED_OUT_PARTIAL_ERROR : TIMED_OUT_ERROR;
+}
+
+/**
  * The provider accepted the request but stopped streaming — no tokens for long
  * enough that the stall watchdog gave up after retrying. Distinct from a clean
  * timeout (the model never produced ANYTHING, vs. ran out of time mid-work) and
@@ -413,20 +436,26 @@ export const PROVIDER_UNRESPONSIVE_PARTIAL_ERROR: FriendlyError = {
 };
 
 /**
- * Pick which of the two stall messages a finished turn earns, from what it left
- * behind. Reasoning does NOT count, and neither does a tool call with no result:
- * both are visible in the transcript, but neither leaves the user anything to
- * keep, and promising otherwise sends them hunting for files that were never
- * written. Structural parameter type — the caller passes the runner's live parts
- * (`StoredPart[]`), which this module has no reason to depend on.
+ * Did this turn leave the user anything worth keeping? Reasoning does NOT count,
+ * and neither does a tool call with no result: both are visible in the transcript,
+ * but neither leaves the user anything to keep, and promising otherwise sends them
+ * hunting for files that were never written. Structural parameter type — the caller
+ * passes the runner's live parts (`StoredPart[]`), which this module has no reason
+ * to depend on.
+ *
+ * This is the one question behind all three partial/total splits below. Every way
+ * a turn can die part-way faces it, and answering it differently per failure is how
+ * the timeout path ended up telling a user who had files on screen to start over.
  */
+function producedWork(parts: ReadonlyArray<{ type: string; text?: string }>): boolean {
+  return parts.some((p) => (p.type === "text" && !!p.text?.trim()) || p.type === "tool-result");
+}
+
+/** Pick which of the two stall messages a finished turn earns, from what it left behind. */
 export function providerUnresponsiveError(
   parts: ReadonlyArray<{ type: string; text?: string }>,
 ): FriendlyError {
-  const producedWork = parts.some(
-    (p) => (p.type === "text" && !!p.text?.trim()) || p.type === "tool-result",
-  );
-  return producedWork ? PROVIDER_UNRESPONSIVE_PARTIAL_ERROR : PROVIDER_UNRESPONSIVE_ERROR;
+  return producedWork(parts) ? PROVIDER_UNRESPONSIVE_PARTIAL_ERROR : PROVIDER_UNRESPONSIVE_ERROR;
 }
 
 /**
@@ -463,3 +492,22 @@ export const INTERRUPTED_ERROR: FriendlyError = {
   userMessage: "This task was interrupted and didn't finish. Please try again.",
   adminDetail: "Worker lost its task lease (server restart or zombie reconciliation); the turn was aborted mid-run.",
 };
+
+/**
+ * The same interruption, over work that survived it. A restart mid-turn is exactly
+ * when the per-step snapshot earns its keep: the finished steps are on screen and in
+ * the workspace, and continuing replays them as history instead of re-executing.
+ */
+export const INTERRUPTED_PARTIAL_ERROR: FriendlyError = {
+  category: "interrupted_partial",
+  userMessage:
+    "This task was interrupted part-way. What it finished above is kept — ask it to continue.",
+  adminDetail: "Worker lost its task lease (server restart or zombie reconciliation); the turn was aborted mid-run.",
+};
+
+/** Pick which of the two interruption messages a run earns, from what it left behind. */
+export function interruptedError(
+  parts: ReadonlyArray<{ type: string; text?: string }>,
+): FriendlyError {
+  return producedWork(parts) ? INTERRUPTED_PARTIAL_ERROR : INTERRUPTED_ERROR;
+}
