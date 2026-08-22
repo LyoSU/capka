@@ -6,8 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The live status row on a running turn now names which wait it is (in queue, connecting to the model, setting up the workspace) instead of always saying "Thinking…", and its clock starts when the message is sent rather than when the model call begins.
+- Durations in chat read in the interface language (`8 с`, `1 хв 32 с`) instead of latin `8s` and the ambiguous `1:32`.
+
 ### Fixed
 
+- A turn whose model emits no reasoning no longer looks dead between a finished tool call and the next step: the status row returns for that gap instead of leaving the Stop button as the only sign of life.
 - Boot config warnings now name what actually happens to a rejected numeric value instead of always claiming a fallback: twelve knobs including `TASK_TIMEOUT_MINUTES`, `PG_POOL_MAX` and `MAX_AGENT_STEPS` are reported as used as written when the value survives (`TASK_TIMEOUT_MINUTES=-1` aborts every turn immediately), and `WORKER_MAX_CONCURRENCY=10g` as running at 10.
 - `MCP_DEFER_TOKEN_PCT` and `MCP_DEFER_TOKEN_MAX` no longer warn at boot for `0` or a fractional value; both are honoured, and only the warning said otherwise.
 - `FORCE_TEXT_AFTER_STEPS` is validated against the ceiling `MAX_AGENT_STEPS` sets rather than as a standalone integer, so a value above that ceiling is reported instead of silently clamped.

@@ -42,7 +42,21 @@ export function useBackgroundChat({
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<"idle" | "running">("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null; retrying: { attempt: number; max: number } | null }>({ startedAt: 0, currentTool: null, retrying: null });
+  // `phase` names the stretches of a turn that produce no content of their own,
+  // so the status row can say which one the user is waiting on instead of a
+  // uniform "Thinking…". "queued" is ours to set (we posted and nothing has come
+  // back); "preparing"/"sandbox" are pushed by the runner; null means the turn is
+  // in its ordinary streaming life. See TaskStatus for how they're prioritized.
+  const [taskInfo, setTaskInfo] = useState<{ startedAt: number; currentTool: string | null; retrying: { attempt: number; max: number } | null; phase: "queued" | "preparing" | "sandbox" | null }>({ startedAt: 0, currentTool: null, retrying: null, phase: null });
+  // Start the wait clock at the moment WE act, not at the task's own task:start.
+  // Between the two sit the POST, the queue, and `prepareRun` (resolving the
+  // model, connecting the connectors) — the part of the wait that most needs
+  // explaining, and the part that used to show a spinner with no number beside
+  // it. The server's own measured duration still wins for the finished label, so
+  // this only ever governs the live row.
+  const startWaiting = useCallback(() => {
+    setTaskInfo({ startedAt: Date.now(), currentTool: null, retrying: null, phase: "queued" });
+  }, []);
   const msgRef = useRef(messages);
   msgRef.current = messages;
   // Optimistic user messages whose POST is still in flight. A task:finish for a
@@ -186,7 +200,20 @@ export function useBackgroundChat({
           // turn, another tab) would otherwise leave the stop button unable
           // to cancel anything (taskId was only set by our own POST before).
           setTaskId(data.taskId);
-          setTaskInfo({ startedAt: Date.now(), currentTool: null, retrying: null });
+          // Keep the clock our own send already started: task:start fires only
+          // after the task was claimed and `prepareRun` resolved the model and
+          // connected the tools, so re-anchoring here would throw away the part
+          // of the wait the user actually noticed and restart at zero. Only a
+          // clock still in the "queued" phase is ours to keep — that phase exists
+          // solely between our POST and this event, so a stale `startedAt` left
+          // by an earlier turn (whose task:start already cleared the phase) can
+          // never be mistaken for this turn's start.
+          setTaskInfo((prev) => ({
+            startedAt: prev.phase === "queued" && prev.startedAt ? prev.startedAt : Date.now(),
+            currentTool: null,
+            retrying: null,
+            phase: null,
+          }));
           // Baseline the seq cursor for this reply (task:start is seq 0), so
           // the first delta (seq 1) is the next contiguous one. NEVER lower a
           // cursor we've already advanced: a redelivered/late task:start
@@ -399,7 +426,7 @@ export function useBackgroundChat({
         case "task:finish": {
           setStatus("idle");
           setTaskId(null);
-          setTaskInfo({ startedAt: 0, currentTool: null, retrying: null });
+          setTaskInfo({ startedAt: 0, currentTool: null, retrying: null, phase: null });
           // Stop tracking this reply's seq — the turn is done; loadHistory
           // below reloads the final, authoritative content. Drop anything still
           // held for this reply too: with its cursor gone, a later drain would
@@ -425,7 +452,20 @@ export function useBackgroundChat({
           // calm "model is slow, retrying" instead of a silent pause; the next
           // content delta clears it (see the GATED apply path above).
           if (data.notice.kind === "retrying") {
-            setTaskInfo((prev) => ({ ...prev, retrying: { attempt: data.notice.attempt, max: data.notice.max } }));
+            // Read out here, not inside the updater: a closure erases the
+            // discriminated-union narrowing `data.notice.kind` just established.
+            const { attempt, max } = data.notice;
+            setTaskInfo((prev) => ({ ...prev, retrying: { attempt, max } }));
+          }
+          // Which setup step the turn is in, for the stretches that stream
+          // nothing. Applied only while we believe a turn is live: this event is
+          // transient and unsequenced, so a "preparing" that arrives after its
+          // own task:finish (out-of-order delivery, a reconnect flush) would
+          // otherwise strand a phase label on an idle chat with no later event
+          // left to clear it.
+          if (data.notice.kind === "phase") {
+            const { phase } = data.notice;
+            setTaskInfo((prev) => (prev.startedAt ? { ...prev, phase } : prev));
           }
           break;
         }
@@ -618,6 +658,7 @@ export function useBackgroundChat({
       const currentMessages = [...msgRef.current, userMsg];
       setMessages(currentMessages);
       setStatus("running");
+      startWaiting();
       if (isFirstMessage && typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("chat:created", {
@@ -671,7 +712,7 @@ export function useBackgroundChat({
         throw e instanceof TypeError ? new Error(t("offline")) : e;
       }
     },
-    [chatId, projectId, t],
+    [chatId, projectId, t, startWaiting],
   );
 
   // ── Re-run the tail (regenerate / edit) ────────────────────
@@ -691,6 +732,7 @@ export function useBackgroundChat({
       // MUST state its own (older) parent — null when editing the first message.
       setMessages(history);
       setStatus("running");
+      startWaiting();
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -725,7 +767,7 @@ export function useBackgroundChat({
         throw e instanceof TypeError ? new Error(t("offline")) : e;
       }
     },
-    [chatId, projectId, t, loadHistory],
+    [chatId, projectId, t, loadHistory, startWaiting],
   );
 
   // Regenerate: drop the latest assistant reply and re-run the same prompt.

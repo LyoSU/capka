@@ -595,7 +595,8 @@ function DoneRow() {
  *  rail — a single thin line connecting each node, so thinking and actions read
  *  as one quiet "here's what I did" timeline rather than two different styles.
  *  A finished run is capped with a terminal "Done ✓" node. */
-function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string }) {
+function ActivityRail({ items, isStreaming, chatId, sandboxPending }: { items: ActivityItem[]; isStreaming?: boolean; chatId?: string; sandboxPending?: boolean }) {
+  const tStatus = useTranslations("chat.taskStatus");
   const rows = items.map((it, i) =>
     it.kind === "reasoning"
       ? <ReasoningRow key={`r${i}`} text={it.text} isStreaming={isStreaming} />
@@ -603,15 +604,29 @@ function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; i
   );
   if (!isStreaming) rows.push(<DoneRow key="done" />);
 
+  // Why the longest pause in the product gets a footnote and not a node: the
+  // container is built FOR the step above — the first tool call that needs it —
+  // so it is that step taking a while, not a separate thing happening. A node
+  // would put a second spinner on screen for one piece of work, which is the
+  // "pile of loaders" failure; a dim line at the tail adds the missing sentence
+  // and nothing else. It sits OUTSIDE the rail wrapper so the connecting line's
+  // geometry (bottom-4, measured to the last badge) stays exactly as it was.
+  const note = isStreaming && sandboxPending ? (
+    <div className="animate-step-in pl-10 text-xs text-muted-foreground">{tStatus("sandbox")}</div>
+  ) : null;
+
   // A lone node needs no connecting line.
-  if (rows.length === 1) return <>{rows}</>;
+  if (rows.length === 1) return <>{rows}{note}</>;
 
   return (
-    <div className="relative my-0.5">
-      {/* the connecting line, centred under the 27px badges */}
-      <div className="pointer-events-none absolute bottom-4 left-[13px] top-4 w-px bg-border" aria-hidden="true" />
-      {rows}
-    </div>
+    <>
+      <div className="relative my-0.5">
+        {/* the connecting line, centred under the 27px badges */}
+        <div className="pointer-events-none absolute bottom-4 left-[13px] top-4 w-px bg-border" aria-hidden="true" />
+        {rows}
+      </div>
+      {note}
+    </>
   );
 }
 
@@ -623,8 +638,9 @@ function ActivityRail({ items, isStreaming, chatId }: { items: ActivityItem[]; i
  *  `timing` is present on the ONE group that owns the turn's measured span (see
  *  the call site); every other group shows its action count and no duration,
  *  because no honest number exists for it. */
-function ActivityGroup({ items, isStreaming, timing, chatId }: { items: ActivityItem[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string }) {
+function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: { items: ActivityItem[]; isStreaming?: boolean; timing?: { measuredMs?: number; startedMsAgo?: number }; chatId?: string; sandboxPending?: boolean }) {
   const t = useTranslations("chat.message");
+  const tDuration = useTranslations("chat.duration");
   const anchorDisclosure = useDisclosureAnchor();
   const streaming = !!isStreaming;
   const timed = timing != null;
@@ -686,7 +702,7 @@ function ActivityGroup({ items, isStreaming, timing, chatId }: { items: Activity
   const hasReasoning = items.some((it) => it.kind === "reasoning");
   const label =
     ms != null
-      ? t(hasReasoning ? "reasonedFor" : "workedFor", { duration: formatShortDuration(ms) })
+      ? t(hasReasoning ? "reasonedFor" : "workedFor", { duration: formatShortDuration(ms, tDuration) })
       : streaming && hasReasoning
         ? t("thinking")
         : t(hasReasoning ? "reasoning" : "activity");
@@ -730,7 +746,7 @@ function ActivityGroup({ items, isStreaming, timing, chatId }: { items: Activity
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5">
-          <ActivityRail items={items} isStreaming={isStreaming} chatId={chatId} />
+          <ActivityRail items={items} isStreaming={isStreaming} chatId={chatId} sandboxPending={sandboxPending} />
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -1427,6 +1443,9 @@ function MessageDetails({
 interface ChatMessageProps {
   message: UIMessage;
   isStreaming?: boolean;
+  /** The turn is waiting on its sandbox container being built — surfaced as a
+   *  dim footnote under the running step, since that step is what's blocked. */
+  sandboxPending?: boolean;
   chatId?: string;
   isAdmin?: boolean;
   /** Provided only on the latest assistant reply — re-runs the same prompt. */
@@ -1477,7 +1496,7 @@ function CompactionDivider({ summary }: { summary: string }) {
   );
 }
 
-function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue, enter }: ChatMessageProps) {
+function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin, onRegenerate, onEdit, onSwitchBranch, onFork, actionsDisabled, onSend, onContinue, enter }: ChatMessageProps) {
   const locale = useLocale();
   const t = useTranslations("chat.message");
   const tTime = useTranslations("chat.time");
@@ -1637,6 +1656,7 @@ function ChatMessageImpl({ message, isStreaming, chatId, isAdmin, onRegenerate, 
                   // count, which is genuinely theirs.
                   timing={gi === firstActivityIdx ? { measuredMs: metadata?.reasoningMs, startedMsAgo: metadata?.runningMs } : undefined}
                   chatId={chatId}
+                  sandboxPending={sandboxPending}
                 />
               </div>
             );

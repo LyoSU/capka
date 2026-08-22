@@ -854,6 +854,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                       chatId={chatId}
                       isAdmin={isAdmin}
                       isStreaming={isStreamingMsg}
+                      // Building the container happens inside a tool call that is
+                      // already spinning on the rail, so it gets a dim sub-line
+                      // under that step rather than a second indicator of its own.
+                      sandboxPending={isStreamingMsg && taskInfo.phase === "sandbox"}
                       onRegenerate={i === lastAssistantIndex && !readOnly ? handleRegenerate : undefined}
                       onEdit={!readOnly ? handleEdit : undefined}
                       onSwitchBranch={switchBranch}
@@ -884,11 +888,22 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   the rail (it mirrors a running node) and explaining the frozen
                   spinner above it. It clears itself the moment content flows. */}
               {isLoading && (() => {
-                const last = messages[messages.length - 1] as { role: string; parts?: unknown[] } | undefined;
-                const showStatus = !!taskInfo.retrying || (!!last && (last.role === "user" || (last.role === "assistant" && (last.parts?.length ?? 0) === 0)));
+                const last = messages[messages.length - 1] as { role: string; parts?: { type: string; state?: string }[] } | undefined;
+                // The gap this closes: a tool has returned and the model is
+                // deciding what to do next. The rule above (empty reply) no
+                // longer holds — there ARE parts — and the rail spins only on a
+                // step whose state is still running, so with a model that emits
+                // no reasoning BOTH indicators fell silent and the only sign the
+                // turn was alive was the Stop button. A finished tool as the last
+                // part means exactly "nothing is in flight but the turn is", so
+                // the same row comes back rather than a new kind of indicator.
+                const tail = last?.parts?.at(-1);
+                const afterTool =
+                  last?.role === "assistant" && tail?.type === "dynamic-tool" && !!tail.state?.startsWith("output-");
+                const showStatus = !!taskInfo.retrying || (!!last && (last.role === "user" || (last.role === "assistant" && (last.parts?.length ?? 0) === 0) || afterTool));
                 return showStatus ? (
                   <div className="px-4 py-4 md:px-6">
-                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} retrying={taskInfo.retrying} />
+                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} retrying={taskInfo.retrying} phase={taskInfo.phase} />
                   </div>
                 ) : null;
               })()}

@@ -24,6 +24,7 @@ import { getModelContextLength, getModelEfforts } from "@/lib/models/catalog";
 import { availableAmounts, clampAmount, parseThinkAmount } from "@/lib/models/thinking";
 import { contextBudget } from "@/lib/chat/context/budget";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
+import { publishTaskEvent } from "./events";
 import type { TaskPayload } from "./runner";
 
 /**
@@ -36,7 +37,7 @@ import type { TaskPayload } from "./runner";
  * context-window budget inputs, and the lazy sandbox session — and returns a
  * ready-to-run bundle plus a `closeMcp` disposer.
  */
-export async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string, messageId: string) {
+export async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string, messageId: string, taskId: string) {
   // A project chat sees its project memory doc + the user-global doc. A
   // standalone chat sees only the user-global doc, so projects don't leak.
   const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, memoryDocs, user, chat, orgProfile, orgInstructions] = await Promise.all([
@@ -110,6 +111,17 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     // Memoize the success; on failure clear it so a later consumer can retry
     // (a transient controller blip shouldn't poison the whole turn's sandbox).
     if (!sessionEnsured) {
+      // Building the container takes 10-20s and it happens INSIDE whatever asked
+      // for it — usually the turn's first sandbox tool call, where the timeline
+      // already says "Running a command" and then sits there. Announce the phase
+      // so that pause has a name, and retract it on settle (success or failure)
+      // so the label can never outlive the work. Fire-and-forget in both
+      // directions: a realtime hiccup must not delay or fail the container.
+      const phase = (p: "sandbox" | null) =>
+        void publishTaskEvent(userId, {
+          type: "task:notice", taskId, chatId, messageId, notice: { kind: "phase", phase: p },
+        }).catch(() => {});
+      phase("sandbox");
       // Resolve mounts FRESH at create time (not a prepareRun snapshot): a folder
       // attached mid-turn via `manage` recreates the container with the new mount,
       // and a stale [] here would make the controller see drift and tear it back
@@ -117,7 +129,12 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       // un-mounts on the next (re)create.
       sessionEnsured = sessionMounts(sessionKey)
         .then((mounts) => createSession(sessionKey, userId, networkMode, mounts))
+        .then((session) => {
+          phase(null);
+          return session;
+        })
         .catch((e) => {
+          phase(null);
           sessionEnsured = null;
           throw e;
         });

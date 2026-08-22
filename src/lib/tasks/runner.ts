@@ -341,8 +341,16 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       return;
     }
 
+    // `prepareRun` resolves the model and connects every tool source before the
+    // first token can exist — seconds of it on a chat with remote connectors, and
+    // it runs BEFORE task:start, so the client had nothing to show and no clock
+    // running for the whole stretch. Name it. Not awaited on the critical path:
+    // a realtime hiccup must not delay the run it is only narrating.
+    void publishTaskEvent(userId, {
+      type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
+    }).catch(() => {});
     const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts } =
-      await prepareRun(userId, sessionKey, payload, chatId, msgId);
+      await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
     // Publish the run identity to the outer scope so the catch path can reconcile

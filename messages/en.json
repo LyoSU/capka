@@ -279,8 +279,15 @@
       "noMessages": "Nothing in this conversation yet",
       "copyFailed": "Couldn't copy the link"
     },
+    "duration": {
+      "sec": "{s}s",
+      "minSec": "{m}m {s}s"
+    },
     "taskStatus": {
       "thinking": "Thinking…",
+      "queued": "In queue…",
+      "preparing": "Connecting to the model…",
+      "sandbox": "Setting up the workspace…",
       "retrying": "The model is slow — retrying…"
     },
     "model": {

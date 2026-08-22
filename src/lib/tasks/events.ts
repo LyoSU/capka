@@ -47,10 +47,17 @@ export type TaskEvent =
   // clean slate instead of being appended to the abandoned attempt.
   | { type: "task:reset"; taskId: string; chatId: string; messageId: string; seq: number }
   // A transient, non-persisted heads-up about the run itself (not the reply
-  // content) — currently only "the provider stalled, we're re-streaming". Lets
-  // the UI replace a silent pause with a calm "model is slow, retrying…" instead
-  // of leaving the user wondering whether anything is happening.
-  | { type: "task:notice"; taskId: string; chatId: string; messageId: string; notice: { kind: "retrying"; attempt: number; max: number }; seq?: number }
+  // content). Lets the UI replace a silent pause with a calm sentence instead of
+  // leaving the user wondering whether anything is happening:
+  //  - `retrying` — the provider stalled and we're re-streaming.
+  //  - `phase`    — which part of the setup the turn is currently in, for the
+  //    stretches that produce no content at all. `preparing` covers resolving
+  //    the model and connecting the tools/connectors (it precedes task:start, so
+  //    that whole wait was previously unattributed); `sandbox` covers building
+  //    the container, which is the single longest unexplained pause in the
+  //    product. `null` means that phase is over. NOT persisted and NOT replayed:
+  //    a client joining mid-turn simply falls back to the generic "Thinking…".
+  | { type: "task:notice"; taskId: string; chatId: string; messageId: string; notice: { kind: "retrying"; attempt: number; max: number } | { kind: "phase"; phase: "preparing" | "sandbox" | null }; seq?: number }
   // messageId is absent when a task fails/cancels before an assistant message exists.
   | { type: "task:finish"; taskId: string; chatId: string; messageId?: string; status: string; error?: string; seq?: number }
   // A freshly-generated title for a new chat, pushed once after its first turn
