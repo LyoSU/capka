@@ -3,11 +3,12 @@ import { createServer, connect } from "node:net";
 import { createEgressProxy, pinnedAddress } from "./egress-proxy.js";
 import { parseAllowlist } from "./egress-policy.js";
 
-// Every case here drives real sockets through a real HTTP server, so the default
-// 5s budget is a measure of the machine, not of the proxy. Raised so a loaded run
-// reports what it means: green in isolation and red in a full suite is the shape
-// that costs the most time to diagnose.
-vi.setConfig({ testTimeout: 15_000 });
+// Every case here drives real sockets through a real HTTP server, so the wall time
+// is a measure of the machine, not of the proxy. The budget it needs comes from the
+// global `testTimeout` in vitest.config.ts and is deliberately NOT restated here: a
+// per-file override is a second copy of one number, and this file had one that said
+// it was raising a 5s default while actually cutting the 20s global down to 15s —
+// taking room from the only suite whose original defect was too little of it.
 
 // Real sockets, no Docker, no network: the DNS answer and the dialer are injected,
 // so a policy decision can be driven end to end against a local echo server.
