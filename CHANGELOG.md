@@ -8,14 +8,15 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
-- `FORCE_TEXT_AFTER_STEPS` sets when a long tool loop is told to stop calling tools and answer, independently of `MAX_AGENT_STEPS` (default: five below the cap, clamped to it). Raising the step cap for bulk work used to push the wrap-up step along with it.
+- `FORCE_TEXT_AFTER_STEPS` pins the step at which a long tool loop is told to stop calling tools and answer. It still defaults to five below `MAX_AGENT_STEPS`, so a raised step cap moves the wrap-up step with it unless you also set this; set it when raising `MAX_AGENT_STEPS` for bulk work. Clamped to the cap.
 
 ### Fixed
 
 - Clearing a stale tool call now drops its arguments as well as its result, on every provider. A turn that writes a hundred rows carries those rows in the arguments and gets an id back, so clearing results alone shed almost nothing and the window kept filling.
-- Tool-result clearing now triggers at `min(50% of the context window, 120k tokens)`. On a 1M-context model nothing was shed until half a million tokens of tool traffic had accumulated.
-- A long tool-calling turn now sheds its own accumulated tool traffic mid-turn on providers without a server-side context edit — once, when the last step's prompt crosses that trigger. Nothing trimmed inside a turn before: compaction is evaluated at a turn boundary, and only Anthropic served directly had an edit of its own.
-- A turn that overflows the context window mid-flight no longer restarts blind to the tool calls it already executed, so it can't repeat a non-idempotent write (an upload, a create). The retry now carries a compact list of what already ran; past a size budget it degrades to per-tool counts rather than growing into the overflow it is recovering from.
+- Tool-result clearing now triggers at `min(50% of the context window, 120k input tokens)`. On a 1M-context model the prompt had to reach half a million tokens before anything was shed.
+- A long tool-calling turn now sheds its own accumulated tool traffic mid-turn on providers without a server-side context edit, from the step where the prompt crosses that trigger until the turn ends. Nothing trimmed inside a turn before: compaction is evaluated at a turn boundary, and only Anthropic served directly had an edit of its own.
+- A turn that overflows the context window mid-flight no longer restarts blind to the tool calls it already executed, so it is far less likely to repeat a non-idempotent write (an upload, a create). The retry carries a list of what already ran, flagging any call that errored as needing verification; past a size budget it degrades to per-tool counts rather than growing into the overflow it is recovering from. Advisory to the model, not an enforced guard.
+- An approval or `ask` continuation now inherits the executed tool calls of the turn's first half, read back from the reply row, instead of starting with an empty record of them.
 
 ## [0.29.0] - 2026-08-21
 

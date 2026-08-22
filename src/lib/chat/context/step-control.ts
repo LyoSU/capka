@@ -86,9 +86,8 @@ export function stepSettings(stepNumber: number): { toolChoice?: "none" } {
 }
 
 /**
- * Shed the tool traffic this turn has already accumulated, keeping the freshest
- * exchanges. Applied ONCE per turn, mid-flight, when the last step's measured
- * prompt crossed the clear trigger.
+ * Shed the tool traffic accumulated before `boundary` (an absolute index into this
+ * step's message list), keeping everything from there on intact.
  *
  * This is the hole the rest of the context machinery left open. Compaction is
  * evaluated at a turn BOUNDARY and buildModelContext clears at turn BUILD, so a
@@ -99,37 +98,50 @@ export function stepSettings(stepNumber: number): { toolChoice?: "none" } {
  * retry re-streams from a blind mechanical trim, which is a far worse outcome
  * than shedding some old tool bodies here.
  *
- * Once, not per step, and that is the whole design. Rewriting the prompt every
- * step is the cache-thrash the `prepareStep` note warns about; rewriting it once
- * costs a single cache write and hands every later step a stable prefix again
- * (the SDK carries a returned `messages` forward as the base for what follows).
+ * An ABSOLUTE boundary, re-applied on every step, and that is the whole design.
+ * A `messages` value returned from `prepareStep` is that step's prompt and nothing
+ * more: the SDK assigns `initialMessages` once, outside its step loop, and rebuilds
+ * `[...initialMessages, ...responseMessages]` per step, so it never sees what we
+ * returned last time. Pruning "once" therefore bought a single step of headroom and
+ * paid for it twice over — the prompt shape changed for that call and changed back
+ * on the next one, two cache transitions for one step of relief, with the turn
+ * unprotected from there on. Re-applying a FIXED cut instead keeps the pruned
+ * prefix byte-identical from step to step, so the cache goes on hitting and the
+ * relief lasts the rest of the turn.
  *
- * Message-scoped rather than tool-scoped: the SDK counts messages, and a tool loop
- * appends roughly one assistant + one tool message per exchange, so keeping the
- * last `TOOL_CLEAR_KEEP_LAST` messages keeps the last one or two exchanges whole.
- * Near enough to the same policy the other two sites enforce, and it is the SDK's
- * own pruner, so tool calls and their results are dropped as pairs and nothing is
- * left orphaned.
+ * Message-scoped rather than tool-scoped: the SDK's pruner counts messages, and a
+ * tool loop appends roughly one assistant + one tool message per exchange. Using
+ * its own pruner is what guarantees calls and results are dropped as PAIRS — an
+ * orphaned tool result is a hard 400 on Anthropic and OpenAI alike.
  */
-export function pruneTurnToolTraffic(messages: ModelMessage[]): ModelMessage[] {
-  return pruneMessages({ messages, toolCalls: `before-last-${TOOL_CLEAR_KEEP_LAST}-messages` });
+export function pruneTurnToolTraffic(messages: ModelMessage[], boundary: number): ModelMessage[] {
+  const keepLast = messages.length - boundary;
+  if (boundary <= 0 || keepLast <= 0) return messages;
+  return pruneMessages({ messages, toolCalls: `before-last-${keepLast}-messages` });
 }
 
 /**
- * Whether this step should shed the turn's accumulated tool traffic — the gate in
- * front of pruneTurnToolTraffic, split out because it is the load-bearing part and
- * the runner it lives in has no test of its own.
+ * Where to cut this turn's tool traffic — 0 until the turn has actually grown past
+ * the trigger. Split out from the runner because it is the load-bearing decision
+ * and the runner has no test file of its own.
  *
  * `triggerAt` is 0 for a provider that clears server-side: the two mechanisms would
  * otherwise fight over the same history and each pay a cache invalidation for it.
- * `alreadyPruned` is what makes it once-per-turn — and it has to be a latch, not a
- * re-measurement, because a successful prune drops the next step's prompt back under
- * the trigger and would silently re-arm the whole thing.
+ *
+ * The boundary only ever moves FORWARD (`Math.max`), which is what stops the
+ * oscillation a naive re-decision would cause: pruning drops the next step's
+ * measured prompt back under the trigger, so a re-measured gate would toggle
+ * off/on and re-shape the prompt — and re-bill the cache — every other step. A
+ * monotonic cut re-arms only when genuinely new traffic has pushed the prompt over
+ * the line again, and each advance costs exactly one cache transition.
  */
-export function shouldPruneTurnMidFlight(input: {
+export function armPruneBoundary(input: {
   triggerAt: number;
-  alreadyPruned: boolean;
+  boundary: number;
   lastStepContextTokens: number;
-}): boolean {
-  return input.triggerAt > 0 && !input.alreadyPruned && input.lastStepContextTokens >= input.triggerAt;
+  messageCount: number;
+}): number {
+  if (input.triggerAt <= 0) return 0;
+  if (input.lastStepContextTokens < input.triggerAt) return input.boundary;
+  return Math.max(input.boundary, input.messageCount - TOOL_CLEAR_KEEP_LAST);
 }

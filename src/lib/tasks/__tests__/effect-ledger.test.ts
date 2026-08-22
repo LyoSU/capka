@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildRecoveryNote,
+  effectsFromParts,
   EFFECT_ARG_CHARS,
   RECOVERY_NOTE_BUDGET,
   type TurnEffect,
 } from "@/lib/tasks/effect-ledger";
+import type { StoredPart } from "@/lib/chat/contracts";
 
 const upsert = (sku: string): TurnEffect => ({ name: "zak_upsert_product", input: { sku, price: 199 } });
 
@@ -56,6 +58,28 @@ describe("buildRecoveryNote", () => {
     expect(note).toContain("wp_publish_product ×14");
   });
 
+  it("flags a call that errored as needing verification, not as clean", () => {
+    // "Did it land?" is the question the ledger exists to answer, and a tool that
+    // writes and then throws is the one case where it genuinely cannot — so it must
+    // say so rather than stay silent.
+    const note = buildRecoveryNote([{ name: "wp_upload_image", input: { file: "a.jpg" }, failed: true }])!;
+    expect(note).toMatch(/errored/);
+    expect(note).toMatch(/verify/);
+  });
+
+  it("carries the errored count through the collapsed form too", () => {
+    // Big enough that the itemized form no longer fits — the collapsed form must
+    // not lose the one distinction that matters most.
+    const effects: TurnEffect[] = [
+      ...Array.from({ length: 400 }, (_, i) => upsert(`CLR-${i}`)),
+      ...Array.from({ length: 8 }, () => ({ name: "wp_upload_image", input: { file: "x.jpg" }, failed: true })),
+    ];
+    const note = buildRecoveryNote(effects)!;
+    expect(note).toContain("counts only");
+    expect(note).toContain("wp_upload_image ×8");
+    expect(note).toMatch(/8 errored/);
+  });
+
   it("keeps a call whose arguments cannot be serialized", () => {
     // The call ran. Losing the entry because its input has a cycle would trade a
     // missing argument for a repeated write.
@@ -63,5 +87,51 @@ describe("buildRecoveryNote", () => {
     cyclic.self = cyclic;
     const note = buildRecoveryNote([{ name: "wp_create_variable_product", input: cyclic }])!;
     expect(note).toContain("wp_create_variable_product");
+  });
+});
+
+describe("effectsFromParts", () => {
+  // The persisted shape: what a reply row's metadata.parts actually holds. A
+  // continuation is a SECOND task writing the SAME row, so this — not process
+  // memory — is where the first half's executed calls live.
+  const call = (id: string, name: string, input: unknown): StoredPart => ({ type: "tool-call", id, name, input });
+  const result = (id: string, name: string): StoredPart => ({ type: "tool-result", id, name, output: { ok: true } });
+  const failed = (id: string, name: string): StoredPart => ({ type: "tool-error", id, name, error: "boom" });
+
+  it("rebuilds executed calls from a row, pairing arguments to their evidence", () => {
+    const effects = effectsFromParts([
+      { type: "text", text: "adding them now" },
+      call("1", "zak_upsert_product", { sku: "CLR-001" }),
+      result("1", "zak_upsert_product"),
+      call("2", "wp_upload_image", { file: "a.jpg" }),
+      failed("2", "wp_upload_image"),
+    ]);
+
+    expect(effects).toEqual([
+      { name: "zak_upsert_product", input: { sku: "CLR-001" } },
+      { name: "wp_upload_image", input: { file: "a.jpg" }, failed: true },
+    ]);
+  });
+
+  it("does not report a call that never ran as done", () => {
+    // A tool-call with no result is either still in flight or was suspended for
+    // approval and never executed. Reporting it would tell the model not to do
+    // something it has not done — and the row would silently go unwritten.
+    expect(effectsFromParts([call("1", "zak_upsert_product", { sku: "CLR-001" })])).toEqual([]);
+  });
+
+  it("survives a result whose call is missing from the row", () => {
+    // Orphans exist in the wild (a sealed dangling call from an interrupted turn).
+    // The evidence that it ran is the result, so the entry has to stand without its
+    // arguments rather than be dropped.
+    const effects = effectsFromParts([result("9", "wp_publish_product")]);
+    expect(effects).toEqual([{ name: "wp_publish_product", input: undefined }]);
+  });
+
+  it("feeds straight into the note the restarted turn reads", () => {
+    const note = buildRecoveryNote(
+      effectsFromParts([call("1", "zak_upsert_product", { sku: "CLR-777" }), result("1", "zak_upsert_product")]),
+    )!;
+    expect(note).toContain("CLR-777");
   });
 });

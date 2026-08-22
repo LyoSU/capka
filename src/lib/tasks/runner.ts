@@ -13,7 +13,7 @@ import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
-import { buildRecoveryNote, type TurnEffect } from "@/lib/tasks/effect-ledger";
+import { buildRecoveryNote, effectsFromParts, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
 import { listFiles } from "@/lib/sandbox/client";
@@ -26,7 +26,7 @@ import { buildModelContext, trimToRecent, type ContextRow } from "@/lib/chat/con
 import { contextBudget, COMPACT_THRESHOLD } from "@/lib/chat/context/budget";
 import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults, markStepTail,
   clearsToolResultsClientSide, toolClearTrigger, TOOL_CLEAR_KEEP_LAST } from "@/lib/chat/context/provider-edits";
-import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, shouldPruneTurnMidFlight,
+import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary,
   MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
@@ -377,6 +377,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .from(messages).where(eq(messages.id, resumeMessageId)).limit(1);
       const meta = (row?.metadata ?? {}) as MessageMeta;
       for (const p of meta.parts ?? []) parts.push(p);
+      // Rebuild the effect ledger from the row, not from this process's memory: the
+      // first half of this turn ran in a DIFFERENT task (and possibly a different
+      // process), so its executed tool calls exist only here. Without this, a
+      // continuation that later overflows would report an empty ledger and re-run
+      // the first half's writes — the exact failure the ledger exists to prevent.
+      turnEffects.push(...effectsFromParts(meta.parts ?? []));
       seq = meta.streamSeq ?? 0;
       // The suspended half's accounting, carried so the finalize below reports the
       // WHOLE turn. A suspended turn finalizes as `completed` (only its metadata
@@ -580,7 +586,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // trigger as the other two enforcement sites, measured off the live per-step
     // prompt size, and applied at most once per turn (see pruneTurnToolTraffic).
     const intraTurnPruneAt = clearsToolResultsClientSide(provider) ? toolClearTrigger(effectiveLimit) : 0;
-    let intraTurnPruned = false;
+    // Absolute index of the cut, 0 until the turn outgrows the trigger. Re-applied
+    // every step and only ever moving forward — a `messages` value returned from
+    // prepareStep is that step's prompt and nothing else (the SDK rebuilds from its
+    // own `initialMessages` each step), so a one-shot prune would relieve exactly
+    // one call and re-shape the prompt twice to do it.
+    let pruneBoundary = 0;
     // Stall detection runs per-attempt: `ac` is the task-wide signal (deadline,
     // cancel, lost lease); `attemptAc` aborts only the CURRENT stream when the
     // provider goes silent, so a retry can re-stream without the whole task
@@ -663,14 +674,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 // this a single long tool loop has no brake at all on any provider
                 // Anthropic doesn't serve directly. Deliberately before the cache
                 // marker below, so the marker lands on the pruned tail.
-                if (shouldPruneTurnMidFlight({ triggerAt: intraTurnPruneAt, alreadyPruned: intraTurnPruned, lastStepContextTokens })) {
-                  const pruned = pruneTurnToolTraffic(msgs);
-                  intraTurnPruned = true;
-                  tlog.info("pruned tool traffic mid-turn", {
-                    stepNumber, contextTokens: lastStepContextTokens, triggerAt: intraTurnPruneAt,
-                    messagesBefore: msgs.length, messagesAfter: pruned.length,
+                if (intraTurnPruneAt) {
+                  const next = armPruneBoundary({
+                    triggerAt: intraTurnPruneAt, boundary: pruneBoundary,
+                    lastStepContextTokens, messageCount: msgs.length,
                   });
-                  msgs = pruned;
+                  if (next !== pruneBoundary) {
+                    tlog.info("pruning tool traffic mid-turn", {
+                      stepNumber, contextTokens: lastStepContextTokens, triggerAt: intraTurnPruneAt,
+                      boundaryFrom: pruneBoundary, boundaryTo: next, messages: msgs.length,
+                    });
+                    pruneBoundary = next;
+                  }
+                  msgs = pruneTurnToolTraffic(msgs, pruneBoundary);
                 }
                 // Moving cache breakpoint on the step tail (see markStepTail for why
                 // it clones): without it, everything a tool loop appends sits beyond
@@ -1058,6 +1074,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // the jsonb metadata write the same way a binary tool-result would.
             const toolErr = stripNul(errMsg(event.error));
             parts.push({ type: "tool-error", id: event.toolCallId, name: event.toolName, error: toolErr });
+            // Ledgered too, and marked failed. Same reason the window counts above:
+            // a tool that throws may have written first, so this is the entry a
+            // restarted turn most needs — "did this land?" cannot be answered from
+            // the transcript and has to be verified.
+            turnEffects.push({ name: event.toolName, input: event.input, failed: true });
             await publishTaskEvent(userId, {
               type: "task:tool-result", taskId, chatId, messageId: msgId,
               toolCallId: event.toolCallId, result: { error: toolErr }, isError: true, seq: ++seq,

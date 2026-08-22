@@ -15,11 +15,17 @@
  * to avoid doing it twice.
  */
 
-/** One executed tool call. Recorded when its result arrives, so it means "this
- *  ran", not "this was requested". */
+import type { StoredPart } from "@/lib/chat/contracts";
+
+/** One executed tool call. Recorded when its result — or its error — arrives, so
+ *  it means "this ran", not "this was requested". */
 export interface TurnEffect {
   name: string;
   input: unknown;
+  /** The call threw instead of returning. It still RAN, and a tool that writes
+   *  before it fails has already written, so this is the entry the model most
+   *  needs: "did this land?" is unanswerable from here and must be checked. */
+  failed?: boolean;
 }
 
 /** Per-entry cap for the rendered arguments. Enough to identify a row (an sku, a
@@ -70,14 +76,56 @@ function renderArgs(input: unknown): string {
 export function buildRecoveryNote(effects: TurnEffect[]): string | null {
   if (effects.length === 0) return null;
 
-  const itemized = HEADER + effects.map((e) => `- ${e.name} ${renderArgs(e.input)}`.trimEnd()).join("\n");
+  const itemized =
+    HEADER +
+    effects
+      .map((e) => `- ${e.name} ${renderArgs(e.input)}${e.failed ? " [errored — may or may not have taken effect; verify]" : ""}`.replace(/  +/g, " ").trimEnd())
+      .join("\n");
   if (itemized.length <= RECOVERY_NOTE_BUDGET) return itemized;
 
-  const counts = new Map<string, number>();
-  for (const e of effects) counts.set(e.name, (counts.get(e.name) ?? 0) + 1);
+  const counts = new Map<string, { ran: number; failed: number }>();
+  for (const e of effects) {
+    const c = counts.get(e.name) ?? { ran: 0, failed: 0 };
+    c.ran++;
+    if (e.failed) c.failed++;
+    counts.set(e.name, c);
+  }
   const summary = [...counts]
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, n]) => `- ${name} ×${n}`)
+    .sort((a, b) => b[1].ran - a[1].ran)
+    .map(([name, c]) => `- ${name} ×${c.ran}${c.failed ? ` (${c.failed} errored — verify those)` : ""}`)
     .join("\n");
   return `${HEADER}(too many to list individually — counts only)\n${summary}`;
+}
+
+/**
+ * Rebuild the ledger from a reply's persisted parts.
+ *
+ * The in-memory ledger is only as durable as the process holding it, and a turn in
+ * this system is a durably queued row that can be picked up again — an approval or
+ * `ask` continuation is literally a SECOND task writing the SAME message row. Its
+ * first half's tool calls are in the row, not in this process's memory, so without
+ * this the continuation starts with an empty ledger and the recovery note it might
+ * later need would omit everything the first half did.
+ *
+ * Paired by tool-call id, because the arguments live on the CALL and the evidence
+ * that it ran lives on the result (or the error): a `tool-call` with neither is
+ * still in flight — or was suspended for approval and never executed — and must
+ * not be reported as done.
+ */
+export function effectsFromParts(parts: StoredPart[]): TurnEffect[] {
+  const calls = new Map<string, { name: string; input: unknown }>();
+  for (const p of parts) {
+    if (p.type === "tool-call") calls.set(p.id, { name: p.name, input: p.input });
+  }
+  const out: TurnEffect[] = [];
+  for (const p of parts) {
+    if (p.type !== "tool-result" && p.type !== "tool-error") continue;
+    const call = calls.get(p.id);
+    out.push({
+      name: call?.name ?? p.name,
+      input: call?.input,
+      ...(p.type === "tool-error" ? { failed: true } : {}),
+    });
+  }
+  return out;
 }
