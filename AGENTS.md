@@ -127,4 +127,37 @@ Never push another session's commits: that is the user's call, not yours.
 that is present, `1` where there are two), which has caused an agent to conclude
 it had lost work and nearly redo it. For anything load-bearing use
 `/usr/bin/grep` or `npx tsc --noEmit`.
+
+It also **summarizes** output, which is worse than miscounting it, because the
+result is well-formed. A `curl` of a 401 came back as `{ error: string }` — 20
+bytes, verified with `od -c` — where the server had sent `{"error":"Unauthorized"}`:
+the value replaced by its *type*. An agent was one message from reporting that a
+live endpoint serves a TypeScript type instead of a body. A wrong number looks
+wrong; a schema standing where a value belongs looks like a finding. So for
+anything you intend to report, get the bytes another way (`rtk proxy <cmd>`,
+`od -c`, a file) and include a request whose answer you already know — the
+control is what exposes the substitution, since the distorted output is
+internally consistent.
+
+Worst for bulk output: it **truncates a pipe**, and the piece it hands back is a
+valid artifact. Measured on one release range, same command, same shell:
+
+```
+git --no-pager diff v0.30.0..v0.31.0 > file    # 338373 bytes, 8150 lines, 57 files
+git --no-pager diff v0.30.0..v0.31.0 | wc -l   #                  572 lines
+```
+
+Exit 0 both times, no marker, and the 572 lines are well-formed hunks — a
+fourteenth of the change looking exactly like the whole change. An audit fed
+that pipe reviews 7% of a release and reports on all of it. **Redirect to a file
+and measure the file; never pipe bulk output into the thing that consumes it.**
+Then confirm the size against a second, independent measure — `--shortstat` said
+6822 insertions here, which cannot fit in 572 lines, and that contradiction is
+the only signal available.
+
+The general rule covering all three: **never let the proxy be the only witness to
+a number, a body, or a size you are about to act on.** Corollary, from an agent
+who lost ten minutes to it the same night: never write `2>/dev/null` while
+establishing a fact. It turned a missing binary into an empty file with exit 0,
+which then read as evidence.
 <!-- END:shared-worktree-rules -->
