@@ -15,6 +15,7 @@ All notable changes to Capka are documented here. Format follows
 - Clearing a stale tool call now drops its arguments as well as its result, on every provider. A turn that writes a hundred rows carries those rows in the arguments and gets an id back, so clearing results alone shed almost nothing and the window kept filling.
 - Tool-result clearing now triggers at `min(50% of the context window, 120k tokens)`. On a 1M-context model nothing was shed until half a million tokens of tool traffic had accumulated.
 - A long tool-calling turn now sheds its own accumulated tool traffic mid-turn on providers without a server-side context edit — once, when the last step's prompt crosses that trigger. Nothing trimmed inside a turn before: compaction is evaluated at a turn boundary, and only Anthropic served directly had an edit of its own.
+- A turn that overflows the context window mid-flight no longer restarts blind to the tool calls it already executed, so it can't repeat a non-idempotent write (an upload, a create). The retry now carries a compact list of what already ran; past a size budget it degrades to per-tool counts rather than growing into the overflow it is recovering from.
 
 ## [0.29.0] - 2026-08-21
 

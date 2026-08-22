@@ -13,6 +13,7 @@ import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
+import { buildRecoveryNote, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
 import { listFiles } from "@/lib/sandbox/client";
@@ -184,6 +185,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // sees what went wrong.
   let messageInserted = false;
   const parts: StoredPart[] = [];
+  // Every tool call this turn has actually EXECUTED. Deliberately separate from
+  // `parts` because the two have opposite lifetimes: `parts` is the reply being
+  // built and is thrown away by a retry, while an executed call stays executed.
+  // Read only by the emergency-overflow path, which restarts the turn from settled
+  // history and needs to tell the model what it already did. See effect-ledger.
+  const turnEffects: TurnEffect[] = [];
   // Set when the AI SDK suspends a `manage` tool call for native approval: the
   // turn finalizes as "awaiting_approval" (non-terminal — no aux, no output-file
   // delivery), the suspended tool-call part is marked with its approvalId, and the
@@ -846,6 +853,11 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the abandoned attempt and resync, so retry deltas land on a clean slate
     // instead of being appended to the thrown-away text.
     const discardPartial = async () => {
+      // NOT cleared here: `turnEffects`. Everything else in this function is about
+      // the abandoned attempt's PRESENTATION — text, timings, tool counts the user
+      // never saw land. Executed tool calls are not presentation: they happened,
+      // and they stay happened after the attempt is thrown away. Clearing them is
+      // what made a restarted turn repeat its writes.
       parts.length = 0;
       textBuf = "";
       reasonBuf = "";
@@ -1017,6 +1029,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
             // the realtime publish below can choke. See stripNul.
             const output = stripNul(event.output);
             parts.push({ type: "tool-result", id: event.toolCallId, name: event.toolName, output });
+            // Ledger of what this turn has actually DONE — recorded on the result,
+            // so it means "ran", not "was asked for". Unlike `parts` it survives a
+            // discard, because the emergency context-overflow retry re-streams from
+            // settled history and would otherwise restart blind to live side
+            // effects. See effect-ledger.
+            turnEffects.push({ name: event.toolName, input: event.input });
             // The full output is in `parts` (saved to the DB at finish-step). Over
             // realtime we ship it only if it fits NOTIFY's budget; an oversized
             // body (e.g. a loaded skill) is dropped here so the small state-flip
@@ -1259,6 +1277,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the very failure this path exists to recover from.
       const trimmedUi = trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT);
       modelMessages = await convertToModelMessages(sealOrphanToolCalls(trimmedUi));
+      // Carry the turn's live side effects across the restart. The trim keeps
+      // SETTLED turns, so by construction it drops everything this turn just did —
+      // and the restarted model would repeat it. A create or an upload is not
+      // idempotent, so this note is the only thing between an overflow and a
+      // duplicate. Appended as a user turn: it is state the model must read, not a
+      // request, and an assistant prefill 400s on modern Anthropic anyway.
+      const recoveryNote = buildRecoveryNote(turnEffects);
+      if (recoveryNote) {
+        modelMessages.push({ role: "user", content: recoveryNote });
+        tlog.info("context overflow — carrying executed effects into the retry", {
+          effects: turnEffects.length, noteChars: recoveryNote.length,
+        });
+      }
       markCacheTail(modelMessages); // fresh objects — re-mark the cache tail
       // Re-attach the turn's native files (the trim+reconvert produced fresh
       // model messages, dropping the bytes injected into the original set).
