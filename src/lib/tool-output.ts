@@ -83,6 +83,23 @@ export function clampOutput(
 }
 
 /**
+ * Serialized size of a tool's output, in characters — the unit both output budgets
+ * are denominated in. One place, because a size that is measured two slightly
+ * different ways is two different budgets.
+ *
+ * A non-serializable value (a cycle, a BigInt) counts as zero: the call still
+ * happened, but guessing high would spend a budget on an artifact of the encoding.
+ */
+export function outputChars(v: unknown): number {
+  if (typeof v === "string") return v.length;
+  try {
+    return JSON.stringify(v)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Total tool output one turn may produce, in characters. `MAX_TOOL_OUTPUT_CHARS`
  * bounds a single call; nothing bounded the sum, so a turn making hundreds of calls
  * had no ceiling at all — at the step cap that is over half a million characters of
@@ -103,22 +120,5 @@ export function clampOutput(
  * none of those: nothing is refused, nothing is rewritten, and it reuses the path
  * FORCE_TEXT_AFTER_STEPS already proves.
  */
-/**
- * Serialized size of a tool's output, in characters — the unit both output budgets
- * are denominated in. One place, because a size that is measured two slightly
- * different ways is two different budgets.
- *
- * A non-serializable value (a cycle, a BigInt) counts as zero: the call still
- * happened, but guessing high would spend a budget on an artifact of the encoding.
- */
-export function outputChars(v: unknown): number {
-  if (typeof v === "string") return v.length;
-  try {
-    return JSON.stringify(v)?.length ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
 export const MAX_TURN_TOOL_OUTPUT_CHARS = Number(process.env.MAX_TURN_TOOL_OUTPUT_CHARS) || 400_000;
 

@@ -97,6 +97,16 @@ describe("buildRecoveryNote", () => {
     expect(note).toMatch(/and \d+ more tools, \d+ calls/);
   });
 
+  it("says nothing rather than \"null\" for a call with no arguments", () => {
+    // The table stores SQL NULL for a no-argument call, so loadEffects hands back
+    // `null` where `parts` would hand back `undefined`. `JSON.stringify(null)` is the
+    // string "null", which put a line reading `- wp_publish_product null` into a
+    // prompt that had just died of its own size.
+    const note = buildRecoveryNote([{ name: "wp_publish_product", input: null }])!;
+    expect(note).toContain("- wp_publish_product");
+    expect(note).not.toContain("null");
+  });
+
   it("keeps a call whose arguments cannot be serialized", () => {
     // The call ran. Losing the entry because its input has a cycle would trade a
     // missing argument for a repeated write.
@@ -114,6 +124,7 @@ describe("effectsFromParts", () => {
   const call = (id: string, name: string, input: unknown): StoredPart => ({ type: "tool-call", id, name, input });
   const result = (id: string, name: string): StoredPart => ({ type: "tool-result", id, name, output: { ok: true } });
   const failed = (id: string, name: string): StoredPart => ({ type: "tool-error", id, name, error: "boom" });
+  const rejected = (id: string, name: string): StoredPart => ({ type: "tool-error", id, name, error: "bad args", invalid: true });
 
   it("rebuilds executed calls from a row, pairing arguments to their evidence", () => {
     const effects = effectsFromParts([
@@ -130,6 +141,25 @@ describe("effectsFromParts", () => {
       { id: "1", name: "zak_upsert_product", input: { sku: "CLR-001" } },
       { id: "2", name: "wp_upload_image", input: { file: "a.jpg" }, failed: true },
     ]);
+  });
+
+  it("does not report a call the SDK rejected before running as done", () => {
+    // `invalid` means the SDK synthesized this error itself for a call it refused to
+    // run, so it is not evidence anything happened. This path is what a CONTINUATION
+    // reads, and the table has no row for such a call — so mergeEffects would keep a
+    // parts-only entry and the restarted half would be told "already ran, do not
+    // repeat" about work that never ran. That omission leaves the row unwritten,
+    // which is worse than the duplication this module prevents.
+    expect(
+      effectsFromParts([call("1", "zak_upsert_product", { sku: "CLR-001" }), rejected("1", "zak_upsert_product")]),
+    ).toEqual([]);
+  });
+
+  it("still reports a call that ran and then threw", () => {
+    // The neighbouring case, so the guard above can't widen into it: a tool that
+    // writes and then fails HAS written, and that is the entry the note most needs.
+    const effects = effectsFromParts([call("1", "wp_upload_image", { file: "a.jpg" }), failed("1", "wp_upload_image")]);
+    expect(effects).toEqual([{ id: "1", name: "wp_upload_image", input: { file: "a.jpg" }, failed: true }]);
   });
 
   it("does not report a call that never ran as done", () => {

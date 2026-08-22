@@ -65,6 +65,11 @@ const HEADER =
 
 /** Compact one call's arguments to something identifying. */
 function renderArgs(input: unknown): string {
+  // No arguments to identify the call by. Both sources produce this — `parts` has
+  // no `tool-call` to pair with, the table stores SQL NULL for a no-argument call —
+  // and `JSON.stringify(null)` is the string "null", which would put a line reading
+  // `- wp_publish_product null` into a prompt that just died of size.
+  if (input === null || input === undefined) return "";
   let s: string;
   try {
     s = typeof input === "string" ? input : JSON.stringify(input) ?? "";
@@ -154,6 +159,16 @@ export function effectsFromParts(parts: StoredPart[]): TurnEffect[] {
   const out: TurnEffect[] = [];
   for (const p of parts) {
     if (p.type !== "tool-result" && p.type !== "tool-error") continue;
+    // The SDK rejected this call before running it (unparseable arguments, unknown
+    // tool) and synthesized the error itself, so it is not evidence that anything
+    // happened. The live ledger already skips these and `recordEffect` is never
+    // called for them — but this path is what a CONTINUATION reads, and mergeEffects
+    // keeps a parts-only entry precisely because the table has no row for it. So
+    // without this the restarted half is told "this already ran, do not repeat"
+    // about work that never ran, and the row goes silently unwritten: the omission
+    // that is worse than the duplication this module exists to prevent. Fourth
+    // reader of one fact — see producedWork and PRODUCED_WORK_SQL for the others.
+    if (p.type === "tool-error" && p.invalid) continue;
     const call = calls.get(p.id);
     out.push({
       id: p.id,
