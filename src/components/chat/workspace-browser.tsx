@@ -272,10 +272,12 @@ export function WorkspaceBrowser({
   const downloadUrl = (p: string) => `/api/sandbox/files/download?${query}&path=${encodeURIComponent(p)}`;
   // Download EVERYTHING via the controller archive (a complete tar.gz streamed from
   // the workspace root), not a zip of the paths the client happened to enumerate.
+  // No `download` attribute: the server names the file after the project/chat and
+  // the date, and for a same-origin response Content-Disposition wins anyway — so
+  // a name here would be a second, silently-losing source of truth.
   const downloadAll = () => {
     const a = document.createElement("a");
     a.href = `/api/sandbox/files/archive?${query}`;
-    a.download = "workspace.tar.gz";
     document.body.appendChild(a);
     a.click();
     a.remove();

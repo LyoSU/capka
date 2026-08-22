@@ -407,6 +407,8 @@
       "upload": "Upload files",
       "download": "Download {name}",
       "downloadAll": "Download all",
+      "archiveFallback": "Workspace",
+      "archiveFiles": "files",
       "alsoChanged": "Also changed · {count}",
       "notCreated": "File wasn't created",
       "createHint": "Send a message to create the workspace",

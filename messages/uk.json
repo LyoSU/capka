@@ -407,6 +407,8 @@
       "upload": "Додати файли",
       "download": "Зберегти {name}",
       "downloadAll": "Завантажити все",
+      "archiveFallback": "Робочий простір",
+      "archiveFiles": "файли",
       "alsoChanged": "Також змінилось · {count}",
       "notCreated": "Файл не створено",
       "createHint": "Напишіть повідомлення, щоб створити робочу теку",

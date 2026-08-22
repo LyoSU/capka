@@ -1,14 +1,10 @@
 import { eq, asc } from "drizzle-orm";
+import { getTranslations } from "next-intl/server";
 import { requireActive, apiHandler } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
 import { requireOwned } from "@/lib/db/ownership";
-
-function sanitizeFilename(name: string): string {
-  // ASCII-safe fallback for Content-Disposition header
-  const ascii = name.replace(/[^\x20-\x7E]/g, "_").replace(/["\\\n\r]/g, "_");
-  return ascii || "chat";
-}
+import { safeFilename, contentDisposition } from "@/lib/download-filename";
 
 export const GET = apiHandler(async (req, { params }) => {
   const { userId } = await requireActive();
@@ -25,10 +21,13 @@ export const GET = apiHandler(async (req, { params }) => {
 
   const { searchParams } = new URL(req.url);
   const format = searchParams.get("format") || "json";
-  const title = (chat.title as string) || "chat";
-  const safeName = sanitizeFilename(title);
-  const disposition = (ext: string) =>
-    `attachment; filename="${safeName}.${ext}"; filename*=UTF-8''${encodeURIComponent(title)}.${ext}`;
+  // Cross-platform sanitizing lives in one place for every download we serve: a
+  // chat titled `Q4: plan` is unsaveable on Windows, and `CON` unsaveable even
+  // with an extension.
+  const t = await getTranslations("chat");
+  const title = (chat.title as string | null) || t("untitled");
+  const base = safeFilename(title, t("untitled"));
+  const disposition = (ext: string) => contentDisposition(`${base}.${ext}`);
 
   if (format === "markdown") {
     const lines: string[] = [`# ${title}`, ""];

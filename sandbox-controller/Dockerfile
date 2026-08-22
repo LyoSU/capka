@@ -1,5 +1,10 @@
 FROM node:22-alpine
 WORKDIR /app
+# `zip` for the workspace archive endpoint. Not in node:22-alpine, and the archive
+# is the "download everything before you delete it" backup — it must not depend on
+# a binary that may or may not be there. (`printf`, used for the empty-workspace
+# archive, is a busybox builtin and needs no package.)
+RUN apk add --no-cache zip
 COPY package.json package-lock.json ./
 # Reproducible install from the committed lockfile. No `npm install` fallback: a
 # broken/absent lockfile must fail the build loudly, never silently resolve a

@@ -81,17 +81,31 @@ export function runWorkspaceStoreContract(makeStore) {
       expect(s2.map((e) => e.name)).not.toContain("only-s1.txt");
     });
 
-    it("archive() streams a gzip of the whole workspace", async () => {
+    it("archive() streams a zip of the whole workspace", async () => {
       await store.ensure("u1", "s1");
       await store.write("u1", "s1", "a.txt", Buffer.from("hello"));
       const child = await store.archive("u1", "s1");
       const chunks = [];
       for await (const c of child.stdout) chunks.push(c);
       const buf = Buffer.concat(chunks);
-      // gzip magic bytes — proves a real archive streamed from the dir root.
-      expect(buf[0]).toBe(0x1f);
-      expect(buf[1]).toBe(0x8b);
-      expect(buf.length).toBeGreaterThan(0);
+      // Local file header "PK\x03\x04" — proves a real zip streamed from the dir root.
+      expect(buf.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    });
+
+    it("archive() of an empty workspace is still a valid, complete zip", async () => {
+      // `zip` exits 12 ("nothing to do") on an empty directory, and a non-zero exit
+      // means "truncated archive" downstream — so the honest backup of a fresh or
+      // emptied workspace would abort mid-download. It must stream the canonical
+      // 22-byte end-of-central-directory record instead.
+      await store.ensure("u1", "empty");
+      const child = await store.archive("u1", "empty");
+      const chunks = [];
+      for await (const c of child.stdout) chunks.push(c);
+      const buf = Buffer.concat(chunks);
+      expect(buf.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+      expect(buf.length).toBe(22);
+      const code = await new Promise((r) => child.on("close", r));
+      expect(code).toBe(0);
     });
 
     it("copyInto() copies a workspace's contents into a destination subdir", async () => {

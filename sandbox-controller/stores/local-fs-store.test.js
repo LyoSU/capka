@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { rm, mkdir, writeFile, symlink, readFile, stat, utimes } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { LocalFsStore } from "./local-fs-store.js";
 import { runWorkspaceStoreContract } from "./workspace-store.contract.js";
@@ -146,6 +147,40 @@ describe("LocalFsStore symlink containment on write", () => {
       expect(existsSync(join(outside, "new.txt"))).toBe(false);
       await expect(store.write("u1", "s1", "escape/new.txt", Buffer.from("pwned"))).rejects.toBeTruthy();
       expect(existsSync(join(outside, "new.txt"))).toBe(false);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("LocalFsStore.archive symlink handling", () => {
+  it("stores a symlink as a link instead of archiving the outside file it points at", async () => {
+    // `tar` never follows symlinks. `zip` follows them BY DEFAULT, reading the
+    // target through the controller's own filesystem — so a link the sandbox
+    // planted would hand the caller a file from outside the workspace. The size
+    // check is the honest assertion: a stored link costs a few bytes, while a
+    // followed one embeds the target, and the payload is incompressible so
+    // deflate cannot hide the difference.
+    const dataRoot = join(TMP, `ws-arc-${Math.random().toString(36).slice(2)}`);
+    const outside = join(TMP, `outside-${Math.random().toString(36).slice(2)}`);
+    const store = new LocalFsStore({ dataRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 });
+    try {
+      await mkdir(outside, { recursive: true });
+      const secret = randomBytes(200_000); // incompressible, so deflate can't mask a leak
+      await writeFile(join(outside, "secret.bin"), secret);
+      const { wsHostPath } = await store.ensure("u1", "s1");
+      await writeFile(join(wsHostPath, "keep.txt"), "kept");
+      await symlink(join(outside, "secret.bin"), join(wsHostPath, "escape.bin"));
+
+      const child = await store.archive("u1", "s1");
+      const chunks = [];
+      for await (const c of child.stdout) chunks.push(c);
+      const buf = Buffer.concat(chunks);
+
+      expect(buf.length).toBeLessThan(20_000); // the 200KB target is not in there
+      expect(buf.toString("latin1")).toContain("escape.bin"); // the link itself was archived
+      expect(buf.includes(secret.subarray(0, 64))).toBe(false);
     } finally {
       await rm(dataRoot, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });

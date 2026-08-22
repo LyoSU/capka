@@ -216,17 +216,34 @@ export class LocalFsStore {
     await rm(this.#wsPath(userId, sessionId), { recursive: true, force: true });
   }
 
-  /** Stream the WHOLE workspace as a gzipped tar, read straight from the host
-   *  directory — no container, and no dependence on a client-visible listing (the
-   *  file-browser's `download-all` archives only paths the client enumerated, so a
-   *  truncated listing silently drops files; this is the honest "download before
-   *  delete" backup). Packs the directory contents at the archive root (`.`).
-   *  Returns the spawned `tar` process; the caller pipes `.stdout` and watches for
-   *  a non-zero exit. Ensures the dir first so an empty workspace still tars. */
+  /** Stream the WHOLE workspace as a zip, read straight from the host directory —
+   *  no container, and no dependence on a client-visible listing (the file-browser's
+   *  `download-all` archives only paths the client enumerated, so a truncated
+   *  listing silently drops files; this is the honest "download before delete"
+   *  backup). Packs the directory contents at the archive root (`.`). Returns the
+   *  spawned process; the caller pipes `.stdout` and watches for a non-zero exit.
+   *
+   *  zip over tar.gz because the audience opens these on a work laptop: Windows 10
+   *  cannot open a .tar.gz without extra software at all.
+   *
+   *  `-y` is NOT optional. `tar` never follows symlinks, but `zip` follows them by
+   *  DEFAULT — and a sandbox owns its /workspace and can plant one. Without `-y` a
+   *  planted `link -> /etc/shadow` would be read through the CONTROLLER's own
+   *  filesystem and shipped to the caller. `-y` stores the link itself. */
   async archive(userId, sessionId) {
     const dir = this.#wsPath(userId, sessionId);
     await mkdir(dir, { recursive: true });
-    return spawn("tar", ["-czf", "-", "-C", dir, "."], { stdio: ["ignore", "pipe", "pipe"] });
+    // `zip` exits 12 ("nothing to do") on an empty directory, and a non-zero exit
+    // reads downstream as a truncated archive — so it would abort the download of a
+    // fresh or emptied workspace, which is a legitimate thing to back up. Stream
+    // the canonical empty archive instead. Spawning `printf` rather than returning
+    // a different shape keeps ONE return type: the caller stays a plain
+    // pipe-and-watch-the-exit-code consumer either way.
+    if ((await readdir(dir)).length === 0) {
+      // 22-byte end-of-central-directory record: "PK\5\6" + 18 zero bytes.
+      return spawn("printf", [`PK\\005\\006${"\\000".repeat(18)}`], { stdio: ["ignore", "pipe", "pipe"] });
+    }
+    return spawn("zip", ["-qryX", "-", "."], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
   }
 
   /** Copy the entire contents of one workspace into another (same user) under a

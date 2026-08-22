@@ -2,6 +2,7 @@ import { lookup } from "mime-types";
 import { requireSession, apiHandler } from "@/lib/auth";
 import { downloadFile } from "@/lib/sandbox/client";
 import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
+import { safeFilename, contentDisposition } from "@/lib/download-filename";
 
 // The controller serves every file as application/octet-stream. For inline
 // previews that's fine for raster images (the browser sniffs them from magic
@@ -30,18 +31,18 @@ export const GET = apiHandler(async (req: Request) => {
   const { sessionKey } = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
   const controllerRes = await downloadFile(sessionKey, filePath, userId);
 
-  // Proxy the binary stream from controller to client
-  const filename = filePath.split("/").pop() || "file";
-  const safeFilename = filename.replace(/[^\x20-\x7E]/g, "_"); // ASCII-safe fallback
-  const encodedFilename = encodeURIComponent(filename);
-
-  const disposition = inline
-    ? `inline; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`
-    : `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`;
+  // Proxy the binary stream from controller to client. The name comes from the
+  // sandbox, where the agent can legally create `Q4:plan.txt` or a name ending in a
+  // dot — unsaveable on Windows — so it goes through the same cross-platform
+  // sanitizing as the archives. The RAW name still decides the content type, since
+  // that only reads the extension.
+  const rawName = filePath.split("/").pop() || "file";
+  const filename = safeFilename(rawName, "file");
+  const disposition = contentDisposition(filename, inline ? "inline" : "attachment");
 
   const headers: Record<string, string> = {
     "Content-Type":
-      (inline ? inlineContentType(filename) : null) ||
+      (inline ? inlineContentType(rawName) : null) ||
       controllerRes.headers.get("Content-Type") ||
       "application/octet-stream",
     "Content-Disposition": disposition,

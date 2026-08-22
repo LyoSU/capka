@@ -12,10 +12,12 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Workspace archives download as `.zip` instead of `.tar.gz`, named after the project or chat and dated (`Quarterly report — 2026-08-22.zip`) instead of a fixed `workspace.tar.gz`. Self-hosters who build images locally must rebuild `sandbox-controller`, which now installs `zip`.
 - `TASK_TIMEOUT_MINUTES` now defaults to 20 minutes, up from 10 — the old ceiling was shorter than `MAX_AGENT_STEPS` tool calls at the controller's 30-second exec timeout, so heavy sandbox work timed out with step budget to spare. Both it and `WRAP_UP_AFTER_FRACTION` now reach the platform container in `docker-compose.yml`.
 
 ### Fixed
 
+- Download filenames taken from a project name or chat title are now valid on every OS: `Q4: plan` was unsaveable on Windows, and a title ending in a dot saved under a different name than the one served.
 - A turn that times out or loses its worker after producing work now offers "Continue" instead of advising a retry, matching what a stalled turn already did — retrying re-runs every tool and rewrites what the turn already wrote.
 
 ## [0.30.0] - 2026-08-22

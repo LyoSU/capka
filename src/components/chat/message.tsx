@@ -385,7 +385,7 @@ function WorkspaceLinks({ text, chatId, live, touched }: { text: string; chatId:
     paths.forEach((p) => params.append("paths", p));
     const a = document.createElement("a");
     a.href = `/api/sandbox/files/download-all?${params}`;
-    a.download = "workspace-files.zip";
+    // Name comes from the server (Content-Disposition), which knows the chat title.
     document.body.appendChild(a);
     a.click();
     a.remove();

@@ -1,9 +1,11 @@
+import { getTranslations } from "next-intl/server";
 import { requireActive, apiHandler } from "@/lib/auth";
 import { createSession, execCommand, downloadFile } from "@/lib/sandbox/client";
-import { resolveWorkspaceTarget, targetParamsFrom } from "@/lib/sandbox/target";
+import { resolveWorkspaceTarget, targetParamsFrom, workspaceLabel } from "@/lib/sandbox/target";
 import { sessionMounts, resolveNetwork } from "@/lib/manage/controls/folders";
 import { guardRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { SAFE_WORKSPACE_PATH_RE } from "@/lib/chat/artifacts";
+import { archiveFilename, contentDisposition } from "@/lib/download-filename";
 
 export const GET = apiHandler(async (req: Request) => {
   const { userId } = await requireActive();
@@ -26,7 +28,8 @@ export const GET = apiHandler(async (req: Request) => {
     return Response.json({ error: "Invalid path" }, { status: 400 });
   }
 
-  const { sessionKey: key, projectId } = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
+  const target = await resolveWorkspaceTarget({ userId, ...targetParamsFrom(searchParams) });
+  const { sessionKey: key, projectId } = target;
   // Archiving shells out to zip/tar, so a live container is required here. Pass
   // the session's real mounts + network so an existing container with host folders
   // is REUSED — omitting them reads as mount drift and would destroy (and reset the
@@ -35,15 +38,24 @@ export const GET = apiHandler(async (req: Request) => {
 
   const shellPaths = paths.map((p) => `'${p.replace(/'/g, "'\\''")}'`).join(" ");
 
+  // What the user sees. One path is a single named folder, so it names itself;
+  // several are a subset of a turn's output, so they are named after the workspace
+  // with a marker that this is NOT the whole thing (that is `archive`).
+  const t = await getTranslations("chat.workspace");
+  const label =
+    paths.length === 1
+      ? (paths[0].split("/").pop() || paths[0])
+      : `${await workspaceLabel(target) ?? t("archiveFallback")} — ${t("archiveFiles")}`;
+
   // Try zip, fall back to tar.gz — rm first to avoid stale entries from prior downloads
   let archiveName = ".download.zip";
-  let displayName = "workspace-files.zip";
+  let displayName = archiveFilename(label, t("archiveFallback"), "zip");
   let contentType = "application/zip";
 
   const zipResult = await execCommand(key, `cd /workspace && rm -f '${archiveName}' && zip -r '${archiveName}' ${shellPaths}`, 30_000);
   if (zipResult.exitCode !== 0) {
     archiveName = ".download.tar.gz";
-    displayName = "workspace-files.tar.gz";
+    displayName = archiveFilename(label, t("archiveFallback"), "tar.gz");
     contentType = "application/gzip";
     const tarResult = await execCommand(key, `cd /workspace && tar -czf '${archiveName}' ${shellPaths}`, 30_000);
     if (tarResult.exitCode !== 0) {
@@ -54,7 +66,7 @@ export const GET = apiHandler(async (req: Request) => {
   const controllerRes = await downloadFile(key, archiveName, userId);
   const headers: Record<string, string> = {
     "Content-Type": contentType,
-    "Content-Disposition": `attachment; filename="${displayName}"`,
+    "Content-Disposition": contentDisposition(displayName),
   };
   // Forward Content-Length only when present; "" is an invalid header the proxy
   // turns into a 502 (the controller streams the archive chunked).

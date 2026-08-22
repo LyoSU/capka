@@ -189,7 +189,7 @@ d("controller HTTP API (lifecycle)", () => {
     expect((await ws.list("udisk", "wdisk", ".")).entries).toEqual([]); // files gone
   });
 
-  it("archives the whole workspace as a gzip stream (owner-gated)", async () => {
+  it("archives the whole workspace as a zip stream (owner-gated)", async () => {
     const ws = new LocalFsStore({ dataRoot: DATA_ROOT, uid: UID, gid: GID });
     await ws.ensure("uarc", "warc");
     await ws.write("uarc", "warc", "report.txt", Buffer.from("data"));
@@ -198,9 +198,9 @@ d("controller HTTP API (lifecycle)", () => {
     const q = new URLSearchParams({ userId: "uarc", token: token("uarc", "warc") });
     const r = await fetch(`${base}/sessions/warc/archive?${q}`, { headers: { Authorization: `Bearer ${SECRET}` } });
     expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("application/zip");
     const buf = Buffer.from(await r.arrayBuffer());
-    expect(buf[0]).toBe(0x1f); // gzip magic
-    expect(buf[1]).toBe(0x8b);
+    expect(buf.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04])); // "PK\x03\x04"
   });
 
   it("copies one workspace into another under a subdir (idempotent, owner-gated both ends)", async () => {

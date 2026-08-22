@@ -52,6 +52,37 @@ export async function resolveWorkspaceTarget({
   };
 }
 
+/** The human name of the workspace a target points at, for naming a download.
+ *
+ *  Branches on the workspace ACTUALLY being served, not on what the client asked
+ *  for: a chat inside a project shares the PROJECT's workspace
+ *  (`workspaceSessionKey` is `projectId ?? chatId`), so an archive downloaded from
+ *  such a chat contains every chat's files and must be named after the project.
+ *  Naming it after the chat would promise one conversation and deliver all of them.
+ *
+ *  Ownership is already enforced by `resolveWorkspaceTarget`, which must run first
+ *  to produce the `ResolvedTarget` this takes — but the owner is re-asserted in both
+ *  queries anyway, so a future caller passing a hand-built target cannot read a name
+ *  across accounts. Returns null when the row has no name (an untitled chat) — the
+ *  caller supplies a localized fallback. */
+export async function workspaceLabel(target: ResolvedTarget): Promise<string | null> {
+  if (target.projectId) {
+    const [project] = await db
+      .select({ name: projects.name })
+      .from(projects)
+      .where(and(eq(projects.id, target.projectId), eq(projects.userId, target.ownerId)))
+      .limit(1);
+    return project?.name ?? null;
+  }
+  // No project, so the session key IS the chat id (see workspaceSessionKey).
+  const [chat] = await db
+    .select({ title: chats.title })
+    .from(chats)
+    .where(and(eq(chats.id, target.sessionKey), eq(chats.userId, target.ownerId)))
+    .limit(1);
+  return chat?.title ?? null;
+}
+
 /** Read a target from a request's query params (chatId / projectId). A tiny helper
  *  so every route parses the pair identically. */
 export function targetParamsFrom(searchParams: URLSearchParams): { chatId: string | null; projectId: string | null } {

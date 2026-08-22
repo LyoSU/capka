@@ -624,7 +624,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // GET /sessions/:id/archive — stream the WHOLE workspace as a gzipped tar,
+    // GET /sessions/:id/archive — stream the WHOLE workspace as a zip,
     // owner-gated exactly like the file ops. Reads from the host directory root, so
     // it is complete regardless of any listing limit (unlike download-all). Powers
     // "download all files" and "download before deleting the project".
@@ -636,10 +636,12 @@ const server = createServer(async (req, res) => {
       store.touch(r.sessionId);
       const child = await workspace.archive(r.userId, r.sessionId);
       res.writeHead(200, {
-        "Content-Type": "application/gzip",
-        "Content-Disposition": `attachment; filename="workspace.tar.gz"`,
+        "Content-Type": "application/zip",
+        // Internal only: the platform route in front of this replaces the header
+        // with a name built from the project/chat, which is the one a user sees.
+        "Content-Disposition": `attachment; filename="workspace.zip"`,
       });
-      // streamArchive owns res.end()/destroy: a non-zero tar exit aborts the socket
+      // streamArchive owns res.end()/destroy: a non-zero exit aborts the socket
       // instead of ending cleanly, so a truncated archive never reads as complete.
       streamArchive(child, res, log);
       return;
