@@ -134,14 +134,25 @@ export function pruneTurnToolTraffic(messages: ModelMessage[], boundary: number)
  * off/on and re-shape the prompt — and re-bill the cache — every other step. A
  * monotonic cut re-arms only when genuinely new traffic has pushed the prompt over
  * the line again, and each advance costs exactly one cache transition.
+ *
+ * `stepNumber` is what keeps the measurement honest. The caller's figure is written
+ * when a step FINISHES, and stepNumber restarts at 0 for every new streamText call
+ * — including the one the emergency overflow retry makes — so at step 0 the figure
+ * describes either nothing at all or a prompt that no longer exists. Arming off the
+ * latter would cut a freshly rebuilt (and deliberately short) history down to its
+ * tail before the model had run once. Only ARMING is gated: applying an already-set
+ * boundary at step 0 is correct, because the resume path only ever APPENDS and a
+ * prefix index stays valid.
  */
 export function armPruneBoundary(input: {
   triggerAt: number;
   boundary: number;
   lastStepContextTokens: number;
   messageCount: number;
+  stepNumber: number;
 }): number {
   if (input.triggerAt <= 0) return 0;
+  if (input.stepNumber === 0) return input.boundary;
   if (input.lastStepContextTokens < input.triggerAt) return input.boundary;
   return Math.max(input.boundary, input.messageCount - TOOL_CLEAR_KEEP_LAST);
 }

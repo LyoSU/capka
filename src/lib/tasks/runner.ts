@@ -584,7 +584,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const ctxMgmt = contextManagementOptions(provider, effectiveLimit);
     // Intra-turn relief for providers with no server-side edit of their own. Same
     // trigger as the other two enforcement sites, measured off the live per-step
-    // prompt size, and applied at most once per turn (see pruneTurnToolTraffic).
+    // prompt size, and re-applied on every step once armed (see pruneTurnToolTraffic).
     const intraTurnPruneAt = clearsToolResultsClientSide(provider) ? toolClearTrigger(effectiveLimit) : 0;
     // Absolute index of the cut, 0 until the turn outgrows the trigger. Re-applied
     // every step and only ever moving forward — a `messages` value returned from
@@ -668,8 +668,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                   const inject = await buildViewFileInjection(messages, sessionKey, userId);
                   if (inject) msgs = [...base, inject];
                 }
-                // RELIEF: shed the tool traffic this turn already accumulated, once,
-                // when the last step's measured prompt crossed the trigger. Everything
+                // RELIEF: shed the tool traffic this turn accumulated before the cut,
+                // armed the first step whose measured prompt crossed the trigger and
+                // re-applied at the same absolute index every step after. Everything
                 // else in the context machinery works at a turn boundary, so without
                 // this a single long tool loop has no brake at all on any provider
                 // Anthropic doesn't serve directly. Deliberately before the cache
@@ -677,7 +678,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                 if (intraTurnPruneAt) {
                   const next = armPruneBoundary({
                     triggerAt: intraTurnPruneAt, boundary: pruneBoundary,
-                    lastStepContextTokens, messageCount: msgs.length,
+                    lastStepContextTokens, messageCount: msgs.length, stepNumber,
                   });
                   if (next !== pruneBoundary) {
                     tlog.info("pruning tool traffic mid-turn", {
@@ -1298,6 +1299,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the very failure this path exists to recover from.
       const trimmedUi = trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT);
       modelMessages = await convertToModelMessages(sealOrphanToolCalls(trimmedUi));
+      // The mid-turn cut is an absolute index into the list this line just REPLACED
+      // with a much shorter one, and it only ever moves forward — so a boundary armed
+      // off the prompt that overflowed outruns the whole rebuilt list, `keepLast` goes
+      // <= 0, and the brake silently disengages for the rest of the turn: exactly the
+      // turn that just proved it needs one. Re-arm from the retry's own measurements.
+      // (The resume path deliberately does NOT reset it — it only appends, so a prefix
+      // index stays valid there. `lastStepContextTokens` is likewise left alone: it is
+      // the (i) popover's and the context meter's figure too, and zeroing it would
+      // report an empty window on a turn that died of a full one. armPruneBoundary
+      // ignores it at step 0 instead.)
+      pruneBoundary = 0;
       // Carry the turn's live side effects across the restart. The trim keeps
       // SETTLED turns, so by construction it drops everything this turn just did —
       // and the restarted model would repeat it. A create or an upload is not

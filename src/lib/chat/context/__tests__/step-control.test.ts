@@ -87,31 +87,49 @@ describe("armPruneBoundary", () => {
   const at = 120_000;
 
   it("arms once the last step's measured prompt reaches the trigger", () => {
-    expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: at, messageCount: 20 })).toBe(17);
-    expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: at - 1, messageCount: 20 })).toBe(0);
+    expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: at, messageCount: 20, stepNumber: 4 })).toBe(17);
+    expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: at - 1, messageCount: 20, stepNumber: 4 })).toBe(0);
   });
 
   it("stays out of the way of a provider that clears server-side", () => {
     // triggerAt 0 is how the runner says "Anthropic is handling this". Both firing
     // would clear the same history twice and pay two cache invalidations for it.
-    expect(armPruneBoundary({ triggerAt: 0, boundary: 0, lastStepContextTokens: 900_000, messageCount: 400 })).toBe(0);
+    expect(armPruneBoundary({ triggerAt: 0, boundary: 0, lastStepContextTokens: 900_000, messageCount: 400, stepNumber: 9 })).toBe(0);
   });
 
   it("holds the cut once armed, even though pruning drops the measurement back", () => {
     // The relief is what makes the next measurement small. A gate that re-decided
     // from the measurement alone would disarm here, restore the full history, and
     // re-shape the prompt — off and on, every other step.
-    expect(armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: 40_000, messageCount: 40 })).toBe(17);
+    expect(armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: 40_000, messageCount: 40, stepNumber: 6 })).toBe(17);
   });
 
   it("only ever moves the cut forward, when genuinely new traffic crosses again", () => {
-    expect(armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: at, messageCount: 60 })).toBe(57);
+    expect(armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: at, messageCount: 60, stepNumber: 8 })).toBe(57);
     // A shorter list cannot drag the cut backwards and un-shed what was shed.
-    expect(armPruneBoundary({ triggerAt: at, boundary: 57, lastStepContextTokens: at, messageCount: 20 })).toBe(57);
+    expect(armPruneBoundary({ triggerAt: at, boundary: 57, lastStepContextTokens: at, messageCount: 20, stepNumber: 9 })).toBe(57);
   });
 
   it("does not arm on the first step of a turn", () => {
     // Nothing has finished yet, so there is no measurement — 0 must read as "wait".
-    expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: 0, messageCount: 3 })).toBe(0);
+    expect(armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: 0, messageCount: 3, stepNumber: 0 })).toBe(0);
+  });
+
+  it("will not arm off a measurement of a prompt that no longer exists", () => {
+    // stepNumber restarts at 0 for every new stream, including the one the emergency
+    // overflow retry makes — and the measurement it carries there is of the oversized
+    // prompt that just 400'd. Arming off it would cut the deliberately short rebuilt
+    // history down to its tail before the model had run once.
+    expect(
+      armPruneBoundary({ triggerAt: at, boundary: 0, lastStepContextTokens: 980_000, messageCount: 22, stepNumber: 0 }),
+    ).toBe(0);
+  });
+
+  it("keeps applying a boundary it already has at step 0, since resume only appends", () => {
+    // A resumed stream restarts stepNumber but not the message list, so the cut armed
+    // before the stall is still the right cut — gating ARMING must not disarm it.
+    expect(
+      armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: 40_000, messageCount: 30, stepNumber: 0 }),
+    ).toBe(17);
   });
 });
