@@ -590,7 +590,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // every step and only ever moving forward — a `messages` value returned from
     // prepareStep is that step's prompt and nothing else (the SDK rebuilds from its
     // own `initialMessages` each step), so a one-shot prune would relieve exactly
-    // one call and re-shape the prompt twice to do it.
+    // one call and re-shape the prompt twice to do it. Lifetime is ONE STREAM, not
+    // one turn: makeStream resets it, for the reason spelled out there.
     let pruneBoundary = 0;
     // Stall detection runs per-attempt: `ac` is the task-wide signal (deadline,
     // cancel, lost lease); `attemptAc` aborts only the CURRENT stream when the
@@ -628,6 +629,28 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the plain drop-reasoning path instead of ping-ponging.
     let effortNegotiated = false;
     const makeStream = () => {
+      // A NEW stream voids the mid-turn cut: `pruneBoundary` indexes the list the
+      // SDK rebuilds from its own `responseMessages`, and a fresh streamText throws
+      // those away. Every caller here is a re-stream (capability retry, overflow
+      // trim, stall resume), so invalidating it belongs to the thing that creates
+      // the stream — an eleventh retry path added later cannot forget to.
+      //
+      // A resume does NOT merely append, which is the trap: `StoredPart` carries no
+      // `step-start`, so convertToModelMessages groups a whole tool loop into ONE
+      // assistant + ONE tool message and buildResumeMessages returns exactly three
+      // messages for any loop length (measured: 1/4/12/30 exchanges → 3, 3, 3, 3).
+      // Any boundary armed past 3 therefore outruns the rebuilt list, `keepLast`
+      // goes <= 0, and the brake disengages for the rest of the turn.
+      //
+      // Cheap, not free: those three messages still carry the whole loop's TOKENS
+      // (only the count collapsed — 30 exchanges measured 12.9k chars), so the next
+      // measurement is still over the trigger and the cut re-arms at step 1. One
+      // unbraked step and one cache transition, not a lost turn. And that is why
+      // `lastStepContextTokens` is deliberately NOT reset alongside it: it is the
+      // (i) popover's and the context meter's figure too, so zeroing it would report
+      // an empty window on a turn that died of a full one. armPruneBoundary's
+      // `stepNumber === 0` guard is what keeps it from arming off that ghost.
+      pruneBoundary = 0;
       // reasoning + context-management + caching may all target the same provider
       // namespace (e.g. anthropic) — merge so none clobbers the others.
       const providerOptions = mergeProviderOptions(
@@ -1299,17 +1322,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // the very failure this path exists to recover from.
       const trimmedUi = trimToRecent(uiMessages, EMERGENCY_KEEP_RECENT);
       modelMessages = await convertToModelMessages(sealOrphanToolCalls(trimmedUi));
-      // The mid-turn cut is an absolute index into the list this line just REPLACED
-      // with a much shorter one, and it only ever moves forward — so a boundary armed
-      // off the prompt that overflowed outruns the whole rebuilt list, `keepLast` goes
-      // <= 0, and the brake silently disengages for the rest of the turn: exactly the
-      // turn that just proved it needs one. Re-arm from the retry's own measurements.
-      // (The resume path deliberately does NOT reset it — it only appends, so a prefix
-      // index stays valid there. `lastStepContextTokens` is likewise left alone: it is
-      // the (i) popover's and the context meter's figure too, and zeroing it would
-      // report an empty window on a turn that died of a full one. armPruneBoundary
-      // ignores it at step 0 instead.)
-      pruneBoundary = 0;
       // Carry the turn's live side effects across the restart. The trim keeps
       // SETTLED turns, so by construction it drops everything this turn just did —
       // and the restarted model would repeat it. A create or an upload is not

@@ -136,13 +136,15 @@ export function pruneTurnToolTraffic(messages: ModelMessage[], boundary: number)
  * the line again, and each advance costs exactly one cache transition.
  *
  * `stepNumber` is what keeps the measurement honest. The caller's figure is written
- * when a step FINISHES, and stepNumber restarts at 0 for every new streamText call
- * — including the one the emergency overflow retry makes — so at step 0 the figure
- * describes either nothing at all or a prompt that no longer exists. Arming off the
- * latter would cut a freshly rebuilt (and deliberately short) history down to its
- * tail before the model had run once. Only ARMING is gated: applying an already-set
- * boundary at step 0 is correct, because the resume path only ever APPENDS and a
- * prefix index stays valid.
+ * when a step FINISHES, and stepNumber restarts at 0 for every new streamText call —
+ * of which the runner has ten — so at step 0 the figure describes either nothing at
+ * all or a prompt that no longer exists. Arming off the latter would cut a rebuilt
+ * (and much shorter) message list down to its tail before the model had run once.
+ *
+ * Invalidating the boundary itself is the CALLER's job, not this function's: a
+ * boundary is only meaningful against the list it was measured on, and only the code
+ * that starts a stream knows the list was replaced. This decides where to cut, and
+ * refuses to move the cut without a measurement from the stream it is cutting.
  */
 export function armPruneBoundary(input: {
   triggerAt: number;

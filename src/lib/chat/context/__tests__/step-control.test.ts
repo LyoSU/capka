@@ -125,9 +125,11 @@ describe("armPruneBoundary", () => {
     ).toBe(0);
   });
 
-  it("keeps applying a boundary it already has at step 0, since resume only appends", () => {
-    // A resumed stream restarts stepNumber but not the message list, so the cut armed
-    // before the stall is still the right cut — gating ARMING must not disarm it.
+  it("leaves invalidating a boundary to the caller instead of zeroing it itself", () => {
+    // The step-0 guard is about the MEASUREMENT being a ghost, not about the boundary
+    // being stale — only the code that starts a stream knows the list was replaced,
+    // and it resets there. Returning 0 from here would put that decision in two
+    // places, one of which cannot see the list.
     expect(
       armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: 40_000, messageCount: 30, stepNumber: 0 }),
     ).toBe(17);
