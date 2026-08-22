@@ -1,6 +1,7 @@
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 import { log } from "@/lib/log";
+import { finiteNonNeg } from "@/lib/config/env";
 
 /**
  * Provider-agnostic progressive tool disclosure ("tool search").
@@ -43,25 +44,16 @@ import { log } from "@/lib/log";
 
 export const FIND_TOOL_NAME = "find_tool";
 
-/** A non-negative number from the environment, or `fallback` when unset/garbage.
- *  Written out rather than `Number(x) || fallback` because an intentional `0`
- *  (always defer / no ceiling) is falsy and would silently read as "unset". */
-function envNumber(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw.trim() === "") return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-
 /** Percentage of the effective context window the connector tool block may occupy
  *  before deferral kicks in. Matches Anthropic's `auto:N` default of ~10%.
  *  `0` defers any non-empty connector set. */
-const DEFER_PCT = envNumber(process.env.MCP_DEFER_TOKEN_PCT, 10);
+const DEFER_PCT = finiteNonNeg(process.env.MCP_DEFER_TOKEN_PCT, 10);
 
 /** Absolute token ceiling on that block, applied on top of the percentage.
  *  Percentage alone scales with the window, so on a ~1M-token model 10% is ~100k
  *  and a large connector set never deferred — it just rode along in every prompt.
  *  `0` disables the ceiling (percentage-only, the pre-ceiling behaviour). */
-const DEFER_MAX = envNumber(process.env.MCP_DEFER_TOKEN_MAX, 8192);
+const DEFER_MAX = finiteNonNeg(process.env.MCP_DEFER_TOKEN_MAX, 8192);
 
 /** Tokens the always-on connector block may occupy this turn: a percentage of the
  *  window, capped by the absolute ceiling. Exceed it and the set is deferred

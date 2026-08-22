@@ -107,7 +107,7 @@ describe("defer thresholds from the environment", () => {
   }
 
   it("keeps a fractional MCP_DEFER_TOKEN_PCT fractional", async () => {
-    // This knob is a PERCENTAGE, and `envNumber` accepts a non-integer on purpose.
+    // This knob is a PERCENTAGE, and `finiteNonNeg` accepts a non-integer on purpose.
     // A shared validator that required an integer would hand back 10 and re-gate the
     // connector block at 100_000 instead of 105_000 — a behaviour change wearing a
     // refactor's clothes, since nothing would report it: the boot diagnostic would

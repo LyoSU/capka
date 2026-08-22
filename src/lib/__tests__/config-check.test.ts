@@ -114,14 +114,14 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
   it("stays silent on a value its read site genuinely honours", () => {
     // 0 and a fractional percent are documented, test-guaranteed policies in
     // mcp/tool-search.ts (`0` = always defer / no ceiling; see tool-search.test.ts).
-    // Boot used to announce both as discarded while envNumber honoured them.
+    // Boot used to announce both as discarded while the reader honoured them.
     for (const raw of ["0", "10.5", "0.5"]) {
       expect(keysOf({ ...VALID, MCP_DEFER_TOKEN_PCT: raw })).not.toContain("MCP_DEFER_TOKEN_PCT");
       expect(keysOf({ ...VALID, MCP_DEFER_TOKEN_MAX: raw })).not.toContain("MCP_DEFER_TOKEN_MAX");
     }
   });
 
-  it("no longer has a knob whose value runs unvalidated, except the one that does", () => {
+  it("no longer has a knob whose value runs unvalidated", () => {
     // TASK_TIMEOUT_MINUTES=-1 was the case that proved the class: truthy, so it passed
     // `Number(env.X) || default` and ran, aborting every turn at ~1ms. Its read site is
     // now posInt, so the value falls back and the message says which number runs.
@@ -133,10 +133,13 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
     expect(posInt(" -1 ", 20)).toBe(20);
     expect(posInt("45", 20)).toBe(45);
 
-    // WORKER_MAX_CONCURRENCY is the exception, and stays reported as such: parseInt
-    // prefix-parses, so `10g` genuinely runs at 10 and no fallback is involved.
-    expect(checkConfig({ ...VALID, WORKER_MAX_CONCURRENCY: "10g" }).find((i) => i.key === "WORKER_MAX_CONCURRENCY")?.message)
-      .toContain("10 will be used");
+    // WORKER_MAX_CONCURRENCY was the last exception and is no longer one. Its site
+    // prefix-parsed, so `10g` used to RUN at ten concurrent tasks; the title of this
+    // test carried "except the one that does" until that site moved onto posInt.
+    const worker = checkConfig({ ...VALID, WORKER_MAX_CONCURRENCY: "10g" }).find((i) => i.key === "WORKER_MAX_CONCURRENCY");
+    expect(worker?.message).toContain("3 will be used");
+    expect(worker?.message).not.toContain("AS WRITTEN");
+    expect(posInt("10g", 3)).toBe(3);
   });
 
   it("honours a zero where zero is a policy, and rejects it where it is not", () => {
@@ -159,16 +162,24 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
     expect(nonNegInt("1.5", 3)).toBe(3);
   });
 
-  it("names the value that will actually run when the site rewrites it", () => {
-    // Same typo, three different mechanisms — which is why no single sentence about
-    // the class can be accurate.
+  it("names each knob's own default, now that one typo has one answer", () => {
+    // This test used to document a divergence: `10g` ran at 10 through parseInt in
+    // worker.ts and fell back to 20 through Number() in db/index.ts — same typo, two
+    // mechanisms, which is why no single sentence about the class could be accurate.
+    // The divergence is gone; what is still worth pinning is that the message names
+    // the number THIS knob falls back to rather than a generic sentence about
+    // defaults, since a message that cannot be wrong about a specific value is a
+    // message an operator can act on.
     const worker = checkConfig({ ...VALID, WORKER_MAX_CONCURRENCY: "10g" }).find((i) => i.key === "WORKER_MAX_CONCURRENCY");
     expect(worker?.level).toBe("warn");
-    expect(worker?.message).toContain("10 will be used"); // parseInt stops at the g
+    expect(worker?.message).toContain("3 will be used");
     const pool = checkConfig({ ...VALID, PG_POOL_MAX: "10g" }).find((i) => i.key === "PG_POOL_MAX");
-    expect(pool?.message).toContain("20 will be used"); // Number() -> NaN -> default
-    const clamped = checkConfig({ ...VALID, WORKER_MAX_CONCURRENCY: "-4" }).find((i) => i.key === "WORKER_MAX_CONCURRENCY");
-    expect(clamped?.message).toContain("1 will be used"); // Math.max(1, -4)
+    expect(pool?.message).toContain("20 will be used");
+    // And the clamp that used to swallow a negative is gone with it: `-4` no longer
+    // runs single-threaded, it falls back and says so.
+    const negative = checkConfig({ ...VALID, WORKER_MAX_CONCURRENCY: "-4" }).find((i) => i.key === "WORKER_MAX_CONCURRENCY");
+    expect(negative?.message).toContain("3 will be used");
+    expect(posInt("-4", 3)).toBe(3);
   });
 
   it("reads FORCE_TEXT_AFTER_STEPS against the ceiling MAX_AGENT_STEPS sets", () => {
@@ -229,8 +240,7 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
     const pattern: Record<string, (k: string) => RegExp> = {
       posInt: (k) => new RegExp(`(posInt|positiveInt)\\(\\s*(process\\.)?env\\.${k}\\b`),
       nonNegInt: (k) => new RegExp(`(nonNegInt|nonNegativeInt)\\(\\s*(process\\.)?env\\.${k}\\b`),
-      finiteNonNeg: (k) => new RegExp(`envNumber\\(\\s*(process\\.)?env\\.${k}\\b`),
-      parseIntClamped: (k) => new RegExp(`parseInt\\(process\\.env\\.${k}\\b`),
+      finiteNonNeg: (k) => new RegExp(`finiteNonNeg\\(\\s*(process\\.)?env\\.${k}\\b`),
     };
     const drifted = NUMERIC_KNOBS.filter(({ key, shape, site }) => {
       const source = readFileSync(new URL(`../../../${site}`, import.meta.url), "utf8");
@@ -274,7 +284,7 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
       /\bNumber\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
       /\bparseInt\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
       /\bparseFloat\(\s*process\.env\.([A-Z][A-Z0-9_]*)/g,
-      /\b(?:posInt|nonNegInt|positiveInt|nonNegativeInt|envNumber)\(\s*(?:process\.)?env\.([A-Z][A-Z0-9_]*)/g,
+      /\b(?:posInt|nonNegInt|finiteNonNeg|positiveInt|nonNegativeInt)\(\s*(?:process\.)?env\.([A-Z][A-Z0-9_]*)/g,
     ]) {
       for (const m of source.matchAll(re)) numeric.add(m[1]);
     }

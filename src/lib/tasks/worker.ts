@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { posInt } from "@/lib/config/env";
 import { models } from "@/lib/db/schema";
 import { realtime } from "@/lib/realtime";
 import { claimNextTask, reconcileZombies, auxInFlight, INTERRUPTED_MESSAGE, INTERRUPTED_PARTIAL_MESSAGE } from "@/lib/tasks/queue";
@@ -26,7 +27,15 @@ import { log } from "@/lib/log";
 // Per-instance concurrent-task ceiling. Configurable so a beefier host (or a
 // multi-instance deployment that wants to tune throughput) can raise it without a
 // code change; claims stay atomic across instances via SKIP LOCKED.
-const MAX_CONCURRENCY = Math.max(1, parseInt(process.env.WORKER_MAX_CONCURRENCY || "3", 10) || 3);
+//
+// `posInt`, not `parseInt`: prefix-parsing OBEYED a typo. `WORKER_MAX_CONCURRENCY=10g`
+// ran ten tasks at once, `2.7` ran two, and `-1` clamped to one and quietly served the
+// whole instance single-threaded — three outcomes, none of them the default that boot
+// promised. The old `Math.max(1, …)` floor is not lost with it: rejecting anything
+// below 1 is what posInt does, so the floor is now the rule rather than a repair
+// applied after the fact. A deliberate `0` yielded 3 before and still does — no
+// concurrency is not a policy here, it is a worker that never claims anything.
+const MAX_CONCURRENCY = posInt(process.env.WORKER_MAX_CONCURRENCY, 3);
 const POLL_MS = 5_000;
 const RECONCILE_MS = 30_000;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;

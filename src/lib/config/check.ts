@@ -1,5 +1,5 @@
 import { isValidMasterKey } from "@/lib/crypto";
-import { nonNegInt, posInt } from "@/lib/config/env";
+import { finiteNonNeg, nonNegInt, posInt } from "@/lib/config/env";
 
 export type ConfigIssue = { level: "error" | "warn"; key: string; message: string };
 
@@ -30,23 +30,22 @@ const isNonNegInt = (n: number) => Number.isInteger(n) && n >= 0;
 const isFiniteNonNeg = (n: number) => Number.isFinite(n) && n >= 0;
 
 export const KNOB_SHAPES = {
-  /** THE reader, not a copy of it: `posInt` from config/env is the function the read
-   *  sites now call, so for these knobs the message cannot drift from the behaviour
-   *  at all. Same for `nonNegInt`. That is also why the bare-`||` shape is gone from
-   *  this table — its twelve knobs go through these two functions now, and the two
-   *  entries below are still mirrors only because their readers are module-local. */
+  /** Every `used` here is THE reader, not a copy of one — the function the read site
+   *  actually calls. That is the point of the table: for a mirror, "does the message
+   *  match the mechanism" is a question a test has to keep asking, and each new value
+   *  is a chance for the two to diverge again; for the reader itself the question
+   *  stops existing. Nothing in this table is a mirror any more, which is also why
+   *  the bare-`||` and prefix-parsing shapes are gone from it: no read site is left
+   *  that uses a value it never validated. */
   posInt: { used: posInt, ok: isPosInt, domain: "a positive integer" },
   /** `nonNegInt` here, `nonNegativeInt(...)` in db/retention.ts. Zero is honoured
    *  wherever it selects a different working behaviour rather than no output. */
   nonNegInt: { used: nonNegInt, ok: isNonNegInt, domain: "a non-negative integer" },
-  /** Mirror of `envNumber(...)` in mcp/tool-search.ts — 0 and fractions are
-   *  DELIBERATE there, and that reader is module-local. */
-  finiteNonNeg: { used: (raw: string, d: number) => (isFiniteNonNeg(Number(raw)) ? Number(raw) : d), ok: isFiniteNonNeg, domain: "a non-negative number" },
-  /** Mirror of `Math.max(1, parseInt(env.X || "3", 10) || 3)` in worker.ts:
-   *  prefix-parsed, so `10g` becomes 10 and RUNS, `2.7` truncates to 2, a negative
-   *  clamps to 1 — three outcomes, none of them the built-in default. The last read
-   *  site in the platform that uses a value it never validated. */
-  parseIntClamped: { used: (raw: string, d: number) => Math.max(1, parseInt(raw, 10) || d), ok: isPosInt, domain: "a positive integer" },
+  /** Separate from `nonNegInt` rather than folded into it, because `MCP_DEFER_TOKEN_PCT`
+   *  is a PERCENTAGE: `10.5` is a legal 10.5% of the window, and an integer rule would
+   *  quietly re-gate the connector block at 100k tokens instead of 105k while this very
+   *  message kept calling the value honoured. */
+  finiteNonNeg: { used: finiteNonNeg, ok: isFiniteNonNeg, domain: "a non-negative number" },
 } as const;
 
 /**
@@ -83,7 +82,7 @@ export const NUMERIC_KNOBS: {
   { key: "VIEW_KEEP_DIRS", fallback: 4, shape: "nonNegInt", site: "src/lib/sandbox/view-file.ts" },
   { key: "MAX_MCP_MEDIA_BYTES", fallback: 5 * 1024 * 1024, shape: "nonNegInt", site: "src/lib/mcp/adapt.ts" },
   { key: "MAX_MCP_TOOL_DESC_CHARS", fallback: 1024, shape: "posInt", site: "src/lib/mcp/adapt.ts" },
-  { key: "WORKER_MAX_CONCURRENCY", fallback: 3, shape: "parseIntClamped", site: "src/lib/tasks/worker.ts" },
+  { key: "WORKER_MAX_CONCURRENCY", fallback: 3, shape: "posInt", site: "src/lib/tasks/worker.ts" },
 ];
 
 /**
@@ -173,11 +172,12 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
       effective === n
         ? {
             // The read site used the value without validating it, so it survives and
-            // runs. Currently UNREACHABLE: every knob in the table now goes through
-            // posInt/nonNegInt/envNumber, and parseIntClamped always rewrites what it
-            // rejects. It stays because the branch is a condition on data, not dead
-            // code — reintroduce a bare `Number(env.X) || d` read (the inverse test
-            // will make you list it) and this is the only message that would be true.
+            // runs. Currently UNREACHABLE: all three readers in KNOB_SHAPES —
+            // posInt, nonNegInt, finiteNonNeg — replace what they reject, and no
+            // read site is left that does otherwise. It stays because the branch is a
+            // condition on data, not dead code: reintroduce a bare `Number(env.X) || d`
+            // read (the inverse test will make you list it) and this is the only
+            // message that would be true.
             level: "error",
             key,
             message: `set to "${raw}", which is not ${domain} — it will be used AS WRITTEN, not replaced by the default. Set a valid value or unset it.`,
