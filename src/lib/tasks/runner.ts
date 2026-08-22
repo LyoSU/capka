@@ -1481,6 +1481,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         model: modelId, provider, steps: stepCount,
       });
     }
+    // `parts` is not the whole story: discardPartial empties it when an attempt is
+    // thrown away and keeps the executed-call ledger, so a failure right after a
+    // restart has writes standing with nothing in parts to show for them.
+    const hadEffects = turnEffects.length > 0;
     const finalStatus = deadlineHit ? "failed" : leaseLost ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : truncated ? "failed" : "completed";
     // Map any provider error to a friendly, role-aware shape: users see
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
@@ -1489,7 +1493,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // and a two-way split within it, because a stall that hit mid-work must not
     // advise "try again": regenerating re-runs every tool and rewrites what this
     // turn already wrote. `parts` is what the turn is keeping, so it decides.
-    const failure = deadlineHit ? timedOutError(parts) : leaseLost ? interruptedError(parts) : stalledOut ? providerUnresponsiveError(parts) : streamError ? classifyLLMError(streamError) : truncated ? RESPONSE_TRUNCATED_ERROR : undefined;
+    const failure = deadlineHit ? timedOutError(parts, hadEffects) : leaseLost ? interruptedError(parts, hadEffects) : stalledOut ? providerUnresponsiveError(parts, hadEffects) : streamError ? classifyLLMError(streamError) : truncated ? RESPONSE_TRUNCATED_ERROR : undefined;
 
     // Token usage + cost, computed once. Needed BOTH for the persisted message
     // metadata (so the (i) details survive a reload — elapsedMs and the usage
@@ -1883,7 +1887,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const isAbort = e instanceof Error && e.name === "AbortError";
     // A lost lease aborts by throwing — it must NOT read as a clean user cancel.
     const status = isAbort && !deadlineHit && !leaseLost ? "cancelled" : "failed";
-    const failure = deadlineHit ? timedOutError(parts) : leaseLost ? interruptedError(parts) : isAbort ? undefined : classifyLLMError(e);
+    const failure = deadlineHit ? timedOutError(parts, turnEffects.length > 0) : leaseLost ? interruptedError(parts, turnEffects.length > 0) : isAbort ? undefined : classifyLLMError(e);
     // This catch swallows the error to finalize gracefully, so the worker's
     // crash log never fires — record it here instead. A clean cancel is info.
     tlog[status === "cancelled" ? "info" : "error"]("task ended", {

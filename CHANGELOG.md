@@ -18,7 +18,9 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Download filenames taken from a project name or chat title are now valid on every OS: `Q4: plan` was unsaveable on Windows, and a title ending in a dot saved under a different name than the one served.
-- A turn that times out or loses its worker after producing work now offers "Continue" instead of advising a retry, matching what a stalled turn already did — retrying re-runs every tool and rewrites what the turn already wrote.
+- A turn that times out or loses its worker after producing work now offers "Continue" instead of advising a retry, matching what a stalled turn already did — retrying re-runs every tool and rewrites what the turn already wrote Covers a turn reaped after a crash or restart, whose verdict comes from the zombie reconciler rather than the worker.
+- A tool call that ran and then threw now counts as work worth keeping, so a turn cut short right after one is no longer reported as a total loss — a script can write three files before it fails.
+- A malformed `WRAP_UP_AFTER_FRACTION` is reported at boot instead of being clamped in silence.
 
 ## [0.30.0] - 2026-08-22
 

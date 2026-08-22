@@ -78,6 +78,27 @@ describe("checkConfig", () => {
       expect.objectContaining({ key: "DB_RETENTION_BATCH_SIZE", level: "warn" }),
     );
   });
+
+  // The one knob here that is deliberately fractional. The integer sweep above
+  // would reject its own default, so it needs a check of its own — and without one
+  // a typo is clamped in silence, which for this knob means the wrap-up brake
+  // quietly arms at a moment the operator never asked for.
+  it("accepts a fractional WRAP_UP_AFTER_FRACTION and warns outside the usable range", () => {
+    expect(keysOf({ ...VALID, WRAP_UP_AFTER_FRACTION: "0.8" })).toEqual([]);
+    expect(keysOf({ ...VALID, WRAP_UP_AFTER_FRACTION: "0.5" })).toEqual([]);
+
+    // 0.05 and 0.99 are numbers, but the reader clamps them — so as written they
+    // are not what will run, which is the silence this warning exists to break.
+    for (const bad of ["1", "0", "-0.2", "1.5", "0.05", "0.99", "eighty percent"]) {
+      expect(keysOf({ ...VALID, WRAP_UP_AFTER_FRACTION: bad })).toContain("WRAP_UP_AFTER_FRACTION");
+    }
+  });
+
+  it("does not sweep the fractional knob into the positive-integer check", () => {
+    // Listing it alongside TASK_TIMEOUT_MINUTES would warn on every valid value.
+    const issues = checkConfig({ ...VALID, WRAP_UP_AFTER_FRACTION: "0.8" });
+    expect(issues.map((i) => i.message).join(" ")).not.toContain("positive integer");
+  });
 });
 
 describe("checkConfig — telemetry", () => {

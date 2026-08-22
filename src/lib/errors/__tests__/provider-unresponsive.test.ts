@@ -42,4 +42,16 @@ describe("providerUnresponsiveError", () => {
     const partial = providerUnresponsiveError([{ type: "text", text: "x" }]);
     expect(partial.adminDetail).toBe(nothing.adminDetail);
   });
+
+  // Same executed-call signal the timeout/interruption selectors take: a stall that
+  // lands right after a discarded attempt has no parts left to read, but the calls
+  // that attempt executed are still standing in the workspace.
+  it("counts executed calls that outlived a discarded attempt's parts", () => {
+    expect(providerUnresponsiveError([], true).category).toBe("provider_unresponsive_partial");
+  });
+
+  it("counts a tool that ran and then threw, because it may have written first", () => {
+    expect(providerUnresponsiveError([{ type: "tool-error" }] as never).category)
+      .toBe("provider_unresponsive_partial");
+  });
 });

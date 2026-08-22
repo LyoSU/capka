@@ -112,6 +112,25 @@ export function checkConfig(env: Record<string, string | undefined> = process.en
       });
     }
   }
+  // The one deliberately FRACTIONAL knob, so it cannot ride the positive-integer
+  // sweep above — that check would reject its own default. Validated against the
+  // clamp in step-control.ts rather than the open interval, because a value inside
+  // (0,1) but outside the clamp is silently rewritten too: what the operator wrote
+  // is not what runs, and that is the whole thing worth saying at boot.
+  {
+    const raw = env.WRAP_UP_AFTER_FRACTION?.trim();
+    if (raw !== undefined && raw !== "") {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0.1 || n > 0.95) {
+        issues.push({
+          level: "warn",
+          key: "WRAP_UP_AFTER_FRACTION",
+          message: `set to "${raw}", which is outside the usable 0.1–0.95 range — it will be clamped.`,
+        });
+      }
+    }
+  }
+
   // Tracing. Advisory, like everything here — the actual enforcement of the
   // content policy lives in resolveTelemetryConfig, because this function never
   // blocks boot and so cannot be what prevents a data leak.

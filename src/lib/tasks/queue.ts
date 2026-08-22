@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { realtime } from "@/lib/realtime";
 import type { MessageMeta } from "@/lib/chat/contracts";
+import { INTERRUPTED_ERROR, INTERRUPTED_PARTIAL_ERROR } from "@/lib/errors/friendly";
 
 /**
  * Durable task queue on Postgres. Tasks are rows; a worker claims them
@@ -371,13 +372,48 @@ export async function isCancelRequested(id: string): Promise<boolean> {
   return rows[0]?.cancel_requested ?? false;
 }
 
+/** A task the reaper failed, plus whether its row still holds work worth keeping —
+ *  the caller needs that to tell a live tab the same thing the reloaded row says. */
+export type ReconciledZombie = Pick<TaskRow, "id" | "user_id" | "chat_id"> & { partial: boolean };
+
 /**
  * User-facing text for a task whose worker died mid-flight. Shared by the
  * persisted message metadata and the live SSE so a reload and a live tab show
  * the exact same thing.
+ *
+ * Taken FROM the friendly errors rather than written again here. These used to be
+ * a separate sentence ("The task was interrupted before it finished"), which meant
+ * one event was described two ways depending on whether the runner or the
+ * reconciler happened to win the finalize race — and only one of them could ever
+ * be the one the category renders to.
  */
-export const INTERRUPTED_MESSAGE =
-  "The task was interrupted before it finished. Please try again.";
+export const INTERRUPTED_MESSAGE = INTERRUPTED_ERROR.userMessage;
+/** Its partial twin: the crash landed on a turn that had already produced work. */
+export const INTERRUPTED_PARTIAL_MESSAGE = INTERRUPTED_PARTIAL_ERROR.userMessage;
+
+/**
+ * The SQL twin of `producedWork` (errors/friendly.ts): did this row's saved parts
+ * leave the user anything to keep? Finished text, a tool result, or a tool that ran
+ * and threw — a failed tool still had its hands on the workspace. Reasoning and an
+ * unanswered tool call are not work.
+ *
+ * It has to be written twice because one side is TypeScript and the other is a
+ * statement Postgres runs without us; the pairing is pinned by
+ * __tests__/reconcile-partial.test.ts, and any change here belongs in both.
+ */
+const PRODUCED_WORK_SQL = `EXISTS (
+          SELECT 1 FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(m.metadata->'parts') = 'array'
+                 THEN m.metadata->'parts' ELSE '[]'::jsonb END) AS p
+           WHERE p->>'type' IN ('tool-result', 'tool-error')
+              OR (p->>'type' = 'text' AND btrim(COALESCE(p->>'text', '')) <> ''))`;
+
+/** What to merge into a stranded message, split on the evidence above. $1 is the
+ *  total-loss sentence, $2 the partial one. */
+const INTERRUPTED_METADATA_SQL = `CASE WHEN ${PRODUCED_WORK_SQL}
+            THEN jsonb_build_object('status', 'failed', 'error', $2::text, 'errorCategory', 'interrupted_partial')
+            ELSE jsonb_build_object('status', 'failed', 'error', $1::text, 'errorCategory', 'interrupted')
+          END`;
 
 /**
  * Fail any running task whose lease has expired (its worker died), reconcile its
@@ -395,8 +431,8 @@ export const INTERRUPTED_MESSAGE =
  * permanent-until-30-days. Returns the reaped task rows so the caller notifies
  * connected clients.
  */
-export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "user_id" | "chat_id">>> {
-  const { rows } = await pool.query<Pick<TaskRow, "id" | "user_id" | "chat_id">>(
+export async function reconcileZombies(): Promise<ReconciledZombie[]> {
+  const { rows } = await pool.query<ReconciledZombie>(
     `WITH dead AS (
         UPDATE tasks
            SET status = 'failed',
@@ -411,10 +447,13 @@ export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "us
          RETURNING id, user_id, chat_id
      ), reconciled_messages AS (
         UPDATE messages m
-           SET metadata = m.metadata || jsonb_build_object('status', 'failed', 'error', $1::text, 'errorCategory', 'interrupted')
+           SET metadata = m.metadata || ${INTERRUPTED_METADATA_SQL}
           FROM dead
          WHERE m.metadata->>'taskId' = dead.id
            AND m.metadata->>'status' = 'running'
+        -- The verdict just written, handed back so the live tab is told the same
+        -- thing the reloaded row will say.
+        RETURNING dead.id AS task_id, m.metadata->>'errorCategory' = 'interrupted_partial' AS partial
      ), reconciled_terminal AS (
         -- Messages stranded at 'running' whose owning task ALREADY reached a
         -- terminal, non-success status: the failure path's finalizeTask succeeded
@@ -425,7 +464,7 @@ export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "us
         -- terminal sweep. 'completed' is excluded so a genuinely finished answer is
         -- never rewritten to "interrupted".
         UPDATE messages m
-           SET metadata = m.metadata || jsonb_build_object('status', 'failed', 'error', $1::text, 'errorCategory', 'interrupted')
+           SET metadata = m.metadata || ${INTERRUPTED_METADATA_SQL}
           FROM tasks t
          WHERE m.metadata->>'taskId' = t.id
            AND m.metadata->>'status' = 'running'
@@ -445,8 +484,9 @@ export async function reconcileZombies(): Promise<Array<Pick<TaskRow, "id" | "us
            AND (t.status IN ('completed', 'failed', 'cancelled')
                 OR u.task_id IN (SELECT id FROM dead))
      )
-     SELECT id, user_id, chat_id FROM dead`,
-    [INTERRUPTED_MESSAGE],
+     SELECT d.id, d.user_id, d.chat_id, COALESCE(rm.partial, false) AS partial
+       FROM dead d LEFT JOIN reconciled_messages rm ON rm.task_id = d.id`,
+    [INTERRUPTED_MESSAGE, INTERRUPTED_PARTIAL_MESSAGE],
   );
   return rows;
 }

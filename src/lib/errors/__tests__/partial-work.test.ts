@@ -33,6 +33,23 @@ describe("timedOutError", () => {
     expect(timedOutError([{ type: "text", text: "x" }]).userMessage).toMatch(/continue/i);
   });
 
+  // A tool that threw still had its hands on the workspace — a script can write
+  // three files and then fail on the fourth. The runner ledgers exactly that call
+  // as the one a restarted turn most needs to know about, so a predicate that reads
+  // the same parts and calls it "nothing happened" contradicts its own neighbour.
+  it("counts a tool that ran and then threw, because it may have written first", () => {
+    expect(timedOutError([{ type: "tool-error" }]).category).toBe("timed_out_partial");
+  });
+
+  // `discardPartial` clears `parts` when an attempt is thrown away but deliberately
+  // KEEPS the executed-call ledger: those calls happened and stay happened. A
+  // timeout right after such a restart therefore sees no parts at all, and without
+  // this signal reports total loss over writes that are still standing.
+  it("counts executed calls that outlived a discarded attempt's parts", () => {
+    expect(timedOutError([], true).category).toBe("timed_out_partial");
+    expect(interruptedError([], true).category).toBe("interrupted_partial");
+  });
+
   it("keeps one adminDetail for the one cause, however the turn ended", () => {
     expect(timedOutError([{ type: "text", text: "x" }]).adminDetail)
       .toBe(timedOutError([]).adminDetail);

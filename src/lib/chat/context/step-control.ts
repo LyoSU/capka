@@ -33,11 +33,12 @@ export const FORCE_TEXT_AFTER_STEPS = Math.min(
  * The wall-clock twin of FORCE_TEXT_AFTER_STEPS: the fraction of a task's run-time
  * budget after which the turn stops calling tools and answers with what it has.
  *
- * 0.8 leaves a fifth of the budget to write the answer in — at the default deadline
- * that is two minutes, comfortably more than a wrap-up reply needs, and short enough
- * that the brake doesn't cost a turn much of its working time. Clamped BELOW 1
- * because a fraction of 1 would arm the brake at the same instant the deadline
- * aborts the run, which is no brake at all.
+ * 0.8 leaves a fifth of the budget to write the answer in — at the 20-minute default
+ * deadline that is four minutes, comfortably more than a wrap-up reply needs, and
+ * short enough that the brake doesn't cost a turn much of its working time. Clamped
+ * BELOW 1 because a fraction of 1 would arm the brake at the same instant the
+ * deadline aborts the run, which is no brake at all. A value outside the clamp is
+ * warned about at boot (config/check.ts) rather than silently rewritten.
  */
 export const WRAP_UP_AFTER_FRACTION = Math.min(
   0.95,

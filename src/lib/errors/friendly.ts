@@ -400,8 +400,10 @@ export const TIMED_OUT_PARTIAL_ERROR: FriendlyError = {
 /** Pick which of the two timeout messages a run earns, from what it left behind. */
 export function timedOutError(
   parts: ReadonlyArray<{ type: string; text?: string }>,
+  /** Executed tool calls the run has on record even when `parts` was cleared. */
+  executedWork = false,
 ): FriendlyError {
-  return producedWork(parts) ? TIMED_OUT_PARTIAL_ERROR : TIMED_OUT_ERROR;
+  return producedWork(parts, executedWork) ? TIMED_OUT_PARTIAL_ERROR : TIMED_OUT_ERROR;
 }
 
 /**
@@ -446,16 +448,42 @@ export const PROVIDER_UNRESPONSIVE_PARTIAL_ERROR: FriendlyError = {
  * This is the one question behind all three partial/total splits below. Every way
  * a turn can die part-way faces it, and answering it differently per failure is how
  * the timeout path ended up telling a user who had files on screen to start over.
+ *
+ * A tool that THREW counts too. It ran: the runner's own tool-error branch notes
+ * that a script can write three files and then fail on the fourth, and ledgers that
+ * call as the one a restarted turn most needs to verify. Reading the same parts and
+ * calling it "nothing happened" would put this predicate at odds with
+ * `effectsFromParts`, which treats the identical part as an executed effect.
+ *
+ * KNOWN IMPRECISION: the SDK also synthesizes a `tool-error` for a call it rejected
+ * BEFORE running (unparseable arguments, unknown tool), and a row cannot tell the
+ * two apart. Counting it errs toward "continue" over "start over", which is the
+ * cheaper mistake — but the real fix is upstream, where such a call should not enter
+ * `parts` as a tool-error at all; that repairs this predicate and its SQL twin in
+ * queue.ts together, which is why neither compensates for it here.
+ *
+ * `executedWork` is the second source, and it exists because `parts` is not durable:
+ * `discardPartial` empties it when an attempt is thrown away, while deliberately
+ * KEEPING the executed-call ledger — those calls happened and stay happened. A
+ * failure right after such a restart therefore reads no parts at all, and the ledger
+ * is the only thing left that knows the workspace was written.
  */
-function producedWork(parts: ReadonlyArray<{ type: string; text?: string }>): boolean {
-  return parts.some((p) => (p.type === "text" && !!p.text?.trim()) || p.type === "tool-result");
+function producedWork(
+  parts: ReadonlyArray<{ type: string; text?: string }>,
+  executedWork = false,
+): boolean {
+  return executedWork || parts.some(
+    (p) => (p.type === "text" && !!p.text?.trim()) || p.type === "tool-result" || p.type === "tool-error",
+  );
 }
 
 /** Pick which of the two stall messages a finished turn earns, from what it left behind. */
 export function providerUnresponsiveError(
   parts: ReadonlyArray<{ type: string; text?: string }>,
+  /** Executed tool calls the run has on record even when `parts` was cleared. */
+  executedWork = false,
 ): FriendlyError {
-  return producedWork(parts) ? PROVIDER_UNRESPONSIVE_PARTIAL_ERROR : PROVIDER_UNRESPONSIVE_ERROR;
+  return producedWork(parts, executedWork) ? PROVIDER_UNRESPONSIVE_PARTIAL_ERROR : PROVIDER_UNRESPONSIVE_ERROR;
 }
 
 /**
@@ -508,6 +536,8 @@ export const INTERRUPTED_PARTIAL_ERROR: FriendlyError = {
 /** Pick which of the two interruption messages a run earns, from what it left behind. */
 export function interruptedError(
   parts: ReadonlyArray<{ type: string; text?: string }>,
+  /** Executed tool calls the run has on record even when `parts` was cleared. */
+  executedWork = false,
 ): FriendlyError {
-  return producedWork(parts) ? INTERRUPTED_PARTIAL_ERROR : INTERRUPTED_ERROR;
+  return producedWork(parts, executedWork) ? INTERRUPTED_PARTIAL_ERROR : INTERRUPTED_ERROR;
 }

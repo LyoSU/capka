@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models } from "@/lib/db/schema";
 import { realtime } from "@/lib/realtime";
-import { claimNextTask, reconcileZombies, auxInFlight, INTERRUPTED_MESSAGE } from "@/lib/tasks/queue";
+import { claimNextTask, reconcileZombies, auxInFlight, INTERRUPTED_MESSAGE, INTERRUPTED_PARTIAL_MESSAGE } from "@/lib/tasks/queue";
 import { drainInFlight } from "@/lib/tasks/drain";
 import { reconcileStaleApplies } from "@/lib/marketplace/operation";
 import { insertPluginAudit } from "@/lib/marketplace/audit";
@@ -102,7 +102,9 @@ async function reconcile(): Promise<void> {
       await releaseHold(t.id);
       await publishTaskEvent(t.user_id, {
         type: "task:finish", taskId: t.id, chatId: t.chat_id, status: "failed",
-        error: INTERRUPTED_MESSAGE,
+        // Same split the reaper just wrote into the row: a crash that landed on a
+        // turn with files already written must not tell the user to start over.
+        error: t.partial ? INTERRUPTED_PARTIAL_MESSAGE : INTERRUPTED_MESSAGE,
       });
     }
     if (dead.length) log.info("reconciled zombie tasks", { count: dead.length, taskIds: dead.map((t) => t.id) });
