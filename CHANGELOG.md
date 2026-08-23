@@ -6,6 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A tool result that carries one JSON value as text now goes through the same shape-driven rendering as typed output (record lists, tables, field grids), descending through metadata wrappers like `{success, data: {…}}`; JSON that matches no shape at least renders re-indented in monospace instead of as a single line.
+
+### Fixed
+
+- A sandbox command that exits non-zero now says so in the step panel ("Command exited with code N") — it previously rendered indistinguishably from a successful one.
+
 ## [0.34.0] - 2026-08-23
 
 ### Changed

@@ -111,8 +111,21 @@ describe("recordsFromValue — the MCP-standard path", () => {
     expect(recordsFromValue({ results })!.length).toBe(2);
   });
 
-  it("refuses a wrapper with two properties — that structure has an opinion", () => {
-    expect(recordsFromValue({ results, total: 2 })).toBeNull();
+  // Scalar siblings are envelope chatter (success flags, totals), never the
+  // payload — the walk toward the one container is what lets a stringified
+  // API reply ({success: true, data: {web: [...]}}) render as the list it is.
+  it("descends through scalar metadata to the one container, however wrapped", () => {
+    expect(recordsFromValue({ results, total: 2 })!.length).toBe(2);
+    expect(recordsFromValue({ success: true, data: { web: results } })!.length).toBe(2);
+  });
+
+  it("refuses two containers side by side — that structure has an opinion", () => {
+    expect(recordsFromValue({ web: results, images: results })).toBeNull();
+  });
+
+  it("stops descending past the depth cap instead of spinning", () => {
+    expect(recordsFromValue({ a: { b: { c: { d: results } } } })!.length).toBe(2);
+    expect(recordsFromValue({ a: { b: { c: { d: { e: results } } } } })).toBeNull();
   });
 
   it("refuses short lists, scalar arrays, and nested arrays", () => {
@@ -148,6 +161,13 @@ describe("fieldsFromValue — one typed object", () => {
   it("sets transport fields aside and reads what remains", () => {
     const fields = fieldsFromValue({ content: [{ type: "text", text: "ok" }], isError: false, status: "green", count: 3 })!;
     expect(fields.map((f) => f.label).sort()).toEqual(["count", "status"]);
+  });
+
+  it("unwraps a pure single-key wrapper, but keeps scalar siblings as fields", () => {
+    expect(fieldsFromValue({ data: { temperature: 21, humidity: 60 } })!.map((f) => f.label)).toEqual(["temperature", "humidity"]);
+    // A scalar next to the container is a field of the entity as far as this
+    // view can know — dropping it would hide data, so no descent happens here.
+    expect(fieldsFromValue({ success: true, data: { temperature: 21 } })!.map((f) => f.label)).toEqual(["success", "data"]);
   });
 
   it("refuses arrays, scalars, and one-property objects — a sentence is not an entity", () => {

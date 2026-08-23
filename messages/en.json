@@ -504,6 +504,7 @@
         "params": "Parameters"
       },
       "result": "Result",
+      "exitCode": "Command exited with code {code}",
       "techDetails": "Technical details",
       "clippedField": "… (shortened)",
       "before": "Before",

@@ -66,17 +66,31 @@ function dataRoot(value: unknown): unknown {
   return value;
 }
 
+/** Walk down through wrapper objects toward the one container that could hold
+ *  the payload. A level counts as a wrapper when exactly one of its properties
+ *  is a container (object or array): the sibling scalars — success flags,
+ *  totals, timings — are envelope chatter around the data, because a scalar
+ *  cannot be the list being looked for. `{success: true, data: {web: [...]}}`
+ *  walks to the array in two steps without knowing any of those key names.
+ *  Two containers side by side = a structure with an opinion; stop there and
+ *  let the caller refuse. Being permissive is safe ONLY because the walk pays
+ *  off solely when a record array sits at the bottom — anything else still
+ *  returns null and the raw view renders instead. Depth-capped so pathological
+ *  nesting cannot spin. */
+function descendToContainer(root: unknown): unknown {
+  let v = root;
+  for (let i = 0; i < 4 && v && typeof v === "object" && !Array.isArray(v); i++) {
+    const containers = Object.values(v as Record<string, unknown>).filter((x) => !!x && typeof x === "object");
+    if (containers.length !== 1) return v;
+    v = containers[0];
+  }
+  return v;
+}
+
 export function recordsFromValue(value: unknown): TextRecord[] | null {
-  const root = dataRoot(value);
-  if (!root || typeof root !== "object") return null;
-  if (Array.isArray(root)) return isContentBlocks(root) ? null : fromArray(root);
-  // An object that is nothing but one array of objects ({results: [...]}) is
-  // that array under a wrapper key — accepted because the shape is unambiguous,
-  // never by the key's name. Two properties = a structure with an opinion, and
-  // flattening it would drop the other half.
-  const props = Object.entries(root as Record<string, unknown>).filter(([, v]) => v !== undefined);
-  if (props.length === 1 && Array.isArray(props[0][1]) && !isContentBlocks(props[0][1])) return fromArray(props[0][1]);
-  return null;
+  const root = descendToContainer(dataRoot(value));
+  if (!Array.isArray(root) || isContentBlocks(root)) return null;
+  return fromArray(root);
 }
 
 /** A single typed object — a weather reading, a status, one entity — becomes
@@ -84,12 +98,25 @@ export function recordsFromValue(value: unknown): TextRecord[] | null {
  *  text pipeline had nothing better than raw JSON to show (the caller gates on
  *  that), so this never displaces a tool's own prose. */
 export function fieldsFromValue(value: unknown): StepField[] | null {
-  const root = dataRoot(value);
-  if (!root || typeof root !== "object" || Array.isArray(root)) return null;
-  const props = Object.entries(root as Record<string, unknown>).filter(([, v]) => v !== undefined);
-  // One property is a sentence, not an entity — the plain text already says it.
-  if (props.length < 2) return null;
-  return props.map(([k, v]) => fieldOf(k, v));
+  let root = dataRoot(value);
+  for (let i = 0; i < 4; i++) {
+    if (!root || typeof root !== "object" || Array.isArray(root)) return null;
+    const props = Object.entries(root as Record<string, unknown>).filter(([, v]) => v !== undefined);
+    // A pure single-key wrapper ({data: {…}}) hides the entity one level down —
+    // unwrap it. A wrapper with scalar SIBLINGS is not unwrapped here, unlike on
+    // the records path: to this view those scalars are fields of the entity as
+    // much as anything inside the container is, and dropping them would hide
+    // data (the records walk can afford that gamble only because it must find a
+    // list at the bottom to render at all).
+    if (props.length === 1 && !!props[0][1] && typeof props[0][1] === "object" && !Array.isArray(props[0][1])) {
+      root = props[0][1];
+      continue;
+    }
+    // One property is a sentence, not an entity — the plain text already says it.
+    if (props.length < 2) return null;
+    return props.map(([k, v]) => fieldOf(k, v));
+  }
+  return null;
 }
 
 /** Homogeneous, short records read better as a table than as cards — the shape

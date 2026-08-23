@@ -240,12 +240,27 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
   // listing or a traceback); prose-shaped output — a web result, an MCP reply —
   // reads better in the body face at a readable size.
   const mono = category === "exec" || category === "file";
+  // A result that arrived as TEXT but is really one JSON value — a connector
+  // that stringifies its payload into a text block — re-enters the same shape
+  // ladder the typed path uses. Parse, don't sniff: JSON.parse is the detector,
+  // and a scalar or a parse failure leaves the text exactly as it was.
+  const parsed = useMemo(() => {
+    if (isError) return null;
+    const head = full.trimStart();
+    if (!head.startsWith("{") && !head.startsWith("[")) return null;
+    try {
+      const v: unknown = JSON.parse(full);
+      return v && typeof v === "object" ? v : null;
+    } catch {
+      return null;
+    }
+  }, [isError, full]);
   // A result that is a LIST — typed records per the MCP spec, or `Key: value`
   // text blocks — renders as one. Never for errors (a traceback is a text) and
   // never for exec/file output, where the bytes themselves are the artifact.
   const records = useMemo(
-    () => (isError || mono ? null : recordsFromValue(output) ?? recordsFromText(full)),
-    [isError, mono, output, full],
+    () => (isError || mono ? null : recordsFromValue(output) ?? (parsed ? recordsFromValue(parsed) : null) ?? recordsFromText(full)),
+    [isError, mono, output, parsed, full],
   );
   // The envelope's other block types, per the MCP spec: images the tool drew,
   // resources it pointed at. They accompany whatever textual shape renders
@@ -256,9 +271,19 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
   // when the text pipeline fell through to raw JSON, so a tool that answered
   // in prose never has that prose displaced by field rows.
   const fields = useMemo(
-    () => (isError || mono || records || !full.trimStart().startsWith("{") ? null : fieldsFromValue(output)),
-    [isError, mono, records, full, output],
+    () => (isError || mono || records || !parsed ? null : fieldsFromValue(output) ?? fieldsFromValue(parsed)),
+    [isError, mono, records, parsed, output],
   );
+  // Capka's own sandbox commands return { output, exitCode } — a first-party
+  // shape, trusted the same way asMediaRef is. Without this, a command that
+  // FAILED renders indistinguishably from one that succeeded, because the tool
+  // call itself completed fine and errorText stays empty.
+  const exitCode = (() => {
+    const o = output as Record<string, unknown> | null;
+    return !isError && o && typeof o === "object" && typeof o.output === "string" && typeof o.exitCode === "number" && o.exitCode !== 0
+      ? o.exitCode
+      : null;
+  })();
 
   const extras = (images || resources) && (
     <>
@@ -398,10 +423,23 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
     );
   }
 
+  // When nothing structured matched but the text IS one JSON value, at least
+  // show it re-indented, in mono: machine text earns the machine face, and a
+  // single-line payload is unreadable at any font. Display shape only — the
+  // copy button keeps the artifact byte-for-byte as the tool sent it.
+  const pretty = parsed ? JSON.stringify(parsed, null, 2) : null;
+  const shownText = pretty ?? full;
+  const overPre = shownText.length > OUTPUT_LIMIT;
+  const preBody = overPre && !showAll ? shownText.slice(0, OUTPUT_LIMIT) : shownText;
+
   return (
     <section>
       <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
       {extras}
+      {/* A failed command is a fact worth one calm sentence, not a red flood:
+          exit code 1 is routine (grep with no match), so the surface below
+          stays neutral and only this line carries the signal. */}
+      {exitCode !== null && <p className="mb-1 text-[11px] text-destructive">{t("exitCode", { code: exitCode })}</p>}
       {/* A quiet tinted surface, nothing more. It used to carry a 2px left rule,
           but an edge butted against a rounded corner reads as a printing defect,
           not a device — the label above already says "this came back", and the
@@ -412,14 +450,14 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
         <pre
           tabIndex={0}
           className={`max-h-56 overflow-auto whitespace-pre-wrap break-words leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-primary/40 ${
-            mono ? "font-mono text-[11px]" : "text-xs"
+            mono || pretty ? "font-mono text-[11px]" : "text-xs"
           } ${isError ? "text-destructive" : "text-muted-foreground"}`}
         >
-          {body}
+          {preBody}
         </pre>
       </div>
-      {over && (
-        <TruncationNotice shown={OUTPUT_LIMIT} total={full.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
+      {overPre && (
+        <TruncationNotice shown={OUTPUT_LIMIT} total={shownText.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
       )}
     </section>
   );
