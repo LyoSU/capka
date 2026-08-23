@@ -7,7 +7,7 @@ import pg from "pg";
 import { sanitize } from "./path-safety.js";
 import { resolveOwnerDecision, safeEqual } from "./owner.js";
 import { parseMultipart } from "./multipart.js";
-import { resolveNetworkMode } from "./sandbox-spec.js";
+import { resolveNetworkMode, DEPLOYMENT_KNOBS } from "./sandbox-spec.js";
 import { validateMountPath } from "./mount-safety.js";
 import { makeComputeBackend } from "./backends/backend-factory.js";
 import { makeWorkspaceStore } from "./stores/workspace-factory.js";
@@ -215,6 +215,23 @@ const SPEC_ENV = {
   mcpGid: MCP_GID,
   fsizeBytes: MAX_FILE_MB * 1024 * 1024,
 };
+// The other half of that "one source" claim, enforced instead of asserted in prose.
+// A knob added here but missing from DEPLOYMENT_KNOBS escapes the test that proves
+// DockerBackend.create() forwards it, and an inert knob is worse than none: the
+// container is built with the default while fingerprint() hashes the operator's
+// value, so reconcile finds every sandbox stale and rebuilds them on every boot.
+{
+  const declared = [...DEPLOYMENT_KNOBS].sort().join(",");
+  const actual = Object.keys(SPEC_ENV).sort().join(",");
+  if (declared !== actual) {
+    console.error(
+      "[sandbox-controller] FATAL: SPEC_ENV and DEPLOYMENT_KNOBS disagree.\n" +
+      `  declared: ${declared}\n  actual:   ${actual}\n` +
+      "  Add the knob to DEPLOYMENT_KNOBS in sandbox-spec.js and forward it in DockerBackend.create().",
+    );
+    process.exit(1);
+  }
+}
 let workspace;
 let backend;
 let hostDataRoot; // real host path of DATA_ROOT, resolved at boot; used by mount validation

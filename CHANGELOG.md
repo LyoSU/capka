@@ -13,12 +13,16 @@ All notable changes to Capka are documented here. Format follows
 - A file a tool step created, edited or read opens from the step's chip in the reply, which now carries a thumbnail of it.
 - Sandbox image: ghostscript, aria2, 7zip, Ukrainian OCR (`tesseract-ocr-ukr`), ocrmypdf and typst, plus the Python packages polars, duckdb, fastparquet, python-calamine, weasyprint, msoffcrypto-tool and extract-msg.
 - `SANDBOX_HOME_MB` sets the size of the sandbox's writable HOME tmpfs (default 64); like the other tmpfs mounts it is charged against `SANDBOX_MEMORY_MB`.
+- `npm run sandbox:smoke [image]` runs the sandbox image's capability suite — document conversion, HTML/Markdown to PDF, diagrams, Ukrainian OCR, parquet — in a container built by the real container spec rather than a hand-written `docker run`. The release workflow runs it on every sandbox image it builds and refuses to publish if it fails.
+- The sandbox image carries `/opt/capka/TOOLS.md`, generated at build time with the versions that actually resolved, and the agent is told to read it before installing anything.
 
 ### Changed
 
 - A tool step now shows what the model sent — the command, the code, the file's new contents, or a before/after for an edit — above its result, with both labelled.
 - The live status names a wait ("Setting up the workspace…") only once it has lasted about a second and a half, instead of flashing it for every short one.
 - The sandbox image no longer ships TeX Live or a JRE (~500 MB): pandoc produces PDFs through weasyprint, and camelot/pdfplumber cover what tabula-py did. Workflows that invoke `pdflatex`/`xelatex` or feed a `.tex` file no longer work.
+- Building the sandbox image now fails if a tool or Python module it is supposed to contain is missing, instead of shipping and failing at runtime.
+- The controller refuses to boot when its deployment knobs and `DEPLOYMENT_KNOBS` disagree: an unforwarded knob ran containers on defaults while marking them stale, which rebuilt every sandbox on every boot.
 - The sandbox image renders mermaid with a small built-in renderer instead of `@mermaid-js/mermaid-cli` (−460 MB, pinned via the `MERMAID_VERSION` build arg): `mmdc -i x.mmd -o x.svg|png|pdf` and the `-t/-b/-w/-H/-s` flags still work, while flags it does not implement are refused rather than silently ignored.
 - The sandbox image ships `fonts-noto-core` instead of `fonts-noto-cjk`: better Latin and Cyrillic defaults, at the cost of CJK text rendering as blank boxes.
 

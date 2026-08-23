@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { DockerBackend } from "./docker-backend.js";
+import { buildSandboxConfig, DEPLOYMENT_KNOBS } from "../sandbox-spec.js";
 
 // Image present so ensureRuntime() no-ops in unit tests.
 const imagePresent = { getImage: () => ({ inspect: async () => ({}) }) };
@@ -44,25 +45,45 @@ describe("DockerBackend (mocked dockerode)", () => {
     expect(cfg.Labels["capka.spec"]).toBe(b.fingerprint({}, "capka-sandbox-egress", "capka-egress-proxy:3128"));
   });
 
-  // The SAME plumbing trap as the egress endpoint above, caught a second time: the
-  // field list in create() is explicit on purpose, so any knob added to the spec is
-  // silently inert until it is named there — while fingerprint() spreads its env and
-  // DOES see it. That split is the expensive half: the container is built with the
-  // default while its posture label is computed from the operator's value, so
-  // reconcile finds every sandbox stale and rebuilds them on every boot, forever.
-  // Asserting the label against fingerprint() with the same knobs covers the whole
-  // class, not just the one field that prompted the test.
-  it("create() honours the tmpfs sizing knobs, and labels the result what fingerprint() expects", async () => {
+  // The SAME plumbing trap as the egress endpoint above, and it has now happened
+  // twice: create()'s field list is explicit on purpose (it stops a caller smuggling
+  // arbitrary container config), so a knob added to the spec is silently inert until
+  // someone names it there — while fingerprint() spreads its env and DOES see it.
+  // The container then runs with the default while its posture label is hashed from
+  // the operator's value, and reconcile rebuilds every sandbox on every boot.
+  //
+  // Compared against buildSandboxConfig rather than against the label, deliberately:
+  // specFingerprint hashes the security POSTURE and leaves out Memory and NanoCpus,
+  // so a label-only assertion would sail past those two being dropped. Every knob in
+  // DEPLOYMENT_KNOBS gets a value distinct from its default, so any field create()
+  // fails to forward shows up as a difference.
+  it("create() forwards every deployment knob, byte-for-byte against buildSandboxConfig", async () => {
+    const knobs = {
+      memoryBytes: 777 * 1024 * 1024,
+      nanoCpus: 3_500_000_000,
+      pidsLimit: 321,
+      tmpMb: 111,
+      mcpTmpMb: 222,
+      homeMb: 333,
+      mcpUid: 1507,
+      mcpGid: 1509,
+      fsizeBytes: 12_345_678,
+    };
+    // If this fails, the knob list grew and this test was not told: add the new knob
+    // above with a non-default value rather than relaxing the assertion.
+    expect(Object.keys(knobs).sort()).toEqual([...DEPLOYMENT_KNOBS].sort());
+
     const start = vi.fn().mockResolvedValue();
     const createContainer = vi.fn().mockResolvedValue({ id: "c1", start });
     const b = new DockerBackend({ docker: { ...imagePresent, createContainer }, image: "img:1", runtime: "runc" });
-    const knobs = { tmpMb: 128, mcpTmpMb: 512, homeMb: 256 };
-    await b.create({ sessionId: "s1", userId: "u1", wsHostPath: "/w", sharedHostPath: "/s", ...knobs });
-    const cfg = createContainer.mock.calls[0][0];
-    expect(cfg.HostConfig.Tmpfs["/tmp"]).toContain("size=128m");
-    expect(cfg.HostConfig.Tmpfs["/opt/mcp"]).toContain("size=512m");
-    expect(cfg.HostConfig.Tmpfs["/home/sandbox"]).toContain("size=256m");
-    expect(cfg.Labels["capka.spec"]).toBe(b.fingerprint(knobs, "none", null));
+    const session = { sessionId: "s1", userId: "u1", wsHostPath: "/w", sharedHostPath: "/s", networkMode: "none" };
+    await b.create({ ...session, ...knobs });
+
+    const built = createContainer.mock.calls[0][0];
+    expect(built).toEqual(buildSandboxConfig({ image: b.imageRef(), runtime: "runc", ...session, ...knobs }));
+    // And the label a created container carries must be the one reconcile computes,
+    // or every sandbox looks stale forever.
+    expect(built.Labels["capka.spec"]).toBe(b.fingerprint(knobs, "none", null));
   });
 
   it("create() self-heals a stale name conflict — force-removes the leftover container and retries", async () => {

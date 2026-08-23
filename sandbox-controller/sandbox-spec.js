@@ -15,6 +15,29 @@ export function resolveNetworkMode(requested) {
   return requested === "bridge" ? "bridge" : "none";
 }
 
+/** Every knob a DEPLOYMENT decides, by name — the contract between three places
+ *  that must agree and have twice failed to: server.js builds SPEC_ENV from these,
+ *  DockerBackend.create() must forward each one, and fingerprint() hashes what they
+ *  produce. create()'s field list is explicit on purpose (it stops a caller
+ *  smuggling arbitrary container config), which is exactly why a new knob is inert
+ *  until someone remembers to name it there — that happened to `egressProxy` and
+ *  then to `homeMb`. server.js refuses to boot if SPEC_ENV drifts from this list,
+ *  and docker-backend.test.js proves create() forwards every entry.
+ *
+ *  Note what is NOT here: readonlyRootfs, sandboxUser, image, runtime and the
+ *  session fields are not deployment knobs the server sends per session. */
+export const DEPLOYMENT_KNOBS = [
+  "memoryBytes",
+  "nanoCpus",
+  "pidsLimit",
+  "tmpMb",
+  "mcpTmpMb",
+  "homeMb",
+  "mcpUid",
+  "mcpGid",
+  "fsizeBytes",
+];
+
 /** Build the full dockerode createContainer config for a sandbox.
  *  `runtime` selects the OCI runtime (gVisor "runsc" by default in the secure
  *  profile; "runc" only for trusted/dev). `readonlyRootfs` makes the container's

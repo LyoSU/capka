@@ -44,6 +44,8 @@ export function buildSandboxPrompt(networkMode: "none" | "bridge"): string {
 
 A full Ubuntu workstation with Python, Node.js, a Bash shell, plus the usual libraries and command-line tools for working with documents, spreadsheets, PDFs, images, media, and data. ${network}
 
+\`/opt/capka/TOOLS.md\` lists what is installed, with versions — it is generated when the image is built, so it is never out of date. Read it before installing anything or concluding a tool is missing.
+
 ### Tool calls
 - \`execute_bash\` — shell commands, pipelines, package installation
 - \`execute_python\` — Python code

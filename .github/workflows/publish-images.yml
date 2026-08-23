@@ -119,6 +119,33 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
           cache-to: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }},mode=max
 
+      # The last point at which a broken sandbox image can still be stopped: this
+      # workflow runs on a v* tag, and cutting that tag IS the deploy (the merge job
+      # moves `stable`, and the public demo redeploys itself on that push). A failure
+      # here fails this matrix cell, so `merge` never runs and nothing is released.
+      #
+      # It checks what NO other gate can: four defects shipped in this image while
+      # pip list, dpkg -l, tsc and vitest were all green, because they only appear at
+      # runtime — and the worst of them only under the container's read-only rootfs,
+      # where LibreOffice and Chromium could not create a profile and produced no file
+      # at all. smoke-image.mjs therefore builds its container through the real
+      # DockerBackend rather than a hand-written `docker run`, so the posture it tests
+      # cannot drift from the one production uses.
+      #
+      # The build pushed by digest and never loaded the image into this runner's
+      # daemon, so pull those exact bytes back. Digest-addressed: it cannot test a
+      # different build than the one just made.
+      - name: Smoke-test the sandbox image
+        if: matrix.image.name == 'sandbox'
+        env:
+          REF: ${{ steps.img.outputs.ref }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull "$REF@$DIGEST"
+          docker tag "$REF@$DIGEST" capka-sandbox:ci
+          npm ci --prefix sandbox-controller
+          node sandbox-controller/smoke-image.mjs capka-sandbox:ci
+
       # Hand the digest to the merge job. The filename is the digest itself; the
       # file is empty — merge only needs the names.
       - name: Export digest

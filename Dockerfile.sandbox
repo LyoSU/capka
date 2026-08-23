@@ -356,6 +356,23 @@ RUN useradd -u 1001 -m -d /home/mcp -s /usr/sbin/nologin mcp
 # (No persistent Xvfb — GUI tools get a throwaway X server on demand; see §8b.)
 COPY --chmod=755 sandbox-entrypoint.sh /entrypoint.sh
 
+# ---------------------------------------------------------------------------
+# 10. Declared-contents check + the agent's own manifest
+# ---------------------------------------------------------------------------
+# Last, so it sees the finished image. Fails the build if anything declared in
+# scripts/sandbox-capabilities.mjs is missing, and writes /opt/capka/TOOLS.md with
+# the versions that actually resolved — generated, so it cannot drift from the image
+# the way a hand-maintained list in a prompt does. (Another agent working in this
+# sandbox asked an admin to install uv, yq and yt-dlp, all three already present, and
+# hand-installed duckdb over the existing one; it had no way to look.)
+#
+# This step deliberately proves only PRESENCE. A build runs as root on a writable
+# rootfs, where LibreOffice and Chromium work even when they cannot work in the real
+# container — which is how they shipped broken. The capability half runs against the
+# production container spec in sandbox-controller/smoke-image.mjs.
+COPY --chmod=755 scripts/sandbox-capabilities.mjs scripts/sandbox-manifest.mjs /opt/capka/bin/
+RUN node /opt/capka/bin/sandbox-manifest.mjs
+
 WORKDIR /workspace
 
 ENTRYPOINT ["/entrypoint.sh"]
