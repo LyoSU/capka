@@ -141,6 +141,21 @@ git user, so `%an`, `%ae` and `%cn` are identical for all of them and no git fie
 separates two agents; absence from your own record is not evidence of someone
 else's authorship. Ask the other session.
 
+And be ready for asking to fail, because **a session's name is not stable and it
+may not know its own.** Two boundary announcements arrived under different names,
+claiming overlapping files for adjacent findings of one audit; four sessions
+independently concluded there was a collision to sequence, from facts that were all
+correct. There was one session. It could not have answered a "who are you" question
+correctly at the time either — the earlier name was gone from `ListAgents` within
+minutes, which reads exactly like a session that vanished mid-edit.
+
+So the durable identifier is the **commit**, not the session. `git log -S "<a
+distinctive string>" -- <path>` names which commit introduced a line, and a session
+can confirm or deny a sha; a name is a handle that may already be void by the time
+you use it. When a claim and a tree disagree, look for the work in the history
+before concluding anyone is racing anyone: two of those "in flight" claims were
+already committed.
+
 Release note: the version is decided by what is *in the range*, not by intent — a
 peer's `feat` landing in the range makes it a minor even if a patch was requested.
 
