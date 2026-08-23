@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-08-23
+
 ### Changed
 
 - The live status row on a running turn now names which wait it is (in queue, connecting to the model, setting up the workspace) instead of always saying "Thinking…", and its clock starts when the message is sent rather than when the model call begins.
