@@ -19,6 +19,7 @@ All notable changes to Capka are documented here. Format follows
 - A tool step now shows what the model sent — the command, the code, the file's new contents, or a before/after for an edit — above its result, with both labelled.
 - The live status names a wait ("Setting up the workspace…") only once it has lasted about a second and a half, instead of flashing it for every short one.
 - The sandbox image no longer ships TeX Live or a JRE (~500 MB): pandoc produces PDFs through weasyprint, and camelot/pdfplumber cover what tabula-py did. Workflows that invoke `pdflatex`/`xelatex` or feed a `.tex` file no longer work.
+- The sandbox image renders mermaid with a small built-in renderer instead of `@mermaid-js/mermaid-cli` (−460 MB, pinned via the `MERMAID_VERSION` build arg): `mmdc -i x.mmd -o x.svg|png|pdf` and the `-t/-b/-w/-H/-s` flags still work, while flags it does not implement are refused rather than silently ignored.
 - The sandbox image ships `fonts-noto-core` instead of `fonts-noto-cjk`: better Latin and Cyrillic defaults, at the cost of CJK text rendering as blank boxes.
 
 ### Fixed

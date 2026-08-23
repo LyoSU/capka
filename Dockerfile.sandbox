@@ -172,15 +172,15 @@ RUN pip install --break-system-packages --no-cache-dir --no-binary imageio-ffmpe
 # ---------------------------------------------------------------------------
 # 7. Node.js global packages
 # ---------------------------------------------------------------------------
-# PUPPETEER_SKIP_DOWNLOAD stops @mermaid-js/mermaid-cli's bundled puppeteer from
-# pulling its OWN ~640 MB Chrome into /root/.cache — at runtime it reuses the
-# single Playwright Chromium via PUPPETEER_EXECUTABLE_PATH (set in §8). Playwright
-# is NOT installed here; §8 pins it to the exact pip version so both share one
-# browser build instead of silently drifting apart.
+# These two used to exist for @mermaid-js/mermaid-cli's bundled puppeteer (see
+# §7c — that package is gone). They are kept because they now serve puppeteer the
+# AGENT installs into /workspace: the skip stops a ~640 MB private Chrome download
+# that would blow the workspace quota, and the exec path points it at the browser
+# already in the image. Playwright is NOT installed here; §8 pins it to the exact
+# pip version so both runtimes share one browser build instead of drifting apart.
 ENV PUPPETEER_SKIP_DOWNLOAD=1
 RUN npm install -g \
     typescript tsx ts-node \
-    @mermaid-js/mermaid-cli \
     sharp pdf-lib docx pptxgenjs \
     marked \
     && npm cache clean --force
@@ -215,6 +215,27 @@ RUN set -eux; \
     chmod 755 /usr/local/bin/yq
 
 # ---------------------------------------------------------------------------
+# 7c. mermaid: the 3.5 MB bundle, not the 462 MB CLI
+# ---------------------------------------------------------------------------
+# @mermaid-js/mermaid-cli cost 462 MB installed — react-aria, fontawesome, zenuml,
+# napi-rs and the rest of the mermaid ecosystem's dependency graph — to wrap
+# dist/mermaid.min.js, which is 3.5 MB. The browser needed to run that bundle is
+# already in this image (§8), so the wrapper was the only part being paid for.
+# `npm pack` fetches from the same registry the globals above come from (no CDN),
+# and only the one file is kept. scripts/sandbox-mmdc.cjs renders it through
+# Playwright and accepts the mmdc flags that matter, so `mmdc -i x.mmd -o x.svg`
+# keeps working; it refuses the flags it does not implement instead of quietly
+# rendering something else.
+ARG MERMAID_VERSION=11.17.0
+RUN set -eux; \
+    cd /tmp; \
+    npm pack "mermaid@${MERMAID_VERSION}"; \
+    mkdir -p /opt/mermaid; \
+    tar -xzf "mermaid-${MERMAID_VERSION}.tgz" -C /tmp package/dist/mermaid.min.js; \
+    mv /tmp/package/dist/mermaid.min.js /opt/mermaid/mermaid.min.js; \
+    rm -rf "/tmp/mermaid-${MERMAID_VERSION}.tgz" /tmp/package; \
+    npm cache clean --force
+# ---------------------------------------------------------------------------
 # 8. Playwright + Chromium (one shared browser for Python AND Node)
 # ---------------------------------------------------------------------------
 # The Python (pip) and Node (npm) Playwright packages each pin an EXACT Chromium
@@ -241,10 +262,11 @@ RUN set -eux; \
     # it dies with "FATAL ... No usable sandbox!" on every launch. The container IS
     # the sandbox (see the same reasoning already applied to html2pdf below), so the
     # flags belong on the entry point rather than on each caller that remembers them.
-    # This also fixes mermaid-cli: PUPPETEER_EXECUTABLE_PATH points here, and its
-    # bundled puppeteer launches with default args, so `mmdc` produced NOTHING
-    # before. Playwright is unaffected — it invokes the real binary in
-    # /opt/pw-browsers directly and passes its own arguments.
+    # This is also what makes an agent-installed puppeteer work, since
+    # PUPPETEER_EXECUTABLE_PATH points here and puppeteer launches with default
+    # args. Playwright is unaffected — it invokes the real binary in
+    # /opt/pw-browsers directly — which is why §7c's renderer passes the two flags
+    # itself rather than relying on this wrapper.
     for name in chromium chromium-browser; do \
       printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage "$@"\n' "$CHROME" > "/usr/local/bin/$name"; \
       chmod 755 "/usr/local/bin/$name"; \
@@ -309,6 +331,13 @@ RUN set -eux; \
       'exec /usr/bin/pandoc "$@"' \
       > /usr/local/bin/pandoc; \
     chmod 755 /usr/local/bin/pandoc
+
+# The mermaid renderer whose bundle §7c fetched. It lives HERE, after Playwright,
+# on purpose: a COPY placed before §8 would make every edit to this script
+# invalidate the cached 195 MB Chromium download.
+COPY --chmod=755 scripts/sandbox-mmdc.cjs /opt/mermaid/mmdc.cjs
+RUN printf '#!/bin/sh\nexec node /opt/mermaid/mmdc.cjs "$@"\n' > /usr/local/bin/mmdc \
+    && chmod 755 /usr/local/bin/mmdc
 
 # ---------------------------------------------------------------------------
 # 9. Non-root user + workspace
