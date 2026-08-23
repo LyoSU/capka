@@ -47,9 +47,17 @@ list exactly your paths; with it unset, it must be empty.
 
 **Then refresh the shared index, or you have armed the very thing you were avoiding.**
 That commit moves HEAD while `.git/index` still holds the PRE-commit blobs for your
-paths, so `git diff --cached` now lists them as staged — and a peer's pathspec-less
-`git commit` would commit those stale blobs, reverting you. `git reset -q` (mixed, no
-paths) puts the index back on HEAD and changes no file content.
+paths — for a new file, its DELETION — so `git diff --cached` now lists them as staged,
+and a peer's pathspec-less `git commit` would commit those stale blobs, reverting you.
+Reset **only your own paths**: `git reset -q -- <your paths>`.
+
+A bare `git reset -q` is what this file prescribed until it was measured. It resets the
+WHOLE index, so a peer's staged new file goes from `A peer.txt` to `?? peer.txt`. Their
+content survives — a mixed reset does not touch the working tree — but the file lands
+back in the one state this file calls un-undoable, and staging is how work gets handed
+on here, so destroying it is the same harm from the other side. The pathspec form is not
+a refinement: index-wide is index-wide, and the bare reset is the banned `git add -A`
+with its sign flipped.
 
 A pathspec commit still does **not** separate two sessions' edits *inside* one
 file: it commits that file's whole working state. When a file holds both, do not
