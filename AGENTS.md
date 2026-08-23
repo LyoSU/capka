@@ -111,6 +111,23 @@ else's authorship. Ask the other session.
 Release note: the version is decided by what is *in the range*, not by intent — a
 peer's `feat` landing in the range makes it a minor even if a patch was requested.
 
+**Cutting the tag IS the deploy.** `publish-images.yml` moves the `stable` branch
+to the released commit, and the public demo redeploys itself on a `stable` push.
+Nobody triggers that and nobody is asked. So the decision to deploy is taken
+several steps upstream, by whoever runs `npm run release`, and it is irreversible
+by the time anyone thinks to ask about it — a manual deploy afterwards is a
+duplicate of one that already ran. "Should we redeploy?" is the wrong question;
+"should this tag exist yet?" is the real one.
+
+Two consequences when checking whether the deploy landed. A deployment reporting
+**finished** is not the moment the new build serves: the platform container still
+has to boot, and that gap has been minutes. And prefer a control with a **known
+answer** over one with a known **time** — a timestamp only helps once you have
+identified the right event, and an agent has now three times recorded a "before"
+reading that was taken after the thing it meant to precede. Comparing a build
+fingerprint against the *previous release's* recorded value proves which build is
+being served no matter when the reading was taken.
+
 ## If you do sweep someone's work
 
 1. `git status -sb` — a quiet repair is only possible while nothing is pushed.
