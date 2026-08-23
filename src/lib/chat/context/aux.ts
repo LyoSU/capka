@@ -1,6 +1,8 @@
 import { generateText } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
 import { isReasoningUnsupportedError } from "@/lib/errors/friendly";
+import { getModelCannotReason, rememberModelCannotReason } from "@/lib/models/catalog";
+import { log } from "@/lib/log";
 import { telemetryFor, withoutParentContext } from "@/lib/telemetry";
 
 /**
@@ -65,7 +67,20 @@ export const AUX_TIMEOUT_MS = 180_000;
  *  rejects the knob (gpt-4o, claude-3.5…), retry once without it — same
  *  optimistic-then-fallback philosophy as the main run. */
 export async function auxGenerate(model: LanguageModel, provider: string, args: AuxArgs, label = "aux") {
-  const providerOptions = auxReasoningOptions(provider);
+  // The id is already on the model — `LanguageModel` is either a V2/V3 object,
+  // which carries `modelId`, or the id itself. So the memo needs no new parameter
+  // threaded through generateChatTitle, the memory-doc builders and their stores.
+  const modelId = typeof model === "string" ? model : model.modelId;
+  // A model that has already refused reasoning gets no knob at all — not even the
+  // suppression one. Suppressing reasoning still SENDS a reasoning parameter
+  // (`reasoningEffort: "low"`, `thinking: disabled`), which is what such a model
+  // rejects, so asking it to think less costs a whole wasted request per aux call.
+  // `.catch(() => false)` deliberately: the memo is an optimisation, and these
+  // calls had no database dependency before it. A catalog read that fails must
+  // cost one wasted request, not a missing chat title — the same reason the write
+  // below is fire-and-forget.
+  const cannotReason = await getModelCannotReason(modelId).catch(() => false);
+  const providerOptions = cannotReason ? undefined : auxReasoningOptions(provider);
   const telemetry = telemetryFor(`capka.aux.${label}`);
   // ROOT_CONTEXT, not the caller's context: aux work is fire-and-forget and
   // OUTLIVES the turn that spawned it (that is what trackAux/auxInFlight exist
@@ -77,6 +92,11 @@ export async function auxGenerate(model: LanguageModel, provider: string, args: 
       return await generateText({ model, ...args, abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS), experimental_telemetry: telemetry, ...(providerOptions ? { providerOptions: providerOptions as never } : {}) });
     } catch (e) {
       if (providerOptions && isReasoningUnsupportedError(e)) {
+        // Same memo the runner writes and reads, so whichever path meets the model
+        // first pays the rejection once and the other never pays it at all.
+        void rememberModelCannotReason(modelId, provider).catch((err) =>
+          log.warn("could not persist that the model cannot reason", { err: String(err) }),
+        );
         return await generateText({ model, ...args, abortSignal: AbortSignal.timeout(AUX_TIMEOUT_MS), experimental_telemetry: telemetry });
       }
       throw e;
