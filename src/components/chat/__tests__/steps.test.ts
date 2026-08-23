@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeStep } from "../steps";
+import { describeStep, describeInvocation } from "../steps";
 
 // A translator stub that echoes "key" or "key(json-values)" so tests can assert
 // which message key was chosen and what was interpolated, without loading i18n.
@@ -158,5 +158,136 @@ describe("describeStep — unknown tools", () => {
       expect(d.activeLabel).toBe("working");
       expect(d.label).not.toContain("Unknown");
     }
+  });
+});
+
+// ── describeInvocation ───────────────────────────────────────────────────────
+//
+// What the model actually SENT, for the "Invocation" block above the result.
+// `describeStep` answers "what did it do" in the user's language; this answers
+// "with what", verbatim. The two are deliberately separate: the sentence must
+// stay readable prose, and a 40-line Python program is not prose.
+
+describe("describeInvocation", () => {
+  it("returns the code for execute_python, which had no visible arguments at all", () => {
+    expect(describeInvocation("execute_python", { code: "print(1)" })).toEqual({
+      kind: "code", lang: "python", text: "print(1)", titleKey: "code",
+    });
+  });
+
+  it("labels execute_node as javascript so the highlighter picks a grammar", () => {
+    expect(describeInvocation("execute_node", { code: "console.log(1)" })).toMatchObject({ lang: "javascript" });
+  });
+
+  // The chip truncates to 48 chars (`clip`), which is right for a one-line row
+  // and wrong for the block — the whole point of the block is that nothing is
+  // hidden. A pipeline is mostly its tail.
+  it("keeps the bash command whole, unlike the truncated row chip", () => {
+    const long = `find . -name '*.tmp' ${"-o -name '*.bak' ".repeat(8)}-print`;
+    expect(describeInvocation("execute_bash", { command: long })).toEqual({
+      kind: "code", lang: "bash", text: long, titleKey: "command",
+    });
+    expect(long.length).toBeGreaterThan(48);
+  });
+
+  it("shows a file write as its content, typed by the path's extension", () => {
+    expect(describeInvocation("write_file", { path: "/workspace/a/run.py", content: "x = 1" })).toEqual({
+      kind: "code", lang: "python", text: "x = 1", titleKey: "content",
+    });
+  });
+
+  it("falls back to no language when the extension is unknown, rather than guessing", () => {
+    expect(describeInvocation("write_file", { path: "notes.zzz", content: "hi" })).toMatchObject({ lang: "" });
+  });
+
+  // str_replace hands us both sides explicitly (old_str/new_str), so the diff is
+  // free — no diffing algorithm, no library.
+  it("renders an edit as a two-sided diff, not a blob", () => {
+    expect(describeInvocation("str_replace", { path: "a.ts", old_str: "const a = 1", new_str: "const a = 2" })).toEqual({
+      kind: "diff", lang: "typescript", before: "const a = 1", after: "const a = 2", titleKey: "changes",
+    });
+  });
+
+  // These already put their one argument in the row's chip. Repeating it in a
+  // code block below would be the same token twice, three lines apart.
+  it("stays silent for tools whose only argument is already the row's chip", () => {
+    expect(describeInvocation("read_file", { path: "a.csv" })).toBeNull();
+    expect(describeInvocation("view_file", { path: "a.pdf" })).toBeNull();
+    expect(describeInvocation("search_files", { pattern: "*.ts" })).toBeNull();
+    expect(describeInvocation("list_files", { path: "/workspace" })).toBeNull();
+  });
+
+  // `manage` is the settings tool; its arguments are internal plumbing and its
+  // result already renders as a card or a localized one-liner.
+  it("stays silent for manage, whose arguments are internal", () => {
+    expect(describeInvocation("manage", { action: "set", key: "x" })).toBeNull();
+  });
+
+  it("shows an unknown or MCP tool's arguments as formatted JSON", () => {
+    const inv = describeInvocation("mcp__notion__create_page", { title: "Q3", parent: "db_1" });
+    expect(inv).toMatchObject({ kind: "code", lang: "json" });
+    expect(inv && "text" in inv && inv.text).toContain('"title": "Q3"');
+  });
+
+  // THE streaming case. Args arrive character by character, so every tool call
+  // is briefly `{}`. Returning an empty block there would flash an empty frame
+  // into the timeline on every single step — the exact jitter this work removes.
+  it("returns null while arguments are still streaming, so no empty block flashes", () => {
+    expect(describeInvocation("execute_python", {})).toBeNull();
+    expect(describeInvocation("execute_bash", { command: "" })).toBeNull();
+    expect(describeInvocation("mcp__notion__create_page", {})).toBeNull();
+    expect(describeInvocation("write_file", { path: "a.py" })).toBeNull();
+    expect(describeInvocation("execute_python", undefined)).toBeNull();
+  });
+
+  // A file created empty on purpose is a real action with a real result. Its
+  // content is "" — which is not the same as "not arrived yet".
+  it("distinguishes a deliberately empty file from arguments that have not arrived", () => {
+    expect(describeInvocation("write_file", { path: "a.py", content: "" })).toEqual({
+      kind: "code", lang: "python", text: "", titleKey: "content",
+    });
+  });
+});
+
+// ── the full path, for opening the file ──────────────────────────────────────
+
+describe("describeStep — the file behind the step", () => {
+  // The chip shows the basename (readable); Quick Look needs the whole path.
+  it("carries the full path alongside the basename chip", () => {
+    const d = describeStep(t, "write_file", { path: "/workspace/deep/logo.svg" });
+    expect(d.file).toBe("/workspace/deep/logo.svg");
+    expect(d.detail).toBe("logo.svg");
+  });
+
+  it("carries the path for every tool that acts on one concrete file", () => {
+    expect(describeStep(t, "str_replace", { path: "a/b.tsx" }).file).toBe("a/b.tsx");
+    expect(describeStep(t, "read_file", { path: "a/b.csv" }).file).toBe("a/b.csv");
+    expect(describeStep(t, "view_file", { path: "a/b.pdf" }).file).toBe("a/b.pdf");
+  });
+
+  // A directory has nothing to open in a file viewer, and a half-streamed path
+  // would resolve to the wrong file — or to a prefix of one.
+  it("omits the path for a directory listing and while the path is still streaming", () => {
+    expect(describeStep(t, "list_files", { path: "/workspace" }).file).toBeUndefined();
+    expect(describeStep(t, "write_file", {}).file).toBeUndefined();
+  });
+});
+
+// The heading over the invocation block. Decided HERE rather than in the
+// component, because the alternative is the component re-deriving it by sniffing
+// the language string — the same fragile `name.includes(...)` pattern this work
+// removes from ToolDetails. A key, not a word: the UI is localized.
+describe("describeInvocation — what to call the block", () => {
+  it("names each kind of invocation in the user's terms, not the tool's", () => {
+    const key = (tool: string, args: Record<string, unknown>) => {
+      const inv = describeInvocation(tool, args);
+      return inv && inv.titleKey;
+    };
+    expect(key("execute_bash", { command: "ls" })).toBe("command");
+    expect(key("execute_python", { code: "x" })).toBe("code");
+    expect(key("execute_node", { code: "x" })).toBe("code");
+    expect(key("write_file", { path: "a.py", content: "x" })).toBe("content");
+    expect(key("str_replace", { path: "a.py", old_str: "x", new_str: "y" })).toBe("changes");
+    expect(key("mcp__notion__create_page", { title: "Q3" })).toBe("params");
   });
 });

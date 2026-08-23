@@ -10,9 +10,17 @@ All notable changes to Capka are documented here. Format follows
 
 - Pinch-to-zoom in the image preview, on touchscreens and on the macOS Safari trackpad.
 - Swiping sideways on a touchscreen pages between the files in an image preview, the way the arrow keys and the header arrows already do.
+- A file a tool step created, edited or read opens from the step's chip in the reply, which now carries a thumbnail of it.
+
+### Changed
+
+- A tool step now shows what the model sent — the command, the code, the file's new contents, or a before/after for an edit — above its result, with both labelled.
+- The live status names a wait ("Setting up the workspace…") only once it has lasted about a second and a half, instead of flashing it for every short one.
 
 ### Fixed
 
+- Tool output too long to show now states how much of it is displayed and offers the rest, instead of ending in an ellipsis that looked like the end of the output.
+- A failed tool step now opens itself instead of staying collapsed, and its error is shown monospaced, scrollable and copyable rather than as a single unwrapped line.
 - A tool still running when a turn hits its time limit or loses its worker is now recorded before it starts, so a restarted or continued turn is told the call may have taken effect instead of being told nothing ran. Migration applies at boot; no action required.
 - "Continue" after a part-way failure now carries the previous reply's executed tool calls into the new turn, so continuing no longer repeats writes that turn had already made.
 - The "Continue" button no longer stays disabled for good when the send behind it does not go through.

@@ -10,9 +10,15 @@ import {
   type StepBrand,
   type StepCategory,
   type StepTranslator,
+  type StepInvocation,
+  type StepInvocationTitle,
+  describeInvocation,
 } from "@/lib/chat/steps";
 
-export type { StepBrand, StepCategory, StepTranslator };
+export type { StepBrand, StepCategory, StepTranslator, StepInvocation, StepInvocationTitle };
+// Re-exported unchanged: it needs no icon, so there is nothing for this wrapper
+// to add. Call sites import both halves of a step's description from one module.
+export { describeInvocation };
 export type StepIcon = ComponentType<{ className?: string }>;
 
 /** The web descriptor: the framework-free step info plus its concrete icon. */

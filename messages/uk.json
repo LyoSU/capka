@@ -495,7 +495,22 @@
       "steps": "{count, plural, one {# крок} few {# кроки} many {# кроків} other {# кроку}}",
       "more": "Ще {count}",
       "continueTurn": "Продовжити",
-      "continuePrompt": "Продовж із того місця, де обірвалося"
+      "continuePrompt": "Продовж із того місця, де обірвалося",
+      "sent": {
+        "command": "Команда",
+        "code": "Код",
+        "content": "Вміст файлу",
+        "changes": "Зміни",
+        "params": "Параметри"
+      },
+      "result": "Результат",
+      "before": "Було",
+      "after": "Стало",
+      "showAll": "Показати повністю",
+      "showLess": "Згорнути",
+      "truncated": "Показано {shown, number} із {total, number} символів",
+      "outputLines": "{count, plural, one {# рядок} few {# рядки} many {# рядків} other {# рядка}}",
+      "openFile": "Відкрити «{name}»"
     },
     "notice": {
       "modality": {

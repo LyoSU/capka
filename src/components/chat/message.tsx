@@ -20,10 +20,10 @@ import { cleanReasoning } from "@/lib/chat/reasoning";
 import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { LLM_ERROR_CATEGORIES, type LLMErrorCategory } from "@/lib/errors/friendly";
-import { SandboxFileTile, type PreviewFile } from "./file-preview";
+import { SandboxFileTile, FileThumb, usePreview, type PreviewFile } from "./file-preview";
 import { MessageEditor } from "./message-editor";
 import type { FileRef } from "@/lib/constants";
-import { describeStep, type StepDescriptor } from "./steps";
+import { describeStep, describeInvocation, type StepDescriptor, type StepInvocation, type StepCategory } from "./steps";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -196,17 +196,31 @@ function asMediaRef(v: unknown): MediaRefLike | null {
   return o && typeof o === "object" && o.kind === "media" && Array.isArray(o.pages) ? o : null;
 }
 
-function ToolDetails({ toolName, output, errorText, chatId }: { toolName: string; output?: unknown; errorText?: string; chatId?: string }) {
+/** How much of a result is shown before the reader has to ask for the rest.
+ *  The value matters less than the fact that overrunning it is now STATED — the
+ *  old code sliced at this size and appended an ellipsis, which is indistinguishable
+ *  from an output that genuinely ended there. A result that misreports its own
+ *  completeness is worse than one that is merely long. Tool output is already
+ *  clamped to ~30k server-side (see clampOutput), so "show all" cannot be huge. */
+const OUTPUT_LIMIT = 2000;
+
+/** Everything that came BACK from a call: output, or the error that replaced it.
+ *
+ *  Takes the step's `category` rather than its tool name. The previous version
+ *  sniffed the name for substrings — `lower.includes("read")`, `.includes("exec")` —
+ *  which quietly mis-rendered any tool whose name happened to contain one of those
+ *  words (an MCP `read_spreadsheet` got source-code treatment). `describeStep`
+ *  already decides what kind of thing a tool is, under test; this uses that answer
+ *  instead of guessing a second time from a different signal. */
+function ToolDetails({ category, output, errorText, chatId }: { category: StepCategory; output?: unknown; errorText?: string; chatId?: string }) {
   const t = useTranslations("chat.tool");
-  if (errorText) {
-    return <p className="text-xs text-destructive">{errorText}</p>;
-  }
+  const [showAll, setShowAll] = useState(false);
 
   // view_file result: show the rendered page(s) as thumbnails, served inline from
   // the workspace (no base64 in the DB or the payload). A page rotated out of the
   // sandbox 404s — hide it rather than showing a broken image.
   const media = asMediaRef(output);
-  if (media && chatId && media.pages.length) {
+  if (!errorText && media && chatId && media.pages.length) {
     return (
       <div className="flex flex-wrap gap-2">
         {media.pages.slice(0, 4).map((pg) => (
@@ -234,49 +248,161 @@ function ToolDetails({ toolName, output, errorText, chatId }: { toolName: string
     );
   }
 
-  const text = formatValue(output);
-  if (!text) return <p className="text-xs text-muted-foreground">{t("done")}</p>;
-
-  const lower = toolName.toLowerCase();
-  const isCode = lower.includes("read") || lower.includes("file");
-  const isCommand = lower.includes("exec") || lower.includes("run") || lower.includes("shell");
-  const isListing = lower.includes("list") || lower.includes("dir");
-
-  // File content — show as code
-  if (isCode && text.length > 50) {
+  // One code path for output and error alike: an error IS the result of the call,
+  // and the old bare <p> gave a multi-line sandbox stack trace no monospace, no
+  // wrapping, no scroll and no way to copy it — the one result a user is most
+  // likely to need to send to somebody else.
+  const isError = !!errorText;
+  const full = errorText ?? formatValue(output);
+  if (!full) {
     return (
-      <pre className="overflow-x-auto rounded-md bg-muted p-2.5 font-mono text-[11px] leading-relaxed max-h-48 overflow-y-auto">
-        {text.slice(0, 3000)}{text.length > 3000 ? "\n..." : ""}
-      </pre>
+      <section>
+        <BlockLabel>{t("result")}</BlockLabel>
+        <p className="text-xs text-muted-foreground">{t("done")}</p>
+      </section>
     );
   }
 
-  // Command output — terminal style
-  if (isCommand) {
-    return (
-      <pre className="overflow-x-auto rounded-md bg-foreground/5 p-2.5 font-mono text-[11px] leading-relaxed max-h-36 overflow-y-auto text-muted-foreground">
-        {text.slice(0, 2000)}{text.length > 2000 ? "\n..." : ""}
-      </pre>
-    );
-  }
+  const over = full.length > OUTPUT_LIMIT;
+  const body = over && !showAll ? full.slice(0, OUTPUT_LIMIT) : full;
+  // Machine-shaped output keeps monospace (alignment carries meaning in a file
+  // listing or a traceback); prose-shaped output — a web result, an MCP reply —
+  // reads better in the body face at a readable size.
+  const mono = category === "exec" || category === "file";
 
-  // Directory listing — clean text list
-  if (isListing) {
-    const lines = text.split("\n").filter(Boolean);
-    const shown = lines.slice(0, 20);
-    return (
-      <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
-        {shown.join("\n")}
-        {lines.length > 20 && `\n… ${t("more", { count: lines.length - 20 })}`}
-      </div>
-    );
-  }
-
-  // Default — clean readable text
   return (
-    <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-36 overflow-y-auto">
-      {text.slice(0, 2000)}{text.length > 2000 ? "…" : ""}
+    <section>
+      <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
+      {/* The left rule is the whole visual claim: "this came back". It is a single
+          quiet edge rather than a filled panel, because on a turn with a dozen
+          steps a dozen filled panels become the page. */}
+      <div className={`rounded-md border-l-2 py-1.5 pl-2.5 pr-2 ${isError ? "border-l-destructive/60 bg-destructive/10" : "border-l-primary/40 bg-muted/50"}`}>
+        {/* tabIndex on a scrollable region: without it a keyboard user cannot reach
+            the part of a long output that is scrolled out of view (WCAG 2.1 AA). */}
+        <pre
+          tabIndex={0}
+          className={`max-h-56 overflow-auto whitespace-pre-wrap break-words leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-primary/40 ${
+            mono ? "font-mono text-[11px]" : "text-xs"
+          } ${isError ? "text-destructive" : "text-muted-foreground"}`}
+        >
+          {body}
+        </pre>
+      </div>
+      {over && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          {!showAll && <span>{t("truncated", { shown: OUTPUT_LIMIT, total: full.length })}</span>}
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="rounded-md font-medium underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          >
+            {showAll ? t("showLess") : t("showAll")}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The heading over one block inside a step's panel. Sentence case and muted —
+ *  deliberately not the uppercase letter-spaced "eyebrow", which is on CLAUDE.md's
+ *  list of the generic-SaaS tells this product avoids. It has exactly one job:
+ *  say which of the two things you are looking at, the one that was sent or the
+ *  one that came back. */
+function BlockLabel({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="mb-1 flex min-h-[22px] items-center justify-between gap-2">
+      <span className="text-xs font-medium text-muted-foreground">{children}</span>
+      {action}
     </div>
+  );
+}
+
+/** Wrap text in a fence long enough that its own content cannot break out.
+ *  A fixed ``` is not safe here: file contents and command output routinely
+ *  contain backticks, and a file that merely DOCUMENTS a code block would
+ *  otherwise terminate its own display halfway and spill the rest as markdown. */
+function fence(text: string, lang: string): string {
+  const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const bar = "`".repeat(longest + 1);
+  return `${bar}${lang}\n${text}\n${bar}`;
+}
+
+/** One side of an edit. */
+function DiffPane({ label, text, tone }: { label: string; text: string; tone: "before" | "after" }) {
+  return (
+    <div className={tone === "before" ? "bg-destructive/10" : "bg-success/10"}>
+      <div className="px-2.5 pt-1.5 text-[11px] font-medium text-muted-foreground">{label}</div>
+      <pre
+        tabIndex={0}
+        className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-2.5 pb-2 font-mono text-[11px] leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
+      >
+        {/* A replacement that DELETES text leaves this side genuinely empty, which
+            is the honest thing to show; the space only keeps the pane's height so
+            the pair still reads as two panes rather than one with a stray label. */}
+        {text || "\u00a0"}
+      </pre>
+    </div>
+  );
+}
+
+/** What the model SENT, above what came back.
+ *
+ *  A result you cannot connect to a request explains nothing, and `execute_python`
+ *  was the extreme case: the row said "Ran Python", the panel showed output, and
+ *  the code itself appeared NOWHERE in the interface. Rendered through the app's
+ *  own <Markdown>, so highlighting, both colour themes and a copy button come from
+ *  the same renderer the answers use rather than a second one written here. */
+function Invocation({ inv }: { inv: StepInvocation }) {
+  const t = useTranslations("chat.tool");
+
+  if (inv.kind === "diff") {
+    return (
+      <section>
+        <BlockLabel>{t("sent.changes")}</BlockLabel>
+        {/* Two labelled panes, not an interleaved diff: the tool hands over whole
+            before/after strings, so there is no line-level diff to draw without
+            inventing one. The tints are a SECOND channel only — "Before"/"After"
+            carry the meaning on their own, for a reader who cannot separate them. */}
+        <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+          <DiffPane label={t("before")} text={inv.before} tone="before" />
+          <DiffPane label={t("after")} text={inv.after} tone="after" />
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <BlockLabel>{t(`sent.${inv.titleKey}`)}</BlockLabel>
+      <Markdown>{fence(inv.text, inv.lang)}</Markdown>
+    </section>
+  );
+}
+
+/** The file a step acted on, as a chip you can open.
+ *
+ *  Rendered as a SIBLING of the row's disclosure trigger, never inside it: the
+ *  trigger is a <button>, and a button within a button is invalid HTML and
+ *  unreachable by keyboard — a lesson this codebase already paid for once, in
+ *  FileTile's `overlay` slot. The trigger covers the row from underneath instead
+ *  (see StepRow), so both controls get their own tab stop and the whole row still
+ *  expands. */
+function StepFileChip({ path, name, chatId }: { path: string; name: string; chatId: string }) {
+  const t = useTranslations("chat.tool");
+  const { open } = usePreview();
+  const file: PreviewFile = useMemo(() => ({ path, name, chatId }), [path, name, chatId]);
+  return (
+    <button
+      type="button"
+      onClick={() => open([file], 0)}
+      title={t("openFile", { name })}
+      aria-label={t("openFile", { name })}
+      className="relative z-10 flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-muted py-0.5 pl-0.5 pr-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+    >
+      <FileThumb file={file} className="h-4 w-4 shrink-0 overflow-hidden rounded-[3px]" />
+      <span className="truncate">{name}</span>
+    </button>
   );
 }
 
@@ -517,7 +643,40 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
   // JSON expander, so the timeline reads cleanly instead of "Manage" + a blob.
   const manageLabel = !isRunning && !isError && rawName === "manage" ? manageStepLabel(part.output, tSteps) : null;
   const doneLabel = manageLabel ?? d.label;
-  const expandable = !isRunning && (isError ? !!part.errorText : rawName === "manage" ? false : !!formatValue(part.output));
+  const label = isRunning ? d.activeLabel : doneLabel;
+
+  // The two halves of the panel, each computed once. `inv` is suppressed while the
+  // call is still in an input-* state: arguments stream in character by character,
+  // so a running step's args are a prefix of themselves, and showing a prefix of a
+  // program as though it were the program is worse than showing nothing.
+  const inv = useMemo(
+    () => (part.state.startsWith("input-") ? null : describeInvocation(rawName, part.input)),
+    [part.state, rawName, part.input],
+  );
+  const outText = useMemo(() => formatValue(part.output), [part.output]);
+
+  // Now true when there is only an INVOCATION and no output: "Ran Python" with an
+  // empty result used to be an inert row with nothing behind it, which is exactly
+  // the step whose code you most want to see.
+  const expandable = !isRunning && rawName !== "manage" && (!!outText || !!inv || !!part.errorText);
+
+  // A failed step opens itself. It is the one row on the rail that the reader
+  // definitely needs, and it was the one row folded away behind a chevron.
+  // An effect rather than an initial value because a step usually starts running
+  // and fails later, long after this component first mounted.
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (isError) setOpen(true);
+  }, [isError]);
+
+  const fileChip =
+    d.file && d.detail && chatId ? <StepFileChip path={d.file} name={d.detail} chatId={chatId} /> : null;
+  // Tells you whether opening this is worth it, before you open it — and only
+  // when that question has an answer worth printing. Below a handful of lines
+  // everything is worth opening, so a count there is a number per row that
+  // decides nothing; on a twelve-step turn that is twelve of them.
+  const lines = outText ? outText.split("\n").length : 0;
+  const showLineCount = lines >= 5;
 
   const row = (
     <div
@@ -526,8 +685,20 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
       }`}
     >
       <StepBadge d={d} state={state} />
-      <span className="text-sm">
-        {isRunning ? d.activeLabel : doneLabel}
+      {/* The disclosure trigger lies UNDER the row's content rather than wrapping
+          it. Wrapping was fine while the row held only text, but the file chip is
+          a real button now, and a button inside a button is invalid HTML and
+          unreachable by keyboard. As siblings, each control gets its own tab stop
+          and the whole row still expands. The content above it is inert
+          (`pointer-events-none`) so clicks fall through to this. */}
+      {expandable && (
+        <CollapsibleTrigger
+          aria-label={label}
+          className="absolute inset-0 z-0 rounded-lg transition-micro hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        />
+      )}
+      <span className="pointer-events-none relative z-10 text-sm">
+        {label}
         {isError ? ` · ${t("failed")}` : ""}
       </span>
       {/* The literal thing acted on — a filename, a command — gets its own chip
@@ -538,35 +709,49 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
           into the middle of a phrase.
           Styled as INLINE CODE (globals.css `[data-streamdown="inline-code"]`).
           A filename is the same kind of thing here as it is in the answer's
-          prose, so it looks the same in both. It used to wear the sunken field
-          treatment, which read as an input you could type into — the observation
-          that eventually flattened fields across the app. */}
-      {d.detail && (
-        <span className="min-w-0 truncate rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-          {d.detail}
-        </span>
-      )}
-      {expandable && (
-        <ChevronRight className="chevron ml-auto h-3.5 w-3.5 shrink-0 opacity-40 transition-transform group-hover/step:opacity-100" />
-      )}
+          prose, so it looks the same in both. When we know WHICH file it is, the
+          chip earns a thumbnail and opens it. */}
+      {fileChip ??
+        (d.detail && (
+          <span className="pointer-events-none relative z-10 min-w-0 truncate rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+            {d.detail}
+          </span>
+        ))}
+      <span className="pointer-events-none relative z-10 ml-auto flex shrink-0 items-center gap-2">
+        {expandable && showLineCount && (
+          <span className="text-[11px] tabular-nums opacity-70">{t("outputLines", { count: lines })}</span>
+        )}
+        {expandable && (
+          /* `opacity-40 → 100` on hover rather than hide-until-hover: an affordance
+             nobody can see is an affordance nobody finds, so the chevron stays
+             faintly present at rest and only firms up under the cursor. */
+          <ChevronRight
+            className={`h-3.5 w-3.5 shrink-0 opacity-40 transition-transform group-hover/step:opacity-100 ${open ? "rotate-90" : ""}`}
+          />
+        )}
+      </span>
     </div>
   );
 
   if (!expandable) return row;
 
   return (
-    <Collapsible defaultOpen={false} onOpenChange={(_, d) => anchorDisclosure(d)}>
-      {/* `opacity-40 → 100` on hover rather than hide-until-hover: an affordance
-          nobody can see is an affordance nobody finds, so the chevron stays
-          faintly present at rest and only firms up under the cursor. Same 40%
-          resting value as the group header's chevron — one quiet level for one
-          idea, instead of the 35/40/80 mix this rail used to carry. */}
-      <CollapsibleTrigger className="group/step block w-full text-left transition-micro hover:text-foreground [&[data-panel-open]_.chevron]:rotate-90">
-        {row}
-      </CollapsibleTrigger>
+    // Controlled, because the chevron's rotation now has to be driven from React:
+    // it is a SIBLING of the trigger, not a descendant, so the old
+    // `[&[data-panel-open]_.chevron]` descendant selector can no longer reach it.
+    <Collapsible
+      open={open}
+      onOpenChange={(next, details) => {
+        setOpen(next);
+        anchorDisclosure(details);
+      }}
+    >
+      <div className="group/step">{row}</div>
       <CollapsibleContent>
-        <div className="mb-2 ml-10 rounded-lg bg-muted/40 p-2.5">
-          <ToolDetails toolName={rawName} output={part.output} errorText={part.errorText} chatId={chatId} />
+        {/* Sent, then returned, in that order — the order they happened in. */}
+        <div className="mb-2 ml-10 space-y-2.5">
+          {inv && <Invocation inv={inv} />}
+          <ToolDetails category={d.category} output={part.output} errorText={part.errorText} chatId={chatId} />
         </div>
       </CollapsibleContent>
     </Collapsible>

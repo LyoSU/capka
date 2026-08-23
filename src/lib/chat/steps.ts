@@ -33,6 +33,11 @@ export interface StepInfo {
   activeLabel: string;
   /** Optional dim trailing detail (e.g. the command that ran). */
   detail?: string;
+  /** The WHOLE path, when the step acted on one concrete file — `detail` carries
+   *  only its basename, which is what a person should read, but a file viewer
+   *  needs the path to actually open it. Absent for directories and for args
+   *  that are still streaming: half a path resolves to the wrong file. */
+  file?: string;
   category: StepCategory;
   brand?: StepBrand;
 }
@@ -207,6 +212,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         label: t("createdFileGeneric"),
         activeLabel: t("creatingFileGeneric"),
         detail: basename(args.path) || undefined,
+        file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
         category: "file",
       };
     case "str_replace":
@@ -215,6 +221,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         label: t("editedFileGeneric"),
         activeLabel: t("editingFileGeneric"),
         detail: basename(args.path) || undefined,
+        file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
         category: "file",
       };
     case "read_file":
@@ -223,6 +230,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         label: t("readFileGeneric"),
         activeLabel: t("readingFileGeneric"),
         detail: basename(args.path) || undefined,
+        file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
         category: "file",
       };
     case "list_files":
@@ -243,6 +251,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         label: t("viewedFileGeneric"),
         activeLabel: t("viewingFileGeneric"),
         detail: basename(args.path) || undefined,
+        file: typeof args.path === "string" && args.path.trim() ? args.path : undefined,
         category: "file",
       };
     case "check_job":
@@ -273,4 +282,102 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
 
   const pretty = prettyToolName(toolName);
   return { iconKey: "wrench", label: pretty || t("usedTool"), activeLabel: pretty ? `${pretty}…` : t("working"), category: "other" };
+}
+
+/**
+ * What the model actually SENT — the "Invocation" block shown above a step's
+ * result.
+ *
+ * Deliberately separate from `describeStep`, which answers "what did it do" as a
+ * sentence in the user's language. This answers "with what", verbatim and
+ * unlocalized. Merging them would force one of the two to compromise: a
+ * forty-line Python program is not prose, and a prose sentence is not something
+ * you can copy and re-run.
+ *
+ * Returns `null` — never an empty block — for three different reasons that all
+ * look the same from the caller's side, and should:
+ *  - the tool's only argument is already the row's chip (a path, a glob);
+ *  - the arguments are internal plumbing nobody outside the app can act on;
+ *  - the arguments have not arrived yet. Tool args stream in character by
+ *    character, so EVERY call is briefly `{}`. An empty code block rendered in
+ *    that window would flash an empty frame into the timeline on every step.
+ */
+/** What to CALL the block, as a message key. Decided here rather than in the
+ *  component: the alternative is the UI re-deriving it by sniffing the language
+ *  string, which is the same brittle `name.includes(...)` guessing this module
+ *  exists to replace. Named for what the user sees, not for the tool — a person
+ *  reading their own chat recognises "Command" and "Changes"; "execute_bash" and
+ *  "str_replace" are our vocabulary, not theirs. */
+export type StepInvocationTitle = "command" | "code" | "content" | "changes" | "params";
+
+export type StepInvocation =
+  | { kind: "code"; lang: string; text: string; titleKey: StepInvocationTitle }
+  | { kind: "diff"; lang: string; before: string; after: string; titleKey: "changes" };
+
+/** Extension → highlighter grammar. An unknown extension yields "" (plain, no
+ *  highlighting) rather than a guess: colouring text by the WRONG grammar is
+ *  actively misleading, where plain text is merely plain. */
+const LANGS: Record<string, string> = {
+  py: "python", ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
+  mjs: "javascript", cjs: "javascript", json: "json", md: "markdown",
+  css: "css", scss: "scss", html: "html", xml: "xml", svg: "xml",
+  sh: "bash", bash: "bash", zsh: "bash", sql: "sql", yml: "yaml", yaml: "yaml",
+  toml: "toml", rs: "rust", go: "go", java: "java", rb: "ruby", php: "php",
+  c: "c", h: "c", cpp: "cpp", cs: "csharp", swift: "swift", kt: "kotlin",
+};
+
+function langOf(path: unknown): string {
+  const s = typeof path === "string" ? path : "";
+  const dot = s.lastIndexOf(".");
+  return dot < 0 ? "" : LANGS[s.slice(dot + 1).toLowerCase()] ?? "";
+}
+
+/** Tools whose whole argument is already the row's chip, or is internal. Listed
+ *  by name rather than inferred, so a new tool defaults to SHOWING its arguments
+ *  — an unexplained action is the worse failure. */
+const NO_INVOCATION = new Set([
+  "read_file", "view_file", "list_files", "search_files", "manage", "skill", "check_job",
+]);
+
+export function describeInvocation(toolName: string, input?: unknown): StepInvocation | null {
+  const args = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  // "" means "still streaming" for a command or a body of code — neither is a
+  // meaningful empty value. `content`/`new_str` are the exceptions and check for
+  // the key's ARRIVAL instead (see below).
+  const filled = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const name = (toolName || "").toLowerCase();
+
+  if (NO_INVOCATION.has(name)) return null;
+
+  switch (name) {
+    case "execute_bash": {
+      const c = filled(args.command);
+      return c ? { kind: "code", lang: "bash", text: c, titleKey: "command" } : null;
+    }
+    case "execute_python": {
+      const c = filled(args.code);
+      return c ? { kind: "code", lang: "python", text: c, titleKey: "code" } : null;
+    }
+    case "execute_node": {
+      const c = filled(args.code);
+      return c ? { kind: "code", lang: "javascript", text: c, titleKey: "code" } : null;
+    }
+    case "write_file":
+      // Creating an empty file is a real action with a real result, so "" here is
+      // a VALUE, not an absence — hence the arrival check. Same below for a
+      // replacement that deletes text (`new_str: ""`).
+      return typeof args.content === "string"
+        ? { kind: "code", lang: langOf(args.path), text: args.content, titleKey: "content" }
+        : null;
+    case "str_replace":
+      return typeof args.old_str === "string" && typeof args.new_str === "string"
+        ? { kind: "diff", lang: langOf(args.path), before: args.old_str, after: args.new_str, titleKey: "changes" }
+        : null;
+  }
+
+  // Everything else — MCP connectors, plugin tools, anything new. Their argument
+  // names are unknowable here, so show the object as it was sent.
+  return Object.keys(args).length > 0
+    ? { kind: "code", lang: "json", text: JSON.stringify(args, null, 2), titleKey: "params" }
+    : null;
 }

@@ -495,7 +495,22 @@
       "steps": "{count, plural, one {# step} other {# steps}}",
       "more": "+{count} more",
       "continueTurn": "Continue",
-      "continuePrompt": "Continue from where you left off"
+      "continuePrompt": "Continue from where you left off",
+      "sent": {
+        "command": "Command",
+        "code": "Code",
+        "content": "File contents",
+        "changes": "Changes",
+        "params": "Parameters"
+      },
+      "result": "Result",
+      "before": "Before",
+      "after": "After",
+      "showAll": "Show all",
+      "showLess": "Show less",
+      "truncated": "Showing {shown, number} of {total, number} characters",
+      "outputLines": "{count, plural, one {# line} other {# lines}}",
+      "openFile": "Open {name}"
     },
     "notice": {
       "modality": {
