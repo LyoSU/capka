@@ -54,7 +54,19 @@ paths) puts the index back on HEAD and changes no file content.
 A pathspec commit still does **not** separate two sessions' edits *inside* one
 file: it commits that file's whole working state. When a file holds both, do not
 patch — `git show HEAD:<path>` into place, re-apply only your own change as a
-literal string replacement, commit explicit paths, then restore the saved copy.
+literal string replacement, commit explicit paths, then put the OTHER session's
+lines back with a second literal replacement.
+
+**That last step is not "restore your saved copy".** Restoring a whole saved file is
+a read-modify-write with a *commit* sitting in the middle of it — about the widest
+window you can hand a peer in a shared directory. Anything they wrote to that file
+between your save and your restore is gone, silently, and because it was never
+committed git holds no copy to recover it from. Two literal replacements have no
+window for any content except the one line you are moving. The recipe used to end
+"restore the saved copy"; a session followed it exactly, restored the whole file, and
+nothing was lost only because nothing landed in the window — which is luck, not a
+property of the procedure.
+
 `git apply --cached --unidiff-zero` on `-U0` hunks **reorders code**, because the
 other session's intervening hunks shift the offsets; it has put a declaration
 after its own use and turned `master` red (TS2448) while the author's own tree
@@ -94,8 +106,8 @@ individual fact was true and the inference assumed there were two of us; `ListAg
 listed ten. Absence of your work in a file is not presence of a particular peer's.
 
 The useful half: the split recipe above is safe WITHOUT knowing the owner — save the
-combined file, `git show HEAD:<path>`, re-apply only your own lines, commit, restore
-the combined copy. Its correctness does not depend on the guess, which is why it held
+combined file, `git show HEAD:<path>`, re-apply only your own lines, commit, then
+re-insert only THEIRS. Its correctness does not depend on the guess, which is why it held
 while the guess was wrong. Prefer a procedure with that property over being right
 about attribution.
 
