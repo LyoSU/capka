@@ -128,6 +128,17 @@ reading that was taken after the thing it meant to precede. Comparing a build
 fingerprint against the *previous release's* recorded value proves which build is
 being served no matter when the reading was taken.
 
+That rule is necessary and not sufficient: **a control must be able to change when
+the event happens.** A build fingerprint taken from `/login` cannot witness a
+release that only touched the chat bundle — the chunk names are legitimately
+identical, so the probe returns "unchanged" however perfectly it is timed, and
+"unchanged" reads as "the deploy did not take". A demo that was already correct
+gets redeployed on the strength of it. Prefer a quantity that changes by
+construction: the deployment's own container identity, a `Pull complete` in its
+log, the running image digest. Before trusting any check, ask what reading it
+would have produced had the answer been the opposite — if that is the same
+reading, the check is decoration.
+
 ## If you do sweep someone's work
 
 1. `git status -sb` — a quiet repair is only possible while nothing is pushed.
