@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-08-23
+
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading. The new HOME tmpfs is charged against `SANDBOX_MEMORY_MB`, leaving 64 MB less for processes unless you raise it.
 
 > **⚠ Breaking — the sandbox image no longer renders LaTeX or CJK text.** TeX Live and the JRE are gone, so `pdflatex`/`xelatex` and `.tex` input fail; `fonts-noto-cjk` is replaced by `fonts-noto-core`, so Chinese, Japanese and Korean glyphs render as blank boxes.
