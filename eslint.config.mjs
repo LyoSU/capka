@@ -25,6 +25,17 @@ const eslintConfig = defineConfig([
     ".cursor/**",
   ]),
   {
+    // `require` is not a style choice here. scripts/sandbox-mmdc.cjs is copied into
+    // the sandbox image, where the global npm tree is reachable only through
+    // NODE_PATH — which Node honours for `require` and not for ESM `import`. Rewriting
+    // the shim as ESM would break `mmdc` inside the image, so the rule goes off for
+    // .cjs instead.
+    files: ["**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  {
     // Open-core boundary: the AGPL core (src/**) must never import from ee/**.
     // EE features attach via extension points the core exposes, so the core
     // stays fully functional and shippable as open source on its own.
