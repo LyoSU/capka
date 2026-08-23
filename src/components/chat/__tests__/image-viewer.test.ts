@@ -20,6 +20,21 @@ describe("one writer", () => {
   });
 });
 
+describe("swiping between files", () => {
+  it("is a touch idiom, and says so", () => {
+    // On a desktop the arrow keys and the header buttons already page. A mouse
+    // drag that navigates is a surprise, and the same drag on a zoomed image is
+    // a pan — both exclusions are invisible in a diff and easy to drop.
+    expect(VIEWER).toContain('!zoomed && pointers.current.size === 1 && e.pointerType !== "mouse"');
+  });
+
+  it("rides the same transform as the zoom", () => {
+    // Two transforms on one element is how the swipe offset and the pan offset
+    // would start fighting over the same pixels.
+    expect(VIEWER.match(/transform: `translate\(/g) ?? []).toHaveLength(1);
+  });
+});
+
 describe("the controls are not part of the zoom surface", () => {
   it("no button lives inside the frame", () => {
     // They used to. Every click on them bubbled into the surface's handlers, so

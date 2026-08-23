@@ -19,7 +19,7 @@ import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
 import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
 import { fileStatusFromHttp, type FileStatus } from "@/lib/chat/file-status";
-import { applyGesture, wheelZoomFactor, type Geometry, type Point } from "@/lib/chat/image-view";
+import { applyGesture, swipeVerdict, wheelZoomFactor, type Geometry, type Point } from "@/lib/chat/image-view";
 import { formatSize } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -243,7 +243,7 @@ function FilePreview({
 
         {/* Body — keyed by path so switching files remounts the viewer cleanly */}
         <div className="min-h-0 flex-1 overflow-auto bg-muted/10">
-          <Viewer key={file.path} file={file} kind={kind} onClose={onClose} />
+          <Viewer key={file.path} file={file} kind={kind} onClose={onClose} onPage={many ? go : undefined} />
         </div>
       </DialogContent>
     </Dialog>
@@ -271,9 +271,15 @@ function HeaderButton({
   );
 }
 
-function Viewer({ file, kind, onClose }: { file: PreviewFile; kind: ReturnType<typeof previewKind>; onClose: () => void }) {
+function Viewer({ file, kind, onClose, onPage }: {
+  file: PreviewFile;
+  kind: ReturnType<typeof previewKind>;
+  onClose: () => void;
+  /** Present only when there is more than one file to page between. */
+  onPage?: (delta: number) => void;
+}) {
   if (kind === "image") {
-    return <ImageViewer file={file} />;
+    return <ImageViewer file={file} onPage={onPage} />;
   }
   if (kind === "pdf") {
     return <PdfViewer file={file} />;
@@ -410,6 +416,9 @@ function useFileImage(file: PreviewFile): ImgState {
   return img;
 }
 
+/** How far a swipe travels before the outgoing image is at its dimmest. */
+const SWIPE_FADE_PX = 320;
+
 /** The frame's own centre — where a command that has no pointer behind it (a
  *  button, a key, a re-fit) anchors its zoom. */
 const ORIGIN: Point = { x: 0, y: 0 };
@@ -439,7 +448,7 @@ type SafariGestureEvent = Event & { scale: number; clientX: number; clientY: num
  * pinching the whole browser instead of the picture. Touchscreens are neither,
  * and are handled from raw pointers below.
  */
-function ImageViewer({ file }: { file: PreviewFile }) {
+function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: number) => void }) {
   const t = useTranslations("chat.preview");
   const img = useFileImage(file);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0, animate: false });
@@ -453,6 +462,15 @@ function ImageViewer({ file }: { file: PreviewFile }) {
   // What the next move is measured against — a lone pointer's position, or the
   // midpoint and spread of two.
   const gesture = useRef<{ at: Point; spread: number } | null>(null);
+  // A one-finger drag across a FITTED image pages to the next file rather than
+  // panning: at fit there is nothing to pan to, and sideways is how a stack of
+  // photos is read on a phone. `dx` follows the finger, so the gesture is visible
+  // while it is being made and can be called off by simply not letting go.
+  const [swipeX, setSwipeX] = useState(0);
+  // The pane width belongs to the ref, not to state: a fast tap can end before
+  // React has re-rendered, and a threshold measured against a width of 0 is no
+  // threshold at all — every twitch would page.
+  const swiping = useRef<{ x: number; y: number; at: number; width: number } | null>(null);
 
   const geometry = useCallback((): Geometry | null => {
     const el = picture.current;
@@ -580,6 +598,13 @@ function ImageViewer({ file }: { file: PreviewFile }) {
   const zoomed = view.scale > 1;
   const step = (factor: number) => apply((cur) => cur * factor, ORIGIN, ORIGIN, true);
   const nudge = (x: number, y: number) => apply((cur) => cur, ORIGIN, { x, y }, true);
+  // Let go: the swipe offset eases back to nothing rather than being cut to it.
+  // The re-clamp is a no-op that exists to turn the easing back on through the
+  // one writer, instead of giving `animate` a second one.
+  const settle = () => {
+    if (swipeX) setSwipeX(0);
+    apply((cur) => cur, ORIGIN, ORIGIN, true);
+  };
   const endPointer = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     pointers.current.delete(e.pointerId);
@@ -587,6 +612,21 @@ function ImageViewer({ file }: { file: PreviewFile }) {
     // becomes the new anchor rather than the now-meaningless midpoint.
     gesture.current = readGesture();
     setDragging(pointers.current.size === 1);
+
+    const started = swiping.current;
+    swiping.current = null;
+    if (started && onPage) {
+      const delta = swipeVerdict({
+        dx: e.clientX - started.x,
+        dy: e.clientY - started.y,
+        elapsedMs: e.timeStamp - started.at,
+        width: started.width,
+      });
+      // `FilePreview` keys the viewer by path, so paging unmounts this one and
+      // there is nothing left here to tidy up.
+      if (delta) return onPage(delta);
+    }
+    settle();
   };
 
   return (
@@ -616,11 +656,29 @@ function ImageViewer({ file }: { file: PreviewFile }) {
           pointers.current.set(e.pointerId, framePoint(e, e.currentTarget));
           gesture.current = readGesture();
           setDragging(pointers.current.size === 1);
+          // Touch and pen only. On a desktop the arrows and the header buttons
+          // already page, and a mouse drag that navigates is a surprise; a second
+          // finger means a pinch, which outranks paging.
+          swiping.current =
+            onPage && !zoomed && pointers.current.size === 1 && e.pointerType !== "mouse"
+              ? { x: e.clientX, y: e.clientY, at: e.timeStamp, width: e.currentTarget.clientWidth }
+              : null;
+          if (swiping.current) {
+            setSwipeX(0);
+            apply((cur) => cur, ORIGIN, ORIGIN, false);
+          } else if (swipeX) setSwipeX(0);
         }}
         onPointerMove={(e) => {
           const from = gesture.current;
           if (!from || !pointers.current.has(e.pointerId)) return;
           pointers.current.set(e.pointerId, framePoint(e, e.currentTarget));
+          const swiped = swiping.current;
+          if (swiped) {
+            // Paging, not panning: a raw finger delta, carried by the image so the
+            // gesture can be seen while it happens.
+            setSwipeX(e.clientX - swiped.x);
+            return;
+          }
           const to = readGesture();
           if (!to) return;
           // One finger has no spread, so the factor is 1 and this is a pure pan;
@@ -667,13 +725,20 @@ function ImageViewer({ file }: { file: PreviewFile }) {
           src={img.url}
           alt={file.name}
           draggable={false}
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+          style={{
+            transform: `translate(${view.x + swipeX}px, ${view.y}px) scale(${view.scale})`,
+            // Fading as it travels turns the swap at the end of a swipe into a
+            // crossfade rather than a cut, without a second image having to exist.
+            // A fixed ramp rather than a fraction of the pane: this is a cosmetic
+            // cue, and tying it to a measurement would put a DOM read in render.
+            opacity: 1 - Math.min(0.5, Math.abs(swipeX) / SWIPE_FADE_PX),
+          }}
           className={cn(
             "max-h-full max-w-full object-contain",
-            // Only the discrete commands ease. A wheel, a pinch or a pan that
-            // eases behind the hand reads as lag rather than as polish — and with
-            // a trackpad firing sixty events a second it reads as rubber.
-            view.animate && "transition-transform duration-150 motion-reduce:transition-none",
+            // Only the discrete commands ease. A wheel, a pinch, a pan or a swipe
+            // that eases behind the hand reads as lag rather than as polish — and
+            // with a trackpad firing sixty events a second it reads as rubber.
+            view.animate && "transition-[transform,opacity] duration-150 motion-reduce:transition-none",
           )}
         />
       </div>

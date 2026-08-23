@@ -4,6 +4,7 @@ import {
   maxScale,
   panBounds,
   wheelZoomFactor,
+  swipeVerdict,
   FLOOR_MAX_SCALE,
   type Geometry,
 } from "@/lib/chat/image-view";
@@ -141,5 +142,47 @@ describe("applyGesture", () => {
     const after = applyGesture(at(1), fitted, 2, { x: 100, y: 0 }, { x: 140, y: 0 });
     const imagePoint = 100;
     expect(after.x + imagePoint * after.scale).toBeCloseTo(140);
+  });
+});
+
+describe("swipeVerdict", () => {
+  const drag = (dx: number, dy = 0, elapsedMs = 300) => ({ dx, dy, elapsedMs, width: 800 });
+
+  it("pages when the drag crosses a quarter of the pane", () => {
+    expect(swipeVerdict(drag(-201))).toBe(1);
+    expect(swipeVerdict(drag(201))).toBe(-1);
+  });
+
+  it("snaps back from a hesitant nudge", () => {
+    expect(swipeVerdict(drag(-90))).toBe(0);
+  });
+
+  it("pages on a short fast flick that never travels far", () => {
+    // The whole point of the second rule: a quick 60px snap of the thumb is a
+    // page turn even though it is nowhere near a quarter of the screen.
+    expect(swipeVerdict(drag(-60, 0, 80))).toBe(1);
+    expect(swipeVerdict(drag(-60, 0, 600))).toBe(0);
+  });
+
+  it("ignores a drag that is mostly vertical", () => {
+    // A mis-grab, or someone reaching for something else. Paging away from the
+    // picture is the one outcome you cannot undo by simply not letting go.
+    expect(swipeVerdict(drag(-220, 400))).toBe(0);
+    expect(swipeVerdict(drag(-220, 100))).toBe(1);
+  });
+
+  it("asks for the same proportion of the screen on any size of pane", () => {
+    expect(swipeVerdict({ dx: -100, dy: 0, elapsedMs: 900, width: 375 })).toBe(1);
+    expect(swipeVerdict({ dx: -100, dy: 0, elapsedMs: 900, width: 1400 })).toBe(0);
+  });
+
+  it("refuses to judge against a pane it has not measured", () => {
+    // A threshold of "a quarter of nothing" is met by every twitch. The caller
+    // keeps the width in a ref for the same reason, but the rule holds the line.
+    expect(swipeVerdict({ dx: -400, dy: 0, elapsedMs: 900, width: 0 })).toBe(0);
+  });
+
+  it("does not divide by a zero-length gesture", () => {
+    expect(swipeVerdict({ dx: -50, dy: 0, elapsedMs: 0, width: 800 })).toBe(0);
   });
 });

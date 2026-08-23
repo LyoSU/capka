@@ -9,6 +9,7 @@ All notable changes to Capka are documented here. Format follows
 ### Added
 
 - Pinch-to-zoom in the image preview, on touchscreens and on the macOS Safari trackpad.
+- Swiping sideways on a touchscreen pages between the files in an image preview, the way the arrow keys and the header arrows already do.
 
 ### Fixed
 

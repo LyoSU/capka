@@ -161,3 +161,41 @@ export function wheelZoomFactor(e: {
   const rate = e.ctrlKey || e.metaKey ? PINCH_RATE : WHEEL_RATE;
   return Math.exp(clamp(-delta * unit * rate, -NOTCH, NOTCH));
 }
+
+// What separates a page turn from a hesitant nudge or the start of something
+// else. The distance is a fraction of the pane rather than a pixel count, so the
+// gesture asks for the same proportion of the screen on a phone and on a
+// desktop. The flick is the escape hatch for the short, fast swipe that never
+// travels far enough to satisfy the first rule.
+const SWIPE_TRAVEL = 0.25;
+const SWIPE_FLICK_SPEED = 0.5;
+const SWIPE_FLICK_TRAVEL = 40;
+
+// How far horizontal must beat vertical before a drag counts as sideways at all.
+const SWIPE_AXIS_BIAS = 1.2;
+
+/**
+ * Which way a finished one-finger drag across a fitted image should page: -1 for
+ * the previous file, +1 for the next, 0 to snap back.
+ *
+ * Only meaningful at fit. Once the image is larger than the frame the same drag
+ * is a pan, and there is a real thing under the finger to move.
+ *
+ * The axis test is what keeps this from firing on a mis-grab: a drag that is
+ * mostly vertical is someone reaching for something else, and paging away from
+ * the picture they were looking at is the one outcome that cannot be undone by
+ * simply not letting go.
+ */
+export function swipeVerdict(d: { dx: number; dy: number; elapsedMs: number; width: number }): -1 | 0 | 1 {
+  if (d.width <= 0) return 0;
+  if (Math.abs(d.dx) < Math.abs(d.dy) * SWIPE_AXIS_BIAS) return 0;
+  const travelled = Math.abs(d.dx) >= d.width * SWIPE_TRAVEL;
+  const flicked =
+    d.elapsedMs > 0 &&
+    Math.abs(d.dx) >= SWIPE_FLICK_TRAVEL &&
+    Math.abs(d.dx) / d.elapsedMs >= SWIPE_FLICK_SPEED;
+  if (!travelled && !flicked) return 0;
+  // Dragging left pulls the next file in from the right, the way a stack of
+  // photos moves rather than the way a scrollbar does.
+  return d.dx < 0 ? 1 : -1;
+}
