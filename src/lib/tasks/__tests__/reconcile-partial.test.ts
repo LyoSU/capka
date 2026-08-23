@@ -48,6 +48,18 @@ describe("reconcileZombies", () => {
     expect(sql).not.toContain("'reasoning'");
   });
 
+  // `parts` is the weaker of the predicate's two sources: an emergency context trim
+  // empties it and keeps the ledger, and this statement runs precisely when the
+  // worker is gone and cannot supply the in-memory ledger the TypeScript twin uses.
+  // Pinned here rather than only in queue.integration.test.ts because that file is
+  // RUN_INTEGRATION-gated: without this line an ordinary `npm test` covers the
+  // second source not at all. `message_effects` appears nowhere else in the
+  // statement, so deleting the clause is the only way to make this fail.
+  it("reads the durable ledger too, not only the parts a trim can erase", async () => {
+    await reconcileZombies();
+    expect(String(query.mock.calls[0][0])).toContain("message_effects");
+  });
+
   it("hands each reaped task its own verdict, so the live tab is told what the row says", async () => {
     query.mockResolvedValue({
       rows: [

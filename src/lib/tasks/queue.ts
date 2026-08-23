@@ -410,16 +410,24 @@ export const INTERRUPTED_MESSAGE = INTERRUPTED_ERROR.userMessage;
 export const INTERRUPTED_PARTIAL_MESSAGE = INTERRUPTED_PARTIAL_ERROR.userMessage;
 
 /**
- * The SQL twin of `producedWork` (errors/friendly.ts): did this row's saved parts
- * leave the user anything to keep? Finished text, a tool result, or a tool that ran
- * and threw — a failed tool still had its hands on the workspace. Reasoning and an
- * unanswered tool call are not work.
+ * The SQL twin of `producedWork` (errors/friendly.ts): did this row leave the user
+ * anything to keep? Finished text, a tool result, or a tool that ran and threw — a
+ * failed tool still had its hands on the workspace. Reasoning and an unanswered tool
+ * call are not work.
  *
  * It has to be written twice because one side is TypeScript and the other is a
  * statement Postgres runs without us; the pairing is pinned by
  * __tests__/reconcile-partial.test.ts, and any change here belongs in both.
+ *
+ * TWO sources, because `parts` is not durable: an emergency context trim empties it
+ * while deliberately KEEPING the executed-call ledger. The TypeScript twin already
+ * has that second source — `producedWork(parts, executedWork)` short-circuits on the
+ * runner's in-memory ledger — but this statement runs on the path where no runner is
+ * left to supply it: the worker died, so the table is the only witness. Reading only
+ * `parts` there advises a retry that re-runs writes which already landed, which is
+ * the one outcome the ledger exists to prevent.
  */
-const PRODUCED_WORK_SQL = `EXISTS (
+const PRODUCED_WORK_SQL = `(EXISTS (
           SELECT 1 FROM jsonb_array_elements(
             CASE WHEN jsonb_typeof(m.metadata->'parts') = 'array'
                  THEN m.metadata->'parts' ELSE '[]'::jsonb END) AS p
@@ -428,7 +436,9 @@ const PRODUCED_WORK_SQL = `EXISTS (
               -- BEFORE running it. Mirrors producedWork in errors/friendly.ts; the
               -- two are one definition in two languages and must move together.
               OR (p->>'type' = 'tool-error' AND p->>'invalid' IS DISTINCT FROM 'true')
-              OR (p->>'type' = 'text' AND btrim(COALESCE(p->>'text', '')) <> ''))`;
+              OR (p->>'type' = 'text' AND btrim(COALESCE(p->>'text', '')) <> ''))
+        OR EXISTS (
+          SELECT 1 FROM message_effects me WHERE me.message_id = m.id))`;
 
 /** What to merge into a stranded message, split on the evidence above. $1 is the
  *  total-loss sentence, $2 the partial one. */

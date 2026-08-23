@@ -86,6 +86,33 @@ run("durable queue", () => {
       expect(rows[0].c).toBe("interrupted");
     });
 
+    // The ledger is the only durable record once an emergency context trim has
+    // cleared `parts`: the calls happened, the row no longer shows them. The
+    // reconciler is precisely where that matters — a dead worker leaves no
+    // in-memory ledger for the TypeScript twin to consult — so a predicate reading
+    // only `parts` advises a retry that re-runs writes which already landed.
+    it("calls a turn partial when the ledger holds a call its parts no longer show", async () => {
+      await pool.query(
+        `INSERT INTO tasks (id, chat_id, user_id, status, worker_id, lease_expires_at)
+         VALUES ('qt-zomb-ledger',$1,$2,'running','w-zomb', now() - interval '2 minutes')`,
+        [C, U],
+      );
+      await pool.query(
+        `INSERT INTO messages (id, chat_id, role, content, metadata) VALUES ($1,$2,'assistant','',$3)`,
+        ["msg-qt-zomb-ledger", C, JSON.stringify({ taskId: "qt-zomb-ledger", status: "running", parts: [] })],
+      );
+      await pool.query(
+        `INSERT INTO message_effects (message_id, tool_call_id, producer_task_id, tool_name, input)
+         VALUES ($1,'c1','qt-zomb-ledger','upsert_row','{"sku":"A-1"}'::jsonb)`,
+        ["msg-qt-zomb-ledger"],
+      );
+
+      await reconcileZombies();
+
+      const { rows } = await pool.query(`SELECT metadata->>'errorCategory' AS c FROM messages WHERE id = $1`, ["msg-qt-zomb-ledger"]);
+      expect(rows[0].c).toBe("interrupted_partial");
+    });
+
     it("does call a tool that ran and then threw 'partial work'", async () => {
       await strand("qt-zomb-ran", [
         { type: "tool-error", id: "c1", name: "x", error: "disk full" },
