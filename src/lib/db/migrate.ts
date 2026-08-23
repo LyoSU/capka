@@ -6,12 +6,12 @@ import { db, pool } from "./index";
 // same time — the others wait, then see everything already applied.
 const MIGRATION_LOCK = 873_2025;
 
-/**
- * Apply any pending migrations on boot. Makes self-hosting "just work": a fresh
- * deploy brings the schema up to date without anyone running drizzle-kit.
- * Idempotent and safe to call on every start.
- */
-export async function runMigrations(): Promise<void> {
+// Backoff between background retries, in seconds; the last value repeats.
+const RETRY_SECONDS = [1, 2, 5, 15, 30, 60];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function applyPending(): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK]);
@@ -21,4 +21,43 @@ export async function runMigrations(): Promise<void> {
     await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK]).catch(() => {});
     client.release();
   }
+}
+
+/**
+ * Apply any pending migrations on boot. Makes self-hosting "just work": a fresh
+ * deploy brings the schema up to date without anyone running drizzle-kit.
+ * Idempotent and safe to call on every start.
+ *
+ * Never rejects, and never blocks boot on a database that isn't up yet: the
+ * setup page has to load to surface the problem. The first attempt is awaited
+ * so a healthy start has its schema ready before the worker takes a task; a
+ * failed one keeps retrying in the background.
+ *
+ * That retry is the whole point. Nothing guarantees the database is up before
+ * we are — a dev server started ahead of its Postgres, a compose stack the
+ * platform wins the race against — and every other consumer here already
+ * tolerates that (the worker retries its poll forever, the pool reconnects).
+ * A one-shot attempt that lost the race froze the schema until someone
+ * restarted the process, while the app reconnected and looked healthy: queries
+ * failed naming a table nobody had created, never the migration that never ran.
+ */
+export async function runMigrations(): Promise<void> {
+  try {
+    await applyPending();
+    return;
+  } catch (e) {
+    console.error("[db] auto-migration failed (continuing; retrying in the background):", e);
+  }
+
+  void (async () => {
+    for (let attempt = 0; ; attempt++) {
+      await sleep(RETRY_SECONDS[Math.min(attempt, RETRY_SECONDS.length - 1)] * 1000);
+      try {
+        await applyPending();
+        return;
+      } catch (e) {
+        console.error("[db] auto-migration retry failed:", e instanceof Error ? e.message : e);
+      }
+    }
+  })();
 }

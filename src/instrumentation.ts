@@ -23,13 +23,14 @@ export async function register() {
   }
 
   // Bring the schema up to date so self-hosting needs no manual migrate step.
-  // A failure here shouldn't prevent the server from booting (e.g. the setup
-  // page should still load to surface the problem) — log loudly and continue.
+  // Never blocks boot and never rejects: the setup page has to load to surface
+  // a problem, and a database that isn't up yet is retried inside runMigrations
+  // rather than left for the next restart. The guard here is for the import.
   try {
     const { runMigrations } = await import("@/lib/db/migrate");
     await runMigrations();
   } catch (e) {
-    console.error("[db] auto-migration failed (continuing without it):", e);
+    console.error("[db] could not start auto-migration (continuing without it):", e);
   }
 
   // Guard against a master key that no longer matches the data at rest (e.g. a
