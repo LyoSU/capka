@@ -6,6 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A generic (MCP/plugin) tool step now shows its arguments as a readable label–value list instead of a highlighted JSON block; the verbatim JSON moved behind a folded "Technical details" link.
+- Copy/download controls over code blocks and tables lost the floating white card look — they sit quietly on the content and firm up on hover.
+
+### Fixed
+
+- Hovering an expandable tool step no longer paints the highlight over the step's icon and timeline rail.
+
 ## [0.33.0] - 2026-08-23
 
 > **⚠ Breaking — the first controller start after upgrading recreates every sandbox container.** Workspaces (users' files) survive the rebuild; a background job running inside a sandbox does not, so let long-running jobs finish before upgrading. The new HOME tmpfs is charged against `SANDBOX_MEMORY_MB`, leaving 64 MB less for processes unless you raise it.

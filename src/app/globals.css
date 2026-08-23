@@ -885,6 +885,41 @@
   border-radius: 0.5rem;
   font-size: 0.8125rem;
 }
+/* The floating copy/download pill over code and mermaid blocks. Stock Streamdown
+   dresses it as a bordered near-white card (`bg-sidebar/80`), which over our
+   flattened blocks reads as a random card hovering in empty space — the loudest
+   thing in a panel meant to be quiet. Strip the card; keep the buttons faintly
+   present (not hidden-until-hover: an affordance nobody can see is an affordance
+   nobody finds — and on touch there is no hover to find it with), firming up
+   when the pointer is over the block. Each button keeps its own small hover wash
+   and a page-tinted backdrop so the icons stay legible when the sticky pill
+   travels over code. */
+[data-streamdown="code-block-actions"],
+[data-streamdown="mermaid-block-actions"] {
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
+  padding: 0;
+  gap: 0.125rem;
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+[data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"],
+[data-streamdown="code-block"]:focus-within [data-streamdown="code-block-actions"],
+[data-streamdown="mermaid-block"]:hover [data-streamdown="mermaid-block-actions"],
+[data-streamdown="mermaid-block"]:focus-within [data-streamdown="mermaid-block-actions"] {
+  opacity: 1;
+}
+[data-streamdown="code-block-actions"] > button,
+[data-streamdown="mermaid-block-actions"] > button {
+  border-radius: 0.375rem;
+  background: color-mix(in oklab, var(--background) 78%, transparent);
+  backdrop-filter: blur(4px);
+}
+[data-streamdown="code-block-actions"] > button:hover,
+[data-streamdown="mermaid-block-actions"] > button:hover {
+  background: var(--hover-strong);
+}
 
 /* Streamdown — flatten table wrapper */
 [data-streamdown="table-wrapper"] {
@@ -894,6 +929,19 @@
   border-radius: 0;
   padding: 0;
   margin: 0.75rem 0;
+}
+/* The table's control row (copy/download/fullscreen), when present, is the
+   wrapper's first child with the scroller after it — same faint-at-rest
+   treatment as the code pill above, for the same reason: chrome should not
+   outshout data. `:not(:last-child)` keeps the rule off the scroller when the
+   controls row is absent. */
+[data-streamdown="table-wrapper"] > :first-child:not(:last-child) {
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+[data-streamdown="table-wrapper"]:hover > :first-child:not(:last-child),
+[data-streamdown="table-wrapper"]:focus-within > :first-child:not(:last-child) {
+  opacity: 1;
 }
 /* The horizontal scroller Streamdown puts between the wrapper and the table.
    It carries no data-attribute of its own, so it's addressed positionally: the

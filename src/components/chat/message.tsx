@@ -11,7 +11,7 @@ import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
 import { Markdown } from "@/components/chat/markdown";
 import { haptic } from "@/lib/haptics";
 import { useLongPress } from "@/hooks/use-long-press";
-import { useState, useMemo, useEffect, useLayoutEffect, useRef, memo } from "react";
+import { Fragment, useState, useMemo, useEffect, useLayoutEffect, useRef, memo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
@@ -286,10 +286,11 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
   return (
     <section>
       <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
-      {/* The left rule is the whole visual claim: "this came back". It is a single
-          quiet edge rather than a filled panel, because on a turn with a dozen
-          steps a dozen filled panels become the page. */}
-      <div className={`rounded-md border-l-2 py-1.5 pl-2.5 pr-2 ${isError ? "border-l-destructive/60 bg-destructive/10" : "border-l-primary/40 bg-muted/50"}`}>
+      {/* A quiet tinted surface, nothing more. It used to carry a 2px left rule,
+          but an edge butted against a rounded corner reads as a printing defect,
+          not a device — the label above already says "this came back", and the
+          tint alone separates it from the page. */}
+      <div className={`rounded-lg px-2.5 py-1.5 ${isError ? "bg-destructive/10" : "bg-muted/50"}`}>
         {/* tabIndex on a scrollable region: without it a keyboard user cannot reach
             the part of a long output that is scrolled out of view (WCAG 2.1 AA). */}
         <pre
@@ -397,6 +398,35 @@ function Invocation({ inv }: { inv: StepInvocation }) {
     );
   }
 
+  // Generic tools (MCP connectors, plugins, anything new): their arguments come
+  // pre-shaped as label/value fields, so a non-technical reader gets "query —
+  // AI news this week" instead of a syntax-highlighted JSON block. The verbatim
+  // JSON is still one click away — tucked, not gone, because it is the one
+  // artifact an admin can act on.
+  if (inv.kind === "fields") {
+    return (
+      <section>
+        <BlockLabel>{t("sent.params")}</BlockLabel>
+        {/* fit-content caps the label column so one long argument name cannot
+            shove every value off the readable line. */}
+        <dl className="grid grid-cols-[fit-content(10rem)_1fr] gap-x-4 gap-y-1 text-[13px]">
+          {inv.entries.map((f, i) => (
+            <Fragment key={i}>
+              <dt className="truncate text-muted-foreground">{f.label}</dt>
+              <dd className={`min-w-0 [overflow-wrap:anywhere] ${f.mono ? "font-mono text-[11px] leading-relaxed text-muted-foreground" : "text-foreground"}`}>
+                {f.value}
+                {/* A stated cut, never a silent one — the same contract the
+                    clamped blocks keep via TruncationNotice. */}
+                {f.clipped && <span className="text-muted-foreground"> {t("clippedField")}</span>}
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+        <TechDetails json={inv.json} />
+      </section>
+    );
+  }
+
   const over = inv.text.length > INVOCATION_LIMIT;
   const body = over && !showAll ? inv.text.slice(0, INVOCATION_LIMIT) : inv.text;
 
@@ -408,6 +438,47 @@ function Invocation({ inv }: { inv: StepInvocation }) {
         <TruncationNotice shown={INVOCATION_LIMIT} total={inv.text.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
       )}
     </section>
+  );
+}
+
+/** The verbatim JSON behind a fields view — folded by default because its only
+ *  audience is someone debugging a connector, and rendered as a plain <pre>
+ *  rather than through <Markdown>: the highlighter's header chrome (language
+ *  tag, floating action pill) is exactly the "code editor in the chat" look the
+ *  fields view exists to remove. */
+function TechDetails({ json }: { json: string }) {
+  const t = useTranslations("chat.tool");
+  const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const over = json.length > INVOCATION_LIMIT;
+  const body = over && !showAll ? json.slice(0, INVOCATION_LIMIT) : json;
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-md text-xs text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        {t("techDetails")}
+      </button>
+      {open && (
+        <>
+          <div className="relative mt-1.5">
+            <div className="absolute right-1 top-1"><CopyButton text={json} /></div>
+            <pre
+              tabIndex={0}
+              className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
+            >
+              {body}
+            </pre>
+          </div>
+          {over && (
+            <TruncationNotice shown={INVOCATION_LIMIT} total={json.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -725,7 +796,13 @@ function StepRow({ part, chatId }: { part: ToolPart; chatId?: string }) {
       {expandable && (
         <CollapsibleTrigger
           aria-label={label}
-          className="absolute inset-0 z-0 rounded-lg transition-micro hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          // Starts AFTER the 27px badge (badge + a 7px breath), not at inset-0:
+          // painted later in DOM order, a full-bleed trigger put its hover wash
+          // OVER the badge and across the rail line — an opaque pill swallowing
+          // the one icon that says what the step is. The icon strip gives up its
+          // few pixels of click target so the wash reads as "this row's text
+          // expands", which is the true claim.
+          className="absolute inset-y-0 left-[34px] right-0 z-0 rounded-lg transition-micro hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         />
       )}
       <span className="pointer-events-none relative z-10 text-sm">

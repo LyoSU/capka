@@ -310,9 +310,24 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
  *  "str_replace" are our vocabulary, not theirs. */
 export type StepInvocationTitle = "command" | "code" | "content" | "changes" | "params";
 
+/** One argument of a generic call, shaped for reading. Built from TYPE alone —
+ *  nothing here knows which tool the argument belongs to, so a new connector
+ *  needs no code (and no dictionary entry) to render decently. */
+export interface StepField {
+  /** The argument's name turned into words: "num_results" → "num results". */
+  label: string;
+  value: string;
+  /** Machine-shaped (a nested structure) — keeps monospace; scalars read as prose. */
+  mono: boolean;
+  /** `value` is a stated prefix of something longer; the whole text lives in the
+   *  sibling `json`, so the cut is one click away rather than silent. */
+  clipped?: boolean;
+}
+
 export type StepInvocation =
   | { kind: "code"; lang: string; text: string; titleKey: StepInvocationTitle }
-  | { kind: "diff"; lang: string; before: string; after: string; titleKey: "changes" };
+  | { kind: "diff"; lang: string; before: string; after: string; titleKey: "changes" }
+  | { kind: "fields"; entries: StepField[]; json: string; titleKey: "params" };
 
 /** Extension → highlighter grammar. An unknown extension yields "" (plain, no
  *  highlighting) rather than a guess: colouring text by the WRONG grammar is
@@ -376,8 +391,10 @@ export function describeInvocation(toolName: string, input?: unknown): StepInvoc
   }
 
   // Everything else — MCP connectors, plugin tools, anything new. Their argument
-  // names are unknowable here, so show the object as it was sent, with one
-  // deliberate change: CHEAPEST FIELD FIRST.
+  // names are unknowable here, so no per-tool rendering is possible — instead
+  // each argument becomes a readable label/value FIELD (typed formatting only),
+  // with the verbatim JSON kept alongside for the "technical details" fold.
+  // Both share one deliberate ordering: CHEAPEST FIELD FIRST.
   //
   // The display clamps long text by taking a prefix, and on any call big enough
   // to be clamped the long field is the payload. Serialized in argument order,
@@ -401,5 +418,47 @@ export function describeInvocation(toolName: string, input?: unknown): StepInvoc
     }
   };
   entries.sort((x, y) => cost(x[1]) - cost(y[1]));
-  return { kind: "code", lang: "json", text: JSON.stringify(Object.fromEntries(entries), null, 2), titleKey: "params" };
+  return {
+    kind: "fields",
+    entries: entries.map(([k, v]) => fieldOf(k, v)),
+    json: JSON.stringify(Object.fromEntries(entries), null, 2),
+    titleKey: "params",
+  };
+}
+
+/** A single argument value larger than this is a payload, not a parameter. The
+ *  field shows its head and SAYS so (`clipped`); the whole value stays available
+ *  in the invocation's raw JSON. */
+const FIELD_VALUE_LIMIT = 500;
+
+/** "num_results" / "numResults" / "num-results" → "num results". Generic by
+ *  construction: argument names are the tool author's vocabulary, and any
+ *  per-tool dictionary here would defeat the point of the fields view — that an
+ *  unknown tool renders decently with no code written for it. */
+const humanizeKey = (k: string) =>
+  k.replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().trim() || k;
+
+const isScalar = (v: unknown) => v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+
+function fieldOf(key: string, v: unknown): StepField {
+  let value: string;
+  let mono = false;
+  if (v == null || v === "") {
+    value = "—"; // null/absent and "" carry the same information for a reader: nothing
+  } else if (typeof v === "string") {
+    value = v;
+  } else if (typeof v === "number" || typeof v === "boolean") {
+    value = String(v);
+  } else if (Array.isArray(v) && v.every(isScalar)) {
+    value = v.map((x) => (x == null ? "—" : String(x))).join(", ");
+  } else {
+    try {
+      value = JSON.stringify(v) ?? "—";
+    } catch {
+      value = "—"; // circular/unserializable — same placeholder, the JSON fold drops it too
+    }
+    mono = true;
+  }
+  const clipped = value.length > FIELD_VALUE_LIMIT;
+  return { label: humanizeKey(key), value: clipped ? value.slice(0, FIELD_VALUE_LIMIT) : value, mono, ...(clipped ? { clipped: true } : {}) };
 }

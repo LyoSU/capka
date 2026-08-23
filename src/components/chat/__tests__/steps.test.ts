@@ -223,10 +223,20 @@ describe("describeInvocation", () => {
     expect(describeInvocation("manage", { action: "set", key: "x" })).toBeNull();
   });
 
-  it("shows an unknown or MCP tool's arguments as formatted JSON", () => {
+  // Generic arguments render as readable label/value FIELDS, not a JSON code
+  // block: the audience is a non-technical reader, and `{"query": "..."}` with
+  // syntax highlighting is a developer artifact. The verbatim JSON is kept
+  // alongside for the folded "technical details" — nothing is lost, it is
+  // demoted.
+  it("shows an unknown or MCP tool's arguments as readable fields, JSON kept alongside", () => {
     const inv = describeInvocation("mcp__notion__create_page", { title: "Q3", parent: "db_1" });
-    expect(inv).toMatchObject({ kind: "code", lang: "json" });
-    expect(inv && "text" in inv && inv.text).toContain('"title": "Q3"');
+    expect(inv).toMatchObject({ kind: "fields", titleKey: "params" });
+    if (!inv || inv.kind !== "fields") throw new Error("expected fields");
+    expect(inv.entries).toEqual([
+      { label: "title", value: "Q3", mono: false },
+      { label: "parent", value: "db_1", mono: false },
+    ]);
+    expect(inv.json).toContain('"title": "Q3"');
   });
 
   // THE streaming case. Args arrive character by character, so every tool call
@@ -299,28 +309,79 @@ describe("describeInvocation — what to call the block", () => {
 // two megabytes of body and never reaches the path, naming nothing the reader
 // could act on. Cheapest-first inverts that: identifiers are short, bodies long.
 describe("describeInvocation — which arguments survive a clamp", () => {
-  const text = (tool: string, args: Record<string, unknown>) => {
+  const fields = (tool: string, args: Record<string, unknown>) => {
     const inv = describeInvocation(tool, args);
-    if (!inv || inv.kind !== "code") throw new Error("expected a code invocation");
-    return inv.text;
+    if (!inv || inv.kind !== "fields") throw new Error("expected a fields invocation");
+    return inv;
   };
 
   it("puts a short identifier ahead of a long body, whatever order they arrived in", () => {
-    const t = text("mcp__files__put", { content: "x".repeat(5000), path: "/srv/report.csv" });
-    expect(t.indexOf('"path"')).toBeLessThan(t.indexOf('"content"'));
-    expect(t.indexOf('"path"')).toBeLessThan(200);
+    const inv = fields("mcp__files__put", { content: "x".repeat(5000), path: "/srv/report.csv" });
+    expect(inv.entries[0].label).toBe("path");
+    expect(inv.json.indexOf('"path"')).toBeLessThan(inv.json.indexOf('"content"'));
+    expect(inv.json.indexOf('"path"')).toBeLessThan(200);
   });
 
   it("orders several fields by cost, so the cheap ones all clear a prefix", () => {
-    const t = text("mcp__x__y", { body: "b".repeat(900), id: 7, note: "n".repeat(80), name: "Q3" });
-    const at = (k: string) => t.indexOf('"' + k + '"');
-    expect(at("id")).toBeLessThan(at("name"));
-    expect(at("name")).toBeLessThan(at("note"));
-    expect(at("note")).toBeLessThan(at("body"));
+    const inv = fields("mcp__x__y", { body: "b".repeat(900), id: 7, note: "n".repeat(80), name: "Q3" });
+    expect(inv.entries.map((f) => f.label)).toEqual(["id", "name", "note", "body"]);
   });
 
   it("still lists every argument — this reorders, it never drops", () => {
-    const t = text("mcp__x__y", { big: "z".repeat(3000), a: 1, b: 2 });
-    for (const k of ["big", "a", "b"]) expect(t).toContain('"' + k + '"');
+    const inv = fields("mcp__x__y", { big: "z".repeat(3000), a: 1, b: 2 });
+    expect(inv.entries.map((f) => f.label).sort()).toEqual(["a", "b", "big"]);
+    for (const k of ["big", "a", "b"]) expect(inv.json).toContain('"' + k + '"');
+  });
+});
+
+// The fields themselves: every rule is TYPE-driven, never tool-driven — a
+// per-tool dictionary here would mean every new connector renders badly until
+// someone writes code for it, which is the exact failure the fields view
+// replaces.
+describe("describeInvocation — how a field reads", () => {
+  const fields = (args: Record<string, unknown>) => {
+    const inv = describeInvocation("mcp__any__tool", args);
+    if (!inv || inv.kind !== "fields") throw new Error("expected a fields invocation");
+    return inv;
+  };
+
+  it("turns key punctuation into words: snake, kebab and camel all read the same", () => {
+    const inv = fields({ num_results: 15, timeRange: "week", "content-type": "text" });
+    expect(inv.entries.map((f) => f.label).sort()).toEqual(["content type", "num results", "time range"]);
+  });
+
+  it("keeps scalars as plain readable text", () => {
+    const inv = fields({ limit: 15, dry_run: false });
+    expect(inv.entries).toEqual([
+      { label: "limit", value: "15", mono: false },
+      { label: "dry run", value: "false", mono: false },
+    ]);
+  });
+
+  it("joins a list of scalars instead of rendering brackets and quotes", () => {
+    const [f] = fields({ tags: ["ai", "news", 3] }).entries;
+    expect(f).toEqual({ label: "tags", value: "ai, news, 3", mono: false });
+  });
+
+  it("keeps a nested structure as compact JSON, marked machine-shaped", () => {
+    const [f] = fields({ filter: { status: "open" } }).entries;
+    expect(f).toEqual({ label: "filter", value: '{"status":"open"}', mono: true });
+  });
+
+  it("shows a dash for null and empty string — absence reads the same either way", () => {
+    const inv = fields({ cursor: null, note: "" });
+    for (const f of inv.entries) expect(f.value).toBe("—");
+  });
+
+  // A stated cut, not a silent one: the flag is what lets the UI SAY the value
+  // was shortened, and the full text stays reachable in `json`.
+  it("clips a payload-sized value and says so, keeping the whole thing in the JSON", () => {
+    const long = "y".repeat(800);
+    const inv = fields({ body: long });
+    const [f] = inv.entries;
+    expect(f.clipped).toBe(true);
+    expect(f.value.length).toBeLessThan(long.length);
+    expect(long.startsWith(f.value)).toBe(true);
+    expect(inv.json).toContain(long);
   });
 });

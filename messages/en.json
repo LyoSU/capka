@@ -504,6 +504,8 @@
         "params": "Parameters"
       },
       "result": "Result",
+      "techDetails": "Technical details",
+      "clippedField": "… (shortened)",
       "before": "Before",
       "after": "After",
       "showAll": "Show all",
