@@ -663,6 +663,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // one call and re-shape the prompt twice to do it. Lifetime is ONE STREAM, not
     // one turn: makeStream resets it, for the reason spelled out there.
     let pruneBoundary = 0;
+    // Deliberately NOT reset by makeStream, unlike pruneBoundary. The boundary is an
+    // index into one stream's list and dies with it; "this turn's tool traffic already
+    // crossed the trigger" is a fact about the TURN and stays true across a re-stream.
+    // Keeping them in one variable is what made a restart wait a step to re-earn relief
+    // it had already earned.
+    let pruneArmedEarlier = false;
     // Stall detection runs per-attempt: `ac` is the task-wide signal (deadline,
     // cancel, lost lease); `attemptAc` aborts only the CURRENT stream when the
     // provider goes silent, so a retry can re-stream without the whole task
@@ -786,8 +792,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                     // the connection, so the trigger is never crossed and this whole
                     // brake stays disengaged — on exactly the providers that have no
                     // server-side edit to fall back on either.
-                    lastStepContextTokens: lastStepContextTokens || estimatePromptTokens(base),
-                    messageCount: base.length, stepNumber,
+                    // Passed SEPARATELY, not collapsed with `||` as they were: the two
+                    // figures are trustworthy at different moments, and folding them
+                    // hid that. `estimatedTokens` is counted only where it will be
+                    // read — walking a long list every step to produce a number that
+                    // the reported figure then wins over is a per-step cost for
+                    // nothing.
+                    lastStepContextTokens,
+                    ...(stepNumber === 0 || !lastStepContextTokens
+                      ? { estimatedTokens: estimatePromptTokens(base) }
+                      : {}),
+                    messageCount: base.length, stepNumber, armedEarlier: pruneArmedEarlier,
                   });
                   if (next !== pruneBoundary) {
                     tlog.info("pruning tool traffic mid-turn", {
@@ -795,6 +810,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
                       boundaryFrom: pruneBoundary, boundaryTo: next, messages: msgs.length,
                     });
                     pruneBoundary = next;
+                    // Only a real advance gets here: a rebuilt history too short to shed
+                    // yields a cut at or behind the boundary, so `next` stays equal to it
+                    // and the turn is not recorded as having armed.
+                    pruneArmedEarlier = true;
                   }
                   msgs = pruneTurnToolTraffic(msgs, pruneBoundary);
                 }

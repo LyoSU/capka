@@ -27,6 +27,10 @@ All notable changes to Capka are documented here. Format follows
 - A crashed turn whose tools already ran is now reported as partial rather than a total loss: the zombie reconciler reads the executed-call ledger, not only the reply's saved parts, so the user is offered "Continue" instead of a retry that repeats those writes.
 - Image preview zoom now follows how far the wheel or trackpad moved rather than how many events the device sent, so a light two-finger swipe no longer jumps straight to maximum zoom.
 - The image preview no longer lets a picture be dragged out of the window, and its zoom buttons no longer reset the zoom when clicked twice quickly.
+- The mid-turn context brake now re-engages on the first step after a turn restarts, instead of sending one unbraked request — on providers without a server-side context edit.
+- The prompt-size estimate that arms that brake no longer under-counts tool traffic by up to a third: it divided bytes by 4, a prose ratio, for content that is almost entirely JSON.
+- `message_effects.input` no longer stores a tool call's whole payload; rows are bounded to roughly what the recovery note can read. Existing rows are left as they are.
+- A recovery note now names the file or record a large tool call targeted, instead of showing a prefix of the payload that pushed the identifying argument off the line.
 
 ## [0.32.0] - 2026-08-23
 

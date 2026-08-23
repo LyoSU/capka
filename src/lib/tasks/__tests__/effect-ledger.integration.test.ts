@@ -37,6 +37,27 @@ run("durable effect ledger", () => {
     expect(await loadEffects(M)).toEqual([{ id: "call-1", name: "upsert_row", input: { sku: "A-1" } }]);
   });
 
+  // The column is jsonb and took whatever the model emitted. On a bulk write that is
+  // the payload — and now that dispatch is recorded before the outcome it crosses the
+  // wire twice per call, for one reader that clamps to a hundred characters. Asserted
+  // on the stored BYTES rather than on what loadEffects hands back: the round trip is
+  // the claim, and a clamp that only held in memory would pass a check on the object.
+  it("stores a bounded row for a call whose arguments are a payload", async () => {
+    await recordEffect({
+      messageId: M, toolCallId: "call-big", taskId: "task-a", name: "write_file",
+      input: { content: "x".repeat(400_000), path: "/srv/report.csv" },
+    });
+
+    const { rows } = await pool.query(
+      `SELECT octet_length(input::text) AS bytes, input FROM message_effects WHERE message_id = $1 AND tool_call_id = 'call-big'`,
+      [M],
+    );
+    expect(Number(rows[0].bytes)).toBeLessThan(2048);
+    // And the field that says WHICH file survived whole — a bound that kept the body
+    // and lost the path would satisfy the size check and defeat the note.
+    expect(rows[0].input.path).toBe("/srv/report.csv");
+  });
+
   // Write-ahead. A row written only on the result cannot describe the window the
   // ledger most needs to cover: the tool was entered, the worker died, and nothing
   // anywhere says the workspace may have been touched. So the row goes in BEFORE

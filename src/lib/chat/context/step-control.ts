@@ -173,6 +173,24 @@ export function pruneTurnToolTraffic(messages: ModelMessage[], boundary: number)
  * all or a prompt that no longer exists. Arming off the latter would cut a rebuilt
  * (and much shorter) message list down to its tail before the model had run once.
  *
+ * Refusing to arm at step 0 AT ALL was too broad, though, and the cost landed on the
+ * restart paths. A new stream resets the boundary — it indexes a list the SDK has
+ * discarded — so a turn that had already earned the cut came back without it and
+ * could not re-earn it until step 1. That unbraked step is the first request after an
+ * overflow: the one least able to afford it.
+ *
+ * `armedEarlier` is what separates the two states the step counter had flattened
+ * together. A turn on its FIRST stream has accumulated no tool traffic of its own and
+ * is upstream compaction's business, so it waits. A turn whose earlier stream crossed
+ * the trigger has, and re-arms at once — off a fresh local count of the list in hand
+ * rather than the stale report, because the rebuilt list carries the same TOKENS even
+ * when its message count collapsed.
+ *
+ * Deliberately narrow: `armedEarlier` gates the estimate rather than the estimate
+ * standing alone. The estimate over-counts prose (see BYTES_PER_TOKEN), and an
+ * ungated step-0 arm would shed a long chat's history before the model had run once,
+ * on a turn that never needed relief. Both conditions must hold.
+ *
  * Invalidating the boundary itself is the CALLER's job, not this function's: a
  * boundary is only meaningful against the list it was measured on, and only the code
  * that starts a stream knows the list was replaced. This decides where to cut, and
@@ -198,20 +216,58 @@ const MESSAGES_PER_TOOL_EXCHANGE = 2;
 export function armPruneBoundary(input: {
   triggerAt: number;
   boundary: number;
+  /** The provider's figure for the last step that FINISHED — a ghost at step 0. */
   lastStepContextTokens: number;
+  /** A local count of the list being sent right now (`estimatePromptTokens`). Never a
+   *  ghost, but an estimate, so it yields to a measurement wherever one exists. */
+  estimatedTokens?: number;
   messageCount: number;
   stepNumber: number;
+  /** Did this TURN arm the cut in a stream that has since been replaced? */
+  armedEarlier?: boolean;
 }): number {
   if (input.triggerAt <= 0) return 0;
-  if (input.stepNumber === 0) return input.boundary;
-  if (input.lastStepContextTokens < input.triggerAt) return input.boundary;
+  // At step 0 the reported figure is not merely unhelpful but WRONG — it describes a
+  // prompt that no longer exists — so it is dropped rather than preferred. The local
+  // count of the list in hand is the only honest figure there.
+  const size = (input.stepNumber === 0 ? 0 : input.lastStepContextTokens) || input.estimatedTokens || 0;
+  if (size < input.triggerAt) return input.boundary;
+  if (input.stepNumber === 0 && !input.armedEarlier) return input.boundary;
+  // No clamp at 0 needed, and one was briefly here: `boundary` starts at 0 and only
+  // moves forward, so Math.max against it already floors the result. A rebuilt history
+  // shorter than what the policy keeps therefore yields a cut of 0 — no cut — which is
+  // the invariant that matters and is asserted through pruneTurnToolTraffic.
   return Math.max(input.boundary, input.messageCount - TOOL_CLEAR_KEEP_LAST * MESSAGES_PER_TOOL_EXCHANGE);
 }
 
-/** UTF-8 bytes per token. Four is the Latin ratio, which is also the floor: every
- *  other script packs more bytes into a character, so the same divisor over- rather
- *  than under-counts them. See estimatePromptTokens for why that direction. */
-const BYTES_PER_TOKEN = 4;
+/**
+ * UTF-8 bytes per token.
+ *
+ * Measured, not inherited, and the measurement is why this is 3. On o200k over
+ * content taken from this repo: English prose 4.2-4.4 bytes per token, Ukrainian
+ * prose 4.8-5.1, TypeScript source 4.2 — so `/4` is a fair-to-generous divisor for
+ * PROSE in any script. Dense JSON is the outlier, and dense JSON is what this
+ * function almost entirely counts: tool-call arguments measured 3.4-3.8 and a
+ * serialized `package.json` as a tool result measured 2.58.
+ *
+ * That is the term the previous divisor missed. `8cd630e` moved this from characters
+ * to bytes to stop under-counting Cyrillic, and correctly rejected a flat `/2` as
+ * over-counting ASCII by 2x — but it reasoned entirely about SCRIPT, and carried
+ * "4 still holds for Latin" over from the English chars-per-token rule of thumb
+ * without re-checking it. Content TYPE turns out to matter more than script here:
+ * every script's prose sits above 4 and structured JSON sits near 2.6.
+ *
+ * Claude's tokenizer is the less efficient of the two — a documented ~15-20% more
+ * tokens for the same text than tiktoken — which moves every figure above further
+ * down. Treated as margin rather than as the basis, since it is not measured here:
+ * 3 is already below every JSON figure on o200k alone.
+ *
+ * A SMALLER divisor over-counts tokens, which is the direction to err in — see
+ * estimatePromptTokens. Exported so a test can pin that direction rather than the
+ * literal: any value that keeps the estimate above dense JSON's real cost is
+ * correct, and 4 is not one of them.
+ */
+export const BYTES_PER_TOKEN = 3;
 
 /**
  * Roughly how many tokens the prompt we are about to send is worth.
@@ -237,15 +293,27 @@ const BYTES_PER_TOKEN = 4;
  * two, so a character-based estimate undercounts a Ukrainian conversation by 2–4×
  * and a real 120k-token chat measures as 60k — never crossing the trigger, leaving
  * the brake absent exactly where this product treats the locale as first-class.
- * Bytes fix it without a locale to detect: Latin is one byte per character (so this
- * stays ~chars/4 and every ASCII estimate is unchanged), Cyrillic is two (~chars/2),
- * CJK three, which over-counts slightly.
+ * Bytes fix it without a locale to detect: Latin is one byte per character, Cyrillic
+ * two, CJK three.
+ *
+ * Choosing bytes did not settle the DIVISOR, and the two questions were conflated
+ * once already — see BYTES_PER_TOKEN for the measurement that separates them.
  *
  * Over-counting is the direction to err in, and the errors are not symmetric:
  * arming early sheds tool bodies a step or two sooner and costs one cache
  * transition, while arming late costs the TURN — the prompt reaches the ceiling, the
  * emergency trim fires, and the restart is the blind one this whole mechanism exists
- * to avoid.
+ * to avoid. The early side is bounded too: this figure is consulted only where the
+ * provider reports no usage at all, or at a step 0 whose reported figure describes a
+ * prompt that no longer exists. A provider that reports is never armed off it.
+ *
+ * STILL UNCOUNTED, and named here rather than left for the next reader to rediscover:
+ * the tool definitions. Names, descriptions and input schemas are sent alongside the
+ * messages, never inside them, so a turn with forty connector tools carries several
+ * thousand tokens this function cannot see. `estimateToolTokens` in
+ * `lib/mcp/tool-search.ts` already sizes exactly that, for the deferral decision —
+ * so the fix is to share one serializer across a module boundary, which is a
+ * different change from the divisor and is deliberately not bundled with it.
  */
 export function estimatePromptTokens(messages: ModelMessage[]): number {
   let bytes = 0;

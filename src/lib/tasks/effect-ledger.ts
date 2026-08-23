@@ -25,6 +25,7 @@ import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { messageEffects, messages } from "@/lib/db/schema";
 import { stripNul } from "@/lib/tasks/sanitize";
+import { outputBytes } from "@/lib/tool-output";
 import type { StoredPart } from "@/lib/chat/contracts";
 
 /** One executed tool call. Recorded when its result — or its error — arrives, so
@@ -158,7 +159,23 @@ const collapsedHeader = (mixed: boolean) =>
 const remainder = (tools: number, calls: number) =>
   `- …and ${tools} more tools, ${calls} calls — check each target before writing it again`;
 
-/** Compact one call's arguments to something identifying. */
+/**
+ * Compact one call's arguments to something identifying.
+ *
+ * "Identifying" is the requirement, and a prefix does not meet it. Cutting the
+ * serialized object at EFFECT_ARG_CHARS keeps whichever fields happen to sort first,
+ * and on the calls that overflow the budget the long field IS the payload — so
+ * `{content: <2 MB>, path: "/srv/report.csv"}` rendered by prefix is a hundred
+ * characters of `x` and no path. The note then tells the model to inspect a target its
+ * own line does not name, which is worse than listing nothing: an entry the model
+ * cannot check is one it redoes.
+ *
+ * So when the budget binds, fields are taken CHEAPEST first until it is spent, with a
+ * count of what did not fit. Short fields are where identifiers live (a path, an sku,
+ * an id, a recipient) and a long one is a body. Field order carries no meaning in JSON
+ * and the note is read by a model, so reordering costs nothing and buys the one thing
+ * the line has to do.
+ */
 function renderArgs(input: unknown): string {
   // No arguments to identify the call by. Both sources produce this — `parts` has
   // no `tool-call` to pair with, the table stores SQL NULL for a no-argument call —
@@ -173,7 +190,26 @@ function renderArgs(input: unknown): string {
     // call still ran, so it belongs in the note — just without its arguments.
     return "";
   }
-  return s.length > EFFECT_ARG_CHARS ? `${s.slice(0, EFFECT_ARG_CHARS)}…` : s;
+  if (s.length <= EFFECT_ARG_CHARS) return s;
+  if (input !== null && typeof input === "object" && !Array.isArray(input)) {
+    const fields = Object.entries(input)
+      .map(([k, v]) => `${JSON.stringify(k)}:${JSON.stringify(v) ?? "null"}`)
+      .sort((a, b) => a.length - b.length);
+    const kept: string[] = [];
+    let used = 2; // the braces
+    for (const f of fields) {
+      if (used + f.length > EFFECT_ARG_CHARS) break;
+      kept.push(f);
+      used += f.length + 1;
+    }
+    // Only when something survived: a single field wider than the whole budget leaves
+    // nothing to show, and `{…+1}` says less than a clamped prefix of that field does.
+    if (kept.length > 0) {
+      const dropped = fields.length - kept.length;
+      return `{${kept.join(",")}${dropped > 0 ? `,…+${dropped}` : ""}}`;
+    }
+  }
+  return `${s.slice(0, EFFECT_ARG_CHARS)}…`;
 }
 
 /**
@@ -359,12 +395,78 @@ interface EffectWrite {
   failed?: boolean;
 }
 
+/**
+ * Serialized size at which a call's arguments stop being arguments and start being a
+ * payload. Under it the row is stored verbatim, so the overwhelming majority of calls
+ * are unaffected by any of this.
+ *
+ * Two writes per call now, not one — `recordEffectStarted` before dispatch and
+ * `recordEffect` on the outcome — so an unbounded `input` crossed the wire twice, was
+ * TOASTed, and stayed in the table for the life of the chat (the row cascades from
+ * `messages`). All of that to serve one reader that clamps to EFFECT_ARG_CHARS.
+ */
+const EFFECT_INPUT_BYTES = 2048;
+
+/** Bound on the field COUNT, since the per-field clamp alone leaves a model free to
+ *  emit ten thousand short keys. Whatever fills a row states its own ceiling. */
+const EFFECT_INPUT_FIELDS = 32;
+
+/** One oversized value, replaced by something that says what was dropped.
+ *
+ *  Stating the size rather than eliding silently, because the note's whole job is to
+ *  be honest about what it knows: an argument that vanished reads as an argument the
+ *  call never had, and the model then cannot tell a truncation from a default. */
+function clampValue(v: unknown): unknown {
+  if (typeof v === "string") {
+    if (v.length <= EFFECT_ARG_CHARS) return v;
+    return `${v.slice(0, EFFECT_ARG_CHARS)}…(+${Math.round(Buffer.byteLength(v, "utf8") / 1024)} KB)`;
+  }
+  if (v === null || typeof v !== "object") return v;
+  const kb = Math.round(outputBytes(v) / 1024);
+  return Array.isArray(v)
+    ? `…(${v.length} items, ${kb} KB)`
+    : `…(${Object.keys(v).length} fields, ${kb} KB)`;
+}
+
+/**
+ * Keep what identifies a call; drop what would replay it.
+ *
+ * Per FIELD rather than over the serialized whole, and that is the point. Clamping the
+ * serialization positionally drops whichever field happens to sort last, so
+ * `{content: <2 MB>, path: "/etc/x"}` stored — or rendered — by prefix keeps two
+ * kilobytes of body and loses the path. The note then instructs the model to "inspect
+ * the target its arguments identify" about a target its arguments no longer name,
+ * which is worse than saying nothing: an unidentifiable entry is one the model has no
+ * way to verify and will therefore redo.
+ *
+ * One level deep, deliberately. Identifying values — a path, an sku, an id, a
+ * recipient — are top-level scalars in every tool signature this has met; a nested
+ * object or array is a payload. Recursing would buy the rare `{target: {sku}}` case at
+ * the cost of an unbounded walk over the very structures this exists to not store.
+ */
+export function clampEffectInput(input: unknown): unknown {
+  if (outputBytes(input) <= EFFECT_INPUT_BYTES) return input;
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return clampValue(input);
+  const entries = Object.entries(input);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of entries.slice(0, EFFECT_INPUT_FIELDS)) out[k] = clampValue(v);
+  if (entries.length > EFFECT_INPUT_FIELDS) out["…"] = `${entries.length - EFFECT_INPUT_FIELDS} more fields`;
+  return out;
+}
+
 async function upsertEffect(e: EffectWrite, settled: boolean): Promise<void> {
   // Sanitized HERE, not at the call sites: a model can emit a literal NUL escape
   // inside a valid JSON string argument, Postgres rejects it in jsonb, and a caller
   // that forgets would turn "this call ran" into a failed write. One place cannot
   // be forgotten in the next one.
-  const row = { toolName: e.name, input: stripNul(e.input) ?? null, failed: e.failed ?? false, settled };
+  // Clamped AFTER stripNul: the sanitizer walks the whole value either way, and
+  // clamping first would leave a NUL inside a marker string it had already built.
+  const row = {
+    toolName: e.name,
+    input: clampEffectInput(stripNul(e.input)) ?? null,
+    failed: e.failed ?? false,
+    settled,
+  };
   let last: unknown;
   for (let attempt = 1; attempt <= LEDGER_WRITE_ATTEMPTS; attempt++) {
     try {

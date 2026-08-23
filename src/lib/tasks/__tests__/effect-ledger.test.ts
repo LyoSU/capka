@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildRecoveryNote,
+  clampEffectInput,
   effectsFromParts,
   mergeEffects,
   EFFECT_ARG_CHARS,
@@ -252,5 +253,97 @@ describe("mergeEffects", () => {
     const fromParts = [{ id: "c1", name: "upsert_row", input: { sku: "A" } }];
 
     expect(mergeEffects(ledger, fromParts)).toEqual(ledger);
+  });
+});
+
+/**
+ * What the row keeps. The column is jsonb and took whatever the model emitted, which
+ * on a bulk write is the payload itself — stored twice per call now that dispatch is
+ * recorded before the outcome, kept for the life of the chat, and read back by exactly
+ * one consumer that clamps it to a hundred characters.
+ */
+describe("clampEffectInput", () => {
+  it("leaves an ordinary call's arguments exactly as they were", () => {
+    // The common case must be untouched, not merely equivalent: a clamp that rewrote
+    // every row would change what every recovery note says to buy nothing, since the
+    // rows that matter for size are a small minority.
+    const input = { sku: "CLR-001", price: 199, tags: ["silver", "new"] };
+    expect(clampEffectInput(input)).toBe(input);
+  });
+
+  it("keeps the field that identifies the target and drops the one that replays it", () => {
+    // The shape this exists for, with `path` deliberately AFTER the body. Clamping the
+    // serialization by prefix — which is what the renderer does and what a naive
+    // storage bound would do — keeps two kilobytes of `content` and loses `path`
+    // entirely, so the note names a write it cannot identify.
+    const clamped = clampEffectInput({ content: "x".repeat(400_000), path: "/srv/report.csv" }) as Record<string, unknown>;
+
+    expect(clamped.path).toBe("/srv/report.csv");
+    expect(String(clamped.content)).toContain("KB");
+    expect(JSON.stringify(clamped).length).toBeLessThan(400);
+  });
+
+  it("makes the note able to name the file, which is the whole point", () => {
+    // Asserted through the note rather than on the clamped object, because the object
+    // is not what anything reads. Before the bound this line was 100 characters of `x`.
+    const note = buildRecoveryNote([
+      { name: "write_file", input: clampEffectInput({ content: "x".repeat(400_000), path: "/srv/report.csv" }) },
+    ]);
+    expect(note).toContain("/srv/report.csv");
+    expect(note).not.toContain("x".repeat(EFFECT_ARG_CHARS));
+  });
+
+  it("says how much it dropped instead of eliding in silence", () => {
+    // An argument that simply vanishes reads as an argument the call never had, and the
+    // model cannot then tell a truncation from a default. Both non-scalar shapes carry
+    // a count as well as a size, for the same reason the degraded note does.
+    const clamped = clampEffectInput({
+      rows: Array.from({ length: 900 }, (_, i) => ({ sku: `S-${i}`, body: "y".repeat(200) })),
+      target: { host: "a".repeat(3000), token: "b".repeat(3000) },
+      label: "nightly",
+    }) as Record<string, unknown>;
+
+    expect(clamped.label).toBe("nightly");
+    expect(String(clamped.rows)).toContain("900 items");
+    expect(String(clamped.target)).toContain("2 fields");
+  });
+
+  it("bounds the field count too, not only each field's size", () => {
+    // Thirty-two short fields are small; ten thousand are not, and the per-field clamp
+    // does nothing about them. A remainder line rather than a silent cut — the same
+    // rule the degraded note follows.
+    const wide = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`k${i}`, "v".repeat(40)]));
+    const clamped = clampEffectInput(wide) as Record<string, unknown>;
+
+    expect(Object.keys(clamped).length).toBeLessThan(40);
+    expect(String(clamped["…"])).toContain("more fields");
+  });
+
+  it("names the target even for a row written before the bound existed", () => {
+    // The clamp only shapes NEW rows. Every row already in the table holds the full
+    // payload, and those are exactly the rows a restart is most likely to read — so the
+    // renderer has to survive an unclamped input on its own, without the storage half
+    // helping. No clampEffectInput here on purpose.
+    const note = buildRecoveryNote([
+      { name: "write_file", input: { content: "x".repeat(400_000), path: "/srv/report.csv" } },
+    ]);
+    expect(note).toContain("/srv/report.csv");
+    expect(note).not.toContain("x".repeat(EFFECT_ARG_CHARS));
+  });
+
+  it("falls back to a prefix when even one field outgrows the whole budget", () => {
+    // Nothing survives the cheapest-first pass, and `{…+1}` would say strictly less
+    // than a clamped prefix of the one field there is.
+    const note = buildRecoveryNote([{ name: "run", input: { script: "s".repeat(5_000) } }]);
+    expect(note).toContain("…");
+    expect(note!.length).toBeLessThan(EFFECT_ARG_CHARS + 1200);
+  });
+
+  it("clamps a bare oversized value that is not an object at all", () => {
+    // A tool whose entire input is one long string. Nothing to keep a field of, so the
+    // prefix is all there is — but it still has to be bounded and still has to say so.
+    const clamped = String(clampEffectInput("z".repeat(50_000)));
+    expect(clamped.length).toBeLessThan(EFFECT_ARG_CHARS + 40);
+    expect(clamped).toContain("KB");
   });
 });

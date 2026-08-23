@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stepSettings, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
-  FORCE_TEXT_AFTER_STEPS, MAX_STEPS, WRAP_UP_AFTER_FRACTION } from "@/lib/chat/context/step-control";
+  FORCE_TEXT_AFTER_STEPS, MAX_STEPS, WRAP_UP_AFTER_FRACTION, BYTES_PER_TOKEN } from "@/lib/chat/context/step-control";
 import type { ModelMessage } from "ai";
 import { readFileSync } from "node:fs";
 
@@ -160,6 +160,85 @@ describe("armPruneBoundary", () => {
       armPruneBoundary({ triggerAt: at, boundary: 17, lastStepContextTokens: 40_000, messageCount: 30, stepNumber: 0 }),
     ).toBe(17);
   });
+
+  it("re-arms at step 0 of a re-stream, instead of giving a restart one unbraked step", () => {
+    // Every re-stream resets the boundary, because it indexes a list the SDK threw
+    // away. Refusing to arm at step 0 then meant a turn that had ALREADY crossed the
+    // trigger came back with no cut and had to wait for step 1 to re-earn it — and
+    // that step is the first request after an overflow, which is the one least able
+    // to afford carrying the traffic again.
+    expect(armPruneBoundary({
+      triggerAt: at, boundary: 0, lastStepContextTokens: 0, estimatedTokens: at,
+      messageCount: 40, stepNumber: 0, armedEarlier: true,
+    })).toBe(34);
+  });
+
+  it("will not arm at step 0 on a turn that never needed the brake", () => {
+    // The pair that makes the line above safe. A first stream has accumulated no tool
+    // traffic of its own, so an estimate over the trigger describes the CHAT's history
+    // — upstream compaction's business. Arming here would shed a long conversation's
+    // tool results before the model had run once, and the estimate over-counts prose,
+    // so it would happen well under the real trigger.
+    expect(armPruneBoundary({
+      triggerAt: at, boundary: 0, lastStepContextTokens: 0, estimatedTokens: at * 2,
+      messageCount: 40, stepNumber: 0, armedEarlier: false,
+    })).toBe(0);
+  });
+
+  it("still refuses the stale report at step 0, even having armed before", () => {
+    // `armedEarlier` widens WHICH figure may arm the cut, not whether a ghost counts as
+    // one. The overflow retry's stepNumber-0 report is of the oversized prompt that
+    // just 400'd; a fresh local count of the rebuilt list is the only honest number
+    // there, and here it says the list is small.
+    expect(armPruneBoundary({
+      triggerAt: at, boundary: 0, lastStepContextTokens: 980_000, estimatedTokens: 1_000,
+      messageCount: 22, stepNumber: 0, armedEarlier: true,
+    })).toBe(0);
+  });
+
+  it("does not shed a rebuilt history shorter than what the policy keeps", () => {
+    // `buildResumeMessages` returns exactly 3 messages for a tool loop of any length —
+    // StoredPart carries no `step-start`, so convertToModelMessages collapses the whole
+    // loop into one assistant + one tool message. Those 3 still carry the loop's TOKENS,
+    // so the estimate is legitimately over the trigger and step-0 arming IS reached here.
+    //
+    // Asserted THROUGH the pruner, and in a pair, because two weaker versions of this
+    // test passed while the thing they named was broken. `toBe(0)` on the returned index
+    // could not fail: the index is floored by `boundary`. Pruning the short list alone
+    // could not fail either — and THAT is the finding worth keeping. A 3-message rebuilt
+    // list holds all its tool traffic in the last PAIR, and the SDK's pruner drops calls
+    // and results as pairs, so no boundary can over-shed it. The short case is safe
+    // structurally, not because the arithmetic guards it.
+    //
+    // So the pair is the guard: same boundary, a list long enough to have a droppable
+    // pair, and that one must lose it. If the pruner ever stops shedding, this fails.
+    const cycle = (n: string): ModelMessage[] => [
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: n, toolName: "x", input: {} }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: n, toolName: "x", output: "ok" }] },
+    ] as ModelMessage[];
+    const arm = (messageCount: number) => armPruneBoundary({
+      triggerAt: at, boundary: 0, lastStepContextTokens: 0, estimatedTokens: at * 4,
+      messageCount, stepNumber: 0, armedEarlier: true,
+    });
+
+    const rebuilt = [{ role: "user", content: "go" } as ModelMessage, ...cycle("t1")];
+    expect(pruneTurnToolTraffic(rebuilt, arm(rebuilt.length))).toEqual(rebuilt);
+
+    const long = [{ role: "user", content: "go" } as ModelMessage,
+      ...cycle("t1"), ...cycle("t2"), ...cycle("t3"), ...cycle("t4"), ...cycle("t5")];
+    expect(pruneTurnToolTraffic(long, arm(long.length))).not.toEqual(long);
+  });
+
+  it("prefers the provider's figure over the estimate once a step has finished", () => {
+    // From step 1 on the report is a measurement of a prompt that really was sent, and
+    // the estimate is a guess about the next one. Taking the larger of the two would let
+    // the guess arm the brake on a provider that reports a smaller real number — which
+    // is most providers, and the estimate over-counts prose.
+    expect(armPruneBoundary({
+      triggerAt: at, boundary: 0, lastStepContextTokens: at - 1, estimatedTokens: at * 3,
+      messageCount: 40, stepNumber: 3,
+    })).toBe(0);
+  });
 });
 
 describe("estimatePromptTokens", () => {
@@ -182,7 +261,7 @@ describe("estimatePromptTokens", () => {
 
     // 400 each: user text, assistant text, reasoning, the call's input, the result.
     // A string input counts raw, not JSON-quoted — outputChars short-circuits on it.
-    expect(n).toBe(Math.ceil(2000 / 4));
+    expect(n).toBe(Math.ceil(2000 / BYTES_PER_TOKEN));
   });
 
   it("does not undercount Cyrillic, where a per-character ratio would", () => {
@@ -193,9 +272,15 @@ describe("estimatePromptTokens", () => {
     const ukrainian = "розрахунок".repeat(40); // 400 characters, 800 UTF-8 bytes
     const latin = "a".repeat(400);
 
-    expect(estimatePromptTokens([{ role: "user", content: ukrainian }] as never)).toBe(200);
-    // Same character count, half the estimate — that gap IS the bug, now visible.
-    expect(estimatePromptTokens([{ role: "user", content: latin }] as never)).toBe(100);
+    const uk = estimatePromptTokens([{ role: "user", content: ukrainian }] as never);
+    const en = estimatePromptTokens([{ role: "user", content: latin }] as never);
+    expect(uk).toBe(Math.ceil(800 / BYTES_PER_TOKEN));
+    expect(en).toBe(Math.ceil(400 / BYTES_PER_TOKEN));
+    // Same character count, twice the estimate — that gap IS the bug, now visible.
+    // A ratio, not `en * 2`: that form only holds for a divisor that divides both byte
+    // counts evenly, so it pinned an arithmetic accident of the constant rather than
+    // the property, and failed the moment the constant changed.
+    expect(uk / en).toBeGreaterThan(1.9);
   });
 
   it("counts Cyrillic inside tool arguments too, not only in prose", () => {
@@ -207,7 +292,7 @@ describe("estimatePromptTokens", () => {
       ] },
     ] as never);
     // {"name":"Ковдра"} — 17 characters, 23 bytes once the six Cyrillic ones double.
-    expect(n).toBe(Math.ceil(23 / 4));
+    expect(n).toBe(Math.ceil(23 / BYTES_PER_TOKEN));
   });
 
   // An image is ~1.5k tokens and ~200k characters of base64. Counting its length
@@ -221,7 +306,26 @@ describe("estimatePromptTokens", () => {
       ] },
     ] as never);
 
-    expect(n).toBe(10);
+    // The 40-byte text and nothing else. Asserted as a bound on the whole estimate,
+    // not just as "not 200k": a term for the file part at ANY ratio would break this.
+    expect(n).toBe(Math.ceil(40 / BYTES_PER_TOKEN));
+  });
+
+  it("keeps the divisor below what dense JSON actually costs", () => {
+    // The guard on the constant, and it is on the PROPERTY rather than the value: any
+    // divisor that leaves the estimate at or above dense JSON's real token cost is
+    // correct here, and 4 — the value this replaced — is not one of them.
+    //
+    // Measured on o200k over content from this repo: English prose 4.2-4.4 bytes per
+    // token, Ukrainian prose 4.8-5.1, TypeScript 4.2, tool-call arguments 3.4-3.8, and
+    // a serialized package.json as a tool result 2.58. Prose was never the problem;
+    // `/4` under-counted the JSON that is nearly all of what this function weighs, by
+    // up to 35%, and under-counting is the direction that costs a whole turn.
+    expect(BYTES_PER_TOKEN).toBeLessThan(3.8);
+    // And not a blanket safety factor either: over-counting prose by more than ~2x
+    // would arm the brake on turns with room to spare, which is the trade `8cd630e`
+    // rejected when it turned down a flat /2.
+    expect(BYTES_PER_TOKEN).toBeGreaterThan(2.4);
   });
 });
 
