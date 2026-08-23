@@ -9,6 +9,7 @@
     "url": "https://github.com/LyoSU/capka.git"
   },
   "scripts": {
+    "predev": "node scripts/ensure-dev-db.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
