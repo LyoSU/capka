@@ -376,8 +376,30 @@ export function describeInvocation(toolName: string, input?: unknown): StepInvoc
   }
 
   // Everything else — MCP connectors, plugin tools, anything new. Their argument
-  // names are unknowable here, so show the object as it was sent.
-  return Object.keys(args).length > 0
-    ? { kind: "code", lang: "json", text: JSON.stringify(args, null, 2), titleKey: "params" }
-    : null;
+  // names are unknowable here, so show the object as it was sent, with one
+  // deliberate change: CHEAPEST FIELD FIRST.
+  //
+  // The display clamps long text by taking a prefix, and on any call big enough
+  // to be clamped the long field is the payload. Serialized in argument order,
+  // `{content: <2 MB>, path: "/srv/report.csv"}` renders two megabytes of body
+  // and never reaches the path — a block that shows the reader everything except
+  // the one token identifying what was acted on. Sorting by serialized size
+  // inverts that: identifiers are short and bodies are long, so the fields that
+  // say WHAT this call was about are the ones that survive the cut.
+  //
+  // Applied unconditionally rather than only when over budget: it is a better
+  // reading order regardless (a path above a forty-line body), and one behaviour
+  // is worth more than a second code path that only runs on large inputs — which
+  // is exactly the case nobody exercises by hand. Reorders only; drops nothing.
+  const entries = Object.entries(args);
+  if (entries.length === 0) return null;
+  const cost = (v: unknown) => {
+    try {
+      return JSON.stringify(v)?.length ?? 0;
+    } catch {
+      return 0; // circular or unserializable — sorts first, and stringify below drops it
+    }
+  };
+  entries.sort((x, y) => cost(x[1]) - cost(y[1]));
+  return { kind: "code", lang: "json", text: JSON.stringify(Object.fromEntries(entries), null, 2), titleKey: "params" };
 }

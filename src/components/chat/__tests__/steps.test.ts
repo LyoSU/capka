@@ -291,3 +291,36 @@ describe("describeInvocation — what to call the block", () => {
     expect(key("mcp__notion__create_page", { title: "Q3" })).toBe("params");
   });
 });
+
+// The clamp is applied by the UI, which can only take a prefix of what it is
+// handed. So the ORDER of the fields here decides what survives being clamped —
+// and on any call big enough to be clamped, the long field IS the payload.
+// `{content: <2 MB>, path: "/srv/report.csv"}` serialized in argument order shows
+// two megabytes of body and never reaches the path, naming nothing the reader
+// could act on. Cheapest-first inverts that: identifiers are short, bodies long.
+describe("describeInvocation — which arguments survive a clamp", () => {
+  const text = (tool: string, args: Record<string, unknown>) => {
+    const inv = describeInvocation(tool, args);
+    if (!inv || inv.kind !== "code") throw new Error("expected a code invocation");
+    return inv.text;
+  };
+
+  it("puts a short identifier ahead of a long body, whatever order they arrived in", () => {
+    const t = text("mcp__files__put", { content: "x".repeat(5000), path: "/srv/report.csv" });
+    expect(t.indexOf('"path"')).toBeLessThan(t.indexOf('"content"'));
+    expect(t.indexOf('"path"')).toBeLessThan(200);
+  });
+
+  it("orders several fields by cost, so the cheap ones all clear a prefix", () => {
+    const t = text("mcp__x__y", { body: "b".repeat(900), id: 7, note: "n".repeat(80), name: "Q3" });
+    const at = (k: string) => t.indexOf('"' + k + '"');
+    expect(at("id")).toBeLessThan(at("name"));
+    expect(at("name")).toBeLessThan(at("note"));
+    expect(at("note")).toBeLessThan(at("body"));
+  });
+
+  it("still lists every argument — this reorders, it never drops", () => {
+    const t = text("mcp__x__y", { big: "z".repeat(3000), a: 1, b: 2 });
+    for (const k of ["big", "a", "b"]) expect(t).toContain('"' + k + '"');
+  });
+});

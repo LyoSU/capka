@@ -204,6 +204,19 @@ function asMediaRef(v: unknown): MediaRefLike | null {
  *  clamped to ~30k server-side (see clampOutput), so "show all" cannot be huge. */
 const OUTPUT_LIMIT = 2000;
 
+/** The same disclosure applied to the INVOCATION, and it is load-bearing for a
+ *  different reason than the result's.
+ *
+ *  Nothing clamps a tool's INPUT anywhere — `clampOutput` bounds what comes back,
+ *  not what was sent — and until this panel existed that was harmless, because
+ *  `part.input` only ever reached `describeStep`, which clips it to 48 characters
+ *  for the row's chip. Rendering it in full put an unbounded string through the
+ *  markdown renderer's syntax highlighter, so a `write_file` carrying a large body
+ *  would highlight the whole thing the moment the step was expanded. Higher than
+ *  OUTPUT_LIMIT because code is the thing you actually came here to read; the rest
+ *  is one click away, and that click is the user choosing to pay for it. */
+const INVOCATION_LIMIT = 4000;
+
 /** Everything that came BACK from a call: output, or the error that replaced it.
  *
  *  Takes the step's `category` rather than its tool name. The previous version
@@ -289,18 +302,29 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
         </pre>
       </div>
       {over && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          {!showAll && <span>{t("truncated", { shown: OUTPUT_LIMIT, total: full.length })}</span>}
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            className="rounded-md font-medium underline-offset-2 transition-colors hover:text-foreground hover:underline"
-          >
-            {showAll ? t("showLess") : t("showAll")}
-          </button>
-        </div>
+        <TruncationNotice shown={OUTPUT_LIMIT} total={full.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
       )}
     </section>
+  );
+}
+
+/** "Showing 2,000 of 18,240 characters · Show all" — the line that stops a
+ *  clamped block from passing itself off as a complete one. Shared by the two
+ *  blocks that clamp, so they cannot drift into describing the same thing
+ *  differently. */
+function TruncationNotice({ shown, total, showAll, onToggle }: { shown: number; total: number; showAll: boolean; onToggle: () => void }) {
+  const t = useTranslations("chat.tool");
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+      {!showAll && <span>{t("truncated", { shown, total })}</span>}
+      <button
+        type="button"
+        onClick={onToggle}
+        className="rounded-md font-medium underline-offset-2 transition-colors hover:text-foreground hover:underline"
+      >
+        {showAll ? t("showLess") : t("showAll")}
+      </button>
+    </div>
   );
 }
 
@@ -355,6 +379,7 @@ function DiffPane({ label, text, tone }: { label: string; text: string; tone: "b
  *  the same renderer the answers use rather than a second one written here. */
 function Invocation({ inv }: { inv: StepInvocation }) {
   const t = useTranslations("chat.tool");
+  const [showAll, setShowAll] = useState(false);
 
   if (inv.kind === "diff") {
     return (
@@ -372,10 +397,16 @@ function Invocation({ inv }: { inv: StepInvocation }) {
     );
   }
 
+  const over = inv.text.length > INVOCATION_LIMIT;
+  const body = over && !showAll ? inv.text.slice(0, INVOCATION_LIMIT) : inv.text;
+
   return (
     <section>
       <BlockLabel>{t(`sent.${inv.titleKey}`)}</BlockLabel>
-      <Markdown>{fence(inv.text, inv.lang)}</Markdown>
+      <Markdown>{fence(body, inv.lang)}</Markdown>
+      {over && (
+        <TruncationNotice shown={INVOCATION_LIMIT} total={inv.text.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
+      )}
     </section>
   );
 }
