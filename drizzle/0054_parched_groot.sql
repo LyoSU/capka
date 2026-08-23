@@ -1,0 +1,1 @@
+ALTER TABLE "message_effects" ADD COLUMN "settled" boolean DEFAULT true NOT NULL;

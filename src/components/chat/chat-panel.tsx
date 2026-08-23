@@ -386,9 +386,10 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // and re-render the whole transcript on every keystroke.
   const sendRef = useRef(send);
   sendRef.current = send;
-  const handleSendAsUser = useCallback((text: string) => {
-    void sendRef.current(text, []);
-  }, []);
+  // Returns `send`'s own verdict rather than swallowing it in `void`: the Continue
+  // button disables itself on click to stop a double-send, and without the outcome it
+  // could never re-enable — a failed send left it dead until a reload.
+  const handleSendAsUser = useCallback((text: string) => sendRef.current(text, []), []);
 
   const handleSubmit = async () => {
     const text = input.trim();

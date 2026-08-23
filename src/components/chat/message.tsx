@@ -755,7 +755,7 @@ function ActivityGroup({ items, isStreaming, timing, chatId, sandboxPending }: {
 
 /** Friendly, role-aware failure notice. Everyone sees `message`; admins can
  *  expand the raw technical `detail`. */
-function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContinue }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean; partial?: boolean; onContinue?: (text: string) => void }) {
+function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContinue }: { message: string; detail?: string; isAdmin?: boolean; ownsResource?: boolean; partial?: boolean; onContinue?: (text: string) => void | Promise<boolean | void> }) {
   const t = useTranslations("chat.tool");
   const anchorDisclosure = useDisclosureAnchor();
   // One-shot: the click sends a real user turn, and until that turn's message
@@ -808,9 +808,16 @@ function ErrorNotice({ message, detail, isAdmin, ownsResource, partial, onContin
             size="sm"
             disabled={continued}
             onClick={() => {
+              // Disabled on click so a second press cannot queue a second turn, and
+              // re-enabled if the send did not land — the composer gets the text back
+              // in that case, so a permanently dead button is the only thing left
+              // that a reload was needed to fix.
               setContinued(true);
               haptic("tap");
-              onContinue(t("continuePrompt"));
+              void Promise.resolve(onContinue(t("continuePrompt"))).then(
+                (ok) => { if (ok === false) setContinued(false); },
+                () => setContinued(false),
+              );
             }}
           >
             <ArrowRight className="h-3.5 w-3.5" />
@@ -1470,7 +1477,7 @@ interface ChatMessageProps {
   /** Same sender as `onSend`, but provided only on the latest assistant reply, so
    *  the "continue" button on a part-way failure can't be offered on a turn the
    *  conversation has already moved past. */
-  onContinue?: (text: string) => void;
+  onContinue?: (text: string) => void | Promise<boolean | void>;
 }
 
 /** A compaction checkpoint in the transcript: a labelled divider where earlier

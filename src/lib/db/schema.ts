@@ -212,6 +212,17 @@ export const messageEffects = pgTable("message_effects", {
   /** The call threw. It still RAN — a tool that writes before it fails has already
    *  written — which makes this the entry a restarted turn most needs to verify. */
   failed: boolean("failed").notNull().default(false),
+  /**
+   * False between dispatch and outcome: the row was written just before the tool was
+   * entered, so it means "this may have run" rather than "this ran".
+   *
+   * The window it exists to describe is the one a result-time-only ledger cannot: the
+   * tool starts, the worker dies, and nothing anywhere records that the workspace may
+   * already have been touched. Defaults to true so every row written before this
+   * column existed keeps its original meaning — those were all recorded on a result
+   * or an error, which is exactly what settled means.
+   */
+  settled: boolean("settled").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   primaryKey({ columns: [table.messageId, table.toolCallId] }),

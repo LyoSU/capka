@@ -24,9 +24,37 @@ describe("buildRecoveryNote", () => {
     expect(note).toContain("CLR-002");
     expect(note).toContain("zak_upsert_product");
     // It has to read as state, not as a request — the whole point is that the
-    // model must not re-run these.
-    expect(note).toMatch(/ALREADY RAN/);
-    expect(note).toMatch(/Do NOT repeat/);
+    // model must not re-run these. Was pinned on the phrase "ALREADY RAN"; the
+    // header no longer makes that claim about the whole list, because a list can
+    // contain a call that ran and THREW, whose effects are not known to be live.
+    // The prohibition is what the test was ever about, so that is what it pins.
+    expect(note).toMatch(/effects are live/);
+    expect(note).toMatch(/do NOT repeat/);
+    // …and it must not narrate the machinery to the user, same rule as resume.ts.
+    expect(note).toMatch(/do not mention this note or the restart/);
+  });
+
+  // A write-ahead row is a WEAKER claim than the rest of the list: the call was
+  // entered and no outcome ever came back. Telling the model it "ALREADY RAN" is the
+  // one error worse than a repeat — it teaches the model to skip work that may never
+  // have happened, and an omission leaves no trace to notice.
+  it("does not tell the model a call already ran when no outcome ever arrived", () => {
+    const note = buildRecoveryNote([{ name: "send_invoice", input: { id: 7 }, unsettled: true }])!;
+    expect(note).not.toMatch(/ALREADY RAN/);
+  });
+
+  it("marks an unsettled call apart from one that completed", () => {
+    const note = buildRecoveryNote([
+      { name: "create_row", input: { i: 1 } },
+      { name: "send_invoice", input: { id: 7 }, unsettled: true },
+    ])!;
+    const [ran, maybe] = note.split("\n").filter((l) => l.startsWith("- "));
+    // The invariant is the DISTINCTION, not a chosen word or a position: the uncertain
+    // entry carries a bracketed state and the completed one carries none. Pinning the
+    // verb, or the marker's place on the line, pins the vocabulary rather than the
+    // behaviour — and both have already moved once.
+    expect(maybe).toMatch(/\[[^\]]+\]/);
+    expect(ran).not.toMatch(/\[[^\]]+\]/);
   });
 
   it("clamps one call's arguments instead of replaying its payload", () => {
@@ -36,7 +64,13 @@ describe("buildRecoveryNote", () => {
     const fat: TurnEffect = { name: "wp_upload_image", input: { blob: "x".repeat(5000) } };
     const note = buildRecoveryNote([fat])!;
     expect(note).toContain("…");
-    expect(note.length).toBeLessThan(EFFECT_ARG_CHARS + 600);
+    // The invariant is that the PAYLOAD is not replayed; the bound was `EFFECT_ARG_CHARS
+    // + 600`, where 600 was slack for a header that has since grown to enumerate three
+    // states and carry the no-narration rule. Asserting the payload's absence directly
+    // says what the test is for, and the length bound is left generous enough that it
+    // only catches unbounded growth rather than any rewording.
+    expect(note).not.toContain("x".repeat(EFFECT_ARG_CHARS + 1));
+    expect(note.length).toBeLessThan(EFFECT_ARG_CHARS + 1200);
   });
 
   it("stays inside its budget on a 193-call turn, and still names every tool", () => {
@@ -64,8 +98,22 @@ describe("buildRecoveryNote", () => {
     // writes and then throws is the one case where it genuinely cannot — so it must
     // say so rather than stay silent.
     const note = buildRecoveryNote([{ name: "wp_upload_image", input: { file: "a.jpg" }, failed: true }])!;
-    expect(note).toMatch(/errored/);
-    expect(note).toMatch(/verify/);
+    expect(note).toMatch(/\[errored\] wp_upload_image/);
+    // Was pinned on the word "verify", which also reads as "re-read this note". The
+    // instruction now names the CLASS of action instead, which is what biases the
+    // model toward a non-mutating call it can actually pick.
+    expect(note).toMatch(/read, list or query/);
+  });
+
+  // Found by reading the RENDERED note rather than the code. The header instructed
+  // the model to "inspect the target its arguments identify" directly above a lead
+  // announcing that "the individual arguments are not available" — one state, two
+  // statements, disagreeing. The collapsed form has its own instruction (guard each
+  // write as you make it), so the per-item one must not also be standing there.
+  it("does not tell the model to use arguments the collapsed form has dropped", () => {
+    const note = buildRecoveryNote(Array.from({ length: 400 }, (_, i) => upsert(`CLR-${i}`)))!;
+    expect(note).toContain("counts only");
+    expect(note).not.toMatch(/arguments identify/);
   });
 
   it("carries the errored count through the collapsed form too", () => {

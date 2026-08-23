@@ -13,7 +13,7 @@ import { loadActivePath } from "@/lib/chat/tree";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { sealOrphanToolCalls } from "@/lib/chat/tool-results";
 import { heartbeat, isCancelRequested, finalizeTask, commitTurnOutcome, absorbQueuedTasks, trackAux } from "@/lib/tasks/queue";
-import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEffects, EffectLedgerError, type TurnEffect } from "@/lib/tasks/effect-ledger";
+import { buildRecoveryNote, effectsFromParts, mergeEffects, recordEffect, loadEffects, loadInheritedEffects, withEffectLedger, EffectLedgerError, type TurnEffect } from "@/lib/tasks/effect-ledger";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { telemetryFor, setTurnOutcome, type TurnStatus } from "@/lib/telemetry";
 import { listFiles } from "@/lib/sandbox/client";
@@ -205,6 +205,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // Read only by the emergency-overflow path, which restarts the turn from settled
   // history and needs to tell the model what it already did. See effect-ledger.
   const turnEffects: TurnEffect[] = [];
+  /**
+   * Executed calls belonging to the PREVIOUS reply (or replies) this turn continues,
+   * when that reply failed part-way. Deliberately NOT `turnEffects`: this array is
+   * context — what the model must not repeat — while `turnEffects` is this reply's
+   * accounting, deciding its failure verdict and owning the rows written under its own
+   * message id. Folding them would make a fresh turn report partial work before it had
+   * done anything, and would attribute another reply's calls to this one.
+   */
+  const inheritedEffects: TurnEffect[] = [];
   // Set when the AI SDK suspends a `manage` tool call for native approval: the
   // turn finalizes as "awaiting_approval" (non-terminal — no aux, no output-file
   // delivery), the suspended tool-call part is marked with its approvalId, and the
@@ -350,8 +359,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
-    const { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
+    // Every locally-executed tool goes behind the write-ahead boundary, keyed by the
+    // reply this turn is writing. Wrapped HERE and not in prepareRun because `msgId` is
+    // what the row belongs to and this is the scope that owns it — and because a tool
+    // set that reached streamText unwrapped would leave the whole dispatch-time half of
+    // the ledger as dead code. `withEffectLedger` returns a tool without an `execute`
+    // untouched, which is what keeps `ask` a suspend and provider-executed tools remote.
+    const tools = withEffectLedger(rawTools, { messageId: msgId, taskId });
     closeMcp = close;
     ownKey = !isShared; // own-key failures are the user's to see + fix
     // Publish the run identity to the outer scope so the catch path can reconcile
@@ -468,6 +484,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       });
       messageInserted = true;
       await db.update(chats).set({ activeLeafId: msgId }).where(eq(chats.id, chatId));
+      // "Continue" after a part-way failure arrives here, not on the resume path: it
+      // sends an ordinary user message, so this reply is a NEW row and the ledger it
+      // must not re-run belongs to the reply above it. Detected from that reply's own
+      // recorded verdict rather than a flag the client sends, so it also covers the
+      // user who types their own follow-up instead of pressing the button.
+      if (replyParentId) inheritedEffects.push(...await loadInheritedEffects(replyParentId));
     }
     // A resume continues an existing message — seed task:start from the loaded seq
     // so the client keeps reconciling against the snapshot it already has, rather
@@ -811,6 +833,31 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       });
     };
 
+    let effectNote: ModelMessage | null = null;
+    const carryEffectsIntoRestart = () => {
+      if (effectNote) {
+        const i = modelMessages.indexOf(effectNote);
+        if (i >= 0) modelMessages.splice(i, 1);
+        effectNote = null;
+      }
+      const note = buildRecoveryNote([...inheritedEffects, ...turnEffects]);
+      if (!note) return;
+      // A user turn, not an assistant prefill: it is state the model must read, and
+      // a prefill 400s on modern Anthropic anyway.
+      effectNote = { role: "user", content: note };
+      modelMessages.push(effectNote);
+      tlog.info("stating what already ran to the next stream", {
+        inherited: inheritedEffects.length, effects: turnEffects.length, noteChars: note.length,
+      });
+    };
+
+    // Stated to the FIRST stream too, not only from discardPartial. A continuation is a
+    // fresh turn whose predecessor failed part-way: nothing has restarted, yet the calls
+    // it must not repeat are already invisible in the transcript it was handed. A no-op
+    // when both ledgers are empty, since buildRecoveryNote returns null. It has to sit
+    // ABOVE this line because streamText is invoked eagerly inside makeStream, so an
+    // injection after it would reach only the retries.
+    carryEffectsIntoRestart();
     let result = makeStream();
 
     // Usage accumulated LIVE from finish-step events — the source of truth.
@@ -977,23 +1024,6 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // echo branch's `foldReasoningIntoText` rewrite for free — that maps assistant
     // messages and returns every other message unchanged, so this user turn comes
     // back as the same object.
-    let effectNote: ModelMessage | null = null;
-    const carryEffectsIntoRestart = () => {
-      if (effectNote) {
-        const i = modelMessages.indexOf(effectNote);
-        if (i >= 0) modelMessages.splice(i, 1);
-        effectNote = null;
-      }
-      const note = buildRecoveryNote(turnEffects);
-      if (!note) return;
-      // A user turn, not an assistant prefill: it is state the model must read, and
-      // a prefill 400s on modern Anthropic anyway.
-      effectNote = { role: "user", content: note };
-      modelMessages.push(effectNote);
-      tlog.info("carrying executed effects into the restart", {
-        effects: turnEffects.length, noteChars: note.length,
-      });
-    };
 
     const discardPartial = async () => {
       // NOT cleared here: `turnEffects`. Everything else in this function is about
@@ -1566,7 +1596,17 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // `parts` is not the whole story: discardPartial empties it when an attempt is
     // thrown away and keeps the executed-call ledger, so a failure right after a
     // restart has writes standing with nothing in parts to show for them.
-    const hadEffects = turnEffects.length > 0;
+    //
+    // Nor is the in-memory mirror: it only learns of a call when its RESULT arrives, and
+    // a tool still running when the deadline fires never produces one. Its write-ahead
+    // row is already on disk, so the ledger is the only thing that knows the workspace
+    // may have been touched — the same second source the SQL twin needed, on this side.
+    // Asked only on a path that will actually form a verdict, because this line runs on
+    // every turn; and a failed read answers TRUE, since "you may have work, continue" is
+    // the recoverable mistake and "start over" duplicates writes that already landed.
+    const hadEffects = turnEffects.length > 0
+      || ((deadlineHit || leaseLost || stalledOut)
+          && await loadEffects(msgId).then((r) => r.length > 0, () => true));
     const finalStatus = deadlineHit ? "failed" : leaseLost ? "failed" : ac.signal.aborted ? "cancelled" : (stalledOut || streamError) ? "failed" : truncated ? "failed" : "completed";
     // Map any provider error to a friendly, role-aware shape: users see
     // `error`, admins can expand `errorDetail`. Raw text stays in tasks.error.
@@ -1978,7 +2018,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const isAbort = e instanceof Error && e.name === "AbortError";
     // A lost lease aborts by throwing — it must NOT read as a clean user cancel.
     const status = isAbort && !deadlineHit && !leaseLost ? "cancelled" : "failed";
-    const failure = deadlineHit ? timedOutError(parts, turnEffects.length > 0) : leaseLost ? interruptedError(parts, turnEffects.length > 0) : isAbort ? undefined : classifyLLMError(e);
+    // Same two sources as the finalize path above, and the same reason: the tool that
+    // was mid-flight when this threw is in the ledger and nowhere else. Kept eager-but-
+    // guarded rather than folded into a shared helper, because the two paths do not
+    // share a scope — and a failed read answers TRUE here for the same asymmetry.
+    const hadEffects = turnEffects.length > 0
+      || ((deadlineHit || leaseLost)
+          && await loadEffects(msgId).then((r) => r.length > 0, () => true));
+    const failure = deadlineHit ? timedOutError(parts, hadEffects) : leaseLost ? interruptedError(parts, hadEffects) : isAbort ? undefined : classifyLLMError(e);
     // This catch swallows the error to finalize gracefully, so the worker's
     // crash log never fires — record it here instead. A clean cancel is info.
     tlog[status === "cancelled" ? "info" : "error"]("task ended", {

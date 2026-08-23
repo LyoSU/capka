@@ -13,6 +13,9 @@ All notable changes to Capka are documented here. Format follows
 
 ### Fixed
 
+- A tool still running when a turn hits its time limit or loses its worker is now recorded before it starts, so a restarted or continued turn is told the call may have taken effect instead of being told nothing ran. Migration applies at boot; no action required.
+- "Continue" after a part-way failure now carries the previous reply's executed tool calls into the new turn, so continuing no longer repeats writes that turn had already made.
+- The "Continue" button no longer stays disabled for good when the send behind it does not go through.
 - A crashed turn whose tools already ran is now reported as partial rather than a total loss: the zombie reconciler reads the executed-call ledger, not only the reply's saved parts, so the user is offered "Continue" instead of a retry that repeats those writes.
 - Image preview zoom now follows how far the wheel or trackpad moved rather than how many events the device sent, so a light two-finger swipe no longer jumps straight to maximum zoom.
 - The image preview no longer lets a picture be dragged out of the window, and its zoom buttons no longer reset the zoom when clicked twice quickly.
