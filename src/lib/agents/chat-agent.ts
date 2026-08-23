@@ -42,7 +42,7 @@ export function buildSandboxPrompt(networkMode: "none" | "bridge"): string {
 
 ## Environment
 
-A full Ubuntu workstation with Python, Node.js, Java, a Bash shell and a LaTeX toolchain, plus the usual libraries and command-line tools for working with documents, spreadsheets, PDFs, images, media, and data. ${network}
+A full Ubuntu workstation with Python, Node.js, a Bash shell, plus the usual libraries and command-line tools for working with documents, spreadsheets, PDFs, images, media, and data. ${network}
 
 ### Tool calls
 - \`execute_bash\` — shell commands, pipelines, package installation

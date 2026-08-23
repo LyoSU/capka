@@ -11,14 +11,22 @@ All notable changes to Capka are documented here. Format follows
 - Pinch-to-zoom in the image preview, on touchscreens and on the macOS Safari trackpad.
 - Swiping sideways on a touchscreen pages between the files in an image preview, the way the arrow keys and the header arrows already do.
 - A file a tool step created, edited or read opens from the step's chip in the reply, which now carries a thumbnail of it.
+- Sandbox image: ghostscript, aria2, 7zip, Ukrainian OCR (`tesseract-ocr-ukr`), ocrmypdf and typst, plus the Python packages polars, duckdb, fastparquet, python-calamine, weasyprint, msoffcrypto-tool and extract-msg.
+- `SANDBOX_HOME_MB` sets the size of the sandbox's writable HOME tmpfs (default 64); like the other tmpfs mounts it is charged against `SANDBOX_MEMORY_MB`.
 
 ### Changed
 
 - A tool step now shows what the model sent — the command, the code, the file's new contents, or a before/after for an edit — above its result, with both labelled.
 - The live status names a wait ("Setting up the workspace…") only once it has lasted about a second and a half, instead of flashing it for every short one.
+- The sandbox image no longer ships TeX Live or a JRE (~500 MB): pandoc produces PDFs through weasyprint, and camelot/pdfplumber cover what tabula-py did. Workflows that invoke `pdflatex`/`xelatex` or feed a `.tex` file no longer work.
+- The sandbox image ships `fonts-noto-core` instead of `fonts-noto-cjk`: better Latin and Cyrillic defaults, at the cost of CJK text rendering as blank boxes.
 
 ### Fixed
 
+- Document conversion in the sandbox works again: the agent's `$HOME` is now a writable tmpfs, which the read-only rootfs had left immutable — `soffice --convert-to pdf` and the `html2pdf` shim were producing no file at all.
+- Mermaid rendering (`mmdc`) and a plain `chromium` call work again: the image's `chromium` entry point passes `--no-sandbox`, without which Chrome cannot start under the container's dropped capabilities.
+- `.parquet` files can be read in the sandbox; the image shipped pandas with no parquet engine installed.
+- `markitdown` can convert office formats again: the image installed it without its optional extras, so every `.docx`/`.xlsx`/`.pptx`/`.pdf` conversion failed with a missing-dependency error.
 - Tool output too long to show now states how much of it is displayed and offers the rest, instead of ending in an ellipsis that looked like the end of the output.
 - A failed tool step now opens itself instead of staying collapsed, and its error is shown monospaced, scrollable and copyable rather than as a single unwrapped line.
 - A tool still running when a turn hits its time limit or loses its worker is now recorded before it starts, so a restarted or continued turn is told the call may have taken effect instead of being told nothing ran. Migration applies at boot; no action required.
@@ -32,6 +40,10 @@ All notable changes to Capka are documented here. Format follows
 - The prompt-size estimate that arms that brake no longer under-counts tool traffic by up to a third: it divided bytes by 4, a prose ratio, for content that is almost entirely JSON.
 - `message_effects.input` no longer stores a tool call's whole payload; rows are bounded to roughly what the recovery note can read. Existing rows are left as they are.
 - A recovery note now names the file or record a large tool call targeted, instead of showing a prefix of the payload that pushed the identifying argument off the line.
+
+### Removed
+
+- `pdfkit` is gone from the sandbox image: it wrapped `wkhtmltopdf`, which the image deliberately does not install, so every call failed.
 
 ## [0.32.0] - 2026-08-23
 

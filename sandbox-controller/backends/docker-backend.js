@@ -199,6 +199,7 @@ export class DockerBackend {
       pidsLimit: spec.pidsLimit,
       tmpMb: spec.tmpMb,
       mcpTmpMb: spec.mcpTmpMb,
+      homeMb: spec.homeMb,
       mcpUid: spec.mcpUid,
       mcpGid: spec.mcpGid,
       fsizeBytes: spec.fsizeBytes,

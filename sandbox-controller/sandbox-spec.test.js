@@ -178,6 +178,38 @@ describe("buildSandboxConfig — tunable tmpfs sizing", () => {
   });
 });
 
+describe("buildSandboxConfig — the agent's HOME must be writable", () => {
+  // readonlyRootfs makes the image's /home/sandbox immutable, and both LibreOffice
+  // and Chromium create a profile under $HOME before doing anything else. Without
+  // this mount `soffice --convert-to pdf` and the html2pdf shim produced NO output
+  // at all — measured, not theorized — which is the product's core file-in/file-out
+  // promise failing silently. matplotlib kept working, so nothing surfaced.
+  it("mounts a writable HOME owned by the agent uid", () => {
+    const t = buildSandboxConfig(base).HostConfig.Tmpfs;
+    expect(t["/home/sandbox"]).toContain("size=64m");
+    expect(t["/home/sandbox"]).toContain("mode=0700");
+    expect(t["/home/sandbox"]).toContain("uid=1000");
+    expect(t["/home/sandbox"]).toContain("gid=1000");
+  });
+
+  it("keeps HOME exec-allowed so pip --user / npx console scripts can run", () => {
+    // Not a relaxation: /workspace is a bind mount with no noexec, so the agent can
+    // already execute what it writes there. noexec here would only half-break the
+    // ordinary install flows whose entry points land in ~/.local/bin.
+    const t = buildSandboxConfig(base).HostConfig.Tmpfs;
+    expect(t["/home/sandbox"]).toContain("exec");
+    expect(t["/home/sandbox"]).toContain("nosuid");
+    expect(t["/home/sandbox"]).toContain("nodev");
+  });
+
+  it("lets the operator resize HOME without weakening its flags", () => {
+    const t = buildSandboxConfig({ ...base, homeMb: 128 }).HostConfig.Tmpfs;
+    expect(t["/home/sandbox"]).toContain("size=128m");
+    expect(t["/home/sandbox"]).toContain("mode=0700");
+    expect(t["/home/sandbox"]).toContain("nosuid");
+  });
+});
+
 describe("buildSandboxConfig — /opt/mcp belongs to the MCP uid, not to everyone", () => {
   // /opt/mcp is the connectors' HOME. World-writable (the old mode=1777) let the
   // agent's uid plant a shell rc file there that the next connector start would

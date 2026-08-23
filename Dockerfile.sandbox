@@ -57,13 +57,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
 
 # ---------------------------------------------------------------------------
-# 2. Java (for tabula-py, pdftk)
-# ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    default-jre-headless \
-    && rm -rf /var/lib/apt/lists/*
-
-# ---------------------------------------------------------------------------
 # 3. Node.js 22
 # ---------------------------------------------------------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -76,13 +69,27 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg imagemagick graphviz \
     pandoc \
-    poppler-utils qpdf \
+    # ghostscript is the PS/EPS interpreter and the PDF recompress/rasterize
+    # backend that neither poppler nor qpdf provides; ocrmypdf reaches for it too.
+    poppler-utils qpdf ghostscript \
+    # aria2: resumes a large download instead of restarting it from zero.
+    # 7zip: office users send .7z, which unzip cannot open at all.
+    aria2 7zip \
     libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw \
     libreoffice-core libreoffice-common python3-uno \
-    tesseract-ocr tesseract-ocr-eng \
-    xvfb xauth xfonts-utils xfonts-scalable xfonts-cyrillic \
-    texlive-base texlive-latex-base texlive-latex-recommended \
-    texlive-fonts-recommended texlive-xetex latexmk \
+    # -ukr is not a nice-to-have: Ukrainian is a first-class locale and this image
+    # shipped English-only. -eng/-osd do arrive as Depends of tesseract-ocr, but
+    # both are named anyway so an upstream change can't silently drop a language.
+    tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd tesseract-ocr-ukr \
+    # xvfb/xauth only. Xvfb depends on libxfont2, NOT on the legacy core-font
+    # packages that used to be listed here; LibreOffice and Chromium both resolve
+    # fonts through fontconfig, so those were ~30 MB serving nothing.
+    xvfb xauth \
+    # No TeX Live. It cost ~300 MB, and over half of that arrived UNNAMED:
+    # texlive-xetex pulls texlive-latex-extra, which pulls texlive-pictures
+    # (82 + 81 MB). pandoc's PDF path now runs through typst (§7b, ~17 MB) with
+    # weasyprint as the HTML/CSS alternative. Anything expecting a literal
+    # pdflatex/xelatex binary will no longer build here.
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
@@ -91,7 +98,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu fonts-dejavu-core fonts-dejavu-extra \
     fonts-liberation fonts-liberation2 fonts-freefont-ttf \
-    fonts-noto-cjk fonts-noto-color-emoji \
+    # fonts-noto-core (43 MB), not fonts-noto-cjk (91 MB): the latter bought CJK
+    # coverage this audience rarely needs while leaving Latin/Cyrillic to DejaVu.
+    # CJK text in a document now renders as tofu — deliberate, revisit if it bites.
+    fonts-noto-core fonts-noto-color-emoji \
     fonts-crosextra-caladea fonts-crosextra-carlito \
     fonts-lmodern fonts-texgyre fonts-opensymbol \
     && rm -rf /var/lib/apt/lists/* \
@@ -100,22 +110,55 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------------------------
 # 6. Python packages
 # ---------------------------------------------------------------------------
-RUN pip install --break-system-packages --no-cache-dir \
+# --no-binary imageio-ffmpeg: its wheel bundles a private ~49 MB ffmpeg build
+# alongside the system ffmpeg installed above. Building from sdist skips the
+# binary; IMAGEIO_FFMPEG_EXE (below) points the library at the real one.
+ENV IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg
+RUN pip install --break-system-packages --no-cache-dir --no-binary imageio-ffmpeg \
     # Data science
     numpy pandas scipy scikit-learn scikit-image \
     matplotlib seaborn plotly sympy networkx \
-    # ML / CV
+    # ML / CV. onnxruntime looks orphaned — nothing here imports it directly — but
+    # it is load-bearing: markitdown requires magika, magika requires onnxruntime,
+    # and the model ships INSIDE the magika wheel, so grepping this file for a
+    # model finds nothing. Removing it breaks document->markdown conversion.
     onnxruntime opencv-python-headless \
     pillow Wand imageio imageio-ffmpeg \
     # PDF arsenal
     pypdf pikepdf pdfplumber pdfminer.six \
-    camelot-py tabula-py pdf2image pdfkit img2pdf reportlab \
+    # No tabula-py (it needed a 195 MB JVM to duplicate camelot/pdfplumber) and no
+    # pdfkit: pdfkit only wraps wkhtmltopdf, which was deliberately dropped for its
+    # CVSS-9.8 SSRF and replaced by the html2pdf shim (§8b). It was installed but
+    # died on every call with "No wkhtmltopdf executable found" — worse than absent,
+    # because the agent saw an importable module and spent a turn on it.
+    camelot-py pdf2image img2pdf reportlab \
+    # ocrmypdf: puts a searchable text layer INTO the original scan, where a raw
+    # tesseract pass rebuilds the PDF and loses its metadata.
+    ocrmypdf \
     # Documents
     python-docx python-pptx openpyxl xlsxwriter odfpy \
+    # Office inputs nothing else here can open: password-protected documents and
+    # Outlook .msg files.
+    msoffcrypto-tool extract-msg \
+    # Tabular. The image had NO parquet engine at all — pandas 3 ships without
+    # pyarrow, so a .parquet dropped into a chat was simply unreadable. polars and
+    # the duckdb MODULE (the CLI in §7b is a separate thing) also handle files
+    # larger than memory; fastparquet is pandas' engine at a fraction of pyarrow's
+    # size, and python-calamine reads big/legacy Excel far faster than openpyxl.
+    polars duckdb fastparquet python-calamine \
+    # weasyprint: HTML/CSS -> PDF for real layouts, and pandoc's non-TeX PDF path.
+    weasyprint \
     # Web / HTML
     flask requests beautifulsoup4 httpx lxml jinja2 \
-    # Markdown
-    markitdown markdownify \
+    # Markdown. The EXTRAS are the point: bare `markitdown` installs a converter
+    # that refuses every office format at runtime with MissingDependencyException
+    # ("include the optional dependency [docx]") — measured, and easy to miss
+    # because the import succeeds and only .convert() fails. Named extras rather
+    # than [all], which drags in azure-ai-documentintelligence, azure-identity,
+    # speechrecognition and youtube-transcript-api for no use here. Of the deps
+    # they pull, only mammoth/xlrd/olefile are actually new; the rest are already
+    # installed above and the extras merely declare them.
+    "markitdown[docx,xlsx,xls,pptx,pdf,outlook]" markdownify \
     # OCR
     pytesseract \
     # Browser
@@ -152,10 +195,20 @@ RUN npm install -g \
 # Pinned to explicit versions (was `latest/download`, which made every rebuild
 # pull a different, unrecorded binary — a non-reproducible supply-chain hole).
 # Bump these deliberately when upgrading.
+# typst: pandoc's PDF engine now that TeX Live is gone (`--pdf-engine=typst`).
+#   One static binary against ~300 MB of texlive, and markedly faster.
 ARG DUCKDB_VERSION=v1.5.4
 ARG YQ_VERSION=v4.53.3
+ARG TYPST_VERSION=v0.15.1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
+    # typst publishes by Rust target triple, not by Debian arch name.
+    case "$arch" in amd64) triple=x86_64-unknown-linux-musl;; arm64) triple=aarch64-unknown-linux-musl;; \
+      *) echo "no typst build for $arch" >&2; exit 1;; esac; \
+    curl -fsSL "https://github.com/typst/typst/releases/download/${TYPST_VERSION}/typst-${triple}.tar.xz" -o /tmp/typst.tar.xz; \
+    tar -xJf /tmp/typst.tar.xz -C /tmp; \
+    install -m 755 "/tmp/typst-${triple}/typst" /usr/local/bin/typst; \
+    rm -rf /tmp/typst.tar.xz "/tmp/typst-${triple}"; \
     curl -fsSL "https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/duckdb_cli-linux-${arch}.zip" -o /tmp/duckdb.zip; \
     unzip -d /usr/local/bin /tmp/duckdb.zip; rm /tmp/duckdb.zip; chmod 755 /usr/local/bin/duckdb; \
     curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${arch}" -o /usr/local/bin/yq; \
@@ -183,8 +236,19 @@ RUN set -eux; \
     # The agent expects a `chromium` command, not a version-buried Playwright
     # path — symlink the resolved binary onto PATH and reuse it for puppeteer.
     CHROME="$(python3 -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"; \
-    ln -sf "$CHROME" /usr/local/bin/chromium; \
-    ln -sf "$CHROME" /usr/local/bin/chromium-browser; \
+    # A WRAPPER, not a symlink. The container drops ALL capabilities and sets
+    # no-new-privileges, so Chrome's own zygote sandbox cannot initialize at all —
+    # it dies with "FATAL ... No usable sandbox!" on every launch. The container IS
+    # the sandbox (see the same reasoning already applied to html2pdf below), so the
+    # flags belong on the entry point rather than on each caller that remembers them.
+    # This also fixes mermaid-cli: PUPPETEER_EXECUTABLE_PATH points here, and its
+    # bundled puppeteer launches with default args, so `mmdc` produced NOTHING
+    # before. Playwright is unaffected — it invokes the real binary in
+    # /opt/pw-browsers directly and passes its own arguments.
+    for name in chromium chromium-browser; do \
+      printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage "$@"\n' "$CHROME" > "/usr/local/bin/$name"; \
+      chmod 755 "/usr/local/bin/$name"; \
+    done; \
     rm -rf /root/.cache
 # mermaid-cli's puppeteer drives the same single Chromium instead of its own copy.
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium
@@ -220,6 +284,31 @@ RUN set -eux; \
       'exec chromium --headless=new --no-sandbox --disable-dev-shm-usage --disable-gpu --no-pdf-header-footer --print-to-pdf="$out" "$url"' \
       > /usr/local/bin/html2pdf; \
     chmod 755 /usr/local/bin/html2pdf
+
+# pandoc's DEFAULT --pdf-engine is pdflatex, which this image no longer ships, so
+# the most ordinary command here (`pandoc notes.md -o notes.pdf`) would fail on a
+# bare install. Shim it the same way §8b shims soffice: inject an engine only when
+# the caller asked for a PDF and named none, so an explicit --pdf-engine still wins.
+#
+# weasyprint, NOT typst, and the reason is a trap: Ubuntu 24.04 ships pandoc 3.1.3,
+# which LISTS typst in --list-output-formats yet, given --pdf-engine=typst, renders
+# an intermediate *HTML* file and feeds that to typst — it dies with
+# "while calling `conf` at toPdfViaTempFile...html". The typst writer only became
+# usable later. So the capability probe answers "yes" and proves nothing; measured,
+# weasyprint is the engine that actually produces a PDF on this pandoc. typst stays
+# in the image as a standalone typesetter (it compiles its own .typ files fine).
+# Revisit if pandoc is ever fetched from upstream instead of apt.
+RUN set -eux; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'engine=""; pdf=""' \
+      'for a in "$@"; do' \
+      '  case "$a" in --pdf-engine|--pdf-engine=*) engine=1 ;; *.pdf) pdf=1 ;; esac' \
+      'done' \
+      '[ -z "$engine" ] && [ -n "$pdf" ] && exec /usr/bin/pandoc --pdf-engine=weasyprint "$@"' \
+      'exec /usr/bin/pandoc "$@"' \
+      > /usr/local/bin/pandoc; \
+    chmod 755 /usr/local/bin/pandoc
 
 # ---------------------------------------------------------------------------
 # 9. Non-root user + workspace

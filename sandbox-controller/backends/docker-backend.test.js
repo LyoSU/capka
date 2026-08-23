@@ -44,6 +44,27 @@ describe("DockerBackend (mocked dockerode)", () => {
     expect(cfg.Labels["capka.spec"]).toBe(b.fingerprint({}, "capka-sandbox-egress", "capka-egress-proxy:3128"));
   });
 
+  // The SAME plumbing trap as the egress endpoint above, caught a second time: the
+  // field list in create() is explicit on purpose, so any knob added to the spec is
+  // silently inert until it is named there — while fingerprint() spreads its env and
+  // DOES see it. That split is the expensive half: the container is built with the
+  // default while its posture label is computed from the operator's value, so
+  // reconcile finds every sandbox stale and rebuilds them on every boot, forever.
+  // Asserting the label against fingerprint() with the same knobs covers the whole
+  // class, not just the one field that prompted the test.
+  it("create() honours the tmpfs sizing knobs, and labels the result what fingerprint() expects", async () => {
+    const start = vi.fn().mockResolvedValue();
+    const createContainer = vi.fn().mockResolvedValue({ id: "c1", start });
+    const b = new DockerBackend({ docker: { ...imagePresent, createContainer }, image: "img:1", runtime: "runc" });
+    const knobs = { tmpMb: 128, mcpTmpMb: 512, homeMb: 256 };
+    await b.create({ sessionId: "s1", userId: "u1", wsHostPath: "/w", sharedHostPath: "/s", ...knobs });
+    const cfg = createContainer.mock.calls[0][0];
+    expect(cfg.HostConfig.Tmpfs["/tmp"]).toContain("size=128m");
+    expect(cfg.HostConfig.Tmpfs["/opt/mcp"]).toContain("size=512m");
+    expect(cfg.HostConfig.Tmpfs["/home/sandbox"]).toContain("size=256m");
+    expect(cfg.Labels["capka.spec"]).toBe(b.fingerprint(knobs, "none", null));
+  });
+
   it("create() self-heals a stale name conflict — force-removes the leftover container and retries", async () => {
     const start = vi.fn().mockResolvedValue();
     // A prior container crashed and was never reaped; its fixed name blocks the new one.

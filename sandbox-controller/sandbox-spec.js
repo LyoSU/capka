@@ -51,6 +51,12 @@ export function buildSandboxConfig({
   // under the memory budget. Tunable via SANDBOX_TMP_MB / SANDBOX_MCP_TMP_MB.
   tmpMb = 64,
   mcpTmpMb = 256,
+  // The agent's HOME. It is NOT optional decoration: with readonlyRootfs the
+  // image's /home/sandbox is immutable, and both LibreOffice and Chromium create a
+  // profile under $HOME before they do anything else — so `soffice --convert-to
+  // pdf` and the html2pdf shim produced NOTHING at all, which is the product's
+  // core "drop a file in, get a converted file back" promise failing silently.
+  homeMb = 64,
   // The uid/gid the MCP bridge execs stdio connectors under (server.js resolves
   // them from SANDBOX_MCP_UID/GID; the `mcp` user baked into the image is 1001).
   // They own /opt/mcp — see the Tmpfs block for why that ownership is load-bearing.
@@ -156,6 +162,16 @@ export function buildSandboxConfig({
         // ordinary tmpfs mount options, so the kernel applies them at mount time
         // and no entrypoint step (or extra capability) can forget to.
         "/opt/mcp": `rw,nosuid,nodev,exec,size=${mcpTmpMb}m,mode=0700,uid=${mcpUid},gid=${mcpGid}`,
+        // The agent's own HOME, 0700 and owned by uid 1000 via mount options for the
+        // same reason /opt/mcp is: the kernel applies them at mount time, so no
+        // entrypoint step can forget it and no capability is needed.
+        //
+        // `exec`, unlike /tmp. That is not a relaxation: /workspace is a bind mount
+        // with no noexec option, so the agent can already run a binary it writes
+        // there — noexec here would buy nothing while half-breaking the ordinary
+        // `pip install --user` / `npx` / `uvx` flows, whose console scripts land in
+        // ~/.local/bin and would fail to execute.
+        "/home/sandbox": `rw,nosuid,nodev,exec,size=${homeMb}m,mode=0700,uid=1000,gid=1000`,
       },
       // Hard, non-negotiable isolation. Privileged is set explicitly so the
       // test pins it and a future edit can't omit it into a truthy default.

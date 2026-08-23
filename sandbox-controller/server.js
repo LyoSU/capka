@@ -88,6 +88,7 @@ function posFloatEnv(name, def) {
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "capka-sandbox";
 const TMP_MB = posIntEnv("SANDBOX_TMP_MB", 64);
 const MCP_TMP_MB = posIntEnv("SANDBOX_MCP_TMP_MB", 256);
+const HOME_MB = posIntEnv("SANDBOX_HOME_MB", 64);
 const MEMORY_LIMIT = posIntEnv("SANDBOX_MEMORY_MB", 512) * 1024 * 1024;
 const PIDS_LIMIT = posIntEnv("SANDBOX_PIDS_LIMIT", 256);
 const CPU_LIMIT = posFloatEnv("SANDBOX_CPUS", 1.0) * 1e9;
@@ -207,6 +208,7 @@ const SPEC_ENV = {
   pidsLimit: PIDS_LIMIT,
   tmpMb: TMP_MB,
   mcpTmpMb: MCP_TMP_MB,
+  homeMb: HOME_MB,
   // Same uid the bridge execs connectors under, so /opt/mcp is created owned by
   // them and closed (0700) to the agent's uid.
   mcpUid: MCP_UID,
