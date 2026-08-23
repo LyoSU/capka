@@ -19,6 +19,7 @@ import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
 import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
 import { fileStatusFromHttp, type FileStatus } from "@/lib/chat/file-status";
+import { applyGesture, wheelZoomFactor, type Geometry, type Point } from "@/lib/chat/image-view";
 import { formatSize } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -409,44 +410,100 @@ function useFileImage(file: PreviewFile): ImgState {
   return img;
 }
 
-const MAX_ZOOM = 8;
+/** The frame's own centre — where a command that has no pointer behind it (a
+ *  button, a key, a re-fit) anchors its zoom. */
+const ORIGIN: Point = { x: 0, y: 0 };
+
+/** Safari's proprietary pinch event. Not in lib.dom, and only Safari fires it. */
+type SafariGestureEvent = Event & { scale: number; clientX: number; clientY: number };
 
 /**
  * Image pane with zoom and pan. Fit-to-window alone is not a viewer: a chart, a
  * scan or a screenshot is precisely the thing someone opens in order to read
  * something small in it, and `object-contain` at 85vh offered no way in.
  *
- * Zoom is anchored to the pointer, not to the centre. The centred version is a few
- * lines shorter and feels wrong for the same reason a map would: the thing you
- * aimed at slides away from you while you zoom. `scale === 1` snaps the offset
- * back to zero so leaving zoom always lands on the tidy fitted view.
+ * The arithmetic — anchoring, bounds, the wheel curve — lives in
+ * `lib/chat/image-view.ts`, where it is tested against numbers instead of a DOM.
+ * What is left here is the part that is genuinely about the platform.
+ *
+ * FOUR WAYS IN, ONE WRITER. Wheel, pinch, drag and the buttons all end at
+ * `apply`, the only thing that touches `view`, so all four get the same bounds
+ * check and the same anchoring. They used to be two paths that agreed about
+ * neither.
+ *
+ * WHO REPORTS A PINCH, AND HOW. Chrome, Edge and Firefox deliver a trackpad
+ * pinch as a wheel event with `ctrlKey` set — a lie they tell on purpose, and
+ * the closest thing to a standard here. Safari on macOS does not: it has its own
+ * `gesturestart`/`gesturechange` carrying an accumulated `scale`, and an
+ * implementation that only listens for ctrl-wheel leaves Mac Safari users
+ * pinching the whole browser instead of the picture. Touchscreens are neither,
+ * and are handled from raw pointers below.
  */
 function ImageViewer({ file }: { file: PreviewFile }) {
   const t = useTranslations("chat.preview");
   const img = useFileImage(file);
-  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0, animate: false });
   const [dragging, setDragging] = useState(false);
   const frame = useRef<HTMLDivElement>(null);
-  const last = useRef({ x: 0, y: 0 });
+  const picture = useRef<HTMLImageElement>(null);
+  // Every pointer currently down on the frame: one is a drag, two are a pinch.
+  // Keeping the whole set (rather than a single "last position") is what lets a
+  // finger join or leave mid-gesture without the image jumping.
+  const pointers = useRef(new Map<number, Point>());
+  // What the next move is measured against — a lone pointer's position, or the
+  // midpoint and spread of two.
+  const gesture = useRef<{ at: Point; spread: number } | null>(null);
 
-  // Both zoom helpers take the NEXT scale as a function of the current one and
-  // resolve it inside the updater, so no caller ever reads `view.scale` from its
-  // closure. That is what lets the wheel listener below be bound once, with no
-  // dependency on the live scale — and it removes the class of bug where the
-  // scale and the offset get computed from two different renders' values.
-  const zoom = useCallback((next: (cur: number) => number, cx = 0, cy = 0) => {
-    setView((v) => {
-      const scale = Math.min(MAX_ZOOM, Math.max(1, next(v.scale)));
-      // Back at fit: drop the pan too, so leaving zoom always lands on the tidy
-      // centred view rather than on a fitted image nudged off to one side.
-      if (scale === 1) return { scale: 1, x: 0, y: 0 };
-      return { scale, x: cx - ((cx - v.x) / v.scale) * scale, y: cy - ((cy - v.y) / v.scale) * scale };
-    });
+  const geometry = useCallback((): Geometry | null => {
+    const el = picture.current;
+    const box = frame.current;
+    if (!el || !box) return null;
+    return {
+      image: { w: el.offsetWidth, h: el.offsetHeight },
+      frame: { w: box.clientWidth, h: box.clientHeight },
+      naturalWidth: el.naturalWidth,
+    };
   }, []);
 
-  const pointerCentre = (e: { clientX: number; clientY: number }, el: HTMLElement) => {
+  /**
+   * The single writer. Takes the NEXT scale as a function of the current one and
+   * resolves it inside the updater, so no caller ever reads `view.scale` from its
+   * closure — that is what lets the listeners below be bound once, with no
+   * dependency on the live scale, and it removes the class of bug where the scale
+   * and the offset are computed from two different renders' values. The geometry
+   * is read in the same place, for the same reason.
+   */
+  const apply = useCallback(
+    (next: (cur: number) => number, from: Point, to: Point, animate: boolean) => {
+      setView((v) => {
+        const g = geometry();
+        if (!g) return v;
+        const moved = applyGesture(v, g, next(v.scale), from, to);
+        // Dragging against a bound, or a resize that changed nothing, must not
+        // re-render sixty times a second to say so.
+        if (moved.scale === v.scale && moved.x === v.x && moved.y === v.y && animate === v.animate) return v;
+        return { ...moved, animate };
+      });
+    },
+    [geometry],
+  );
+
+  /** A client point in the frame's coordinates, measured from its centre — which
+   *  is where the transform's origin sits. See the note in `image-view.ts`. */
+  const framePoint = (e: { clientX: number; clientY: number }, el: HTMLElement): Point => {
     const r = el.getBoundingClientRect();
-    return { cx: e.clientX - r.left - r.width / 2, cy: e.clientY - r.top - r.height / 2 };
+    return { x: e.clientX - r.left - r.width / 2, y: e.clientY - r.top - r.height / 2 };
+  };
+
+  /** The anchor of whatever is touching the frame right now. */
+  const readGesture = () => {
+    const pts = [...pointers.current.values()];
+    if (pts.length === 0) return null;
+    if (pts.length === 1) return { at: pts[0], spread: 0 };
+    return {
+      at: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
+      spread: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+    };
   };
 
   // Bound by hand rather than with onWheel, because React registers wheel handlers
@@ -456,93 +513,182 @@ function ImageViewer({ file }: { file: PreviewFile }) {
   useEffect(() => {
     const el = frame.current;
     if (!el) return;
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const { cx, cy } = pointerCentre(e, el);
-      zoom((cur) => cur * (e.deltaY < 0 ? 1.15 : 1 / 1.15), cx, cy);
+      const at = framePoint(e, el);
+      apply((cur) => cur * wheelZoomFactor(e), at, at, false);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [zoom, img.state]);
+
+    // Safari's own pinch, wanted for opposite reasons on its two platforms. On
+    // macOS this is the ONLY signal, so it drives the zoom. On iOS the pointers
+    // below already do that and these listeners exist purely to refuse the
+    // event: `touch-action: none` does not stop iOS from zooming the page —
+    // Safari keeps that gesture for accessibility — and preventing
+    // `gesturestart` is Apple's documented way to take it back. macOS Safari is
+    // the one engine with GestureEvent and no TouchEvent, which is the feature
+    // test for "drives the zoom" versus "is only suppressed".
+    const drivesZoom = "GestureEvent" in window && !("TouchEvent" in window);
+    let anchor = ORIGIN;
+    let reported = 1;
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      anchor = framePoint(e as SafariGestureEvent, el);
+      reported = 1;
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      if (!drivesZoom) return;
+      const g = e as SafariGestureEvent;
+      // `scale` accumulates from the start of the gesture, so the step is the
+      // ratio against what it said last time.
+      const factor = reported > 0 ? g.scale / reported : 1;
+      const at = framePoint(g, el);
+      reported = g.scale;
+      apply((cur) => cur * factor, anchor, at, false);
+      anchor = at;
+    };
+    const onGestureEnd = (e: Event) => e.preventDefault();
+    el.addEventListener("gesturestart", onGestureStart, { passive: false });
+    el.addEventListener("gesturechange", onGestureChange, { passive: false });
+    el.addEventListener("gestureend", onGestureEnd, { passive: false });
+
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", onGestureStart);
+      el.removeEventListener("gesturechange", onGestureChange);
+      el.removeEventListener("gestureend", onGestureEnd);
+    };
+  }, [apply, img.state]);
+
+  // Going fullscreen re-fits the image: a pan that was legal is now out of
+  // bounds, and a scale that was 1:1 no longer is. Re-running the clamp with the
+  // anchor at the centre leaves a view that is still legal exactly as it was.
+  useEffect(() => {
+    const el = frame.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => apply((cur) => cur, ORIGIN, ORIGIN, true));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [apply, img.state]);
 
   if (img.state === "loading")
     return <ViewerLoading />;
   if (img.state !== "ok") return <UnavailableNotice state={img.state} />;
 
   const zoomed = view.scale > 1;
+  const step = (factor: number) => apply((cur) => cur * factor, ORIGIN, ORIGIN, true);
+  const nudge = (x: number, y: number) => apply((cur) => cur, ORIGIN, { x, y }, true);
+  const endPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    pointers.current.delete(e.pointerId);
+    // Lifting one finger of a pinch must not teleport the image: the survivor
+    // becomes the new anchor rather than the now-meaningless midpoint.
+    gesture.current = readGesture();
+    setDragging(pointers.current.size === 1);
+  };
+
   return (
-    <div
-      ref={frame}
-      // The whole frame is the zoom surface, and it takes focus so +/-/0 reach it.
-      // Arrow keys are deliberately left alone — they page between files.
-      tabIndex={0}
-      // `group`, NOT `img`: role="img" makes every descendant presentational, which
-      // would hide the zoom controls below from assistive tech entirely. The picture
-      // itself is named by the <img>'s own alt.
-      role="group"
-      aria-label={file.name}
-      onDoubleClick={(e) => {
-        const { cx, cy } = pointerCentre(e, e.currentTarget);
-        zoom((cur) => (cur > 1 ? 1 : 2), cx, cy);
-      }}
-      onPointerDown={(e) => {
-        if (!zoomed) return;
-        e.currentTarget.setPointerCapture(e.pointerId);
-        last.current = { x: e.clientX, y: e.clientY };
-        setDragging(true);
-      }}
-      onPointerMove={(e) => {
-        if (!dragging) return;
-        // Deltas from the last position rather than `movementX/Y`, which is only
-        // reliable for mouse — touch and pen report 0 for it in several browsers,
-        // so panning by finger simply wouldn't move.
-        setView((v) => ({ ...v, x: v.x + (e.clientX - last.current.x), y: v.y + (e.clientY - last.current.y) }));
-        last.current = { x: e.clientX, y: e.clientY };
-      }}
-      onPointerUp={(e) => {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-        setDragging(false);
-      }}
-      // A touch interrupted by the system (a call, a gesture) fires cancel, not up —
-      // without this the frame would stay stuck in its grabbing state.
-      onPointerCancel={() => setDragging(false)}
-      onKeyDown={(e) => {
-        if (e.key === "+" || e.key === "=") zoom((c) => c * 1.4);
-        else if (e.key === "-") zoom((c) => c / 1.4);
-        else if (e.key === "0") zoom(() => 1);
-        else return;
-        e.preventDefault();
-      }}
-      className={cn(
-        "relative flex h-full touch-none items-center justify-center overflow-hidden p-4 outline-none",
-        zoomed ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in",
-      )}
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={img.url}
-        alt={file.name}
-        draggable={false}
-        style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+    // The controls are a SIBLING of the zoom surface, not a child of it. As a
+    // child, every click on them bubbled into the surface's own handlers: a
+    // double-click on "+" reached `onDoubleClick` and reset the zoom, so the
+    // buttons fought whoever used them twice in a row.
+    <div className="relative h-full">
+      <div
+        ref={frame}
+        // The whole frame is the zoom surface, and it takes focus so +/-/0 and
+        // the arrows reach it.
+        tabIndex={0}
+        // `group`, NOT `img`: role="img" makes every descendant presentational,
+        // which would hide the zoom controls from assistive tech entirely. The
+        // picture itself is named by the <img>'s own alt.
+        role="group"
+        aria-label={file.name}
+        onDoubleClick={(e) => {
+          const at = framePoint(e, e.currentTarget);
+          apply((cur) => (cur > 1 ? 1 : 2), at, at, true);
+        }}
+        onPointerDown={(e) => {
+          // Captured so a fast drag that leaves the frame keeps feeding us moves
+          // instead of stranding the image mid-pan.
+          e.currentTarget.setPointerCapture(e.pointerId);
+          pointers.current.set(e.pointerId, framePoint(e, e.currentTarget));
+          gesture.current = readGesture();
+          setDragging(pointers.current.size === 1);
+        }}
+        onPointerMove={(e) => {
+          const from = gesture.current;
+          if (!from || !pointers.current.has(e.pointerId)) return;
+          pointers.current.set(e.pointerId, framePoint(e, e.currentTarget));
+          const to = readGesture();
+          if (!to) return;
+          // One finger has no spread, so the factor is 1 and this is a pure pan;
+          // two fingers make the same call a pinch. Deltas come from the tracked
+          // positions rather than `movementX/Y`, which touch and pen report as 0
+          // in several browsers — panning by finger simply wouldn't move.
+          const factor = from.spread > 0 && to.spread > 0 ? to.spread / from.spread : 1;
+          apply((cur) => cur * factor, from.at, to.at, false);
+          gesture.current = to;
+        }}
+        onPointerUp={endPointer}
+        // A touch interrupted by the system (a call, a gesture) fires cancel, not
+        // up — without this the frame would stay stuck in its grabbing state.
+        onPointerCancel={endPointer}
+        onKeyDown={(e) => {
+          const PAN = 48;
+          if (e.key === "+" || e.key === "=") step(1.4);
+          else if (e.key === "-") step(1 / 1.4);
+          else if (e.key === "0") apply(() => 1, ORIGIN, ORIGIN, true);
+          else if (zoomed && e.key.startsWith("Arrow")) {
+            // Arrows page between files (a window listener in `FilePreview`), and
+            // that stays true at fit. But once the image is bigger than the frame
+            // they mean panning, and with the pan now bounded a keyboard user
+            // otherwise has no way to reach a corner at all. Stopping propagation
+            // is what keeps the native event from also reaching that listener.
+            e.stopPropagation();
+            nudge(
+              e.key === "ArrowLeft" ? PAN : e.key === "ArrowRight" ? -PAN : 0,
+              e.key === "ArrowUp" ? PAN : e.key === "ArrowDown" ? -PAN : 0,
+            );
+          } else return;
+          e.preventDefault();
+        }}
         className={cn(
-          "max-h-full max-w-full object-contain",
-          // No transition while dragging: a pan that eases behind the cursor reads
-          // as lag rather than as polish.
-          !dragging && "transition-transform duration-150 motion-reduce:transition-none",
+          // `touch-none`: the browser's own pan/zoom must be off for two fingers
+          // to reach us as plain pointers.
+          "flex h-full touch-none items-center justify-center overflow-hidden p-4 outline-none",
+          zoomed ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in",
         )}
-      />
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          ref={picture}
+          src={img.url}
+          alt={file.name}
+          draggable={false}
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+          className={cn(
+            "max-h-full max-w-full object-contain",
+            // Only the discrete commands ease. A wheel, a pinch or a pan that
+            // eases behind the hand reads as lag rather than as polish — and with
+            // a trackpad firing sixty events a second it reads as rubber.
+            view.animate && "transition-transform duration-150 motion-reduce:transition-none",
+          )}
+        />
+      </div>
       <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border bg-background/90 p-0.5 backdrop-blur">
-        <HeaderButton onClick={() => zoom((c) => c / 1.4)} label={t("zoomOut")}><ZoomOut className="h-4 w-4" /></HeaderButton>
+        <HeaderButton onClick={() => step(1 / 1.4)} label={t("zoomOut")}><ZoomOut className="h-4 w-4" /></HeaderButton>
         <button
           type="button"
-          onClick={() => zoom(() => 1)}
+          onClick={() => apply(() => 1, ORIGIN, ORIGIN, true)}
           aria-label={t("zoomReset")}
           title={t("zoomReset")}
           className="min-w-11 rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
         >
           {Math.round(view.scale * 100)}%
         </button>
-        <HeaderButton onClick={() => zoom((c) => c * 1.4)} label={t("zoomIn")}><ZoomIn className="h-4 w-4" /></HeaderButton>
+        <HeaderButton onClick={() => step(1.4)} label={t("zoomIn")}><ZoomIn className="h-4 w-4" /></HeaderButton>
       </div>
     </div>
   );

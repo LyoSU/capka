@@ -6,9 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Pinch-to-zoom in the image preview, on touchscreens and on the macOS Safari trackpad.
+
 ### Fixed
 
 - A crashed turn whose tools already ran is now reported as partial rather than a total loss: the zombie reconciler reads the executed-call ledger, not only the reply's saved parts, so the user is offered "Continue" instead of a retry that repeats those writes.
+- Image preview zoom now follows how far the wheel or trackpad moved rather than how many events the device sent, so a light two-finger swipe no longer jumps straight to maximum zoom.
+- The image preview no longer lets a picture be dragged out of the window, and its zoom buttons no longer reset the zoom when clicked twice quickly.
 
 ## [0.32.0] - 2026-08-23
 
