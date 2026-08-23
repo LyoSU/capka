@@ -30,6 +30,27 @@ and leaves the index alone, so it cannot give your work away — and it is much
 harder to get wrong under time pressure than any clever alternative. `git add -A`
 is banned outright.
 
+**A pathspec commit cannot commit a file git does not track yet.** `git commit --
+drizzle/0054_x.sql` dies with `did not match any file(s) known to git`, and the
+obvious fix is the banned one. Use a PRIVATE index — it is not shared, so the reason
+behind the ban does not apply to it:
+
+```
+export GIT_INDEX_FILE=/tmp/mine.index
+git read-tree HEAD
+git add -- <your paths>     # writes only to /tmp/mine.index
+git commit -F msg           # commits that index; .git/index is never touched
+```
+
+Assert both halves: with `GIT_INDEX_FILE` set, `git diff --cached --name-only` must
+list exactly your paths; with it unset, it must be empty.
+
+**Then refresh the shared index, or you have armed the very thing you were avoiding.**
+That commit moves HEAD while `.git/index` still holds the PRE-commit blobs for your
+paths, so `git diff --cached` now lists them as staged — and a peer's pathspec-less
+`git commit` would commit those stale blobs, reverting you. `git reset -q` (mixed, no
+paths) puts the index back on HEAD and changes no file content.
+
 A pathspec commit still does **not** separate two sessions' edits *inside* one
 file: it commits that file's whole working state. When a file holds both, do not
 patch — `git show HEAD:<path>` into place, re-apply only your own change as a
@@ -65,6 +86,18 @@ half an hour — because it read the file while the other half was already in
 `HEAD`. Classifying hunks by a keyword list fails the same way and worse: the
 list goes stale, new work matches nothing, and "matched neither list" reads as
 "mine". Treat no-match as STOP, not as ownership.
+
+**Ownership by elimination is the same error with better manners.** An agent read
+`git status`, subtracted the files it knew were its own, and assigned the remainder to
+the one peer it happened to be talking to. Wrong: a third session held them. Every
+individual fact was true and the inference assumed there were two of us; `ListAgents`
+listed ten. Absence of your work in a file is not presence of a particular peer's.
+
+The useful half: the split recipe above is safe WITHOUT knowing the owner — save the
+combined file, `git show HEAD:<path>`, re-apply only your own lines, commit, restore
+the combined copy. Its correctness does not depend on the guess, which is why it held
+while the guess was wrong. Prefer a procedure with that property over being right
+about attribution.
 
 **A diff read is a timestamped fact and it expires.** One correct diff read went
 stale eight minutes later when the other session's commit moved those very lines
@@ -196,6 +229,34 @@ or a size you are about to act on.** And note how both wrong mechanisms were
 produced — by inferring from measurements without looking at the thing measured,
 which is the very failure this section is about. A caveat asserting a cause it
 has not checked belongs here as much as a log line does.
+
+Three more from one night, none of which the advice above covers.
+
+**A reformat can make a whole grep class silently empty.** `git diff | grep '^+'`
+returned NOTHING for a diff with fourteen insertions: the proxy re-renders a diff as a
+summary (`--- Changes ---`, `+1 -0`), so no line begins with `+` any more. Not a wrong
+count, and not a value replaced by its type — the pattern simply stops matching, and an
+empty result reads as "none of my work is in this file", which is precisely the
+conclusion you must never reach by accident.
+
+**`rtk proxy <cmd>` is named above as the escape hatch and is not always one.** For
+that same diff it reported the correct size (3355 bytes) with the body truncated behind
+`// ... 56 lines omitted`. Only `/usr/bin/git --no-pager diff` produced all 58 lines,
+and only then did the insertion count agree with `--shortstat`. For git, the escape
+hatch is the real binary, not the proxy.
+
+**And it differs by COMMAND, not only by invocation shape.** The same night, one
+session's `rtk proxy git diff` truncated while another's `rtk proxy npx vitest run` was
+honest — and that session's plain `vitest | grep` came back empty while its redirect
+gave a truncated log pointing at a `[full output: …]` file that also lacked the summary.
+So "no safe shape" extends to "no safe command": do not promote either observation into
+a rule.
+
+One the proxy cannot be blamed for: **the artifact you measure must be the artifact you
+produced.** An agent ran `vitest run 2>&1 | tail -8 > out`, then half an hour later
+asked `out` which test had failed. It is 351 bytes and cannot answer — and `wc -c` is
+what revealed that, not reading it. Truncating your own output is indistinguishable,
+after the fact, from the tool truncating it.
 
 Corollary, from an agent who lost ten minutes to it the same night: never write
 `2>/dev/null` while establishing a fact. It turned a missing binary into an empty
