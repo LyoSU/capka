@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-08-23
+
 ### Changed
 
 - A generic (MCP/plugin) tool step now shows its arguments as a readable label–value list instead of a highlighted JSON block; the verbatim JSON moved behind a folded "Technical details" link.
