@@ -33,6 +33,27 @@ describe("extractWorkspacePaths", () => {
   it("drops bare-dot segments too", () => {
     expect(extractWorkspacePaths("/workspace/./hidden.txt")).toEqual([]);
   });
+
+  // captureResult tells the model where its overflowed output was parked, and
+  // models routinely repeat that sentence — which used to mint a tile for our own
+  // recovery log while the real result sat unmentioned.
+  it("drops Capka's own scratch dir, however the model phrases it", () => {
+    const text = [
+      "Готово, звіт у /workspace/Звіт Q3.xlsx.",
+      "Full output (412 KB) is saved at /workspace/.capka/output/1787483216992635450-124.log",
+      "job log: /workspace/.capka/jobs/ab12/log.txt",
+    ].join("\n");
+    expect(extractWorkspacePaths(text)).toEqual(["Звіт Q3.xlsx"]);
+  });
+
+  // The rule is "our directory", not "anything dotted": a dotted folder that
+  // isn't ours still holds the user's own results.
+  // (A bare `/workspace/.gitignore` never reached this tier anyway — the pattern
+  // needs a name before the extension — which is exactly why the fold below,
+  // where it DOES appear, has its own case.)
+  it("keeps a dotted path that is not Capka's", () => {
+    expect(extractWorkspacePaths("оновив /workspace/.config/settings.json")).toEqual([".config/settings.json"]);
+  });
 });
 
 describe("freshWorkspacePathRe", () => {

@@ -15,7 +15,8 @@
  * rather than merged into tier one. That keeps the "Files · N" heading an honest
  * promise, keeps "Download all" pointed at the result, and means we never have to
  * maintain an ignore-list guessing which files are junk (a list that would
- * eventually hide a file someone needed).
+ * eventually hide a file someone needed). The one exclusion both tiers DO apply,
+ * `isInternalPath`, is not such a guess — see its note.
  *
  * Both tiers live here so the web and Telegram can never disagree about them.
  */
@@ -62,9 +63,32 @@ export function isSafeWorkspaceRel(rel: string): boolean {
   return rel.split("/").every((seg) => seg !== ".." && seg !== ".");
 }
 
+/**
+ * Capka's own scratch space inside the workspace: the tee'd capture logs
+ * (`.capka/output`), background-job dirs (`.capka/jobs/<id>/{log,pid,exitcode}`),
+ * rendered previews, injected native media, installed skills. The file browser has
+ * always hidden these, but neither artifact tier did — so a command whose output
+ * overran the inline cap left its recovery log on disk inside a tool window, and a
+ * turn that named nothing surfaced that log as its ONE artifact tile.
+ *
+ * This is not the ignore-list the header refuses to keep: such a list would be
+ * guesses about which of the USER's files are junk. `.capka/` is OURS, created by
+ * our own wrappers (`withCapture`, `backgroundWrapper`, the MCP spill), so the rule
+ * is exact and cannot go stale — a dotfile the user asked for is still an artifact.
+ *
+ * Presentation only. `read_file`/grep/download still reach `.capka/`, which is the
+ * entire point of writing a log the model is told to page through instead of
+ * re-running the command.
+ */
+export function isInternalPath(rel: string): boolean {
+  return rel === ".capka" || rel.startsWith(".capka/");
+}
+
 /** Unique workspace-relative paths the text references, in first-seen order. */
 export function extractWorkspacePaths(text: string): string[] {
-  return [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))].filter(isSafeWorkspaceRel);
+  return [...new Set(Array.from(text.matchAll(WORKSPACE_PATH_RE), (m) => m[1]))].filter(
+    (rel) => isSafeWorkspaceRel(rel) && !isInternalPath(rel),
+  );
 }
 
 /** One entry of a workspace listing — the subset of the controller's `FileEntry`
@@ -109,7 +133,14 @@ export function selectTouchedFiles(
   if (windows.length === 0) return [];
   const already = new Set(named);
   return entries
-    .filter((e) => !e.isDirectory && e.modifiedAt && !already.has(e.path) && isSafeWorkspaceRel(e.path))
+    .filter(
+      (e) =>
+        !e.isDirectory &&
+        e.modifiedAt &&
+        !already.has(e.path) &&
+        isSafeWorkspaceRel(e.path) &&
+        !isInternalPath(e.path),
+    )
     .map((e) => ({ path: e.path, at: Date.parse(e.modifiedAt as string) }))
     .filter(
       (e) =>

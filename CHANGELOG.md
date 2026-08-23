@@ -17,6 +17,7 @@ All notable changes to Capka are documented here. Format follows
 
 - A platform that starts before its database no longer runs on a frozen schema until the next restart: a boot migration that fails is retried in the background until it lands.
 - Hovering an expandable tool step no longer paints the highlight over the step's icon and timeline rail.
+- Capka's own scratch files under `.capka/` (capture logs, background-job dirs, rendered previews) no longer appear as a turn's artifacts: a command whose output overran the inline cap surfaced its recovery log as the reply's only file tile. They remain readable and downloadable by path.
 
 ## [0.33.0] - 2026-08-23
 

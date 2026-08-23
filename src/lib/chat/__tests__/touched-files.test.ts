@@ -107,6 +107,28 @@ describe("selectTouchedFiles — what the turn actually touched", () => {
     expect(out).toEqual(["ok.txt"]);
   });
 
+  // Every capture log is written BY a tool call, so its mtime lands inside a
+  // window by construction — the one thing this tier cannot filter on. A turn that
+  // named nothing then promoted it to the primary artifact tile.
+  it("drops Capka's own scratch files, which always fall inside a window", () => {
+    const out = selectTouchedFiles(
+      [
+        file(".capka/output/1787483216992635450-124.log", "2026-08-12T10:00:05Z"),
+        file(".capka/jobs/ab12/exitcode", "2026-08-12T10:00:04Z"),
+        file(".capka/view/preview.png", "2026-08-12T10:00:04Z"),
+        file("Звіт Q3.xlsx", "2026-08-12T10:00:03Z"),
+      ],
+      WINDOW,
+      [],
+    );
+    expect(out).toEqual(["Звіт Q3.xlsx"]);
+  });
+
+  it("keeps a user's own dotfile — the rule is our directory, not any dot", () => {
+    const out = selectTouchedFiles([file(".gitignore", "2026-08-12T10:00:03Z")], WINDOW, []);
+    expect(out).toEqual([".gitignore"]);
+  });
+
   it("returns nothing when the turn ran no tools at all", () => {
     expect(selectTouchedFiles([file("a.txt", "2026-08-12T10:00:03Z")], [], [])).toEqual([]);
   });
