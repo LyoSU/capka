@@ -10,6 +10,7 @@ All notable changes to Capka are documented here. Format follows
 
 - A generic (MCP/plugin) tool step now shows its arguments as a readable label–value list instead of a highlighted JSON block; the verbatim JSON moved behind a folded "Technical details" link.
 - Copy/download controls over code blocks and tables lost the floating white card look — they sit quietly on the content and firm up on hover.
+- A tool result that is a list of records — typed `structuredContent` per the MCP spec, or repeated "Key: value" text blocks — now renders as a readable list with clickable links; markdown-shaped results (scraped pages) render as markdown. Anything else falls back to plain text unchanged.
 
 ### Fixed
 

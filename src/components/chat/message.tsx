@@ -24,6 +24,7 @@ import { SandboxFileTile, FileThumb, usePreview, type PreviewFile } from "./file
 import { MessageEditor } from "./message-editor";
 import type { FileRef } from "@/lib/constants";
 import { describeStep, describeInvocation, type StepDescriptor, type StepInvocation, type StepCategory } from "./steps";
+import { recordsFromValue, recordsFromText, looksLikeMarkdown, type TextRecord } from "@/lib/chat/record-list";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -229,6 +230,20 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
   const t = useTranslations("chat.tool");
   const [showAll, setShowAll] = useState(false);
 
+  const isError = !!errorText;
+  const full = errorText ?? formatValue(output);
+  // Machine-shaped output keeps monospace (alignment carries meaning in a file
+  // listing or a traceback); prose-shaped output — a web result, an MCP reply —
+  // reads better in the body face at a readable size.
+  const mono = category === "exec" || category === "file";
+  // A result that is a LIST — typed records per the MCP spec, or `Key: value`
+  // text blocks — renders as one. Never for errors (a traceback is a text) and
+  // never for exec/file output, where the bytes themselves are the artifact.
+  const records = useMemo(
+    () => (isError || mono ? null : recordsFromValue(output) ?? recordsFromText(full)),
+    [isError, mono, output, full],
+  );
+
   // view_file result: show the rendered page(s) as thumbnails, served inline from
   // the workspace (no base64 in the DB or the payload). A page rotated out of the
   // sandbox 404s — hide it rather than showing a broken image.
@@ -265,8 +280,6 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
   // and the old bare <p> gave a multi-line sandbox stack trace no monospace, no
   // wrapping, no scroll and no way to copy it — the one result a user is most
   // likely to need to send to somebody else.
-  const isError = !!errorText;
-  const full = errorText ?? formatValue(output);
   if (!full) {
     return (
       <section>
@@ -276,12 +289,42 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
     );
   }
 
+  if (records) {
+    return (
+      <section>
+        {/* The copy button still copies the TEXT the tool returned, not the
+            rendering — what came back is the artifact, the list is a view. */}
+        <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
+        <RecordList records={records} />
+      </section>
+    );
+  }
+
   const over = full.length > OUTPUT_LIMIT;
   const body = over && !showAll ? full.slice(0, OUTPUT_LIMIT) : full;
-  // Machine-shaped output keeps monospace (alignment carries meaning in a file
-  // listing or a traceback); prose-shaped output — a web result, an MCP reply —
-  // reads better in the body face at a readable size.
-  const mono = category === "exec" || category === "file";
+
+  // Markdown-shaped output (a scraped page, a connector's formatted reply) goes
+  // through the SAME renderer the answers use — links click, lists indent —
+  // instead of showing its own syntax as noise. `reasoning-prose` flattens the
+  // heading scale: a scraped page's <h1> has no business shouting inside a step
+  // panel. While clamped, the prefix renders as incomplete markdown so a cut
+  // link or list does not mangle the tail.
+  if (!isError && !mono && looksLikeMarkdown(full)) {
+    return (
+      <section>
+        <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
+        <div
+          tabIndex={0}
+          className="reasoning-prose max-h-72 overflow-auto rounded-lg bg-muted/50 px-3 py-2 text-sm leading-relaxed text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-primary/40 [&_img]:max-h-40 [&_img]:rounded-md"
+        >
+          <Markdown isStreaming={over && !showAll}>{body}</Markdown>
+        </div>
+        {over && (
+          <TruncationNotice shown={OUTPUT_LIMIT} total={full.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
+        )}
+      </section>
+    );
+  }
 
   return (
     <section>
@@ -306,6 +349,78 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
         <TruncationNotice shown={OUTPUT_LIMIT} total={full.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
       )}
     </section>
+  );
+}
+
+/** A record list result, rendered to be READ: the record's first field is its
+ *  heading (linked when the record carries a URL), long fields flow as quiet
+ *  text, and everything short collapses into one dim metadata line. Which field
+ *  plays which role is decided by SHAPE — position, length, being a URL — never
+ *  by the field's name, so an unknown tool's list renders as well as a known
+ *  one's. Every field the tool sent is on screen; nothing is dropped. */
+function RecordList({ records }: { records: TextRecord[] }) {
+  const t = useTranslations("chat.tool");
+  // Bounded like every other result surface: the container scrolls, and past
+  // a page of records the tail is a stated count, not an endless render.
+  const shown = records.slice(0, 25);
+  const host = (u: string) => { try { return new URL(u).hostname; } catch { return null; } };
+  return (
+    <div
+      tabIndex={0}
+      className="max-h-72 overflow-auto rounded-lg bg-muted/50 px-3 py-2 outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
+    >
+      <ol className="space-y-3">
+        {shown.map((r, i) => {
+          const [head, ...rest] = r.fields;
+          const link = r.fields.find((f) => f.url)?.value;
+          const body = rest.filter((f) => !f.url && !f.mono && f.value.length > 80);
+          const meta = rest.filter((f) => !body.includes(f));
+          return (
+            <li key={i} className="min-w-0">
+              {link ? (
+                <a
+                  href={link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[13px] font-medium leading-snug text-link [overflow-wrap:anywhere] underline-offset-2 hover:underline"
+                >
+                  {head.value}
+                </a>
+              ) : (
+                <div className="text-[13px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]">{head.value}</div>
+              )}
+              {body.map((f, j) => (
+                <p key={j} className="mt-0.5 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                  {f.value}
+                  {f.clipped ? ` ${t("clippedField")}` : ""}
+                </p>
+              ))}
+              {meta.length > 0 && (
+                <p className="mt-0.5 text-[11px] text-muted-foreground/80 [overflow-wrap:anywhere]">
+                  {meta.map((f, j) => (
+                    <span key={j}>
+                      {j > 0 && " · "}
+                      {f.url ? (
+                        // A secondary URL earns a link but not its whole address:
+                        // the hostname is the part a reader acts on.
+                        <a href={f.value} target="_blank" rel="noopener noreferrer" className="underline decoration-border underline-offset-2 hover:text-foreground">
+                          {host(f.value) ?? f.label}
+                        </a>
+                      ) : (
+                        `${f.label} ${f.value}`
+                      )}
+                    </span>
+                  ))}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {records.length > shown.length && (
+        <p className="mt-2 text-[11px] text-muted-foreground">{t("more", { count: records.length - shown.length })}</p>
+      )}
+    </div>
   );
 }
 
@@ -414,7 +529,13 @@ function Invocation({ inv }: { inv: StepInvocation }) {
             <Fragment key={i}>
               <dt className="truncate text-muted-foreground">{f.label}</dt>
               <dd className={`min-w-0 [overflow-wrap:anywhere] ${f.mono ? "font-mono text-[11px] leading-relaxed text-muted-foreground" : "text-foreground"}`}>
-                {f.value}
+                {f.url ? (
+                  <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline-offset-2 hover:underline">
+                    {f.value}
+                  </a>
+                ) : (
+                  f.value
+                )}
                 {/* A stated cut, never a silent one — the same contract the
                     clamped blocks keep via TruncationNotice. */}
                 {f.clipped && <span className="text-muted-foreground"> {t("clippedField")}</span>}

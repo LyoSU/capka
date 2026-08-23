@@ -322,6 +322,8 @@ export interface StepField {
   /** `value` is a stated prefix of something longer; the whole text lives in the
    *  sibling `json`, so the cut is one click away rather than silent. */
   clipped?: boolean;
+  /** The value is a bare http(s) URL — the UI may render it as a link. */
+  url?: boolean;
 }
 
 export type StepInvocation =
@@ -435,12 +437,17 @@ const FIELD_VALUE_LIMIT = 500;
  *  construction: argument names are the tool author's vocabulary, and any
  *  per-tool dictionary here would defeat the point of the fields view — that an
  *  unknown tool renders decently with no code written for it. */
-const humanizeKey = (k: string) =>
+export const humanizeKey = (k: string) =>
   k.replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().trim() || k;
+
+/** A whole value that is one http(s) URL — the only string shape the UI turns
+ *  into a link. Deliberately strict (nothing before, no spaces after): linking
+ *  prose that merely CONTAINS a URL would mean parsing prose. */
+export const isBareUrl = (s: string) => /^https?:\/\/\S+$/.test(s);
 
 const isScalar = (v: unknown) => v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 
-function fieldOf(key: string, v: unknown): StepField {
+export function fieldOf(key: string, v: unknown): StepField {
   let value: string;
   let mono = false;
   if (v == null || v === "") {
@@ -460,5 +467,13 @@ function fieldOf(key: string, v: unknown): StepField {
     mono = true;
   }
   const clipped = value.length > FIELD_VALUE_LIMIT;
-  return { label: humanizeKey(key), value: clipped ? value.slice(0, FIELD_VALUE_LIMIT) : value, mono, ...(clipped ? { clipped: true } : {}) };
+  if (clipped) value = value.slice(0, FIELD_VALUE_LIMIT);
+  return {
+    label: humanizeKey(key),
+    value,
+    mono,
+    ...(clipped ? { clipped: true } : {}),
+    // A clipped URL is a broken link, so the flag only survives an intact value.
+    ...(!clipped && !mono && isBareUrl(value) ? { url: true } : {}),
+  };
 }
