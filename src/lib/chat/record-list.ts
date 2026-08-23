@@ -44,20 +44,113 @@ function fromArray(arr: unknown[]): TextRecord[] | null {
   return records;
 }
 
+/** The MCP transport envelope's `content` array: blocks tagged with a string
+ *  `type` ("text", "image", …). They are the MESSAGE, never the data — treating
+ *  two text blocks as a two-record list was this module's first real bug. Both
+ *  key names come from the MCP spec, not from any tool's vocabulary. */
+const isContentBlocks = (v: unknown): v is Record<string, unknown>[] =>
+  Array.isArray(v) &&
+  v.length > 0 &&
+  v.every((el) => !!el && typeof el === "object" && !Array.isArray(el) && typeof (el as Record<string, unknown>).type === "string");
+
+/** The typed payload, per the spec: `structuredContent` when present, otherwise
+ *  the value itself with the transport fields (`content`, `isError`) set aside. */
+function dataRoot(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const obj = value as Record<string, unknown>;
+  if (obj.structuredContent && typeof obj.structuredContent === "object") return obj.structuredContent;
+  if (isContentBlocks(obj.content) || typeof obj.isError === "boolean") {
+    const rest = Object.fromEntries(Object.entries(obj).filter(([k]) => k !== "content" && k !== "isError"));
+    return Object.keys(rest).length > 0 ? rest : null;
+  }
+  return value;
+}
+
 export function recordsFromValue(value: unknown): TextRecord[] | null {
-  if (!value || typeof value !== "object") return null;
-  // `structuredContent` is where the MCP spec puts typed output — unwrapping it
-  // is following the standard, not guessing a field name.
-  const sc = (value as Record<string, unknown>).structuredContent;
-  const root = sc && typeof sc === "object" ? sc : value;
-  if (Array.isArray(root)) return fromArray(root);
+  const root = dataRoot(value);
+  if (!root || typeof root !== "object") return null;
+  if (Array.isArray(root)) return isContentBlocks(root) ? null : fromArray(root);
   // An object that is nothing but one array of objects ({results: [...]}) is
   // that array under a wrapper key — accepted because the shape is unambiguous,
   // never by the key's name. Two properties = a structure with an opinion, and
   // flattening it would drop the other half.
   const props = Object.entries(root as Record<string, unknown>).filter(([, v]) => v !== undefined);
-  if (props.length === 1 && Array.isArray(props[0][1])) return fromArray(props[0][1]);
+  if (props.length === 1 && Array.isArray(props[0][1]) && !isContentBlocks(props[0][1])) return fromArray(props[0][1]);
   return null;
+}
+
+/** A single typed object — a weather reading, a status, one entity — becomes
+ *  the same label/value fields the params view uses. Only reached when the
+ *  text pipeline had nothing better than raw JSON to show (the caller gates on
+ *  that), so this never displaces a tool's own prose. */
+export function fieldsFromValue(value: unknown): StepField[] | null {
+  const root = dataRoot(value);
+  if (!root || typeof root !== "object" || Array.isArray(root)) return null;
+  const props = Object.entries(root as Record<string, unknown>).filter(([, v]) => v !== undefined);
+  // One property is a sentence, not an entity — the plain text already says it.
+  if (props.length < 2) return null;
+  return props.map(([k, v]) => fieldOf(k, v));
+}
+
+/** Homogeneous, short records read better as a table than as cards — the shape
+ *  a SQL row set or an inventory listing arrives in. Same keys in the same
+ *  order, every value short, at least three rows; anything less regular keeps
+ *  the card layout, where per-record variation does not shear the columns. */
+export function readsAsTable(records: TextRecord[]): boolean {
+  if (records.length < 3) return false;
+  const shape = records[0].fields.map((f) => f.label).join("\u0000");
+  if (records[0].fields.length < 2 || records[0].fields.length > 8) return false;
+  return records.every(
+    (r) => r.fields.map((f) => f.label).join("\u0000") === shape && r.fields.every((f) => !f.mono && !f.clipped && f.value.length <= 60),
+  );
+}
+
+/** An image the tool sent back, as an inline-renderable data URI. Bounded: past
+ *  four the rest add scroll, not information. */
+export interface ResultImage {
+  src: string;
+}
+
+export function imagesFromValue(value: unknown): ResultImage[] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const content = (value as Record<string, unknown>).content;
+  if (!isContentBlocks(content)) return null;
+  const images = content
+    .filter((b) => b.type === "image" && typeof b.data === "string" && typeof b.mimeType === "string")
+    .slice(0, 4)
+    .map((b) => ({ src: `data:${b.mimeType as string};base64,${b.data as string}` }));
+  return images.length > 0 ? images : null;
+}
+
+/** A resource the tool pointed at (`resource_link`) or carried (`resource`) —
+ *  both block shapes are the MCP spec's own. The UI links http(s) URIs and
+ *  shows any other scheme as an identifier. */
+export interface ResourceRef {
+  name: string;
+  uri: string;
+  description?: string;
+}
+
+export function resourcesFromValue(value: unknown): ResourceRef[] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const content = (value as Record<string, unknown>).content;
+  if (!isContentBlocks(content)) return null;
+  const refs: ResourceRef[] = [];
+  for (const b of content) {
+    if (b.type === "resource_link" && typeof b.uri === "string") {
+      refs.push({
+        name: typeof b.name === "string" && b.name ? b.name : b.uri,
+        uri: b.uri,
+        ...(typeof b.description === "string" && b.description ? { description: b.description } : {}),
+      });
+    } else if (b.type === "resource" && b.resource && typeof b.resource === "object") {
+      const r = b.resource as Record<string, unknown>;
+      if (typeof r.uri === "string") {
+        refs.push({ name: typeof r.name === "string" && r.name ? r.name : r.uri, uri: r.uri });
+      }
+    }
+  }
+  return refs.length > 0 ? refs.slice(0, 16) : null;
 }
 
 /** `Key: value` — key short and word-like (any script), value non-empty. The

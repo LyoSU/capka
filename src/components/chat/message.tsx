@@ -24,7 +24,11 @@ import { SandboxFileTile, FileThumb, usePreview, type PreviewFile } from "./file
 import { MessageEditor } from "./message-editor";
 import type { FileRef } from "@/lib/constants";
 import { describeStep, describeInvocation, type StepDescriptor, type StepInvocation, type StepCategory } from "./steps";
-import { recordsFromValue, recordsFromText, looksLikeMarkdown, type TextRecord } from "@/lib/chat/record-list";
+import {
+  recordsFromValue, recordsFromText, looksLikeMarkdown, readsAsTable,
+  fieldsFromValue, imagesFromValue, resourcesFromValue, type TextRecord,
+} from "@/lib/chat/record-list";
+import { isBareUrl, type StepField } from "@/lib/chat/steps";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -243,6 +247,58 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
     () => (isError || mono ? null : recordsFromValue(output) ?? recordsFromText(full)),
     [isError, mono, output, full],
   );
+  // The envelope's other block types, per the MCP spec: images the tool drew,
+  // resources it pointed at. They accompany whatever textual shape renders
+  // below — a result can legitimately carry both.
+  const images = useMemo(() => (isError ? null : imagesFromValue(output)), [isError, output]);
+  const resources = useMemo(() => (isError ? null : resourcesFromValue(output)), [isError, output]);
+  // A single typed object earns the same grid the params view uses — but only
+  // when the text pipeline fell through to raw JSON, so a tool that answered
+  // in prose never has that prose displaced by field rows.
+  const fields = useMemo(
+    () => (isError || mono || records || !full.trimStart().startsWith("{") ? null : fieldsFromValue(output)),
+    [isError, mono, records, full, output],
+  );
+
+  const extras = (images || resources) && (
+    <>
+      {images && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {images.map((im, i) => (
+            // The same fixed box the view_file thumbnails reserve, for the same
+            // reason: an unsized image decodes late and shoves the page.
+            // eslint-disable-next-line @next/next/no-img-element -- inline data URI carried by the tool result, not a static asset
+            <img key={i} src={im.src} alt="" loading="lazy" className="h-40 w-32 rounded-md border border-border bg-muted/40 object-contain" />
+          ))}
+        </div>
+      )}
+      {resources && (
+        <ul className="mb-2 flex flex-wrap gap-1.5">
+          {resources.map((r, i) => (
+            <li key={i} className="min-w-0">
+              {isBareUrl(r.uri) ? (
+                <a
+                  href={r.uri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={r.description ?? r.uri}
+                  className="flex max-w-full items-center rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-link transition-colors hover:border-primary/40"
+                >
+                  <span className="truncate">{r.name}</span>
+                </a>
+              ) : (
+                // A non-web URI (file://, a custom scheme) is an identifier the
+                // reader can quote, not a place a browser can go — no dead link.
+                <span title={r.description ?? r.uri} className="flex max-w-full items-center rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                  <span className="truncate">{r.name}</span>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
 
   // view_file result: show the rendered page(s) as thumbnails, served inline from
   // the workspace (no base64 in the DB or the payload). A page rotated out of the
@@ -284,7 +340,9 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
     return (
       <section>
         <BlockLabel>{t("result")}</BlockLabel>
-        <p className="text-xs text-muted-foreground">{t("done")}</p>
+        {/* An image- or resource-only result is a real result — "done" is the
+            wording for a call that returned NOTHING to show, and only that. */}
+        {extras || <p className="text-xs text-muted-foreground">{t("done")}</p>}
       </section>
     );
   }
@@ -295,7 +353,20 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
         {/* The copy button still copies the TEXT the tool returned, not the
             rendering — what came back is the artifact, the list is a view. */}
         <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
+        {extras}
         <RecordList records={records} />
+      </section>
+    );
+  }
+
+  if (fields) {
+    return (
+      <section>
+        <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
+        {extras}
+        <div className="rounded-lg bg-muted/50 px-2.5 py-1.5">
+          <FieldsGrid fields={fields} />
+        </div>
       </section>
     );
   }
@@ -313,6 +384,7 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
     return (
       <section>
         <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
+        {extras}
         <div
           tabIndex={0}
           className="reasoning-prose max-h-72 overflow-auto rounded-lg bg-muted/50 px-3 py-2 text-sm leading-relaxed text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-primary/40 [&_img]:max-h-40 [&_img]:rounded-md"
@@ -329,6 +401,7 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
   return (
     <section>
       <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
+      {extras}
       {/* A quiet tinted surface, nothing more. It used to carry a 2px left rule,
           but an edge butted against a rounded corner reads as a printing defect,
           not a device — the label above already says "this came back", and the
@@ -358,12 +431,63 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
  *  plays which role is decided by SHAPE — position, length, being a URL — never
  *  by the field's name, so an unknown tool's list renders as well as a known
  *  one's. Every field the tool sent is on screen; nothing is dropped. */
+function hostOf(u: string): string | null {
+  try {
+    return new URL(u).hostname;
+  } catch {
+    return null;
+  }
+}
+
 function RecordList({ records }: { records: TextRecord[] }) {
   const t = useTranslations("chat.tool");
   // Bounded like every other result surface: the container scrolls, and past
   // a page of records the tail is a stated count, not an endless render.
   const shown = records.slice(0, 25);
-  const host = (u: string) => { try { return new URL(u).hostname; } catch { return null; } };
+
+  // Homogeneous short records — a query's row set — read as a table; the wide
+  // case scrolls inside this container, never the page.
+  if (readsAsTable(shown)) {
+    return (
+      <div
+        tabIndex={0}
+        className="max-h-72 overflow-auto rounded-lg bg-muted/50 px-3 py-2 outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
+      >
+        <table className="min-w-full text-xs">
+          <thead>
+            <tr>
+              {shown[0].fields.map((f) => (
+                <th key={f.label} className="whitespace-nowrap px-2 py-1 text-left text-[11px] font-medium text-muted-foreground">
+                  {f.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r, i) => (
+              <tr key={i} className="border-t border-border/60">
+                {r.fields.map((f, j) => (
+                  <td key={j} className="whitespace-nowrap px-2 py-1 text-muted-foreground">
+                    {f.url ? (
+                      <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline-offset-2 hover:underline">
+                        {hostOf(f.value) ?? f.value}
+                      </a>
+                    ) : (
+                      f.value
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {records.length > shown.length && (
+          <p className="mt-2 text-[11px] text-muted-foreground">{t("more", { count: records.length - shown.length })}</p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       tabIndex={0}
@@ -404,7 +528,7 @@ function RecordList({ records }: { records: TextRecord[] }) {
                         // A secondary URL earns a link but not its whole address:
                         // the hostname is the part a reader acts on.
                         <a href={f.value} target="_blank" rel="noopener noreferrer" className="underline decoration-border underline-offset-2 hover:text-foreground">
-                          {host(f.value) ?? f.label}
+                          {hostOf(f.value) ?? f.label}
                         </a>
                       ) : (
                         `${f.label} ${f.value}`
@@ -522,27 +646,7 @@ function Invocation({ inv }: { inv: StepInvocation }) {
     return (
       <section>
         <BlockLabel>{t("sent.params")}</BlockLabel>
-        {/* fit-content caps the label column so one long argument name cannot
-            shove every value off the readable line. */}
-        <dl className="grid grid-cols-[fit-content(10rem)_1fr] gap-x-4 gap-y-1 text-[13px]">
-          {inv.entries.map((f, i) => (
-            <Fragment key={i}>
-              <dt className="truncate text-muted-foreground">{f.label}</dt>
-              <dd className={`min-w-0 [overflow-wrap:anywhere] ${f.mono ? "font-mono text-[11px] leading-relaxed text-muted-foreground" : "text-foreground"}`}>
-                {f.url ? (
-                  <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline-offset-2 hover:underline">
-                    {f.value}
-                  </a>
-                ) : (
-                  f.value
-                )}
-                {/* A stated cut, never a silent one — the same contract the
-                    clamped blocks keep via TruncationNotice. */}
-                {f.clipped && <span className="text-muted-foreground"> {t("clippedField")}</span>}
-              </dd>
-            </Fragment>
-          ))}
-        </dl>
+        <FieldsGrid fields={inv.entries} />
         <TechDetails json={inv.json} />
       </section>
     );
@@ -559,6 +663,35 @@ function Invocation({ inv }: { inv: StepInvocation }) {
         <TruncationNotice shown={INVOCATION_LIMIT} total={inv.text.length} showAll={showAll} onToggle={() => setShowAll((v) => !v)} />
       )}
     </section>
+  );
+}
+
+/** Label/value rows for typed fields — the params view AND a single-object
+ *  result share this one rendering, so "what was sent" and "what one entity
+ *  came back as" read identically. fit-content caps the label column so one
+ *  long name cannot shove every value off the readable line. */
+function FieldsGrid({ fields }: { fields: StepField[] }) {
+  const t = useTranslations("chat.tool");
+  return (
+    <dl className="grid grid-cols-[fit-content(10rem)_1fr] gap-x-4 gap-y-1 text-[13px]">
+      {fields.map((f, i) => (
+        <Fragment key={i}>
+          <dt className="truncate text-muted-foreground">{f.label}</dt>
+          <dd className={`min-w-0 [overflow-wrap:anywhere] ${f.mono ? "font-mono text-[11px] leading-relaxed text-muted-foreground" : "text-foreground"}`}>
+            {f.url ? (
+              <a href={f.value} target="_blank" rel="noopener noreferrer" className="text-link underline-offset-2 hover:underline">
+                {f.value}
+              </a>
+            ) : (
+              f.value
+            )}
+            {/* A stated cut, never a silent one — the same contract the
+                clamped blocks keep via TruncationNotice. */}
+            {f.clipped && <span className="text-muted-foreground"> {t("clippedField")}</span>}
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
   );
 }
 
