@@ -107,8 +107,16 @@ describe("buildSandboxConfig — isolation hardening", () => {
     expect(buildSandboxConfig({ ...base, pidsLimit: 256 }).HostConfig.PidsLimit).toBe(256);
   });
 
-  it("defaults to a runsc-safe pids budget", () => {
-    expect(buildSandboxConfig(base).HostConfig.PidsLimit).toBe(256);
+  // Measured on the demo host, not guessed: a FRESH gVisor sandbox already sits at
+  // ~30 pids, and every burst of parallel execs raises that high-water mark by ~2
+  // per exec WITHOUT ever giving them back (the systrap stub processes are not
+  // reaped). A real agent session reached 196/256 in thirteen minutes and then died
+  // on `fork rejected by pids controller`, which under gVisor kills the sentry and
+  // therefore the whole sandbox — 23 such deaths in the host's journal since July.
+  // The budget has to cover peak CONCURRENCY for the life of the sandbox, and 256
+  // was sized for heavy single processes (ImageMagick, Chromium) instead.
+  it("defaults to a pids budget that survives an agent's parallel tool calls", () => {
+    expect(buildSandboxConfig(base).HostConfig.PidsLimit).toBe(1024);
   });
 });
 

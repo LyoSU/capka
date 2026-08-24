@@ -54,12 +54,19 @@ export function buildSandboxConfig({
   networkMode = "none",
   memoryBytes,
   nanoCpus,
-  // gVisor's host-side runtime threads count toward Docker's pids cgroup. A
-  // limit of 100 leaves too little headroom for normal image/document renderers
-  // (ImageMagick, Chromium, LibreOffice) and can surface as misleading ENOMEM
-  // errors from unrelated helpers such as tail/xargs. 256 still contains fork
-  // bombs while leaving a useful workload budget across runc and runsc.
-  pidsLimit = 256,
+  // gVisor's host-side runtime threads count toward Docker's pids cgroup, and they
+  // are NOT transient: each burst of parallel execs raises a high-water mark of
+  // systrap stub processes that is never given back, so this budget is spent for
+  // the LIFE of the sandbox, not for the duration of a command. Measured: a fresh
+  // sandbox idles at ~30, and an agent session reached 196 in thirteen minutes.
+  // Hitting the cap is fatal rather than annoying — the kernel refuses the fork,
+  // the sentry dies, and the whole sandbox goes with it (see the exec-liveness
+  // check in docker-backend.js for how that surfaces). 1024 covers the peak
+  // concurrency an agent actually reaches, while still containing a fork bomb —
+  // which under gVisor is bounded by the memory cgroup long before pids anyway.
+  // Below ~128, image/document renderers (ImageMagick, Chromium, LibreOffice) die
+  // with a misleading ENOMEM from unrelated helpers such as tail/xargs.
+  pidsLimit = 1024,
   nofileLimit = 65536,
   // Max bytes any single file may reach (RLIMIT_FSIZE). 0 = no cap. This is the
   // kernel-enforced, synchronous backstop the poll-based workspace quota lacks:

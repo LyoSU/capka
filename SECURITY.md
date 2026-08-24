@@ -54,7 +54,7 @@ but all of them are real and worth knowing before you flip the switch:
 |---|---|
 | Host setup, Linux only | Root install plus a Docker restart. The script also enables `userns-remap`, which shifts container uids on the host — a multi-tenant requirement, not an optional extra. |
 | Speed | Syscalls are serviced in user space, so syscall-heavy work (many small file operations, spawning processes) is slower; CPU-bound work much less so. |
-| Resource budget | gVisor's own processes are charged to the sandbox's `SANDBOX_PIDS_LIMIT` and to the same memory cgroup as the workload. This is why the PID default is 256 — under ~128, image and document rendering dies with a misleading `Cannot allocate memory`. |
+| Resource budget | gVisor's own processes are charged to the sandbox's `SANDBOX_PIDS_LIMIT` and to the same memory cgroup as the workload. gVisor's stub processes are a high-water mark that is never reclaimed, so a long agent session spends the PID budget permanently and exhausting it kills the sandbox outright — hence the 1024 default; under ~128, image and document rendering dies with a misleading `Cannot allocate memory`. |
 | Egress plumbing | Under gVisor the in-container firewall needs `CAP_NET_RAW` and the legacy iptables backend. `install-gvisor.sh` registers the runtime with `--net-raw=true` for exactly this reason; if you ever register `runsc` by hand, keep that flag or **every** sandbox dies at startup the moment egress is on. |
 | Upgrades | Fail-closed cuts both ways: anything that de-registers `runsc` on the daemon stops the controller from booting rather than quietly downgrading it to `runc`. That is the intended behavior — treat it as a deploy-time check, not a surprise. |
 

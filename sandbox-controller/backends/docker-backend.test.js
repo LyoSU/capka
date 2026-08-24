@@ -257,3 +257,52 @@ describe("DockerBackend — a started container is not yet a live one", () => {
     expect(/no such container|is not running/i.test(err.message)).toBe(true);
   });
 });
+
+// Measured on the demo host: when the sandbox dies mid-command (its pids cgroup
+// refuses a fork, and the kernel takes the gVisor sentry down with it), Docker
+// still ends the exec stream normally. The runtime's own complaint arrives as
+// stderr — `urpc method "containerManager.WaitPID" failed: EOF` — with exit 128.
+// Returned as a result, that is indistinguishable from a command that ran and
+// printed something odd: the model reads gVisor's internals as its own output and
+// carries on, and nobody rebuilds the sandbox that is already gone.
+describe("DockerBackend — an exec whose sandbox died under it", () => {
+  function deadMidExec({ execExitCode = 128, running = false } = {}) {
+    const stream = new EventEmitter();
+    stream.resume = () => {};
+    const container = {
+      exec: vi.fn(async () => ({
+        start: (_o, cb) => {
+          cb(null, stream);
+          queueMicrotask(() => {
+            stream.emit("data", logFrame(2, 'waiting on pid 2: waiting on PID 2 in sandbox "abc": urpc method "containerManager.WaitPID" failed: EOF\n'));
+            stream.emit("end");
+          });
+        },
+        inspect: async () => ({ ExitCode: execExitCode }),
+      })),
+      inspect: async () => ({ State: { Running: running, ExitCode: 2 } }),
+      logs: async () => logFrame(2, "fork rejected by pids controller"),
+    };
+    return container;
+  }
+
+  it("reports a dead sandbox in the phrase the server invalidates on, instead of returning it as output", async () => {
+    const container = deadMidExec();
+    const b = new DockerBackend({ docker: { ...imagePresent, getContainer: () => container }, image: "img:1", runtime: "runsc" });
+    const err = await b.exec("abc", "ls").catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    // server.js matches this to drop the stale session so the platform rebuilds.
+    expect(/no such container|is not running/i.test(err.message)).toBe(true);
+    expect(err.message).toMatch(/exit 2/);
+  });
+
+  // The guard against over-triggering: a command that merely failed is the normal
+  // case, and must never cost the user their sandbox.
+  it("leaves a failed command in a live container as an ordinary non-zero result", async () => {
+    const container = deadMidExec({ execExitCode: 1, running: true });
+    const b = new DockerBackend({ docker: { ...imagePresent, getContainer: () => container }, image: "img:1", runtime: "runsc" });
+    const out = await b.exec("abc", "false");
+    expect(out.exitCode).toBe(1);
+    expect(out.stderr).toMatch(/urpc method/);
+  });
+});

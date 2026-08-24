@@ -117,6 +117,14 @@ async function sendRequest(path: string, method: string, body: unknown, timeoutM
     if (data.code === "IMAGE_PULLING") {
       throw new SandboxError(String(raw), op, true, 503);
     }
+    // The sandbox died (reclaimed while idle, or killed under the command). The
+    // controller has already dropped its session record, so this is recoverable —
+    // and the message is actionable in exactly the way the quota block is: it names
+    // what survived the restart. Collapsing it to the generic string would leave the
+    // model guessing whether its files are still there.
+    if (data.code === "SANDBOX_GONE") {
+      throw new SandboxError(String(raw), op, false, 409);
+    }
     throw new SandboxError("Sandbox operation failed", op, res.status >= 500);
   }
   return data;

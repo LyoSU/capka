@@ -155,6 +155,10 @@ export async function loadSandboxTools(
   userId: string,
   ensureSession: () => Promise<unknown>,
   networkMode: "none" | "bridge" = "none",
+  /** Called when the controller reports the container is gone. The run's
+   *  `ensureSession` is memoized, so without dropping that memo every remaining
+   *  command in the turn fails identically against a sandbox nobody will rebuild. */
+  onSandboxGone?: () => void,
 ) {
   // Best-effort lease: a job that outlives the turn keeps the container alive only
   // while the controller knows it's there. A failed lease is not a failed job — it
@@ -179,6 +183,16 @@ export async function loadSandboxTools(
       // failed command result (the actionable message in stderr) so the model
       // reads it and recovers, rather than the tool call hard-erroring.
       if (e && typeof e === "object" && (e as { status?: number }).status === 413) {
+        return { stdout: "", stderr: (e as Error).message, exitCode: 1 };
+      }
+      // The sandbox died under the command (409). Drop the memoized session so the
+      // NEXT call builds a fresh container, and hand the model the controller's
+      // message — which says what survived — as a failed command rather than a hard
+      // tool error. Deliberately NOT an automatic re-run of `cmd`: /workspace is a
+      // bind-mount that outlived the container, so a non-idempotent command may
+      // already be half-applied, and repeating it silently is the worse failure.
+      if (e && typeof e === "object" && (e as { status?: number }).status === 409) {
+        onSandboxGone?.();
         return { stdout: "", stderr: (e as Error).message, exitCode: 1 };
       }
       throw e;

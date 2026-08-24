@@ -102,6 +102,26 @@ describe("sandbox tools — workspace-full (quota) recovery", () => {
     const { tools } = await load();
     await expect(tools.execute_bash.execute!({ command: "ls" }, opts)).rejects.toThrow("controller down");
   });
+
+  // A sandbox can die UNDER a command (gVisor's sentry is one host process, so a
+  // pids-cgroup refusal or an OOM kill takes the whole sandbox with it). The
+  // controller answers 409 SANDBOX_GONE and has already dropped its session record
+  // — but this run's ensureSession is memoized, so without clearing it every
+  // remaining command in the turn fails the same way. Recreating the container is
+  // the recovery; re-running the command is NOT, because a half-applied
+  // non-idempotent command would be silently repeated.
+  it("turns a dead sandbox into an actionable failed result and clears the memo so the next call rebuilds", async () => {
+    const msg = "The sandbox restarted, so this command did not run. Files in /workspace are intact; anything in /tmp and any running process is gone.";
+    execCommand.mockRejectedValue(Object.assign(new Error(msg), { status: 409 }));
+    const onSandboxGone = vi.fn();
+    const { tools } = await loadSandboxTools("sess1", "user1", async () => {}, "none", onSandboxGone);
+    const res = (await tools.execute_bash.execute!({ command: "ls" }, opts)) as {
+      output: string; success: boolean;
+    };
+    expect(res.success).toBe(false);
+    expect(res.output).toContain("/workspace are intact");
+    expect(onSandboxGone).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("sandbox tools — output truncation safeguards", () => {

@@ -145,7 +145,13 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // what makes a tool-less project genuinely cheap — no container is ever created
   // (nothing reaches `ensureSession`) and no stdio connector child process spawns.
   const empty = { tools: {}, close: async () => {} };
-  const sandbox = caps.sandbox ? await loadSandboxTools(sessionKey, userId, ensureSession, networkMode) : empty;
+  // Dropping the memo is the whole recovery when a sandbox dies mid-turn: the
+  // controller has already forgotten the session, so the next consumer that calls
+  // `ensureSession` builds a fresh container against the same (bind-mounted, and
+  // therefore surviving) workspace instead of retrying against a dead handle.
+  const sandbox = caps.sandbox
+    ? await loadSandboxTools(sessionKey, userId, ensureSession, networkMode, () => { sessionEnsured = null; })
+    : empty;
   const mcp = caps.connectors
     ? await loadMcpTools({
         userId,

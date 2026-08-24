@@ -328,12 +328,32 @@ export class DockerBackend {
           // The demux already bounds what it keeps (RAM guard) and flags an
           // overflow as `truncated` — so no post-hoc .slice() is needed here.
           const { stdout, stderr, truncated } = demux.result();
+          let exitCode = -1;
           try {
-            const info = await execObj.inspect();
-            resolve({ stdout, stderr, exitCode: info.ExitCode, truncated });
-          } catch {
-            resolve({ stdout, stderr, exitCode: -1, truncated });
+            ({ ExitCode: exitCode } = await execObj.inspect());
+          } catch { /* the stream ended; -1 stands in for an exit code we can't read */ }
+          // A sandbox can die UNDER a command instead of failing it: gVisor's sentry
+          // is one host process, so a pids-cgroup fork refusal or an OOM kill takes
+          // the whole sandbox down mid-exec. Docker ends the stream normally anyway
+          // and hands back the runtime's own complaint as output ("urpc method
+          // \"containerManager.WaitPID\" failed: EOF") with a non-zero code — which is
+          // indistinguishable from a command that ran and printed something odd. So
+          // ask the container, not the text: liveness is the only signal that can't
+          // be forged by a command that merely mentions the runtime. Only on a
+          // non-zero exit, so the common path costs nothing extra.
+          if (exitCode !== 0) {
+            const dead = await exitReason(container);
+            // Same phrase server.js invalidates on, so the session is dropped and the
+            // platform rebuilds against the same workspace instead of handing the
+            // model a dead sandbox's internals as its own output.
+            if (dead) {
+              return reject(new Error(
+                `sandbox container is not running (exit ${dead.exitCode})` +
+                (dead.message ? `: ${dead.message}` : ""),
+              ));
+            }
           }
+          resolve({ stdout, stderr, exitCode, truncated });
         });
         stream.on("error", (e) => { cleanup(); reject(e); });
       });

@@ -90,7 +90,20 @@ const TMP_MB = posIntEnv("SANDBOX_TMP_MB", 64);
 const MCP_TMP_MB = posIntEnv("SANDBOX_MCP_TMP_MB", 256);
 const HOME_MB = posIntEnv("SANDBOX_HOME_MB", 64);
 const MEMORY_LIMIT = posIntEnv("SANDBOX_MEMORY_MB", 512) * 1024 * 1024;
-const PIDS_LIMIT = posIntEnv("SANDBOX_PIDS_LIMIT", 256);
+const PIDS_LIMIT = posIntEnv("SANDBOX_PIDS_LIMIT", 1024);
+
+/** What the agent is told when the workspace container is gone — reclaimed while
+ *  idle, or killed under a command (gVisor's sentry is a single host process, so
+ *  a pids-cgroup fork refusal or an OOM kill takes the whole sandbox with it).
+ *  It names what SURVIVED, because that is the only part the model can act on:
+ *  /workspace is a host bind-mount and outlives the container, while /tmp and any
+ *  running process do not. It deliberately does not promise the command can just
+ *  be repeated — a half-applied non-idempotent command must not be re-run blindly.
+ */
+const SANDBOX_GONE_MESSAGE =
+  "The sandbox restarted, so this command did not run. Files in /workspace are intact; " +
+  "anything in /tmp, any environment set earlier, and any running process are gone. " +
+  "Check whether the command had already taken effect before repeating it.";
 const CPU_LIMIT = posFloatEnv("SANDBOX_CPUS", 1.0) * 1e9;
 const EXEC_TIMEOUT = posIntEnv("SANDBOX_EXEC_TIMEOUT_MS", 30000);
 const IDLE_TTL = posIntEnv("SANDBOX_IDLE_TTL_MS", 900000); // 15 min — stop idle CONTAINER (files stay)
@@ -469,7 +482,7 @@ const server = createServer(async (req, res) => {
       // Stopped workspace (container reclaimed): tell the caller to recreate so a
       // fresh container is spun up against the same files. The platform's
       // ensureSession does exactly that before retrying.
-      if (!session.handle) return jsonRes(res, 409, { error: "Sandbox is stopped; recreate the session" });
+      if (!session.handle) return jsonRes(res, 409, { error: SANDBOX_GONE_MESSAGE, code: "SANDBOX_GONE" });
       // Disk-quota gate: refuse to run a command once the workspace is at/over the
       // cap, so a session that has filled /workspace can't keep growing it. The
       // escape is NOT `rm` (that's an exec and is blocked too — which would
@@ -511,7 +524,7 @@ const server = createServer(async (req, res) => {
           await store.delete(session.sessionId);
           liveCount = Math.max(0, liveCount - 1);
           log("session.invalidate", { sessionId: session.sessionId }, "warn");
-          return jsonRes(res, 409, { error: "Sandbox is gone; recreate the session" });
+          return jsonRes(res, 409, { error: SANDBOX_GONE_MESSAGE, code: "SANDBOX_GONE" });
         }
         throw e;
       }
