@@ -76,3 +76,8 @@ services:
       # Experimental share-link import — enabled in dev so it can be exercised
       # locally; stays off by default in prod (operators opt in explicitly).
       - CAPKA_SHARE_IMPORT=true
+      # Match the loopback `ports:` override above. The app reads this to decide
+      # whether the first-run admin claim needs a SETUP_TOKEN; without it dev would
+      # inherit the base compose default (0.0.0.0) and every fresh dev database
+      # would demand a token to get through the wizard.
+      - PLATFORM_BIND=127.0.0.1

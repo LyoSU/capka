@@ -88,8 +88,12 @@ async function fetchJson(url: string, init?: RequestInit, blockPrivate?: boolean
     throw new Error("Provider endpoint returned an unexpected redirect");
   }
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+    // Status only, never the upstream body: it can carry an API key, a signed URL,
+    // or the contents of an internal endpoint reached through a user-supplied
+    // baseUrl. `providers/test` refuses to echo a body for exactly that reason
+    // (content-exfiltration oracle); no caller logs this message today, but one
+    // that did would inherit the leak, so the body never enters the string.
+    throw new Error(`HTTP ${res.status}`);
   }
   return res.json();
 }
@@ -485,7 +489,24 @@ async function listOllama(baseUrl: string, blockPrivate: boolean): Promise<Model
 // re-fetches on every mount. Cache successful results per credential set for a
 // few minutes so navigating between chats doesn't re-probe the provider.
 const MODELS_TTL_MS = 5 * 60_000;
+// Bounded on purpose: the key carries a user-supplied `baseUrl` (the picker lists
+// an unsaved endpoint before it is stored), so one resident model array per
+// distinct URL/key pair would accumulate for the process lifetime — expiry alone
+// never freed anything, it only stopped a stale entry being READ. `remember`
+// drops expired entries and evicts the oldest insertion at the cap.
+const MODELS_CACHE_MAX = 100;
 const modelsCache = new Map<string, { at: number; models: ModelInfo[] }>();
+
+function rememberModels(key: string, models: ModelInfo[]): void {
+  const now = Date.now();
+  for (const [k, v] of modelsCache) if (now - v.at >= MODELS_TTL_MS) modelsCache.delete(k);
+  while (modelsCache.size >= MODELS_CACHE_MAX) {
+    const oldest = modelsCache.keys().next().value;
+    if (oldest === undefined) break;
+    modelsCache.delete(oldest);
+  }
+  modelsCache.set(key, { at: now, models });
+}
 
 function modelsCacheKey(o: { provider: string; apiKey?: string; baseUrl?: string }): string {
   const keyHash = o.apiKey ? createHash("sha256").update(o.apiKey).digest("hex").slice(0, 16) : "";
@@ -564,7 +585,7 @@ async function listProviderModelsCached(opts: {
   const hit = modelsCache.get(key);
   if (hit && Date.now() - hit.at < MODELS_TTL_MS) return hit.models;
   const models = await listProviderModelsLive(opts);
-  modelsCache.set(key, { at: Date.now(), models });
+  rememberModels(key, models);
   return models;
 }
 

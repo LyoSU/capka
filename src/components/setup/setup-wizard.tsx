@@ -51,12 +51,18 @@ export function SetupWizard({
   initialStep,
   signedIn,
   setupTokenRequired,
+  bootstrapBlocked,
 }: {
   initialStep: SetupStep;
   signedIn: boolean;
   /** Only true when the operator opted into the SETUP_TOKEN hardening (env). When
    *  false the wizard shows no token step at all — first-run stays zero-friction. */
   setupTokenRequired: boolean;
+  /** Reachable from the network with no SETUP_TOKEN set: the API refuses the admin
+   *  claim, so show the operator WHY and how to fix it instead of a form that ends
+   *  in a toast. Explaining it here leaks nothing — an attacker who can reach the
+   *  page already knows setup is unfinished, and cannot claim admin either way. */
+  bootstrapBlocked: boolean;
 }) {
   const router = useRouter();
   const t = useTranslations("setup");
@@ -263,23 +269,43 @@ export function SetupWizard({
             <span className="text-sm font-medium tracking-tight text-muted-foreground">{t("brand.wordmark")}</span>
           </div>
 
-          <div className="mt-7">
-            <StepBars current={step} label={t("stepOf", { current: step + 1, total: STEPS.length })} />
-          </div>
+          {!bootstrapBlocked && (
+            <div className="mt-7">
+              <StepBars current={step} label={t("stepOf", { current: step + 1, total: STEPS.length })} />
+            </div>
+          )}
 
             <div key={step} className="animate-blur-rise mt-6 space-y-6">
               <div className="space-y-1.5">
                 <h1 className="font-display text-[1.75rem] leading-tight tracking-tight text-balance">
-                  {step === 0 ? (signedIn ? t("account.claimTitle") : t("account.title")) : t("provider.title")}
+                  {bootstrapBlocked
+                    ? t("blocked.title")
+                    : step === 0 ? (signedIn ? t("account.claimTitle") : t("account.title")) : t("provider.title")}
                 </h1>
                 <p className="text-sm leading-relaxed text-muted-foreground text-pretty">
-                  {step === 0 ? (signedIn ? t("account.claimSubtitle") : t("account.subtitle")) : t("provider.subtitle")}
+                  {bootstrapBlocked
+                    ? t("blocked.subtitle")
+                    : step === 0 ? (signedIn ? t("account.claimSubtitle") : t("account.subtitle")) : t("provider.subtitle")}
                 </p>
               </div>
 
               {/* A form, not a div: these are three text fields and a button, and
                   pressing Enter in any of them used to do nothing at all. */}
-              {step === 0 && (
+              {bootstrapBlocked && (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-border bg-muted/40 p-4">
+                    <p className="text-sm leading-relaxed text-muted-foreground text-pretty">{t("blocked.why")}</p>
+                  </div>
+                  <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
+                    <li>{t("blocked.step1")}</li>
+                    <li>{t("blocked.step2")}</li>
+                    <li>{t("blocked.step3")}</li>
+                  </ol>
+                  <p className="text-xs leading-relaxed text-muted-foreground/80 text-pretty">{t("blocked.hint")}</p>
+                </div>
+              )}
+
+              {!bootstrapBlocked && step === 0 && (
                 <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleAccount(); }}>
                   {!signedIn && (
                     <>
@@ -345,7 +371,7 @@ export function SetupWizard({
                 </form>
               )}
 
-              {step === 1 && (
+              {!bootstrapBlocked && step === 1 && (
                 <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleProvider(); }}>
                   <div className="space-y-1.5">
                     <Label htmlFor="provider">{t("provider.field")}</Label>

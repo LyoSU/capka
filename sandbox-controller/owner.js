@@ -19,6 +19,29 @@ export function workspaceToken(secret, userId, sessionId) {
     .digest("hex");
 }
 
+/** HMAC for the per-user SHARED store (`/shared` in every sandbox).
+ *
+ *  A distinct label domain rather than a session id: `sanitize()` keeps only
+ *  [A-Za-z0-9_-], so ":" can never occur in a sanitized session id and a shared
+ *  token can therefore never be confused with — or minted from — a workspace one.
+ *  `_global` stays refused by `POST /sessions`; this is the supported way in. */
+export function sharedToken(secret, userId) {
+  return createHmac("sha256", secret)
+    .update(`${sanitize(userId)}|_shared:v1`)
+    .digest("hex");
+}
+
+/** Decide the owner of a SHARED-store operation. No session is involved — the
+ *  shared store outlives every session and has no row — so possession of the
+ *  secret bound to THIS userId is the whole check.
+ *
+ *  Returns { userId } | { missing: true } | { forbidden: true }. */
+export function resolveSharedOwnerDecision({ userId, token, secret }) {
+  if (!userId) return { missing: true };
+  if (!token || !safeEqual(sharedToken(secret, userId), token)) return { forbidden: true };
+  return { userId: sanitize(userId) };
+}
+
 /** Decide the owner of a file operation. Pure (no I/O) so it is unit-testable;
  *  the caller fetches `session` from the store and passes it in.
  *

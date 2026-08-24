@@ -8,6 +8,32 @@ import { resumeStep, type SetupStep } from "@/lib/setup-steps";
 // module's server-only deps (db/pg → node `tls`) into the browser bundle.
 export { SETUP_STEPS, resumeStep, type SetupStep } from "@/lib/setup-steps";
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0:0:0:0:0:0:0:1"]);
+
+/**
+ * Whether this deployment is reachable from beyond the host, decided from SERVER
+ * configuration ONLY — never from request headers. A gate keyed on Host or
+ * X-Forwarded-Host is defeated by `curl -H "Host: localhost"`, i.e. by exactly the
+ * actor it exists to stop.
+ *
+ * Compose always passes PLATFORM_BIND (defaulting to the same 0.0.0.0 its port
+ * mapping uses), so an ABSENT value means a bare `npm run dev` / `npm start` on a
+ * developer machine — the frictionless case. An unparseable PUBLIC_URL counts as
+ * exposed: a malformed override must never silently unlock the bootstrap.
+ */
+export function isPubliclyReachable(env: Record<string, string | undefined> = process.env): boolean {
+  const publicUrl = (env.PUBLIC_URL || env.BETTER_AUTH_URL || "").trim();
+  if (publicUrl) {
+    try {
+      if (!LOOPBACK_HOSTS.has(new URL(publicUrl).hostname.toLowerCase())) return true;
+    } catch {
+      return true;
+    }
+  }
+  const bind = env.PLATFORM_BIND?.trim();
+  return !!bind && !LOOPBACK_HOSTS.has(bind.toLowerCase());
+}
+
 /**
  * The single source of truth for setup progress. Reads real state — completion
  * flag and session — so a page refresh resumes exactly where the admin left
@@ -20,16 +46,20 @@ export async function getSetupState(): Promise<{
   /** Whether a SETUP_TOKEN is configured (advanced, opt-in hardening). When unset
    *  the wizard shows no token step at all — first-run stays zero-friction. */
   setupTokenRequired: boolean;
+  /** True when this deploy is reachable from the network AND no SETUP_TOKEN is
+   *  configured — first-run is refused rather than raced for admin. */
+  bootstrapBlocked: boolean;
 }> {
   const setupTokenRequired = !!process.env.SETUP_TOKEN?.trim();
+  const bootstrapBlocked = !setupTokenRequired && isPubliclyReachable();
   if (await isSetupComplete()) {
-    return { complete: true, signedIn: false, step: "account", setupTokenRequired };
+    return { complete: true, signedIn: false, step: "account", setupTokenRequired, bootstrapBlocked: false };
   }
 
   const auth = await getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
-    return { complete: false, signedIn: false, step: "account", setupTokenRequired };
+    return { complete: false, signedIn: false, step: "account", setupTokenRequired, bootstrapBlocked };
   }
 
   // Admin is claimed when admin_email matches this session — only then is the
@@ -43,5 +73,6 @@ export async function getSetupState(): Promise<{
     signedIn: true,
     step: resumeStep({ hasSession: true, adminClaimed }),
     setupTokenRequired,
+    bootstrapBlocked,
   };
 }

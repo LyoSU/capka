@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveOwnerDecision, workspaceToken, safeEqual } from "./owner.js";
+import { resolveOwnerDecision, resolveSharedOwnerDecision, workspaceToken, sharedToken, safeEqual } from "./owner.js";
 
 const SECRET = "test-secret";
 
@@ -59,5 +59,38 @@ describe("resolveOwnerDecision", () => {
     const token = workspaceToken(SECRET, "bob", "OTHER");
     expect(resolveOwnerDecision({ session: null, sessionId: "s1", fallbackUserId: "bob", token, secret: SECRET }))
       .toEqual({ forbidden: true });
+  });
+});
+
+describe("sharedToken / resolveSharedOwnerDecision", () => {
+  const secret = "s3cr3t";
+
+  it("refuses a workspace token replayed at the shared store", () => {
+    // The whole point of the separate label: `sanitize()` keeps only
+    // [A-Za-z0-9_-], so ":" cannot appear in a session id and no workspace token
+    // can ever equal the shared one for the same user.
+    const ws = workspaceToken(secret, "u1", "_global");
+    expect(resolveSharedOwnerDecision({ userId: "u1", token: ws, secret })).toEqual({ forbidden: true });
+  });
+
+  it("refuses a shared token replayed at a workspace", () => {
+    const sh = sharedToken(secret, "u1");
+    expect(resolveOwnerDecision({ session: null, sessionId: "s1", fallbackUserId: "u1", token: sh, secret }))
+      .toEqual({ forbidden: true });
+  });
+
+  it("accepts the matching shared token and returns the sanitized owner", () => {
+    expect(resolveSharedOwnerDecision({ userId: "u1", token: sharedToken(secret, "u1"), secret }))
+      .toEqual({ userId: "u1" });
+  });
+
+  it("refuses another user's shared token", () => {
+    expect(resolveSharedOwnerDecision({ userId: "u2", token: sharedToken(secret, "u1"), secret }))
+      .toEqual({ forbidden: true });
+  });
+
+  it("reports a missing userId separately from a bad token", () => {
+    expect(resolveSharedOwnerDecision({ userId: "", token: "x", secret })).toEqual({ missing: true });
+    expect(resolveSharedOwnerDecision({ userId: "u1", token: "", secret })).toEqual({ forbidden: true });
   });
 });

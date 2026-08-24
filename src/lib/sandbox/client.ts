@@ -29,6 +29,16 @@ function workspaceToken(userId: string, sessionId: string): string {
     .digest("hex");
 }
 
+/** HMAC proving this caller may act on <userId>'s SHARED store. A separate label
+ *  domain from `workspaceToken`: `sanitizeId` keeps only [A-Za-z0-9_-], so ":"
+ *  cannot occur in a session id and neither token can be replayed as the other.
+ *  Must match the controller's `sharedToken` exactly. */
+function sharedToken(userId: string): string {
+  return createHmac("sha256", CONTROLLER_SECRET)
+    .update(`${sanitizeId(userId)}|_shared:v1`)
+    .digest("hex");
+}
+
 /** Which level a controller failure deserves, from its status alone.
  *
  *  A 4xx is a condition the CALLER has to handle — a file that isn't there, a full
@@ -124,6 +134,12 @@ async function sendRequest(path: string, method: string, body: unknown, timeoutM
     // model guessing whether its files are still there.
     if (data.code === "SANDBOX_GONE") {
       throw new SandboxError(String(raw), op, false, 409);
+    }
+    // The shared folder is full. Actionable in exactly the way WORKSPACE_FULL is —
+    // the message names /shared and the tool that frees it — so it passes verbatim
+    // rather than collapsing to the generic string.
+    if (data.code === "SHARED_FULL") {
+      throw new SandboxError(String(raw), op, false, 413);
     }
     throw new SandboxError("Sandbox operation failed", op, res.status >= 500);
   }
@@ -280,6 +296,36 @@ export async function downloadFile(sessionId: string, filePath: string, userId?:
     // controller's raw internal status.
     const status = res.status >= 500 ? 502 : res.status;
     throw new SandboxError("File download failed", "download", res.status >= 500, status);
+  }
+  return res;
+}
+
+/** List the per-user shared store (`/shared`). Addressed by userId — the shared
+ *  store is not a session and `_global` stays refused as a session id. */
+export async function listSharedFiles(userId: string, path = ".", depth?: number, limit?: number): Promise<{ entries: FileEntry[]; truncated?: boolean; error?: string }> {
+  const params = new URLSearchParams({ path, token: sharedToken(userId) });
+  if (depth && depth > 1) params.set("depth", String(depth));
+  if (limit && limit > 1) params.set("limit", String(limit));
+  return request(`/users/${sanitizeId(userId)}/shared/files?${params}`, "GET");
+}
+
+/** Delete inside the per-user shared store. The ONLY way to free `/shared` once
+ *  it is over its cap — the workspace delete cannot reach it. */
+export async function deleteSharedFile(userId: string, filePath: string): Promise<{ ok: boolean }> {
+  const params = new URLSearchParams({ path: filePath, token: sharedToken(userId) });
+  return request(`/users/${sanitizeId(userId)}/shared/files?${params}`, "DELETE");
+}
+
+/** Stream one file out of the per-user shared store, for the download proxy. */
+export async function downloadSharedFile(userId: string, filePath: string): Promise<Response> {
+  const params = new URLSearchParams({ path: filePath, token: sharedToken(userId) });
+  const res = await sandboxFetch(`${CONTROLLER_URL}/users/${sanitizeId(userId)}/shared/download?${params}`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    log[failureLevel(res.status)]("shared download failed", { status: res.status });
+    throw new SandboxError("Download failed", "download", res.status >= 500, res.status);
   }
   return res;
 }

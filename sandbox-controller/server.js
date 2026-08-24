@@ -5,7 +5,7 @@ import { hostname } from "node:os";
 import Docker from "dockerode";
 import pg from "pg";
 import { sanitize } from "./path-safety.js";
-import { resolveOwnerDecision, safeEqual } from "./owner.js";
+import { resolveOwnerDecision, resolveSharedOwnerDecision, safeEqual } from "./owner.js";
 import { parseMultipart } from "./multipart.js";
 import { resolveNetworkMode, DEPLOYMENT_KNOBS } from "./sandbox-spec.js";
 import { validateMountPath } from "./mount-safety.js";
@@ -121,6 +121,12 @@ const DATA_ROOT = process.env.DATA_ROOT || "/data/storage";
 const MOUNT_ALLOW_ROOTS = (process.env.SANDBOX_MOUNT_ALLOW || "").split(":").filter(Boolean);
 const MAX_SESSIONS_PER_USER = posIntEnv("MAX_SESSIONS_PER_USER", 5);
 const MAX_WORKSPACE_MB = intEnv("MAX_WORKSPACE_MB", 500);
+// Budget for the per-user SHARED store (`/shared`), counted separately from any
+// one workspace because it is shared BY all of them and outlives each. It was
+// counted by nothing at all: the workspace quota measures a single session dir,
+// the GC listing skips `_global`, and the agent's own prompt points it here for
+// "files the user wants reusable everywhere". Set 0 to disable the check.
+const MAX_SHARED_MB = intEnv("MAX_SHARED_MB", 500);
 // Hard per-file size cap (RLIMIT_FSIZE), kernel-enforced. Defaults to the whole
 // workspace budget: no single file may exceed the total quota anyway, and this
 // stops a one-command disk bomb (`fallocate -l 100G`) that the poll-based quota
@@ -261,6 +267,15 @@ const quota = createQuotaTracker({
   ttlMs: QUOTA_CACHE_TTL_MS,
 });
 
+// The same tracker for the per-user shared store, keyed by userId: `/shared` is
+// per-user rather than per-session, so the userId IS the cache key (the tracker's
+// second argument is only that) and the measured directory is that user's.
+const sharedQuota = createQuotaTracker({
+  size: (userId) => workspace.sharedSize(userId),
+  limitBytes: MAX_SHARED_MB * 1024 * 1024,
+  ttlMs: QUOTA_CACHE_TTL_MS,
+});
+
 /** Resolve the owner of a file op: a platform-supplied userId backed by a valid
  *  HMAC token bound to userId+sessionId — required whether the session is live or
  *  stopped, and (for a live session) cross-checked against its pinned owner.
@@ -268,6 +283,12 @@ const quota = createQuotaTracker({
 async function resolveOwner(sessionId, fallbackUserId, token) {
   const session = await store.get(sessionId);
   return resolveOwnerDecision({ session, sessionId, fallbackUserId, token, secret: SECRET });
+}
+
+/** Resolve the owner of a SHARED-store op. No session lookup: the shared store has
+ *  no row and outlives every session, so the userId-bound HMAC is the whole check. */
+function resolveSharedOwner(userId, token) {
+  return resolveSharedOwnerDecision({ userId, token, secret: SECRET });
 }
 
 // --- On-disk workspace listing (for GC). Skips the per-user _global shared dir. ---
@@ -496,6 +517,18 @@ const server = createServer(async (req, res) => {
           code: "WORKSPACE_FULL",
         });
       }
+      // The shared store has its own budget: it is written by every one of this
+      // user's chats and reclaimed by nothing, so a workspace that is comfortably
+      // under its own cap says nothing about it. 413 with a distinct code, NOT 409
+      // — 409 on this path means "the sandbox died" and would have the platform
+      // rebuild the container instead of telling the agent to free space.
+      if (await sharedQuota.isOverQuota(session.userId, session.userId)) {
+        log("shared.exec_blocked", { sessionId: session.sessionId, userId: session.userId, limitMb: MAX_SHARED_MB }, "warn");
+        return jsonRes(res, 413, {
+          error: `The shared folder is full (max ${MAX_SHARED_MB}MB). Use the delete_path tool on a /shared/… path to remove files you no longer need there, then continue — running commands is paused until usage is back under the limit.`,
+          code: "SHARED_FULL",
+        });
+      }
       const { command, timeout } = await parseBody(req);
       if (!command) return jsonRes(res, 400, { error: "Missing command" });
       // Validate the caller timeout: a finite ms value, clamped to a sane band.
@@ -626,6 +659,62 @@ const server = createServer(async (req, res) => {
       // command for a few seconds. Drop the cached size so the next exec re-measures.
       quota.forget(r.sessionId);
       return jsonRes(res, 200, { ok: true });
+    }
+
+    // ── Per-user shared store (`/shared` in every sandbox) ──────────────────
+    // Addressed by userId, never by a session id: `POST /sessions` refuses
+    // `_global` so it can't be reached as a workspace, and that reservation stays.
+    // Its own HMAC domain too (owner.js `sharedToken`), so a workspace token can
+    // never be replayed here.
+    const sharedMatch = path.match(/^\/users\/([^/]+)\/shared\/files$/);
+    if (sharedMatch && (method === "GET" || method === "DELETE")) {
+      const r = resolveSharedOwner(decodeURIComponent(sharedMatch[1]), url.searchParams.get("token"));
+      if (r.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (r.forbidden) return jsonRes(res, 403, { error: "Invalid or missing shared token" });
+
+      if (method === "GET") {
+        const depth = Math.min(20, Math.max(1, parseInt(url.searchParams.get("depth") || "1", 10) || 1));
+        const limit = Math.min(20000, Math.max(1, parseInt(url.searchParams.get("limit") || "1000", 10) || 1000));
+        const { entries, truncated } = await workspace.sharedList(r.userId, url.searchParams.get("path") || ".", depth, limit);
+        return jsonRes(res, 200, { entries, truncated });
+      }
+
+      const filePath = url.searchParams.get("path");
+      if (!filePath) return jsonRes(res, 400, { error: "Missing path" });
+      try {
+        await workspace.sharedDelete(r.userId, filePath);
+      } catch (e) {
+        return jsonRes(res, 400, { error: e.message });
+      }
+      // Lift a shared-quota block immediately, exactly as the workspace delete does
+      // — otherwise the agent that just freed space is still refused for the cache TTL.
+      sharedQuota.forget(r.userId);
+      return jsonRes(res, 200, { ok: true });
+    }
+
+    // GET /users/:userId/shared/download?path=
+    const sharedDlMatch = path.match(/^\/users\/([^/]+)\/shared\/download$/);
+    if (method === "GET" && sharedDlMatch) {
+      const r = resolveSharedOwner(decodeURIComponent(sharedDlMatch[1]), url.searchParams.get("token"));
+      if (r.missing) return jsonRes(res, 400, { error: "Missing userId" });
+      if (r.forbidden) return jsonRes(res, 403, { error: "Invalid or missing shared token" });
+      const filePath = url.searchParams.get("path");
+      if (!filePath) return jsonRes(res, 400, { error: "Missing path" });
+      let stream;
+      try {
+        stream = await workspace.sharedRead(r.userId, filePath);
+      } catch {
+        return jsonRes(res, 404, { error: "File not found" });
+      }
+      const rawName = filePath.split("/").pop() || "download";
+      const safeName = rawName.replace(/[^\x20-\x7E]/g, "_");
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(rawName)}`,
+      });
+      stream.on("error", () => { if (!res.headersSent) jsonRes(res, 500, { error: "Read failed" }); else res.destroy(); });
+      stream.pipe(res);
+      return;
     }
 
     // GET /sessions/:id/download

@@ -1857,6 +1857,15 @@
   },
   "setup": {
     "back": "Back",
+    "blocked": {
+      "title": "Setup is locked on this deployment",
+      "subtitle": "This Capka is reachable from the network, so the first account cannot simply claim admin.",
+      "why": "Without a setup token, admin would go to whoever opens this page first — not necessarily you. Capka refuses that race instead of running it.",
+      "step1": "Set SETUP_TOKEN to a random value in your .env file.",
+      "step2": "Restart Capka so it picks up the change.",
+      "step3": "Open the setup link again and finish — the token is checked when the admin account is claimed.",
+      "hint": "Running scripts/up.sh generates the token for you and prints a ready-to-click link."
+    },
     "brand": {
       "wordmark": "Capka",
       "sub": "Connect a provider once. Then everyone can open a chat and get to work — in a browser or Telegram.",

@@ -320,9 +320,15 @@ services:
       # Public origin. Set it (recommended in prod) so it can't be spoofed via
       # proxy headers; unset → derived from X-Forwarded-*.
       - PUBLIC_URL=${PUBLIC_URL:-}
-      # Opt-in hardening for the first-run wizard — require this token to claim the
-      # admin account on a public deploy. Unset ⇒ frictionless setup.
+      # Required to claim the admin account on a deploy reachable beyond loopback;
+      # scripts/up.sh generates one there. Unset on a loopback-only deploy ⇒
+      # frictionless setup.
       - SETUP_TOKEN=${SETUP_TOKEN:-}
+      # The interface the port above is published on, passed in so the app can tell
+      # a networked deploy from a loopback one WITHOUT trusting a request header
+      # (`curl -H "Host: localhost"` would defeat that). Must stay in sync with the
+      # `ports:` mapping — same default.
+      - PLATFORM_BIND=${PLATFORM_BIND:-0.0.0.0}
       # Bounded daily database cleanup. Zero days disables retention for that
       # table; live tasks, suspended turns, and pending spend holds are preserved.
       - TASK_RETENTION_DAYS=${TASK_RETENTION_DAYS:-30}

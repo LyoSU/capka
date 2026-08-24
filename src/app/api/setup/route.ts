@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { providerConfigs, users } from "@/lib/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { getSetting, setSetting, isSetupComplete, getMasterKey } from "@/lib/settings";
+import { isPubliclyReachable } from "@/lib/setup";
 import { getAuth } from "@/lib/auth";
 import { PROVIDERS } from "@/lib/providers";
 
@@ -36,6 +37,17 @@ export async function POST(req: Request) {
   const { step } = body;
 
   if (step === "account") {
+    // Fail closed on a networked deploy: without a token, admin goes to whoever
+    // reaches this first, and PLATFORM_BIND defaults to 0.0.0.0 — so the race is
+    // the DEFAULT, not an exotic setup. Keyed on server config, never on request
+    // headers: a Host-based check is bypassed by `curl -H "Host: localhost"`.
+    if (!process.env.SETUP_TOKEN?.trim() && isPubliclyReachable()) {
+      return Response.json({
+        error: "This deployment is reachable from the network, so claiming the admin account requires a setup token. Set SETUP_TOKEN in .env and restart (scripts/up.sh generates one for you), then open the /setup link it prints.",
+        code: "SETUP_TOKEN_REQUIRED",
+      }, { status: 403 });
+    }
+
     // If the operator opted into the SETUP_TOKEN hardening, claiming admin
     // requires presenting it (checked here, on the admin-email claim; the later
     // "complete" step is bound to that email, so it inherits the gate). When no

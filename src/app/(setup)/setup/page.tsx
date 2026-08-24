@@ -5,10 +5,17 @@ import { SetupWizard } from "@/components/setup/setup-wizard";
 export const dynamic = "force-dynamic";
 
 export default async function SetupPage() {
-  const { complete, signedIn, step, setupTokenRequired } = await getSetupState();
+  const { complete, signedIn, step, setupTokenRequired, bootstrapBlocked } = await getSetupState();
   if (complete) {
     redirect("/chat");
   }
 
-  return <SetupWizard initialStep={step} signedIn={signedIn} setupTokenRequired={setupTokenRequired} />;
+  return (
+    <SetupWizard
+      initialStep={step}
+      signedIn={signedIn}
+      setupTokenRequired={setupTokenRequired}
+      bootstrapBlocked={bootstrapBlocked}
+    />
+  );
 }

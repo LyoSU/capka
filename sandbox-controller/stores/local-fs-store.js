@@ -93,8 +93,19 @@ export class LocalFsStore {
    *  against symlink-cycle recursion). Folder sync MUST refuse a truncated tree:
    *  treating the unseen files as absent would drive a destructive local delete.
    *  With `withHash`, each file entry also carries a content SHA-256 (`hash`). */
-  async list(userId, sessionId, relPath = ".", depth = 1, limit = 1000, { withHash = false } = {}) {
-    const base = this.#wsPath(userId, sessionId);
+  async list(userId, sessionId, relPath = ".", depth = 1, limit = 1000, opts = {}) {
+    return this.#listAt(this.#wsPath(userId, sessionId), relPath, depth, limit, opts);
+  }
+
+  /** Same listing for the per-user shared store (`/shared` in every sandbox). A
+   *  separate entry point rather than a session id: `_global` is refused by
+   *  `POST /sessions` on purpose, and routing it back through the session path
+   *  would re-open exactly what that reservation closes. */
+  async sharedList(userId, relPath = ".", depth = 1, limit = 1000, opts = {}) {
+    return this.#listAt(this.#sharedPath(userId), relPath, depth, limit, opts);
+  }
+
+  async #listAt(base, relPath = ".", depth = 1, limit = 1000, { withHash = false } = {}) {
     const deep = depth > 1; // multi-level walk → a dir left un-descended means incomplete
     const entries = [];
     let truncated = false;
@@ -132,7 +143,15 @@ export class LocalFsStore {
   }
 
   async read(userId, sessionId, relPath) {
-    const base = this.#wsPath(userId, sessionId);
+    return this.#readAt(this.#wsPath(userId, sessionId), relPath);
+  }
+
+  /** Read one file out of the per-user shared store. */
+  async sharedRead(userId, relPath) {
+    return this.#readAt(this.#sharedPath(userId), relPath);
+  }
+
+  async #readAt(base, relPath) {
     const full = await safeRealPath(base, relPath);
     const s = await stat(full).catch(() => null);
     if (!s || s.isDirectory()) throw Object.assign(new Error("File not found"), { code: "ENOENT" });
@@ -157,7 +176,17 @@ export class LocalFsStore {
   }
 
   async size(userId, sessionId) {
-    const dir = this.#wsPath(userId, sessionId);
+    return this.#sizeAt(this.#wsPath(userId, sessionId));
+  }
+
+  /** Bytes held by the per-user shared store. The workspace quota never counted
+   *  this directory, so `/shared` grew without any bound at all — the agent is
+   *  told in its prompt to put reusable files there, and nothing measured them. */
+  async sharedSize(userId) {
+    return this.#sizeAt(this.#sharedPath(userId));
+  }
+
+  async #sizeAt(dir) {
     // `du` (C, warm inode cache) is dramatically cheaper than recursing the tree
     // with readdir+stat in JS — a bloated workspace can hold tens of thousands of
     // files, and this runs on the exec quota gate AND the periodic sweep, so a JS
@@ -291,7 +320,18 @@ export class LocalFsStore {
    *  the disk-quota gate, which blocks the in-sandbox `rm`. The blast radius is
    *  bounded to whatever path the (already-authorized) caller names. */
   async delete(userId, sessionId, relPath) {
-    const base = this.#wsPath(userId, sessionId);
+    return this.#deleteAt(this.#wsPath(userId, sessionId), relPath);
+  }
+
+  /** Delete inside the per-user shared store. Required, not optional: the exec gate
+   *  refuses commands once `/shared` is over its cap, and `delete_path` reached only
+   *  `/workspace` — so a full shared store would have been a dead end for the agent
+   *  AND invisible to the user. */
+  async sharedDelete(userId, relPath) {
+    return this.#deleteAt(this.#sharedPath(userId), relPath);
+  }
+
+  async #deleteAt(base, relPath) {
     const full = await safeRealPath(base, relPath);
     // rm has no O_NOFOLLOW equivalent, so re-walk the ancestor chain right before
     // removing: a symlink swapped into an intermediate component since safeRealPath

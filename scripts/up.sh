@@ -79,9 +79,10 @@ echo "Ensuring secrets in $ENV_FILE ..."
 ensure_secret POSTGRES_PASSWORD
 ensure_secret CONTROLLER_SECRET
 ensure_secret CAPKA_MASTER_KEY
-# SETUP_TOKEN is intentionally NOT auto-generated: first-run is frictionless by
-# default. It's an opt-in hardening for public deploys — set it in .env yourself
-# to require it when claiming the admin account (see .env.example).
+# SETUP_TOKEN is generated further down, once the effective bind/domain is known:
+# it is required only for a deploy reachable beyond loopback, and there it is
+# generated automatically rather than left to the operator (see the block after
+# BIND is resolved). A loopback-only run still gets no token and no friction.
 
 # Pin the image tag so later runs pull the same version that was installed here
 # (the installer/updater passes the ref it checked out). Compose reads this from
@@ -152,6 +153,31 @@ BIND="$(env_value PLATFORM_BIND)"; BIND="${PLATFORM_BIND:-${BIND:-}}"
 SETUP_TOKEN_VALUE="$(env_value SETUP_TOKEN)"
 BIND_LOOPBACK=""
 
+# Bootstrap hardening decided by EXPOSURE, not left as an opt-in. On a deploy
+# reachable beyond loopback, whoever opens /setup first claims admin — and since
+# PLATFORM_BIND defaults to 0.0.0.0, that race is the DEFAULT, not an exotic
+# setup. Generating the token here costs the operator nothing: the link printed
+# below carries it in the URL FRAGMENT, so it never reaches a server log, and the
+# platform refuses the admin claim without it (isPubliclyReachable in lib/setup).
+if [ -z "$SETUP_TOKEN_VALUE" ]; then
+  case "$BIND" in
+    127.0.0.1|localhost|::1) NEED_SETUP_TOKEN="" ;;
+    # Empty too: compose maps ${PLATFORM_BIND:-0.0.0.0}, so unset means published.
+    *) NEED_SETUP_TOKEN=1 ;;
+  esac
+  # A domain or public origin is exposed even when the container binds loopback,
+  # because the proxy in front publishes it.
+  [ -n "$DOMAIN_EFFECTIVE" ] && NEED_SETUP_TOKEN=1
+  case "$PUBLIC_URL_EFFECTIVE" in
+    ""|http://localhost*|https://localhost*|http://127.0.0.1*|https://127.0.0.1*) : ;;
+    *) NEED_SETUP_TOKEN=1 ;;
+  esac
+  if [ -n "$NEED_SETUP_TOKEN" ]; then
+    ensure_secret SETUP_TOKEN
+    SETUP_TOKEN_VALUE="$(env_value SETUP_TOKEN)"
+  fi
+fi
+
 # Compose file set: the TLS overlay is layered in only when a DOMAIN is configured.
 COMPOSE="-f docker-compose.yml"
 if [ -n "$DOMAIN_EFFECTIVE" ]; then
@@ -207,7 +233,7 @@ else
   if [ -z "$PUBLIC_URL_EFFECTIVE" ]; then
     echo "  NOTE: plain HTTP, no domain. For turnkey HTTPS re-run with DOMAIN=your.domain,"
     echo "        or front it with your own TLS proxy and set PUBLIC_URL."
-    echo "        Exposing /setup over plain HTTP? Set SETUP_TOKEN in $ENV_FILE first (see .env.example)."
+    echo "        /setup is protected by a generated SETUP_TOKEN — use the link below, it carries it."
   fi
 fi
 echo

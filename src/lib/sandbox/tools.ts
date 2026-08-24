@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { execCommand, deleteFile, markBusy } from "./client";
+import { execCommand, deleteFile, deleteSharedFile, markBusy } from "./client";
 import { clampOutput, MAX_TOOL_OUTPUT_CHARS, DEFAULT_READ_LINES } from "@/lib/tool-output";
 import { nonNegInt, posInt } from "@/lib/config/env";
 
@@ -462,17 +462,26 @@ print('OK')`;
 
     delete_path: tool({
       description:
-        "Delete a file or an entire folder (recursively) from the workspace. Use this to remove " +
-        "files you no longer need, and especially to FREE SPACE when the workspace is full — it is " +
-        "the only way to delete then, because `rm` via execute_bash is paused while storage is over " +
-        "the limit. Deletion is permanent.",
+        "Delete a file or an entire folder (recursively) from the workspace, or from the shared " +
+        "folder by passing a /shared/… path. Use this to remove files you no longer need, and " +
+        "especially to FREE SPACE when storage is full — it is the only way to delete then, because " +
+        "`rm` via execute_bash is paused while storage is over the limit. Deletion is permanent.",
       inputSchema: z.object({
-        path: z.string().describe("Path relative to /workspace — a file or a folder"),
+        path: z.string().describe("A file or folder: relative to /workspace, or an absolute /shared/… path"),
       }),
       execute: async ({ path }) => {
+        // A `/shared/…` path goes to the per-user shared store, which is a different
+        // directory with its own quota — and the ONLY way to free it. Without this
+        // branch the shared-full block named a tool that could not reach the files
+        // it was telling the agent to delete: a stop with no exit.
+        const shared = /^\/?shared(\/|$)/.test(path);
         await ensureSession();
         try {
-          await deleteFile(sessionKey, path, userId);
+          if (shared) {
+            await deleteSharedFile(userId, path.replace(/^\/?shared\/?/, "") || ".");
+          } else {
+            await deleteFile(sessionKey, path, userId);
+          }
           return { success: true, path };
         } catch (e) {
           return { success: false, error: e instanceof Error ? e.message : "Delete failed" };

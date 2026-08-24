@@ -8,6 +8,7 @@ import { isShared, generateShareToken } from "@/lib/chat/sharing";
 import { workspaceSessionKey } from "@/lib/sandbox/workspace";
 import { listFiles, copyWorkspace } from "@/lib/sandbox/client";
 import { isLiveProject } from "@/lib/projects/live";
+import { deleteChat } from "@/lib/chat/teardown";
 import { THINK_AMOUNTS } from "@/lib/models/thinking";
 import { log } from "@/lib/log";
 
@@ -113,8 +114,10 @@ export const PATCH = apiHandler(async (req, { params }) => {
 export const DELETE = apiHandler(async (_req, { params }) => {
   const { userId } = await requireRole("admin", "user");
   const { id } = await params;
-  await requireOwned(chats, id, userId, "Chat");
+  const existing = await requireOwned(chats, id, userId, "Chat");
 
-  await db.delete(chats).where(and(eq(chats.id, id), eq(chats.userId, userId)));
+  // Through the owning module, not a bare row delete: a chat with no project also
+  // owns a sandbox session and folder attachments that no FK reaches.
+  await deleteChat({ id, userId, projectId: (existing.projectId as string | null) ?? null });
   return new Response(null, { status: 204 });
 });

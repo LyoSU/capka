@@ -6,15 +6,24 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+> **⚠ Breaking — a deploy reachable beyond loopback now refuses the first-run admin claim unless `SETUP_TOKEN` is set.** `scripts/up.sh` generates one there and prints a `#token=…` setup link, so the turnkey path is unchanged; a hand-rolled `docker compose up` on a public address must set `SETUP_TOKEN` and restart before finishing setup.
+
 ### Changed
 
 - A tool result that carries one JSON value as text now goes through the same shape-driven rendering as typed output (record lists, tables, field grids), descending through metadata wrappers like `{success, data: {…}}`; JSON that matches no shape at least renders re-indented in monospace instead of as a single line.
 - `SANDBOX_PIDS_LIMIT` now defaults to 1024 (was 256): under gVisor the budget is a high-water mark that is never reclaimed, so a working session exhausted it and the sandbox was killed outright. Deployments that pinned 256 should raise it.
+- Provider model-listing failures no longer put the upstream response body in the error message.
 
 ### Fixed
 
 - A sandbox command that exits non-zero now says so in the step panel ("Command exited with code N") — it previously rendered indistinguishably from a successful one.
 - A sandbox killed under a running command no longer returns the container runtime's internals as that command's output: the session is invalidated and rebuilt, and the agent is told the sandbox restarted and that `/workspace` survived.
+- Deleting a chat now tears down the sandbox session and folder attachments it owned; `attached_folders` rows carry a plain session key with no foreign key, so nothing ever reclaimed them. A chat inside a project shares the project's workspace and is left untouched.
+- The provider model-listing cache is bounded at 100 entries: expired entries were only skipped on read, never evicted, so listing distinct `baseUrl` values grew platform memory for the life of the process.
+
+### Security
+
+- The first-run admin claim is fail-closed on a networked deploy (see the breaking note above). Exposure is decided from `PLATFORM_BIND` and `PUBLIC_URL`, never from a request header — a `Host: localhost` header cannot unlock it.
 
 ## [0.34.0] - 2026-08-23
 
