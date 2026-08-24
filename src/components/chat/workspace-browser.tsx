@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
-  ArrowDownUp, ChevronRight, Cloud, Check, Download, FileWarning, Folder, LayoutGrid, List, Loader2, RefreshCw, Trash2, Upload, X,
+  ArrowDownUp, ChevronLeft, ChevronRight, Cloud, Check, Download, FileWarning, Folder, FolderSymlink, LayoutGrid, List, Loader2, RefreshCw, Trash2, Upload, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -143,11 +143,37 @@ export function WorkspaceBrowser({
   const [grouped, setGrouped] = usePref<"0" | "1">("capka.files.group", "0");
 
   const query = targetQuery(target);
-  // Build a PreviewFile addressed at this browser's target (chat or project).
+
+  // Which store this browser is showing. The per-user SHARED folder (`/shared` in
+  // every sandbox) is not a workspace addressed by an id — the controller reserves
+  // `_global` as a session id precisely so it can never be reached as one — so it
+  // has its own routes and is entered as a scope rather than as a target.
+  //
+  // It needs to be here at all because the agent's prompt invites reusable files
+  // into `/shared` while nothing on this side could list, download or delete them.
+  const [scope, setScope] = useState<"workspace" | "shared">("workspace");
+  const shared = scope === "shared";
+  // Clear the listing too: the two stores share one list, and leaving the previous
+  // one on screen under the new title would label another store's files as these.
+  // Emptying it also brings back the skeletons, so the swap reads as a load.
+  const enterScope = (next: "workspace" | "shared") => {
+    setScope(next);
+    setPath(".");
+    setEntries([]);
+    setError(null);
+  };
+  const filesApi = shared ? "/api/sandbox/shared/files" : "/api/sandbox/files";
+  // The shared store takes no id: the signed-in user IS the address.
+  const scopeQuery = shared ? "" : `${query}&`;
+
+  // Build a PreviewFile addressed at this browser's target (chat or project), or at
+  // the shared store.
   const fileFor = useCallback(
     (p: string, name: string): PreviewFile =>
-      target.kind === "chat" ? { path: p, name, chatId: target.chatId } : { path: p, name, projectId: target.projectId },
-    [target],
+      shared
+        ? { path: p, name, shared: true }
+        : target.kind === "chat" ? { path: p, name, chatId: target.chatId } : { path: p, name, projectId: target.projectId },
+    [target, shared],
   );
 
   // onLoaded via a ref so it isn't a fetchFiles dependency (an unmemoized host
@@ -165,12 +191,14 @@ export function WorkspaceBrowser({
     inFlight.current = ac;
     if (!silent) setLoading(true);
     try {
-      const res = await fetch(`/api/sandbox/files?${query}&path=${encodeURIComponent(path)}`, { signal: ac.signal });
+      const res = await fetch(`${filesApi}?${scopeQuery}path=${encodeURIComponent(path)}`, { signal: ac.signal });
       const data = await res.json();
       if (ac.signal.aborted) return; // superseded — don't clobber with stale entries
       setError(data.error ?? null);
       setEntries(data.entries ?? []);
-      if (path === ".") onLoadedRef.current?.(data.entries ?? []); // keep the host's count fresh
+      // Only the workspace root feeds the host's file count — reporting the shared
+      // listing there would label another store's files as this chat's.
+      if (path === "." && !shared) onLoadedRef.current?.(data.entries ?? []);
     } catch (e) {
       if ((e as Error)?.name === "AbortError") return;
       if (!silent) setError(t("loadError"));
@@ -178,7 +206,7 @@ export function WorkspaceBrowser({
       if (inFlight.current === ac) inFlight.current = null;
       if (!silent) setLoading(false);
     }
-  }, [query, path, t]);
+  }, [filesApi, scopeQuery, shared, path, t]);
 
   // When the host seeded the root listing (initialEntries), skip BOTH first fetches
   // exactly once so the same view isn't re-fetched on mount — the seed is consumed
@@ -269,7 +297,10 @@ export function WorkspaceBrowser({
     return <Cloud className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-label={t("statusPending")} />;
   };
 
-  const downloadUrl = (p: string) => `/api/sandbox/files/download?${query}&path=${encodeURIComponent(p)}`;
+  const downloadUrl = (p: string) =>
+    shared
+      ? `/api/sandbox/shared/download?path=${encodeURIComponent(p)}`
+      : `/api/sandbox/files/download?${query}&path=${encodeURIComponent(p)}`;
   // Download EVERYTHING via the controller archive (a complete tar.gz streamed from
   // the workspace root), not a zip of the paths the client happened to enumerate.
   // No `download` attribute: the server names the file after the project/chat and
@@ -284,6 +315,9 @@ export function WorkspaceBrowser({
   };
 
   const upload = async (fileList: FileList | File[]) => {
+    // The shared store has no upload route on purpose: the agent puts files there,
+    // and a second write path would need its own quota accounting at the door.
+    if (shared) return;
     setUploading(true);
     try {
       for (const file of Array.from(fileList)) {
@@ -307,7 +341,7 @@ export function WorkspaceBrowser({
     if (!pendingDelete) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/sandbox/files?${query}&path=${encodeURIComponent(pendingDelete.path)}`, { method: "DELETE" });
+      const res = await fetch(`${filesApi}?${scopeQuery}path=${encodeURIComponent(pendingDelete.path)}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) toast.error(t("deleteFailed"));
       else toast.success(t("deleted"));
@@ -534,7 +568,7 @@ export function WorkspaceBrowser({
       <div className="flex items-center gap-2 border-b border-border bg-muted/20 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:pt-3">
         <h3 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold tracking-tight">
           <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="truncate">{t("title")}</span>
+          <span className="truncate">{shared ? t("sharedTitle") : t("title")}</span>
           {entryCount > 0 && (
             <span className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground">{entryCount}</span>
           )}
@@ -547,14 +581,14 @@ export function WorkspaceBrowser({
             `peer-focus-visible` puts the ring on the visible box.
             The icon becomes a spinner while uploading rather than pulsing: fading
             an icon in and out reads as "disabled", not as "in progress". */}
-        <input
+        {!shared && <input
           id={uploadId}
           type="file"
           multiple
           className="peer sr-only"
           onChange={(e) => e.target.files && upload(e.target.files)}
-        />
-        <label
+        />}
+        {!shared && <label
           htmlFor={uploadId}
           title={t("upload")}
           className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring/50"
@@ -565,8 +599,8 @@ export function WorkspaceBrowser({
             <Upload className="h-3.5 w-3.5" aria-hidden="true" />
           )}
           <span className="sr-only">{t("upload")}</span>
-        </label>
-        {canDownloadAll(folders.length, fileCount) && (
+        </label>}
+        {!shared && canDownloadAll(folders.length, fileCount) && (
           <button onClick={downloadAll} title={t("downloadAll")} aria-label={t("downloadAll")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
             <Download className="h-3.5 w-3.5" />
           </button>
@@ -624,6 +658,34 @@ export function WorkspaceBrowser({
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
+        {/* The way in and the way out. A row rather than a header toggle: the shared
+            folder IS a folder in the sandbox (`/shared`), so it reads as one here
+            too, and the panel keeps a single title. */}
+        {!shared && path === "." && (
+          <button
+            type="button"
+            onClick={() => enterScope("shared")}
+            className="mx-1 mb-1 flex w-[calc(100%-0.5rem)] items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-hover"
+          >
+            <FolderSymlink className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm">{t("sharedTitle")}</span>
+              <span className="block truncate text-[11px] text-muted-foreground">{t("sharedHint")}</span>
+            </span>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />
+          </button>
+        )}
+        {shared && (
+          <button
+            type="button"
+            onClick={() => enterScope("workspace")}
+            className="mx-1 mb-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+          >
+            <ChevronLeft className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+            <span className="truncate">{t("backToFiles")}</span>
+          </button>
+        )}
+
         {segments.length > 0 && (
           // The whole trail, not just "back": inside a nested folder the user needs
           // to see where they are and jump out in one step. A named <nav>, so the

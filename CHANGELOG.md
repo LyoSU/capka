@@ -8,6 +8,10 @@ All notable changes to Capka are documented here. Format follows
 
 > **⚠ Breaking — a deploy reachable beyond loopback now refuses the first-run admin claim unless `SETUP_TOKEN` is set.** `scripts/up.sh` generates one there and prints a `#token=…` setup link, so the turnkey path is unchanged; a hand-rolled `docker compose up` on a public address must set `SETUP_TOKEN` and restart before finishing setup.
 
+### Added
+
+- The per-user shared folder (`/shared`) is browsable from the chat file panel — list, preview, download, delete. It was previously reachable only by the agent, which its own prompt invites to store reusable files there.
+
 ### Changed
 
 - A tool result that carries one JSON value as text now goes through the same shape-driven rendering as typed output (record lists, tables, field grids), descending through metadata wrappers like `{success, data: {…}}`; JSON that matches no shape at least renders re-indented in monospace instead of as a single line.

@@ -28,7 +28,7 @@ import { copyToClipboard } from "@/lib/clipboard";
  *  workspace via `chatId`, or a project's shared one via `projectId` — exactly one)
  *  locate it on the controller. Chat surfaces pass `chatId` as before; the project
  *  hub's file browser passes `projectId`. */
-export type PreviewFile = { path: string; name: string; chatId?: string; projectId?: string };
+export type PreviewFile = { path: string; name: string; chatId?: string; projectId?: string; shared?: boolean };
 
 /** The workspace-address query fragment for a file (`projectId=…` or `chatId=…`). */
 function fileQuery(f: PreviewFile): string {
@@ -42,10 +42,14 @@ function fileQuery(f: PreviewFile): string {
 const MAX_TEXT_BYTES = 1024 * 1024;
 
 function inlineUrl(f: PreviewFile) {
-  return `/api/sandbox/files/download?${fileQuery(f)}&path=${encodeURIComponent(f.path)}&inline=1`;
+  return f.shared
+    ? `/api/sandbox/shared/download?path=${encodeURIComponent(f.path)}&inline=1`
+    : `/api/sandbox/files/download?${fileQuery(f)}&path=${encodeURIComponent(f.path)}&inline=1`;
 }
 function downloadUrl(f: PreviewFile) {
-  return `/api/sandbox/files/download?${fileQuery(f)}&path=${encodeURIComponent(f.path)}`;
+  return f.shared
+    ? `/api/sandbox/shared/download?path=${encodeURIComponent(f.path)}`
+    : `/api/sandbox/files/download?${fileQuery(f)}&path=${encodeURIComponent(f.path)}`;
 }
 
 // One shared, cached status probe for a workspace file — the single source of
