@@ -10,6 +10,15 @@ All notable changes to Capka are documented here. Format follows
 
 - The Telegram marker next to a message's timestamp now explains itself on hover ("Sent via Telegram"), like the other icon-only controls.
 
+### Changed
+
+- Telegram citations now ride native Bot API footnotes: [N] markers render as superscript references with a footnote section, instead of a quoted "Sources:" list (kept as the fallback when a marker only appears inside code).
+
+### Fixed
+
+- Web citation chips render as styled pills again; the transcript's link renderer dropped their attributes, so a `[1, 9]` group read as a bare blue "19".
+- Citation chips no longer stay inert until a page reload on a freshly finished message that cites a previous turn's sources.
+
 ## [0.36.0] - 2026-08-28
 
 ### Added

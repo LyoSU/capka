@@ -79,7 +79,18 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
   }, [chatId, citeKey]);
 
   return (
+    // The key is load-bearing: Streamdown's own memo comparator checks
+    // `children`, `plugins`, `className`… but NOT `remarkPlugins` or
+    // `components`. A message whose citation sources resolve only at finalize
+    // (cross-turn [N] markers arrive via metadata.citedSources) hands Streamdown
+    // a new citations plugin while the text is already final — the comparator
+    // sees identical children and skips the re-render, so the markers stayed
+    // dead until a full page reload. Remounting is the only way past a memo
+    // that doesn't compare the prop; the source NUMBERS identify the set
+    // (branch-unique), and isStreaming covers the workspace-chip components
+    // flipping to existence-verified at the same silent moment.
     <Streamdown
+      key={`${sources?.map((s) => s.n).join(",") ?? ""}${isStreaming ? ":s" : ""}`}
       parseIncompleteMarkdown={isStreaming}
       controls={STREAMDOWN_CONTROLS}
       plugins={plugins}

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GrammyError, HttpError } from "grammy";
-import { composeConfirmPreview, composeDraft, composeError, composeFinal, composeSources, draftIdFrom, makeDeliverySink, refusedDelivery, taskForDraft } from "../delivery";
+import { composeConfirmPreview, composeDraft, composeError, composeFinal, composeSources, draftIdFrom, makeDeliverySink, refusedDelivery, taskForDraft, weaveCitations } from "../delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 
 const uk = getTranslator("uk", "telegram");
@@ -71,6 +71,57 @@ describe("composeSources", () => {
     // Plain fallback never hides anything behind markup it can't express.
     expect(plain).not.toContain("<details>");
     expect(plain).toContain("[6] T6 — https://s.example/6");
+  });
+});
+
+describe("weaveCitations", () => {
+  const S = [
+    { n: 1, title: "A", url: "https://a.example" },
+    { n: 2, title: "B", url: "https://b.example" },
+    { n: 3, title: "C", url: "https://c.example" },
+  ];
+
+  it("rewrites [N] and comma groups into native footnote refs with definitions", () => {
+    const { markdown, plain } = weaveCitations("Kyiv [1] wins [2, 3].", S, uk);
+    expect(markdown).toContain("Kyiv [^1] wins [^2][^3].");
+    expect(markdown).toContain("[^1]: A — https://a.example");
+    expect(markdown).toContain("[^3]: C — https://c.example");
+    expect(markdown).not.toContain("Джерела:"); // the native section replaces the quoted block
+    // The plain fallback has no footnotes — literal body + the flat lines.
+    expect(plain).toContain("Kyiv [1] wins [2, 3].");
+    expect(plain).toContain("Джерела:");
+    expect(plain).toContain("[1] A — https://a.example");
+  });
+
+  it("leaves an unknown number and a mixed group literal — visibly inert, like the web", () => {
+    const one = [S[0]];
+    const { markdown } = weaveCitations("ok [1] bogus [9] mixed [1, 9]", one, uk);
+    expect(markdown).toContain("ok [^1]");
+    expect(markdown).toContain("bogus [9]");
+    expect(markdown).toContain("mixed [1, 9]");
+    expect(markdown).toContain("[^1]: A — https://a.example");
+  });
+
+  it("never rewrites inside code, and falls back to the quoted block when a source ends up unreferenced", () => {
+    // The only [1] lives in code — weaving it would corrupt the snippet, and an
+    // unreferenced definition is dropped by clients, silently losing the source.
+    const { markdown } = weaveCitations("run `x [1]` then check ```\narr[1]\n```", [S[0]], uk);
+    expect(markdown).toContain("`x [1]`");
+    expect(markdown).not.toContain("[^1]");
+    expect(markdown).toContain("> Джерела:");
+    expect(markdown).toContain("[1] A — https://a.example");
+  });
+
+  it("keeps a markdown link label and a line-start reference definition intact", () => {
+    const { markdown } = weaveCitations("see [1](https://x.example)\n[1]: https://y.example", [S[0]], uk);
+    expect(markdown).toContain("[1](https://x.example)");
+    expect(markdown).toContain("\n[1]: https://y.example");
+    expect(markdown).toContain("> Джерела:"); // nothing woven → fallback block
+  });
+
+  it("weaves a [N]: mid-sentence (prose colon, not a reference definition)", () => {
+    const { markdown } = weaveCitations("Gemma 4 від Google [1]: модельки", [S[0]], uk);
+    expect(markdown).toContain("Google [^1]: модельки");
   });
 });
 
@@ -376,16 +427,17 @@ describe("TelegramSink streaming", () => {
     expect(Buffer.byteLength(rows[0][0].callback_data, "utf8")).toBeLessThanOrEqual(64);
   });
 
-  it("keeps the cited-sources block on a stopped partial", async () => {
+  it("keeps woven citations on a stopped partial", async () => {
     const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 79, locale: "uk" });
     await sink.finish({
       status: "cancelled", text: "Політика змінилась [1]", toolCount: 1, elapsedMs: 50,
       sources: [{ n: 1, title: "T", url: "https://t.example" }],
     });
     const md = api.sendRichMessage.mock.calls[0][1].markdown;
-    expect(md).toContain("[1] T — https://t.example");
-    // Sources sit under the text they annotate, above the stopped footer.
-    expect(md.indexOf("Джерела:")).toBeLessThan(md.indexOf("Зупинено"));
+    expect(md).toContain("Політика змінилась [^1]");
+    expect(md).toContain("[^1]: T — https://t.example");
+    // Definitions sit under the text they annotate, above the stopped footer.
+    expect(md.indexOf("[^1]:")).toBeLessThan(md.indexOf("Зупинено"));
   });
 
   it("registers the streaming draft for the stop button and clears it on finish", async () => {

@@ -231,10 +231,60 @@ export function composeFinal(
   return body;
 }
 
+// Source titles come from arbitrary web pages — one plain line, no Markdown
+// syntax left to hijack the row it lands in.
+function flatTitle(title: string): string {
+  return title.replace(/\s+/g, " ").replace(/[[\]()`*_~>#|^]/g, "").slice(0, 120).trim();
+}
+
+/** Rich-Markdown citations (Bot API 10.3 native footnotes): every resolvable
+ *  `[N]` marker in the body becomes a `[^N]` reference and the cited sources are
+ *  appended as `[^N]: Title — URL` definitions — Telegram renders superscript
+ *  links plus its own footnote section instead of naked bracket numbers over a
+ *  quoted URL list. Markers inside code (fenced or inline) stay literal,
+ *  mirroring the web chip rule (mdast text nodes only), and a group with an
+ *  unknown number stays literal entirely. If any cited source ends up with NO
+ *  woven reference (its marker lives only inside code), the whole message falls
+ *  back to the composeSources block — clients drop definitions nothing
+ *  references, which would silently lose the source. The plain fallback always
+ *  keeps the literal [N] body plus the flat lines. */
+export function weaveCitations(
+  body: string,
+  sources: { n: number; title: string; url: string }[],
+  t: Translator,
+): { markdown: string; plain: string } {
+  const known = new Set(sources.map((s) => s.n));
+  const woven = new Set<number>();
+  // Even indices are prose, odd are the captured code spans left untouched.
+  const segments = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/);
+  for (let i = 0; i < segments.length; i += 2) {
+    // Same marker shape as the web's CITE_RE (lib/chat/citations.ts); the web
+    // rewrites mdast text nodes so link labels are already link NODES there —
+    // on a raw string the `](`-label and line-start `]:`-definition forms must
+    // be excluded by hand or the rewrite corrupts them.
+    segments[i] = segments[i].replace(/\[(\d{1,4}(?:\s*,\s*\d{1,4})*)\]/g, (m, group: string, offset: number, whole: string) => {
+      const next = whole[offset + m.length];
+      if (next === "(") return m;
+      if (next === ":" && (offset === 0 || whole[offset - 1] === "\n")) return m;
+      const ns = group.split(",").map((p) => parseInt(p, 10));
+      if (!ns.every((n) => known.has(n))) return m; // mixed/unknown group stays literal
+      for (const n of ns) woven.add(n);
+      return ns.map((n) => `[^${n}]`).join("");
+    });
+  }
+  const flat = composeSources(sources, t);
+  const plain = `${body}\n\n${flat.plain}`;
+  if (!sources.every((s) => woven.has(s.n))) return { markdown: `${body}\n\n${flat.markdown}`, plain };
+  const defs = sources
+    .map((s) => `[^${s.n}]: ${flatTitle(s.title) ? `${flatTitle(s.title)} — ` : ""}${s.url}`)
+    .join("\n");
+  return { markdown: `${segments.join("")}\n\n${defs}`, plain };
+}
+
 /** The cited-sources footer: `[N] Title — URL` per line, in number order — the
- *  Telegram twin of the web reply's "Sources" list, and what turns the answer's
- *  naked [N] markers into resolvable footnotes. Titles come from arbitrary web
- *  pages, so they are flattened to one plain line (no newlines, links, or
+ *  fallback weaveCitations uses when native footnotes can't carry the sources,
+ *  and the shape the plain-text path always gets. Titles are flattened to one
+ *  plain line (no newlines, links, or
  *  emphasis) before touching Markdown; the URL is sent bare and lets the client
  *  autolink it, which leaves no caption to spoof. A short list is a quoted
  *  block; past five sources it collapses behind <details> (the Bot API renders
@@ -244,10 +294,8 @@ export function composeSources(
   sources: { n: number; title: string; url: string }[],
   t: Translator,
 ): { markdown: string; plain: string } {
-  const line = (s: { n: number; title: string; url: string }) => {
-    const title = s.title.replace(/\s+/g, " ").replace(/[[\]()`*_~>#|]/g, "").slice(0, 120).trim();
-    return `[${s.n}] ${title ? `${title} — ` : ""}${s.url}`;
-  };
+  const line = (s: { n: number; title: string; url: string }) =>
+    `[${s.n}] ${flatTitle(s.title) ? `${flatTitle(s.title)} — ` : ""}${s.url}`;
   const lines = sources.map(line);
   const plain = [t("sourcesHeader"), ...lines].join("\n");
   const markdown = sources.length > 5
@@ -523,12 +571,10 @@ class TelegramSink implements DeliverySink {
       // Silent — the user just acted; a notification would echo their own tap.
       const partial = result.text.trim();
       if (partial) {
-        // A stopped partial can already carry [N] markers — keep its sources
-        // block, exactly like a completed reply, so the markers stay resolvable.
-        const src = result.sources?.length ? composeSources(result.sources, this.t) : null;
-        const md = src ? `${partial}\n\n${src.markdown}` : partial;
-        const pl = src ? `${partial}\n\n${src.plain}` : partial;
-        await this.sendRich(`${md}\n\n> ${this.t("stopped")}`, `${pl}\n\n${this.t("stopped")}`, true);
+        // A stopped partial can already carry [N] markers — weave its citations
+        // exactly like a completed reply, so the markers stay resolvable.
+        const src = result.sources?.length ? weaveCitations(partial, result.sources, this.t) : null;
+        await this.sendRich(`${src ? src.markdown : partial}\n\n> ${this.t("stopped")}`, `${src ? src.plain : partial}\n\n${this.t("stopped")}`, true);
       }
       return;
     }
@@ -547,13 +593,13 @@ class TelegramSink implements DeliverySink {
     }
 
     const body = result.text.trim();
-    // The cited-sources block sits between the answer and the tool-log footer —
-    // sources only make sense under text that cites them. The markdown side is a
-    // quoted block; the plain fallback carries the SAME lines unquoted, so a
-    // Markdown rejection never strips where the [N] markers point.
-    const src = body && result.sources?.length ? composeSources(result.sources, this.t) : null;
-    const mdBody = src ? `${body}\n\n${src.markdown}` : body;
-    const plainBody = src ? `${body}\n\n${src.plain}` : body;
+    // Citations ride native footnotes ([^N] refs + definitions, see
+    // weaveCitations); the plain fallback carries the literal [N] body plus the
+    // flat source lines, so a Markdown rejection never strips where the markers
+    // point.
+    const src = body && result.sources?.length ? weaveCitations(body, result.sources, this.t) : null;
+    const mdBody = src ? src.markdown : body;
+    const plainBody = src ? src.plain : body;
     let markdown: string | null;
     if (body) {
       // The whole answer, one message — closed with the tool-log footer.

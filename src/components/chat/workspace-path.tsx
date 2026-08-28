@@ -112,13 +112,17 @@ function WorkspacePathChip({ rel, chatId, live }: { rel: string; chatId: string;
  */
 export function makeWorkspaceComponents(chatId: string, live?: boolean) {
   return {
-    // Only href + children are read; the `node` prop react-markdown also passes
-    // is intentionally ignored so it never lands on the DOM element.
-    a({ href, children }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+    // The `node` prop react-markdown also passes is destructured away so it
+    // never lands on the DOM element; everything else flows through — the
+    // citation chips (lib/chat/citations.ts) are anchors that carry
+    // `data-citation` + `title`, and dropping those here rendered them as bare
+    // blue numbers instead of the styled pills globals.css targets.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructured only to keep react-markdown's AST handle off the DOM element
+    a({ href, children, node: _node, ...rest }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
       const rel = typeof href === "string" ? workspaceRelFromHref(href) : null;
       if (rel) return <WorkspacePathChip rel={rel} chatId={chatId} live={live} />;
       return (
-        <a href={href} target="_blank" rel="noopener noreferrer nofollow">
+        <a href={href} target="_blank" rel="noopener noreferrer nofollow" {...rest}>
           {children}
         </a>
       );
