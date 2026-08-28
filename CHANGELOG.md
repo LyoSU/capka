@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-08-28
+
 > **⚠ Breaking — a deploy reachable beyond loopback now refuses the first-run admin claim unless `SETUP_TOKEN` is set.** `scripts/up.sh` generates one there and prints a `#token=…` setup link, so the turnkey path is unchanged; a hand-rolled `docker compose up` on a public address must set `SETUP_TOKEN` and restart before finishing setup.
 
 ### Added
