@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Check, Undo2, AlertTriangle, SlidersHorizontal, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight, FilePen, FolderPlus } from "lucide-react";
+import { Check, Undo2, AlertTriangle, SlidersHorizontal, ShieldQuestion, ExternalLink, Stethoscope, Plug, Trash2, Power, Loader2, RefreshCw, ArrowUpRight, FilePen, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
 import type { StepTranslator } from "@/lib/chat/steps";
@@ -362,13 +362,30 @@ type Preview = { title: string; before: string; after: string; impact?: string; 
  * blocked meanwhile (see useBackgroundChat.awaitingApproval), so this is the one
  * next action — no "press confirm" prose, no stale card.
  */
+/** The human label of a gated (governance-"ask") tool call: a connector's tool
+ *  reads "server: tool", a skill reads as its own name — mirrors the label the
+ *  runner builds for the Telegram side of the same card. */
+function gatedToolLabel(toolName: string, input: unknown): string {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName);
+  if (mcp) return `${mcp[1]}: ${mcp[2]}`;
+  if (toolName === "skill" && input && typeof input === "object" && typeof (input as { name?: unknown }).name === "string") {
+    return (input as { name: string }).name;
+  }
+  return toolName;
+}
+
 export function ApprovalCard({
-  messageId, toolCallId, input, state, approval, output, onSend,
+  messageId, toolCallId, toolName, input, state, approval, output, onSend,
 }: {
-  messageId: string; toolCallId: string; input: unknown; state: string;
+  messageId: string; toolCallId: string; toolName: string; input: unknown; state: string;
   approval?: { id: string; approved?: boolean; reason?: string }; output?: unknown; onSend?: (text: string) => void;
 }) {
   const t = useTranslations("chat.manage");
+  const ta = useTranslations("chat.approval");
+  // A gated ordinary tool (connector/skill under a governance "ask") has no staged
+  // change to preview — the card asks about the CALL: what would run, with what
+  // arguments. `manage` keeps its rich before→after preview below.
+  const gated = toolName !== "manage";
   const awaiting = state === "approval-requested";
   const [preview, setPreview] = useState<Preview | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -376,7 +393,7 @@ export function ApprovalCard({
   // Fetch the preview only while awaiting — a resolved card shows the applied
   // result's own summary instead, so we never re-probe a connector after the fact.
   useEffect(() => {
-    if (!awaiting) return;
+    if (!awaiting || gated) return;
     let alive = true;
     (async () => {
       try {
@@ -393,7 +410,7 @@ export function ApprovalCard({
       } catch { /* fall back to the header alone */ }
     })();
     return () => { alive = false; };
-  }, [awaiting, input, messageId, toolCallId]);
+  }, [awaiting, gated, input, messageId, toolCallId]);
 
   const decide = async (approved: boolean) => {
     if (submitting) return;
@@ -431,11 +448,35 @@ export function ApprovalCard({
   return (
     <CardShell>
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-        {t("confirmTitle")}
+        {gated ? <ShieldQuestion className="h-4 w-4 text-muted-foreground" /> : <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />}
+        {gated ? ta("title") : t("confirmTitle")}
       </div>
 
-      {awaiting && (
+      {awaiting && gated && (() => {
+        // The skill's only argument IS the label, so a details fold would repeat it.
+        let args = "";
+        if (toolName !== "skill") {
+          try { args = JSON.stringify(input, null, 2) ?? ""; } catch { /* unserializable — the label still says what runs */ }
+          if (args === "{}") args = "";
+        }
+        return (
+          <>
+            <div className="mt-2 text-sm text-muted-foreground">{ta("prompt", { tool: gatedToolLabel(toolName, input) })}</div>
+            {args && (
+              <details className="mt-2 text-sm">
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{ta("showArgs")}</summary>
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2.5 text-xs text-muted-foreground">{args}</pre>
+              </details>
+            )}
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" onClick={() => decide(true)} disabled={submitting}>{ta("allow")}</Button>
+              <Button size="sm" variant="ghost" onClick={() => decide(false)} disabled={submitting}>{ta("decline")}</Button>
+            </div>
+          </>
+        );
+      })()}
+
+      {awaiting && !gated && (
         <>
           {preview ? (
             <>
@@ -479,13 +520,19 @@ export function ApprovalCard({
 
       {/* Resolved states — the agent's follow-up text carries the details, so the
           card settles into a quiet confirmation. Approved-but-still-running shows a
-          spinner; a denied call reads "declined"; an applied one shows its summary. */}
+          spinner; a denied call reads "declined"; an applied one shows its summary.
+          A gated tool keeps its "what would run" line so the outcome names its
+          subject (its approved+executed state never reaches this card — the part
+          returns to the activity rail, see isApprovalPart). */}
+      {gated && !awaiting && (
+        <div className="mt-2 text-sm text-muted-foreground">{ta("prompt", { tool: gatedToolLabel(toolName, input) })}</div>
+      )}
       {!awaiting && approval?.approved === true && state !== "output-available" && state !== "output-error" && (
         <div className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />{t("applying")}
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />{gated ? ta("running") : t("applying")}
         </div>
       )}
-      {!awaiting && approval?.approved === false && <Outcome kind="cancelled" text={t("declined")} />}
+      {!awaiting && approval?.approved === false && <Outcome kind="cancelled" text={gated ? ta("declined") : t("declined")} />}
       {!awaiting && state === "output-available" && (
         <>
           {oo?.summary && <div className="mt-2 text-sm text-muted-foreground">{oo.summary}</div>}

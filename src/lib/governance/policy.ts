@@ -10,12 +10,13 @@ import type { CapabilityType, Effect, PolicyInfo, PolicyMatcher, PolicyScope } f
 import { buildMatcher } from "./matcher";
 export { buildMatcher, explainPolicy } from "./matcher";
 
-/** A capability is usable only when explicitly allowed (the unmatched default is
- *  "allow", see buildMatcher). "ask" is treated as DENY until a real interactive
- *  approval gate exists — an admin who sets "Ask" expects a control, so it must
- *  fail safe (block), never silently allow. */
-export function isUsable(effect: Effect): boolean {
-  return effect === "allow";
+/** Whether a capability is OFFERED to the agent at all (the unmatched default is
+ *  "allow", see buildMatcher). "deny" removes it entirely; "allow" and "ask" both
+ *  offer it — "ask" additionally suspends every call for the user's explicit
+ *  approval (the tool's `needsApproval` → the awaiting_approval card), so the
+ *  admin's "Ask" is a live gate on each use, not a silent allow. */
+export function isOffered(effect: Effect): boolean {
+  return effect !== "deny";
 }
 
 /** Policies visible to a run (org system + own user + the project), as a matcher. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMatcher, isUsable } from "../policy";
+import { buildMatcher, isOffered } from "../policy";
 import { explainPolicy } from "../matcher";
 import type { PolicyRow } from "../types";
 
@@ -66,10 +66,10 @@ describe("explainPolicy", () => {
   });
 });
 
-describe("isUsable", () => {
-  it("usable only when explicitly allowed; ask fails safe (deny) until an approval gate exists", () => {
-    expect(isUsable("allow")).toBe(true);
-    expect(isUsable("ask")).toBe(false);
-    expect(isUsable("deny")).toBe(false);
+describe("isOffered", () => {
+  it("deny removes the capability; allow and ask both offer it (ask gates each call via needsApproval)", () => {
+    expect(isOffered("allow")).toBe(true);
+    expect(isOffered("ask")).toBe(true);
+    expect(isOffered("deny")).toBe(false);
   });
 });

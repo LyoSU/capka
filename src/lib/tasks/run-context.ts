@@ -17,7 +17,7 @@ import { hostFolderEnabled, sessionMounts } from "@/lib/manage/controls/folders"
 import { makeAskTool } from "@/lib/ask/tool";
 import { makeMemoryTools } from "@/lib/memory/tool";
 import { readMemoryDocs } from "@/lib/memory/store";
-import { resolvePolicies, isUsable } from "@/lib/governance/policy";
+import { resolvePolicies, isOffered } from "@/lib/governance/policy";
 import { resolveAgentProfile, capProfile, parseAgentProfile } from "@/lib/agents/profile";
 import { getSandboxNetworkDefault, getMaxContextTokens, getOrgAgentProfile, getOrgInstructions, getSetting, setSetting } from "@/lib/settings";
 import { getModelCannotReason, getModelContextLength, getModelEfforts } from "@/lib/models/catalog";
@@ -158,7 +158,10 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
         projectId: payload.projectId ?? null,
         sessionKey,
         ensureSession,
-        isServerAllowed: (name) => isUsable(policy.effect("connector", name)),
+        isServerAllowed: (name) => isOffered(policy.effect("connector", name)),
+        // An "ask" connector's every call suspends for the user's approval
+        // (SDK needsApproval → the awaiting_approval card on web/Telegram).
+        serverNeedsApproval: (name) => policy.effect("connector", name) === "ask",
         // Lets a connector elicit input from the user mid-tool-call (block-and-poll).
         elicitContext: { userId, chatId, messageId, origin: payload.origin },
       })
@@ -171,7 +174,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   const closeAll = async () => { await Promise.allSettled([sandbox.close(), mcp.close()]); };
   try {
     const availableSkills = caps.skills
-      ? (await listAvailableSkills(userId, payload.projectId ?? null)).filter((s) => isUsable(policy.effect("skill", s.name)))
+      ? (await listAvailableSkills(userId, payload.projectId ?? null)).filter((s) => isOffered(policy.effect("skill", s.name)))
       : [];
     // `view_file` (render a workspace file to image so the model can SEE it) is
     // offered only to a model that takes images at all. HOW the image reaches the
@@ -198,6 +201,10 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
               sessionKey,
               projectId: payload.projectId ?? null,
               ensureSession: caps.sandbox ? ensureSession : undefined,
+              // Governance reaches the tool itself, not just the prompt list: a
+              // "deny" skill is refused even if the model calls it by name, and an
+              // "ask" skill suspends for the user's approval before loading.
+              effectFor: (name) => policy.effect("skill", name),
             }),
           }
         : {}),

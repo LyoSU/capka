@@ -54,6 +54,17 @@ describe("composeConfirmPreview", () => {
     expect(plain).toContain("Isolated → Network access");
   });
 
+  it("composes the localized title for a gated tool call (governance \"ask\" — no staged diff)", () => {
+    const { markdown, plain } = composeConfirmPreview(
+      { title: "", tool: "tavily: search", before: "", after: "", body: "{\n  \"query\": \"weather kyiv\"\n}" },
+      uk,
+    );
+    expect(markdown).toContain("Дозволити цю дію?");
+    expect(markdown).toContain("tavily: search");
+    expect(plain).toContain("tavily: search");
+    expect(plain).toContain("weather kyiv"); // the arguments survive into the fallback too
+  });
+
   it("shows only the new value when there is no meaningful 'before'", () => {
     const { markdown, plain } = composeConfirmPreview(
       { title: "Add connector", before: "", after: "Grok" },

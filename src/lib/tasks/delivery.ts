@@ -44,13 +44,16 @@ export interface TaskResult {
    *  the answer, pointing at /model — the user otherwise can't tell the model
    *  never heard them. */
   blindModalities?: Modality[];
-  /** A `manage` tool call the SDK SUSPENDED for the user's approval (native HITL).
+  /** A tool call the SDK SUSPENDED for the user's approval (native HITL) — a
+   *  `manage` change, or any connector/skill call under a governance "ask".
    *  On Telegram the final message carries Approve/Reject buttons keyed to the
    *  assistant `messageId` — the tap (not the model) records the decision and
    *  resumes the turn, so this channel gets the same real approval boundary as web.
    *  The preview (`title`/before→after, the ⚠️ `impact`, and `body`/`items` — the
-   *  full text/set being approved) travels too, so nobody approves a change blind. */
-  approval?: { messageId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] };
+   *  full text/set being approved) travels too, so nobody approves a change blind.
+   *  A gated tool has no staged diff: it sends `tool` (the human label of what
+   *  would run) instead of `title`, and the title is localized here. */
+  approval?: { messageId: string; title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[] };
   /** An `ask` tool call the runner SUSPENDED for a human answer. On Telegram this
    *  starts a sequential field-by-field collection (see ask-collect); `userId` owns
    *  the answer submission, `messageId` is the suspended assistant message. */
@@ -204,13 +207,16 @@ export function composeFinal(
  *  rendered into BOTH the rich markdown and the plain-text fallback, so a Markdown
  *  rejection can never silently strip the impact line or the body the web card shows. */
 export function composeConfirmPreview(
-  c: { title: string; before: string; after: string; impact?: string; body?: string; items?: string[] },
+  c: { title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[] },
   t: Translator,
 ): { markdown: string; plain: string } {
+  // A gated tool call (governance "ask") arrives with only a `tool` label — the
+  // localized question is composed here, where the channel's translator lives.
+  const title = c.title || (c.tool ? t("approveTool", { tool: c.tool }) : "");
   const diff = c.before && c.before !== c.after ? `${c.before} → ${c.after}` : c.after;
   // Title + ⚠️ impact are consecutive blockquote lines → one quote block in rich md.
-  const quote = [`> ${escapeHtml(c.title)}${diff ? `: ${escapeHtml(diff)}` : ""}`];
-  const plain = [`${c.title}${diff ? `: ${diff}` : ""}`];
+  const quote = [`> ${escapeHtml(title)}${diff ? `: ${escapeHtml(diff)}` : ""}`];
+  const plain = [`${title}${diff ? `: ${diff}` : ""}`];
   if (c.impact) {
     quote.push(`> ⚠️ ${escapeHtml(c.impact)}`);
     plain.push(`⚠️ ${c.impact}`);

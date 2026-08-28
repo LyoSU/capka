@@ -63,6 +63,9 @@ export async function loadMcpTools(opts: {
   ensureSession?: () => Promise<unknown>;
   /** Governance gate — a denied connector is never connected (G1). */
   isServerAllowed?: (name: string) => boolean;
+  /** Governance "ask": every tool of this server suspends for the user's
+   *  approval before executing (SDK needsApproval). Absent = no gating. */
+  serverNeedsApproval?: (name: string) => boolean;
   /** Present during a live turn: lets a connector elicit input from the user
    *  mid-tool-call (block-and-poll). Omitted for background cache warms. */
   elicitContext?: import("./client").ElicitContext;
@@ -170,8 +173,9 @@ export async function loadMcpTools(opts: {
     const cached = getCachedTools(cacheKey(c));
     if (cached) {
       const caller = lazyCaller(c);
+      const gated = opts.serverNeedsApproval?.(c.name) ?? false;
       for (const mt of [...cached].sort((a, b) => a.name.localeCompare(b.name))) {
-        tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(caller, c.name, mt, spillCtx);
+        tools[mcpToolName(c.name, mt.name)] = adaptMcpTool(caller, c.name, mt, spillCtx, gated);
       }
       // Stale-while-revalidate, remote only: a server can gain or lose tools without
       // telling us, and if the model never calls one nothing else re-reads its

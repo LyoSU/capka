@@ -1885,17 +1885,36 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     });
     // Build the Telegram approval payload (buttons + preview) only on an origin
     // channel — the web card fetches its own preview, so this query is skipped there.
-    let telegramApproval: { messageId: string; title: string; before: string; after: string; impact?: string; body?: string; items?: string[] } | undefined;
+    let telegramApproval: { messageId: string; title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[] } | undefined;
     if (awaitingApproval && payload.origin) {
       const callPart = parts.find((p) => p.type === "tool-call" && p.id === awaitingApproval!.toolCallId);
       const input = callPart?.type === "tool-call" ? callPart.input : undefined;
-      const { previewManageForUser } = await import("@/lib/manage/authed");
-      // Pass the run's sandbox session so a workspace-path preview reads the real files, and
-      // the call id so a preview that resolves a moving target pins what these buttons will
-      // show — without it a Telegram approval of a repo install has no review to apply and
-      // (correctly, but pointlessly) refuses.
-      const pv = await previewManageForUser(userId, input, { sessionKey, toolCallId: awaitingApproval.toolCallId }).catch(() => null);
-      if (pv) telegramApproval = { messageId: msgId, title: pv.title, before: pv.before, after: pv.after, impact: pv.impact, body: pv.body, items: pv.items };
+      const toolName = callPart?.type === "tool-call" ? callPart.name : undefined;
+      if (toolName === "manage") {
+        const { previewManageForUser } = await import("@/lib/manage/authed");
+        // Pass the run's sandbox session so a workspace-path preview reads the real files, and
+        // the call id so a preview that resolves a moving target pins what these buttons will
+        // show — without it a Telegram approval of a repo install has no review to apply and
+        // (correctly, but pointlessly) refuses.
+        const pv = await previewManageForUser(userId, input, { sessionKey, toolCallId: awaitingApproval.toolCallId }).catch(() => null);
+        if (pv) telegramApproval = { messageId: msgId, title: pv.title, before: pv.before, after: pv.after, impact: pv.impact, body: pv.body, items: pv.items };
+      } else if (toolName) {
+        // A governance-"ask" tool (a connector's tool, or a skill): there is no
+        // staged change to diff — show WHAT would run (`tool`, localized into a
+        // title by the delivery layer) and the raw arguments behind "Details".
+        const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName);
+        const label = mcp ? `${mcp[1]}: ${mcp[2]}`
+          : toolName === "skill" && input && typeof input === "object" && typeof (input as { name?: unknown }).name === "string"
+            ? (input as { name: string }).name
+            : toolName;
+        let args = "";
+        try { args = JSON.stringify(input, null, 2) ?? ""; } catch { /* unserializable input — approve on the label alone */ }
+        if (args.length > 1500) args = `${args.slice(0, 1500)} …`;
+        telegramApproval = {
+          messageId: msgId, title: "", tool: label, before: "", after: "",
+          ...(args && args !== "{}" ? { body: args } : {}),
+        };
+      }
     }
     // A suspended `ask` on an origin channel starts a sequential field-by-field
     // collection there (the web card fills the same role in the browser).

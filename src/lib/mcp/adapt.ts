@@ -193,11 +193,14 @@ function toModelContent(result: McpCallResult) {
  *  - the run's abort signal is forwarded, so cancel/deadline stops an in-flight call;
  *  - a tool-level `isError` result is thrown (the SDK doesn't), so it surfaces as a
  *    real tool error rather than masquerading as a successful result;
- *  - `toModelOutput` hands the model proper text/media parts. */
-export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: McpToolDef, ctx: SpillCtx = {}) {
+ *  - `toModelOutput` hands the model proper text/media parts;
+ *  - `needsApproval` (governance "ask" on the server) suspends each call for the
+ *    user's approval before execute runs — same native HITL boundary as `manage`. */
+export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: McpToolDef, ctx: SpillCtx = {}, needsApproval = false) {
   return dynamicTool({
     description: clampDescription(mcpTool.description ?? `${serverName} ${mcpTool.name}`),
     inputSchema: jsonSchema(sanitizeToolSchema(mcpTool.inputSchema ?? { type: "object", properties: {} }) as never),
+    ...(needsApproval ? { needsApproval: true } : {}),
     execute: async (input, { abortSignal }) => {
       const result = (await client.callTool(
         { name: mcpTool.name, arguments: (input ?? {}) as Record<string, unknown> },

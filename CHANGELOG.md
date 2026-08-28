@@ -6,6 +6,14 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- The "Ask" permission effect is now a real approval gate: a connector or skill set to "Ask" stays available to the agent, but every call suspends the turn with an Allow/Don't-allow card (web and Telegram) showing what would run and with what arguments; the decision resumes the turn. "Ask" previously behaved as a block.
+
+### Fixed
+
+- A skill set to "Deny" is now refused when the agent calls it by name; previously the policy only hid it from the skills list in the prompt.
+
 ## [0.35.0] - 2026-08-28
 
 > **⚠ Breaking — a deploy reachable beyond loopback now refuses the first-run admin claim unless `SETUP_TOKEN` is set.** `scripts/up.sh` generates one there and prints a `#token=…` setup link, so the turnkey path is unchanged; a hand-rolled `docker compose up` on a public address must set `SETUP_TOKEN` and restart before finishing setup.

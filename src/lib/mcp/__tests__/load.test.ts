@@ -22,8 +22,10 @@ vi.mock("../client", () => ({
   disconnectMcp: (...a: unknown[]) => disconnectMcp(...(a as [])),
 }));
 vi.mock("../adapt", () => ({
-  // Capture the caller passed in so a test can exercise the lazy-connect path.
-  adaptMcpTool: (client: unknown, server: string, tool: { name: string }) => ({ __caller: client, __server: server, __tool: tool.name }),
+  // Capture the caller passed in so a test can exercise the lazy-connect path,
+  // and the needsApproval flag so a test can assert governance-"ask" threading.
+  adaptMcpTool: (client: unknown, server: string, tool: { name: string }, _ctx: unknown, needsApproval?: boolean) =>
+    ({ __caller: client, __server: server, __tool: tool.name, __needsApproval: needsApproval }),
   mcpToolName: (s: string, t: string) => `mcp__${s}__${t}`,
 }));
 vi.mock("../connect-errors", () => ({
@@ -76,6 +78,18 @@ describe("loadMcpTools — remote connectors are lazy too", () => {
     const res = await loadMcpTools({ userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn() });
     expect(Object.keys(res.tools)).toEqual(["mcp__api__q"]);
     expect(connectMcpServer).not.toHaveBeenCalled();
+  });
+
+  it("threads a governance-\"ask\" server's needsApproval into every adapted tool", async () => {
+    setCachedTools("api", [{ name: "q", inputSchema: { type: "object", properties: {} } }]);
+    setCachedTools("plug", [{ name: "w", inputSchema: { type: "object", properties: {} } }]);
+    listEnabledServerConfigs.mockResolvedValue([cfg("api", "http"), cfg("plug", "http")]);
+    const res = await loadMcpTools({
+      userId: "u1", projectId: null, sessionKey: "s1", ensureSession: vi.fn(),
+      serverNeedsApproval: (name) => name === "api",
+    });
+    expect((res.tools["mcp__api__q"] as unknown as { __needsApproval?: boolean }).__needsApproval).toBe(true);
+    expect((res.tools["mcp__plug__w"] as unknown as { __needsApproval?: boolean }).__needsApproval).toBe(false);
   });
 
   it("does NOT block startup when a remote connector's connect hangs", async () => {

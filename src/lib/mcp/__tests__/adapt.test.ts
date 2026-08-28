@@ -180,3 +180,12 @@ describe("adaptMcpTool bounding (execute)", () => {
     expect(out.content[0].text).toContain("could not be saved");
   });
 });
+
+describe("adaptMcpTool — governance \"ask\"", () => {
+  it("marks the tool needsApproval when the server is gated, and leaves it unset otherwise", () => {
+    const client = { callTool: vi.fn() };
+    const def = { name: "t", inputSchema: { type: "object", properties: {} } };
+    expect(adaptMcpTool(client, "srv", def, {}, true).needsApproval).toBe(true);
+    expect(adaptMcpTool(client, "srv", def).needsApproval).toBeUndefined();
+  });
+});

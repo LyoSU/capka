@@ -170,12 +170,18 @@ function isToolPart(part: { type: string }): part is ToolPart {
   return part.type === "dynamic-tool" || (part.type.startsWith("tool-") && part.type !== "tool");
 }
 
-/** A `manage` tool call the SDK suspended for native approval — it (and its
- *  resolved states) always renders as the prominent approval card, never the quiet
- *  activity rail: the card is the user's one required action. */
+/** A tool call the SDK suspended for native approval — `manage`, or any
+ *  connector/skill call under a governance "ask". While the user's decision is
+ *  the required action (or the call was declined), it renders as the prominent
+ *  approval card, never the quiet activity rail. `manage` keeps the card through
+ *  its resolved states too (the applied change IS the outcome); a gated ordinary
+ *  tool returns to the timeline once it has run, so its result renders with the
+ *  full shape ladder instead of being trapped in a consent card. */
 function isApprovalPart(part: ToolPart): boolean {
-  return getToolName(part) === "manage"
-    && (part.state === "approval-requested" || part.state === "approval-responded" || !!part.approval);
+  if (getToolName(part) === "manage") {
+    return part.state === "approval-requested" || part.state === "approval-responded" || !!part.approval;
+  }
+  return part.state === "approval-requested" || part.state === "approval-responded";
 }
 
 /** An `ask` tool call the runner suspended for a human answer — it (and its
@@ -2222,7 +2228,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
               );
             }
             if (g.kind === "approval") {
-              return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} onSend={onSend} />;
+              return <ApprovalCard key={gi} messageId={message.id} toolCallId={g.part.toolCallId} toolName={getToolName(g.part)} input={g.part.input} state={g.part.state} approval={g.part.approval} output={g.part.output} onSend={onSend} />;
             }
             if (g.kind === "ask") {
               // An `elicit:` toolCallId marks a block-and-poll MCP elicitation — the

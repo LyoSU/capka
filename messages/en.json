@@ -598,6 +598,15 @@
       "offline": "No connection. Check your internet and try again."
     },
     "clearSearch": "Clear search",
+    "approval": {
+      "title": "Permission needed",
+      "prompt": "The assistant wants to use {tool}.",
+      "showArgs": "Show details",
+      "allow": "Allow",
+      "decline": "Don't allow",
+      "running": "Running…",
+      "declined": "Not allowed"
+    },
     "manage": {
       "settingTitle": "Setting updated",
       "confirmTitle": "Confirm change",
@@ -868,7 +877,7 @@
       "effects": {
         "allow": "Allowed",
         "deny": "Blocked",
-        "ask": "Block until approved"
+        "ask": "Asks each time"
       },
       "tierLabel": "Spend tier",
       "defaultTier": "Instance default",
@@ -1558,7 +1567,7 @@
       "exceptions": "{count, plural, one {# exception} other {# exceptions}}",
       "effect": {
         "allow": "Allow",
-        "ask": "Block until approved",
+        "ask": "Ask each time",
         "deny": "Deny"
       },
       "scope": {
@@ -1568,7 +1577,7 @@
       },
       "verb": {
         "allow": "Allowed",
-        "ask": "Blocked until approved",
+        "ask": "Asks each time",
         "deny": "Denied"
       },
       "globalRule": "Global rule",
@@ -2051,6 +2060,7 @@
     "modelSet": "✅ Now using *{model}* in this chat.",
     "modelEmpty": "No models available yet. Add a provider in Capka settings.",
     "modelStale": "That list is out of date — send /model again.",
+    "approveTool": "Allow this action? {tool}",
     "confirmApply": "✓ Confirm",
     "confirmCancel": "Cancel",
     "confirmApplied": "✓ Done.",

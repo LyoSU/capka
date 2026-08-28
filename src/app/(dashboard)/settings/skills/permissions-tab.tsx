@@ -35,8 +35,8 @@ interface AuditEntry { id: string; action: string; targetType: string | null; ta
 
 type T = ReturnType<typeof useTranslations>;
 
-/** Three-way segmented control: Allow / Block until approved / Deny. The stored
- *  "ask" value is unchanged; only its label is honest about being a block today. */
+/** Three-way segmented control: Allow / Ask each time / Deny. "Ask" suspends every
+ *  call of the capability for the user's own approval (the in-chat card). */
 function EffectControl({ value, onChange, t, size = "default" }: { value: Effect; onChange: (e: Effect) => void; t: T; size?: "sm" | "default" }) {
   const opts: Effect[] = ["allow", "ask", "deny"];
   const color: Record<Effect, string> = {

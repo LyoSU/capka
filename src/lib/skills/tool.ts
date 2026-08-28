@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import type { Effect } from "@/lib/governance/types";
 import { getSkillForRun, listAvailableSkills } from "./service";
 import { materializeSkill } from "./materialize";
 
@@ -11,6 +12,11 @@ export interface SkillToolCtx {
    *  sandbox via `docker exec`, so ensure the container exists before materializing.
    *  Optional so the tool still works (body-only) if no creator was provided. */
   ensureSession?: () => Promise<unknown>;
+  /** Governance effect for one skill name. Enforced HERE, not only in the prompt
+   *  list: the model can call any name it likes, so a "deny" must refuse at
+   *  execute and an "ask" must suspend the call for the user's approval —
+   *  otherwise the policy gates the menu but not the kitchen. */
+  effectFor?: (name: string) => Effect;
 }
 
 /**
@@ -30,7 +36,14 @@ export function makeSkillTool(ctx: SkillToolCtx) {
     inputSchema: z.object({
       name: z.string().describe("The exact skill name from the Available Skills list"),
     }),
+    // Async and per-call: only the "ask"-governed skill suspends; the rest run
+    // as before. Not serialized to the provider, so the definition stays
+    // cache-stable regardless of policy.
+    needsApproval: async ({ name }) => ctx.effectFor?.(name) === "ask",
     execute: async ({ name }) => {
+      if (ctx.effectFor?.(name) === "deny") {
+        return { error: `Skill "${name}" is not available in this workspace.` };
+      }
       const loaded = await getSkillForRun(ctx.userId, ctx.projectId, name);
       if (!loaded) {
         const available = (await listAvailableSkills(ctx.userId, ctx.projectId)).map((s) => s.name);
