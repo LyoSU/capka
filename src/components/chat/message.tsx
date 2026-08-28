@@ -1921,9 +1921,16 @@ function UserBubble({
 }
 
 function TimestampRow({ timestamp, isTelegram }: { timestamp: string; isTelegram: boolean }) {
+  const t = useTranslations("chat.message");
   return (
     <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground opacity-60 sm:opacity-0 transition-opacity duration-200 sm:group-hover/msg:opacity-100">
-      {isTelegram && <Send className="h-3 w-3" />}
+      {/* A status marker, not a control — so it carries its own role: the Hint
+          puts the label on the span, and a bare <svg> would expose nothing. */}
+      {isTelegram && (
+        <Hint label={t("viaTelegram")}>
+          <span role="img" className="inline-flex"><Send className="h-3 w-3" /></span>
+        </Hint>
+      )}
       <span>{timestamp}</span>
     </div>
   );

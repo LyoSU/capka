@@ -569,6 +569,7 @@
       "stepCount": "{count, plural, one {# action} other {# actions}}",
       "fork": "Fork into a new chat",
       "actions": "Message actions",
+      "viaTelegram": "Sent via Telegram",
       "prevVersion": "Previous version",
       "nextVersion": "Next version",
       "versions": "{count, plural, one {# version} other {# versions}}"

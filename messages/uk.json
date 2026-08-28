@@ -569,6 +569,7 @@
       "stepCount": "{count, plural, one {# дія} few {# дії} many {# дій} other {# дії}}",
       "fork": "Продовжити в окремому чаті",
       "actions": "Дії з повідомленням",
+      "viaTelegram": "Надіслано через Telegram",
       "prevVersion": "Попередня версія",
       "nextVersion": "Наступна версія",
       "versions": "{count, plural, one {# версія} few {# версії} many {# версій} other {# версії}}"
