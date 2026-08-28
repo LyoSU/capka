@@ -99,7 +99,9 @@ describe("sourcesFromOutput", () => {
       { n: 1, title: "A", url: "https://a.example" },
       { bogus: true },
     ] };
-    expect(sourcesFromOutput(out)).toEqual([{ n: 1, title: "A", url: "https://a.example" }]);
+    // Read-gate revalidation runs the url through `new URL(...).toString()`,
+    // which normalizes a bare origin with a trailing slash.
+    expect(sourcesFromOutput(out)).toEqual([{ n: 1, title: "A", url: "https://a.example/" }]);
     expect(sourcesFromOutput({ content: [] })).toBeNull();
     expect(sourcesFromOutput("text")).toBeNull();
   });
@@ -114,5 +116,18 @@ describe("sourcesModelText", () => {
     expect(s.startsWith("The short answer.")).toBe(true);
     expect(s).toContain("cite it inline as [N]");
     expect(s).toContain("[3] A — https://a.example\nsn");
+  });
+});
+
+describe("sourcesFromOutput — hostile rows die at the read gate", () => {
+  it("drops non-http(s) schemes and malformed numbers", () => {
+    const out = { capkaSources: [
+      { n: 1, title: "ok", url: "https://a.example" },
+      { n: 2, title: "xss", url: "javascript:alert(1)" },
+      { n: 3, title: "data", url: "data:text/html,hi" },
+      { n: 0, title: "bad n", url: "https://b.example" },
+      { n: 1.5, title: "frac", url: "https://c.example" },
+    ] };
+    expect(sourcesFromOutput(out)).toEqual([{ n: 1, title: "ok", url: "https://a.example/" }]);
   });
 });

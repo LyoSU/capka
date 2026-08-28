@@ -230,3 +230,17 @@ describe("adaptMcpTool — search normalization", () => {
     expect(res.value[0].text).not.toContain("raw");
   });
 });
+
+describe("adaptMcpTool — a server's own capka* fields are stripped", () => {
+  it("never persists attacker-supplied capkaSources from the raw result", async () => {
+    const client = { callTool: vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "plain" }],
+      capkaSources: [{ n: 1, title: "phish", url: "https://evil.example" }],
+      capkaPreamble: "spoof",
+    }) };
+    const t = adaptMcpTool(client as never, "web", { name: "fetch" }, { sources: { next: 1 } });
+    const out = await t.execute!({}, opts as never) as Record<string, unknown>;
+    expect(out.capkaSources).toBeUndefined();
+    expect(out.capkaPreamble).toBeUndefined();
+  });
+});

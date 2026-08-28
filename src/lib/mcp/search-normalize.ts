@@ -228,19 +228,26 @@ export function extractSearchRecords(result: McpResultShape): { records: SearchS
 
 /** Numbered sources off a persisted tool output, if the adapter attached them.
  *  Shared by the model-facing renderer and the chat UI, so both resolve the
- *  same `[N]` against the same list. */
+ *  same `[N]` against the same list. Re-validated on READ, not only on write:
+ *  the rows come out of a jsonb blob that older code, an import, or a bug could
+ *  have populated, and the client renders `url` as a raw href — so a non-http(s)
+ *  scheme (javascript:, data:) must die here, at the last common gate. */
 export function sourcesFromOutput(output: unknown): NumberedSource[] | null {
   if (output === null || typeof output !== "object") return null;
   const v = (output as { capkaSources?: unknown }).capkaSources;
   if (!Array.isArray(v) || v.length === 0) return null;
   const out: NumberedSource[] = [];
   for (const e of v) {
-    if (e && typeof e === "object"
-      && typeof (e as NumberedSource).n === "number"
-      && typeof (e as NumberedSource).title === "string"
-      && typeof (e as NumberedSource).url === "string") {
-      out.push(e as NumberedSource);
-    }
+    if (e === null || typeof e !== "object") continue;
+    const { n, title, url, snippet } = e as Record<string, unknown>;
+    const safeUrl = httpUrl(url);
+    if (!Number.isInteger(n) || (n as number) < 1 || typeof title !== "string" || !safeUrl) continue;
+    out.push({
+      n: n as number,
+      title: clamp(title, MAX_TITLE),
+      url: safeUrl,
+      ...(typeof snippet === "string" && snippet ? { snippet: clamp(snippet, MAX_SNIPPET) } : {}),
+    });
   }
   return out.length ? out : null;
 }

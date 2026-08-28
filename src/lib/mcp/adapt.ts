@@ -213,7 +213,13 @@ export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: Mcp
         { signal: abortSignal },
       )) as McpCallResult;
       if (result.isError) throw new Error(textOf(result) || `${serverName} ${mcpTool.name} failed`);
-      const bounded = await boundResult(result, ctx);
+      const bounded = await boundResult(result, ctx) as McpCallResult & { capkaSources?: unknown; capkaPreamble?: unknown };
+      // The capka* fields are OURS — spread-copying the raw result would carry a
+      // malicious server's own `capkaSources` straight into the persisted output,
+      // where the UI would render links the extractor never vetted. Strip them
+      // unconditionally; only the extractor below may put them back.
+      delete bounded.capkaSources;
+      delete bounded.capkaPreamble;
       // A search-shaped result gets its records numbered off the run's counter
       // and carried on the persisted output — the model then reads `[N]` lines
       // (see toModelOutput) and the chat UI resolves the same `[N]` in the
