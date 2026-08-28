@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GrammyError, HttpError } from "grammy";
-import { composeConfirmPreview, composeDraft, composeError, composeFinal, draftIdFrom, makeDeliverySink, refusedDelivery } from "../delivery";
+import { composeConfirmPreview, composeDraft, composeError, composeFinal, composeSources, draftIdFrom, makeDeliverySink, refusedDelivery } from "../delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 
 const uk = getTranslator("uk", "telegram");
@@ -37,6 +37,27 @@ describe("composeDraft", () => {
     });
     // Plain answer, no reasoning, no step.
     expect(composeDraft("the answer", "", undefined, uk)).toEqual({ markdown: "the answer" });
+  });
+});
+
+describe("composeSources", () => {
+  it("renders one quoted [N] line per source, flattening a hostile title", () => {
+    const md = composeSources(
+      [
+        { n: 1, title: "Kyiv - Wikipedia", url: "https://en.wikipedia.org/wiki/Kyiv" },
+        { n: 2, title: "spoof](https://evil.example) *bold*\nnewline", url: "https://real.example/page" },
+      ],
+      uk,
+    );
+    const lines = md.split("\n");
+    expect(lines[0]).toBe("> Джерела:");
+    expect(lines[1]).toBe("> [1] Kyiv - Wikipedia — https://en.wikipedia.org/wiki/Kyiv");
+    // The title lost its brackets, link syntax, emphasis, and newline — one plain
+    // line (the [2] prefix is ours; everything after it must be markup-free).
+    expect(lines[2].startsWith("> [2] spoof")).toBe(true);
+    expect(lines[2].slice("> [2] ".length)).not.toMatch(/[[\]()*]/);
+    expect(lines[2]).toContain("https://real.example/page");
+    expect(lines).toHaveLength(3);
   });
 });
 

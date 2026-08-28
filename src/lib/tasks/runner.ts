@@ -45,6 +45,7 @@ import { errorText } from "@/lib/errors/message";
 import { type FileRef } from "@/lib/constants";
 import type { StoredPart, MessageMeta } from "@/lib/chat/contracts";
 import { sourcesFromOutput } from "@/lib/mcp/search-normalize";
+import { citedSources } from "@/lib/chat/citations";
 import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 import { prepareRun } from "./run-context";
@@ -1946,6 +1947,15 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const telegramAsk = awaitingAnswer && payload.origin
       ? { messageId: msgId, form: awaitingAnswer.form, userId }
       : undefined;
+    // The [N] markers the reply carries, resolved against this turn's search
+    // results — Telegram appends them as a quoted "Sources:" footer (the web
+    // resolves the same numbers client-side from the parts, so it gets nothing).
+    const telegramSources = payload.origin
+      ? (() => {
+          const all = parts.flatMap((p) => (p.type === "tool-result" ? sourcesFromOutput(p.output) ?? [] : []));
+          return all.length ? citedSources(getFullText(), all).map(({ n, title, url }) => ({ n, title, url })) : [];
+        })()
+      : [];
     try {
       await sink.finish({
         // The whole answer, persisted as one rich message (no bubble fragmentation).
@@ -1959,6 +1969,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // call's input, so the tap resumes the turn instead of applying out-of-band.
         ...(telegramApproval ? { approval: telegramApproval } : {}),
         ...(telegramAsk ? { ask: telegramAsk } : {}),
+        ...(telegramSources.length ? { sources: telegramSources } : {}),
       });
     } catch (e) {
       // Execution truth is already durable in tasks/messages. An outbound channel

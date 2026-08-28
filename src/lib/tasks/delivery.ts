@@ -27,6 +27,13 @@ export interface TaskResult {
   /** The model's thinking, folded into a collapsed <details> block above the
    *  answer (mirrors the web, which shows reasoning collapsed). */
   reasoning?: string;
+  /** The sources this reply actually cited (the [N] markers resolved against the
+   *  turn's search results — the same subset the web footer lists). Rendered as
+   *  a quoted "Sources:" block under the answer, so the naked [N] markers in the
+   *  Telegram text mean something. URLs are http(s)-vetted upstream
+   *  (sourcesFromOutput); titles are still web-page strings and are flattened
+   *  here before touching Markdown. */
+  sources?: { n: number; title: string; url: string }[];
   /** Friendly, user-facing error (set when status is "failed"). English fallback;
    *  prefer `errorCategory` for a localized message. */
   error?: string;
@@ -202,6 +209,23 @@ export function composeFinal(
   const log = toolCount > 0 ? t("doneLog", { count: toolCount, secs: Math.round(elapsedMs / 1000) }) : null;
   if (log) return body ? `${body}\n\n> ${log}` : `> ${log}`;
   return body;
+}
+
+/** The cited-sources footer: one quoted block, `[N] Title — URL` per line, in
+ *  number order — the Telegram twin of the web reply's "Sources" list, and what
+ *  turns the answer's naked [N] markers into resolvable footnotes. Titles come
+ *  from arbitrary web pages, so they are flattened to one plain line (no
+ *  newlines, links, or emphasis) before touching Markdown; the URL is sent bare
+ *  and lets the client autolink it, which leaves no caption to spoof. */
+export function composeSources(
+  sources: { n: number; title: string; url: string }[],
+  t: Translator,
+): string {
+  const line = (s: { n: number; title: string; url: string }) => {
+    const title = s.title.replace(/\s+/g, " ").replace(/[[\]()`*_~>#|]/g, "").slice(0, 120).trim();
+    return `> [${s.n}] ${title ? `${title} — ` : ""}${s.url}`;
+  };
+  return [`> ${t("sourcesHeader")}`, ...sources.map(line)].join("\n");
 }
 
 /** The confirm preview shown before a staged change is approved — the same
@@ -473,10 +497,17 @@ class TelegramSink implements DeliverySink {
     }
 
     const body = result.text.trim();
+    // The cited-sources block sits between the answer and the tool-log footer —
+    // sources only make sense under text that cites them. The markdown side is a
+    // quoted block; the plain fallback carries the SAME lines unquoted, so a
+    // Markdown rejection never strips where the [N] markers point.
+    const sourcesMd = body && result.sources?.length ? composeSources(result.sources, this.t) : null;
+    const mdBody = sourcesMd ? `${body}\n\n${sourcesMd}` : body;
+    const plainBody = sourcesMd ? `${body}\n\n${sourcesMd.replace(/^> /gm, "")}` : body;
     let markdown: string | null;
     if (body) {
       // The whole answer, one message — closed with the tool-log footer.
-      markdown = composeFinal(body, result.toolCount, result.elapsedMs, this.t);
+      markdown = composeFinal(mdBody, result.toolCount, result.elapsedMs, this.t);
     } else if (result.toolCount > 0) {
       // Tools ran but the turn wrote no closing text — still cap the reply with a
       // "done" footer so it doesn't just trail off.
@@ -499,7 +530,7 @@ class TelegramSink implements DeliverySink {
     // composer-block equivalent on Telegram is that a plain reply is routed to the
     // pending question until it's answered.
     if (result.ask) {
-      if (body && markdown) await this.sendRich(markdown, body, false);
+      if (body && markdown) await this.sendRich(markdown, plainBody, false);
       const bot = await this.getBot();
       if (bot) {
         const { startAskCollection } = await import("@/lib/telegram/ask-collect");
@@ -521,7 +552,7 @@ class TelegramSink implements DeliverySink {
       markdown = markdown ? `${markdown}\n\n${previewMd}` : previewMd;
       // The plain-text fallback carries the SAME preview (diff + impact + body), so
       // a Markdown rejection never drops what the user needs to approve safely.
-      const plain = body ? `${body}\n\n${previewPlain}` : previewPlain;
+      const plain = plainBody ? `${plainBody}\n\n${previewPlain}` : previewPlain;
       // Truncated arguments = no buttons: what this channel can show is not the
       // whole call, so the decision belongs to the web card, which always is.
       // composeConfirmPreview already appended the pointer line.
@@ -540,7 +571,7 @@ class TelegramSink implements DeliverySink {
       return;
     }
 
-    if (markdown) await this.sendRich(markdown, notice ? `${notice}\n\n${body}` : body || this.t("noText"), false);
+    if (markdown) await this.sendRich(markdown, notice ? `${notice}\n\n${plainBody}` : plainBody || this.t("noText"), false);
   }
 
   async sendFiles(files: OutFile[]): Promise<void> {
