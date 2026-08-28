@@ -18,6 +18,7 @@ All notable changes to Capka are documented here. Format follows
 
 - Web citation chips render as styled pills again; the transcript's link renderer dropped their attributes, so a `[1, 9]` group read as a bare blue "19".
 - Citation chips no longer stay inert until a page reload on a freshly finished message that cites a previous turn's sources.
+- The live "Thinking…" row now continues the activity rail as its next step, instead of floating a message-gap below the last one.
 
 ## [0.36.0] - 2026-08-28
 
