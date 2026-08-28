@@ -890,7 +890,7 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   the rail (it mirrors a running node) and explaining the frozen
                   spinner above it. It clears itself the moment content flows. */}
               {isLoading && (() => {
-                const last = messages[messages.length - 1] as { role: string; parts?: { type: string; state?: string }[] } | undefined;
+                const last = messages[messages.length - 1] as { role: string; parts?: { type: string; state?: string; toolName?: string }[] } | undefined;
                 // The gap this closes: a tool has returned and the model is
                 // deciding what to do next. The rule above (empty reply) no
                 // longer holds — there ARE parts — and the rail spins only on a
@@ -903,9 +903,24 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 const afterTool =
                   last?.role === "assistant" && tail?.type === "dynamic-tool" && !!tail.state?.startsWith("output-");
                 const showStatus = !!taskInfo.retrying || (!!last && (last.role === "user" || (last.role === "assistant" && (last.parts?.length ?? 0) === 0) || afterTool));
+                // Whether the block directly above this row is the activity rail,
+                // and so whether the row should read as its next node rather than
+                // as a separate indicator floating a message-gap below it. A
+                // `manage` or `ask` result escapes the rail into its own prominent
+                // card, and those resolve to an `output-` state like any other tool
+                // — so `afterTool` alone would hang a timeline off a card. Excluded
+                // by name on purpose: the real predicates are private to message.tsx
+                // and a second copy here would drift out of step with them, whereas
+                // this errs only toward the row keeping its old spacing.
+                const continuesRail = afterTool && tail?.toolName !== "manage" && tail?.toolName !== "ask";
                 return showStatus ? (
-                  <div className="px-4 py-4 md:px-6">
-                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} retrying={taskInfo.retrying} phase={taskInfo.phase} />
+                  // The negative margin cancels the message's own bottom padding, so
+                  // the row lands at the rail's rhythm (py-1 to py-1) instead of a
+                  // message gap away from it. Only when it continues the rail: at the
+                  // start of a turn this row sits under the USER's bubble, where the
+                  // distance is correct and hugging would be wrong.
+                  <div className={continuesRail ? "-mt-4 px-4 pb-4 md:px-6" : "px-4 py-4 md:px-6"}>
+                    <TaskStatus startedAt={taskInfo.startedAt} currentTool={taskInfo.currentTool} retrying={taskInfo.retrying} phase={taskInfo.phase} continuesRail={continuesRail} />
                   </div>
                 ) : null;
               })()}

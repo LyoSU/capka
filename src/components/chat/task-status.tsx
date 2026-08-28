@@ -13,6 +13,7 @@ export function TaskStatus({
   currentTool,
   retrying,
   phase,
+  continuesRail,
 }: {
   startedAt: number;
   currentTool: string | null;
@@ -22,6 +23,10 @@ export function TaskStatus({
   // Which contentless stretch of the turn we're in, when we know (see
   // useBackgroundChat). Names the wait instead of calling all of it "Thinking…".
   phase?: Phase | null;
+  // Whether the activity rail ends directly above this row (see the call site).
+  // Purely presentational: it draws the short piece of connecting line that makes
+  // the live row the rail's next node instead of a second, unrelated indicator.
+  continuesRail?: boolean;
 }) {
   const [elapsed, setElapsed] = useState(0);
   const tSteps = useTranslations("steps");
@@ -94,7 +99,22 @@ export function TaskStatus({
   // Mirrors a running rail node (27px circle + spinner) so the live status reads
   // as the next step still being written, then a soft highlight sweeps the label.
   return (
-    <div role="status" aria-live="polite" className="flex animate-in items-center gap-3 py-1 text-sm fade-in duration-300">
+    <div role="status" aria-live="polite" className="relative flex animate-in items-center gap-3 py-1 text-sm fade-in duration-300">
+      {/* The last ~10px of the rail's connecting line, drawn from THIS side of the
+          seam. The row is deliberately not a node inside the activity spoiler: it
+          is mounted once, in one place, so it never remounts and flickers as the
+          turn progresses — and putting it in the spoiler would let a reader
+          collapse away the only sign the turn is still alive. So the two halves
+          are laid out to meet: the badges are already one column (27px circles at
+          the same inset), the call site cancels the message's bottom padding, and
+          this segment closes the seam between them. Geometry mirrors the rail's
+          own line: same 13px offset, stopping at the badge's top edge. */}
+      {continuesRail && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-1.5 bottom-[calc(50%+13px)] left-[13px] w-px bg-border"
+        />
+      )}
       <span
         className="grid h-[27px] w-[27px] shrink-0 place-items-center rounded-full border border-border bg-card text-foreground"
         aria-hidden="true"
