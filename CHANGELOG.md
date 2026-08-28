@@ -10,6 +10,12 @@ All notable changes to Capka are documented here. Format follows
 
 - The "Ask" permission effect is now a real approval gate: a connector or skill set to "Ask" stays available to the agent, but every call suspends the turn with an Allow/Don't-allow card (web and Telegram) showing what would run and with what arguments; the decision resumes the turn. "Ask" previously behaved as a block.
 - Web search through MCP connectors now yields citations: a search-shaped tool result (Tavily, Brave, Exa, Firecrawl, SearXNG, …) is recognized by shape, numbered, and rendered as a source list, and the reply's inline [N] references become clickable chips with a "Sources" footer. A number the model invents stays plain text, never a link.
+- Telegram replies that cite search results end with a "Sources:" block resolving the [N] markers; six or more sources collapse behind an expandable quote.
+- Streaming Telegram replies carry a native Stop button (Bot API 10.3): it cancels the turn the same way the web stop does, and the partial answer is kept as a real message instead of vanishing with the draft.
+
+### Changed
+
+- grammy bumped to 1.46.0 (Bot API 10.3).
 
 ### Fixed
 

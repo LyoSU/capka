@@ -1,12 +1,12 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { PoolClient } from "pg";
 import { nanoid } from "nanoid";
-import { eq, and, ne, desc, isNotNull } from "drizzle-orm";
+import { eq, and, ne, desc, isNotNull, inArray } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
-import { telegramLinks, linkCodes, chats, messages, users, accounts } from "@/lib/db/schema";
+import { telegramLinks, linkCodes, chats, messages, users, accounts, tasks } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { publishTaskEvent } from "@/lib/tasks/events";
-import { enqueueTask } from "@/lib/tasks/queue";
+import { enqueueTask, requestCancel } from "@/lib/tasks/queue";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { reserveBudget, releaseHold } from "@/lib/billing/limits";
 import { toUIMessages } from "@/lib/chat/presenter";
@@ -392,6 +392,28 @@ async function buildBot(): Promise<Bot | null> {
     await db.update(chats).set({ model: choice.ref, updatedAt: new Date() }).where(eq(chats.id, chat.id));
     await ctx.editMessageReplyMarkup().catch(() => {});
     await reply(ctx, "modelSet", { values: { model: choice.label } });
+  });
+
+  // The user tapped the native stop button under a streaming draft (Bot API
+  // 10.3, armed via `can_stop` on every sendRichMessageDraft). This is the same
+  // cooperative cancel the web stop button performs: flip the DB flag the
+  // running worker polls — never kill anything from here. The turn then
+  // finalizes as cancelled, and the delivery sink re-sends the partial text as
+  // a real message so what the user watched being written doesn't evaporate
+  // with the draft. Scoped to the link's PINNED chat: that is the only chat
+  // Telegram drafts stream from, so a web turn in another chat is untouchable.
+  bot.on("stopped_message_generation", async (ctx) => {
+    const stop = ctx.stoppedMessageGeneration;
+    if (!stop) return;
+    const link = await findLink(stop.chat.id); // a private chat's id IS the user's id
+    if (!link?.activeChatId) return;
+    const [task] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.chatId, link.activeChatId), inArray(tasks.status, ["queued", "running"])))
+      .orderBy(desc(tasks.createdAt))
+      .limit(1);
+    if (task) await requestCancel(task.id);
   });
 
   // A tool approval was tapped (native HITL — `manage`, or a governance-"ask"

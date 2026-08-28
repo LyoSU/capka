@@ -42,14 +42,14 @@ describe("composeDraft", () => {
 
 describe("composeSources", () => {
   it("renders one quoted [N] line per source, flattening a hostile title", () => {
-    const md = composeSources(
+    const { markdown, plain } = composeSources(
       [
         { n: 1, title: "Kyiv - Wikipedia", url: "https://en.wikipedia.org/wiki/Kyiv" },
         { n: 2, title: "spoof](https://evil.example) *bold*\nnewline", url: "https://real.example/page" },
       ],
       uk,
     );
-    const lines = md.split("\n");
+    const lines = markdown.split("\n");
     expect(lines[0]).toBe("> Джерела:");
     expect(lines[1]).toBe("> [1] Kyiv - Wikipedia — https://en.wikipedia.org/wiki/Kyiv");
     // The title lost its brackets, link syntax, emphasis, and newline — one plain
@@ -58,6 +58,19 @@ describe("composeSources", () => {
     expect(lines[2].slice("> [2] ".length)).not.toMatch(/[[\]()*]/);
     expect(lines[2]).toContain("https://real.example/page");
     expect(lines).toHaveLength(3);
+    // The plain fallback carries the same flat lines, unquoted.
+    expect(plain).toContain("[1] Kyiv - Wikipedia — https://en.wikipedia.org/wiki/Kyiv");
+    expect(plain).not.toContain("> ");
+  });
+
+  it("collapses past five sources behind an expandable details block", () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({ n: i + 1, title: `T${i + 1}`, url: `https://s.example/${i + 1}` }));
+    const { markdown, plain } = composeSources(many, uk);
+    expect(markdown.startsWith("<details><summary>Джерела: (6)</summary>")).toBe(true);
+    expect(markdown).toContain("[6] T6 — https://s.example/6");
+    // Plain fallback never hides anything behind markup it can't express.
+    expect(plain).not.toContain("<details>");
+    expect(plain).toContain("[6] T6 — https://s.example/6");
   });
 });
 

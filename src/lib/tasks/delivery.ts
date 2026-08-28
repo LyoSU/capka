@@ -211,21 +211,29 @@ export function composeFinal(
   return body;
 }
 
-/** The cited-sources footer: one quoted block, `[N] Title — URL` per line, in
- *  number order — the Telegram twin of the web reply's "Sources" list, and what
- *  turns the answer's naked [N] markers into resolvable footnotes. Titles come
- *  from arbitrary web pages, so they are flattened to one plain line (no
- *  newlines, links, or emphasis) before touching Markdown; the URL is sent bare
- *  and lets the client autolink it, which leaves no caption to spoof. */
+/** The cited-sources footer: `[N] Title — URL` per line, in number order — the
+ *  Telegram twin of the web reply's "Sources" list, and what turns the answer's
+ *  naked [N] markers into resolvable footnotes. Titles come from arbitrary web
+ *  pages, so they are flattened to one plain line (no newlines, links, or
+ *  emphasis) before touching Markdown; the URL is sent bare and lets the client
+ *  autolink it, which leaves no caption to spoof. A short list is a quoted
+ *  block; past five sources it collapses behind <details> (the Bot API renders
+ *  it as an expandable quotation), so a well-researched answer doesn't end in a
+ *  screenful of links. The plain fallback always carries the flat lines. */
 export function composeSources(
   sources: { n: number; title: string; url: string }[],
   t: Translator,
-): string {
+): { markdown: string; plain: string } {
   const line = (s: { n: number; title: string; url: string }) => {
     const title = s.title.replace(/\s+/g, " ").replace(/[[\]()`*_~>#|]/g, "").slice(0, 120).trim();
-    return `> [${s.n}] ${title ? `${title} — ` : ""}${s.url}`;
+    return `[${s.n}] ${title ? `${title} — ` : ""}${s.url}`;
   };
-  return [`> ${t("sourcesHeader")}`, ...sources.map(line)].join("\n");
+  const lines = sources.map(line);
+  const plain = [t("sourcesHeader"), ...lines].join("\n");
+  const markdown = sources.length > 5
+    ? `<details><summary>${escapeHtml(t("sourcesHeader"))} (${sources.length})</summary>\n\n${lines.join("\n")}\n\n</details>`
+    : [`> ${t("sourcesHeader")}`, ...lines.map((l) => `> ${l}`)].join("\n");
+  return { markdown, plain };
 }
 
 /** The confirm preview shown before a staged change is approved — the same
@@ -357,8 +365,12 @@ class TelegramSink implements DeliverySink {
       if (!bot || this.closed) return; // finish() may have latched during the await
       if (!answer.trim() && !reasoning.trim() && !status) return; // nothing to show yet
       // Ephemeral animated preview; the real message is sent on finish().
+      // `can_stop` (Bot API 10.3) puts a native stop button under the draft — the
+      // tap arrives as a stopped_message_generation update (bot.ts) and flips the
+      // same cooperative-cancel flag as the web stop button. `keep_on_stop` keeps
+      // the partial visible until finish() persists it as a real message.
       const draft = composeDraft(answer, reasoning, status, this.t);
-      const send = bot.api.sendRichMessageDraft(this.chatId, this.draftId, draft);
+      const send = bot.api.sendRichMessageDraft(this.chatId, this.draftId, draft, { can_stop: true, keep_on_stop: true });
       this.sending = send;
       this.streamed = true;
       await send;
@@ -398,7 +410,7 @@ class TelegramSink implements DeliverySink {
       // finish() may have latched while we awaited the bot/network — re-check
       // before sending so we never re-push a draft for an already-ended turn.
       if (bot && !this.closed) {
-        const send = bot.api.sendRichMessageDraft(this.chatId, this.draftId, this.lastDraft);
+        const send = bot.api.sendRichMessageDraft(this.chatId, this.draftId, this.lastDraft, { can_stop: true, keep_on_stop: true });
         this.sending = send;
         await send;
         this.lastSentAt = Date.now();
@@ -481,7 +493,16 @@ class TelegramSink implements DeliverySink {
     // Wait out a draft update already on the wire — processed after the final,
     // it would resurrect the (already-answered) streaming bubble for ~30s.
     if (this.sending) await this.sending.catch(() => {});
-    if (result.status === "cancelled") return; // nothing useful to persist
+    if (result.status === "cancelled") {
+      // A user-initiated stop (the web button, or Telegram's own stop button on
+      // the draft). The web transcript keeps whatever was already written — this
+      // channel now does too: the draft dies with the stop, so a non-empty
+      // partial is re-sent as a real message with a quiet "stopped" footer.
+      // Silent — the user just acted; a notification would echo their own tap.
+      const partial = result.text.trim();
+      if (partial) await this.sendRich(`${partial}\n\n> ${this.t("stopped")}`, `${partial}\n\n${this.t("stopped")}`, true);
+      return;
+    }
 
     // A failure is delivered in-chat, never deferred to the web UI: a calm
     // notice for everyone, plus a collapsed technical detail for admins.
@@ -501,9 +522,9 @@ class TelegramSink implements DeliverySink {
     // sources only make sense under text that cites them. The markdown side is a
     // quoted block; the plain fallback carries the SAME lines unquoted, so a
     // Markdown rejection never strips where the [N] markers point.
-    const sourcesMd = body && result.sources?.length ? composeSources(result.sources, this.t) : null;
-    const mdBody = sourcesMd ? `${body}\n\n${sourcesMd}` : body;
-    const plainBody = sourcesMd ? `${body}\n\n${sourcesMd.replace(/^> /gm, "")}` : body;
+    const src = body && result.sources?.length ? composeSources(result.sources, this.t) : null;
+    const mdBody = src ? `${body}\n\n${src.markdown}` : body;
+    const plainBody = src ? `${body}\n\n${src.plain}` : body;
     let markdown: string | null;
     if (body) {
       // The whole answer, one message — closed with the tool-log footer.
