@@ -556,11 +556,17 @@
    node and stays plain text — visibly inert by design. */
 .chat-prose a[data-citation] {
   display: inline-block;
-  vertical-align: super;
-  font-size: 0.66em;
-  line-height: 1.1;
-  padding: 0.1em 0.5em;
-  margin: 0 0.12em;
+  /* A fixed raise, not `super`: super lifts the pill clear of the baseline and
+     the punctuation after it reads as detached ("слово ¹ ,"). Verified in the
+     CSS harness — 0.25em keeps the pill visually IN the line. Contrast measured
+     (canvas-rasterized, oklch tokens): 6.08:1 light / 4.84:1 dark — AA at 11px. */
+  vertical-align: 0.25em;
+  font-size: 0.68em;
+  line-height: 1;
+  padding: 0.12em 0.42em;
+  /* Asymmetric on purpose: a hair of air after the word it cites, and almost
+     none before the punctuation that usually follows. */
+  margin: 0 0.05em 0 0.12em;
   border-radius: 9999px;
   background: var(--muted);
   color: var(--muted-foreground);

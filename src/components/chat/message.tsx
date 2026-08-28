@@ -833,7 +833,10 @@ function SourceList({ sources }: { sources: NumberedSource[] }) {
     <ol className="space-y-1.5 rounded-lg bg-muted/50 px-3 py-2">
       {sources.map((s) => (
         <li key={s.n} className="flex min-w-0 items-baseline gap-2 text-sm">
-          <span className="shrink-0 rounded-full bg-muted px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">{s.n}</span>
+          {/* bg-background inverts against the panel's muted/50 so the number is
+              findable when matching a [N] chip back to its source; the min-width
+              keeps one- and two-digit rows left-aligned. */}
+          <span className="min-w-[1.5rem] shrink-0 rounded-full border border-border bg-background px-1 text-center text-[11px] font-medium tabular-nums text-muted-foreground">{s.n}</span>
           <span className="min-w-0">
             <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">{s.title}</a>
             {hostOf(s.url) && <span className="ml-1.5 text-xs text-muted-foreground">{hostOf(s.url)}</span>}
