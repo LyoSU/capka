@@ -8,6 +8,8 @@ import "streamdown/styles.css";
 // bundle it, so import it here where the math plugin is wired in.
 import "katex/dist/katex.min.css";
 import { remarkWorkspacePaths, makeWorkspaceComponents } from "./workspace-path";
+import { makeRemarkCitations } from "@/lib/chat/citations";
+import type { NumberedSource } from "@/lib/mcp/search-normalize";
 
 // Default remark pipeline + our /workspace path linker. Passing remarkPlugins
 // replaces Streamdown's defaults, so re-include them (gfm, codeMeta) to keep GFM
@@ -45,7 +47,7 @@ function loadPlugins(): Promise<PluginConfig> {
   return pluginsPromise;
 }
 
-export function Markdown({ children, isStreaming, chatId }: { children: string; isStreaming?: boolean; chatId?: string }) {
+export function Markdown({ children, isStreaming, chatId, sources }: { children: string; isStreaming?: boolean; chatId?: string; sources?: NumberedSource[] }) {
   const [plugins, setPlugins] = useState<PluginConfig | undefined>(undefined);
 
   useEffect(() => {
@@ -65,12 +67,23 @@ export function Markdown({ children, isStreaming, chatId }: { children: string; 
     [chatId, isStreaming],
   );
 
+  // Citation chips ([N] → source link). The sources array is rebuilt by the
+  // message on every render, so memoize on its CONTENT — a fresh plugin array
+  // each render would defeat Streamdown's memo (see STREAMDOWN_CONTROLS above).
+  const citeKey = sources?.length ? sources.map((s) => `${s.n}${s.url}${s.title}`).join("\n") : "";
+  const remarkPlugins = useMemo(() => {
+    const base = chatId ? REMARK_WITH_PATHS : undefined;
+    if (!citeKey) return base;
+    return [...(base ?? Object.values(defaultRemarkPlugins)), makeRemarkCitations(sources!)];
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `sources` is represented by citeKey (content identity, not reference)
+  }, [chatId, citeKey]);
+
   return (
     <Streamdown
       parseIncompleteMarkdown={isStreaming}
       controls={STREAMDOWN_CONTROLS}
       plugins={plugins}
-      remarkPlugins={chatId ? REMARK_WITH_PATHS : undefined}
+      remarkPlugins={remarkPlugins}
       components={components}
       urlTransform={urlTransform}
     >

@@ -1,6 +1,7 @@
 import { dynamicTool, jsonSchema } from "ai";
 import { clampOutput, MAX_TOOL_OUTPUT_CHARS } from "@/lib/tool-output";
 import { spillToWorkspace } from "./spill";
+import { extractSearchRecords, sourcesModelText, type NumberedSource } from "./search-normalize";
 import { nonNegInt, posInt } from "@/lib/config/env";
 
 /** Ceiling for a single MCP media/blob block, measured on the base64 STRING
@@ -13,10 +14,14 @@ const MAX_MCP_MEDIA_BYTES = nonNegInt(process.env.MAX_MCP_MEDIA_BYTES, 5 * 1024 
 const MAX_MCP_TOOL_DESC_CHARS = posInt(process.env.MAX_MCP_TOOL_DESC_CHARS, 1024);
 
 /** Where spill writes and who owns the workspace — threaded from loadMcpTools.
- *  Absent (e.g. no sandbox session) means spill degrades to a plain clamp. */
+ *  Absent (e.g. no sandbox session) means spill degrades to a plain clamp.
+ *  `sources` is the run's citation counter: search-shaped results get their
+ *  records numbered through it, so `[N]` stays unique across every search call
+ *  of the turn. Absent (background cache warms) disables normalization. */
 interface SpillCtx {
   sessionKey?: string;
   userId?: string;
+  sources?: { next: number };
 }
 
 const kb = (n: number) => `${Math.round(n / 1024)} KB`;
@@ -208,8 +213,29 @@ export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: Mcp
         { signal: abortSignal },
       )) as McpCallResult;
       if (result.isError) throw new Error(textOf(result) || `${serverName} ${mcpTool.name} failed`);
-      return boundResult(result, ctx);
+      const bounded = await boundResult(result, ctx);
+      // A search-shaped result gets its records numbered off the run's counter
+      // and carried on the persisted output — the model then reads `[N]` lines
+      // (see toModelOutput) and the chat UI resolves the same `[N]` in the
+      // answer. Nothing matched confidently = result untouched.
+      if (ctx.sources) {
+        const found = extractSearchRecords(bounded);
+        if (found) {
+          const capkaSources: NumberedSource[] = found.records.map((r) => ({ n: ctx.sources!.next++, ...r }));
+          return { ...bounded, capkaSources, ...(found.preamble ? { capkaPreamble: found.preamble } : {}) };
+        }
+      }
+      return bounded;
     },
-    toModelOutput: ({ output }) => ({ type: "content", value: toModelContent(output as McpCallResult) }),
+    toModelOutput: ({ output }) => {
+      const o = output as McpCallResult & { capkaSources?: NumberedSource[]; capkaPreamble?: string };
+      if (o?.capkaSources?.length) {
+        // The numbered rendering REPLACES the text blocks (same information,
+        // one shape); media blocks the result also carried pass through.
+        const media = toModelContent(o).filter((p) => p.type === "media");
+        return { type: "content", value: [{ type: "text" as const, text: sourcesModelText(o.capkaSources, o.capkaPreamble) }, ...media] };
+      }
+      return { type: "content", value: toModelContent(o) };
+    },
   });
 }

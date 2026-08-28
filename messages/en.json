@@ -598,6 +598,9 @@
       "offline": "No connection. Check your internet and try again."
     },
     "clearSearch": "Clear search",
+    "citations": {
+      "sources": "Sources"
+    },
     "approval": {
       "title": "Permission needed",
       "prompt": "The assistant wants to use {tool}.",

@@ -29,6 +29,8 @@ import {
   fieldsFromValue, imagesFromValue, resourcesFromValue, type TextRecord,
 } from "@/lib/chat/record-list";
 import { isBareUrl, type StepField } from "@/lib/chat/steps";
+import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normalize";
+import { citedSources } from "@/lib/chat/citations";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -261,12 +263,16 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
       return null;
     }
   }, [isError, full]);
+  // Search results the adapter normalized (mcp/search-normalize.ts) — rendered
+  // as the numbered source list the reply's [N] chips point into, ahead of the
+  // generic record ladder so the numbers the model cited stay visible.
+  const searchSources = useMemo(() => (isError ? null : sourcesFromOutput(output)), [isError, output]);
   // A result that is a LIST — typed records per the MCP spec, or `Key: value`
   // text blocks — renders as one. Never for errors (a traceback is a text) and
   // never for exec/file output, where the bytes themselves are the artifact.
   const records = useMemo(
-    () => (isError || mono ? null : recordsFromValue(output) ?? (parsed ? recordsFromValue(parsed) : null) ?? recordsFromText(full)),
-    [isError, mono, output, parsed, full],
+    () => (isError || mono || searchSources ? null : recordsFromValue(output) ?? (parsed ? recordsFromValue(parsed) : null) ?? recordsFromText(full)),
+    [isError, mono, searchSources, output, parsed, full],
   );
   // The envelope's other block types, per the MCP spec: images the tool drew,
   // resources it pointed at. They accompany whatever textual shape renders
@@ -374,6 +380,16 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
         {/* An image- or resource-only result is a real result — "done" is the
             wording for a call that returned NOTHING to show, and only that. */}
         {extras || <p className="text-xs text-muted-foreground">{t("done")}</p>}
+      </section>
+    );
+  }
+
+  if (searchSources) {
+    return (
+      <section>
+        <BlockLabel action={<CopyButton text={full} />}>{t("result")}</BlockLabel>
+        {extras}
+        <SourceList sources={searchSources} />
       </section>
     );
   }
@@ -810,7 +826,47 @@ function StepFileChip({ path, name, chatId }: { path: string; name: string; chat
 
 
 
-function TextContent({ text, isStreaming, chatId, touched }: { text: string; isStreaming?: boolean; chatId?: string; touched?: string[] }) {
+/** Numbered search results inside a step panel — the list the reply's [N]
+ *  chips point into: number, linked title, domain, clamped snippet. */
+function SourceList({ sources }: { sources: NumberedSource[] }) {
+  return (
+    <ol className="space-y-1.5 rounded-lg bg-muted/50 px-3 py-2">
+      {sources.map((s) => (
+        <li key={s.n} className="flex min-w-0 items-baseline gap-2 text-sm">
+          <span className="shrink-0 rounded-full bg-muted px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">{s.n}</span>
+          <span className="min-w-0">
+            <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">{s.title}</a>
+            {hostOf(s.url) && <span className="ml-1.5 text-xs text-muted-foreground">{hostOf(s.url)}</span>}
+            {s.snippet && <span className="line-clamp-2 block text-xs leading-relaxed text-muted-foreground">{s.snippet}</span>}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The sources a reply actually cited, as a quiet footer under the answer —
+ *  only the cited ones: the full result lists already live in the step panels,
+ *  and repeating twenty rows under every answer would drown the reply. */
+function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
+  const t = useTranslations("chat.citations");
+  return (
+    <div className="animate-message-in mt-3 border-t border-border pt-2">
+      <div className="mb-1 text-xs font-medium text-muted-foreground">{t("sources")}</div>
+      <ol className="space-y-0.5">
+        {list.map((s) => (
+          <li key={s.n} className="flex min-w-0 items-baseline gap-1.5 text-xs">
+            <span className="shrink-0 tabular-nums text-muted-foreground">[{s.n}]</span>
+            <a href={s.url} target="_blank" rel="noopener noreferrer" title={s.url} className="min-w-0 truncate text-link hover:underline">{s.title}</a>
+            {hostOf(s.url) && <span className="shrink-0 text-muted-foreground">{hostOf(s.url)}</span>}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function TextContent({ text, isStreaming, chatId, touched, sources }: { text: string; isStreaming?: boolean; chatId?: string; touched?: string[]; sources?: NumberedSource[] }) {
   // `chat-prose` caps flowing text to a ~70ch measure (see globals.css) so long
   // answers stay in the comfortable reading band; code blocks and tables are
   // exempt and keep the full column width. 16px (text-base) is the readable
@@ -823,7 +879,7 @@ function TextContent({ text, isStreaming, chatId, touched }: { text: string; isS
   // information anyway — it marks the write head and blinks when it parks.
   return (
     <div className="chat-prose text-base leading-relaxed" data-streaming={isStreaming ? "" : undefined}>
-      <Markdown isStreaming={isStreaming} chatId={chatId}>{text}</Markdown>
+      <Markdown isStreaming={isStreaming} chatId={chatId} sources={sources}>{text}</Markdown>
       {chatId && <WorkspaceLinks text={text} chatId={chatId} live={isStreaming} touched={touched} />}
     </div>
   );
@@ -2189,6 +2245,19 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const lastIdx = groups.length - 1;
   const firstActivityIdx = groups.findIndex((g) => g.kind === "activity");
 
+  // Every numbered source this turn's search results produced — what the [N]
+  // markers in the answer resolve against (per MESSAGE, so numbers from another
+  // turn can never be borrowed). The footer lists only the cited subset.
+  const turnSources: NumberedSource[] = [];
+  for (const part of parts) {
+    if (!isToolPart(part)) continue;
+    const s = sourcesFromOutput((part as ToolPart).output);
+    if (s) turnSources.push(...s);
+  }
+  const cited = turnSources.length
+    ? citedSources(groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n"), turnSources)
+    : [];
+
   // An assistant turn that's still warming up (no parts yet) renders nothing —
   // the single "working…" indicator in the panel owns that state. Rendering an
   // empty padded bubble here would just shove the indicator down a notch the
@@ -2223,6 +2292,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
                     isStreaming={isStreaming && gi === lastTextIdx}
                     chatId={chatId}
                     touched={gi === lastTextIdx ? metadata?.touchedFiles : undefined}
+                    sources={turnSources.length ? turnSources : undefined}
                   />
                 </div>
               );
@@ -2264,6 +2334,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
             {metadata?.taskStatus === "cancelled" ? t("cancelled") : "…"}
           </span>
         )}
+        {cited.length > 0 && !isStreaming && <CitedSourcesFooter list={cited} />}
         {metadata?.taskStatus === "failed" && (
           <ErrorNotice
             message={

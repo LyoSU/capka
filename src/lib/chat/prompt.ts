@@ -33,6 +33,12 @@ export interface BuiltPrompt {
  *  two can't drift apart. Role is enforced server-side inside the tool, so this
  *  stays role-neutral and cache-stable — a non-admin's attempt at an org
  *  setting simply fails. */
+// Connector search results arrive pre-numbered (`[N] Title — URL`, see
+// mcp/search-normalize.ts). One static sentence teaches the convention; the
+// result itself repeats it, so this is reinforcement, not the sole carrier.
+const CITATIONS_PROMPT = `## Citing sources
+When a tool result lists numbered search results ("[N] Title — URL"), cite them inline as [N] immediately after each claim that uses them. Only cite numbers that actually appear in this conversation's results — never invent one.`;
+
 const MANAGE_PROMPT = `## Managing settings & configuration
 - When the user asks to change a preference or setting (their language/timezone, connectors, skills, or — for admins — platform-wide configuration), do it yourself with the \`manage\` tool instead of pointing them at a settings page, following that tool's rules: discover with \`list\`/\`capabilities\` (never invent a control id), then CALL the matching action and react to its result — permission is decided entirely by the server, so never refuse up front.
 - When the user describes a RECURRING intent ("щотижня", "щоранку", "стеж за", "нагадуй", "every Monday"), offer to create an automation (\`add\` on \`automations\`): the platform will run the instruction on schedule and deliver results as a new chat (+ Telegram if linked). Translate the schedule into a cron expression in the user's timezone yourself — the user must never see cron syntax; the approval card shows them the next run dates instead. For "remind me once at X" use \`once_at\`. After creating one, offer to run the instruction right now yourself as a test.`;
@@ -191,6 +197,9 @@ export function buildSystemPrompt(opts: {
       // Deferred-connector index (progressive tool disclosure). Deterministic like
       // skills, so it sits in the cached prefix rather than the volatile tail.
       caps.connectors ? opts.connectorIndex || undefined : undefined,
+      // Static like MANAGE_PROMPT, so the cached prefix stays byte-stable; only
+      // meaningful when connectors (the sole source of numbered results) exist.
+      caps.connectors ? CITATIONS_PROMPT : undefined,
       caps.manage ? MANAGE_PROMPT : undefined,
     ]),
 

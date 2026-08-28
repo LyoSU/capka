@@ -66,6 +66,10 @@ export async function loadMcpTools(opts: {
   /** Governance "ask": every tool of this server suspends for the user's
    *  approval before executing (SDK needsApproval). Absent = no gating. */
   serverNeedsApproval?: (name: string) => boolean;
+  /** The run's citation counter — search-shaped results number their records
+   *  through it so `[N]` stays unique across the turn. Absent (cache warms)
+   *  disables search normalization. */
+  sourceCounter?: { next: number };
   /** Present during a live turn: lets a connector elicit input from the user
    *  mid-tool-call (block-and-poll). Omitted for background cache warms. */
   elicitContext?: import("./client").ElicitContext;
@@ -79,7 +83,7 @@ export async function loadMcpTools(opts: {
   const allow = opts.isServerAllowed ?? (() => true);
   // Passed to every adapted tool so an oversized result can be parked in the
   // workspace (off-disk via the controller file API — no container needed).
-  const spillCtx = { sessionKey: opts.sessionKey, userId: opts.userId };
+  const spillCtx = { sessionKey: opts.sessionKey, userId: opts.userId, sources: opts.sourceCounter };
   const configs = (await listEnabledServerConfigs(opts.userId, opts.projectId))
     .filter((c) => allow(c.name))
     .sort((a, b) => a.name.localeCompare(b.name));

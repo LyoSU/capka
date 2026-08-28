@@ -189,3 +189,44 @@ describe("adaptMcpTool — governance \"ask\"", () => {
     expect(adaptMcpTool(client, "srv", def).needsApproval).toBeUndefined();
   });
 });
+
+describe("adaptMcpTool — search normalization", () => {
+  const hit = (n: number) => JSON.stringify({ results: [
+    { url: `https://a.example/${n}`, title: `A${n}` },
+    { url: `https://b.example/${n}`, title: `B${n}` },
+  ] });
+
+  it("numbers search-shaped results off the shared counter, across calls", async () => {
+    const sources = { next: 1 };
+    const client = { callTool: vi.fn()
+      .mockResolvedValueOnce({ content: [{ type: "text", text: hit(1) }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: hit(2) }] }) };
+    const t = adaptMcpTool(client as never, "web", { name: "search" }, { sources });
+    const first = await t.execute!({}, opts as never) as { capkaSources: { n: number; url: string }[] };
+    const second = await t.execute!({}, opts as never) as { capkaSources: { n: number; url: string }[] };
+    expect(first.capkaSources.map((s) => s.n)).toEqual([1, 2]);
+    expect(second.capkaSources.map((s) => s.n)).toEqual([3, 4]);
+  });
+
+  it("leaves a non-search result untouched, and skips normalization without a counter", async () => {
+    const client = { callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "plain prose" }] }) };
+    const withCounter = adaptMcpTool(client as never, "web", { name: "fetch" }, { sources: { next: 1 } });
+    expect(await withCounter.execute!({}, opts as never)).toEqual({ content: [{ type: "text", text: "plain prose" }] });
+    const clientSearch = { callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: hit(1) }] }) };
+    const noCounter = adaptMcpTool(clientSearch as never, "web", { name: "search" });
+    expect(await noCounter.execute!({}, opts as never)).not.toHaveProperty("capkaSources");
+  });
+
+  it("hands the model numbered [N] lines instead of the raw blob", () => {
+    const client = { callTool: vi.fn() };
+    const t = adaptMcpTool(client as never, "web", { name: "search" });
+    const output = {
+      content: [{ type: "text", text: "raw" }],
+      capkaSources: [{ n: 5, title: "T", url: "https://t.example", snippet: "sn" }],
+    };
+    const res = t.toModelOutput!({ output } as never) as { value: { type: string; text?: string }[] };
+    expect(res.value).toHaveLength(1);
+    expect(res.value[0].text).toContain("[5] T — https://t.example");
+    expect(res.value[0].text).not.toContain("raw");
+  });
+});

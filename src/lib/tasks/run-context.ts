@@ -152,6 +152,11 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   const sandbox = caps.sandbox
     ? await loadSandboxTools(sessionKey, userId, ensureSession, networkMode, () => { sessionEnsured = null; })
     : empty;
+  // The turn's citation counter: search-shaped connector results number their
+  // records through it, so `[N]` stays unique across every search call of the
+  // run. A continuation reusing the same message seeds it past the first
+  // half's numbers (see runner.ts) — that's why the counter rides the bundle.
+  const sourceCounter = { next: 1 };
   const mcp = caps.connectors
     ? await loadMcpTools({
         userId,
@@ -162,6 +167,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
         // An "ask" connector's every call suspends for the user's approval
         // (SDK needsApproval → the awaiting_approval card on web/Telegram).
         serverNeedsApproval: (name) => policy.effect("connector", name) === "ask",
+        sourceCounter,
         // Lets a connector elicit input from the user mid-tool-call (block-and-poll).
         elicitContext: { userId, chatId, messageId, origin: payload.origin },
       })
@@ -323,7 +329,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       availableAmounts(provider, modelEfforts),
     );
 
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason };
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter };
   } catch (e) {
     await closeAll();
     throw e;

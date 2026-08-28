@@ -44,6 +44,7 @@ import { repairToolCall } from "./tool-repair";
 import { errorText } from "@/lib/errors/message";
 import { type FileRef } from "@/lib/constants";
 import type { StoredPart, MessageMeta } from "@/lib/chat/contracts";
+import { sourcesFromOutput } from "@/lib/mcp/search-normalize";
 import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
 import { prepareRun } from "./run-context";
@@ -359,7 +360,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
-    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
     // Every locally-executed tool goes behind the write-ahead boundary, keyed by the
     // reply this turn is writing. Wrapped HERE and not in prepareRun because `msgId` is
@@ -439,6 +440,12 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // dropped effect is precisely the one that gets done twice. See mergeEffects.
       turnEffects.push(...mergeEffects(await loadEffects(resumeMessageId), effectsFromParts(meta.parts ?? [])));
       seq = meta.streamSeq ?? 0;
+      // Seed the citation counter past the suspended half's numbers: this
+      // continuation's tools number their search results through it, and a
+      // restart from 1 would mint a second [1] inside the same message — the
+      // client resolves [N] per message, so the collision would mis-link.
+      const maxSource = Math.max(0, ...parts.flatMap((p) => (p.type === "tool-result" ? (sourcesFromOutput(p.output)?.map((s) => s.n) ?? []) : [])));
+      if (maxSource > 0) sourceCounter.next = maxSource + 1;
       // The suspended half's accounting, carried so the finalize below reports the
       // WHOLE turn. A suspended turn finalizes as `completed` (only its metadata
       // `status` says awaiting_*), so these were persisted; the first snapshot of
