@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
+import { Hint } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth-client";
@@ -190,15 +191,16 @@ export function TelegramLinkCard() {
                 <code className="flex-1 rounded-md bg-muted px-3 py-2 text-sm font-mono">
                   /link {linkCode}
                 </code>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9 shrink-0"
-                  onClick={handleCopyCode}
-                  aria-label={copied ? t("copied") : t("link.copyCommand")}
-                >
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
+                <Hint label={copied ? t("copied") : t("link.copyCommand")}>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={handleCopyCode}
+                  >
+                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </Hint>
                 <span role="status" aria-live="polite" className="sr-only">{copied ? t("copied") : ""}</span>
               </div>
               {codeExpiry && (

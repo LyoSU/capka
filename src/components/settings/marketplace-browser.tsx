@@ -6,6 +6,7 @@ import { Loader2, Plus, Trash2, RefreshCw, Download, Check, Search, Store } from
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Hint } from "@/components/ui/tooltip";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -204,12 +205,16 @@ export function MarketplaceBrowser() {
               <button onClick={() => setSelected(m.id)} className="flex items-center gap-1.5">
                 {m.name} <span className="text-xs text-muted-foreground">({m.pluginCount})</span>
               </button>
-              <button onClick={() => refresh(m.id)} aria-label={t("refresh")} className="ml-1 text-muted-foreground hover:text-foreground">
-                <RefreshCw className="h-3 w-3" />
-              </button>
-              <button onClick={() => removeMarket(m.id)} aria-label={t("remove")} className="text-muted-foreground hover:text-destructive">
-                <Trash2 className="h-3 w-3" />
-              </button>
+              <Hint label={t("refresh")}>
+                <button onClick={() => refresh(m.id)} className="ml-1 text-muted-foreground hover:text-foreground">
+                  <RefreshCw className="h-3 w-3" />
+                </button>
+              </Hint>
+              <Hint label={t("remove")}>
+                <button onClick={() => removeMarket(m.id)} className="text-muted-foreground hover:text-destructive">
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </Hint>
             </div>
           ))}
         </div>

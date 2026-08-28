@@ -6,7 +6,7 @@ import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { useTranslations } from "next-intl";
 import { Search, ChevronDown, X, Eye, Brain, Star, Loader2, KeyRound, AlertCircle, FileText, AudioLines, Video, SlidersHorizontal, Sparkles, Layers } from "lucide-react";
 import { iconForSlug } from "./provider-icons";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { Hint } from "@/components/ui/tooltip";
 import { parseModelId, splitModelRef, displayModelName, encodeModelRef, acceptsNativeFile, PROVIDER_META, type ProviderName, type Modality } from "@/lib/providers/registry";
 import type { ModelInfo } from "@/app/api/models/route";
 import { customModelOption } from "@/lib/providers/custom-model";
@@ -86,33 +86,18 @@ function Caps({ model }: { model: ModelInfo }) {
   // with plain-language meaning on hover and for screen readers. Native input
   // modalities (PDF/audio/video) let the user see what they can attach; image
   // is already conveyed by the vision badge.
+  const cap = (key: string, icon: React.ReactNode) => (
+    <Hint label={t(`caps.${key}`)}>
+      <span className="inline-flex">{icon}</span>
+    </Hint>
+  );
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-1.5 py-0.5">
-      {caps.vision && (
-        <span title={t("caps.vision")} className="inline-flex">
-          <Eye className="h-3.5 w-3.5" aria-label={t("caps.vision")} />
-        </span>
-      )}
-      {hasPdf && (
-        <span title={t("caps.pdf")} className="inline-flex">
-          <FileText className="h-3.5 w-3.5" aria-label={t("caps.pdf")} />
-        </span>
-      )}
-      {hasAudio && (
-        <span title={t("caps.audio")} className="inline-flex">
-          <AudioLines className="h-3.5 w-3.5" aria-label={t("caps.audio")} />
-        </span>
-      )}
-      {hasVideo && (
-        <span title={t("caps.video")} className="inline-flex">
-          <Video className="h-3.5 w-3.5" aria-label={t("caps.video")} />
-        </span>
-      )}
-      {caps.reasoning && (
-        <span title={t("caps.reasoning")} className="inline-flex">
-          <Brain className="h-3.5 w-3.5" aria-label={t("caps.reasoning")} />
-        </span>
-      )}
+      {caps.vision && cap("vision", <Eye className="h-3.5 w-3.5" />)}
+      {hasPdf && cap("pdf", <FileText className="h-3.5 w-3.5" />)}
+      {hasAudio && cap("audio", <AudioLines className="h-3.5 w-3.5" />)}
+      {hasVideo && cap("video", <Video className="h-3.5 w-3.5" />)}
+      {caps.reasoning && cap("reasoning", <Brain className="h-3.5 w-3.5" />)}
     </span>
   );
 }
@@ -155,11 +140,7 @@ function PriceMeter({ model }: { model: ModelInfo }) {
   // that read as "cheapest/unknown". Render the word, tinted like the meter.
   if (isFreeModel(model)) {
     return (
-      <span
-        className="shrink-0 text-[11px] font-medium leading-none text-emerald-600 dark:text-emerald-400"
-        title={t("price.free")}
-        aria-label={t("price.free")}
-      >
+      <span className="shrink-0 text-[11px] font-medium leading-none text-emerald-600 dark:text-emerald-400">
         {t("price.free")}
       </span>
     );
@@ -171,20 +152,18 @@ function PriceMeter({ model }: { model: ModelInfo }) {
     out: formatPrice(pricing?.completion ?? 0),
   })}`;
   return (
-    <span
-      className="inline-flex shrink-0 items-center font-medium tabular-nums leading-none"
-      title={title}
-      aria-label={title}
-    >
-      {[0, 1, 2].map((i) =>
-        i < filled ? (
-          <span key={i} className="text-emerald-500">$</span>
-        ) : (
-          <span key={i} className="text-muted-foreground/40">·</span>
-        ),
-      )}
-      {tier >= 4 && <span className="text-emerald-500">+</span>}
-    </span>
+    <Hint label={title}>
+      <span className="inline-flex shrink-0 items-center font-medium tabular-nums leading-none">
+        {[0, 1, 2].map((i) =>
+          i < filled ? (
+            <span key={i} className="text-emerald-500">$</span>
+          ) : (
+            <span key={i} className="text-muted-foreground/40">·</span>
+          ),
+        )}
+        {tier >= 4 && <span className="text-emerald-500">+</span>}
+      </span>
+    </Hint>
   );
 }
 
@@ -524,7 +503,6 @@ function ProviderRail({
     ) : (
       <button
         type="button"
-        aria-label={title}
         aria-pressed={isActive}
         onClick={() => onSelect(key)}
         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${activeCls}`}
@@ -533,30 +511,27 @@ function ProviderRail({
       </button>
     );
     return (
-      <Tooltip key={key}>
-        <TooltipTrigger render={btn} />
-        <TooltipContent side={vertical ? "right" : "bottom"}>{title}</TooltipContent>
-      </Tooltip>
+      <Hint key={key} label={title} side={vertical ? "right" : "bottom"}>
+        {btn}
+      </Hint>
     );
   };
 
   return (
-    <TooltipProvider delay={300}>
-      <div
-        className={`flex shrink-0 gap-1 ${
-          vertical
-            ? `flex-col overflow-y-auto overflow-x-hidden overscroll-contain border-r p-2 ${labeled ? "w-40 items-stretch" : "items-center"}`
-            : "flex-row items-center overflow-x-auto border-b p-2"
-        }`}
-      >
-        {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
-        {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
-        {(hasAll || hasFeatured) && (
-          <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
-        )}
-        {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
-      </div>
-    </TooltipProvider>
+    <div
+      className={`flex shrink-0 gap-1 ${
+        vertical
+          ? `flex-col overflow-y-auto overflow-x-hidden overscroll-contain border-r p-2 ${labeled ? "w-40 items-stretch" : "items-center"}`
+          : "flex-row items-center overflow-x-auto border-b p-2"
+      }`}
+    >
+      {hasAll && item(ALL_TAB, t("all"), <Layers className="h-4 w-4" />)}
+      {hasFeatured && item(FEATURED_TAB, t("featured"), <Star className="h-4 w-4" />)}
+      {(hasAll || hasFeatured) && (
+        <span className={vertical ? (labeled ? "my-1 h-px w-full bg-border" : "my-1 h-px w-6 bg-border") : "mx-1 h-6 w-px bg-border"} />
+      )}
+      {groups.map((g) => item(g.key, g.group, <BrandIcon slug={g.icon} size={18} />))}
+    </div>
   );
 }
 
@@ -782,23 +757,23 @@ function ModelList({
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
         {searching && <span className="text-[10px] text-muted-foreground tabular-nums">{visible.length}</span>}
-        <button
-          type="button"
-          onClick={() => setFiltersOpen((v) => !v)}
-          aria-pressed={filtersOpen}
-          aria-label={t("filter.title")}
-          title={t("filter.title")}
-          className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
-            filtersOpen || filters.size > 0 ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-hover hover:text-foreground"
-          }`}
-        >
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          {filters.size > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-medium leading-none text-primary-foreground tabular-nums">
-              {filters.size}
-            </span>
-          )}
-        </button>
+        <Hint label={t("filter.title")}>
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((v) => !v)}
+            aria-pressed={filtersOpen}
+            className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
+              filtersOpen || filters.size > 0 ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-hover hover:text-foreground"
+            }`}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            {filters.size > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-medium leading-none text-primary-foreground tabular-nums">
+                {filters.size}
+              </span>
+            )}
+          </button>
+        </Hint>
       </div>
       {filtersOpen && <FilterBar active={filters} onToggle={toggleFilter} onClear={clearFilters} />}
 
@@ -876,7 +851,7 @@ function ModelList({
                       }`}
                     >
                       {model.context > 0 && (
-                        <span className="tabular-nums" title={t("context")}>{formatContext(model.context)}</span>
+                        <Hint label={t("context")}><span className="tabular-nums">{formatContext(model.context)}</span></Hint>
                       )}
                       <Caps model={model} />
                     </span>
@@ -1313,13 +1288,13 @@ export function ModelPicker({
                 <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-warning-text" aria-label={t("unavailable")} />
               )}
               {currentModel && currentModel.context > 0 && (
-                <span className="text-xs text-muted-foreground tabular-nums hidden md:inline" title={t("context")}>{formatContext(currentModel.context)}</span>
+                <Hint label={t("context")}><span className="text-xs text-muted-foreground tabular-nums hidden md:inline">{formatContext(currentModel.context)}</span></Hint>
               )}
               {/* Shared-key chip: shown when the whole offering is the shared key,
                   or (in a mixed own+shared picker) when the SELECTED model runs on
                   a shared connection. */}
               {(state.isShared || currentModel?.configShared) && (
-                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline" title={t("sharedTooltip")}>{t("shared")}</span>
+                <Hint label={t("sharedTooltip")}><span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground hidden sm:inline">{t("shared")}</span></Hint>
               )}
             </span>
           )}
@@ -1368,7 +1343,6 @@ export function ModelPicker({
           type="button"
           onClick={(e) => { e.stopPropagation(); onChange(""); }}
           aria-label={t("clearSelection")}
-          title={t("clearSelection")}
           className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" />

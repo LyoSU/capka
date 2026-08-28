@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Hint } from "@/components/ui/tooltip";
 import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ActionMenu, type ActionItem } from "@/components/ui/action-menu";
 import { Markdown } from "@/components/chat/markdown";
@@ -1512,15 +1513,15 @@ function CopyButton({ text }: { text: string }) {
     setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <button
-      type="button"
-      onClick={onCopy}
-      title={copied ? t("copied") : t("copy")}
-      aria-label={copied ? t("copied") : t("copy")}
-      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-    >
-      {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-    </button>
+    <Hint label={copied ? t("copied") : t("copy")}>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+      >
+        {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
+    </Hint>
   );
 }
 
@@ -1539,27 +1540,27 @@ function BranchSwitcher({
   if (count <= 1) return null;
   return (
     <div className="flex items-center gap-0.5 text-xs text-muted-foreground" aria-label={t("versions", { count })}>
-      <button
-        type="button"
-        onClick={() => onSwitch(messageId, "prev")}
-        disabled={disabled || index <= 0}
-        title={t("prevVersion")}
-        aria-label={t("prevVersion")}
-        className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
-      >
-        <ChevronLeft className="h-3.5 w-3.5" />
-      </button>
+      <Hint label={t("prevVersion")}>
+        <button
+          type="button"
+          onClick={() => onSwitch(messageId, "prev")}
+          disabled={disabled || index <= 0}
+          className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+      </Hint>
       <span className="tabular-nums">{index + 1}/{count}</span>
-      <button
-        type="button"
-        onClick={() => onSwitch(messageId, "next")}
-        disabled={disabled || index >= count - 1}
-        title={t("nextVersion")}
-        aria-label={t("nextVersion")}
-        className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
-      >
-        <ChevronRight className="h-3.5 w-3.5" />
-      </button>
+      <Hint label={t("nextVersion")}>
+        <button
+          type="button"
+          onClick={() => onSwitch(messageId, "next")}
+          disabled={disabled || index >= count - 1}
+          className="rounded-md p-0.5 transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </Hint>
     </div>
   );
 }
@@ -1570,16 +1571,16 @@ function BranchSwitcher({
 function ForkButton({ messageId, onFork, disabled }: { messageId: string; onFork: (messageId: string) => void; disabled?: boolean }) {
   const t = useTranslations("chat.message");
   return (
-    <button
-      type="button"
-      onClick={() => onFork(messageId)}
-      disabled={disabled}
-      title={t("fork")}
-      aria-label={t("fork")}
-      className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-    >
-      <GitBranch className="h-3.5 w-3.5" />
-    </button>
+    <Hint label={t("fork")}>
+      <button
+        type="button"
+        onClick={() => onFork(messageId)}
+        disabled={disabled}
+        className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+      >
+        <GitBranch className="h-3.5 w-3.5" />
+      </button>
+    </Hint>
   );
 }
 
@@ -1665,28 +1666,28 @@ export function QueuedBubble({
     <div className="group/queued flex animate-message-in justify-end px-4 md:px-6 py-4">
       <div className="flex max-w-[75%] items-center gap-1.5 lg:max-w-[65%]">
         {onEdit && (
-          <button
-            type="button"
-            onClick={() => onEditingChange?.(true)}
-            aria-label={t("panel.editQueued")}
-            title={t("panel.editQueued")}
-            className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
-          >
-            <Pencil className="h-4 w-4" />
-          </button>
+          <Hint label={t("panel.editQueued")}>
+            <button
+              type="button"
+              onClick={() => onEditingChange?.(true)}
+              className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+          </Hint>
         )}
         {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            aria-label={t("panel.cancelQueued")}
-            title={t("panel.cancelQueued")}
-            // Hover is the desktop affordance; touch has no hover, so coarse
-            // pointers get it permanently rather than hiding the only way out.
-            className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <Hint label={t("panel.cancelQueued")}>
+            <button
+              type="button"
+              onClick={onCancel}
+              // Hover is the desktop affordance; touch has no hover, so coarse
+              // pointers get it permanently rather than hiding the only way out.
+              className="shrink-0 rounded-full p-1.5 text-muted-foreground opacity-0 transition hover:bg-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover/queued:opacity-100 pointer-coarse:opacity-100"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </Hint>
         )}
         {/* 65%, not less. Opacity dims the text AND the surface under it, so
             the two compound: measured against the real bubble's 18.6:1, this
@@ -1893,16 +1894,16 @@ function UserBubble({
             )}
             {onEdit && text && (
               <span className="opacity-0 transition group-hover/msg:opacity-100">
-                <button
-                  type="button"
-                  onClick={(e) => openEditor(e.currentTarget)}
-                  disabled={actionsDisabled}
-                  title={tMsg("edit")}
-                  aria-label={tMsg("edit")}
-                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
+                <Hint label={tMsg("edit")}>
+                  <button
+                    type="button"
+                    onClick={(e) => openEditor(e.currentTarget)}
+                    disabled={actionsDisabled}
+                    className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </Hint>
               </span>
             )}
             {onFork && (
@@ -2033,13 +2034,11 @@ function MessageDetails({
 
   return (
     <Popover onOpenChange={(open) => open && loadGen()}>
-      <PopoverTrigger
-        className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground"
-        aria-label={t("show")}
-        title={t("show")}
-      >
-        <Info className="h-3.5 w-3.5" />
-      </PopoverTrigger>
+      <Hint label={t("show")}>
+        <PopoverTrigger className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground data-[popup-open]:bg-accent/50 data-[popup-open]:text-foreground">
+          <Info className="h-3.5 w-3.5" />
+        </PopoverTrigger>
+      </Hint>
       <PopoverContent className="min-w-60 space-y-1.5 text-xs" side="top" align="start">
         {/* Everyone's view: plain, calm facts about the reply — nothing that reads
             as developer plumbing (cf. PRODUCT.md "hide the machinery"). */}
@@ -2367,16 +2366,16 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
               )}
               {copyText && <CopyButton text={copyText} />}
               {onRegenerate && (
-                <button
-                  type="button"
-                  onClick={onRegenerate}
-                  disabled={actionsDisabled}
-                  title={t("regenerate")}
-                  aria-label={t("regenerate")}
-                  className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
+                <Hint label={t("regenerate")}>
+                  <button
+                    type="button"
+                    onClick={onRegenerate}
+                    disabled={actionsDisabled}
+                    className="flex items-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </button>
+                </Hint>
               )}
               {onFork && <ForkButton messageId={message.id} onFork={onFork} disabled={actionsDisabled} />}
               <MessageDetails

@@ -14,6 +14,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Hint } from "@/components/ui/tooltip";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { SettingsEmpty } from "@/components/settings/shell";
 import { cn } from "@/lib/utils";
@@ -293,12 +294,11 @@ export default function InstalledPlugins() {
                   <span className="truncate font-medium">{title}</span>
                   {p.version && <span className="text-xs text-muted-foreground">v{p.version}</span>}
                   {p.commitSha && (
-                    <code
-                      className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground"
-                      title={p.commitDate ? `${p.commitSha} · ${new Date(p.commitDate).toLocaleString()}` : p.commitSha}
-                    >
-                      #{p.commitSha.slice(0, 7)}
-                    </code>
+                    <Hint label={p.commitDate ? `${p.commitSha} · ${new Date(p.commitDate).toLocaleString()}` : p.commitSha}>
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+                        #{p.commitSha.slice(0, 7)}
+                      </code>
+                    </Hint>
                   )}
                   <Badge variant={stateVariant(p.enabledState)}>{stateLabel[p.enabledState]}</Badge>
                   {/* Every other tab in Settings > Skills marks shared vs personal — this
@@ -386,9 +386,11 @@ export default function InstalledPlugins() {
                         <span className="truncate">{c.name}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
-                        <span className={cn("flex items-center gap-1 text-xs", st.cls)} title={st.detail}>
-                          <st.Icon className="h-3 w-3" />{st.label}
-                        </span>
+                        <Hint label={st.detail}>
+                          <span className={cn("flex items-center gap-1 text-xs", st.cls)}>
+                            <st.Icon className="h-3 w-3" />{st.label}
+                          </span>
+                        </Hint>
                         {needsLogin && (
                           <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => signIn(c.id)}>
                             <LogIn className="mr-1 h-3 w-3" />{t("signIn")}

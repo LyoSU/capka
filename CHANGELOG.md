@@ -12,6 +12,7 @@ All notable changes to Capka are documented here. Format follows
 - Web search through MCP connectors now yields citations: a search-shaped tool result (Tavily, Brave, Exa, Firecrawl, SearXNG, …) is recognized by shape, numbered, and rendered as a source list, and the reply's inline [N] references become clickable chips with a "Sources" footer. A number the model invents stays plain text, never a link.
 - Telegram replies that cite search results end with a "Sources:" block resolving the [N] markers; six or more sources collapse behind an expandable quote.
 - Streaming Telegram replies carry a native Stop button (Bot API 10.3): it cancels the turn the same way the web stop does, and the partial answer is kept as a real message instead of vanishing with the draft.
+- Icon-only buttons across the web UI (composer, message actions, file panel, model picker, sidebar, settings) show a styled localized tooltip on hover/focus; keyboard shortcuts (e.g. ⌘B) render inside it. Desktop-only — touch is unaffected.
 
 ### Changed
 

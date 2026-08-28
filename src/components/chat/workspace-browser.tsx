@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Hint } from "@/components/ui/tooltip";
 import { formatSize } from "@/lib/constants";
 import { fileCategory, fileKind, previewKind, type FileCategory } from "@/lib/file-kinds";
 import { cn } from "@/lib/utils";
@@ -366,12 +367,14 @@ export function WorkspaceBrowser({
           <p className="truncate text-sm font-medium">{entry.name}</p>
         </button>
         {isSyncedFolder(entry) && (
-          <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary" title={t("syncedFolder")}>
-            {syncingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-            {syncingNow && folderSync?.progress && folderSync.progress.total > 0
-              ? `${folderSync.progress.done}/${folderSync.progress.total}`
-              : t("synced")}
-          </span>
+          <Hint label={t("syncedFolder")}>
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+              {syncingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              {syncingNow && folderSync?.progress && folderSync.progress.total > 0
+                ? `${folderSync.progress.done}/${folderSync.progress.total}`
+                : t("synced")}
+            </span>
+          </Hint>
         )}
       </div>
     );
@@ -402,19 +405,24 @@ export function WorkspaceBrowser({
             </span>
           </span>
         </button>
-        <a href={downloadUrl(entry.path)} download={entry.name} aria-label={t("download", { name: entry.name })}
-          className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-[opacity,color,background-color] hover:bg-hover hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100">
-          <Download className="h-3.5 w-3.5" />
-        </a>
-        <button
-          type="button"
-          onClick={() => setPendingDelete(entry)}
-          aria-label={t("deleteTitle", { name: entry.name })}
-          title={t("delete")}
-          className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-[opacity,color,background-color] hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <Hint label={t("download", { name: entry.name })}>
+          <a href={downloadUrl(entry.path)} download={entry.name}
+            className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-[opacity,color,background-color] hover:bg-hover hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100">
+            <Download className="h-3.5 w-3.5" />
+          </a>
+        </Hint>
+        {/* The hint says "Delete"; the button keeps the longer name-bearing label,
+            which wins over the hint's, so a screen reader still says which file. */}
+        <Hint label={t("delete")}>
+          <button
+            type="button"
+            onClick={() => setPendingDelete(entry)}
+            aria-label={t("deleteTitle", { name: entry.name })}
+            className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-[opacity,color,background-color] hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </Hint>
       </div>
     );
   };
@@ -422,13 +430,11 @@ export function WorkspaceBrowser({
   // The sync badge as a tile corner overlay — the same verdict the list row shows,
   // so flipping to grid never silently drops a file's status.
   const tileBadge = (label: string, icon: React.ReactNode) => (
-    <span
-      aria-label={label}
-      title={label}
-      className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-background/90 ring-1 ring-border/60"
-    >
-      {icon}
-    </span>
+    <Hint label={label}>
+      <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-background/90 ring-1 ring-border/60">
+        {icon}
+      </span>
+    </Hint>
   );
 
   const folderTile = (entry: FileEntry) => {
@@ -588,27 +594,31 @@ export function WorkspaceBrowser({
           className="peer sr-only"
           onChange={(e) => e.target.files && upload(e.target.files)}
         />}
-        {!shared && <label
-          htmlFor={uploadId}
-          title={t("upload")}
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring/50"
-        >
-          {uploading ? (
-            <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" aria-hidden="true" />
-          ) : (
-            <Upload className="h-3.5 w-3.5" aria-hidden="true" />
-          )}
-          <span className="sr-only">{t("upload")}</span>
-        </label>}
+        {!shared && <Hint label={t("upload")} side="bottom">
+          <label
+            htmlFor={uploadId}
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring/50"
+          >
+            {uploading ? (
+              <span className="spinner-ring h-3.5 w-3.5 animate-spin rounded-full" aria-hidden="true" />
+            ) : (
+              <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </label>
+        </Hint>}
         {!shared && canDownloadAll(folders.length, fileCount) && (
-          <button onClick={downloadAll} title={t("downloadAll")} aria-label={t("downloadAll")} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
-            <Download className="h-3.5 w-3.5" />
-          </button>
+          <Hint label={t("downloadAll")} side="bottom">
+            <button onClick={downloadAll} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
+              <Download className="h-3.5 w-3.5" />
+            </button>
+          </Hint>
         )}
         {onClose && (
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={onClose} aria-label={t("close")}>
-            <X className="h-3.5 w-3.5" />
-          </Button>
+          <Hint label={t("close")} side="bottom">
+            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={onClose}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </Hint>
         )}
       </div>
 
@@ -648,12 +658,16 @@ export function WorkspaceBrowser({
           variant="outline"
           size="sm"
         >
-          <ToggleGroupItem value="list" aria-label={t("viewList")} title={t("viewList")} className="h-6 w-6">
-            <List className="h-3.5 w-3.5" />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="grid" aria-label={t("viewGrid")} title={t("viewGrid")} className="h-6 w-6">
-            <LayoutGrid className="h-3.5 w-3.5" />
-          </ToggleGroupItem>
+          <Hint label={t("viewList")}>
+            <ToggleGroupItem value="list" className="h-6 w-6">
+              <List className="h-3.5 w-3.5" />
+            </ToggleGroupItem>
+          </Hint>
+          <Hint label={t("viewGrid")}>
+            <ToggleGroupItem value="grid" className="h-6 w-6">
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </ToggleGroupItem>
+          </Hint>
         </ToggleGroup>
       </div>
 

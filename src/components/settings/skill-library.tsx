@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { Hint } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -428,13 +429,15 @@ function SkillRow({
         />
         {canDelete && (
           <AlertDialog>
-            <AlertDialogTrigger
-              render={
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label={t("deleteAria", { name: skill.name })}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              }
-            />
+            <Hint label={t("delete")}>
+              <AlertDialogTrigger
+                render={
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" aria-label={t("deleteAria", { name: skill.name })}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                }
+              />
+            </Hint>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>{t("deleteTitle", { name: skill.name })}</AlertDialogTitle>

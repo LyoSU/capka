@@ -7,6 +7,7 @@ import type { Root, RootContent } from "mdast";
 import { usePreview, useFileStatus, type PreviewFile } from "./file-preview";
 import { fileKind, previewKind } from "@/lib/file-kinds";
 import { freshWorkspacePathRe, isSafeWorkspaceRel, workspaceRelFromHref } from "@/lib/chat/artifacts";
+import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 /** An mdast link to a workspace file, captioned with just the file name. */
@@ -75,30 +76,32 @@ function WorkspacePathChip({ rel, chatId, live }: { rel: string; chatId: string;
   );
   if (missing) {
     return (
-      <span
-        title={tw("notCreated")}
-        className={cn(cls, "cursor-default border-dashed text-muted-foreground/70 line-through opacity-70 hover:border-border hover:bg-hover")}
-      >
-        {inner}
-      </span>
+      <Hint label={tw("notCreated")}>
+        <span className={cn(cls, "cursor-default border-dashed text-muted-foreground/70 line-through opacity-70 hover:border-border hover:bg-hover")}>
+          {inner}
+        </span>
+      </Hint>
     );
   }
   if (previewKind(name) !== null) {
     return (
-      <button type="button" title={`/workspace/${rel}`} onClick={() => open([file], 0)} className={cls}>
-        {inner}
-      </button>
+      <Hint label={`/workspace/${rel}`}>
+        <button type="button" onClick={() => open([file], 0)} className={cls}>
+          {inner}
+        </button>
+      </Hint>
     );
   }
   return (
-    <a
-      href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(rel)}`}
-      download={name}
-      title={`/workspace/${rel}`}
-      className={cls}
-    >
-      {inner}
-    </a>
+    <Hint label={`/workspace/${rel}`}>
+      <a
+        href={`/api/sandbox/files/download?chatId=${chatId}&path=${encodeURIComponent(rel)}`}
+        download={name}
+        className={cls}
+      >
+        {inner}
+      </a>
+    </Hint>
   );
 }
 

@@ -7,6 +7,7 @@ import { ContextMeter } from "@/components/chat/context-meter";
 import { AttachFolderMenu } from "@/components/chat/attach-folder-menu";
 import { useIsMobile, MOBILE_BREAKPOINT } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
+import { Hint } from "@/components/ui/tooltip";
 import { AttachmentTray } from "@/components/chat/attachment-tray";
 import { useAutoGrow } from "@/components/chat/use-auto-grow";
 import type { FileRef } from "@/lib/constants";
@@ -284,25 +285,23 @@ export function ChatInput({
                 // Folder access is on for this user → the paperclip opens a small
                 // menu (upload files vs connect a folder from their computer).
                 <AttachFolderMenu folders={folders} onUpload={() => fileInputRef.current?.click()}>
-                  <span
-                    className="inline-flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90"
-                    title={t("attach")}
-                    aria-label={t("attach")}
-                  >
-                    <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
-                  </span>
+                  <Hint label={t("attach")}>
+                    <span className="inline-flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90">
+                      <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                    </span>
+                  </Hint>
                 </AttachFolderMenu>
               ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90"
-                  onClick={() => fileInputRef.current?.click()}
-                  title={t("attach")}
-                  aria-label={t("attach")}
-                >
-                  <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
-                </Button>
+                <Hint label={t("attach")}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 sm:h-8 sm:w-8 rounded-xl text-muted-foreground transition-transform hover:text-foreground active:scale-90"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Paperclip className="h-4.5 w-4.5 sm:h-4 sm:w-4" />
+                  </Button>
+                </Hint>
               )}
             </div>
 
@@ -316,35 +315,37 @@ export function ChatInput({
                   something to send, otherwise Stop. Idle: always Send. Send stays
                   disabled until any in-flight upload settles. */}
               {isLoading && !hasContent ? (
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
-                  // Keep the caret in the composer — a button click would otherwise
-                  // steal focus (and close the mobile keyboard) on every send/stop.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={onStop}
-                  aria-label={t("stop")}
-                >
-                  <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                </Button>
+                <Hint label={t("stop")}>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
+                    // Keep the caret in the composer — a button click would otherwise
+                    // steal focus (and close the mobile keyboard) on every send/stop.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={onStop}
+                  >
+                    <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  </Button>
+                </Hint>
               ) : (
-                <Button
-                  size="icon"
-                  className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
-                  disabled={!canSend}
-                  // Keep the caret in the composer — a button click would otherwise
-                  // steal focus (and close the mobile keyboard) on every send.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={onSubmit}
-                  aria-label={isLoading ? t("queue") : t("send")}
-                >
-                  {uploading ? (
-                    <Loader2 className="h-4.5 w-4.5 animate-spin sm:h-4 sm:w-4" />
-                  ) : (
-                    <ArrowUp className="h-4.5 w-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:h-4 sm:w-4" />
-                  )}
-                </Button>
+                <Hint label={isLoading ? t("queue") : t("send")}>
+                  <Button
+                    size="icon"
+                    className="group/send h-10 w-10 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-transform active:scale-90"
+                    disabled={!canSend}
+                    // Keep the caret in the composer — a button click would otherwise
+                    // steal focus (and close the mobile keyboard) on every send.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={onSubmit}
+                  >
+                    {uploading ? (
+                      <Loader2 className="h-4.5 w-4.5 animate-spin sm:h-4 sm:w-4" />
+                    ) : (
+                      <ArrowUp className="h-4.5 w-4.5 transition-transform group-hover/send:-translate-y-0.5 sm:h-4 sm:w-4" />
+                    )}
+                  </Button>
+                </Hint>
               )}
             </div>
           </div>

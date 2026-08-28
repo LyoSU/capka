@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Hint } from "@/components/ui/tooltip";
 import { ProviderGlyph, BRAND_ICON_SLUGS } from "@/components/chat/provider-icons";
 
 /** A compact icon button that opens a grid of brand glyphs in a popover, so a
@@ -23,14 +24,15 @@ export function IconPicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        aria-label={t("changeIcon")}
-        // Square on the field scale (h-8/rounded-lg): it always sits beside an
-        // Input, and at h-9/rounded-md it read as a taller, boxier neighbour.
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-muted-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50"
-      >
-        <ProviderGlyph slug={value ?? fallback} size={16} />
-      </PopoverTrigger>
+      <Hint label={t("changeIcon")}>
+        <PopoverTrigger
+          // Square on the field scale (h-8/rounded-lg): it always sits beside an
+          // Input, and at h-9/rounded-md it read as a taller, boxier neighbour.
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-muted-foreground outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <ProviderGlyph slug={value ?? fallback} size={16} />
+        </PopoverTrigger>
+      </Hint>
       <PopoverContent side="bottom" align="start" className="w-auto max-w-[calc(100vw-2rem)]">
         <div className="flex flex-wrap gap-1" style={{ width: "18rem" }}>
           {options.map((slug) => {

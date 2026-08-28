@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { X, RotateCw, Loader2 } from "lucide-react";
 import { FileTile, SandboxFileTile, BinaryFileThumb, type PreviewFile } from "./file-preview";
 import type { AttachedFile } from "./chat-input";
+import { Hint } from "@/components/ui/tooltip";
 
 /**
  * The files staged for one message: the same square tiles used everywhere else a
@@ -77,15 +78,18 @@ export function AttachmentTray({
           af.status === "error" ? (
             <>
               {removeButton(af)}
-              <button
-                type="button"
-                onClick={() => onRetry(af.id)}
-                className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-destructive/25 text-destructive-foreground ring-1 ring-destructive transition hover:bg-destructive/35"
-                aria-label={t("retryUpload", { name: af.name })}
-                title={t("uploadFailed", { files: af.name })}
-              >
-                <RotateCw className="h-5 w-5" />
-              </button>
+              {/* The hint states the failure; the button keeps its own label,
+                  which wins over the hint's, so the action stays announced. */}
+              <Hint label={t("uploadFailed", { files: af.name })}>
+                <button
+                  type="button"
+                  onClick={() => onRetry(af.id)}
+                  className="absolute inset-0 z-[1] grid place-items-center rounded-xl bg-destructive/25 text-destructive-foreground ring-1 ring-destructive transition hover:bg-destructive/35"
+                  aria-label={t("retryUpload", { name: af.name })}
+                >
+                  <RotateCw className="h-5 w-5" />
+                </button>
+              </Hint>
             </>
           ) : (
             <>

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Hint } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -207,14 +208,15 @@ export function AddProviderDialog({ isAdmin, onAdded }: { isAdmin: boolean; onAd
                     placeholder="sk-..."
                     className="pr-9"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowKey((v) => !v)}
-                    aria-label={showKey ? t("hideKey") : t("showKey")}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+                  <Hint label={showKey ? t("hideKey") : t("showKey")} side="left">
+                    <button
+                      type="button"
+                      onClick={() => setShowKey((v) => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </Hint>
                 </div>
               </div>
             )}

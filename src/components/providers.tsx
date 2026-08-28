@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 type Theme = "light" | "dark" | "system";
 
@@ -59,7 +60,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
-      {children}
+      {/* One provider for every <Hint>: a shared delay, and no delay at all when
+          the pointer moves straight from one hinted control to its neighbour. */}
+      <TooltipProvider delay={500} closeDelay={0}>
+        {children}
+      </TooltipProvider>
     </ThemeContext.Provider>
   );
 }

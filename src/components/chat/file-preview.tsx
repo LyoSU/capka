@@ -15,6 +15,7 @@ import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Download, FileWa
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Hint } from "@/components/ui/tooltip";
 import { Markdown } from "./markdown";
 import { useChatDraft } from "./use-chat-draft";
 import { extOf, fileKind, previewKind } from "@/lib/file-kinds";
@@ -268,10 +269,14 @@ function HeaderButton({
 }) {
   const cls =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
-  return href ? (
-    <a href={href} download={download} aria-label={label} title={label} className={cls}>{children}</a>
-  ) : (
-    <button type="button" onClick={onClick} aria-label={label} title={label} className={cls}>{children}</button>
+  return (
+    <Hint label={label} side="bottom">
+      {href ? (
+        <a href={href} download={download} className={cls}>{children}</a>
+      ) : (
+        <button type="button" onClick={onClick} className={cls}>{children}</button>
+      )}
+    </Hint>
   );
 }
 
@@ -748,15 +753,15 @@ function ImageViewer({ file, onPage }: { file: PreviewFile; onPage?: (delta: num
       </div>
       <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border bg-background/90 p-0.5 backdrop-blur">
         <HeaderButton onClick={() => step(1 / 1.4)} label={t("zoomOut")}><ZoomOut className="h-4 w-4" /></HeaderButton>
-        <button
-          type="button"
-          onClick={() => apply(() => 1, ORIGIN, ORIGIN, true)}
-          aria-label={t("zoomReset")}
-          title={t("zoomReset")}
-          className="min-w-11 rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-        >
-          {Math.round(view.scale * 100)}%
-        </button>
+        <Hint label={t("zoomReset")} side="top">
+          <button
+            type="button"
+            onClick={() => apply(() => 1, ORIGIN, ORIGIN, true)}
+            className="min-w-11 rounded-md px-1.5 py-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+          >
+            {Math.round(view.scale * 100)}%
+          </button>
+        </Hint>
         <HeaderButton onClick={() => step(1.4)} label={t("zoomIn")}><ZoomIn className="h-4 w-4" /></HeaderButton>
       </div>
     </div>
@@ -1037,15 +1042,15 @@ function CopyButton({ text }: { text: string }) {
   }, [done]);
 
   return (
-    <button
-      type="button"
-      onClick={() => void copyToClipboard(text).then((ok) => ok && setDone(true))}
-      aria-label={done ? t("copied") : t("copy")}
-      title={done ? t("copied") : t("copy")}
-      className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md border bg-background/90 text-muted-foreground backdrop-blur transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-    >
-      {done ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-    </button>
+    <Hint label={done ? t("copied") : t("copy")} side="left">
+      <button
+        type="button"
+        onClick={() => void copyToClipboard(text).then((ok) => ok && setDone(true))}
+        className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md border bg-background/90 text-muted-foreground backdrop-blur transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      >
+        {done ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
+    </Hint>
   );
 }
 

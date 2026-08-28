@@ -34,6 +34,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { buttonVariants } from "@/components/ui/button";
+import { Hint } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -299,21 +300,22 @@ function ProjectCluster({
     // `group/menu-item`, and Tailwind's group-hover matches *any* ancestor with
     // the class — so hovering the header would reveal the ⋮ on every row inside.
     <li className="mt-2 first:mt-0">
-      <Link
-        href={`/projects/${projectId}`}
-        title={projectName}
-        // /70 matches the date-group label, not a dimmer shade: at 11px anything
-        // lighter drops under the 4.5:1 AA floor (/55 measures 4.11:1 on the
-        // light sidebar). The hierarchy comes from size and indentation instead.
-        className={cn(
-          "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium",
-          "text-sidebar-foreground/70 transition-colors hover:text-sidebar-foreground",
-          "focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
-        )}
-      >
-        <FolderOpen className="size-3 shrink-0" />
-        <span className="truncate">{projectName}</span>
-      </Link>
+      <Hint label={projectName} side="right">
+        <Link
+          href={`/projects/${projectId}`}
+          // /70 matches the date-group label, not a dimmer shade: at 11px anything
+          // lighter drops under the 4.5:1 AA floor (/55 measures 4.11:1 on the
+          // light sidebar). The hierarchy comes from size and indentation instead.
+          className={cn(
+            "flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium",
+            "text-sidebar-foreground/70 transition-colors hover:text-sidebar-foreground",
+            "focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+          )}
+        >
+          <FolderOpen className="size-3 shrink-0" />
+          <span className="truncate">{projectName}</span>
+        </Link>
+      </Hint>
       {/* Labelled with the project name: the hairline and indent that carry the
           "inside a folder" meaning visually are invisible to a screen reader,
           which would otherwise announce a bare nested list. */}
@@ -704,26 +706,28 @@ export function AppSidebar() {
       <SidebarHeader className="p-2">
         <div className="flex items-center justify-between group-data-[collapsible=icon]:justify-center">
           <div className="flex items-center gap-2">
-            <button
-              onClick={sidebarState === "collapsed" ? toggleSidebar : undefined}
-              className={cn("shrink-0 rounded-md transition-opacity", sidebarState === "collapsed" && "hover:opacity-70 cursor-pointer")}
-              title={sidebarState === "collapsed" ? t("expandSidebar") : undefined}
-            >
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#0a0a0a] text-[#fafafa]" aria-label="Capka">
-                <ClawMark className="h-3.5 w-3.5" />
-              </span>
-            </button>
+            <Hint label={sidebarState === "collapsed" && t("expandSidebar")} side="right">
+              <button
+                onClick={sidebarState === "collapsed" ? toggleSidebar : undefined}
+                className={cn("shrink-0 rounded-md transition-opacity", sidebarState === "collapsed" && "hover:opacity-70 cursor-pointer")}
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#0a0a0a] text-[#fafafa]" aria-label="Capka">
+                  <ClawMark className="h-3.5 w-3.5" />
+                </span>
+              </button>
+            </Hint>
             <span className="text-base font-medium group-data-[collapsible=icon]:hidden">Capka</span>
           </div>
           <SidebarTrigger className="group-data-[collapsible=icon]:hidden" />
         </div>
-        <Link
-          href={newChatHref}
-          className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden h-8 w-8 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:mx-auto")}
-          title={t("newChat")}
-        >
-          <Plus className="h-4 w-4" strokeWidth={2.75} />
-        </Link>
+        <Hint label={t("newChat")} side="right">
+          <Link
+            href={newChatHref}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden h-8 w-8 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:mx-auto")}
+          >
+            <Plus className="h-4 w-4" strokeWidth={2.75} />
+          </Link>
+        </Hint>
       </SidebarHeader>
 
       {/* Keep SidebarContent in the layout when collapsed so its `flex-1`

@@ -42,6 +42,7 @@ import { PreviewProvider } from "@/components/chat/file-preview";
 import { FileTypeSuggestions } from "@/components/chat/file-type-suggestions";
 import { RecentChats } from "@/components/chat/recent-chats";
 import { Button } from "@/components/ui/button";
+import { Hint } from "@/components/ui/tooltip";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useBackgroundChat } from "@/hooks/use-background-chat";
 import { ChatNav } from "@/components/chat/chat-nav";
@@ -936,31 +937,33 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                 {thinkingEl}
               </div>
               {projectId && projectName && (
-                <Link
-                  href={`/projects/${projectId}`}
-                  className="pointer-events-auto inline-flex max-w-[40vw] items-center gap-1 truncate rounded-full bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-raised transition-colors hover:text-foreground"
-                  title={projectName}
-                >
-                  <FolderOpen className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{projectName}</span>
-                </Link>
+                <Hint label={projectName} side="bottom">
+                  <Link
+                    href={`/projects/${projectId}`}
+                    className="pointer-events-auto inline-flex max-w-[40vw] items-center gap-1 truncate rounded-full bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-raised transition-colors hover:text-foreground"
+                  >
+                    <FolderOpen className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{projectName}</span>
+                  </Link>
+                </Hint>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              // `shrink-0`: a fixed `w-8` is still shrinkable in flex, so under
-              // width pressure this button squashed before the model name gave way.
-              className={`h-8 w-8 shrink-0 transition-[transform,opacity] duration-200 ${
-                filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
-              }`}
-              onClick={() => setFilesOpen(true)}
-              title={t("panel.workspaceFiles")}
-              aria-hidden={filesOpen}
-              tabIndex={filesOpen ? -1 : 0}
-            >
-              <FolderOpen className="h-4 w-4" />
-            </Button>
+            <Hint label={t("panel.workspaceFiles")}>
+              <Button
+                variant="ghost"
+                size="icon"
+                // `shrink-0`: a fixed `w-8` is still shrinkable in flex, so under
+                // width pressure this button squashed before the model name gave way.
+                className={`h-8 w-8 shrink-0 transition-[transform,opacity] duration-200 ${
+                  filesOpen ? "pointer-events-none scale-90 opacity-0" : "pointer-events-auto opacity-100"
+                }`}
+                onClick={() => setFilesOpen(true)}
+                aria-hidden={filesOpen}
+                tabIndex={filesOpen ? -1 : 0}
+              >
+                <FolderOpen className="h-4 w-4" />
+              </Button>
+            </Hint>
           </div>
 
           <ChatNav
@@ -1003,15 +1006,16 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
                   <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                     <AlertCircle className="h-4 w-4 shrink-0" />
                     <span className="flex-1">{error}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-destructive hover:text-destructive"
-                      onClick={reload}
-                      aria-label={t("panel.retry")}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </Button>
+                    <Hint label={t("panel.retry")}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-destructive hover:text-destructive"
+                        onClick={reload}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                    </Hint>
                   </div>
                 </div>
               )}

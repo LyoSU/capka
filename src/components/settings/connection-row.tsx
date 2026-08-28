@@ -6,6 +6,7 @@ import { GripVertical, Trash2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Hint } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -77,14 +78,15 @@ export function ConnectionRow({
     >
       <Collapsible open={expanded} onOpenChange={onExpandedChange}>
         <div className="flex items-center gap-1.5 px-2.5 py-2">
-          <button
-            type="button"
-            {...dragHandleProps}
-            aria-label={t("reorder")}
-            className="flex h-7 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/50 outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing"
-          >
-            <GripVertical className="h-4 w-4" />
-          </button>
+          <Hint label={t("reorder")}>
+            <button
+              type="button"
+              {...dragHandleProps}
+              className="flex h-7 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/50 outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing"
+            >
+              <GripVertical className="h-4 w-4" />
+            </button>
+          </Hint>
 
           <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&[data-panel-open]_.chevron]:rotate-180">
             <ProviderGlyph slug={c.iconSlug || meta?.iconSlug} size={16} className="shrink-0 text-muted-foreground" />

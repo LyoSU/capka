@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
+  Hint,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -284,21 +285,22 @@ function SidebarTrigger({
   const t = useTranslations("nav")
 
   return (
-    <Button
-      data-sidebar="trigger"
-      data-slot="sidebar-trigger"
-      variant="ghost"
-      size="icon-sm"
-      className={cn(className)}
-      onClick={(event) => {
-        onClick?.(event)
-        toggleSidebar()
-      }}
-      {...props}
-    >
-      <PanelLeftIcon />
-      <span className="sr-only">{t("toggleSidebar")}</span>
-    </Button>
+    <Hint label={t("toggleSidebar")} keys={["mod", SIDEBAR_KEYBOARD_SHORTCUT.toUpperCase()]}>
+      <Button
+        data-sidebar="trigger"
+        data-slot="sidebar-trigger"
+        variant="ghost"
+        size="icon-sm"
+        className={cn(className)}
+        onClick={(event) => {
+          onClick?.(event)
+          toggleSidebar()
+        }}
+        {...props}
+      >
+        <PanelLeftIcon />
+      </Button>
+    </Hint>
   )
 }
 

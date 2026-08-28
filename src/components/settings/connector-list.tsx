@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Hint } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -549,9 +550,11 @@ export default function ConnectorList({ chrome = true }: { chrome?: boolean }) {
                 aria-label={t("toggleAria", { name: s.name })}
               />
               {canManage(s) && (
-                <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-destructive" onClick={() => remove(s)} aria-label={t("delete")}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <Hint label={t("delete")}>
+                  <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-destructive" onClick={() => remove(s)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </Hint>
               )}
             </div>
           </div>

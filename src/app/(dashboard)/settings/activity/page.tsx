@@ -8,6 +8,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SettingsPage, SettingsEmpty, SettingsGroup } from "@/components/settings/shell";
 import { Button } from "@/components/ui/button";
+import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 
@@ -193,7 +194,9 @@ export default function ActivityPage() {
                         <p className="mt-0.5 flex items-center text-xs text-muted-foreground">
                           <span className="truncate">{actor}</span>
                           <Dot className="h-3 w-3 shrink-0" />
-                          <span className="shrink-0" title={fullTime(e.createdAt)}>{timeOf(e.createdAt)}</span>
+                          <Hint label={fullTime(e.createdAt)}>
+                            <span className="shrink-0">{timeOf(e.createdAt)}</span>
+                          </Hint>
                         </p>
                       </div>
                     </div>
