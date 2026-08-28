@@ -52,6 +52,27 @@ describe("makeRemarkCitations", () => {
     const link = (tree.children[0] as { children: { type: string; children: { type: string; value: string }[] }[] }).children[0];
     expect(link.children[0].value).toBe("[1]");
   });
+
+  it("never rewrites inside a link even through formatting (no nested anchors)", () => {
+    // `[read **report [1]**](url)` — the marker's PARENT is `strong`; only the
+    // ancestry check knows it still sits inside a link.
+    const tree = para([{
+      type: "link", url: "https://x.example",
+      children: [{ type: "strong", children: [{ type: "text", value: "report [1]" }] }],
+    }]);
+    run(tree);
+    const link = (tree.children[0] as { children: { type: string; children: { type: string; value?: string }[] }[] }).children[0];
+    const strong = link.children[0] as { type: string; children: { type: string; value?: string }[] };
+    expect(strong.children).toHaveLength(1);
+    expect(strong.children[0]).toMatchObject({ type: "text", value: "report [1]" });
+  });
+
+  it("resolves four-digit numbers (long branches mint past 999)", () => {
+    const tree = para([{ type: "text", value: "Late claim [1000]." }]);
+    makeRemarkCitations([{ n: 1000, title: "Z", url: "https://z.example" }])()(tree);
+    const children = (tree.children[0] as { children: { type: string; url?: string }[] }).children;
+    expect(children.filter((c) => c.type === "link").map((c) => c.url)).toEqual(["https://z.example"]);
+  });
 });
 
 describe("citedSources", () => {

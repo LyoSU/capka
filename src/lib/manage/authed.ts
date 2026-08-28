@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, eq, sql, TransactionRollbackError } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -108,12 +109,20 @@ export async function approveManageForUser(userId: string, d: ApprovalDecision):
 
   const meta = (msg.metadata ?? {}) as MessageMeta;
   const parts = (meta.parts ?? []) as StoredPart[];
-  // A message has at most one call awaiting approval at a time (the composer
-  // blocks while it's pending), so a channel that can't cheaply carry the
-  // toolCallId (Telegram's 64-byte callback) may omit it and match the sole one.
+  // The decision must land on the exact call the user was shown. Three ways to
+  // name it: the full toolCallId (web), a `#`-marked 12-hex sha256 prefix (a
+  // Telegram callback, where the full id rarely fits 64 bytes), or — legacy
+  // buttons already sent without a pin — no id, matching the first undecided
+  // call. That last form is why the pinned forms exist: after a web approval
+  // resumed the turn into a SECOND gated call, "first undecided" is a
+  // different call than the one the stale card previews.
+  const matches = (id: string) =>
+    !d.toolCallId ||
+    id === d.toolCallId ||
+    (d.toolCallId.startsWith("#") && createHash("sha256").update(id).digest("hex").startsWith(d.toolCallId.slice(1)));
   const call = parts.find(
     (p): p is Extract<StoredPart, { type: "tool-call" }> =>
-      p.type === "tool-call" && !!p.approval && p.approval.approved === undefined && (!d.toolCallId || p.id === d.toolCallId),
+      p.type === "tool-call" && !!p.approval && p.approval.approved === undefined && matches(p.id),
   );
   if (!call || !call.approval) return "gone";
 

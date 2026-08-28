@@ -27,6 +27,9 @@ export interface SearchSourceRecord {
   title: string;
   url: string;
   snippet?: string;
+  /** Publication date/age, verbatim from the connector ("2026-08-27", "3 days
+   *  ago") — carried because a "latest news" answer is unusable without it. */
+  date?: string;
 }
 
 export interface NumberedSource extends SearchSourceRecord {
@@ -36,6 +39,7 @@ export interface NumberedSource extends SearchSourceRecord {
 const MAX_RECORDS = 20;
 const MAX_TITLE = 200;
 const MAX_SNIPPET = 400;
+const MAX_DATE = 40;
 
 /** Wrapper keys that mark an array as SEARCH results. Deliberately narrow:
  *  generic `data`/`items` arrays (a DB query, an API listing) must keep their
@@ -46,6 +50,13 @@ const SEARCH_KEYS = new Set(["results", "organic", "web", "news", "hits", "sourc
 const GENERIC_KEYS = new Set(["data", "items"]);
 
 const clamp = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+
+/** Collapse a connector-controlled string to one line: control characters and
+ *  every newline become a single space. The model reads sources as `[N] Title —
+ *  URL` LINES, so a title carrying its own newline could otherwise fabricate a
+ *  record line ("real title\n[2] Evil — https://attacker…") that reads exactly
+ *  like one of ours. Applied at build AND at the read-side re-validation. */
+const flat = (s: string) => s.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/ {2,}/g, " ").trim();
 
 function httpUrl(v: unknown): string | null {
   if (typeof v !== "string") return null;
@@ -76,10 +87,12 @@ function recordFromObject(o: unknown): SearchSourceRecord | null {
   if (!url) return null;
   const title = pickString(r, ["title", "name", "heading"]) ?? new URL(url).hostname;
   const snippet = pickString(r, ["description", "snippet", "content", "text", "summary", "highlights"]);
+  const date = pickString(r, ["published", "published_date", "publishedDate", "publication_date", "date", "published_time", "page_age"]);
   return {
-    title: clamp(title, MAX_TITLE),
+    title: clamp(flat(title), MAX_TITLE),
     url,
-    ...(snippet ? { snippet: clamp(snippet, MAX_SNIPPET) } : {}),
+    ...(snippet ? { snippet: clamp(flat(snippet), MAX_SNIPPET) } : {}),
+    ...(date ? { date: clamp(flat(date), MAX_DATE) } : {}),
   };
 }
 
@@ -117,7 +130,7 @@ function recordsFromJson(v: unknown, depth = 0): { records: SearchSourceRecord[]
   const o = v as Record<string, unknown>;
   // A summary the search API itself wrote (Tavily's `answer`) — kept, so
   // normalizing never drops information the model would have seen raw.
-  const preamble = typeof o.answer === "string" && o.answer.trim() ? clamp(o.answer.trim(), 800) : undefined;
+  const preamble = typeof o.answer === "string" && o.answer.trim() ? clamp(flat(o.answer), 800) : undefined;
   for (const [k, val] of Object.entries(o)) {
     if (!Array.isArray(val)) continue;
     const key = k.toLowerCase();
@@ -143,14 +156,15 @@ const LABEL_RE = /^(title|url|link|source|published(?: date)?|author|content|des
 function recordsFromLabeledText(text: string): { records: SearchSourceRecord[]; preamble?: string } | null {
   const records: SearchSourceRecord[] = [];
   const preambleLines: string[] = [];
-  let cur: { title?: string; url?: string; snippet?: string[] } | null = null;
+  let cur: { title?: string; url?: string; snippet?: string[]; date?: string } | null = null;
   const flush = () => {
     const url = cur?.url && httpUrl(cur.url);
     if (cur && url) {
       records.push({
-        title: clamp(cur.title || new URL(url).hostname, MAX_TITLE),
+        title: clamp(flat(cur.title || new URL(url).hostname), MAX_TITLE),
         url,
-        ...(cur.snippet?.length ? { snippet: clamp(cur.snippet.join(" ").trim(), MAX_SNIPPET) } : {}),
+        ...(cur.snippet?.length ? { snippet: clamp(flat(cur.snippet.join(" ")), MAX_SNIPPET) } : {}),
+        ...(cur.date ? { date: clamp(flat(cur.date), MAX_DATE) } : {}),
       });
     }
     cur = null;
@@ -169,6 +183,7 @@ function recordsFromLabeledText(text: string): { records: SearchSourceRecord[]; 
       }
       if (!cur) { preambleLines.push(line); continue; }
       if (key === "url" || key === "link" || key === "source") cur.url ??= val;
+      else if (key.startsWith("published")) cur.date ??= val;
       else if (key === "content" || key === "description" || key === "snippet" || key.startsWith("highlight")) cur.snippet!.push(val);
       continue;
     }
@@ -239,14 +254,15 @@ export function sourcesFromOutput(output: unknown): NumberedSource[] | null {
   const out: NumberedSource[] = [];
   for (const e of v) {
     if (e === null || typeof e !== "object") continue;
-    const { n, title, url, snippet } = e as Record<string, unknown>;
+    const { n, title, url, snippet, date } = e as Record<string, unknown>;
     const safeUrl = httpUrl(url);
     if (!Number.isInteger(n) || (n as number) < 1 || typeof title !== "string" || !safeUrl) continue;
     out.push({
       n: n as number,
-      title: clamp(title, MAX_TITLE),
+      title: clamp(flat(title), MAX_TITLE),
       url: safeUrl,
-      ...(typeof snippet === "string" && snippet ? { snippet: clamp(snippet, MAX_SNIPPET) } : {}),
+      ...(typeof snippet === "string" && snippet ? { snippet: clamp(flat(snippet), MAX_SNIPPET) } : {}),
+      ...(typeof date === "string" && date ? { date: clamp(flat(date), MAX_DATE) } : {}),
     });
   }
   return out.length ? out : null;
@@ -256,7 +272,10 @@ export function sourcesFromOutput(output: unknown): NumberedSource[] | null {
  *  (if any), then one `[N]` line per source. The citing instruction rides the
  *  result itself, so it works even for a model that skimmed the system prompt. */
 export function sourcesModelText(sources: NumberedSource[], preamble?: string): string {
-  const lines = sources.map((s) => `[${s.n}] ${s.title} — ${s.url}${s.snippet ? `\n${s.snippet}` : ""}`);
+  // Titles/snippets are flattened to one line at build time, so only OUR lines
+  // start at column 0 — a snippet is indented, keeping the record grammar
+  // unforgeable by connector text.
+  const lines = sources.map((s) => `[${s.n}] ${s.title} — ${s.url}${s.date ? ` (${s.date})` : ""}${s.snippet ? `\n    ${s.snippet}` : ""}`);
   return [
     preamble,
     "Search results — when your answer uses one, cite it inline as [N] right after the claim:",

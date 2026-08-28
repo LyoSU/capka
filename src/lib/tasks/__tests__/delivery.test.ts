@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GrammyError, HttpError } from "grammy";
-import { composeConfirmPreview, composeDraft, composeError, composeFinal, composeSources, draftIdFrom, makeDeliverySink, refusedDelivery } from "../delivery";
+import { composeConfirmPreview, composeDraft, composeError, composeFinal, composeSources, draftIdFrom, makeDeliverySink, refusedDelivery, taskForDraft } from "../delivery";
 import { getTranslator } from "@/lib/i18n/translator";
 
 const uk = getTranslator("uk", "telegram");
@@ -360,6 +360,42 @@ describe("TelegramSink streaming", () => {
     expect(rows[0][1].callback_data).toBe("mr:msg123"); // reject → resume with a denial
     // The before→after preview rides along so the Telegram user sees what they approve.
     expect(api.sendRichMessage.mock.calls[0][1].markdown).toContain("Isolated → Network access");
+  });
+
+  it("pins the exact call with a #sha256 prefix that always fits 64 bytes", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 78, locale: "en" });
+    // A raw provider id this long can never ride the callback — the digest must.
+    const longId = "toolu_01A09q90qw90lq917835lq9X".repeat(3);
+    await sink.finish({
+      status: "completed", text: "", toolCount: 1, elapsedMs: 1000,
+      approval: { messageId: "msg123", toolCallId: longId, title: "", tool: "tavily: search", before: "", after: "" },
+    });
+    const rows = api.sendRichMessage.mock.calls[0][2].reply_markup.inline_keyboard;
+    expect(rows[0][0].callback_data).toMatch(/^ma:msg123:#[0-9a-f]{12}$/);
+    expect(rows[0][1].callback_data).toMatch(/^mr:msg123:#[0-9a-f]{12}$/);
+    expect(Buffer.byteLength(rows[0][0].callback_data, "utf8")).toBeLessThanOrEqual(64);
+  });
+
+  it("keeps the cited-sources block on a stopped partial", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 79, locale: "uk" });
+    await sink.finish({
+      status: "cancelled", text: "Політика змінилась [1]", toolCount: 1, elapsedMs: 50,
+      sources: [{ n: 1, title: "T", url: "https://t.example" }],
+    });
+    const md = api.sendRichMessage.mock.calls[0][1].markdown;
+    expect(md).toContain("[1] T — https://t.example");
+    // Sources sit under the text they annotate, above the stopped footer.
+    expect(md.indexOf("Джерела:")).toBeLessThan(md.indexOf("Зупинено"));
+  });
+
+  it("registers the streaming draft for the stop button and clears it on finish", async () => {
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 80, locale: "uk" }, "task-x");
+    sink.push("hi", "", { kind: "thinking" });
+    await vi.advanceTimersByTimeAsync(900);
+    const draftId = api.sendRichMessageDraft.mock.calls[0][1];
+    expect(taskForDraft(80, draftId)).toBe("task-x");
+    await sink.finish({ status: "completed", text: "hi", toolCount: 0, elapsedMs: 10 });
+    expect(taskForDraft(80, draftId)).toBeUndefined();
   });
 
   it("persists the whole answer as one final message, dropping the reasoning", async () => {

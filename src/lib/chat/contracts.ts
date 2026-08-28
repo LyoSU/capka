@@ -139,6 +139,13 @@ export type MessageMeta = {
   // See `selectTouchedFiles` for how a turn's own writes are told apart from a
   // parallel chat's in a shared project workspace.
   touchedFiles?: string[];
+  // The numbered sources this reply's [N] markers actually resolved to, written
+  // at finalize. Persisted (not re-derived) because numbers are unique across
+  // the BRANCH and a follow-up may cite a source a previous turn's search
+  // produced — the client renders one message at a time and cannot see other
+  // rows' tool parts, so without this snapshot a cross-turn citation would
+  // render as inert text.
+  citedSources?: { n: number; title: string; url: string }[];
   // Marks this row as a COMPACTION CHECKPOINT — a summary that stands in for
   // every turn up to `summarizedUpTo` when building context for the model. The
   // full history stays in the DB and in the UI transcript (rendered as a

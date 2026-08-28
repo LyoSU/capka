@@ -17,10 +17,17 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - grammy bumped to 1.46.0 (Bot API 10.3).
+- Citation numbers are now unique across a whole conversation branch (not per turn), and a reply citing a previous turn's search source still renders a working chip and footer entry.
+- Search-result normalization keeps the publication date when the connector provides one (shown in the source panel and to the model).
 
 ### Fixed
 
 - A skill set to "Deny" is now refused when the agent calls it by name; previously the policy only hid it from the skills list in the prompt.
+- Telegram approval buttons now pin the exact suspended tool call via a digest (the raw id rarely fits Telegram's 64-byte callback limit); a stale unpinned card could previously approve a different, later call sight unseen.
+- The Telegram Stop button now cancels exactly the draft it sits under; it could previously cancel a queued follow-up or, after `/new`, a turn in a different chat.
+- Large JSON search responses (past the 30k output clamp) no longer lose their citations — sources are extracted before the result is bounded.
+- A connector can no longer forge extra `[N] Title — URL` source lines through newlines embedded in titles or snippets.
+- A stopped (partial) Telegram reply keeps its "Sources:" block, so its [N] markers stay resolvable.
 
 ## [0.35.0] - 2026-08-28
 

@@ -44,7 +44,7 @@ import { repairToolCall } from "./tool-repair";
 import { errorText } from "@/lib/errors/message";
 import { type FileRef } from "@/lib/constants";
 import type { StoredPart, MessageMeta } from "@/lib/chat/contracts";
-import { sourcesFromOutput } from "@/lib/mcp/search-normalize";
+import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normalize";
 import { citedSources } from "@/lib/chat/citations";
 import { log } from "@/lib/log";
 import { injectNativeFiles, collectReferencedFiles } from "./run-attachments";
@@ -291,7 +291,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // realtime. Created up front so the catch path can still finalize it. We track
   // the live activity + tool count so the channel can show a status header while
   // streaming and a collapsed "✅ N tools · Ts" log once done.
-  const sink = makeDeliverySink(payload.origin);
+  const sink = makeDeliverySink(payload.origin, taskId);
   // Same human-readable step labels the web UI uses ("Running a command…"),
   // localized to the originating channel's language.
   const stepsT = getTranslator(payload.origin?.locale, "steps");
@@ -441,12 +441,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // dropped effect is precisely the one that gets done twice. See mergeEffects.
       turnEffects.push(...mergeEffects(await loadEffects(resumeMessageId), effectsFromParts(meta.parts ?? [])));
       seq = meta.streamSeq ?? 0;
-      // Seed the citation counter past the suspended half's numbers: this
-      // continuation's tools number their search results through it, and a
-      // restart from 1 would mint a second [1] inside the same message — the
-      // client resolves [N] per message, so the collision would mis-link.
-      const maxSource = Math.max(0, ...parts.flatMap((p) => (p.type === "tool-result" ? (sourcesFromOutput(p.output)?.map((s) => s.n) ?? []) : [])));
-      if (maxSource > 0) sourceCounter.next = maxSource + 1;
+      // (The citation counter is seeded branch-wide at the path load below —
+      // the path ends at this very message, so the suspended half's numbers
+      // are covered there.)
       // The suspended half's accounting, carried so the finalize below reports the
       // WHOLE turn. A suspended turn finalizes as `completed` (only its metadata
       // `status` says awaiting_*), so these were persisted; the first snapshot of
@@ -533,6 +530,14 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // the server-side edits need this one instead. Persisted for the same reason:
     // shedding shrinks the next measurement, so the answer has to be sticky.
     let contextDeep = false;
+    // Every numbered source the branch has already minted (prior turns' search
+    // results). Two consumers: the counter seed just below — numbers must be
+    // unique across the BRANCH, not the message, because the model reads the
+    // whole history and a re-minted [1] would attach an old claim to an
+    // unrelated new source — and the finalize step, which resolves this turn's
+    // [N] markers against branch + own sources (a follow-up may legitimately
+    // cite a source the previous turn's search produced).
+    const branchSources: NumberedSource[] = [];
     if (replyParentId) {
       const path = await loadActivePath(chatId, replyParentId);
       // Shape the path into the model's view: collapse history at the newest
@@ -551,6 +556,19 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       // worth more than the tokens. The signal is the prompt size the previous
       // turn already measured and persisted — nothing new to compute or store.
       const nodes = path.map((p) => p.node);
+      // Collect from the FULL path, not the compaction-collapsed model view:
+      // the transcript still renders every old message, so uniqueness has to
+      // hold against everything the user can see.
+      for (const n of nodes) {
+        for (const p of ((n.metadata as MessageMeta | null)?.parts ?? [])) {
+          if (p.type === "tool-result") {
+            const s = sourcesFromOutput(p.output);
+            if (s) branchSources.push(...s);
+          }
+        }
+      }
+      const maxSource = Math.max(0, ...branchSources.map((s) => s.n));
+      if (maxSource > 0) sourceCounter.next = maxSource + 1;
       contextDeep = thinkingIsDeep(nodes, effectiveLimit);
       toolsCleared = shouldClearToolResults(provider, nodes, effectiveLimit);
       if (path.length) {
@@ -1734,6 +1752,22 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       prior,
     );
 
+    // The [N] markers this reply carries, resolved against branch + own sources
+    // (numbers are branch-unique — see the seed at the path load — so a
+    // follow-up may legitimately cite a source a PREVIOUS turn's search
+    // produced). The resolved subset is persisted on the message: the web
+    // client renders chips/footer per message and cannot see other rows'
+    // parts, so a cross-turn citation would otherwise be inert there.
+    const turnSourceMap = new Map<number, NumberedSource>();
+    for (const s of branchSources) turnSourceMap.set(s.n, s);
+    for (const p of parts) {
+      if (p.type !== "tool-result") continue;
+      for (const s of sourcesFromOutput(p.output) ?? []) turnSourceMap.set(s.n, s);
+    }
+    const citedLean = turnSourceMap.size
+      ? citedSources(getFullText(), [...turnSourceMap.values()]).map(({ n, title, url }) => ({ n, title, url }))
+      : [];
+
     const outcomeMeta: MessageMeta = {
         // A suspended turn is NOT done — mark it so the presenter maps the pending
         // tool call to its card state (approval-requested / ask input-available),
@@ -1748,6 +1782,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // bare "Reasoning", which reads as if nothing had happened at all.
         reasoningMs: turn.reasoningMs,
         ...(touchedFiles ? { touchedFiles } : {}),
+        ...(citedLean.length ? { citedSources: citedLean } : {}),
         // On EVERY outcome, not just the successful ones: a failed turn's message
         // still sits on the path the next turn reads, and this is how that turn
         // learns clearing is already on (see shouldClearToolResults).
@@ -1947,15 +1982,9 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     const telegramAsk = awaitingAnswer && payload.origin
       ? { messageId: msgId, form: awaitingAnswer.form, userId }
       : undefined;
-    // The [N] markers the reply carries, resolved against this turn's search
-    // results — Telegram appends them as a quoted "Sources:" footer (the web
-    // resolves the same numbers client-side from the parts, so it gets nothing).
-    const telegramSources = payload.origin
-      ? (() => {
-          const all = parts.flatMap((p) => (p.type === "tool-result" ? sourcesFromOutput(p.output) ?? [] : []));
-          return all.length ? citedSources(getFullText(), all).map(({ n, title, url }) => ({ n, title, url })) : [];
-        })()
-      : [];
+    // The same resolved subset the message metadata carries (`citedLean`) —
+    // Telegram appends it as a quoted "Sources:" footer.
+    const telegramSources = payload.origin ? citedLean : [];
     try {
       await sink.finish({
         // The whole answer, persisted as one rich message (no bubble fragmentation).

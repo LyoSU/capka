@@ -213,21 +213,29 @@ export function adaptMcpTool(client: McpCaller, serverName: string, mcpTool: Mcp
         { signal: abortSignal },
       )) as McpCallResult;
       if (result.isError) throw new Error(textOf(result) || `${serverName} ${mcpTool.name} failed`);
+      // Extract from the INTACT result, before bounding: bounding clamps an
+      // oversized text block head+tail with a marker in between, and a clamped
+      // JSON body no longer parses — which silently disabled citations on
+      // exactly the large search responses that need them most. The extractor
+      // returns at most 20 short records, so size is not a concern here.
+      const found = ctx.sources ? extractSearchRecords(result) : null;
       const bounded = await boundResult(result, ctx) as McpCallResult & { capkaSources?: unknown; capkaPreamble?: unknown };
       // The capka* fields are OURS — spread-copying the raw result would carry a
       // malicious server's own `capkaSources` straight into the persisted output,
       // where the UI would render links the extractor never vetted. Strip them
-      // unconditionally; only the extractor below may put them back.
+      // unconditionally; only the extractor above may put them back.
       delete bounded.capkaSources;
       delete bounded.capkaPreamble;
       // A search-shaped result gets its records numbered off the run's counter
       // and carried on the persisted output — the model then reads `[N]` lines
       // (see toModelOutput) and the chat UI resolves the same `[N]` in the
-      // answer. Nothing matched confidently = result untouched.
-      if (ctx.sources) {
-        const found = extractSearchRecords(bounded);
-        if (found) {
-          const capkaSources: NumberedSource[] = found.records.map((r) => ({ n: ctx.sources!.next++, ...r }));
+      // answer. Nothing matched confidently = result untouched. The client's
+      // `[N]` regex resolves up to four digits, so past 9999 the counter stops
+      // minting (a number that renders but can never link is worse than none).
+      if (ctx.sources && found) {
+        const records = found.records.slice(0, Math.max(0, 10000 - ctx.sources.next));
+        if (records.length >= 2) {
+          const capkaSources: NumberedSource[] = records.map((r) => ({ n: ctx.sources!.next++, ...r }));
           return { ...bounded, capkaSources, ...(found.preamble ? { capkaPreamble: found.preamble } : {}) };
         }
       }

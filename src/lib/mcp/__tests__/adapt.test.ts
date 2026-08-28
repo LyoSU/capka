@@ -217,6 +217,30 @@ describe("adaptMcpTool — search normalization", () => {
     expect(await noCounter.execute!({}, opts as never)).not.toHaveProperty("capkaSources");
   });
 
+  it("extracts from the INTACT result — a JSON body past the clamp threshold still yields sources", async () => {
+    mockedSpill.mockResolvedValue(null);
+    // One JSON value over 30k chars: bounding clamps it head+tail (unparseable);
+    // extraction must have run before that.
+    const bigJson = JSON.stringify({ results: [
+      { url: "https://a.example/1", title: "A", description: "x".repeat(20_000) },
+      { url: "https://b.example/2", title: "B", description: "y".repeat(20_000) },
+    ] });
+    expect(bigJson.length).toBeGreaterThan(30_000);
+    const client = { callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: bigJson }] }) };
+    const t = adaptMcpTool(client as never, "web", { name: "search" }, { sources: { next: 1 } });
+    const out = await t.execute!({}, opts as never) as { capkaSources: { n: number; url: string }[]; content: { text?: string }[] };
+    expect(out.capkaSources.map((s) => s.n)).toEqual([1, 2]);
+    expect(out.content[0].text!.length).toBeLessThan(bigJson.length); // the raw body is still bounded
+  });
+
+  it("stops minting past 9999 — a number the client regex can't resolve is never issued", async () => {
+    const client = { callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: hit(1) }] }) };
+    const t = adaptMcpTool(client as never, "web", { name: "search" }, { sources: { next: 9999 } });
+    // Two records, but only one number (9999) remains below the ceiling —
+    // fewer than the two a source list needs, so the result stays raw.
+    expect(await t.execute!({}, opts as never)).not.toHaveProperty("capkaSources");
+  });
+
   it("hands the model numbered [N] lines instead of the raw blob", () => {
     const client = { callTool: vi.fn() };
     const t = adaptMcpTool(client as never, "web", { name: "search" });

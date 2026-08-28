@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { PoolClient } from "pg";
 import { nanoid } from "nanoid";
-import { eq, and, ne, desc, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, ne, desc, isNotNull } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { telegramLinks, linkCodes, chats, messages, users, accounts, tasks } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
@@ -405,12 +405,26 @@ async function buildBot(): Promise<Bot | null> {
   bot.on("stopped_message_generation", async (ctx) => {
     const stop = ctx.stoppedMessageGeneration;
     if (!stop) return;
+    // The update names the exact draft the user stopped — cancel ITS task via
+    // the sink registry. "Newest queued/running in the pinned chat" would hit
+    // the wrong turn twice over: a follow-up queued mid-stream is newer than
+    // the streaming task, and a delayed update after /new lands on a chat the
+    // stopped draft never belonged to.
+    const { taskForDraft } = await import("@/lib/tasks/delivery");
+    const exact = taskForDraft(stop.chat.id, stop.draft_id);
+    if (exact) {
+      await requestCancel(exact);
+      return;
+    }
+    // Registry miss (a restart dropped the in-memory map): fall back to the
+    // RUNNING task in the pinned chat — only a running one has a draft on
+    // screen, so a queued follow-up can't be collateral.
     const link = await findLink(stop.chat.id); // a private chat's id IS the user's id
     if (!link?.activeChatId) return;
     const [task] = await db
       .select({ id: tasks.id })
       .from(tasks)
-      .where(and(eq(tasks.chatId, link.activeChatId), inArray(tasks.status, ["queued", "running"])))
+      .where(and(eq(tasks.chatId, link.activeChatId), eq(tasks.status, "running")))
       .orderBy(desc(tasks.createdAt))
       .limit(1);
     if (task) await requestCancel(task.id);
@@ -420,10 +434,10 @@ async function buildBot(): Promise<Bot | null> {
   // connector/skill call). The decision is recorded HERE (server-side, keyed to
   // the tapping Telegram user) and RESUMES the suspended turn — never the model,
   // so a prompt-injected agent can stage but never self-approve. callback_data is
-  // `ma:<messageId>[:<toolCallId>]` (approve) / `mr:…` (reject): the id pins the
-  // exact suspended call when it fits the 64-byte limit (a step can hold several
-  // gated calls); without it the decision falls to the first undecided call,
-  // which is also the one the preview was built from (runner.ts).
+  // `ma:<messageId>:<pin>` (approve) / `mr:…` (reject), where the pin is a
+  // `#`-marked sha256 prefix of the toolCallId (fits the 64-byte limit where the
+  // raw id often doesn't) — approveManageForUser resolves either form. A legacy
+  // button without a pin falls back to the first undecided call.
   for (const [pattern, approved] of [[/^ma:([^:]+)(?::(.+))?$/, true], [/^mr:([^:]+)(?::(.+))?$/, false]] as const) {
     bot.callbackQuery(pattern, async (ctx) => {
       const t = tFor(ctx);

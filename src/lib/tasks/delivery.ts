@@ -10,6 +10,7 @@
  * streaming uses `sendRichMessageDraft` (an ephemeral, animated 30s preview);
  * the final answer is persisted with `sendRichMessage`.
  */
+import { createHash } from "node:crypto";
 import { InputFile, InlineKeyboard, GrammyError } from "grammy";
 import { log } from "@/lib/log";
 import { getTranslator, type Translator } from "@/lib/i18n/translator";
@@ -118,9 +119,28 @@ export interface DeliverySink {
 
 const NOOP_SINK: DeliverySink = { push() {}, async finish() {}, async sendFiles() {} };
 
-export function makeDeliverySink(origin: TaskOrigin | undefined): DeliverySink {
-  if (origin?.platform === "telegram") return new TelegramSink(origin.telegramChatId, origin.locale);
+export function makeDeliverySink(origin: TaskOrigin | undefined, taskId?: string): DeliverySink {
+  if (origin?.platform === "telegram") return new TelegramSink(origin.telegramChatId, origin.locale, taskId);
   return NOOP_SINK;
+}
+
+/** Live Telegram drafts → the task each streams, so the native stop button
+ *  (`stopped_message_generation`) cancels exactly the draft it sits under —
+ *  never "the newest task in the chat", which could be a queued follow-up or,
+ *  after /new, a different chat's turn. Bound: an entry lives while its sink
+ *  streams (finish() removes it); a crash strands at most one entry per turn,
+ *  so the size cap below is a backstop that evicts oldest-first. */
+const liveDrafts = new Map<string, string>();
+const LIVE_DRAFTS_MAX = 500;
+function registerDraft(telegramChatId: number, draftId: number, taskId: string): void {
+  if (liveDrafts.size >= LIVE_DRAFTS_MAX) {
+    const oldest = liveDrafts.keys().next().value;
+    if (oldest !== undefined) liveDrafts.delete(oldest);
+  }
+  liveDrafts.set(`${telegramChatId}:${draftId}`, taskId);
+}
+export function taskForDraft(telegramChatId: number, draftId: number): string | undefined {
+  return liveDrafts.get(`${telegramChatId}:${draftId}`);
 }
 
 const TELEGRAM_LIMIT = 4000; // plain-text fallback chunk size (under the 4096 cap)
@@ -326,8 +346,9 @@ class TelegramSink implements DeliverySink {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private bot: any = null;
 
-  constructor(private readonly chatId: number, private readonly locale?: string) {
+  constructor(private readonly chatId: number, private readonly locale?: string, taskId?: string) {
     this.draftId = draftIdFrom(`tg:${chatId}:${Date.now()}`);
+    if (taskId) registerDraft(chatId, this.draftId, taskId);
     this.t = getTranslator(locale, "telegram");
     this.tErr = getTranslator(locale, "errors.llm");
   }
@@ -480,6 +501,7 @@ class TelegramSink implements DeliverySink {
     // no-op rather than a duplicate delivery.
     if (this.closed) return;
     this.closed = true;
+    liveDrafts.delete(`${this.chatId}:${this.draftId}`); // the draft dies with the turn
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -500,7 +522,14 @@ class TelegramSink implements DeliverySink {
       // partial is re-sent as a real message with a quiet "stopped" footer.
       // Silent — the user just acted; a notification would echo their own tap.
       const partial = result.text.trim();
-      if (partial) await this.sendRich(`${partial}\n\n> ${this.t("stopped")}`, `${partial}\n\n${this.t("stopped")}`, true);
+      if (partial) {
+        // A stopped partial can already carry [N] markers — keep its sources
+        // block, exactly like a completed reply, so the markers stay resolvable.
+        const src = result.sources?.length ? composeSources(result.sources, this.t) : null;
+        const md = src ? `${partial}\n\n${src.markdown}` : partial;
+        const pl = src ? `${partial}\n\n${src.plain}` : partial;
+        await this.sendRich(`${md}\n\n> ${this.t("stopped")}`, `${pl}\n\n${this.t("stopped")}`, true);
+      }
       return;
     }
 
@@ -581,13 +610,18 @@ class TelegramSink implements DeliverySink {
         await this.sendRich(markdown, plain, false);
         return;
       }
-      // The tap decides the exact suspended call when its id fits Telegram's
-      // 64-byte callback_data; otherwise it falls back to the first undecided
-      // call — which is also the one this preview was built from (runner.ts).
-      const withId = c.toolCallId && `ma:${c.messageId}:${c.toolCallId}`.length <= 64 ? `:${c.toolCallId}` : "";
+      // The tap must decide the EXACT suspended call this preview shows. The
+      // full tool-call id rarely fits Telegram's 64-byte callback_data (a UUID
+      // message id leaves ~24 bytes and Anthropic ids alone are longer), and a
+      // button WITHOUT the id falls back to "first undecided call" — which,
+      // after a web approval resumed the turn into a SECOND gated call, is a
+      // different call approved sight unseen. A `#`-marked 12-hex sha256 prefix
+      // pins the call in 13 ASCII bytes, so the pin always fits (see the
+      // matching digest branch in approveManageForUser).
+      const pin = c.toolCallId ? `:#${createHash("sha256").update(c.toolCallId).digest("hex").slice(0, 12)}` : "";
       const keyboard = new InlineKeyboard()
-        .text(this.t("confirmApply"), `ma:${c.messageId}${withId}`)
-        .text(this.t("confirmCancel"), `mr:${c.messageId}${withId}`);
+        .text(this.t("confirmApply"), `ma:${c.messageId}${pin}`)
+        .text(this.t("confirmCancel"), `mr:${c.messageId}${pin}`);
       await this.sendRich(markdown, plain, false, keyboard);
       return;
     }

@@ -841,6 +841,7 @@ function SourceList({ sources }: { sources: NumberedSource[] }) {
           <span className="min-w-0">
             <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">{s.title}</a>
             {hostOf(s.url) && <span className="ml-1.5 text-xs text-muted-foreground">{hostOf(s.url)}</span>}
+            {s.date && <span className="ml-1.5 text-xs text-muted-foreground">· {s.date}</span>}
             {s.snippet && <span className="line-clamp-2 block text-xs leading-relaxed text-muted-foreground">{s.snippet}</span>}
           </span>
         </li>
@@ -2159,7 +2160,7 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const tErr = useTranslations("errors.llm");
   const isUser = message.role === "user";
   const metadata = message.metadata as
-    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
+    | { createdAt?: string | null; platform?: string | null; taskStatus?: string | null; error?: string | null; errorDetail?: string | null; errorCategory?: string | null; errorOwned?: boolean | null; siblingIndex?: number; siblingCount?: number; attachedFiles?: { name: string; type: string }[]; durationMs?: number; reasoningMs?: number; runningMs?: number; model?: string; usage?: { input: number; output: number; cached: number; cacheWrite?: number; reasoning?: number }; costUsd?: number; costSource?: "provider" | "catalog"; upstreamProvider?: string; hasGeneration?: boolean; touchedFiles?: string[]; citedSources?: { n: number; title: string; url: string }[]; compaction?: { summary: string; summarizedUpTo: string; tokensSaved?: number } }
     | undefined;
 
   const [createdAt] = useState(() => metadata?.createdAt ?? new Date().toISOString());
@@ -2247,14 +2248,20 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
   const lastIdx = groups.length - 1;
   const firstActivityIdx = groups.findIndex((g) => g.kind === "activity");
 
-  // Every numbered source this turn's search results produced — what the [N]
-  // markers in the answer resolve against (per MESSAGE, so numbers from another
-  // turn can never be borrowed). The footer lists only the cited subset.
+  // Every numbered source this turn's search results produced, plus the
+  // resolved snapshot finalize persisted (`metadata.citedSources`) — numbers
+  // are unique across the BRANCH, so a reply may cite a source a previous
+  // turn's search minted, and only the snapshot carries those here. Own parts
+  // win on a collision (they carry snippet/date; the snapshot is lean).
+  // The footer lists only the cited subset.
   const turnSources: NumberedSource[] = [];
   for (const part of parts) {
     if (!isToolPart(part)) continue;
     const s = sourcesFromOutput((part as ToolPart).output);
     if (s) turnSources.push(...s);
+  }
+  for (const s of metadata?.citedSources ?? []) {
+    if (!turnSources.some((t) => t.n === s.n)) turnSources.push(s);
   }
   const cited = turnSources.length
     ? citedSources(groups.filter((g) => g.kind === "text").map((g) => g.text).join("\n"), turnSources)
