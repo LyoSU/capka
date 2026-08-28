@@ -52,8 +52,11 @@ export interface TaskResult {
    *  The preview (`title`/before→after, the ⚠️ `impact`, and `body`/`items` — the
    *  full text/set being approved) travels too, so nobody approves a change blind.
    *  A gated tool has no staged diff: it sends `tool` (the human label of what
-   *  would run) instead of `title`, and the title is localized here. */
-  approval?: { messageId: string; title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[] };
+   *  would run) instead of `title`, and the title is localized here. `toolCallId`
+   *  pins the tap to the exact suspended call (a step can hold several);
+   *  `truncated` means the arguments did not fit the preview — the buttons are
+   *  then withheld, because a cut argument list cannot be consented to. */
+  approval?: { messageId: string; toolCallId?: string; title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[]; truncated?: boolean };
   /** An `ask` tool call the runner SUSPENDED for a human answer. On Telegram this
    *  starts a sequential field-by-field collection (see ask-collect); `userId` owns
    *  the answer submission, `messageId` is the suspended assistant message. */
@@ -207,7 +210,7 @@ export function composeFinal(
  *  rendered into BOTH the rich markdown and the plain-text fallback, so a Markdown
  *  rejection can never silently strip the impact line or the body the web card shows. */
 export function composeConfirmPreview(
-  c: { title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[] },
+  c: { title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[]; truncated?: boolean },
   t: Translator,
 ): { markdown: string; plain: string } {
   // A gated tool call (governance "ask") arrives with only a `tool` label — the
@@ -233,6 +236,12 @@ export function composeConfirmPreview(
     // inline in the fallback — nobody confirms an unseen permanent instruction.
     markdown += `\n\n<details><summary>${escapeHtml(t("confirmDetails"))}</summary>\n\n${escapeHtml(c.body)}\n\n</details>`;
     plain.push(c.body);
+  }
+  if (c.truncated) {
+    // The arguments were cut to fit — this channel gets no Approve/Reject buttons
+    // (a cut call cannot be consented to), so say where the decision lives.
+    markdown += `\n\n${escapeHtml(t("approveOnWeb"))}`;
+    plain.push(t("approveOnWeb"));
   }
   return { markdown, plain: plain.join("\n\n") };
 }
@@ -513,9 +522,20 @@ class TelegramSink implements DeliverySink {
       // The plain-text fallback carries the SAME preview (diff + impact + body), so
       // a Markdown rejection never drops what the user needs to approve safely.
       const plain = body ? `${body}\n\n${previewPlain}` : previewPlain;
+      // Truncated arguments = no buttons: what this channel can show is not the
+      // whole call, so the decision belongs to the web card, which always is.
+      // composeConfirmPreview already appended the pointer line.
+      if (c.truncated) {
+        await this.sendRich(markdown, plain, false);
+        return;
+      }
+      // The tap decides the exact suspended call when its id fits Telegram's
+      // 64-byte callback_data; otherwise it falls back to the first undecided
+      // call — which is also the one this preview was built from (runner.ts).
+      const withId = c.toolCallId && `ma:${c.messageId}:${c.toolCallId}`.length <= 64 ? `:${c.toolCallId}` : "";
       const keyboard = new InlineKeyboard()
-        .text(this.t("confirmApply"), `ma:${c.messageId}`)
-        .text(this.t("confirmCancel"), `mr:${c.messageId}`);
+        .text(this.t("confirmApply"), `ma:${c.messageId}${withId}`)
+        .text(this.t("confirmCancel"), `mr:${c.messageId}${withId}`);
       await this.sendRich(markdown, plain, false, keyboard);
       return;
     }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -362,6 +362,31 @@ type Preview = { title: string; before: string; after: string; impact?: string; 
  * blocked meanwhile (see useBackgroundChat.awaitingApproval), so this is the one
  * next action — no "press confirm" prose, no stale card.
  */
+/** The raw arguments of a gated call, behind a fold. Serialized only once the
+ *  fold is opened: a model can hand a tool megabytes of arguments, and mounting
+ *  them inside a closed <details> still builds (and re-builds on every render)
+ *  the whole DOM string. */
+function GatedArgsFold({ input, label }: { input: unknown; label: string }) {
+  const [open, setOpen] = useState(false);
+  const args = useMemo(() => {
+    if (!open) return "";
+    try {
+      const s = JSON.stringify(input, null, 2) ?? "";
+      return s === "{}" ? "" : s;
+    } catch { return ""; }
+  }, [open, input]);
+  // Cheap emptiness probe, so an argument-less call gets no dead fold.
+  if (input == null || (typeof input === "object" && !Array.isArray(input) && Object.keys(input).length === 0)) return null;
+  return (
+    <details className="mt-2 text-sm" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{label}</summary>
+      {open && args && (
+        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2.5 text-xs text-muted-foreground">{args}</pre>
+      )}
+    </details>
+  );
+}
+
 /** The human label of a gated (governance-"ask") tool call: a connector's tool
  *  reads "server: tool", a skill reads as its own name — mirrors the label the
  *  runner builds for the Telegram side of the same card. */
@@ -452,29 +477,17 @@ export function ApprovalCard({
         {gated ? ta("title") : t("confirmTitle")}
       </div>
 
-      {awaiting && gated && (() => {
-        // The skill's only argument IS the label, so a details fold would repeat it.
-        let args = "";
-        if (toolName !== "skill") {
-          try { args = JSON.stringify(input, null, 2) ?? ""; } catch { /* unserializable — the label still says what runs */ }
-          if (args === "{}") args = "";
-        }
-        return (
-          <>
-            <div className="mt-2 text-sm text-muted-foreground">{ta("prompt", { tool: gatedToolLabel(toolName, input) })}</div>
-            {args && (
-              <details className="mt-2 text-sm">
-                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{ta("showArgs")}</summary>
-                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2.5 text-xs text-muted-foreground">{args}</pre>
-              </details>
-            )}
-            <div className="mt-3 flex gap-2">
-              <Button size="sm" onClick={() => decide(true)} disabled={submitting}>{ta("allow")}</Button>
-              <Button size="sm" variant="ghost" onClick={() => decide(false)} disabled={submitting}>{ta("decline")}</Button>
-            </div>
-          </>
-        );
-      })()}
+      {awaiting && gated && (
+        <>
+          <div className="mt-2 text-sm text-muted-foreground">{ta("prompt", { tool: gatedToolLabel(toolName, input) })}</div>
+          {/* The skill's only argument IS the label, so a details fold would repeat it. */}
+          {toolName !== "skill" && <GatedArgsFold input={input} label={ta("showArgs")} />}
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" onClick={() => decide(true)} disabled={submitting}>{ta("allow")}</Button>
+            <Button size="sm" variant="ghost" onClick={() => decide(false)} disabled={submitting}>{ta("decline")}</Button>
+          </div>
+        </>
+      )}
 
       {awaiting && !gated && (
         <>

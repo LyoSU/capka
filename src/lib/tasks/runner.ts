@@ -1885,34 +1885,52 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     });
     // Build the Telegram approval payload (buttons + preview) only on an origin
     // channel — the web card fetches its own preview, so this query is skipped there.
-    let telegramApproval: { messageId: string; title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[] } | undefined;
+    let telegramApproval: { messageId: string; toolCallId: string; title: string; tool?: string; before: string; after: string; impact?: string; body?: string; items?: string[]; truncated?: boolean } | undefined;
     if (awaitingApproval && payload.origin) {
-      const callPart = parts.find((p) => p.type === "tool-call" && p.id === awaitingApproval!.toolCallId);
-      const input = callPart?.type === "tool-call" ? callPart.input : undefined;
-      const toolName = callPart?.type === "tool-call" ? callPart.name : undefined;
-      if (toolName === "manage") {
+      // The preview must describe the SAME call the tap will decide. A step can
+      // suspend several gated calls at once, and a decision that arrives without a
+      // toolCallId resolves to the FIRST undecided one (authed.ts) — so the card is
+      // built from that first undecided part, never from the last-suspended scalar,
+      // and its id travels in the payload so the callback can pin it explicitly.
+      // Review finding (gpt-5.6-sol): a card showing call B must not approve call A.
+      const callPart = parts.find(
+        (p): p is Extract<StoredPart, { type: "tool-call" }> =>
+          p.type === "tool-call" && !!p.approval && p.approval.approved === undefined,
+      );
+      const input = callPart?.input;
+      const toolName = callPart?.name;
+      if (callPart && toolName === "manage") {
         const { previewManageForUser } = await import("@/lib/manage/authed");
         // Pass the run's sandbox session so a workspace-path preview reads the real files, and
         // the call id so a preview that resolves a moving target pins what these buttons will
         // show — without it a Telegram approval of a repo install has no review to apply and
         // (correctly, but pointlessly) refuses.
-        const pv = await previewManageForUser(userId, input, { sessionKey, toolCallId: awaitingApproval.toolCallId }).catch(() => null);
-        if (pv) telegramApproval = { messageId: msgId, title: pv.title, before: pv.before, after: pv.after, impact: pv.impact, body: pv.body, items: pv.items };
-      } else if (toolName) {
+        const pv = await previewManageForUser(userId, input, { sessionKey, toolCallId: callPart.id }).catch(() => null);
+        if (pv) telegramApproval = { messageId: msgId, toolCallId: callPart.id, title: pv.title, before: pv.before, after: pv.after, impact: pv.impact, body: pv.body, items: pv.items };
+      } else if (callPart && toolName) {
         // A governance-"ask" tool (a connector's tool, or a skill): there is no
         // staged change to diff — show WHAT would run (`tool`, localized into a
         // title by the delivery layer) and the raw arguments behind "Details".
+        // The label is the consent headline and tool names come from untrusted MCP
+        // servers, so it is flattened to one plain line before it can reach a
+        // Markdown surface — no newlines, links, or backticks survive.
         const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName);
-        const label = mcp ? `${mcp[1]}: ${mcp[2]}`
+        const rawLabel = mcp ? `${mcp[1]}: ${mcp[2]}`
           : toolName === "skill" && input && typeof input === "object" && typeof (input as { name?: unknown }).name === "string"
             ? (input as { name: string }).name
             : toolName;
+        const label = rawLabel.replace(/\s+/g, " ").replace(/[^\p{L}\p{N} ._:/-]/gu, "").slice(0, 120).trim() || "tool";
         let args = "";
         try { args = JSON.stringify(input, null, 2) ?? ""; } catch { /* unserializable input — approve on the label alone */ }
-        if (args.length > 1500) args = `${args.slice(0, 1500)} …`;
+        // A truncated argument list cannot be consented to — a benign prefix could
+        // hide a destructive tail. The flag makes the delivery layer withhold the
+        // buttons and point at the web card, which always shows the full call.
+        const truncated = args.length > 1500;
+        if (truncated) args = `${args.slice(0, 1500)} …`;
         telegramApproval = {
-          messageId: msgId, title: "", tool: label, before: "", after: "",
+          messageId: msgId, toolCallId: callPart.id, title: "", tool: label, before: "", after: "",
           ...(args && args !== "{}" ? { body: args } : {}),
+          ...(truncated ? { truncated: true } : {}),
         };
       }
     }

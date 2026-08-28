@@ -65,6 +65,16 @@ describe("composeConfirmPreview", () => {
     expect(plain).toContain("weather kyiv"); // the arguments survive into the fallback too
   });
 
+  it("a truncated gated call points at the web card in both markdown and plain (its buttons are withheld)", () => {
+    const { markdown, plain } = composeConfirmPreview(
+      { title: "", tool: "crm: bulk_update", before: "", after: "", body: "{ \"ids\": [1,2,3 …", truncated: true },
+      uk,
+    );
+    for (const out of [markdown, plain]) {
+      expect(out).toContain("відкрийте Capka у браузері");
+    }
+  });
+
   it("shows only the new value when there is no meaningful 'before'", () => {
     const { markdown, plain } = composeConfirmPreview(
       { title: "Add connector", before: "", after: "Grok" },

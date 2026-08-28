@@ -394,19 +394,21 @@ async function buildBot(): Promise<Bot | null> {
     await reply(ctx, "modelSet", { values: { model: choice.label } });
   });
 
-  // A `manage` approval was tapped (native HITL). The decision is recorded HERE
-  // (server-side, keyed to the tapping Telegram user) and RESUMES the suspended
-  // turn — never the model, so a prompt-injected agent can stage but never
-  // self-approve. callback_data is `ma:<messageId>` (approve) / `mr:<messageId>`
-  // (reject); the message has one pending call at a time, and a nanoid messageId is
-  // well under the 64-byte callback limit.
-  for (const [pattern, approved] of [[/^ma:(.+)$/, true], [/^mr:(.+)$/, false]] as const) {
+  // A tool approval was tapped (native HITL — `manage`, or a governance-"ask"
+  // connector/skill call). The decision is recorded HERE (server-side, keyed to
+  // the tapping Telegram user) and RESUMES the suspended turn — never the model,
+  // so a prompt-injected agent can stage but never self-approve. callback_data is
+  // `ma:<messageId>[:<toolCallId>]` (approve) / `mr:…` (reject): the id pins the
+  // exact suspended call when it fits the 64-byte limit (a step can hold several
+  // gated calls); without it the decision falls to the first undecided call,
+  // which is also the one the preview was built from (runner.ts).
+  for (const [pattern, approved] of [[/^ma:([^:]+)(?::(.+))?$/, true], [/^mr:([^:]+)(?::(.+))?$/, false]] as const) {
     bot.callbackQuery(pattern, async (ctx) => {
       const t = tFor(ctx);
       const link = await findLink(ctx.from!.id);
       if (!link) { await ctx.answerCallbackQuery(); return; }
       const { approveManageForUser } = await import("@/lib/manage/authed");
-      const outcome = await approveManageForUser(link.userId, { messageId: ctx.match![1], approved });
+      const outcome = await approveManageForUser(link.userId, { messageId: ctx.match![1], toolCallId: ctx.match![2] || undefined, approved });
       const msg = outcome === "busy" ? t("confirmBusy")
         : outcome === "gone" ? t("confirmExpired")
         : approved ? t("confirmApplied") : t("confirmCancelled");

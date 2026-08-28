@@ -2061,6 +2061,7 @@
     "modelEmpty": "No models available yet. Add a provider in Capka settings.",
     "modelStale": "That list is out of date — send /model again.",
     "approveTool": "Allow this action? {tool}",
+    "approveOnWeb": "The full request is too long to show here — open Capka in the browser to review it and decide.",
     "confirmApply": "✓ Confirm",
     "confirmCancel": "Cancel",
     "confirmApplied": "✓ Done.",
