@@ -400,6 +400,10 @@ services:
       - MCP_DEFER_TOKEN_PCT=${MCP_DEFER_TOKEN_PCT:-}
       - MCP_DEFER_TOKEN_MAX=${MCP_DEFER_TOKEN_MAX:-}
       - CAPKA_SHARE_IMPORT=${CAPKA_SHARE_IMPORT:-}
+      # Passed through empty rather than with a default repeated here: the code's
+      # own default (data/vault-cas under process.cwd()) already lives under the
+      # ./data:/app/data mount above, so only set this to move blobs elsewhere.
+      - VAULT_CAS_DIR=${VAULT_CAS_DIR:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

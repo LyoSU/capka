@@ -63,6 +63,7 @@ describe("vault CAS", () => {
 
   it("blobPath з невалідним ключем кидає синхронно", () => {
     expect(() => blobPath("../etc/passwd")).toThrow();
+    expect(() => blobPath("ABC")).toThrow();
   });
 
   it("readBlob для добре сформованого, але відсутнього ключа — reject", async () => {
