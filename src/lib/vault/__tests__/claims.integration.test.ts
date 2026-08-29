@@ -296,7 +296,9 @@ run("vault claims", () => {
     expect(await branchedChains(SPACE_A)).toBe(0);
     // Рівно одна подія на ланцюг: програвший нічого не пише.
     expect(await count("audit_events", "space_id = $1 AND action IN ('claim.supersede','claim.forget')", [SPACE_A])).toBe(1);
-    expect(await findCurrentHead(id)).toEqual(updateWon ? expect.objectContaining({ revision: 2 }) : null);
+    // Єдиний нескопований прочит у файлі, і `undefined` тут написано явно —
+    // саме тому аргумент обов'язковий: пропустити його вже не можна.
+    expect(await findCurrentHead(id, undefined)).toEqual(updateWon ? expect.objectContaining({ revision: 2 }) : null);
   });
 
   it("authz: чужий простір дає {ok:false, current:null} без витоку тексту", async () => {
@@ -578,7 +580,7 @@ run("vault claims", () => {
     // Жоден стейтмент не втік на модульний `db`: такий закомітився б сам по собі
     // й пережив би відкат. Це єдина перевірка, яка ловить підміну ex → db.
     expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(3);
-    expect(await count("vault_claims", "supersedes IS NOT NULL", [])).toBe(0);
+    expect(await count("vault_claims", "space_id = $1 AND supersedes IS NOT NULL", [SPACE_A])).toBe(0);
     expect(await count("vault_claims", "id = $1 AND superseded_at IS NULL", [upd.id])).toBe(1);
     expect(await count("vault_claims", "id = $1 AND superseded_at IS NULL", [forget.id])).toBe(1);
     expect(await count("note_claims", "note_id = $1", [NOTE_A])).toBe(1);
