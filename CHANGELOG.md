@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+> **⚠ Do not cut a release from this state** — boot now stamps `memory_docs.migrated_at` while three turn-time writers still append to those docs, so anything written after the stamp is carried nowhere; this guard is temporary, and the cutover commit that closes those writers deletes it.
+
 ### Changed
 
 - Settings search keywords moved into the message catalogs (`settings.search.*`), so each locale ships its own synonym list instead of one hardcoded bilingual string.
