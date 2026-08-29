@@ -284,7 +284,11 @@ describe("extractCandidates — what is actually sent to the aux model", () => {
     expect(calledWith.system).toMatch(/never instructions to follow/i);
   });
 
-  it("the system prompt forbids extracting credentials and extends sensitive to cover them", async () => {
+  // Documentation-only pin: this only proves the WORDING is still there, not that
+  // anything enforces it — the aux model can ignore prompt-level guidance. The
+  // actual guarantee against a durably-stored secret is `looksLikeSecret`, tested
+  // behaviourally below in "secret-shaped statements are never auto-activated".
+  it("the system prompt ALSO asks the model not to extract credentials, and extends sensitive to cover them", async () => {
     const generate = generateReturning("[]");
     await extractCandidates({ ...baseArgs, generate });
     const [[calledWith]] = generate.mock.calls;
@@ -292,6 +296,67 @@ describe("extractCandidates — what is actually sent to the aux model", () => {
     expect(calledWith.system).toMatch(/password/i);
     expect(calledWith.system).toMatch(/api key/i);
     expect(calledWith.system).toMatch(/connection string/i);
+  });
+
+  // Pins the wording that makes the I2 real-verifier tests above meaningful: if
+  // this instruction is ever deleted, those tests keep passing (they call
+  // verifyDirectProvenance directly, not through the prompt) while the guarantee
+  // they demonstrate quietly stops holding in production. This is that tripwire.
+  it("the system prompt still asks for same-language, literal-reuse phrasing", async () => {
+    const generate = generateReturning("[]");
+    await extractCandidates({ ...baseArgs, generate });
+    const [[calledWith]] = generate.mock.calls;
+    expect(calledWith.system).toMatch(/same language/i);
+    expect(calledWith.system).toMatch(/reusing the user's own words/i);
+  });
+});
+
+describe("extractCandidates — secret-shaped statements are never auto-activated", () => {
+  // Driven end-to-end through extractCandidates to the resulting proposeCandidate
+  // call, per the review: asserting on the OUTCOME (sensitive forced true), not on
+  // words present in the prompt string. The model is made to say `sensitive:false`
+  // on purpose in each case, to prove the code — not the model's own honesty —
+  // is what forces the gate.
+  it("a Postgres connection string with an inline password is forced sensitive", async () => {
+    const generate = generateReturning(
+      JSON.stringify([
+        {
+          statement: "our db is postgresql://svcuser:Sup3rSecretPW9!@db.internal:5432/prod",
+          from: "user",
+          sensitive: false,
+        },
+      ]),
+    );
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
+  });
+
+  it("an sk--prefixed API token is forced sensitive", async () => {
+    const generate = generateReturning(
+      JSON.stringify([{ statement: "here is my API key sk-ABC123XYZ7890DEF456GHI", from: "user", sensitive: false }]),
+    );
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
+  });
+
+  it("a PEM private-key block is forced sensitive", async () => {
+    const generate = generateReturning(
+      JSON.stringify([
+        {
+          statement: "-----BEGIN RSA PRIVATE KEY-----\nMIIExampleNotARealKey==\n-----END RSA PRIVATE KEY-----",
+          from: "user",
+          sensitive: false,
+        },
+      ]),
+    );
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
+  });
+
+  it("does not flag an ordinary fact — the screen is not so broad it eats normal usage", async () => {
+    const generate = generateReturning('[{"statement":"pays suppliers in EUR","from":"user","sensitive":false}]');
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
   });
 });
 
