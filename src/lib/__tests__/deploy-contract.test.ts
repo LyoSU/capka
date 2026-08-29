@@ -304,6 +304,10 @@ describe("every documented knob reaches the container that reads it", () => {
     // Service wiring, fixed to the compose network's internal hostname. An operator
     // moving the controller elsewhere is changing the topology, not tuning a value.
     "SANDBOX_CONTROLLER_URL",
+    // Optional override with a working zero-config default: `data/vault-cas`
+    // already lives under the `./data:/app/data` bind mount compose gives
+    // platform, so no operator wiring is needed to persist blobs.
+    "VAULT_CAS_DIR",
   ]);
 
   it("documents every platform knob it reads, or names it internal", () => {
