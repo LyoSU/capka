@@ -178,18 +178,103 @@ run("vault spaces", () => {
     expect(await retireEvents(spaceId)).toBe(1);
   });
 
-  it("retire ідемпотентний: повтор не кидає і не пише другу подію", async () => {
+  it("retire пише РІВНО одну подію — і на повтор, і на порожньому просторі", async () => {
+    // Непорожній простір: так teardown передрайвлюється з worker-тіка після
+    // часткової невдачі, і другої події бути не мусить.
     const spaceId = await getOrCreateSpace({ type: "project", refId: PROJ, ownerUserId: OWNER });
     await mkClaim(`${P}claim2`, spaceId);
-
     await retireProjectSpace(PROJ);
     expect(await retireEvents(spaceId)).toBe(1);
-
-    // Так teardown передрайвлюється з worker-тіка після часткової невдачі.
     await expect(retireProjectSpace(PROJ)).resolves.toBeUndefined();
     expect(await retireEvents(spaceId)).toBe(1);
+
+    // Порожній простір (користувач почистив усе руками): зносити нічого, але слід
+    // усе одно мусить бути — інакше «події немає» читається як «teardown не
+    // доїхав», а це та сама відповідь, яку оператор шукає в аудиті.
+    const emptyProj = `${P}empty-proj`;
+    const emptySpace = await getOrCreateSpace({ type: "project", refId: emptyProj, ownerUserId: OWNER });
+    await retireProjectSpace(emptyProj);
+    expect(await retireEvents(emptySpace)).toBe(1);
+    await retireProjectSpace(emptyProj);
+    expect(await retireEvents(emptySpace)).toBe(1);
+
     // І простору, якого взагалі немає, теж терпить.
     await expect(retireProjectSpace(`${P}never-existed`)).resolves.toBeUndefined();
+  });
+
+  it("retire серіалізується на рядку простору, тож подія не двоїться", async () => {
+    // «Події ще немає» — це read-modify-write, і на ПОРОЖНЬОМУ просторі жоден
+    // інший рядок транзакції не серіалізує, тож умову тримає лише блокування
+    // рядка простору. Паралельний виклик тут нічого не довів би: без блокування
+    // він однаково зелений, бо перша транзакція встигає закомітитись. Тому лок
+    // спостерігається прямо — чужа транзакція тримає рядок, і retire не рухається.
+    const lockProj = `${P}lock-proj`;
+    const spaceId = await getOrCreateSpace({ type: "project", refId: lockProj, ownerUserId: OWNER });
+
+    const holder = await pool.connect();
+    let pending: Promise<void>;
+    try {
+      await holder.query("BEGIN");
+      // Саме FOR KEY SHARE, а не FOR UPDATE: він конфліктує з локом retire, але
+      // НЕ з тим FOR KEY SHARE, який INSERT в audit_events бере на батьківський
+      // рядок через FK. З FOR UPDATE тут блокувалась би й сама вставка, і тест
+      // був би зелений навіть без лока — тобто не перевіряв би нічого. Ця ж
+      // асиметрія і є причиною лока: два одночасні retire без нього беруть лише
+      // по FOR KEY SHARE, які між собою не конфліктують, і подія двоїться.
+      await holder.query("SELECT id FROM spaces WHERE id = $1 FOR KEY SHARE", [spaceId]);
+      pending = retireProjectSpace(lockProj);
+      const outcome = await Promise.race([
+        pending.then(() => "done" as const),
+        new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
+      ]);
+      expect(outcome).toBe("blocked");
+      expect(await retireEvents(spaceId)).toBe(0);
+    } finally {
+      await holder.query("ROLLBACK");
+      holder.release();
+    }
+
+    // Лок віддано — той самий виклик доходить, рівно з однією подією.
+    await pending;
+    expect(await retireEvents(spaceId)).toBe(1);
+  });
+
+  it("усі три функції читають і пишуть ЧЕРЕЗ переданий ex", async () => {
+    // Стан ДО транзакції: простір проєкту з одним клеймом, обидва закоммічені.
+    const spaceId = await getOrCreateSpace({ type: "project", refId: PROJ, ownerUserId: OWNER });
+    const claim = `${P}claim-ex`;
+    await mkClaim(claim, spaceId);
+    const userRef = `${P}ex-user`;
+    const topic = "Тема в транзакції";
+
+    const seen = { space: [] as string[], note: [] as string[] };
+    const boom = new Error("rollback");
+    const err = await db
+      .transaction(async (tx) => {
+        // Другий виклик мусить ПОБАЧИТИ незакоммічений рядок першого: SELECT повз
+        // ex його не знайшов би, повторний INSERT мовчки з'їв би 23505, і функція
+        // кинула б «vanished after insert». Тож це пінить і читання, і запис.
+        seen.space.push(await getOrCreateSpace({ type: "user", refId: userRef }, tx));
+        seen.space.push(await getOrCreateSpace({ type: "user", refId: userRef }, tx));
+        seen.note.push(await getOrCreateTopicNote(spaceId, topic, tx));
+        seen.note.push(await getOrCreateTopicNote(spaceId, topic, tx));
+        await retireProjectSpace(PROJ, tx);
+        throw boom;
+      })
+      .then(() => null, (e: unknown) => e);
+
+    expect(err).toBe(boom);
+    expect(new Set(seen.space).size).toBe(1);
+    expect(new Set(seen.note).size).toBe(1);
+
+    // Жоден стейтмент не втік на модульний `db`: такий закоммітився б сам по собі
+    // й пережив би відкат. Це єдина перевірка, яка ловить підміну ex → db, і без
+    // неї Task 4/5/6 тихо втратили б атомарність.
+    expect(await count("spaces", "type = 'user' AND ref_id = $1", [userRef])).toBe(0);
+    expect(await count("vault_notes", "space_id = $1", [spaceId])).toBe(0);
+    expect(await count("audit_events", "space_id = $1", [spaceId])).toBe(0);
+    // А клейм, який retire видалив усередині транзакції, повернувся на місце.
+    expect(await count("vault_claims", "id = $1", [claim])).toBe(1);
   });
 
   it("purge зносить простори користувача І давно retired-проєкту", async () => {

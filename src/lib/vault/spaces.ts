@@ -60,8 +60,8 @@ export async function getOrCreateTopicNote(spaceId: string, title: string, ex: E
  *  версії/фрагменти/цитати не чіпаються. Рядок простору теж лишається — його
  *  знесе purge за owner_user_id (повний GC — план D).
  *
- *  Ідемпотентний, бо teardown передрайвлюється з worker-тіка: повтор нічого не
- *  знаходить і тому не пише другої події `space.retire`. */
+ *  Ідемпотентний, бо teardown передрайвлюється з worker-тіка: подія `space.retire`
+ *  пишеться рівно раз на простір. */
 export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<void> {
   if (!ex) return db.transaction((tx) => retireProjectSpace(projectId, tx));
 
@@ -69,7 +69,13 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
     .select({ id: spaces.id })
     .from(spaces)
     .where(and(eq(spaces.type, "project"), eq(spaces.refId, projectId)))
-    .limit(1);
+    .limit(1)
+    // Блокуємо рядок простору на час транзакції: «події ще немає» — це
+    // read-modify-write, і без цього два одночасні retire (запит і worker-тік,
+    // якщо перший переповз 30-секундний grace) обидва прочитали б «немає» і
+    // записали б по події. Стара умова «було що зносити» була race-safe
+    // випадково — одна з транзакцій нічого б не видалила.
+    .for("update");
   if (!space) return;
   const spaceId = space.id;
 
@@ -86,7 +92,17 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
     .where(and(eq(knowledgeSources.spaceId, spaceId), isNull(knowledgeSources.deletedAt)))
     .returning({ id: knowledgeSources.id });
 
-  if (claims.length + notes.length + candidates.length + sources.length === 0) return;
+  // Рівно одна подія на видалення проєкту — умова саме «події ще немає», а НЕ
+  // «було що зносити»: простір, який користувач почистив руками, теж мусить
+  // лишити слід, інакше «події немає» читається однаково як «простір був
+  // порожній» і як «teardown не доїхав», а з retryPendingProjectTeardowns це
+  // жива операційна різниця. Лукап іде по idx_audit_space_created.
+  const [priorEvent] = await ex
+    .select({ id: auditEvents.id })
+    .from(auditEvents)
+    .where(and(eq(auditEvents.spaceId, spaceId), eq(auditEvents.action, "space.retire")))
+    .limit(1);
+  if (priorEvent) return;
   await ex.insert(auditEvents).values({
     id: nanoid(),
     spaceId,
