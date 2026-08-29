@@ -35,8 +35,8 @@ function truncateToBytes(value: string, maxBytes: number): string {
 
 function clean(value: string): string {
   const normalized = value
-    // Newlines and tabs carry a word boundary (a chat titled "Звіт\nза Q4"
-    // should read "Звіт за Q4", not "Звітза Q4"); other control characters
+    // Newlines and tabs carry a word boundary (a chat titled "Report\nfor Q4"
+    // should read "Report for Q4", not "Reportfor Q4"); other control characters
     // carry nothing and go.
     .replace(/[\r\n\t\v\f]/g, " ")
     .replace(/[\x00-\x1F\x7F]/g, "")
@@ -77,7 +77,7 @@ export function safeFilename(raw: string | null | undefined, fallback: string): 
   return safeFallback ? defuseDeviceName(safeFallback) : "download";
 }
 
-/** Name an archive after what is inside it, dated: `Квартальний звіт — 2026-08-22.zip`.
+/** Name an archive after what is inside it, dated: `Quarterly report — 2026-08-22.zip`.
  *  The label leads so a file manager sorted by name groups every download of the
  *  same workspace together, and the date makes yesterday's backup distinguishable
  *  from today's instead of `workspace (3).zip`.

@@ -207,8 +207,8 @@ export function ThinkingPicker({ value, onChange, provider, reasoning, efforts, 
               one and the pill never changes width. Without this, dragging the
               slider re-lays-out the whole pill (and, since it's centred, shifts the
               model name and this popover sideways on every step).
-              The cost is that the slot always reserves the worst case ("Без
-              думання"), which is fine everywhere this trigger still renders: the
+              The cost is that the slot always reserves the worst case (the longest
+              label in the active locale), which is fine everywhere it renders: the
               greeting gives the pill a row of its own, and the chat header on a phone
               uses the compact model trigger instead, with this control living inside
               its overlay. */}

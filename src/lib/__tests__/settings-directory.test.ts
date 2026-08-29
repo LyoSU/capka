@@ -25,10 +25,10 @@ describe("settings directory", () => {
     expect(missing.map((m) => m.href)).toEqual([]);
   });
 
-  it("resolves every label and page key in both locales", () => {
+  it("resolves every label, page and keyword key in both locales", () => {
     const broken: string[] = [];
     for (const entry of SETTINGS_DIRECTORY) {
-      for (const key of [entry.label, entry.page]) {
+      for (const key of [entry.label, entry.page, entry.keywordsKey].filter(Boolean) as string[]) {
         for (const [name, catalog] of [["en", en], ["uk", uk]] as const) {
           if (typeof lookup(catalog, key) !== "string") broken.push(`${name}: ${key}`);
         }
@@ -65,46 +65,48 @@ describe("settings directory", () => {
 });
 
 describe("searchSettings", () => {
-  const resolve = (key: string) => (lookup(uk, key) as string) ?? key;
+  // Resolved against a real catalog, so the ranking is exercised on the words the
+  // page actually shows rather than on a stub that can drift from it.
+  const resolve = (key: string) => (lookup(en, key) as string) ?? key;
 
   it("returns nothing for an empty query", () => {
     expect(searchSettings(SETTINGS_DIRECTORY, "   ", resolve)).toEqual([]);
   });
 
   it("finds a setting by a word from its own label", () => {
-    const hits = searchSettings(SETTINGS_DIRECTORY, "інструкції", resolve);
+    const hits = searchSettings(SETTINGS_DIRECTORY, "instructions", resolve);
     expect(hits[0].href).toBe("/settings/agent#agent-instructions");
   });
 
   it("finds a setting by a word the user would type instead of ours", () => {
-    // Nothing on screen says "промпт" — that's the point of the keyword list.
-    const hits = searchSettings(SETTINGS_DIRECTORY, "промпт", resolve);
+    // Nothing on screen says "prompt" — that's the point of the keyword list.
+    const hits = searchSettings(SETTINGS_DIRECTORY, "prompt", resolve);
     expect(hits.map((h) => h.href)).toContain("/settings/agent#agent-instructions");
   });
 
   it("ranks a label match above a keyword-only match", () => {
-    // "пам'ять" is the memory switch's own name and merely a keyword elsewhere.
-    const hits = searchSettings(SETTINGS_DIRECTORY, "пам'ять", resolve);
+    // "memory" is the memory switch's own name and merely a keyword elsewhere.
+    const hits = searchSettings(SETTINGS_DIRECTORY, "memory", resolve);
     expect(hits[0].href).toBe("/settings/memory#memory-enabled");
   });
 
   it("matches a typed phrase across the label and the keywords together", () => {
-    // Someone describing what they want ("вимкнути пам'ять") types words that live
-    // in different fields. Matching the phrase as one string would find nothing.
-    const hits = searchSettings(SETTINGS_DIRECTORY, "вимкнути пам'ять", resolve);
+    // Someone describing what they want ("disable memory") types words that live in
+    // different fields. Matching the phrase as one string would find nothing.
+    const hits = searchSettings(SETTINGS_DIRECTORY, "disable memory", resolve);
     expect(hits.map((h) => h.href)).toContain("/settings/memory#memory-enabled");
   });
 
   it("requires every word to match something, so extra words narrow rather than widen", () => {
-    // "пам'ять" alone hits several rows; adding a word that matches none of them
+    // "memory" alone hits several rows; adding a word that matches none of them
     // must return nothing rather than falling back to the loosest match.
-    expect(searchSettings(SETTINGS_DIRECTORY, "пам'ять zzzz", resolve)).toEqual([]);
-    expect(searchSettings(SETTINGS_DIRECTORY, "пам'ять", resolve).length).toBeGreaterThan(1);
+    expect(searchSettings(SETTINGS_DIRECTORY, "memory zzzz", resolve)).toEqual([]);
+    expect(searchSettings(SETTINGS_DIRECTORY, "memory", resolve).length).toBeGreaterThan(1);
   });
 
   it("respects the caller's filtering, so a member never sees admin-only rows", () => {
     const memberOnly = SETTINGS_DIRECTORY.filter((e) => !e.adminOnly);
-    const hits = searchSettings(memberOnly, "промпт", resolve);
+    const hits = searchSettings(memberOnly, "prompt", resolve);
     expect(hits).toEqual([]);
   });
 });

@@ -238,7 +238,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
   // Join distinct segments with a blank line, not "". The model emits text (and
   // reasoning) in runs broken up by tool/reasoning steps, so each `text` part is
   // its own paragraph — the web renders them apart, but a channel that flattens
-  // parts to one string (Telegram) would otherwise glue "…межі.Прав адміна…" into
+  // parts to one string (Telegram) would otherwise glue "…the limit.Admin rights…" into
   // a run-on wall. A blank line restores the paragraph the web already shows.
   const getFullText = () =>
     parts.filter((p): p is { type: "text"; text: string } => p.type === "text")

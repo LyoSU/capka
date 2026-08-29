@@ -167,8 +167,8 @@ describe("checkConfig — the diagnostic matches the mechanism", () => {
     // this one knob: the reader honours 0 (asserted just above), the stall loop then
     // performs no recovery, and no `task:notice` with kind "retrying" is published.
     // The third is the one an operator sees — the chat's status row renders it — so
-    // without it someone who switched recovery off would still watch "повторна
-    // спроба…" for a policy they disabled. A validator that returns 0 while the UI
+    // without it someone who switched recovery off would still watch a "retrying…"
+    // notice for a policy they disabled. A validator that returns 0 while the UI
     // narrates retries is a guard sitting next to the thing it was believed to
     // protect.
     //

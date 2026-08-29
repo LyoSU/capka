@@ -53,8 +53,10 @@ export const PATCH = apiHandler(async (req, { params }) => {
       const listing = await listFiles(srcKey, ".", userId);
       const hasFiles = (listing.entries ?? []).some((e) => !e.name.startsWith("."));
       if (hasFiles) {
+        // Deliberately NOT localized: the subdir name is the retry key, so a user
+        // who switched language between attempts must not get a second copy.
         const title = ((existing.title as string | null) || "chat").replace(/[/\\]/g, "-").slice(0, 80);
-        const subdir = `Із чату «${title}» (${id.slice(0, 8)})`;
+        const subdir = `From chat "${title}" (${id.slice(0, 8)})`;
         await copyWorkspace(newProjectId, srcKey, subdir, userId);
         log.info("chat files carried into project on move", { chatId: id, projectId: newProjectId });
       }

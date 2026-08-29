@@ -1,4 +1,4 @@
-// The new-chat greeting ("Чим можу допомогти?") rotates through a catalog of
+// The new-chat greeting ("How can I help?") rotates through a catalog of
 // lines that vary by the moment — time of day, weekday, season — and weave in
 // the user's first name. Claude does the same: a fresh chat feels addressed to
 // *you, now*, not stamped from a template.
@@ -153,7 +153,7 @@ export function pickGreeting(opts: PickOptions = {}): string {
   );
 
   // Resolve a line's text for this locale, substituting the name (or trimming a
-  // trailing-comma form like "Доброго ранку, {name}!" down cleanly when absent).
+  // trailing-comma form like "Good morning, {name}!" down cleanly when absent).
   const render = (g: Greeting): string => {
     const tmpl = g.text[locale] ?? g.text.uk ?? "";
     return name ? tmpl.replace("{name}", name) : tmpl.replace(/,?\s*\{name\}/, "");

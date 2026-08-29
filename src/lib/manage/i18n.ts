@@ -47,7 +47,7 @@ export function loc(t: ManageT, key: string, fallback: string, values?: Record<s
   return v === MISSING || v === "" ? fallback : v;
 }
 
-/** Localized display of a raw setting value (e.g. "bridge" → "З доступом до мережі").
+/** Localized display of a raw setting value (e.g. "bridge" → "With network access").
  *  Tries a per-control key, then a shared key for booleans, then the English
  *  fallback (the control's own format/raw). */
 export function locValue(t: ManageT, controlId: string, raw: string, fallback: string): string {

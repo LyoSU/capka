@@ -56,7 +56,7 @@ export interface Control {
    *  string like `user.locale`). */
   options?: string[];
   read(ctx: ManageContext): Promise<string>;
-  /** Human-readable rendering of a raw value (e.g. "true" → "Увімкнено"). */
+  /** Human-readable rendering of a raw value (e.g. "true" → "Enabled"). */
   format?(value: string): string;
   apply(ctx: ManageContext, value: string): Promise<void>;
   /** Optional warning about knock-on effects, shown in the confirm preview. */

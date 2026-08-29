@@ -119,8 +119,8 @@ export function CommandPalette() {
             <CommandItem
               key={`${entry.href}-${entry.label}`}
               // cmdk matches on the item's own text; the synonyms someone actually
-              // types ("промпт", "gpt") live in the index, so hand them over too.
-              keywords={entry.keywords?.split(/\s+/)}
+              // types ("prompt", "gpt") live in the index, so hand them over too.
+              keywords={entry.keywordsKey ? tRoot(entry.keywordsKey).split(/\s+/) : undefined}
               onSelect={() => run(() => router.push(entry.href))}
             >
               <Settings className="mr-2 h-4 w-4" />

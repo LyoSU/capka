@@ -81,7 +81,7 @@ const PARTIAL_ERROR_CATEGORIES = new Set<string>([
 type TimeTranslator = (key: string, values?: Record<string, string | number>) => string;
 
 /** Locale-aware relative timestamp. Intl formatters are built per call from the
- *  active locale so the same component reads "2 hours ago" or "2 години тому". */
+ *  active locale, so the same component reads "2 hours ago" or its translation. */
 function formatRelativeTime(dateStr: string, locale: string, t: TimeTranslator): string {
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const date = new Date(dateStr);

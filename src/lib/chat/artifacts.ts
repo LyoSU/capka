@@ -10,8 +10,8 @@
  * turn's tool calls (`selectTouchedFiles`). This exists because tier one has a
  * silent failure: the most common way Capka produces a file is a python script
  * writing an .xlsx, and if the reply just says "Done!" the user is shown nothing
- * at all. The listing has no taste, though — it cannot tell `Звіт Q3.xlsx` from
- * `~$Звіт Q3.xlsx` — so tier two is deliberately kept SEPARATE and folded away
+ * at all. The listing has no taste, though — it cannot tell `Report Q3.xlsx` from
+ * `~$Report Q3.xlsx` — so tier two is deliberately kept SEPARATE and folded away
  * rather than merged into tier one. That keeps the "Files · N" heading an honest
  * promise, keeps "Download all" pointed at the result, and means we never have to
  * maintain an ignore-list guessing which files are junk (a list that would

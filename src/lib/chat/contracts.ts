@@ -135,7 +135,7 @@ export type MessageMeta = {
   // Workspace files this turn changed that its reply never names — the folded
   // "Also changed" tier under the file tiles. Kept separate from the named ones
   // (which are re-derived from the text, not stored) precisely because a listing
-  // has no sense of relevance: it cannot tell `Звіт.xlsx` from `~$Звіт.xlsx`.
+  // has no sense of relevance: it cannot tell `Report.xlsx` from `~$Report.xlsx`.
   // See `selectTouchedFiles` for how a turn's own writes are told apart from a
   // parallel chat's in a shared project workspace.
   touchedFiles?: string[];

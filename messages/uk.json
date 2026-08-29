@@ -661,7 +661,8 @@
       "imported": "Імпортовано {n, plural, one {# файл} few {# файли} many {# файлів} other {# файлу}} з «{name}»",
       "nothingImported": "Немає що імпортувати — усі файли пропущено (завеликі або не для синхронізації).",
       "downloadZip": "Завантажити як zip"
-    }
+    },
+    "copySuffix": "(копія)"
   },
   "projects": {
     "title": "Проєкти",
@@ -1871,6 +1872,36 @@
         "people": "Люди",
         "signin": "Вхід"
       }
+    },
+    "search": {
+      "profile": "ім'я name profile профіль",
+      "theme": "тема dark light темна світла appearance вигляд",
+      "language": "мова language локаль locale",
+      "telegramAccount": "telegram телеграм акаунт account",
+      "memoryEnabled": "пам'ять memory забути forget нотатки notes вимкнути disable off вивчати",
+      "memoryFacts": "про мене about me факти facts",
+      "connections": "ключ key api openai anthropic gpt claude модель model провайдер",
+      "skills": "навички skills конектори connectors mcp плагіни plugins маркетплейс",
+      "automations": "розклад schedule cron автоматизації нагадування",
+      "agentInstructions": "промпт prompt system системний інструкції instructions персона persona тон tone змінити change замінити replace",
+      "sandbox": "пісочниця sandbox код code файли files виконувати run вимкнути disable off",
+      "autonomy": "автономний autonomous підтвердження confirm дозвіл",
+      "agentMode": "режим mode raw чистий промпт пам'ять memory можливості capabilities",
+      "users": "користувачі users роль role admin адмін доступ approve схвалити видалити remove запросити invite",
+      "signin": "реєстрація registration signup вхід login закрити",
+      "telegramAuth": "telegram телеграм oidc вхід login",
+      "permissions": "дозволи permissions заборонити deny allow політика policy",
+      "billingMode": "спільний ключ shared key власний own",
+      "billingLimits": "ліміт limit бюджет budget витрати spend гроші вимкнути змінити",
+      "telegramBot": "telegram телеграм бот bot токен token botfather інтеграції integrations",
+      "encryption": "шифрування encryption master key ключ",
+      "sandboxNetwork": "інтернет internet мережа network egress дозволити allow вимкнути off",
+      "blockPrivate": "ssrf приватні private localhost внутрішні",
+      "hostFolders": "теки folders сервер server монтувати mount",
+      "pcFolders": "теки folders комп'ютер computer синхронізація sync",
+      "usage": "аналітика analytics витрати cost токени tokens статистика",
+      "activity": "журнал log аудит audit історія history зміни",
+      "updates": "оновлення update версія version реліз"
     }
   },
   "setup": {
@@ -2076,7 +2107,8 @@
     "confirmCancelled": "Скасовано.",
     "confirmExpired": "Строк цього підтвердження минув — просто попросіть ще раз.",
     "confirmBusy": "Цей чат ще завершує інше повідомлення — натисніть ще раз за мить.",
-    "confirmDetails": "Деталі"
+    "confirmDetails": "Деталі",
+    "automationPaused": "Я призупинила автоматизацію «{title}»: три запуски поспіль не вдалися. Перевірте останній запуск і ввімкніть її знову, коли будете готові."
   },
   "updateBanner": {
     "message": "Доступна Capka {version}",

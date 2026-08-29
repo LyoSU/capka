@@ -8,10 +8,13 @@ All notable changes to Capka are documented here. Format follows
 
 ### Changed
 
+- Settings search keywords moved into the message catalogs (`settings.search.*`), so each locale ships its own synonym list instead of one hardcoded bilingual string.
+- Files carried into a project when a chat is moved land in an English subdir (`From chat "…"`), which stays stable across an interface-language change so a retry replaces rather than duplicates the copy.
 - Web citations redesigned: [N] markers render as raised number pills with a hover card (title, domain, date), and the "Sources" footer is a grid of source tiles with domain monograms, one tile per URL, collapsing beyond six.
 
 ### Fixed
 
+- A forked or cloned chat is named in the interface language — the "(copy)" suffix was hardcoded Ukrainian for everyone.
 - Inline citation pills actually render in the web chat — the markdown sanitizer strips the attribute the previous CSS styling targeted, so markers showed as plain blue numbers and a `[1, 9]` group read as "19".
 - A reply's [N] markers no longer resolve against a different message's sources (markdown processor cache collision on anonymous plugins).
 

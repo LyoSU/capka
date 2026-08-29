@@ -269,7 +269,7 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
   // The one object that stays INSIDE the sentence. Every other step puts the
   // thing it acted on in `detail`, which the web renders as a sunken mono well —
   // right for a path, a glob or a slug, wrong for a web query, because a query is
-  // prose the user typed. "ціни на бензин" set in monospace reads as broken
+  // prose the user typed. "petrol prices near me" set in monospace reads as broken
   // typography, and the well's "machine detail, skippable" framing is a lie for
   // the one field that says what the user actually wanted to know.
   if (/(web|search|google|brave|tavily)/.test(name)) {

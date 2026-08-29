@@ -661,7 +661,8 @@
       "imported": "Imported {n, plural, one {# file} other {# files}} from “{name}”",
       "nothingImported": "Nothing to import — every file was skipped (too large or not syncable).",
       "downloadZip": "Download as zip"
-    }
+    },
+    "copySuffix": "(copy)"
   },
   "projects": {
     "title": "Projects",
@@ -1871,6 +1872,36 @@
         "people": "People",
         "signin": "Sign-in"
       }
+    },
+    "search": {
+      "profile": "name profile",
+      "theme": "theme dark light appearance",
+      "language": "language locale",
+      "telegramAccount": "telegram account",
+      "memoryEnabled": "memory forget notes disable off learn",
+      "memoryFacts": "about me facts",
+      "connections": "key api openai anthropic gpt claude model provider",
+      "skills": "skills connectors mcp plugins marketplace",
+      "automations": "schedule cron automations reminders",
+      "agentInstructions": "prompt system instructions persona tone change replace",
+      "sandbox": "sandbox code files run disable off",
+      "autonomy": "autonomous confirm permission",
+      "agentMode": "mode raw prompt memory capabilities",
+      "users": "users role admin access approve remove invite",
+      "signin": "registration signup login close",
+      "telegramAuth": "telegram oidc login",
+      "permissions": "permissions deny allow policy",
+      "billingMode": "shared key own",
+      "billingLimits": "limit budget spend money disable change",
+      "telegramBot": "telegram bot token botfather integrations",
+      "encryption": "encryption master key",
+      "sandboxNetwork": "internet network egress allow off",
+      "blockPrivate": "ssrf private localhost internal",
+      "hostFolders": "folders server mount",
+      "pcFolders": "folders computer sync",
+      "usage": "analytics cost tokens statistics",
+      "activity": "log audit history changes",
+      "updates": "update version release"
     }
   },
   "setup": {
@@ -2076,7 +2107,8 @@
     "confirmCancelled": "Cancelled.",
     "confirmExpired": "This confirmation expired — just ask again.",
     "confirmBusy": "This chat is still finishing another message — tap again in a moment.",
-    "confirmDetails": "Details"
+    "confirmDetails": "Details",
+    "automationPaused": "I paused the automation \"{title}\": three runs in a row failed. Check the last run and re-enable it when ready."
   },
   "updateBanner": {
     "message": "Capka {version} is available",

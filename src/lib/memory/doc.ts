@@ -121,17 +121,17 @@ export interface ConversationTurn {
 /** Below this, a prompt on its own carries no durable fact. */
 const TRIVIAL_USER_CHARS = 20;
 /** Below this, a reply carries none either. Far higher than the prompt bound
- *  because the two sides are not symmetric: "продовжуй" is a nine-character
+ *  because the two sides are not symmetric: "continue" is an eight-character
  *  prompt that can pull a page of facts, while a reply this short is an
  *  acknowledgement. */
 const TRIVIAL_ASSISTANT_CHARS = 200;
 
 /**
  * Whether a finished turn is too small to be worth an LLM call — a pleasantry
- * exchange ("дякую" → "Будь ласка"), not new information.
+ * exchange ("thanks" → "You're welcome"), not new information.
  *
  * Judges the whole exchange, not just the prompt. A gate on the user's text alone
- * threw away the most valuable turns it saw: a two-word "продовжуй" with a long,
+ * threw away the most valuable turns it saw: a one-word "continue" with a long,
  * fact-dense answer is exactly what memory is for.
  */
 export function isTrivialTurn(turn: ConversationTurn): boolean {

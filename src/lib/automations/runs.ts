@@ -6,6 +6,7 @@ import { enqueueTask } from "@/lib/tasks/queue";
 import { publishTaskEvent } from "@/lib/tasks/events";
 import { toUIMessages } from "@/lib/chat/presenter";
 import { loadActivePath } from "@/lib/chat/tree";
+import { getTranslator } from "@/lib/i18n/translator";
 import type { TaskPayload } from "@/lib/tasks/runner";
 import { log } from "@/lib/log";
 
@@ -133,10 +134,8 @@ export async function recordAutomationOutcome(automationId: string, status: stri
       const { getBot } = await import("@/lib/telegram/bot");
       const bot = await getBot();
       const [user] = await db.select({ locale: users.locale }).from(users).where(eq(users.id, row.userId));
-      const text = user?.locale === "uk"
-        ? `Я призупинила автоматизацію «${row.title}»: три запуски поспіль не вдалися. Перевірте останній запуск і ввімкніть її знову, коли будете готові.`
-        : `I paused the automation "${row.title}": three runs in a row failed. Check the last run and re-enable it when ready.`;
-      await bot?.api.sendMessage(link.telegramUserId, text);
+      const t = getTranslator(user?.locale, "telegram");
+      await bot?.api.sendMessage(link.telegramUserId, t("automationPaused", { title: row.title }));
     } catch (e) {
       log.warn("automation auto-disable notify failed", { automationId, err: String(e) });
     }

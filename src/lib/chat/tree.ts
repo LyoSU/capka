@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { and, eq } from "drizzle-orm";
+import { getTranslations } from "next-intl/server";
 import { db } from "@/lib/db";
 import { chats, messages } from "@/lib/db/schema";
 import { isShared } from "./sharing";
@@ -218,12 +219,13 @@ export async function forkChat(opts: {
     };
   });
 
+  const t = await getTranslations("chat");
   await db.transaction(async (tx) => {
     await tx.insert(chats).values({
       id: newChatId,
       userId,
       projectId: source.projectId,
-      title: `${source.title ?? "Chat"} (копія)`,
+      title: `${source.title ?? "Chat"} ${t("copySuffix")}`,
       model: source.model,
     });
     if (copies.length > 0) {
@@ -261,7 +263,8 @@ export async function cloneSharedChat(opts: {
 
   const path = activePath(await loadMessages(source.id), source.activeLeafId ?? null);
   const newChatId = nanoid();
-  const title = `${source.title ?? "Chat"} (копія)`;
+  const t = await getTranslations("chat");
+  const title = `${source.title ?? "Chat"} ${t("copySuffix")}`;
 
   const idMap = new Map<string, string>();
   const copies = path.map(({ node }) => {

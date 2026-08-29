@@ -1,19 +1,19 @@
 import type { Translator } from "@/lib/i18n/translator";
 
 /** Renders a whole number of seconds through the `chat.duration` messages.
- *  Localized rather than latin `s`/`m` because these numbers sit inside Ukrainian
- *  sentences ("Міркував 8 с") where a bare `8s` reads as untranslated UI. This is
+ *  Localized rather than latin `s`/`m` because these numbers sit inside translated
+ *  sentences, where a bare `8s` reads as untranslated UI. This is
  *  the shape `chat.details.durationSec/durationMin` has always used for the (i)
  *  popover — the live timer and the group header were the two stragglers. */
 function render(sec: number, t: Translator): string {
   if (sec < 60) return t("sec", { s: sec });
   // Padded: this is the one string that ticks under the reader's eye, and an
-  // unpadded "1 хв 5 с" → "1 хв 10 с" jogs the row a character wider every
+  // unpadded "1 m 5 s" → "1 m 10 s" jogs the row a character wider every
   // tenth second. `tabular-nums` fixes digit WIDTH, not digit COUNT.
   return t("minSec", { m: Math.floor(sec / 60), s: String(sec % 60).padStart(2, "0") });
 }
 
-/** A finished span, for the "Міркував …" / "Працював …" group header. Rounds:
+/** A finished span, for the "Thought for …" / "Worked for …" group header. Rounds:
  *  the measurement is over, so the nearest second is the truest single number. */
 export function formatShortDuration(ms: number, t: Translator): string {
   return render(Math.max(0, Math.round(ms / 1000)), t);

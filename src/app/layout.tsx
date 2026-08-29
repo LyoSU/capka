@@ -14,7 +14,8 @@ import "./globals.css";
 // the font step with nothing wrong in the app. The committed files are the
 // upstream variable fonts (OFL-1.1, licences alongside them) subset to exactly
 // the codepoints Google's own `latin` + `cyrillic` slices cover, so rendering is
-// unchanged; Ukrainian is safe because ґ/є/і/ї live in that Cyrillic range.
+// unchanged; Ukrainian is safe because its four extra letters (U+0404, U+0406,
+// U+0407, U+0490 and their lowercase forms) live in that Cyrillic range.
 // Geist Mono was already local, via the `geist` package.
 //
 // One file per family rather than Google's per-subset split: next/font/local

@@ -12,7 +12,7 @@ describe("createDeltaCoalescer", () => {
     c.enqueue("a");
     c.enqueue("b");
     c.enqueue("c");
-    expect(applied).toEqual([]); // нічого не застосовано до спливу інтервалу
+    expect(applied).toEqual([]); // nothing applied before the interval elapses
 
     vi.advanceTimersByTime(250);
     expect(applied).toEqual(["a", "b", "c"]);
@@ -26,7 +26,7 @@ describe("createDeltaCoalescer", () => {
     c.flush();
     expect(applied).toEqual(["a"]);
 
-    // Таймер скасовано — повторне спрацювання не дублює події.
+    // The timer is cancelled — a later tick must not replay the events.
     vi.advanceTimersByTime(500);
     expect(applied).toEqual(["a"]);
   });
