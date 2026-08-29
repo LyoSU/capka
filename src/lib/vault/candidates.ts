@@ -414,6 +414,15 @@ export async function confirmCandidate(args: {
                     // because a NULL jsonb arrives as `null` and the patch tests
                     // `!== undefined`. Same rule as the merge above: a candidate that
                     // asserts no value must not empty one.
+                    //
+                    // The cost of inheriting, accepted knowingly: a candidate can
+                    // change the WORDS without asserting a value, and then the
+                    // successor's value contradicts its own statement — "Acme pays in
+                    // 60 days" carrying `{days:30}`. Nothing renders `value` today, and
+                    // the alternative loses it on the far commoner rephrase, so the
+                    // stale value is the cheaper wrong. The FIRST reader of
+                    // `vault_claims.value` must revisit this: from then on the
+                    // contradiction is visible, and the trade stops being free.
                     value: cand.value ?? undefined,
                     // Inheriting from the predecessor is exactly what must not happen
                     // here: the text came from THIS candidate, so the provenance is
