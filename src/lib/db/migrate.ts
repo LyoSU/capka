@@ -1,5 +1,6 @@
 import path from "node:path";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { migrateMemoryDocs } from "@/lib/vault/migrate-memory-docs";
 import { db, pool } from "./index";
 
 // Fixed advisory-lock id so concurrent instances don't run migrations at the
@@ -24,6 +25,28 @@ async function applyPending(): Promise<void> {
 }
 
 /**
+ * Carry legacy memory docs into the vault, once the schema is known to be there.
+ *
+ * Not awaited by the caller, and deliberately: unlike the schema, this is a data
+ * migration nobody is blocked on — until it lands, memory still reads from the
+ * legacy doc — so making boot wait on it would only delay serving. It retries on
+ * the same backoff as the migrations above rather than a second scheme of its
+ * own, and never rejects, so a failing carry cannot take the boot down with it.
+ */
+async function carryMemoryDocsIntoVault(): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const { migrated } = await migrateMemoryDocs();
+      if (migrated > 0) console.log(`[db] carried ${migrated} legacy memory doc(s) into the vault`);
+      return;
+    } catch (e) {
+      console.error("[db] memory-doc migration failed (retrying in the background):", e);
+    }
+    await sleep(RETRY_SECONDS[Math.min(attempt, RETRY_SECONDS.length - 1)] * 1000);
+  }
+}
+
+/**
  * Apply any pending migrations on boot. Makes self-hosting "just work": a fresh
  * deploy brings the schema up to date without anyone running drizzle-kit.
  * Idempotent and safe to call on every start.
@@ -44,6 +67,11 @@ async function applyPending(): Promise<void> {
 export async function runMigrations(): Promise<void> {
   try {
     await applyPending();
+    // Called after EVERY successful `applyPending` — here and in the retry loop
+    // below — because that is the only place that knows the schema is actually
+    // there. `runMigrations` never rejects, so "after it returns" in
+    // instrumentation would not mean the migrations ran.
+    void carryMemoryDocsIntoVault();
     return;
   } catch (e) {
     console.error("[db] auto-migration failed (continuing; retrying in the background):", e);
@@ -54,6 +82,7 @@ export async function runMigrations(): Promise<void> {
       await sleep(RETRY_SECONDS[Math.min(attempt, RETRY_SECONDS.length - 1)] * 1000);
       try {
         await applyPending();
+        void carryMemoryDocsIntoVault();
         return;
       } catch (e) {
         console.error("[db] auto-migration retry failed:", e instanceof Error ? e.message : e);
