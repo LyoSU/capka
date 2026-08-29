@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTranslations, useLocale } from "next-intl";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { nanoid } from "nanoid";
 
@@ -49,7 +49,7 @@ import { ChatNav } from "@/components/chat/chat-nav";
 import { useChatScroll, ChatScrollProvider } from "@/components/chat/use-chat-scroll";
 import { JumpPill } from "@/components/chat/jump-pill";
 import { ClawMark } from "@/components/brand/claw-mark";
-import { pickGreeting, type GreetingLocale } from "@/lib/chat/greeting";
+import { pickGreeting } from "@/lib/chat/greeting";
 import { haptic } from "@/lib/haptics";
 import { chatTarget } from "@/lib/workspace-target";
 
@@ -82,7 +82,7 @@ interface ChatPanelProps {
 
 export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId, projectName, isAdmin, readOnly, initialHasHistory, recentChats, userName, shareImportEnabled }: ChatPanelProps) {
   const t = useTranslations("chat");
-  const locale = useLocale();
+  const tGreeting = useTranslations("chat.greetings");
   const [model, setModel] = useState(defaultModel);
 
   // How hard the model should think in this chat. Persisted immediately (not only
@@ -148,8 +148,8 @@ export function ChatPanel({ chatId, defaultModel, initialThinkAmount, projectId,
   // Keyed on chatId so each fresh chat is re-picked and feels freshly addressed.
   const [greeting, setGreeting] = useState<string | null>(null);
   useEffect(() => {
-    setGreeting(pickGreeting({ name: userName, locale: locale as GreetingLocale }));
-  }, [chatId, userName, locale]);
+    setGreeting(pickGreeting({ name: userName, t: tGreeting }));
+  }, [chatId, userName, tGreeting]);
   const router = useRouter();
   const { messages, isLoading, error, historyLoaded, sendMessage, regenerate, editMessage, switchBranch, forkChat, stop, ensureChat, reload, awaitingInput, taskInfo } = useBackgroundChat({
     chatId,

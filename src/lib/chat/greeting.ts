@@ -6,9 +6,9 @@
 // Split of concerns:
 //   - this file = the ENGINE (pure, testable): read the moment, filter the
 //     catalog to what fits, pick one, fill the name.
-//   - `greetings.catalog.ts` = the DATA (localized lines + when-conditions).
-//     That file is the one to grow; the engine never needs touching to add a
-//     greeting.
+//   - `greetings.catalog.ts` = the WHEN of each line; its words live under
+//     `chat.greetings.<id>` in the message catalogs. Those two are the ones to
+//     grow; the engine never needs touching to add a greeting.
 //
 // Selection runs CLIENT-SIDE only: the server has no idea what time it is in
 // the user's timezone, and the line is random, so computing it during SSR would
@@ -19,7 +19,6 @@ import { GREETINGS } from "@/lib/chat/greetings.catalog";
 
 export type TimeOfDay = "morning" | "afternoon" | "evening" | "night";
 export type Season = "winter" | "spring" | "summer" | "autumn";
-export type GreetingLocale = "uk" | "en";
 
 /** The decoded "now" a greeting is matched against. All derived from one Date so
  *  the engine stays a pure function of its inputs (easy to test). */
@@ -39,9 +38,8 @@ export interface Moment {
  *  a text is filled with the user's first name; a line that uses it is only
  *  eligible when a name is known (see `needsName`). */
 export interface Greeting {
+  /** Also the message key: the line's words are `chat.greetings.<id>`. */
   id: string;
-  /** Localized text per locale. May contain a single `{name}` placeholder. */
-  text: Partial<Record<GreetingLocale, string>>;
   time?: TimeOfDay[];
   /** Specific weekdays (0–6) this line is for, e.g. [1] = Mondays. */
   weekdays?: number[];
@@ -50,7 +48,7 @@ export interface Greeting {
   /** true = weekends only, false = weekdays only, undefined = any day. */
   weekend?: boolean;
   /** Only offer this line when a name is available. Auto-detected from a
-   *  `{name}` placeholder; set explicitly only to override. */
+   *  `{name}` placeholder in the resolved text; set explicitly only to override. */
   needsName?: boolean;
   /** Relative likelihood within its specificity tier (default 1). */
   weight?: number;
@@ -120,14 +118,16 @@ function specificity(g: Greeting): number {
   );
 }
 
-function needsName(g: Greeting): boolean {
-  return g.needsName ?? Object.values(g.text).some((t) => t?.includes("{name}"));
+function needsName(g: Greeting, text: string): boolean {
+  return g.needsName ?? text.includes("{name}");
 }
 
 export interface PickOptions {
+  /** Resolves a greeting id against the `chat.greetings` namespace. The caller
+   *  owns the locale, so the engine never needs to know it. */
+  t: (id: string) => string;
   now?: Date;
   name?: string | null;
-  locale?: GreetingLocale;
   /** Override the catalog (tests). Defaults to the shipped one. */
   catalog?: Greeting[];
   /** Injectable RNG in [0,1) for deterministic tests. */
@@ -140,37 +140,36 @@ export interface PickOptions {
  * the more specific. Returns the resolved, name-filled text — never null,
  * because the catalog always carries name-less time-of-day lines as a floor.
  */
-export function pickGreeting(opts: PickOptions = {}): string {
+export function pickGreeting(opts: PickOptions): string {
   const now = opts.now ?? new Date();
-  const locale = opts.locale ?? "uk";
   const catalog = opts.catalog ?? GREETINGS;
   const rng = opts.random ?? Math.random;
   const name = firstName(opts.name);
   const moment = getMoment(now);
 
-  const eligible = catalog.filter(
-    (g) => g.text[locale] && matches(g, moment) && (needsName(g) ? !!name : true),
+  // Resolved once per line: the name filter and the render both need the text,
+  // and a translator call per line per pass is the kind of thing that quietly
+  // doubles as the catalog grows.
+  const lines = catalog.map((g) => ({ g, text: opts.t(g.id) }));
+  const eligible = lines.filter(
+    ({ g, text }) => matches(g, moment) && (needsName(g, text) ? !!name : true),
   );
 
-  // Resolve a line's text for this locale, substituting the name (or trimming a
-  // trailing-comma form like "Good morning, {name}!" down cleanly when absent).
-  const render = (g: Greeting): string => {
-    const tmpl = g.text[locale] ?? g.text.uk ?? "";
-    return name ? tmpl.replace("{name}", name) : tmpl.replace(/,?\s*\{name\}/, "");
-  };
+  // Substitute the name, or trim a trailing-comma form like "Good morning,
+  // {name}!" down cleanly when it is absent.
+  const render = (text: string): string =>
+    name ? text.replace("{name}", name) : text.replace(/,?\s*\{name\}/, "");
 
-  if (eligible.length === 0) {
-    // Should not happen with a healthy catalog; fail soft to any localized line.
-    const any = catalog.find((g) => g.text[locale]);
-    return any ? render(any) : "";
-  }
+  // Should not happen with a healthy catalog, which carries name-less any-time
+  // lines as a floor; fail soft to the first line rather than to an empty header.
+  if (eligible.length === 0) return lines[0] ? render(lines[0].text) : "";
 
-  const weights = eligible.map((g) => (g.weight ?? 1) * (1 + specificity(g)));
+  const weights = eligible.map(({ g }) => (g.weight ?? 1) * (1 + specificity(g)));
   const total = weights.reduce((a, b) => a + b, 0);
   let r = rng() * total;
   for (let i = 0; i < eligible.length; i++) {
     r -= weights[i];
-    if (r < 0) return render(eligible[i]);
+    if (r < 0) return render(eligible[i].text);
   }
-  return render(eligible[eligible.length - 1]);
+  return render(eligible[eligible.length - 1].text);
 }

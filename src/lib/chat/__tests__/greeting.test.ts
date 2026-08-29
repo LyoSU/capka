@@ -1,15 +1,27 @@
 import { describe, it, expect } from "vitest";
 
+import en from "../../../../messages/en.json";
+import uk from "../../../../messages/uk.json";
 import { getMoment, firstName, pickGreeting, type Greeting } from "@/lib/chat/greeting";
+import { GREETINGS } from "@/lib/chat/greetings.catalog";
 
 // A tiny, fully-controlled catalog so selection is deterministic and doesn't
-// depend on whatever the shipped one happens to contain.
+// depend on whatever the shipped one happens to contain. Texts are supplied by
+// the stub translator below, the same way the real one gets them from next-intl.
 const catalog: Greeting[] = [
-  { id: "morning", time: ["morning"], text: { uk: "Ранок", en: "Morning" } },
-  { id: "morning-name", time: ["morning"], text: { uk: "Привіт, {name}", en: "Hi, {name}" } },
-  { id: "evening", time: ["evening"], text: { uk: "Вечір", en: "Evening" } },
-  { id: "friday-eve", time: ["evening"], weekdays: [5], text: { uk: "П'ятниця ввечері", en: "Friday eve" } },
+  { id: "morning", time: ["morning"] },
+  { id: "morning-name", time: ["morning"] },
+  { id: "evening", time: ["evening"] },
+  { id: "friday-eve", time: ["evening"], weekdays: [5] },
 ];
+
+const TEXTS: Record<string, string> = {
+  morning: "Morning",
+  "morning-name": "Hi, {name}",
+  evening: "Evening",
+  "friday-eve": "Friday eve",
+};
+const t = (id: string) => TEXTS[id] ?? id;
 
 // 2026-06-08 is a Monday; 2026-06-12 a Friday. Local time via the Date ctor.
 const monMorning = new Date(2026, 5, 8, 9, 0); // Mon 09:00
@@ -34,7 +46,7 @@ describe("getMoment", () => {
 
 describe("firstName", () => {
   it("takes the first token of a full name", () => {
-    expect(firstName("Йосип Любчак")).toBe("Йосип");
+    expect(firstName("Ada Lovelace")).toBe("Ada");
   });
   it("rejects empty, email-like, or non-letter junk", () => {
     expect(firstName("")).toBeNull();
@@ -47,36 +59,61 @@ describe("firstName", () => {
 describe("pickGreeting", () => {
   it("only offers lines matching the current moment", () => {
     // rng→0 picks the first eligible line; at Monday morning that's "morning".
-    const g = pickGreeting({ now: monMorning, catalog, random: () => 0 });
-    expect(g).toBe("Ранок");
+    expect(pickGreeting({ t, now: monMorning, catalog, random: () => 0 })).toBe("Morning");
   });
 
   it("excludes {name} lines when no name is known", () => {
     // Force the last eligible line; without a name, morning-name is filtered out
     // so the only morning line left is the plain one.
-    const g = pickGreeting({ now: monMorning, catalog, random: () => 0.999 });
-    expect(g).toBe("Ранок");
+    expect(pickGreeting({ t, now: monMorning, catalog, random: () => 0.999 })).toBe("Morning");
   });
 
   it("substitutes the first name into a {name} line", () => {
-    const g = pickGreeting({ now: monMorning, name: "Олег Петренко", catalog, random: () => 0.999 });
-    expect(g).toBe("Привіт, Олег");
-  });
-
-  it("respects locale", () => {
-    expect(pickGreeting({ now: monMorning, catalog, locale: "en", random: () => 0 })).toBe("Morning");
+    const g = pickGreeting({ t, now: monMorning, name: "Ada Lovelace", catalog, random: () => 0.999 });
+    expect(g).toBe("Hi, Ada");
   });
 
   it("favours the more specific line when its moment comes", () => {
     // Friday evening: both "evening" and the Friday-evening line are eligible.
     // The specific one carries extra weight, so a midpoint draw lands on it.
-    const g = pickGreeting({ now: friEvening, catalog, random: () => 0.99 });
-    expect(g).toBe("П'ятниця ввечері");
+    expect(pickGreeting({ t, now: friEvening, catalog, random: () => 0.99 })).toBe("Friday eve");
   });
 
-  it("falls back to any localized line when nothing matches the moment", () => {
-    const onlyMorning: Greeting[] = [{ id: "m", time: ["morning"], text: { uk: "Ранок" } }];
-    const g = pickGreeting({ now: friEvening, catalog: onlyMorning });
-    expect(g).toBe("Ранок");
+  it("falls back to a line when nothing matches the moment", () => {
+    const onlyMorning: Greeting[] = [{ id: "morning", time: ["morning"] }];
+    expect(pickGreeting({ t, now: friEvening, catalog: onlyMorning })).toBe("Morning");
+  });
+});
+
+describe("greetings catalog", () => {
+  // The catalog carries only the WHEN of each line; its words live in the message
+  // catalogs. Nothing types that link, so a renamed or forgotten key would show
+  // the raw id as the greeting on a fresh chat — checked here instead.
+  it("resolves every greeting id in both locales", () => {
+    const broken: string[] = [];
+    for (const g of GREETINGS) {
+      for (const [name, catalog] of [["en", en], ["uk", uk]] as const) {
+        const text = (catalog.chat.greetings as Record<string, string>)[g.id];
+        if (typeof text !== "string" || text === "") broken.push(`${name}: ${g.id}`);
+      }
+    }
+    expect(broken).toEqual([]);
+  });
+
+  it("keeps a name-less floor for every time of day, so a nameless user always has a line", () => {
+    const nameless = (id: string, cat: Record<string, string>) => !cat[id].includes("{name}");
+    const ukTexts = uk.chat.greetings as Record<string, string>;
+    for (const time of ["morning", "afternoon", "evening", "night"] as const) {
+      const floor = GREETINGS.filter(
+        (g) => (!g.time || g.time.includes(time)) && !g.weekdays && !g.seasons && g.weekend === undefined
+          && nameless(g.id, ukTexts),
+      );
+      expect(floor.length, `no name-less line for ${time}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("has no duplicate ids", () => {
+    const ids = GREETINGS.map((g) => g.id);
+    expect(ids.length).toBe(new Set(ids).size);
   });
 });
