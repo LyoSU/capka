@@ -1,8 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
-import { createClaim, listHeadClaims } from "./claims";
+import { attachToTopic, createClaim, listHeadClaims } from "./claims";
 import { getOrCreateSpace, getOrCreateTopicNote } from "./spaces";
 
 /** Та сама тема, у яку кладе факти реєстр кандидатів: клейм без теми не
@@ -15,28 +15,64 @@ const DEFAULT_TOPIC = "Загальне";
 const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
 
 /**
- * Переносить legacy-документ пам'яті в клейми: рядок → булет → підтверджений
+ * Переносить legacy-документи пам'яті в клейми: рядок → булет → підтверджений
  * клейм із походженням `legacy_memory_doc`. Актор — `system`, а не реєстр
  * кандидатів: те, що вже лежало в пам'яті користувача, — не пропозиція на
  * розгляд, і просити підтвердити власні ж давні факти було б регресією.
  *
  * СЕЛЕКТОР — `migrated_at IS NULL`, і крапка. НЕ «або migrated_at < updated_at»:
- * коробка одна (compose, без rolling-реплік), а legacy-PUT стає 409 ТИМ САМИМ
- * деплоєм, що й ця міграція, — тож legacy-запис ПІСЛЯ успішного переносу
- * неможливий за побудовою. Ре-міграція «пізніх правок» була б машинерією без
- * сценарію, а ще й дублювала б відредаговані булети (додавання без supersede).
+ * ре-міграція «пізніх правок» дублювала б відредаговані булети (додавання без
+ * supersede), а закриває те вікно не селектор, а cutover — див. нижче.
  *
- * ПРИПУЩЕННЯ ОДНОГО ПИСЬМЕННИКА: усе вище тримається на «одна коробка + PUT уже
- * 409». Helm-чарт з `ee/` із rolling-реплікою це припущення порушує — там дві
- * версії застосунку живуть одночасно, стара ще приймає PUT, і тоді потрібен
- * fence (фіча-флаг «legacy-запис закрито» ПЕРЕД переносом), а не цей селектор.
- * Записано явно, щоб план B/EE не наступив на це мовчки.
+ * ВІКНО ДО CUTOVER (Task 10) — реальне, і тримати його відкритим довго не можна.
+ * `memory_docs` пише не лише legacy-PUT: у `src/lib/memory/store.ts` через
+ * `optimisticUpdate` живуть ЧОТИРИ письменники — `maintainMemoryDoc` (ранер, після
+ * КОЖНОГО ходу), `rememberFact`, `forgetFact` і `setMemoryDoc` (єдиний, куди
+ * дістає PUT). Поки Task 10 не закрив усі чотири, кожен бут штампує `migrated_at`,
+ * а три турн-письменники далі дописують `content` — і цих дописів уже не перенесе
+ * ніхто: селектор дивиться на `IS NULL`, і fallback Task 10 читає той самий
+ * стовпець, тож на cutover такі булети зникнуть з екрана. Звідси правило:
+ * РЕЛІЗ МІЖ ЦИМ КОМІТОМ І CUTOVER-ОМ НЕ РІЗАТИ.
+ *
+ * ПРИПУЩЕННЯ ОДНОГО ПИСЬМЕННИКА (після cutover): «одна коробка, PUT уже 409».
+ * Helm-чарт з `ee/` із rolling-реплікою його порушує — там дві версії застосунку
+ * живуть одночасно, стара ще приймає запис, — і тоді потрібен fence (прапорець
+ * «legacy-запис закрито» ПЕРЕД переносом), а не цей селектор. Записано явно, щоб
+ * план B/EE не наступив на це мовчки.
+ *
+ * `docIds` звужує вибірку і потрібен ЛИШЕ тестам: без нього виклик за побудовою
+ * бере всі непереноcені документи бази, тобто в спільній тестовій базі змітав би
+ * і чужі, справжні. Бут аргументу не передає — його поведінка та сама.
  */
-export async function migrateMemoryDocs(): Promise<{ migrated: number }> {
-  const pending = await db.select({ id: memoryDocs.id }).from(memoryDocs).where(isNull(memoryDocs.migratedAt));
+export async function migrateMemoryDocs(opts: { docIds?: string[] } = {}): Promise<{ migrated: number }> {
+  const pending = await db
+    .select({ id: memoryDocs.id })
+    .from(memoryDocs)
+    .where(and(isNull(memoryDocs.migratedAt), opts.docIds ? inArray(memoryDocs.id, opts.docIds) : undefined));
 
   let migrated = 0;
-  for (const doc of pending) if (await migrateOne(doc.id)) migrated++;
+  const failed: string[] = [];
+  let firstError: unknown;
+  for (const doc of pending) {
+    try {
+      if (await migrateOne(doc.id)) migrated++;
+    } catch (e) {
+      // Ізоляція ПО ДОКУМЕНТУ. Без неї один документ, що падає детерміновано
+      // (скажімо, NUL у legacy-контенті, записаному до того, як `stripNul`
+      // затулив цей шлях), ховав би від переносу ВСІ документи після себе — на
+      // кожному буті, назавжди, — а `SELECT` вище не впорядкований, тож навіть
+      // «які саме» щоразу інші.
+      failed.push(doc.id);
+      firstError ??= e;
+      console.error(`[vault] memory doc ${doc.id} did not migrate:`, e);
+    }
+  }
+  // Кидаємо ОДИН раз і в кінці: решта документів на цей момент уже перенесена, а
+  // retry в `migrate.ts` мусить лишитись озброєним — тихий успіх із
+  // непереносеними документами був би гіршим за галасливий повтор.
+  if (failed.length) {
+    throw new Error(`${failed.length} memory doc(s) did not migrate: ${failed.join(", ")}`, { cause: firstError });
+  }
   return { migrated };
 }
 
@@ -48,9 +84,11 @@ async function migrateOne(docId: string): Promise<boolean> {
     // CAS-крок ПЕРШИЙ: він і бере блокування рядка, і перевіряє «ще не
     // перенесено» — між перевіркою й записом немає вікна. Нуль рядків = документ
     // узяв інший інстанс (або попередній прогін), і це не помилка, а пропуск.
+    // Час — годинник БАЗИ (`now()`), як і `created_at` усіх сусідніх таблиць:
+    // штамп із годинника контейнера не можна було б чесно порівняти з ними.
     const [doc] = await tx
       .update(memoryDocs)
-      .set({ migratedAt: new Date() })
+      .set({ migratedAt: sql`now()` })
       .where(and(eq(memoryDocs.id, docId), isNull(memoryDocs.migratedAt)))
       .returning();
     if (!doc) return false;
@@ -66,14 +104,20 @@ async function migrateOne(docId: string): Promise<boolean> {
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC, tx);
 
     // Дедуп проти вже наявних голів простору — рятує повтор після часткового
-    // падіння (тоді клейми відкотились, але простір міг лишитись від сусіднього
-    // документа) і збіг із фактом, який користувач уже сказав сам.
-    const seen = new Set((await listHeadClaims(spaceId, {}, tx)).map((h) => norm(h.statement)));
+    // падіння і збіг із фактом, який користувач уже сказав сам.
+    const seen = new Map((await listHeadClaims(spaceId, {}, tx)).map((h) => [norm(h.statement), h.id]));
     for (const line of doc.content.split("\n")) {
       const statement = line.trim().replace(/^[-*]\s*/, "").trim();
-      if (!statement || seen.has(norm(statement))) continue;
-      seen.add(norm(statement));
-      await createClaim(
+      if (!statement) continue;
+      const known = seen.get(norm(statement));
+      if (known !== undefined) {
+        // Факт уже є — але, можливо, поза темами (його міг створити не реєстр
+        // кандидатів). Просто пропустити булет означало б лишити рядок у базі й
+        // прибрати його з екрана: GET читає «Загальне».
+        await attachToTopic(known, noteId, tx);
+        continue;
+      }
+      const claim = await createClaim(
         {
           spaceId,
           statement,
@@ -86,6 +130,7 @@ async function migrateOne(docId: string): Promise<boolean> {
         { kind: "system" },
         tx,
       );
+      seen.set(norm(statement), claim.id);
     }
 
     // Єдина копія оригінального markdown, що переживає перенос: булети —

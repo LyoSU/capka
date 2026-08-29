@@ -32,6 +32,11 @@ async function applyPending(): Promise<void> {
  * legacy doc — so making boot wait on it would only delay serving. It retries on
  * the same backoff as the migrations above rather than a second scheme of its
  * own, and never rejects, so a failing carry cannot take the boot down with it.
+ *
+ * DO NOT CUT A RELEASE until the legacy write paths are closed in the same
+ * deploy: three of `src/lib/memory/store.ts`'s four writers still append to
+ * `memory_docs` after this has stamped `migrated_at`, and nothing carries those
+ * appends across. The window is spelled out in `migrateMemoryDocs`'s docblock.
  */
 async function carryMemoryDocsIntoVault(): Promise<void> {
   for (let attempt = 0; ; attempt++) {

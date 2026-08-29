@@ -258,6 +258,19 @@ export async function confirmClaim(claimId: string, sensitive: boolean, ex: Ex =
   await ex.update(vaultClaims).set({ reviewStatus: "confirmed", sensitive }).where(eq(vaultClaims.id, claimId));
 }
 
+/** Прив'язати НАЯВНУ голову до теми, без нової версії: коли твердження, яке
+ *  приносить колер, збіглося з уже записаним фактом, змісту міняти нема чого — а
+ *  от факт, що лежить поза всіма темами, невидимий для проєкції нот, тобто для
+ *  UI не існує. Ідемпотентно за `uniq_note_claims`.
+ *
+ *  Це ДОДАВАННЯ теми, а не перенос: курований людиною розділ лишається на місці
+ *  (на відміну від запасної теми в `updateClaim`, яка застосовується лише коли
+ *  прив'язок не лишилось узагалі). Живе в цьому модулі з тієї ж причини, що й
+ *  `confirmClaim`: `note_claims` пише лише той, хто ним володіє. */
+export async function attachToTopic(claimId: string, noteId: string, ex: Ex = db): Promise<void> {
+  await ex.insert(noteClaims).values({ noteId, claimId }).onConflictDoNothing();
+}
+
 export async function attachEvidence(claimId: string, ev: EvidenceInput, ex: Ex = db): Promise<void> {
   await ex.insert(claimEvidence).values({
     id: nanoid(),

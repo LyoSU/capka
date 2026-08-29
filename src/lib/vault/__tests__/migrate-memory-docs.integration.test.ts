@@ -8,10 +8,11 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from "vites
  * саме рядки Postgres відкотить разом із `migrated_at`, коли посеред документа
  * щось упаде. In-memory дубль перевіряв би власну уяву, а не базу.
  *
- * Асерти скоповані (`space_id = $1`, префіксовані id): інтеграційні файли
- * біжать проти ОДНІЄЇ спільної бази, у якій живуть і чужі документи — сама
- * `migrateMemoryDocs()` за побудовою бере їх усі, тож глобальні лічильники тут
- * нічого не доводять.
+ * КОЖЕН виклик іде з `docIds`. Без нього `migrateMemoryDocs()` за побудовою бере
+ * ВСІ непереноcені документи бази — а база тут спільна, і в ній лежить справжня
+ * пам'ять розробника: suite мігрував би її й лишав по собі простір, тему, клейми
+ * й проставлений `migrated_at`, яких не прибирає жоден prefix-scoped DELETE.
+ * Асерти теж скоповані (`space_id = $1`, префіксовані id) — поруч живе воркер.
  */
 import { pool } from "@/lib/db";
 import { getOrCreateSpace } from "../spaces";
@@ -20,8 +21,8 @@ import { migrateMemoryDocs } from "../migrate-memory-docs";
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
 /** Падіння «посеред документа» задається ТЕКСТОМ булета, а не порядковим
- *  номером виклику: у спільній базі є й чужі непереноcені документи, тож скільки
- *  разів `createClaim` покличуть до нашого — не наша змінна. */
+ *  номером виклику: порядок документів у вибірці не визначений, тож «третій
+ *  виклик» — не наша змінна, а «третій булет ЦЬОГО документа» — наша. */
 const hook = vi.hoisted(() => ({ failOn: null as string | null }));
 
 vi.mock("../claims", async (importOriginal) => {
@@ -42,6 +43,9 @@ vi.mock("../claims", async (importOriginal) => {
 const P = "mdmig-";
 const OWNER = `${P}owner`;
 const PROJ = `${P}proj`;
+
+/** Перенос лише названих документів — див. коментар до suite. */
+const migrate = (...docIds: string[]) => migrateMemoryDocs({ docIds });
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
@@ -75,17 +79,23 @@ const spaceOf = async (type: "user" | "project", refId: string): Promise<string 
   return rows[0]?.id ?? null;
 };
 
-const topicOf = async (spaceId: string): Promise<string | null> => {
-  const { rows } = await pool.query<{ id: string }>(
-    `SELECT id FROM vault_notes WHERE space_id = $1 AND title = 'Загальне' AND kind = 'memory_topic'`,
-    [spaceId],
-  );
-  return rows[0]?.id ?? null;
-};
-
 const statements = async (spaceId: string): Promise<string[]> => {
   const { rows } = await pool.query<{ statement: string }>(
     `SELECT statement FROM vault_claims WHERE space_id = $1 AND superseded_at IS NULL`,
+    [spaceId],
+  );
+  return rows.map((r) => r.statement);
+};
+
+/** Те, що справді побачить GET: клейми, ПРИВ'ЯЗАНІ до теми «Загальне». Клейм
+ *  поза темою лишається в таблиці й зникає з екрана — різниця, яку прості
+ *  лічильники клеймів не ловлять. */
+const inTopic = async (spaceId: string): Promise<string[]> => {
+  const { rows } = await pool.query<{ statement: string }>(
+    `SELECT c.statement FROM vault_claims c
+       JOIN note_claims nc ON nc.claim_id = c.id
+       JOIN vault_notes n ON n.id = nc.note_id
+      WHERE c.space_id = $1 AND c.superseded_at IS NULL AND n.title = 'Загальне' AND n.kind = 'memory_topic'`,
     [spaceId],
   );
   return rows.map((r) => r.statement);
@@ -138,8 +148,7 @@ run("vault: перенос memory_docs", () => {
     const content = "- любить чай\n\n* дедлайн у п'ятницю\n  - працює зі Львова\n";
     await mkDoc(`${P}d1`, content);
 
-    const res = await migrateMemoryDocs();
-    expect(res.migrated).toBeGreaterThanOrEqual(1);
+    expect(await migrate(`${P}d1`)).toEqual({ migrated: 1 });
 
     const spaceId = await spaceOf("user", OWNER);
     expect(spaceId).not.toBeNull();
@@ -157,9 +166,7 @@ run("vault: перенос memory_docs", () => {
     ).toBe(3);
 
     // Клейм поза темою невидимий для проєкції нот, тобто для UI не існує.
-    const noteId = await topicOf(spaceId!);
-    expect(noteId).not.toBeNull();
-    expect(await count("note_claims", "note_id = $1", [noteId])).toBe(3);
+    expect(await inTopic(spaceId!)).toHaveLength(3);
 
     // Єдина копія оригінального markdown, що переживає перенос.
     const events = await snapshots(spaceId!);
@@ -173,13 +180,13 @@ run("vault: перенос memory_docs", () => {
 
   it("повторний виклик не додає нічого і не перештампує документ", async () => {
     await mkDoc(`${P}d2`, "- один\n- два");
-    await migrateMemoryDocs();
+    await migrate(`${P}d2`);
 
     const spaceId = (await spaceOf("user", OWNER))!;
     const stamp = await migratedAt(`${P}d2`);
     expect(stamp).not.toBeNull();
 
-    await migrateMemoryDocs();
+    expect(await migrate(`${P}d2`)).toEqual({ migrated: 0 });
 
     expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(2);
     expect(await snapshots(spaceId)).toHaveLength(1);
@@ -189,11 +196,13 @@ run("vault: перенос memory_docs", () => {
   it("гонка двох переносів не дублює жодного клейма (CAS на рядку документа)", async () => {
     await mkDoc(`${P}d3`, "- факт А\n- факт Б");
 
-    await Promise.all([migrateMemoryDocs(), migrateMemoryDocs()]);
+    const [a, b] = await Promise.all([migrate(`${P}d3`), migrate(`${P}d3`)]);
 
+    // Рівно один із двох забрав документ — другий побачив нуль рядків на CAS.
+    expect(a.migrated + b.migrated).toBe(1);
     const spaceId = (await spaceOf("user", OWNER))!;
     expect(await statements(spaceId)).toHaveLength(2);
-    expect(await count("note_claims", "note_id = $1", [await topicOf(spaceId)])).toBe(2);
+    expect(await inTopic(spaceId)).toHaveLength(2);
     expect(await snapshots(spaceId)).toHaveLength(1);
   });
 
@@ -201,7 +210,7 @@ run("vault: перенос memory_docs", () => {
     await mkDoc(`${P}d4`, "- один\n- два\n- три\n- чотири");
     hook.failOn = "три";
 
-    await expect(migrateMemoryDocs()).rejects.toThrow(/навмисне падіння/);
+    await expect(migrate(`${P}d4`)).rejects.toThrow(`1 memory doc(s) did not migrate: ${P}d4`);
 
     // Простір створювався в тій самій транзакції, тож його відсутність — і є
     // доказ повного відкату: ні клеймів, ні теми, ні події.
@@ -209,17 +218,34 @@ run("vault: перенос memory_docs", () => {
     expect(await migratedAt(`${P}d4`)).toBeNull();
 
     hook.failOn = null;
-    await migrateMemoryDocs();
+    await migrate(`${P}d4`);
 
     const spaceId = (await spaceOf("user", OWNER))!;
     expect(new Set(await statements(spaceId))).toEqual(new Set(["один", "два", "три", "чотири"]));
     expect(await migratedAt(`${P}d4`)).not.toBeNull();
   });
 
+  it("документ, що падає, не ховає від переносу решту документів", async () => {
+    await mkDoc(`${P}d8bad`, "- цілий\n- отруйний");
+    await mkDoc(`${P}d8ok`, "- сусідній факт", PROJ);
+    hook.failOn = "отруйний";
+
+    // Кидок лишається — інакше retry на буті не спрацював би, — але тільки після
+    // того, як решту документів уже перенесено. Порядок вибірки не визначений,
+    // тож здоровий документ мусить доїхати, хоч який із двох ішов першим.
+    await expect(migrate(`${P}d8bad`, `${P}d8ok`)).rejects.toThrow(`did not migrate: ${P}d8bad`);
+
+    expect(await migratedAt(`${P}d8ok`)).not.toBeNull();
+    expect(await statements((await spaceOf("project", PROJ))!)).toEqual(["сусідній факт"]);
+
+    expect(await migratedAt(`${P}d8bad`)).toBeNull();
+    expect(await spaceOf("user", OWNER)).toBeNull();
+  });
+
   it("порожній документ штампується і не породжує клеймів", async () => {
     await mkDoc(`${P}d5`, "");
 
-    await migrateMemoryDocs();
+    await migrate(`${P}d5`);
 
     expect(await migratedAt(`${P}d5`)).not.toBeNull();
     const spaceId = (await spaceOf("user", OWNER))!;
@@ -229,8 +255,10 @@ run("vault: перенос memory_docs", () => {
     expect(events[0].payload.content).toBe("");
   });
 
-  it("булет, що вже існує клеймом (частковий попередній прогін), не дублюється", async () => {
+  it("булет, що вже існує клеймом поза темою, не дублюється — і потрапляє в «Загальне»", async () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    // Голова БЕЗ прив'язки до теми — саме те, що лишає по собі частковий прогін
+    // або клейм, створений не реєстром кандидатів.
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status)
        VALUES ($1, $2, 'Любить   чай', '{"kind":"legacy_memory_doc"}'::jsonb, 'confirmed')`,
@@ -238,17 +266,20 @@ run("vault: перенос memory_docs", () => {
     );
     await mkDoc(`${P}d6`, "- любить чай\n- нове");
 
-    await migrateMemoryDocs();
+    await migrate(`${P}d6`);
 
     // Нормалізація та сама, що в реєстрі кандидатів: регістр і кратні пробіли
     // не роблять із того самого факту два.
     expect(new Set(await statements(spaceId))).toEqual(new Set(["Любить   чай", "нове"]));
+    // І пропуск булета не лишає факт поза екраном: GET читає лише «Загальне».
+    expect(new Set(await inTopic(spaceId))).toEqual(new Set(["Любить   чай", "нове"]));
+    expect(await count("note_claims", "claim_id = $1", [`${P}claim`])).toBe(1);
   });
 
   it("документ проєкту йде в проєктний простір, власником якого стає власник документа", async () => {
     await mkDoc(`${P}d7`, "- проєктний факт", PROJ);
 
-    await migrateMemoryDocs();
+    await migrate(`${P}d7`);
 
     const spaceId = await spaceOf("project", PROJ);
     expect(spaceId).not.toBeNull();
