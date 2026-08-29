@@ -97,7 +97,26 @@ export async function updateClaim(
   args: {
     claimId: string;
     expectedRevision: number;
-    patch: { statement?: string; value?: unknown; slotKey?: string };
+    /** Неперелічені поля успадковуються від попередника — це дефолт, бо supersede
+     *  сам по собі нічого не стверджує про факт. Але тоді, коли новий зміст
+     *  приходить З ІНШОГО джерела (реєстр кандидатів), успадкувати `origin`
+     *  означало б підписати текст користувача чужим походженням, а
+     *  `reviewStatus` — лишити щойно підтверджений факт `unverified`. Тому вони
+     *  перелічувані явно, а не читаються колером із рядка й не дописуються
+     *  окремим UPDATE повз цей модуль. */
+    patch: {
+      statement?: string;
+      value?: unknown;
+      slotKey?: string;
+      reviewStatus?: "unverified" | "confirmed";
+      sensitive?: boolean;
+      origin?: Record<string, unknown>;
+      /** Запасна тема: застосовується ЛИШЕ якщо з попередника не переїхала
+       *  жодна прив'язка. Наступник поза всіма темами невидимий для проєкції
+       *  нот, а мовчки перекладати курований людиною розділ у «Загальне» —
+       *  гірше за це. */
+      topicNoteId?: string;
+    },
     allowedSpaceIds: string[];
     actor: Actor;
   },
@@ -146,9 +165,9 @@ export async function updateClaim(
     slotKey: patch.slotKey ?? prev.slotKey,
     value: patch.value !== undefined ? patch.value : prev.value,
     kind: prev.kind,
-    origin: prev.origin,
-    reviewStatus: prev.reviewStatus,
-    sensitive: prev.sensitive,
+    origin: patch.origin ?? prev.origin,
+    reviewStatus: patch.reviewStatus ?? prev.reviewStatus,
+    sensitive: patch.sensitive ?? prev.sensitive,
     validFrom: prev.validFrom,
     validTo: prev.validTo,
     revision,
@@ -157,7 +176,16 @@ export async function updateClaim(
   // Перенос прив'язок одним UPDATE: наступник опиняється в тих самих темах,
   // попередник їх не тримає. Пара insert...select + delete дала б той самий
   // стан двома стейтментами й порядком, який можна переплутати.
-  await ex.update(noteClaims).set({ claimId: id }).where(eq(noteClaims.claimId, claimId));
+  const moved = await ex
+    .update(noteClaims)
+    .set({ claimId: id })
+    .where(eq(noteClaims.claimId, claimId))
+    .returning({ noteId: noteClaims.noteId });
+  // Попередник не був у жодній темі — успадкувати «жодної» означає зробити
+  // наступника невидимим для проєкції нот, тож тут спрацьовує запасна тема.
+  if (!moved.length && patch.topicNoteId) {
+    await ex.insert(noteClaims).values({ noteId: patch.topicNoteId, claimId: id });
+  }
   await ex.insert(auditEvents).values({
     id: nanoid(),
     spaceId: prev.spaceId,
@@ -165,7 +193,14 @@ export async function updateClaim(
     action: "claim.supersede",
     subjectType: "claim",
     subjectId: claimId,
-    payload: { successor: id, revision },
+    // Стан НАСТУПНИКА, а не патча: інакше подія стверджувала б зміну там, де
+    // поле просто успадкувалось. Тексту немає — аудит читають ширше.
+    payload: {
+      successor: id,
+      revision,
+      reviewStatus: patch.reviewStatus ?? prev.reviewStatus,
+      sensitive: patch.sensitive ?? prev.sensitive,
+    },
   });
   return { ok: true, id, revision };
 }
@@ -204,6 +239,23 @@ export async function forgetClaim(
     payload: { revision: prev.revision, reason: reason ?? null },
   });
   return { ok: true };
+}
+
+/** Позначити НАЯВНУ голову підтвердженою, без supersede: коли твердження
+ *  користувача збіглося з тим, що вже записано, зміст не змінився — змінилось
+ *  лише те, що факт тепер підтверджений, і нова версія була б порожньою.
+ *
+ *  Чутливість тільки піднімається (колер передає `head.sensitive || ...`): зняти
+ *  її тут означало б розкрити те, що вже позначили закритим.
+ *
+ *  Живе в цьому модулі, а не в реєстрі кандидатів, з тієї ж причини, що й решта:
+ *  `vault_claims` пише лише той, хто ним володіє. Space-фільтра немає свідомо —
+ *  як і `attachEvidence`, ця функція приймає id, ЩОЙНО прочитаний
+ *  space-скопованим запитом; окремий фільтр тут удавав би перевірку, якої в
+ *  сигнатурі немає чим зробити. Події не пише: підтвердження фіксує
+ *  `candidate.confirm`/`candidate.propose` на боці реєстру. */
+export async function confirmClaim(claimId: string, sensitive: boolean, ex: Ex = db): Promise<void> {
+  await ex.update(vaultClaims).set({ reviewStatus: "confirmed", sensitive }).where(eq(vaultClaims.id, claimId));
 }
 
 export async function attachEvidence(claimId: string, ev: EvidenceInput, ex: Ex = db): Promise<void> {

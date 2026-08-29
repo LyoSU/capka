@@ -346,6 +346,41 @@ run("vault candidates", () => {
     expect(await count("memory_candidates", "space_id = $1 AND resolved_at IS NULL", [SPACE_A])).toBe(0);
   });
 
+  it("slot_key:'' — це ВІДСУТНІЙ слот, а не слот з іменем ''", async () => {
+    // `""` не-NULL, тобто повноцінний учасник uniq_vclaims_active_slot, але
+    // хибний у JS. Без нормалізації другий propose пішов би гілкою «без слота»,
+    // вставив клейм ПОЗА savepoint-ом і 23505 полетів би в колера. Модель під
+    // тулом Task 7 віддає `slot_key: ""` як звичайну відповідь.
+    const first = await propose({ statement: "Живе в Одесі", slotKey: "" });
+    expect(first.state).toBe("auto_active");
+    if (first.state !== "auto_active") throw new Error("unreachable");
+    expect((await claimRow(first.claimId)).slot_key).toBeNull();
+
+    // Другий, з ІНШИМ текстом, не має ані впасти, ані злитись.
+    const second = await propose({ statement: "Має кота", slotKey: "   " });
+    expect(second.state).toBe("auto_active");
+
+    expect(await count("vault_claims", "space_id = $1 AND slot_key IS NULL", [SPACE_A])).toBe(2);
+    expect(await count("memory_candidates", "space_id = $1 AND slot_key IS NOT NULL", [SPACE_A])).toBe(0);
+  });
+
+  it("confirm кандидата зі slot_key:'' не залипає в try_again", async () => {
+    // Рядок, записаний ДО нормалізації, теж мусить підтверджуватись: інакше
+    // confirm ніколи не прочитає голову, щоразу ловитиме 23505 на вставці й
+    // повертатиме try_again НАЗАВЖДИ.
+    const cand = `${P}legacy-empty-slot`;
+    await q(
+      `INSERT INTO memory_candidates (id, idempotency_key, space_id, statement, slot_key, provenance, policy_state)
+       VALUES ($1, $1, $2, 'Успадкований порожній слот', '', '{"kind":"user_direct"}'::jsonb, 'pending')`,
+      [cand, SPACE_A],
+    );
+
+    const res = await confirmCandidate({ candidateId: cand, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("unreachable");
+    expect((await claimRow(res.claimId)).slot_key).toBeNull();
+  });
+
   it("зайнятий слот + інший текст → conflict із посиланням на голову", async () => {
     const first = await propose({ statement: "Працює в Києві", slotKey: "city" });
     if (first.state !== "auto_active") throw new Error("expected auto_active");
@@ -373,6 +408,27 @@ run("vault candidates", () => {
     const other = await propose({ statement: "Має собаку" });
     expect(other.state).toBe("auto_active");
     expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(2);
+  });
+
+  it("merged ПІДТВЕРДЖУЄ голову: те, що користувач сказав сам, не лишається unverified", async () => {
+    // Голова від майбутньої міграції legacy memory doc — unverified і поза
+    // маніфестом Task 8. Користувач говорить це прямо; merged без підтвердження
+    // повернув би «злито», а факт так і лишився б невидимим.
+    const stale = await createClaim(
+      {
+        spaceId: SPACE_A,
+        statement: "Має кота на ім'я Мурчик",
+        origin: { kind: "legacy_memory_doc" },
+        reviewStatus: "unverified",
+      },
+      ACTOR,
+    );
+
+    expect(await propose({ statement: "має кота на ім'я мурчик" })).toEqual({ state: "merged", claimId: stale.id });
+    expect((await claimRow(stale.id)).review_status).toBe("confirmed");
+    // Підтвердження — не нова версія: зміст не змінився.
+    expect((await claimRow(stale.id)).revision).toBe(1);
+    expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(1);
   });
 
   it("ГОНКА двох propose на НЕзайнятий слот (той самий текст): один active, один merged", async () => {
@@ -476,9 +532,19 @@ run("vault candidates", () => {
     expect(await count("audit_events", "space_id = $1 AND action = 'candidate.confirm'", [SPACE_A])).toBe(1);
   });
 
-  it("confirm при зайнятому слоті з тим самим текстом → merge у голову без нового клейма", async () => {
-    const head = await propose({ statement: "Працює в Києві", slotKey: "city" });
-    if (head.state !== "auto_active") throw new Error("expected auto_active");
+  it("confirm при зайнятому слоті з тим самим текстом → merge у голову, і голова стає confirmed", async () => {
+    // Голова навмисно unverified і нечутлива: рішення ЛЮДИНИ мусить підняти
+    // обидва поля, інакше {ok:true} повертається для факту, якого не видно.
+    const head = await createClaim(
+      {
+        spaceId: SPACE_A,
+        statement: "Працює в Києві",
+        slotKey: "city",
+        origin: { kind: "legacy_memory_doc" },
+        reviewStatus: "unverified",
+      },
+      ACTOR,
+    );
 
     const pending = await propose({
       statement: "працює в києві",
@@ -489,14 +555,41 @@ run("vault candidates", () => {
     if (pending.state !== "pending") throw new Error("expected pending");
 
     const res = await confirmCandidate({ candidateId: pending.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
-    expect(res).toEqual({ ok: true, claimId: head.claimId });
+    expect(res).toEqual({ ok: true, claimId: head.id });
     expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(1);
-    expect(await count("claim_evidence", "claim_id = $1", [head.claimId])).toBe(1);
+    expect(await count("claim_evidence", "claim_id = $1", [head.id])).toBe(1);
+
+    const row = await claimRow(head.id);
+    expect(row.review_status).toBe("confirmed");
+    // Чутливість кандидата піднімає голову; знімати її merge не має права.
+    expect(row.sensitive).toBe(true);
+    expect(row.revision).toBe(1); // merge — не нова версія
+  });
+
+  it("confirm БЕЗ слота дедупить за текстом, а не плодить другу голову", async () => {
+    // Чутливий факт пішов у pending; той самий текст тим часом активувався
+    // іншою пропозицією. Без дедупу підтвердження дало б ДРУГУ байт-у-байт
+    // голову, і сховище назавжди повторювало б людині те саме двічі.
+    const pending = await propose({ statement: "Має алергію на пилок", sensitive: true, evidence: [{ messageId: `${P}m` }] });
+    if (pending.state !== "pending") throw new Error("expected pending");
+
+    const active = await propose({ statement: "має   АЛЕРГІЮ на пилок " });
+    if (active.state !== "auto_active") throw new Error("expected auto_active");
+
+    const res = await confirmCandidate({ candidateId: pending.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(res).toEqual({ ok: true, claimId: active.claimId });
+    expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(1);
+    // Доказ кандидата долитий до наявної голови.
+    expect(await count("claim_evidence", "claim_id = $1", [active.claimId])).toBe(1);
+    // Чутливість кандидата піднялась на голову, яка була нечутливою.
+    expect((await claimRow(active.claimId)).sensitive).toBe(true);
   });
 
   it("confirm при зайнятому слоті з іншим текстом: стара голова superseded, нова active і confirmed", async () => {
-    // Голова навмисно unverified: якби confirm лише копіював review_status
-    // попередника, підтверджений факт лишився б невидимим для маніфесту.
+    // Голова навмисно unverified, із ЧУЖИМ походженням і БЕЗ теми: якби confirm
+    // успадковував ці три поля від попередника, підтверджений факт вийшов би
+    // unverified (поза маніфестом Task 8), підписаний legacy_memory_doc (хоча
+    // текст сказав користувач) і не прив'язаний до жодної теми (поза GET Task 10).
     const old = await createClaim(
       {
         spaceId: SPACE_A,
@@ -507,6 +600,7 @@ run("vault candidates", () => {
       },
       ACTOR,
     );
+    expect(await count("note_claims", "claim_id = $1", [old.id])).toBe(0);
 
     const pending = await propose({ statement: "Працює у Львові", slotKey: "city", value: { city: "Lviv" }, sensitive: true });
     if (pending.state !== "pending") throw new Error("expected pending");
@@ -526,7 +620,31 @@ run("vault candidates", () => {
     expect(next.revision).toBe(2);
     expect(next.review_status).toBe("confirmed");
     expect(next.sensitive).toBe(true);
+    // Походження — кандидата, НЕ попередника: текст сказав користувач.
+    expect(next.origin).toEqual({ kind: "user_direct", messageId: `${P}msg` });
+    // Попередник не був у жодній темі — наступник мусить опинитись у «Загальному»,
+    // інакше підтверджений факт невидимий для GET Task 10.
+    expect(await inDefaultTopic(res.claimId)).toBe(1);
     expect(await count("vault_claims", "space_id = $1 AND slot_key = 'city' AND superseded_at IS NULL", [SPACE_A])).toBe(1);
+  });
+
+  it("supersede НЕ переселяє курований людиною розділ у «Загальне»", async () => {
+    // Дзеркало попереднього: якщо прив'язка з попередника переїхала, запасна
+    // тема не спрацьовує — інакше confirm мовчки перекладав би факт із теми,
+    // яку обрала людина.
+    const old = await createClaim(
+      { spaceId: SPACE_A, statement: "Працює в Києві", slotKey: "city", origin: {}, reviewStatus: "confirmed", topicNoteId: NOTE_A },
+      ACTOR,
+    );
+    const pending = await propose({ statement: "Працює у Львові", slotKey: "city", sensitive: true });
+    if (pending.state !== "pending") throw new Error("expected pending");
+
+    const res = await confirmCandidate({ candidateId: pending.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    if (!res.ok) throw new Error("expected ok");
+
+    expect(await count("note_claims", "note_id = $1 AND claim_id = $2", [NOTE_A, res.claimId])).toBe(1);
+    expect(await inDefaultTopic(res.claimId)).toBe(0);
+    expect(await count("note_claims", "claim_id = $1", [old.id])).toBe(0);
   });
 
   it("ГОНКА confirm/confirm: рівно один ok, другий — already_resolved", async () => {

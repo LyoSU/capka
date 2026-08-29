@@ -1,14 +1,16 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { auditEvents, memoryCandidates, vaultClaims } from "@/lib/db/schema";
+import { auditEvents, memoryCandidates } from "@/lib/db/schema";
 import {
   attachEvidence,
+  confirmClaim,
   createClaim,
   headBySlot,
   listHeadClaims,
   updateClaim,
   type Actor,
+  type ClaimHead,
   type EvidenceInput,
 } from "./claims";
 import { getOrCreateTopicNote, type Ex } from "./spaces";
@@ -75,15 +77,32 @@ export async function proposeCandidate(input: {
   sensitive?: boolean;
   evidence?: EvidenceInput[];
   forceState?: "conflict";
+  /** Поважається ЛИШЕ на шляху негайної активації. Кандидат, який пішов у
+   *  pending, теми не запам'ятовує — у `memory_candidates` немає такого стовпця,
+   *  тож `confirmCandidate` завжди кладе факт у «Загальне». У плані A це не
+   *  спостережувано (GET Task 10 читає лише «Загальне», Task 7 сюди нічого не
+   *  передає); справжнім знобом це стане в плані D разом із UI тем і міграцією
+   *  під стовпець. */
   topicNoteId?: string;
 }): Promise<
   | { state: "auto_active"; claimId: string; revision: number }
   | { state: "merged"; claimId: string }
+  // `denied` тут недосяжний: жодне правило цієї політики його не породжує, а
+  // `rejectCandidate` `policy_state` не переписує. Лишається в контракті під
+  // governance наступних планів.
   | { state: "pending" | "denied" | "conflict"; candidateId: string }
   | { state: "duplicate" }
 > {
   const actor: Actor = { kind: "agent" };
   const evidence = input.evidence ?? [];
+  // Порожній слот — це ВІДСУТНІЙ слот, а не слот з іменем "". Модель під тулом
+  // Task 7 віддає `slot_key: ""` як звичайну відповідь, а `""` — не-NULL, тобто
+  // повноцінний учасник `uniq_vclaims_active_slot`. Без цієї нормалізації рядок
+  // зберігав би `""`, вся логіка нижче йшла б гілкою «без слота» (бо `""`
+  // хибний) — і вставка клейма опинилась би ПОЗА savepoint-ом, де 23505 абортує
+  // всю транзакцію й летить у колера. Нормалізуємо ОДИН раз, тут, і далі
+  // вживаємо лише `slotKey`.
+  const slotKey = input.slotKey?.trim() || undefined;
 
   // Гейт рахується ДО вставки: `policy_state` — NOT NULL, і провізорний стан із
   // подальшим UPDATE лише додав би стан, якого ніхто ніколи не бачить.
@@ -108,7 +127,7 @@ export async function proposeCandidate(input: {
         spaceId: input.spaceId,
         originMessageId: input.originMessageId ?? null,
         statement: input.statement,
-        slotKey: input.slotKey ?? null,
+        slotKey: slotKey ?? null,
         value: input.value ?? null,
         provenance: input.provenance,
         // Клейма для pending ще немає — докази чекають тут і застосовуються
@@ -133,7 +152,7 @@ export async function proposeCandidate(input: {
         subjectType: "candidate",
         subjectId: id,
         // Без тексту пропозиції: аудит читають ширше, ніж сам простір знань.
-        payload: { state, slotKey: input.slotKey ?? null, provenance: input.provenance.kind, ...payload },
+        payload: { state, slotKey: slotKey ?? null, provenance: input.provenance.kind, ...payload },
       });
 
     if (gate) {
@@ -147,8 +166,16 @@ export async function proposeCandidate(input: {
      *  ПРИЙНЯТО: доказ, долитий до голови, яку паралельно supersede-нули, лишається
      *  на тій — тепер неактивній — версії. Це історично чесно (доказ стосується
      *  саме того формулювання), а агрегацію ланцюга покаже план D. */
-    const merged = async (claimId: string) => {
+    const merged = async (head: ClaimHead) => {
+      const claimId = head.id;
       for (const ev of evidence) await attachEvidence(claimId, ev, tx);
+      // Голова, у яку злилось ВЛАСНЕ твердження користувача, — підтверджений
+      // факт. Без цього збіг із головою, яку хтось створив `unverified`
+      // (наприклад, майбутня міграція legacy memory doc), лишав би її поза
+      // маніфестом Task 8: користувач щойно сказав це прямо, а пам'ять мовчить.
+      // Гейт вище гарантує, що сюди не доходить чутлива пропозиція, тож
+      // чутливість голови просто зберігається.
+      await confirmClaim(claimId, head.sensitive, tx);
       await tx
         .update(memoryCandidates)
         .set({ claimId, policyState: "auto_active", resolvedAt: new Date() })
@@ -173,12 +200,15 @@ export async function proposeCandidate(input: {
         {
           spaceId: input.spaceId,
           statement: input.statement,
-          slotKey: input.slotKey,
+          slotKey,
           value: input.value,
           origin: { ...input.provenance },
           // НЕ "unverified": маніфест Task 8 перелічує лише confirmed, тож
           // щойно збережений користувачем факт інакше був би невидимий.
           reviewStatus: "confirmed",
+          // `sensitive` не передається НЕ через недогляд: гейт вище відводить
+          // кожну чутливу пропозицію в pending, тож сюди доходить лише
+          // нечутлива. Якщо гейт колись зміниться — це місце треба міняти разом.
           topicNoteId: noteId,
         },
         actor,
@@ -197,9 +227,9 @@ export async function proposeCandidate(input: {
       return { state: "auto_active", claimId: claim.id, revision: claim.revision } as const;
     };
 
-    if (input.slotKey) {
-      const head = await headBySlot(input.spaceId, input.slotKey, tx);
-      if (head) return norm(head.statement) === norm(input.statement) ? merged(head.id) : conflict(head.id);
+    if (slotKey) {
+      const head = await headBySlot(input.spaceId, slotKey, tx);
+      if (head) return norm(head.statement) === norm(input.statement) ? merged(head) : conflict(head.id);
 
       let claim: { id: string; revision: number };
       try {
@@ -209,12 +239,12 @@ export async function proposeCandidate(input: {
         // Конкурент устиг закомітити голову в цей слот, поки ми вставляли свою.
         // 23505 приходить лише ПІСЛЯ його коміту (до того INSERT просто чекає на
         // блокуванні індексу), тож read-committed перечитування його вже бачить.
-        const winner = await headBySlot(input.spaceId, input.slotKey, tx);
+        const winner = await headBySlot(input.spaceId, slotKey, tx);
         // Голови немає — між його комітом і нашим прочитом хтось третій її
         // забув/перекрив. Не вигадуємо переможця й не віддаємо назовні pg-помилку:
         // слот спірний, кандидат лишається відкритим для людини.
         if (!winner) return conflict(null);
-        return norm(winner.statement) === norm(input.statement) ? merged(winner.id) : conflict(winner.id);
+        return norm(winner.statement) === norm(input.statement) ? merged(winner) : conflict(winner.id);
       }
       return activated(claim);
     }
@@ -225,7 +255,7 @@ export async function proposeCandidate(input: {
     // прийнято, курує людина.
     const heads = await listHeadClaims(input.spaceId, {}, tx);
     const dup = heads.find((h) => norm(h.statement) === norm(input.statement));
-    if (dup) return merged(dup.id);
+    if (dup) return merged(dup);
     return activated(await activate(tx));
   });
 }
@@ -269,6 +299,13 @@ export async function confirmCandidate(args: {
       }
 
       const evidence = (cand.evidence ?? []) as EvidenceInput[];
+      // Та сама нормалізація, що й у propose, і з тієї ж причини — але тут вона
+      // ще й рятує рядки, записані ДО цього виправлення: кандидат зі
+      // `slot_key = ''` інакше ніколи не прочитав би голову, щоразу ловив би
+      // 23505 на вставці й повертав `try_again` НАЗАВЖДИ, без жодного способу
+      // його підтвердити.
+      const slotKey = cand.slotKey?.trim() || null;
+      const origin = cand.provenance as Record<string, unknown>;
       const finish = async (claimId: string) => {
         // `policy_state` лишається як був: перехід pending→підтверджено фіксує
         // подія, а не переписаний стан пропозиції.
@@ -280,7 +317,7 @@ export async function confirmCandidate(args: {
           action: "candidate.confirm",
           subjectType: "candidate",
           subjectId: cand.id,
-          payload: { claimId, policyState: cand.policyState, slotKey: cand.slotKey },
+          payload: { claimId, policyState: cand.policyState, slotKey },
         });
         return { ok: true, claimId } as const;
       };
@@ -291,34 +328,56 @@ export async function confirmCandidate(args: {
       for (let attempt = 0; attempt < 2; attempt++) {
         const claimId = await tx
           .transaction(async (sp): Promise<string | null> => {
-            const head = cand.slotKey ? await headBySlot(cand.spaceId, cand.slotKey, sp) : null;
+            // Зі слотом «наявна голова» — це голова СЛОТУ; без слота — голова з
+            // тим самим нормалізованим текстом. Дедуп тут обов'язковий: propose
+            // (крок 7) його робить, і якби confirm не робив, чутливий факт,
+            // запропонований без слота, а потім активований іншою пропозицією,
+            // на підтвердженні дав би ДРУГУ байт-у-байт голову — і сховище
+            // назавжди повторювало б людині те саме двічі.
+            const head = slotKey
+              ? await headBySlot(cand.spaceId, slotKey, sp)
+              : ((await listHeadClaims(cand.spaceId, {}, sp)).find(
+                  (h) => norm(h.statement) === norm(cand.statement),
+                ) ?? null);
 
             if (head && norm(head.statement) === norm(cand.statement)) {
               for (const ev of evidence) await attachEvidence(head.id, ev, sp);
+              // Це рішення ЛЮДИНИ, тож голова стає підтвердженою — інакше
+              // `{ok:true}` повертався б для факту, якого маніфест не покаже.
+              await confirmClaim(head.id, head.sensitive || cand.sensitive, sp);
               return head.id;
             }
 
+            // Сюди можна дійти лише зі слотом: без слота `head` за побудовою вже
+            // збіг, а розходитись із чим не збіглося — нічого.
             if (head) {
               const upd = await updateClaim(
                 {
                   claimId: head.id,
                   expectedRevision: head.revision,
-                  patch: { statement: cand.statement, value: cand.value },
+                  patch: {
+                    statement: cand.statement,
+                    value: cand.value,
+                    // Успадкування від попередника тут — саме те, чого не можна:
+                    // текст прийшов від ЦЬОГО кандидата, тож і походження його
+                    // (інакше наступник ніс би, скажімо, `legacy_memory_doc` на
+                    // тому, що користувач щойно сказав сам), і review/sensitive —
+                    // рішення про НЬОГО, а не про попередника. Чутливість тільки
+                    // піднімається: зняти її означало б розкрити вже закрите.
+                    origin,
+                    reviewStatus: "confirmed",
+                    sensitive: head.sensitive || cand.sensitive,
+                    // Попередник міг не бути в жодній темі (наприклад, його
+                    // створили не через цей реєстр) — тоді підтверджена голова
+                    // опинилась би поза проєкцією нот, тобто невидимою для GET.
+                    topicNoteId: await getOrCreateTopicNote(cand.spaceId, DEFAULT_TOPIC, sp),
+                  },
                   allowedSpaceIds,
                   actor,
                 },
                 sp,
               );
               if (!upd.ok) return null; // програли CAS — перечитати
-              // `updateClaim` копіює review_status і sensitive з попередника —
-              // навмисно, бо supersede сам по собі нічого не стверджує. Але це
-              // ПІДТВЕРДЖЕННЯ, тож наступник мусить бути confirmed, інакше факт
-              // не потрапить у маніфест. Чутливість тільки піднімається: зняти
-              // її тут означало б розкрити те, що вже позначили закритим.
-              await sp
-                .update(vaultClaims)
-                .set({ reviewStatus: "confirmed", sensitive: head.sensitive || cand.sensitive })
-                .where(eq(vaultClaims.id, upd.id));
               for (const ev of evidence) await attachEvidence(upd.id, ev, sp);
               return upd.id;
             }
@@ -328,9 +387,9 @@ export async function confirmCandidate(args: {
               {
                 spaceId: cand.spaceId,
                 statement: cand.statement,
-                slotKey: cand.slotKey ?? undefined,
+                slotKey: slotKey ?? undefined,
                 value: cand.value,
-                origin: cand.provenance as Record<string, unknown>,
+                origin,
                 reviewStatus: "confirmed",
                 sensitive: cand.sensitive,
                 topicNoteId: noteId,
