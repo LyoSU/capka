@@ -13,7 +13,7 @@ describe("extractWorkspacePaths", () => {
   });
 
   it("captures a non-Latin name inside a nested directory", () => {
-    expect(extractWorkspacePaths("см. /workspace/合同/审核 意见.pdf")).toEqual(["合同/审核 意见.pdf"]);
+    expect(extractWorkspacePaths("see /workspace/合同/审核 意见.pdf")).toEqual(["合同/审核 意见.pdf"]);
   });
 
   it("captures referenced workspace files in first-seen order, deduped", () => {
@@ -39,11 +39,11 @@ describe("extractWorkspacePaths", () => {
   // recovery log while the real result sat unmentioned.
   it("drops Capka's own scratch dir, however the model phrases it", () => {
     const text = [
-      "Готово, звіт у /workspace/Звіт Q3.xlsx.",
+      "Done, the report is in /workspace/Report Q3.xlsx.",
       "Full output (412 KB) is saved at /workspace/.capka/output/1787483216992635450-124.log",
       "job log: /workspace/.capka/jobs/ab12/log.txt",
     ].join("\n");
-    expect(extractWorkspacePaths(text)).toEqual(["Звіт Q3.xlsx"]);
+    expect(extractWorkspacePaths(text)).toEqual(["Report Q3.xlsx"]);
   });
 
   // The rule is "our directory", not "anything dotted": a dotted folder that
@@ -52,7 +52,7 @@ describe("extractWorkspacePaths", () => {
   // needs a name before the extension — which is exactly why the fold below,
   // where it DOES appear, has its own case.)
   it("keeps a dotted path that is not Capka's", () => {
-    expect(extractWorkspacePaths("оновив /workspace/.config/settings.json")).toEqual([".config/settings.json"]);
+    expect(extractWorkspacePaths("updated /workspace/.config/settings.json")).toEqual([".config/settings.json"]);
   });
 });
 
@@ -72,7 +72,7 @@ describe("freshWorkspacePathRe", () => {
 describe("SAFE_WORKSPACE_PATH_RE", () => {
   it("accepts a non-Latin workspace-relative path", () => {
     expect(SAFE_WORKSPACE_PATH_RE.test("合同/审核 意见.pdf")).toBe(true);
-    expect(SAFE_WORKSPACE_PATH_RE.test("звіт (1).xlsx")).toBe(true);
+    expect(SAFE_WORKSPACE_PATH_RE.test("报告 (1).xlsx")).toBe(true);
   });
 
   it("rejects shell metacharacters that must never reach the archive command", () => {
@@ -84,8 +84,8 @@ describe("SAFE_WORKSPACE_PATH_RE", () => {
 
 describe("workspaceRelFromHref", () => {
   it("decodes percent-encoded (Cyrillic) names so the chip reads correctly", () => {
-    const href = "/workspace/" + encodeURIComponent("KNESS_аудит продукту.docx");
-    expect(workspaceRelFromHref(href)).toBe("KNESS_аудит продукту.docx");
+    const href = "/workspace/" + encodeURIComponent("KNESS_产品审核.docx");
+    expect(workspaceRelFromHref(href)).toBe("KNESS_产品审核.docx");
   });
 
   it("returns a plain relative path unchanged", () => {

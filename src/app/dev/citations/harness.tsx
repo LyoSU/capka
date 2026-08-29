@@ -10,21 +10,21 @@ const SOURCES: NumberedSource[] = [
   { n: 9, title: "Best Open Source AI Models for Coding (2026)", url: "https://kilo.ai/blog/best-open-source-ai-models", snippet: "", date: "2026-08-20" },
 ];
 
-const TEXT = `Ось головні цікавинки та тренди в індустрії за останні дні:
+const TEXT = `Here are the main things that moved in the industry over the last few days:
 
-**Open-weight та локальні моделі**
+**Open-weight and local models**
 
-- **GLM-5.3 / 5.2 від Zhipu AI** [1, 9]: китайські відкриті ваги продовжують активно тиснути на комерційні API, особливо в задачах кодингу та агентних пайплайнах [9].
-- **Серія Gemma 4 від Google** [6]: моделі середнього розміру (12B/31B з контекстом до 256K під Apache 2.0) [6] стали чи не найпопулярнішим вибором для локального запуску.
-- **Qwen3 Coder** [9]: лінійка від Alibaba закріпилась у топі відкритих моделей [1, 6, 9].
+- **GLM-5.3 / 5.2 from Zhipu AI** [1, 9]: Chinese open weights keep pressing hard on the commercial APIs, especially at coding and agentic pipelines [9].
+- **Google's Gemma 4 series** [6]: mid-sized models (12B/31B, context up to 256K, Apache 2.0) [6] have become about the most popular pick for running locally.
+- **Qwen3 Coder** [9]: Alibaba's line has settled in near the top of the open models [1, 6, 9].
 
-Невідоме джерело лишається текстом: [7], мішана група теж: [1, 7]. Маркер у \`коді [1]\` не чіпається.
+An unknown source stays plain text: [7], and so does a mixed group: [1, 7]. A marker inside \`code [1]\` is left alone.
 
 \`\`\`
-[1] у фенсі теж лишається як є
+[1] inside a fence stays as it is
 \`\`\`
 
-Звичайне посилання [зі своїм текстом](https://example.com/page) живе як завжди.`;
+An ordinary [link with its own text](https://example.com/page) works as always.`;
 
 export function CitationsHarness() {
   return (

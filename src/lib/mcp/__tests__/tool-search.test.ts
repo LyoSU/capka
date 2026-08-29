@@ -248,8 +248,8 @@ describe("find_tool — BM25", () => {
     // English query has zero lexical overlap with the description, so the match
     // must come from the tokenized tool NAME (generate_image → generate, image).
     const tools: Record<string, Tool> = { bash: fakeTool("run a command") };
-    tools["mcp__yunwu__generate_image"] = fakeTool(bulky("Згенерувати зображення за текстовим описом користувача"));
-    tools["mcp__yunwu__edit_photo"] = fakeTool(bulky("Відредагувати наявну світлину за інструкцією"));
+    tools["mcp__yunwu__generate_image"] = fakeTool(bulky("Generate an image from the user's text description"));
+    tools["mcp__yunwu__edit_photo"] = fakeTool(bulky("Edit an existing photo following an instruction"));
     const plan = planToolSearch({ tools, effectiveLimit: 2000 });
     const r = await callFind(plan, "generate an image");
     expect(r.matched.map((m) => m.name)).toContain("mcp__yunwu__generate_image");

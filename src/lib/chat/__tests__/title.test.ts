@@ -15,7 +15,7 @@ beforeEach(() => generateTextMock.mockReset());
 describe("sanitizeTitle", () => {
   it("strips surrounding quotes and trailing punctuation", () => {
     expect(sanitizeTitle('"Deploy script fix."')).toBe("Deploy script fix");
-    expect(sanitizeTitle("«Налаштування пошти»")).toBe("Налаштування пошти");
+    expect(sanitizeTitle("«Mail settings»")).toBe("Mail settings");
   });
 
   it("removes a leading bullet/dash the model may add", () => {
@@ -48,7 +48,7 @@ describe("sanitizeTitle", () => {
 
   it("abstains when the output is an unclosed reasoning tag (token-truncated)", () => {
     // Reasoning models token-truncated mid-thought: no usable title remains.
-    expect(sanitizeTitle('<think> The user just said "Привіт')).toBeNull();
+    expect(sanitizeTitle('<think> The user just said "Hello')).toBeNull();
     expect(sanitizeTitle("<reasoning>the topic seems to be")).toBeNull();
   });
 });

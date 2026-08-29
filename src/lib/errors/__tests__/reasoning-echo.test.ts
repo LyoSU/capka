@@ -13,7 +13,7 @@ describe("foldReasoningIntoText", () => {
     // reasoning_content field → no 400; context kept → no stall), and the
     // tool-call part must survive or the following tool result is orphaned.
     const messages: ModelMessage[] = [
-      { role: "user", content: "які ліміти на безкоштовний апі" },
+      { role: "user", content: "what are the limits on the free api" },
       {
         role: "assistant",
         content: [

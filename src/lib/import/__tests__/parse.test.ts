@@ -9,16 +9,16 @@ import { MAX_IMPORT_MESSAGES, MAX_IMPORT_MESSAGE_CHARS } from "../types";
 describe("parseClaudeSnapshot", () => {
   it("reconstructs text from content[] blocks and separates roles", () => {
     const raw = {
-      snapshot_name: "Рецепт котлети",
+      snapshot_name: "Cutlet recipe",
       chat_messages: [
-        { sender: "human", text: "", content: [{ type: "text", text: "Порадь рецепт." }], attachments: [], files: [] },
+        { sender: "human", text: "", content: [{ type: "text", text: "Suggest a recipe." }], attachments: [], files: [] },
         {
           sender: "assistant",
           text: "",
           content: [
             { type: "tool_use", name: "web_search" },
             { type: "tool_result" },
-            { type: "text", text: "Ось рецепт." },
+            { type: "text", text: "Here is a recipe." },
           ],
           attachments: [],
           files: [],
@@ -27,10 +27,10 @@ describe("parseClaudeSnapshot", () => {
     };
     const r = parseClaudeSnapshot(raw);
     expect(r.source).toBe("claude");
-    expect(r.title).toBe("Рецепт котлети");
+    expect(r.title).toBe("Cutlet recipe");
     expect(r.messages).toEqual([
-      { role: "user", content: "Порадь рецепт." },
-      { role: "assistant", content: "Ось рецепт." },
+      { role: "user", content: "Suggest a recipe." },
+      { role: "assistant", content: "Here is a recipe." },
     ]);
     // The assistant turn had tool blocks → rich content was dropped.
     expect(r.droppedRichContent).toBe(true);
@@ -40,7 +40,7 @@ describe("parseClaudeSnapshot", () => {
     const raw = {
       snapshot_name: "x",
       chat_messages: [
-        { sender: "human", content: [{ type: "text", text: "дивись фото" }], attachments: [], files: [{ file_name: "a.png" }], image_count: 1 },
+        { sender: "human", content: [{ type: "text", text: "look at the photo" }], attachments: [], files: [{ file_name: "a.png" }], image_count: 1 },
       ],
     };
     const r = parseClaudeSnapshot(raw);
@@ -49,8 +49,8 @@ describe("parseClaudeSnapshot", () => {
   });
 
   it("falls back to the flat text field when content[] has no text block", () => {
-    const raw = { chat_messages: [{ sender: "human", text: "лише flat", content: [] }] };
-    expect(parseClaudeSnapshot(raw).messages).toEqual([{ role: "user", content: "лише flat" }]);
+    const raw = { chat_messages: [{ sender: "human", text: "flat only", content: [] }] };
+    expect(parseClaudeSnapshot(raw).messages).toEqual([{ role: "user", content: "flat only" }]);
   });
 
   it("skips a turn that has no text at all (pure tool turn)", () => {
@@ -65,12 +65,12 @@ describe("parseClaudeSnapshot", () => {
   it("skips a message with an unknown sender and flags dropped content", () => {
     const raw = {
       chat_messages: [
-        { sender: "human", content: [{ type: "text", text: "агов" }] },
-        { sender: "moderator", content: [{ type: "text", text: "не імпортувати" }] },
+        { sender: "human", content: [{ type: "text", text: "hey" }] },
+        { sender: "moderator", content: [{ type: "text", text: "do not import" }] },
       ],
     };
     const r = parseClaudeSnapshot(raw);
-    expect(r.messages).toEqual([{ role: "user", content: "агов" }]);
+    expect(r.messages).toEqual([{ role: "user", content: "hey" }]);
     expect(r.droppedRichContent).toBe(true);
   });
 
@@ -83,19 +83,19 @@ describe("parseClaudeSnapshot", () => {
 describe("parseChatGptState", () => {
   const mapping = {
     n0: { id: "n0", message: { author: { role: "system" }, content: { content_type: "text", parts: [""] } }, parent: null, children: ["n1"] },
-    n1: { id: "n1", message: { author: { role: "user" }, content: { content_type: "text", parts: ["Привіт"] } }, parent: "n0", children: ["n2"] },
-    n2: { id: "n2", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["Вітаю!"] } }, parent: "n1", children: ["n3"] },
-    n3: { id: "n3", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["Радий допомогти"] } }, parent: "n2", children: [] },
+    n1: { id: "n1", message: { author: { role: "user" }, content: { content_type: "text", parts: ["Hello"] } }, parent: "n0", children: ["n2"] },
+    n2: { id: "n2", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["Welcome!"] } }, parent: "n1", children: ["n3"] },
+    n3: { id: "n3", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["Happy to help"] } }, parent: "n2", children: [] },
   };
 
   it("walks current_node → root, drops system, keeps user/assistant in order", () => {
-    const r = parseChatGptState({ title: "Привітання", current_node: "n3", mapping });
+    const r = parseChatGptState({ title: "Greeting", current_node: "n3", mapping });
     expect(r.source).toBe("chatgpt");
-    expect(r.title).toBe("Привітання");
+    expect(r.title).toBe("Greeting");
     expect(r.messages).toEqual([
-      { role: "user", content: "Привіт" },
-      { role: "assistant", content: "Вітаю!" },
-      { role: "assistant", content: "Радий допомогти" },
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Welcome!" },
+      { role: "assistant", content: "Happy to help" },
     ]);
     expect(r.droppedRichContent).toBe(false);
   });
@@ -103,24 +103,24 @@ describe("parseChatGptState", () => {
   it("follows only the branch the sharer left visible (ignores unrelated siblings)", () => {
     const branched = {
       ...mapping,
-      n2b: { id: "n2b", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["ІНША ГІЛКА"] } }, parent: "n1", children: [] },
+      n2b: { id: "n2b", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["OTHER BRANCH"] } }, parent: "n1", children: [] },
     };
     // current_node points at n2 → chain is n0,n1,n2; the n2b sibling is not on it.
     const r = parseChatGptState({ current_node: "n2", mapping: branched });
-    expect(r.messages.map((m) => m.content)).toEqual(["Привіт", "Вітаю!"]);
+    expect(r.messages.map((m) => m.content)).toEqual(["Hello", "Welcome!"]);
   });
 
   it("without current_node, descends the last branch deterministically (no sibling mixing)", () => {
     const branched = {
-      r0: { id: "r0", message: { author: { role: "user" }, content: { content_type: "text", parts: ["корінь"] } }, parent: null, children: ["a1", "b1"] },
-      a1: { id: "a1", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["ПЕРША ГІЛКА"] } }, parent: "r0", children: [] },
-      b1: { id: "b1", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["ОСТАННЯ ГІЛКА"] } }, parent: "r0", children: [] },
+      r0: { id: "r0", message: { author: { role: "user" }, content: { content_type: "text", parts: ["root"] } }, parent: null, children: ["a1", "b1"] },
+      a1: { id: "a1", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["FIRST BRANCH"] } }, parent: "r0", children: [] },
+      b1: { id: "b1", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["LAST BRANCH"] } }, parent: "r0", children: [] },
     };
     // No current_node → descend from root via the last child → only b1's branch.
     const r = parseChatGptState({ mapping: branched });
     expect(r.messages).toEqual([
-      { role: "user", content: "корінь" },
-      { role: "assistant", content: "ОСТАННЯ ГІЛКА" },
+      { role: "user", content: "root" },
+      { role: "assistant", content: "LAST BRANCH" },
     ]);
   });
 
@@ -136,13 +136,13 @@ describe("parseChatGptState", () => {
     const withTool = {
       current_node: "t2",
       mapping: {
-        t1: { id: "t1", message: { author: { role: "user" }, content: { content_type: "text", parts: ["зроби картинку"] } }, parent: null, children: ["t2"] },
+        t1: { id: "t1", message: { author: { role: "user" }, content: { content_type: "text", parts: ["make me a picture"] } }, parent: null, children: ["t2"] },
         t2: { id: "t2", message: { author: { role: "tool" }, content: { content_type: "text", parts: ["<image>"] } }, parent: "t1", children: [] },
       },
     };
     const r = parseChatGptState(withTool);
     expect(r.droppedRichContent).toBe(true);
-    expect(r.messages).toEqual([{ role: "user", content: "зроби картинку" }]);
+    expect(r.messages).toEqual([{ role: "user", content: "make me a picture" }]);
   });
 
   it("survives a garbage payload", () => {
@@ -154,18 +154,18 @@ describe("parseChatGptState", () => {
 describe("parseGrokResponses", () => {
   it("maps responses to roles case-insensitively and keeps the markdown message", () => {
     const raw = {
-      conversation: { title: "Список покупок", conversationId: "c1" },
+      conversation: { title: "Shopping list", conversationId: "c1" },
       responses: [
-        { sender: "human", message: "Склади список." },
-        { sender: "ASSISTANT", message: "Ось **список**:\n- хліб\n- молоко" },
+        { sender: "human", message: "Make a list." },
+        { sender: "ASSISTANT", message: "Here is the **list**:\n- bread\n- milk" },
       ],
     };
     const r = parseGrokResponses(raw);
     expect(r.source).toBe("grok");
-    expect(r.title).toBe("Список покупок");
+    expect(r.title).toBe("Shopping list");
     expect(r.messages).toEqual([
-      { role: "user", content: "Склади список." },
-      { role: "assistant", content: "Ось **список**:\n- хліб\n- молоко" },
+      { role: "user", content: "Make a list." },
+      { role: "assistant", content: "Here is the **list**:\n- bread\n- milk" },
     ]);
     expect(r.droppedRichContent).toBe(false);
   });
@@ -174,8 +174,8 @@ describe("parseGrokResponses", () => {
     const raw = {
       conversation: { title: "x" },
       responses: [
-        { sender: "human", message: "що там у новинах?" },
-        { sender: "assistant", message: "Ось підсумок.", webSearchResults: [{ url: "https://example.test" }], xpostIds: ["p1"] },
+        { sender: "human", message: "what is in the news?" },
+        { sender: "assistant", message: "Here is the summary.", webSearchResults: [{ url: "https://example.test" }], xpostIds: ["p1"] },
       ],
     };
     const r = parseGrokResponses(raw);
@@ -184,13 +184,13 @@ describe("parseGrokResponses", () => {
   });
 
   it("skips a response with an empty message", () => {
-    const raw = { responses: [{ sender: "human", message: "" }, { sender: "assistant", message: "лишень я" }] };
+    const raw = { responses: [{ sender: "human", message: "" }, { sender: "assistant", message: "just me" }] };
     const r = parseGrokResponses(raw);
-    expect(r.messages).toEqual([{ role: "assistant", content: "лишень я" }]);
+    expect(r.messages).toEqual([{ role: "assistant", content: "just me" }]);
   });
 
   it("has a null title when conversation is missing, and survives garbage", () => {
-    expect(parseGrokResponses({ responses: [{ sender: "human", message: "агов" }] }).title).toBeNull();
+    expect(parseGrokResponses({ responses: [{ sender: "human", message: "hey" }] }).title).toBeNull();
     expect(parseGrokResponses(null).messages).toEqual([]);
     expect(parseGrokResponses({ responses: "nope" }).messages).toEqual([]);
   });
@@ -200,7 +200,7 @@ describe("parseGrokResponses", () => {
       responses: [
         { sender: "human", message: "   " },
         { sender: "human" },
-        { sender: "system", message: "Я асистент." },
+        { sender: "system", message: "I am the assistant." },
       ],
     };
     const r = parseGrokResponses(raw);
@@ -213,20 +213,20 @@ describe("parseGrokResponses", () => {
 describe("parseGeminiTurns", () => {
   it("expands each turn into a user + assistant message", () => {
     const raw = {
-      title: "Ідеї для подорожі",
+      title: "Trip ideas",
       turns: [
-        { query: "Куди поїхати навесні?", response: "Раджу:\n1. Львів\n2. Одеса" },
-        { query: "А з дітьми?", response: "Тоді Карпати." },
+        { query: "Where should I go in spring?", response: "I suggest:\n1. Lviv\n2. Odesa" },
+        { query: "And with kids?", response: "Then the Carpathians." },
       ],
     };
     const r = parseGeminiTurns(raw);
     expect(r.source).toBe("gemini");
-    expect(r.title).toBe("Ідеї для подорожі");
+    expect(r.title).toBe("Trip ideas");
     expect(r.messages).toEqual([
-      { role: "user", content: "Куди поїхати навесні?" },
-      { role: "assistant", content: "Раджу:\n1. Львів\n2. Одеса" },
-      { role: "user", content: "А з дітьми?" },
-      { role: "assistant", content: "Тоді Карпати." },
+      { role: "user", content: "Where should I go in spring?" },
+      { role: "assistant", content: "I suggest:\n1. Lviv\n2. Odesa" },
+      { role: "user", content: "And with kids?" },
+      { role: "assistant", content: "Then the Carpathians." },
     ]);
     expect(r.droppedRichContent).toBe(false);
   });
@@ -234,25 +234,25 @@ describe("parseGeminiTurns", () => {
   it("skips an empty query or response side without dropping the other", () => {
     const raw = {
       turns: [
-        { query: "лише питання", response: "" },
-        { query: "", response: "лише відповідь" },
+        { query: "question only", response: "" },
+        { query: "", response: "answer only" },
         { query: "", response: "" },
       ],
     };
     const r = parseGeminiTurns(raw);
     expect(r.messages).toEqual([
-      { role: "user", content: "лише питання" },
-      { role: "assistant", content: "лише відповідь" },
+      { role: "user", content: "question only" },
+      { role: "assistant", content: "answer only" },
     ]);
   });
 
   it("passes the script's droppedRichContent flag through", () => {
-    const r = parseGeminiTurns({ turns: [{ query: "фото?", response: "ось" }], droppedRichContent: true });
+    const r = parseGeminiTurns({ turns: [{ query: "photo?", response: "here" }], droppedRichContent: true });
     expect(r.droppedRichContent).toBe(true);
   });
 
   it("trims the title and treats a blank one as null", () => {
-    expect(parseGeminiTurns({ title: "  Подорож  ", turns: [] }).title).toBe("Подорож");
+    expect(parseGeminiTurns({ title: "  Trip  ", turns: [] }).title).toBe("Trip");
     expect(parseGeminiTurns({ title: "   ", turns: [] }).title).toBeNull();
   });
 
@@ -268,12 +268,12 @@ describe("normalizeImport", () => {
 
   it("drops empty messages and strips control characters", () => {
     const r = normalizeImport({ ...base, messages: [
-      { role: "user", content: "питання" },
+      { role: "user", content: "question" },
       { role: "user", content: "  " },
       { role: "assistant", content: "hello\x00\x07 world\r\nsecond" },
     ] });
     expect(r.messages).toEqual([
-      { role: "user", content: "питання" },
+      { role: "user", content: "question" },
       { role: "assistant", content: "hello world\nsecond" },
     ]);
   });
@@ -300,20 +300,20 @@ describe("normalizeImport", () => {
 
   it("drops leading assistant messages so the history starts with a user turn", () => {
     const r = normalizeImport({ ...base, messages: [
-      { role: "assistant", content: "привіт наперед" },
-      { role: "user", content: "питання" },
-      { role: "assistant", content: "відповідь" },
+      { role: "assistant", content: "hello up front" },
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
     ] });
     expect(r.messages).toEqual([
-      { role: "user", content: "питання" },
-      { role: "assistant", content: "відповідь" },
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
     ]);
     expect(r.truncated).toBe(true);
   });
 
   it("drops everything (and marks truncated) when there is no user turn at all", () => {
     const r = normalizeImport({ ...base, messages: [
-      { role: "assistant", content: "лише асистент" },
+      { role: "assistant", content: "assistant only" },
     ] });
     expect(r.messages).toEqual([]);
     expect(r.truncated).toBe(true);
@@ -324,7 +324,7 @@ describe("normalizeImport", () => {
     // chars only), so it's skipped and the assistant would otherwise lead.
     const r = normalizeImport({ ...base, messages: [
       { role: "user", content: "\x07\x00" },
-      { role: "assistant", content: "привіт" },
+      { role: "assistant", content: "hello" },
     ] });
     expect(r.messages).toEqual([]);
     expect(r.truncated).toBe(true);

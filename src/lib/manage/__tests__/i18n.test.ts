@@ -15,11 +15,14 @@ describe("manage/i18n", () => {
     expect(loc(t, "control.does_not_exist.title", "English default")).toBe("English default");
   });
 
-  it("resolves a real Ukrainian translation when present", () => {
+  it("resolves a real translation when present, rather than the English literal", () => {
     const t = manageT("uk");
-    expect(loc(t, "control.user_locale.title", "Interface language")).toBe("Мова інтерфейсу");
-    expect(locValue(t, "org.sandbox_network", "bridge", "Network access")).toBe("З доступом до мережі");
-    expect(locValue(t, "org.agent_sandbox", "true", "Enabled")).toBe("Увімкнено"); // shared bool key
+    // Asserted as "not the fallback" rather than against the translated words: a
+    // catalog miss returns the English literal itself, so that is the one thing a
+    // green result has to rule out — and it stays true when a wording is revised.
+    expect(loc(t, "control.user_locale.title", "Interface language")).not.toBe("Interface language");
+    expect(locValue(t, "org.sandbox_network", "bridge", "Network access")).not.toBe("Network access");
+    expect(locValue(t, "org.agent_sandbox", "true", "Enabled")).not.toBe("Enabled"); // shared bool key
   });
 
   it("English locale falls back to the in-code literals (no separate en catalog to drift)", () => {

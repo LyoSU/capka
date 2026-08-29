@@ -27,7 +27,7 @@ describe("isTransientError", () => {
         ),
       ),
     ).toBe(false);
-    expect(isTransientError(new Error("Bad request: 500 г курячого фаршу"))).toBe(false);
+    expect(isTransientError(new Error("Bad request: 500 g of minced chicken"))).toBe(false);
   });
   it("a structured status outranks the text", () => {
     expect(isTransientError(Object.assign(new Error("capacity of the pan"), { statusCode: 400 }))).toBe(false);

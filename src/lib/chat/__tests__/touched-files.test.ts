@@ -67,9 +67,9 @@ describe("selectTouchedFiles — what the turn actually touched", () => {
   // presentations of one file" bug this design exists to avoid.
   it("excludes files already listed as named artifacts", () => {
     const out = selectTouchedFiles(
-      [file("Звіт Q3.xlsx", "2026-08-12T10:00:03Z"), file("calc.py", "2026-08-12T10:00:02Z")],
+      [file("Report Q3.xlsx", "2026-08-12T10:00:03Z"), file("calc.py", "2026-08-12T10:00:02Z")],
       WINDOW,
-      ["Звіт Q3.xlsx"],
+      ["Report Q3.xlsx"],
     );
     expect(out).toEqual(["calc.py"]);
   });
@@ -116,12 +116,12 @@ describe("selectTouchedFiles — what the turn actually touched", () => {
         file(".capka/output/1787483216992635450-124.log", "2026-08-12T10:00:05Z"),
         file(".capka/jobs/ab12/exitcode", "2026-08-12T10:00:04Z"),
         file(".capka/view/preview.png", "2026-08-12T10:00:04Z"),
-        file("Звіт Q3.xlsx", "2026-08-12T10:00:03Z"),
+        file("Report Q3.xlsx", "2026-08-12T10:00:03Z"),
       ],
       WINDOW,
       [],
     );
-    expect(out).toEqual(["Звіт Q3.xlsx"]);
+    expect(out).toEqual(["Report Q3.xlsx"]);
   });
 
   it("keeps a user's own dotfile — the rule is our directory, not any dot", () => {

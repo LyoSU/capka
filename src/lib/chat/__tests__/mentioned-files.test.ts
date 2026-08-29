@@ -5,7 +5,7 @@ describe("splitTouchedByMention — models name files however they like", () => 
   // The capable case: a full /workspace/ path. Already handled by
   // extractWorkspacePaths, but must not regress here.
   it("matches a file named with its full workspace path", () => {
-    const out = splitTouchedByMention(["report.xlsx", "calc.py"], "Готово — /workspace/report.xlsx зібрано.");
+    const out = splitTouchedByMention(["report.xlsx", "calc.py"], "Done — /workspace/report.xlsx is built.");
     expect(out.mentioned).toEqual(["report.xlsx"]);
     expect(out.rest).toEqual(["calc.py"]);
   });
@@ -14,23 +14,23 @@ describe("splitTouchedByMention — models name files however they like", () => 
   // /workspace/ regex cannot see, and every touched file would be promoted as if
   // the reply had named nothing.
   it("matches a bare filename mentioned in prose", () => {
-    const out = splitTouchedByMention(["report.xlsx", "calc.py"], "Зберіг усе в report.xlsx, перевірте будь ласка.");
+    const out = splitTouchedByMention(["report.xlsx", "calc.py"], "Saved everything to report.xlsx, please take a look.");
     expect(out.mentioned).toEqual(["report.xlsx"]);
     expect(out.rest).toEqual(["calc.py"]);
   });
 
   it("matches a file inside a nested folder by its basename", () => {
-    const out = splitTouchedByMention(["out/2026/Звіт Q3.xlsx"], "Звіт Q3.xlsx готовий.");
-    expect(out.mentioned).toEqual(["out/2026/Звіт Q3.xlsx"]);
+    const out = splitTouchedByMention(["out/2026/Report Q3.xlsx"], "Report Q3.xlsx is ready.");
+    expect(out.mentioned).toEqual(["out/2026/Report Q3.xlsx"]);
   });
 
   it("ignores case differences a model introduces in prose", () => {
-    const out = splitTouchedByMention(["Report.XLSX"], "результат у report.xlsx");
+    const out = splitTouchedByMention(["Report.XLSX"], "the result is in report.xlsx");
     expect(out.mentioned).toEqual(["Report.XLSX"]);
   });
 
   it("puts everything in rest when the reply names nothing", () => {
-    const out = splitTouchedByMention(["report.xlsx", "calc.py"], "Готово!");
+    const out = splitTouchedByMention(["report.xlsx", "calc.py"], "Done!");
     expect(out.mentioned).toEqual([]);
     expect(out.rest).toEqual(["report.xlsx", "calc.py"]);
   });
@@ -38,7 +38,7 @@ describe("splitTouchedByMention — models name files however they like", () => 
   it("keeps the given order within each side", () => {
     const out = splitTouchedByMention(
       ["a.xlsx", "b.py", "c.csv", "d.log"],
-      "Зробив a.xlsx та c.csv.",
+      "Made a.xlsx and c.csv.",
     );
     expect(out.mentioned).toEqual(["a.xlsx", "c.csv"]);
     expect(out.rest).toEqual(["b.py", "d.log"]);
@@ -47,12 +47,12 @@ describe("splitTouchedByMention — models name files however they like", () => 
   // A name too short to be distinctive would match incidental prose, and the cost
   // of a false promotion is junk in tier one — the exact thing tier two prevents.
   it("does not promote on an implausibly short basename", () => {
-    const out = splitTouchedByMention(["a.c"], "точка a.c на графіку");
+    const out = splitTouchedByMention(["a.c"], "the point a.c on the chart");
     expect(out.mentioned).toEqual([]);
   });
 
   it("handles an empty reply and an empty list without throwing", () => {
-    expect(splitTouchedByMention([], "текст")).toEqual({ mentioned: [], rest: [] });
+    expect(splitTouchedByMention([], "some text")).toEqual({ mentioned: [], rest: [] });
     expect(splitTouchedByMention(["x.txt"], "")).toEqual({ mentioned: [], rest: ["x.txt"] });
   });
 });

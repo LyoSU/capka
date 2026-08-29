@@ -7,8 +7,8 @@ describe("safeFilename", () => {
   });
 
   it("keeps Cyrillic and emoji — they are valid on Windows, macOS and Linux", () => {
-    expect(safeFilename("Квартальний звіт", "Робочий простір")).toBe("Квартальний звіт");
-    expect(safeFilename("Звіт 📊", "Робочий простір")).toBe("Звіт 📊");
+    expect(safeFilename("Quarterly report", "Workspace")).toBe("Quarterly report");
+    expect(safeFilename("Report 📊", "Workspace")).toBe("Report 📊");
   });
 
   it("replaces the characters Windows forbids", () => {
@@ -71,28 +71,28 @@ describe("safeFilename", () => {
   });
 
   it("truncates long names with room to spare under the 255-byte filesystem limit", () => {
-    // Cyrillic is 2 bytes per character in UTF-8 and filesystem limits are byte-based,
+    // A Japanese kana is 3 bytes in UTF-8 and filesystem limits are byte-based,
     // so the cap has to be measured in bytes, not characters.
-    const long = "я".repeat(200);
-    const out = safeFilename(long, "Робочий простір");
+    const long = "ま".repeat(200);
+    const out = safeFilename(long, "Workspace");
     expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(120);
-    expect(out.startsWith("я")).toBe(true);
+    expect(out.startsWith("ま")).toBe(true);
   });
 
   it("never truncates in the middle of a multi-byte character", () => {
-    const out = safeFilename("я".repeat(200), "Робочий простір");
+    const out = safeFilename("ま".repeat(200), "Workspace");
     // A split surrogate/continuation byte would decode to U+FFFD.
     expect(out).not.toContain("�");
-    expect(Buffer.byteLength(out, "utf8") % 2).toBe(0);
+    expect(Buffer.byteLength(out, "utf8") % 3).toBe(0);
   });
 
   it("falls back when nothing usable survives", () => {
-    expect(safeFilename("", "Робочий простір")).toBe("Робочий простір");
-    expect(safeFilename("   ", "Робочий простір")).toBe("Робочий простір");
-    expect(safeFilename("///", "Робочий простір")).toBe("Робочий простір");
-    expect(safeFilename("...", "Робочий простір")).toBe("Робочий простір");
-    expect(safeFilename(null, "Робочий простір")).toBe("Робочий простір");
-    expect(safeFilename(undefined, "Робочий простір")).toBe("Робочий простір");
+    expect(safeFilename("", "Workspace")).toBe("Workspace");
+    expect(safeFilename("   ", "Workspace")).toBe("Workspace");
+    expect(safeFilename("///", "Workspace")).toBe("Workspace");
+    expect(safeFilename("...", "Workspace")).toBe("Workspace");
+    expect(safeFilename(null, "Workspace")).toBe("Workspace");
+    expect(safeFilename(undefined, "Workspace")).toBe("Workspace");
   });
 
   it("never yields a relative-path name", () => {
@@ -107,10 +107,10 @@ describe("safeFilename", () => {
 
 describe("contentDisposition", () => {
   it("emits both an ASCII filename and a UTF-8 one", () => {
-    const header = contentDisposition("Квартальний звіт — 2026-08-22.zip");
+    const header = contentDisposition("Quarterly report — 2026-08-22.zip");
     expect(header).toMatch(/^attachment; filename="[^"]*"; filename\*=UTF-8''/);
     // The UTF-8 form carries the real name.
-    expect(header).toContain(`filename*=UTF-8''${encodeURIComponent("Квартальний звіт — 2026-08-22.zip")}`);
+    expect(header).toContain(`filename*=UTF-8''${encodeURIComponent("Quarterly report — 2026-08-22.zip")}`);
   });
 
   it("transliterates the dash separator instead of mangling it in the ASCII fallback", () => {
@@ -119,7 +119,7 @@ describe("contentDisposition", () => {
   });
 
   it("keeps the ASCII fallback pure ASCII and quote-free", () => {
-    const header = contentDisposition('Звіт "важливий" — 2026-08-22.zip');
+    const header = contentDisposition('Report "important" — 2026-08-22.zip');
     const ascii = header.match(/filename="([^"]*)"/)![1];
     expect(ascii).toMatch(/^[\x20-\x7E]*$/);
     expect(ascii).not.toContain('"');
@@ -129,9 +129,9 @@ describe("contentDisposition", () => {
 
   it("percent-encodes the apostrophe, which is the filename* delimiter itself", () => {
     // `filename*=UTF-8''<value>` uses `'` as its own separator, so a raw apostrophe
-    // in the value can truncate the name at the parser. Ukrainian names are full of
-    // them (Мар'яна, здоров'я), so this is the common case, not an edge one.
-    const header = contentDisposition("Мар'яна.zip");
+    // in the value can truncate the name at the parser. Apostrophes are ordinary in
+    // names (L'été, O'Brien), so this is the common case, not an edge one.
+    const header = contentDisposition("L'été.zip");
     const ext = header.match(/filename\*=UTF-8''(.*)$/)![1];
     expect(ext).not.toContain("'");
     expect(ext).toContain("%27");
@@ -147,7 +147,7 @@ describe("contentDisposition", () => {
   });
 
   it("round-trips the real name through the filename* encoding", () => {
-    const name = "Квартальний звіт — 2026-08-22.zip";
+    const name = "Quarterly report — 2026-08-22.zip";
     const ext = contentDisposition(name).match(/filename\*=UTF-8''(.*)$/)![1];
     expect(decodeURIComponent(ext)).toBe(name);
   });
@@ -166,7 +166,7 @@ describe("contentDisposition", () => {
   });
 
   it("never lets an ASCII fallback collapse to nothing", () => {
-    const header = contentDisposition("Квартальний.zip");
+    const header = contentDisposition("Quarterly.zip");
     const ascii = header.match(/filename="([^"]*)"/)![1];
     expect(ascii.replace(/[_\s]/g, "")).not.toBe("");
   });
@@ -176,8 +176,8 @@ describe("archiveFilename", () => {
   const day = new Date("2026-08-22T10:30:00Z");
 
   it("names the archive after what is inside it, dated", () => {
-    expect(archiveFilename("Квартальний звіт", "Робочий простір", "zip", day)).toBe(
-      "Квартальний звіт — 2026-08-22.zip",
+    expect(archiveFilename("Quarterly report", "Workspace", "zip", day)).toBe(
+      "Quarterly report — 2026-08-22.zip",
     );
   });
 
@@ -194,7 +194,7 @@ describe("archiveFilename", () => {
   });
 
   it("falls back when the chat has no title", () => {
-    expect(archiveFilename(null, "Робочий простір", "zip", day)).toBe("Робочий простір — 2026-08-22.zip");
+    expect(archiveFilename(null, "Workspace", "zip", day)).toBe("Workspace — 2026-08-22.zip");
   });
 
   it("carries the extension it is given", () => {
@@ -202,7 +202,7 @@ describe("archiveFilename", () => {
   });
 
   it("stays well under the 255-byte filesystem limit even with a long label", () => {
-    const out = archiveFilename("я".repeat(300), "Робочий простір", "zip", day);
+    const out = archiveFilename("ま".repeat(300), "Workspace", "zip", day);
     expect(Buffer.byteLength(out, "utf8")).toBeLessThan(200);
     expect(out.endsWith(" — 2026-08-22.zip")).toBe(true);
   });

@@ -9,34 +9,34 @@ const en = getTranslator("en", "telegram");
 describe("composeDraft", () => {
   it("uses a native <tg-thinking> block while reasoning with no answer yet", () => {
     // No reasoning text yet → localized placeholder.
-    expect(composeDraft("", "", { kind: "thinking" }, uk)).toEqual({ html: "<tg-thinking>думаю…</tg-thinking>" });
+    expect(composeDraft("", "", { kind: "thinking" }, en)).toEqual({ html: "<tg-thinking>thinking…</tg-thinking>" });
     // Live reasoning text fills the block.
-    expect(composeDraft("", "Зважую варіанти", { kind: "thinking" }, uk)).toEqual({
-      html: "<tg-thinking>Зважую варіанти</tg-thinking>",
+    expect(composeDraft("", "Weighing the options", { kind: "thinking" }, en)).toEqual({
+      html: "<tg-thinking>Weighing the options</tg-thinking>",
     });
     // HTML-significant chars in reasoning are escaped (markdown isn't parsed in tg-thinking).
-    expect(composeDraft("", "a < b & c", { kind: "thinking" }, uk)).toEqual({
+    expect(composeDraft("", "a < b & c", { kind: "thinking" }, en)).toEqual({
       html: "<tg-thinking>a &lt; b &amp; c</tg-thinking>",
     });
   });
   it("shows the friendly tool label (and detail) in the thinking block when nothing is written yet", () => {
-    expect(composeDraft("", "", { kind: "tool", label: "Виконання команди…", detail: "ls -la" }, uk)).toEqual({
-      html: "<tg-thinking>🔧 Виконання команди… — ls -la</tg-thinking>",
+    expect(composeDraft("", "", { kind: "tool", label: "Running a command…", detail: "ls -la" }, en)).toEqual({
+      html: "<tg-thinking>🔧 Running a command… — ls -la</tg-thinking>",
     });
-    expect(composeDraft("", "", { kind: "tool", label: "Створення logo.svg…" }, uk)).toEqual({
-      html: "<tg-thinking>🔧 Створення logo.svg…</tg-thinking>",
+    expect(composeDraft("", "", { kind: "tool", label: "Creating logo.svg…" }, en)).toEqual({
+      html: "<tg-thinking>🔧 Creating logo.svg…</tg-thinking>",
     });
   });
   it("content wins once any answer text exists — no thinking/tool block jumps in above it", () => {
     // Reasoning continues (thinking-again after a tool) but the live view stays
     // the clean answer — mid-answer reasoning is dropped, never shown.
-    expect(composeDraft("Привіт", "Зважую варіанти", undefined, uk)).toEqual({ markdown: "Привіт" });
+    expect(composeDraft("Hello", "Weighing the options", undefined, en)).toEqual({ markdown: "Hello" });
     // A tool running mid-answer doesn't float a `> 🔧` line above the streamed text.
-    expect(composeDraft("partial", "", { kind: "tool", label: "Виконання команди…" }, uk)).toEqual({
+    expect(composeDraft("partial", "", { kind: "tool", label: "Running a command…" }, en)).toEqual({
       markdown: "partial",
     });
     // Plain answer, no reasoning, no step.
-    expect(composeDraft("the answer", "", undefined, uk)).toEqual({ markdown: "the answer" });
+    expect(composeDraft("the answer", "", undefined, en)).toEqual({ markdown: "the answer" });
   });
 });
 
@@ -47,10 +47,10 @@ describe("composeSources", () => {
         { n: 1, title: "Kyiv - Wikipedia", url: "https://en.wikipedia.org/wiki/Kyiv" },
         { n: 2, title: "spoof](https://evil.example) *bold*\nnewline", url: "https://real.example/page" },
       ],
-      uk,
+      en,
     );
     const lines = markdown.split("\n");
-    expect(lines[0]).toBe("> Джерела:");
+    expect(lines[0]).toBe("> Sources:");
     expect(lines[1]).toBe("> [1] Kyiv - Wikipedia — https://en.wikipedia.org/wiki/Kyiv");
     // The title lost its brackets, link syntax, emphasis, and newline — one plain
     // line (the [2] prefix is ours; everything after it must be markup-free).
@@ -65,8 +65,8 @@ describe("composeSources", () => {
 
   it("collapses past five sources behind an expandable details block", () => {
     const many = Array.from({ length: 6 }, (_, i) => ({ n: i + 1, title: `T${i + 1}`, url: `https://s.example/${i + 1}` }));
-    const { markdown, plain } = composeSources(many, uk);
-    expect(markdown.startsWith("<details><summary>Джерела: (6)</summary>")).toBe(true);
+    const { markdown, plain } = composeSources(many, en);
+    expect(markdown.startsWith("<details><summary>Sources: (6)</summary>")).toBe(true);
     expect(markdown).toContain("[6] T6 — https://s.example/6");
     // Plain fallback never hides anything behind markup it can't express.
     expect(plain).not.toContain("<details>");
@@ -82,20 +82,20 @@ describe("weaveCitations", () => {
   ];
 
   it("rewrites [N] and comma groups into native footnote refs with definitions", () => {
-    const { markdown, plain } = weaveCitations("Kyiv [1] wins [2, 3].", S, uk);
+    const { markdown, plain } = weaveCitations("Kyiv [1] wins [2, 3].", S, en);
     expect(markdown).toContain("Kyiv [^1] wins [^2][^3].");
     expect(markdown).toContain("[^1]: A — https://a.example");
     expect(markdown).toContain("[^3]: C — https://c.example");
-    expect(markdown).not.toContain("Джерела:"); // the native section replaces the quoted block
+    expect(markdown).not.toContain("Sources:"); // the native section replaces the quoted block
     // The plain fallback has no footnotes — literal body + the flat lines.
     expect(plain).toContain("Kyiv [1] wins [2, 3].");
-    expect(plain).toContain("Джерела:");
+    expect(plain).toContain("Sources:");
     expect(plain).toContain("[1] A — https://a.example");
   });
 
   it("leaves an unknown number and a mixed group literal — visibly inert, like the web", () => {
     const one = [S[0]];
-    const { markdown } = weaveCitations("ok [1] bogus [9] mixed [1, 9]", one, uk);
+    const { markdown } = weaveCitations("ok [1] bogus [9] mixed [1, 9]", one, en);
     expect(markdown).toContain("ok [^1]");
     expect(markdown).toContain("bogus [9]");
     expect(markdown).toContain("mixed [1, 9]");
@@ -105,23 +105,23 @@ describe("weaveCitations", () => {
   it("never rewrites inside code, and falls back to the quoted block when a source ends up unreferenced", () => {
     // The only [1] lives in code — weaving it would corrupt the snippet, and an
     // unreferenced definition is dropped by clients, silently losing the source.
-    const { markdown } = weaveCitations("run `x [1]` then check ```\narr[1]\n```", [S[0]], uk);
+    const { markdown } = weaveCitations("run `x [1]` then check ```\narr[1]\n```", [S[0]], en);
     expect(markdown).toContain("`x [1]`");
     expect(markdown).not.toContain("[^1]");
-    expect(markdown).toContain("> Джерела:");
+    expect(markdown).toContain("> Sources:");
     expect(markdown).toContain("[1] A — https://a.example");
   });
 
   it("keeps a markdown link label and a line-start reference definition intact", () => {
-    const { markdown } = weaveCitations("see [1](https://x.example)\n[1]: https://y.example", [S[0]], uk);
+    const { markdown } = weaveCitations("see [1](https://x.example)\n[1]: https://y.example", [S[0]], en);
     expect(markdown).toContain("[1](https://x.example)");
     expect(markdown).toContain("\n[1]: https://y.example");
-    expect(markdown).toContain("> Джерела:"); // nothing woven → fallback block
+    expect(markdown).toContain("> Sources:"); // nothing woven → fallback block
   });
 
   it("weaves a [N]: mid-sentence (prose colon, not a reference definition)", () => {
-    const { markdown } = weaveCitations("Gemma 4 від Google [1]: модельки", [S[0]], uk);
-    expect(markdown).toContain("Google [^1]: модельки");
+    const { markdown } = weaveCitations("Gemma 4 from Google [1]: small models", [S[0]], en);
+    expect(markdown).toContain("Google [^1]: small models");
   });
 });
 
@@ -142,9 +142,9 @@ describe("composeConfirmPreview", () => {
   it("composes the localized title for a gated tool call (governance \"ask\" — no staged diff)", () => {
     const { markdown, plain } = composeConfirmPreview(
       { title: "", tool: "tavily: search", before: "", after: "", body: "{\n  \"query\": \"weather kyiv\"\n}" },
-      uk,
+      en,
     );
-    expect(markdown).toContain("Дозволити цю дію?");
+    expect(markdown).toContain("Allow this action?");
     expect(markdown).toContain("tavily: search");
     expect(plain).toContain("tavily: search");
     expect(plain).toContain("weather kyiv"); // the arguments survive into the fallback too
@@ -153,10 +153,10 @@ describe("composeConfirmPreview", () => {
   it("a truncated gated call points at the web card in both markdown and plain (its buttons are withheld)", () => {
     const { markdown, plain } = composeConfirmPreview(
       { title: "", tool: "crm: bulk_update", before: "", after: "", body: "{ \"ids\": [1,2,3 …", truncated: true },
-      uk,
+      en,
     );
     for (const out of [markdown, plain]) {
-      expect(out).toContain("відкрийте Capka у браузері");
+      expect(out).toContain("open Capka in the browser");
     }
   });
 
@@ -208,14 +208,17 @@ describe("composeFinal", () => {
   // answer) must remain a strict text PREFIX of the final message, so clients
   // adopt the draft with an append-only "typing out" animation instead of
   // repainting the whole bubble from scratch.
-  it("appends a collapsed tool log with correct plural grammar (uk)", () => {
-    expect(composeFinal("Готово.", 1, 3000, uk)).toBe("Готово.\n\n> ✅ 1 інструмент · 3с");
-    expect(composeFinal("Готово.", 2, 12_300, uk)).toBe("Готово.\n\n> ✅ 2 інструменти · 12с");
-    expect(composeFinal("Готово.", 5, 9000, uk)).toBe("Готово.\n\n> ✅ 5 інструментів · 9с");
-  });
-  it("localizes the log for English", () => {
+  it("appends a collapsed tool log with correct plural grammar", () => {
     expect(composeFinal("Done.", 1, 3000, en)).toBe("Done.\n\n> ✅ 1 tool · 3s");
     expect(composeFinal("Done.", 2, 12_000, en)).toBe("Done.\n\n> ✅ 2 tools · 12s");
+  });
+  it("keeps every plural category a language declares", () => {
+    // English has two forms, so it cannot catch a catalog that lost a category.
+    // Ukrainian has one/few/many: if `doneLog` drops one, 1, 2 and 5 collapse onto
+    // the same word — grammatical nonsense to a native reader, and invisible to
+    // any assertion written against English.
+    const forms = new Set([1, 2, 5].map((n) => composeFinal("x", n, 3000, uk)));
+    expect(forms.size).toBe(3);
   });
   it("returns the bare answer when no tools ran", () => {
     expect(composeFinal("Just chatting.", 0, 4000, en)).toBe("Just chatting.");
@@ -223,11 +226,11 @@ describe("composeFinal", () => {
   it("never folds reasoning into the final message — thinking is draft-only", () => {
     // Even when the turn reasoned, the final carries only the answer (+ tool log).
     expect(composeFinal("Hi.", 0, 1000, en)).toBe("Hi.");
-    expect(composeFinal("Готово.", 2, 6000, uk)).toBe("Готово.\n\n> ✅ 2 інструменти · 6с");
+    expect(composeFinal("Done.", 2, 6000, en)).toBe("Done.\n\n> ✅ 2 tools · 6s");
   });
   it("keeps the streamed draft a strict prefix of the final (append-only convergence)", () => {
-    const body = "Стрімлена відповідь.";
-    expect(composeFinal(body, 3, 9000, uk).startsWith(body)).toBe(true);
+    const body = "A streamed answer.";
+    expect(composeFinal(body, 3, 9000, en).startsWith(body)).toBe(true);
   });
 });
 
@@ -280,7 +283,7 @@ describe("TelegramSink streaming", () => {
   afterEach(() => vi.useRealTimers());
 
   it("coalesces a burst of pushes into a single draft with the latest text", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 42, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 42, locale: "en" });
     sink.push("a", "", { kind: "thinking" });
     sink.push("ab", "", { kind: "thinking" });
     sink.push("abc", "", undefined);
@@ -294,7 +297,7 @@ describe("TelegramSink streaming", () => {
   });
 
   it("persists the final answer via sendRichMessage and cancels pending drafts", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 7, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 7, locale: "en" });
     sink.push("draft text", "", { kind: "thinking" });
     await sink.finish({ status: "completed", text: "final answer", toolCount: 1, elapsedMs: 3000 });
 
@@ -303,17 +306,17 @@ describe("TelegramSink streaming", () => {
 
     expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
     expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe(
-      "final answer\n\n> ✅ 1 інструмент · 3с",
+      "final answer\n\n> ✅ 1 tool · 3s",
     );
     expect(api.sendRichMessageDraft).not.toHaveBeenCalled();
   });
 
   it("bridges the final into the draft (same id, exact final text) before persisting it", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 30, locale: "uk" });
-    sink.push("відповідь", "", undefined);
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 30, locale: "en" });
+    sink.push("an answer", "", undefined);
     await vi.advanceTimersByTimeAsync(900); // the draft actually reached Telegram
 
-    await sink.finish({ status: "completed", text: "відповідь", toolCount: 1, elapsedMs: 3000 });
+    await sink.finish({ status: "completed", text: "an answer", toolCount: 1, elapsedMs: 3000 });
 
     // Clients adopt a streamed draft into the arriving real message by matching
     // text prefixes. The bridge re-sends the draft with the exact final
@@ -325,7 +328,7 @@ describe("TelegramSink streaming", () => {
     const finalMarkdown = api.sendRichMessage.mock.calls[0][1].markdown;
     expect(bridgeId).toBe(streamedId);
     expect(bridgeBody.markdown).toBe(finalMarkdown);
-    expect(finalMarkdown).toBe("відповідь\n\n> ✅ 1 інструмент · 3с");
+    expect(finalMarkdown).toBe("an answer\n\n> ✅ 1 tool · 3s");
     // The bridge must land strictly before the final message.
     expect(api.sendRichMessageDraft.mock.invocationCallOrder[1]).toBeLessThan(
       api.sendRichMessage.mock.invocationCallOrder[0],
@@ -337,7 +340,7 @@ describe("TelegramSink streaming", () => {
     api.sendRichMessageDraft.mockImplementationOnce(
       () => new Promise<true>((r) => { release = r; }),
     );
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 31, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 31, locale: "en" });
     sink.push("partial", "", undefined);
     await vi.advanceTimersByTimeAsync(900); // dispatches the draft; it hangs on the wire
 
@@ -353,7 +356,7 @@ describe("TelegramSink streaming", () => {
   });
 
   it("kills the draft keepalive permanently once finished (no orphaned re-sends)", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 21, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 21, locale: "en" });
     sink.push("partial", "", { kind: "thinking" });
     await vi.advanceTimersByTimeAsync(900); // first draft flushes → arms the keepalive
     expect(api.sendRichMessageDraft).toHaveBeenCalledTimes(1);
@@ -368,7 +371,7 @@ describe("TelegramSink streaming", () => {
   });
 
   it("finish is idempotent — a second call delivers nothing", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 22, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 22, locale: "en" });
     await sink.finish({ status: "completed", text: "only once", toolCount: 0, elapsedMs: 100 });
     expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
     await sink.finish({ status: "completed", text: "only once", toolCount: 0, elapsedMs: 100 });
@@ -387,15 +390,15 @@ describe("TelegramSink streaming", () => {
   });
 
   it("persists nothing when the task was cancelled", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 5, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 5, locale: "en" });
     await sink.finish({ status: "cancelled", text: "", toolCount: 0, elapsedMs: 50 });
     expect(api.sendRichMessage).not.toHaveBeenCalled();
   });
 
   it("finish caps a tools-only reply with a notifying footer", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 12, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 12, locale: "en" });
     await sink.finish({ status: "completed", text: "", toolCount: 3, elapsedMs: 5000 });
-    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("> ✅ 3 інструменти · 5с");
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("> ✅ 3 tools · 5s");
     expect(api.sendRichMessage.mock.calls[0][2]).toBeUndefined(); // final pings
   });
 
@@ -428,20 +431,20 @@ describe("TelegramSink streaming", () => {
   });
 
   it("keeps woven citations on a stopped partial", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 79, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 79, locale: "en" });
     await sink.finish({
-      status: "cancelled", text: "Політика змінилась [1]", toolCount: 1, elapsedMs: 50,
+      status: "cancelled", text: "The policy changed [1]", toolCount: 1, elapsedMs: 50,
       sources: [{ n: 1, title: "T", url: "https://t.example" }],
     });
     const md = api.sendRichMessage.mock.calls[0][1].markdown;
-    expect(md).toContain("Політика змінилась [^1]");
+    expect(md).toContain("The policy changed [^1]");
     expect(md).toContain("[^1]: T — https://t.example");
     // Definitions sit under the text they annotate, above the stopped footer.
-    expect(md.indexOf("[^1]:")).toBeLessThan(md.indexOf("Зупинено"));
+    expect(md.indexOf("[^1]:")).toBeLessThan(md.indexOf("Stopped"));
   });
 
   it("registers the streaming draft for the stop button and clears it on finish", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 80, locale: "uk" }, "task-x");
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 80, locale: "en" }, "task-x");
     sink.push("hi", "", { kind: "thinking" });
     await vi.advanceTimersByTimeAsync(900);
     const draftId = api.sendRichMessageDraft.mock.calls[0][1];
@@ -451,20 +454,20 @@ describe("TelegramSink streaming", () => {
   });
 
   it("persists the whole answer as one final message, dropping the reasoning", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 13, locale: "uk" });
-    sink.push("Готово.", "Зважую варіанти", undefined);
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 13, locale: "en" });
+    sink.push("Done.", "Weighing the options", undefined);
     await sink.finish({
-      status: "completed", text: "Готово.", reasoning: "Зважую варіанти",
+      status: "completed", text: "Done.", reasoning: "Weighing the options",
       toolCount: 0, elapsedMs: 6000, reasoningMs: 6000,
     });
     expect(api.sendRichMessage).toHaveBeenCalledTimes(1);
-    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("Готово.");
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("Done.");
   });
 
   it("finish falls back to a no-text note when nothing was produced", async () => {
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 14, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 14, locale: "en" });
     await sink.finish({ status: "completed", text: "", toolCount: 0, elapsedMs: 1000 });
-    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("_(асистент нічого не відповів)_");
+    expect(api.sendRichMessage.mock.calls[0][1].markdown).toBe("_(the assistant returned no text)_");
   });
 
   it("delivers a failure in-chat, with admin detail collapsed", async () => {
@@ -516,7 +519,7 @@ describe("TelegramSink emission safety", () => {
 
   it("falls back to plain text when Telegram rejected the markup", async () => {
     api.sendRichMessage.mockRejectedValueOnce(apiError(400, "can't parse entities"));
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 21, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 21, locale: "en" });
 
     await sink.finish({ status: "completed", text: "answer", toolCount: 0, elapsedMs: 1000 });
 
@@ -526,7 +529,7 @@ describe("TelegramSink emission safety", () => {
 
   it("does NOT re-send when the response was lost — the message may already be there", async () => {
     api.sendRichMessage.mockRejectedValueOnce(new HttpError("network error", new Error("ECONNRESET")));
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 22, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 22, locale: "en" });
 
     await sink.finish({ status: "completed", text: "answer", toolCount: 0, elapsedMs: 1000 });
 
@@ -535,7 +538,7 @@ describe("TelegramSink emission safety", () => {
 
   it("does NOT re-send on a 5xx, which is the same ambiguity from the far side", async () => {
     api.sendRichMessage.mockRejectedValueOnce(apiError(500, "Internal Server Error"));
-    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 23, locale: "uk" });
+    const sink = makeDeliverySink({ platform: "telegram", telegramChatId: 23, locale: "en" });
 
     await sink.finish({ status: "completed", text: "answer", toolCount: 0, elapsedMs: 1000 });
 

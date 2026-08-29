@@ -27,9 +27,9 @@ describe("describeStep — categories", () => {
 
   it("uses the same label for every file of one action, whatever the name", () => {
     const a = describeStep(t, "str_replace", { path: "a.tsx" });
-    const b = describeStep(t, "str_replace", { path: "b/c/долгое имя.csv" });
+    const b = describeStep(t, "str_replace", { path: "b/c/a long file name.csv" });
     expect(a.label).toBe(b.label);
-    expect(b.detail).toBe("долгое имя.csv");
+    expect(b.detail).toBe("a long file name.csv");
   });
 
   // Args stream in progressively: the path can be missing on the first render.
@@ -63,9 +63,9 @@ describe("describeStep — categories", () => {
   // A web query is prose, not a token: in a mono well it reads as broken type.
   // It stays inside the sentence, which is why this tool keeps its own key.
   it("keeps a web search query in the sentence rather than the well", () => {
-    const d = describeStep(t, "brave_web_search", { query: "ціни на бензин" });
+    const d = describeStep(t, "brave_web_search", { query: "petrol prices near me" });
     expect(d.detail).toBeUndefined();
-    expect(JSON.stringify(d.label)).toContain("ціни на бензин");
+    expect(JSON.stringify(d.label)).toContain("petrol prices near me");
   });
 
   it("classifies web search and page fetch via heuristics", () => {

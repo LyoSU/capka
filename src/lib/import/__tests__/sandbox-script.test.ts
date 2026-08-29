@@ -79,10 +79,10 @@ describe("import projections", () => {
     const full = {
       conversation: { title: "Big one", conversationId: "x", extra: "y".repeat(1000) },
       responses: [
-        { sender: "human", message: "питання", steps: [{ log: "z".repeat(400_000) }] },
+        { sender: "human", message: "a question", steps: [{ log: "z".repeat(400_000) }] },
         {
           sender: "ASSISTANT",
-          message: "відповідь",
+          message: "an answer",
           steps: [{ log: "z".repeat(400_000) }],
           webSearchResults: [{ snippet: "w".repeat(300_000) }],
         },
@@ -118,11 +118,11 @@ describe("import projections", () => {
   });
 
   it("grok: byte budget drops the tail and flags __capkaTruncated (multi-byte text)", () => {
-    // Cyrillic is 2 bytes/char, so the byte budget bites before the char caps —
+    // Greek is 2 bytes/char, so the byte budget bites before the char caps —
     // the platform can't observe those dropped messages, the flag must carry it.
     const full = {
       conversation: { title: "t" },
-      responses: Array.from({ length: 20 }, () => ({ sender: "human", message: "ц".repeat(90_000) })),
+      responses: Array.from({ length: 20 }, () => ({ sender: "human", message: "α".repeat(90_000) })),
     };
     const slim = proj("grok", full, CAPS);
     expect(slim.__capkaTruncated).toBe(true);
@@ -139,13 +139,13 @@ describe("import projections", () => {
           sender: "human",
           text: "",
           content: [
-            { type: "text", text: "перший блок" },
+            { type: "text", text: "first block" },
             { type: "tool_use", input: { big: "q".repeat(500_000) } },
-            { type: "text", text: "другий блок" },
+            { type: "text", text: "second block" },
           ],
         },
-        { sender: "assistant", text: "лише плаский текст", content: [{ type: "thinking", thinking: "w".repeat(200_000) }] },
-        { sender: "human", text: "з файлом", content: [{ type: "text", text: "з файлом" }], attachments: [{ file_name: "a.pdf" }] },
+        { sender: "assistant", text: "flat text only", content: [{ type: "thinking", thinking: "w".repeat(200_000) }] },
+        { sender: "human", text: "with a file", content: [{ type: "text", text: "with a file" }], attachments: [{ file_name: "a.pdf" }] },
       ],
     };
     const slim = proj("claude", full, CAPS);
@@ -164,7 +164,7 @@ describe("import projections", () => {
           children: ["c"],
           message: {
             author: { role: "user" },
-            content: { content_type: "text", parts: ["привіт"] },
+            content: { content_type: "text", parts: ["hello"] },
             metadata: { search_results: [{ body: "m".repeat(400_000) }] },
           },
         },
@@ -173,7 +173,7 @@ describe("import projections", () => {
           children: [],
           message: {
             author: { role: "assistant" },
-            content: { content_type: "multimodal_text", parts: ["текст і", { asset_pointer: "img" }] },
+            content: { content_type: "multimodal_text", parts: ["text and", { asset_pointer: "img" }] },
             metadata: { huge: "n".repeat(300_000) },
           },
         },
