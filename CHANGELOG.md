@@ -6,6 +6,15 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Web citations redesigned: [N] markers render as raised number pills with a hover card (title, domain, date), and the "Sources" footer is a grid of source tiles with domain monograms, one tile per URL, collapsing beyond six.
+
+### Fixed
+
+- Inline citation pills actually render in the web chat — the markdown sanitizer strips the attribute the previous CSS styling targeted, so markers showed as plain blue numbers and a `[1, 9]` group read as "19".
+- A reply's [N] markers no longer resolve against a different message's sources (markdown processor cache collision on anonymous plugins).
+
 ## [0.37.0] - 2026-08-29
 
 ### Added

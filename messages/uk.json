@@ -600,7 +600,9 @@
     },
     "clearSearch": "Очистити пошук",
     "citations": {
-      "sources": "Джерела"
+      "sources": "Джерела",
+      "openSource": "Джерело {n}: {title}",
+      "more": "Ще {n, plural, one {# джерело} few {# джерела} many {# джерел} other {# джерела}}"
     },
     "approval": {
       "title": "Потрібен Ваш дозвіл",

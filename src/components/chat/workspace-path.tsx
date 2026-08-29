@@ -7,6 +7,8 @@ import type { Root, RootContent } from "mdast";
 import { usePreview, useFileStatus, type PreviewFile } from "./file-preview";
 import { fileKind, previewKind } from "@/lib/file-kinds";
 import { freshWorkspacePathRe, isSafeWorkspaceRel, workspaceRelFromHref } from "@/lib/chat/artifacts";
+import { CitationChip } from "./sources";
+import type { NumberedSource } from "@/lib/mcp/search-normalize";
 import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -107,20 +109,34 @@ function WorkspacePathChip({ rel, chatId, live }: { rel: string; chatId: string;
 
 /**
  * Markdown `components` for the chat transcript: render links the remark plugin
- * produced for `/workspace/` files as file chips; everything else is a normal,
- * safe external link. Closes over chatId so the chip can address the file.
+ * produced for `/workspace/` files as file chips, and the numbered links the
+ * citations plugin produced as citation chips; everything else is a normal,
+ * safe external link. Closes over chatId so the file chip can address the file.
+ *
+ * Citations are recognized by CONTENT (label is the source's number, href is
+ * the source's url), not by the `data-citation` attribute the plugin also sets:
+ * Streamdown sanitizes the tree with rehype-sanitize's default schema, which
+ * strips data-* attributes before components ever see them.
  */
-export function makeWorkspaceComponents(chatId: string, live?: boolean) {
+export function makeWorkspaceComponents(chatId?: string, live?: boolean, sources?: NumberedSource[]) {
+  const byN = sources?.length ? new Map(sources.map((s) => [s.n, s])) : null;
   return {
     // The `node` prop react-markdown also passes is destructured away so it
-    // never lands on the DOM element; everything else flows through — the
-    // citation chips (lib/chat/citations.ts) are anchors that carry
-    // `data-citation` + `title`, and dropping those here rendered them as bare
-    // blue numbers instead of the styled pills globals.css targets.
+    // never lands on the DOM element.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructured only to keep react-markdown's AST handle off the DOM element
     a({ href, children, node: _node, ...rest }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
       const rel = typeof href === "string" ? workspaceRelFromHref(href) : null;
-      if (rel) return <WorkspacePathChip rel={rel} chatId={chatId} live={live} />;
+      if (rel && chatId) return <WorkspacePathChip rel={rel} chatId={chatId} live={live} />;
+      if (byN && typeof children === "string" && /^\d{1,4}$/.test(children)) {
+        const source = byN.get(parseInt(children, 10));
+        // Both matches exact, so the chip never changes what the model wrote:
+        // canonical text equality keeps a hand-written "007" a plain link, and
+        // URL equality keeps a model-authored [7](elsewhere) pointing elsewhere
+        // instead of being silently redirected to the numbered source.
+        if (source && String(source.n) === children && source.url === href) {
+          return <CitationChip n={source.n} source={source} />;
+        }
+      }
       return (
         <a href={href} target="_blank" rel="noopener noreferrer nofollow" {...rest}>
           {children}

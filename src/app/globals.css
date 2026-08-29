@@ -549,35 +549,9 @@
   opacity: 0.55;
 }
 
-/* Citation chip — a [N] the reply resolved against this turn's search results
-   (rendered by remark as an anchor carrying data-citation; lib/chat/citations.ts).
-   A raised pill, quiet like the muted surface; the number is the whole label, the
-   title rides the anchor's title attribute. An UNRESOLVED [N] never gets this
-   node and stays plain text — visibly inert by design. */
-.chat-prose a[data-citation] {
-  display: inline-block;
-  /* A fixed raise, not `super`: super lifts the pill clear of the baseline and
-     the punctuation after it reads as detached ("слово ¹ ,"). Verified in the
-     CSS harness — 0.25em keeps the pill visually IN the line. Contrast measured
-     (canvas-rasterized, oklch tokens): 6.08:1 light / 4.84:1 dark — AA at 11px. */
-  vertical-align: 0.25em;
-  font-size: 0.68em;
-  line-height: 1;
-  padding: 0.12em 0.42em;
-  /* Asymmetric on purpose: a hair of air after the word it cites, and almost
-     none before the punctuation that usually follows. */
-  margin: 0 0.05em 0 0.12em;
-  border-radius: 9999px;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  text-decoration: none;
-  font-variant-numeric: tabular-nums;
-  transition: color 120ms ease, background-color 120ms ease;
-}
-.chat-prose a[data-citation]:hover {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
+/* Citation chips are React components (components/chat/sources.tsx), not CSS
+   over the markdown anchor: Streamdown sanitizes the hast with rehype-sanitize's
+   default schema, which strips the data-* attribute a selector here would need. */
 
 /* NB: `.scroll-fade-b` — "this list continues below" as a soft edge instead of a
    row chopped in half — is NOT defined here. tw-animate-css already ships it, and
@@ -832,8 +806,10 @@
     break-after: avoid;
   }
   /* A link is dead on paper unless its destination comes with it. Scoped to answer
-     prose so interface links don't sprout URLs. */
-  .chat-prose a[href^="http"]::after {
+     prose so interface links don't sprout URLs; citation chips are excluded — the
+     footer tiles already print each source once, and a URL after every [N] would
+     balloon the printed answer. */
+  .chat-prose a[href^="http"]:not(.citation-chip)::after {
     content: " (" attr(href) ")";
     font-size: 0.85em;
     word-break: break-all;
@@ -1136,13 +1112,16 @@
 /* Links: a distinct colour (the one accent hue in the palette) carries the
    "clickable" signal — no underline at rest, which would clutter dense prose.
    The underline appears only on hover as the affordance confirmation. */
-.chat-prose a {
+/* Citation chips (components/chat/sources.tsx) carry their own colors and no
+   underline; without the exclusion these prose rules out-specify the chip's
+   utility classes and paint a blue underlined number inside the pill. */
+.chat-prose a:not(.citation-chip) {
   color: var(--link);
   text-decoration: none;
   text-underline-offset: 2px;
   transition: color 150ms ease;
 }
-.chat-prose a:hover {
+.chat-prose a:hover:not(.citation-chip) {
   text-decoration: underline;
   text-decoration-thickness: 1px;
 }

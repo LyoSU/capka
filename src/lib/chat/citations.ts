@@ -22,18 +22,27 @@ import type { NumberedSource } from "@/lib/mcp/search-normalize";
 const CITE_RE = /\[(\d{1,4}(?:\s*,\s*\d{1,4})*)\]/g;
 
 function chip(n: number, s: NumberedSource): RootContent {
+  // A plain link node — no hProperties marker: Streamdown sanitizes the hast
+  // (rehype-sanitize default schema), which strips data-* attributes, so the
+  // renderer's `a` override recognizes a citation by content instead (label is
+  // the source's number, href is the source's url — workspace-path.tsx).
   return {
     type: "link",
     url: s.url,
     title: s.title,
     children: [{ type: "text", value: String(n) }],
-    // Flows through remark-rehype onto the anchor, where globals.css styles
-    // `a[data-citation]` as a superscript pill — no component override needed.
-    data: { hProperties: { "data-citation": "" } },
   };
 }
 
-export function makeRemarkCitations(sources: NumberedSource[]) {
+/**
+ * A NAMED attacher taking sources as plugin OPTIONS (`[remarkCitations, {sources}]`),
+ * not a closure factory: Streamdown caches its unified processor keyed by each
+ * plugin's function NAME plus JSON of its tuple options. A factory's anonymous
+ * closure has name "" for every source set, so two messages with different
+ * sources would silently share the FIRST message's processor — resolving the
+ * second reply's [N] markers against the wrong sources.
+ */
+export function remarkCitations({ sources }: { sources: NumberedSource[] }) {
   const byN = new Map(sources.map((s) => [s.n, s]));
   // Hand-rolled recursion instead of unist-util-visit because the guard is
   // ANCESTRY, not parenthood: a marker inside `**bold**` inside a link has a
@@ -64,13 +73,15 @@ export function makeRemarkCitations(sources: NumberedSource[]) {
       }
     }
   };
-  return () => (tree: Root) => walk(tree, false);
+  return (tree: Root) => walk(tree, false);
 }
 
-/** The sources a reply actually cited, in number order — what the footer lists.
- *  A plain-regex scan over the raw markdown (so a `[1]` inside a code block
- *  counts too); footer over-inclusion is harmless, a broken chip is not, which
- *  is why the CHIP side runs on the mdast instead. */
+/** The sources a reply actually cited, in FIRST-USE order — what the footer
+ *  lists, so the source backing the opening claim leads even when branch-global
+ *  numbering gave it a large number. A plain-regex scan over the raw markdown
+ *  (so a `[1]` inside a code block counts too); footer over-inclusion is
+ *  harmless, a broken chip is not, which is why the CHIP side runs on the
+ *  mdast instead. */
 export function citedSources(text: string, sources: NumberedSource[]): NumberedSource[] {
   if (!sources.length) return [];
   const byN = new Map(sources.map((s) => [s.n, s]));
@@ -83,5 +94,5 @@ export function citedSources(text: string, sources: NumberedSource[]): NumberedS
       if (s) out.set(n, s);
     }
   }
-  return [...out.values()].sort((a, b) => a.n - b.n);
+  return [...out.values()];
 }

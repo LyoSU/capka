@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Root } from "mdast";
-import { makeRemarkCitations, citedSources } from "../citations";
+import { remarkCitations, citedSources } from "../citations";
 
 const SOURCES = [
   { n: 1, title: "A", url: "https://a.example/1" },
@@ -12,18 +12,17 @@ const para = (children: unknown[]) =>
   ({ type: "root", children: [{ type: "paragraph", children }] }) as unknown as Root;
 
 function run(tree: Root): Root {
-  makeRemarkCitations(SOURCES)()(tree);
+  remarkCitations({ sources: SOURCES })(tree);
   return tree;
 }
 
-describe("makeRemarkCitations", () => {
+describe("remarkCitations", () => {
   it("turns a resolvable [N] into a link chip and leaves surrounding text intact", () => {
     const tree = run(para([{ type: "text", value: "Kyiv is the capital [1] of Ukraine." }]));
     const children = (tree.children[0] as { children: { type: string; url?: string; title?: string; data?: { hProperties?: Record<string, unknown> }; children?: { value: string }[]; value?: string }[] }).children;
     expect(children.map((c) => c.type)).toEqual(["text", "link", "text"]);
     expect(children[1].url).toBe("https://a.example/1");
     expect(children[1].title).toBe("A");
-    expect(children[1].data?.hProperties).toHaveProperty("data-citation");
     expect(children[1].children![0].value).toBe("1");
   });
 
@@ -69,15 +68,15 @@ describe("makeRemarkCitations", () => {
 
   it("resolves four-digit numbers (long branches mint past 999)", () => {
     const tree = para([{ type: "text", value: "Late claim [1000]." }]);
-    makeRemarkCitations([{ n: 1000, title: "Z", url: "https://z.example" }])()(tree);
+    remarkCitations({ sources: [{ n: 1000, title: "Z", url: "https://z.example" }] })(tree);
     const children = (tree.children[0] as { children: { type: string; url?: string }[] }).children;
     expect(children.filter((c) => c.type === "link").map((c) => c.url)).toEqual(["https://z.example"]);
   });
 });
 
 describe("citedSources", () => {
-  it("returns only the cited subset, deduped, in number order", () => {
-    expect(citedSources("uses [2] then [1] and [2] again, plus bogus [9]", SOURCES).map((s) => s.n)).toEqual([1, 2]);
+  it("returns only the cited subset, deduped, in first-use order", () => {
+    expect(citedSources("uses [2] then [1] and [2] again, plus bogus [9]", SOURCES).map((s) => s.n)).toEqual([2, 1]);
   });
   it("is empty with no sources or no markers", () => {
     expect(citedSources("[1]", [])).toEqual([]);

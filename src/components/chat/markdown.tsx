@@ -8,7 +8,8 @@ import "streamdown/styles.css";
 // bundle it, so import it here where the math plugin is wired in.
 import "katex/dist/katex.min.css";
 import { remarkWorkspacePaths, makeWorkspaceComponents } from "./workspace-path";
-import { makeRemarkCitations } from "@/lib/chat/citations";
+import { remarkCitations } from "@/lib/chat/citations";
+import type { Pluggable } from "unified";
 import type { NumberedSource } from "@/lib/mcp/search-normalize";
 
 // Default remark pipeline + our /workspace path linker. Passing remarkPlugins
@@ -58,23 +59,29 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
     };
   }, []);
 
-  // Clickable /workspace file chips only in the chat transcript (where chatId is
-  // set and a PreviewProvider is mounted). Memoized so Streamdown's memo holds;
-  // `isStreaming` is a dep so chips switch from optimistic to existence-verified
-  // exactly once, when the reply finalizes (not on every streamed token).
+  // The sources array is rebuilt by the message on every render, so the memos
+  // below key on its CONTENT — a fresh array each render would defeat
+  // Streamdown's memo (see STREAMDOWN_CONTROLS above).
+  const citeKey = sources?.length ? sources.map((s) => `${s.n}${s.url}${s.title}${s.date ?? ""}`).join("\n") : "";
+
+  // Clickable /workspace file chips and citation chips, in the chat transcript
+  // (chatId set / sources present). Memoized so Streamdown's memo holds;
+  // `isStreaming` is a dep so file chips switch from optimistic to
+  // existence-verified exactly once, when the reply finalizes.
   const components = useMemo<Components | undefined>(
-    () => (chatId ? makeWorkspaceComponents(chatId, isStreaming) : undefined),
-    [chatId, isStreaming],
+    () => (chatId || citeKey ? makeWorkspaceComponents(chatId, isStreaming, sources) : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `sources` is represented by citeKey (content identity, not reference)
+    [chatId, isStreaming, citeKey],
   );
 
-  // Citation chips ([N] → source link). The sources array is rebuilt by the
-  // message on every render, so memoize on its CONTENT — a fresh plugin array
-  // each render would defeat Streamdown's memo (see STREAMDOWN_CONTROLS above).
-  const citeKey = sources?.length ? sources.map((s) => `${s.n}${s.url}${s.title}`).join("\n") : "";
+  // Citation links ([N] -> source url; the a-override above upgrades them to
+  // chips). The TUPLE form is load-bearing: Streamdown caches its processor
+  // keyed by plugin NAME + JSON(options), so a bare closure per source set
+  // would collide on name "" and hand every message the first one's processor.
   const remarkPlugins = useMemo(() => {
     const base = chatId ? REMARK_WITH_PATHS : undefined;
     if (!citeKey) return base;
-    return [...(base ?? Object.values(defaultRemarkPlugins)), makeRemarkCitations(sources!)];
+    return [...(base ?? Object.values(defaultRemarkPlugins)), [remarkCitations, { sources: sources! }] as Pluggable];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sources` is represented by citeKey (content identity, not reference)
   }, [chatId, citeKey]);
 
@@ -86,11 +93,12 @@ export function Markdown({ children, isStreaming, chatId, sources }: { children:
     // a new citations plugin while the text is already final — the comparator
     // sees identical children and skips the re-render, so the markers stayed
     // dead until a full page reload. Remounting is the only way past a memo
-    // that doesn't compare the prop; the source NUMBERS identify the set
-    // (branch-unique), and isStreaming covers the workspace-chip components
-    // flipping to existence-verified at the same silent moment.
+    // that doesn't compare the prop; citeKey covers the full identity the chips
+    // render (number, url, title, date), and isStreaming covers the
+    // workspace-chip components flipping to existence-verified at the same
+    // silent moment.
     <Streamdown
-      key={`${sources?.map((s) => s.n).join(",") ?? ""}${isStreaming ? ":s" : ""}`}
+      key={`${citeKey}${isStreaming ? ":s" : ""}`}
       parseIncompleteMarkdown={isStreaming}
       controls={STREAMDOWN_CONTROLS}
       plugins={plugins}

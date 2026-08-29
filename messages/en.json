@@ -600,7 +600,9 @@
     },
     "clearSearch": "Clear search",
     "citations": {
-      "sources": "Sources"
+      "sources": "Sources",
+      "openSource": "Source {n}: {title}",
+      "more": "{n, plural, one {# more source} other {# more sources}}"
     },
     "approval": {
       "title": "Permission needed",

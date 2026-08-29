@@ -31,6 +31,7 @@ import {
 } from "@/lib/chat/record-list";
 import { isBareUrl, type StepField } from "@/lib/chat/steps";
 import { sourcesFromOutput, type NumberedSource } from "@/lib/mcp/search-normalize";
+import { hostOf, CitedSourcesFooter } from "./sources";
 import { citedSources } from "@/lib/chat/citations";
 import { AskCard } from "./ask-card";
 import { ManageCard, ApprovalCard, isManageCard, manageStepLabel } from "./manage-cards";
@@ -492,13 +493,6 @@ function ToolDetails({ category, output, errorText, chatId }: { category: StepCa
  *  plays which role is decided by SHAPE — position, length, being a URL — never
  *  by the field's name, so an unknown tool's list renders as well as a known
  *  one's. Every field the tool sent is on screen; nothing is dropped. */
-function hostOf(u: string): string | null {
-  try {
-    return new URL(u).hostname;
-  } catch {
-    return null;
-  }
-}
 
 function RecordList({ records }: { records: TextRecord[] }) {
   const t = useTranslations("chat.tool");
@@ -850,26 +844,6 @@ function SourceList({ sources }: { sources: NumberedSource[] }) {
   );
 }
 
-/** The sources a reply actually cited, as a quiet footer under the answer —
- *  only the cited ones: the full result lists already live in the step panels,
- *  and repeating twenty rows under every answer would drown the reply. */
-function CitedSourcesFooter({ list }: { list: NumberedSource[] }) {
-  const t = useTranslations("chat.citations");
-  return (
-    <div className="animate-message-in mt-3 border-t border-border pt-2">
-      <div className="mb-1 text-xs font-medium text-muted-foreground">{t("sources")}</div>
-      <ol className="space-y-0.5">
-        {list.map((s) => (
-          <li key={s.n} className="flex min-w-0 items-baseline gap-1.5 text-xs">
-            <span className="shrink-0 tabular-nums text-muted-foreground">[{s.n}]</span>
-            <a href={s.url} target="_blank" rel="noopener noreferrer" title={s.url} className="min-w-0 truncate text-link hover:underline">{s.title}</a>
-            {hostOf(s.url) && <span className="shrink-0 text-muted-foreground">{hostOf(s.url)}</span>}
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
 
 function TextContent({ text, isStreaming, chatId, touched, sources }: { text: string; isStreaming?: boolean; chatId?: string; touched?: string[]; sources?: NumberedSource[] }) {
   // `chat-prose` caps flowing text to a ~70ch measure (see globals.css) so long
