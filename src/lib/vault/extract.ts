@@ -68,7 +68,11 @@ const EXTRACT_INSTRUCTION =
  */
 const SECRET_PATTERNS: RegExp[] = [
   // Provider-prefixed tokens: OpenAI (sk-), GitHub (ghp_/gho_), Slack (xoxb-/xoxp-/xoxa-/xoxs-), AWS access key id.
-  /\bsk-[A-Za-z0-9]{10,}\b/,
+  // Widened to `[A-Za-z0-9_-]` (not just alphanumeric) with a 20-char floor:
+  // modern OpenAI project keys are internally hyphenated (`sk-proj-AbCdEf...`), and
+  // a narrower class would miss that shape entirely while the older `sk-...` form
+  // still clears the same floor.
+  /\bsk-[A-Za-z0-9_-]{20,}\b/,
   /\bgh[po]_[A-Za-z0-9]{10,}\b/,
   /\bxox[bpas]-[A-Za-z0-9-]{10,}\b/,
   /\bAKIA[A-Z0-9]{12,}\b/,
@@ -78,9 +82,16 @@ const SECRET_PATTERNS: RegExp[] = [
   /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/i,
   // An assignment whose key names a secret and whose value is non-trivial.
   /\b(password|passwd|secret|token|api[-_]?key|authorization)\s*[:=]\s*['"]?[^\s'"]{4,}['"]?/i,
-  // Catch-all: a long unbroken base64/hex-ish run. Ordinary prose rarely contains
-  // one; tokens, hashes, and keys that miss the specific patterns above usually do.
-  /\b[A-Za-z0-9+/_-]{28,}={0,2}\b/,
+  // Catch-all: a long unbroken base64/hex-ish run — deliberately EXCLUDING `-`
+  // from the class. Including it (an earlier version of this pattern did) also
+  // matched ordinary hyphenated things an office user states as plain fact — a URL
+  // slug, a preview-deploy hostname, a UUID — which this screen must not swallow
+  // (a screened item goes `sensitive` → pending, and plan A ships no confirmation
+  // UI, so it would sit invisible for the whole intervening period: a real quiet
+  // degradation, not the "one extra confirmation" cost this module accepts
+  // elsewhere). A 40-char hex commit sha, a bare base64 token, and a
+  // `github_pat_...` fine-grained PAT all still clear the floor without a hyphen.
+  /\b[A-Za-z0-9+/_]{28,}={0,2}\b/,
 ];
 
 function looksLikeSecret(statement: string): boolean {

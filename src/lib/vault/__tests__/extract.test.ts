@@ -353,8 +353,48 @@ describe("extractCandidates — secret-shaped statements are never auto-activate
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
   });
 
+  it("an sk-proj- (internally hyphenated) OpenAI project key is forced sensitive", async () => {
+    // The catch-all deliberately excludes `-` (see round-3 note on SECRET_PATTERNS),
+    // so this shape is caught ONLY by the widened sk- pattern itself — this test is
+    // what would fail if that pattern were narrowed back down.
+    const generate = generateReturning(
+      '[{"statement":"sk-proj-AbCdEf0123456789ghijkl","from":"user","sensitive":false}]',
+    );
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
+  });
+
   it("does not flag an ordinary fact — the screen is not so broad it eats normal usage", async () => {
     const generate = generateReturning('[{"statement":"pays suppliers in EUR","from":"user","sensitive":false}]');
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
+  });
+
+  // Negative controls for the specific false-positive class round 3 found: ordinary
+  // hyphenated things (a URL slug, a preview-deploy hostname, a UUID) are common
+  // facts for an office user to state and must not be screened as secret-shaped.
+  // Without these, the next re-tightening of the catch-all could silently
+  // reintroduce the same hole with nothing here failing.
+  it("does not flag a URL containing a long hyphenated slug", async () => {
+    const generate = generateReturning(
+      '[{"statement":"The user prefers the article at https://example.com/how-to-configure-the-thing-properly","from":"user","sensitive":false}]',
+    );
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
+  });
+
+  it("does not flag a hyphenated preview-deploy hostname", async () => {
+    const generate = generateReturning(
+      '[{"statement":"Staging lives at deploy-preview-1234-my-app-name.netlify.app","from":"user","sensitive":false}]',
+    );
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
+  });
+
+  it("does not flag a UUID", async () => {
+    const generate = generateReturning(
+      '[{"statement":"Project id is 3f2504e0-4f89-11d3-9a0c-0305e82c3301","from":"user","sensitive":false}]',
+    );
     await extractCandidates({ ...baseArgs, generate });
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
   });
