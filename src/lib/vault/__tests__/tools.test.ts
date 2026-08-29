@@ -26,7 +26,9 @@ const PROJECT_SPACE = "space-project";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const opts = (toolCallId: string) => ({ toolCallId, messages: [] }) as any;
 
-const head = (over: Partial<{ id: string; revision: number; statement: string; slotKey: string | null }> = {}) => ({
+const head = (
+  over: Partial<{ id: string; revision: number; statement: string; slotKey: string | null; sensitive: boolean }> = {},
+) => ({
   id: "c1",
   revision: 1,
   statement: "Клієнт платить у гривні",
@@ -114,6 +116,15 @@ describe("memory_propose", () => {
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
   });
 
+  it("поза проєктом scope:'project' падає в user-простір, а не втрачає факт", async () => {
+    // Асиметрія з memory_search свідома: факт уже сказаний, і покласти його
+    // рівнем вище дешевше, ніж загубити; пошук же нічого не втрачає, мовчки
+    // підмінивши простір, тому там — порожньо.
+    const tools = await make({ projectId: null, projectOwnerUserId: undefined });
+    await run(tools.memory_propose, { statement: "Дедлайн у п'ятницю", scope: "project" });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
+  });
+
   it("зламаний value_json — це РЕЗУЛЬТАТ тула, не throw, і пропозиції не було", async () => {
     const tools = await make();
     const out = await run(tools.memory_propose, { statement: "Відстрочка 30 днів", value_json: "{нема" });
@@ -173,6 +184,8 @@ describe("memory_update", () => {
       'Claim c5 is now at revision 4: "У євро". Re-issue with expected_revision=4 if the change still applies.',
     );
     expect(proposeCandidate).not.toHaveBeenCalled();
+    // Простір потрібен лише конфлікту, а більшість програшів CAS другого не має.
+    expect(findCurrentHead).not.toHaveBeenCalled();
   });
 
   it("забутий клейм не витікає нічим, крім «його немає»", async () => {
@@ -184,8 +197,8 @@ describe("memory_update", () => {
     );
   });
 
-  it("ДРУГИЙ mismatch по тому ж клейму фіксує конфлікт у просторі клейма", async () => {
-    updateClaim.mockResolvedValue({ ok: false, current: head({ id: "c5", revision: 4 }) });
+  it("ДРУГИЙ mismatch по тому ж клейму фіксує конфлікт у просторі клейма, зберігаючи чутливість", async () => {
+    updateClaim.mockResolvedValue({ ok: false, current: head({ id: "c5", revision: 4, sensitive: true }) });
     // Клейм знайшовся у project-просторі → саме туди й лягає конфлікт.
     findCurrentHead.mockResolvedValue(head({ id: "c5", revision: 4 }));
     proposeCandidate.mockResolvedValue({ state: "conflict", candidateId: "cand3" });
@@ -204,13 +217,15 @@ describe("memory_update", () => {
         spaceId: PROJECT_SPACE,
         statement: "У доларах",
         provenance: { kind: "derived", messageId: "m1" },
+        // Чутливість — властивість факту; conflict-гейт її не заміняє.
+        sensitive: true,
         evidence: [{ messageId: "m1" }],
       }),
     );
   });
 
   it("клейм не з project-простору → конфлікт лягає в user-простір", async () => {
-    updateClaim.mockResolvedValue({ ok: false, current: null });
+    updateClaim.mockResolvedValue({ ok: false, current: head({ id: "c5", revision: 4 }) });
     findCurrentHead.mockResolvedValue(null);
     proposeCandidate.mockResolvedValue({ state: "conflict", candidateId: "cand4" });
     const tools = await make();
@@ -218,6 +233,19 @@ describe("memory_update", () => {
     await run(tools.memory_update, { claim_id: "cX", expected_revision: 1, statement: "У доларах" }, "call-1");
     await run(tools.memory_update, { claim_id: "cX", expected_revision: 1, statement: "У доларах" }, "call-2");
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
+  });
+
+  it("другий mismatch по НЕІСНУЮЧОМУ клеймі не вигадує конфлікт ні з чим", async () => {
+    updateClaim.mockResolvedValue({ ok: false, current: null });
+    const tools = await make();
+
+    for (const call of ["call-1", "call-2", "call-3"]) {
+      expect(await run(tools.memory_update, { claim_id: "cX", expected_revision: 1, statement: "У доларах" }, call)).toBe(
+        "That claim no longer exists (it was forgotten).",
+      );
+    }
+    expect(proposeCandidate).not.toHaveBeenCalled();
+    expect(findCurrentHead).not.toHaveBeenCalled();
   });
 
   it("дзеркало mismatch-ів живе рівно один хід", async () => {
@@ -320,6 +348,27 @@ describe("memory_search", () => {
     );
     const tools = await make();
     expect((await run(tools.memory_search, { query: "факт" })).split("\n")).toHaveLength(20);
+  });
+
+  it("переповнений проєкт не витісняє user-простір зі списку", async () => {
+    // Без поділу стелі двадцять проєктних збігів зробили б user-клейми не лише
+    // невидимими, а й невиправними: id для update/forget беруться тільки звідси.
+    listHeadClaims.mockImplementation(async (spaceId: string) =>
+      Array.from({ length: 30 }, (_, i) =>
+        head({ id: `${spaceId === PROJECT_SPACE ? "p" : "u"}${i}`, statement: `факт ${i}` }),
+      ),
+    );
+    const tools = await make();
+    const lines = (await run(tools.memory_search, { query: "факт" })).split("\n");
+    expect(lines).toHaveLength(20);
+    expect(lines.filter((l) => l.startsWith("[p"))).toHaveLength(10);
+    expect(lines.filter((l) => l.startsWith("[u"))).toHaveLength(10);
+  });
+
+  it("поза проєктом scope:'project' не підмінює простір, а віддає порожньо", async () => {
+    const tools = await make({ projectId: null, projectOwnerUserId: undefined });
+    expect(await run(tools.memory_search, { query: "х", scope: "project" })).toBe("No saved memory matches.");
+    expect(listHeadClaims).not.toHaveBeenCalled();
   });
 });
 

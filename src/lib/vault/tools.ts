@@ -83,14 +83,16 @@ export async function makeVaultMemoryTools(ctx: {
   const allowedSpaceIds = projectSpaceId ? [userSpaceId, projectSpaceId] : [userSpaceId];
   const actor = { kind: "agent" } as const;
 
-  /** Дзеркало програшів CAS ЦЬОГО ходу: claim_id → простір клейма. Живе в
-   *  замиканні фабрики, а фабрику кличуть раз на хід — тож стан гасне разом із
-   *  ходом за побудовою, без жодного прибирання. */
-  const mismatched = new Map<string, string>();
+  /** Клейми, які вже програли CAS у ЦЬОМУ ході. Живе в замиканні фабрики, а
+   *  фабрику кличуть раз на хід — тож стан гасне разом із ходом за побудовою,
+   *  без жодного прибирання. Тримає лише id: простір потрібен рівно там, де
+   *  пишеться конфлікт, і зонд за ним живе там само. */
+  const mismatched = new Set<string>();
 
   /** У якому просторі лежить клейм. `ClaimHead` не несе `spaceId` (текст клейма
    *  віддається лише тим, хто пройшов space-фільтр), тож єдиний спосіб — спитати
-   *  вужчим скоупом. Один зайвий SELECT, і лише на програші CAS. */
+   *  вужчим скоупом. Викликається лише з конфліктної гілки: більшість програшів
+   *  CAS другого не має, і платити за них SELECT-ом наперед нема за що. */
   const claimSpaceId = async (claimId: string) =>
     projectSpaceId && (await findCurrentHead(claimId, [projectSpaceId])) ? projectSpaceId : userSpaceId;
 
@@ -117,15 +119,25 @@ export async function makeVaultMemoryTools(ctx: {
                 // `ClaimHead` не несе `recorded_at`.
                 (projectSpaceId ? [projectSpaceId, userSpaceId] : [userSpaceId]);
         const needle = query.toLowerCase();
-        const hits: ClaimHead[] = [];
+        const buckets: ClaimHead[][] = [];
         for (const spaceId of spaceIds) {
           // Еквівалент `ILIKE '%query%'` по statement АБО slot_key. Свідомо
           // примітивно: лексичний пошук — план C, і робити його тут наполовину
           // означало б два різні пошуки в одній системі.
-          for (const c of await listHeadClaims(spaceId)) {
-            if (c.statement.toLowerCase().includes(needle) || c.slotKey?.toLowerCase().includes(needle)) hits.push(c);
-          }
+          buckets.push(
+            (await listHeadClaims(spaceId)).filter(
+              (c) => c.statement.toLowerCase().includes(needle) || c.slotKey?.toLowerCase().includes(needle),
+            ),
+          );
         }
+        // Стеля ділиться між просторами, а не з'їдається першим. Пошук — ЄДИНИЙ
+        // спосіб дістати `[id@revision]`, тож двадцять збігів у проєкті інакше
+        // робили б user-простір не лише невидимим, а й невиправним: ні update, ні
+        // forget нема чим адресувати. Недобір одного простору доливає інший, тож
+        // стеля використовується повністю.
+        const quota = Math.ceil(SEARCH_LIMIT / Math.max(buckets.length, 1));
+        const hits = buckets.flatMap((b) => b.slice(0, quota));
+        for (const b of buckets) for (const c of b.slice(quota)) if (hits.length < SEARCH_LIMIT) hits.push(c);
         return hits.length ? hits.slice(0, SEARCH_LIMIT).map(line).join("\n") : "No saved memory matches.";
       },
     }),
@@ -212,9 +224,13 @@ export async function makeVaultMemoryTools(ctx: {
         // наступний update моделі йшов би за мертвою адресою.
         if (res.ok) return `Updated. The claim is now [${res.id}@${res.revision}].`;
 
-        const firstSpaceId = mismatched.get(claim_id);
-        if (firstSpaceId === undefined) {
-          mismatched.set(claim_id, await claimSpaceId(claim_id));
+        // Клейма немає (ланцюг забуто АБО він не з наших просторів) — і другий
+        // програш цього не змінює. Конфлікт тут був би суперечкою з порожнечею:
+        // людині показали б «розв'яжіть» проти факту, якого нема, а текст моделі
+        // заїхав би у сховище за неіснуючим id.
+        if (!res.current) return mismatch(null);
+        if (!mismatched.has(claim_id)) {
+          mismatched.add(claim_id);
           return mismatch(res.current);
         }
         // Другий програш поспіль по тому ж клейму — це вже не «перечитай», а
@@ -224,12 +240,17 @@ export async function makeVaultMemoryTools(ctx: {
         if (statement === undefined) return mismatch(res.current);
         await proposeCandidate({
           idempotencyKey: `${ctx.messageId}:${toolCallId}:conflict`,
-          spaceId: firstSpaceId,
+          spaceId: await claimSpaceId(claim_id),
           originMessageId: ctx.messageId,
           statement,
           // Не `user_direct` навіть за дослівного збігу: активувати текст, який
           // ЩОЙНО програв CAS, означало б обійти голову замість розв'язати конфлікт.
           provenance: { kind: "derived", messageId: ctx.messageId },
+          // Чутливість — властивість ФАКТУ, а не рішення політики: `forceState`
+          // однаково веде в conflict, тож не передати її означало б просто
+          // загубити прапорець на рядку, який читатиме людина (і все, що по ньому
+          // ховає текст).
+          sensitive: res.current.sensitive,
           evidence: [{ messageId: ctx.messageId }],
           forceState: "conflict",
         });
