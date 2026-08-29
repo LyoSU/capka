@@ -3,11 +3,11 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from "vites
 /**
  * Opt-in: RUN_INTEGRATION=1 DATABASE_URL=... npx vitest run src/lib/vault
  *
- * Сервіс клеймів існує заради трьох речей, і жодну з них не можна перевірити без
- * справжнього Postgres: CAS-крок, який серіалізує два одночасні supersede на
- * блокуванні рядка; два партіальні unique-індекси, які ловлять розгалуження;
- * і атомарність ходу всередині ЧУЖОЇ транзакції. In-memory дубль перевіряв би
- * власну уяву про кожну з них.
+ * The claims service exists for three things, none of which can be checked without
+ * a real Postgres: the CAS step that serializes two concurrent supersedes on a row
+ * lock; the two partial unique indexes that catch a fork; and atomicity of a move
+ * inside SOMEONE ELSE'S transaction. An in-memory double would be testing its own
+ * imagination about each of them.
  */
 import { db, pool } from "@/lib/db";
 import { auditEvents } from "@/lib/db/schema";
@@ -25,12 +25,13 @@ import {
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
-/** Префікс фікстур: усе прибирається одним DELETE по просторах (каскад зносить
- *  клейми з їхніми nanoid-ами, ноти, прив'язки, докази й аудит). */
+/** Fixture prefix: everything is cleaned up by one DELETE over the spaces (the
+ *  cascade takes the claims with their nanoid ids, the notes, the attachments, the
+ *  evidence and the audit rows). */
 const P = "clmtest-";
 const OWNER = `${P}owner`;
-const SPACE_A = `${P}space-a`; // «мій» простір
-const SPACE_B = `${P}space-b`; // чужий: перевіряє authz
+const SPACE_A = `${P}space-a`; // "my" space
+const SPACE_B = `${P}space-b`; // someone else's: exercises authz
 const NOTE_A = `${P}note-a`;
 const ACTOR: Actor = { kind: "user", id: OWNER };
 
@@ -57,9 +58,9 @@ const claimRow = async (id: string) => {
   return rows[0];
 };
 
-/** Розгалуження ланцюга: два рядки з тим самим supersedes. Партіальний unique
- *  `uniq_vclaims_one_successor` мусить робити це неможливим — тест дивиться на
- *  результат, а не на індекс. */
+/** A forked chain: two rows with the same supersedes. The partial unique
+ *  `uniq_vclaims_one_successor` has to make that impossible — the test looks at the
+ *  outcome, not at the index. */
 const branchedChains = async (spaceId: string) => {
   const { rows } = await pool.query<{ n: string }>(
     `SELECT count(*) AS n FROM (
@@ -72,8 +73,8 @@ const branchedChains = async (spaceId: string) => {
   return Number(rows[0].n);
 };
 
-/** users.email теж unique — таргетований ON CONFLICT (id) кинув би 23505 на
- *  залишковому рядку з тим самим email, а це виглядало б як skipped-тест. */
+/** users.email is unique too — a targeted ON CONFLICT (id) would raise 23505 on a
+ *  leftover row with the same email, which reads like a skipped test. */
 const mkUser = (id: string) =>
   q(
     `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
@@ -90,18 +91,19 @@ const fixtures = async () => {
     `${P}proj`,
     OWNER,
   ]);
-  await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Тема', 'memory_topic')`, [
+  await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Topic', 'memory_topic')`, [
     NOTE_A,
     SPACE_A,
   ]);
 };
 
-/** Клейм-фікстура: створюється сервісом, бо саме його вихід і є входом решти. */
+/** The claim fixture is created through the service, because its output is exactly
+ *  what everything else takes as input. */
 const seed = (over: Partial<Parameters<typeof createClaim>[0]> = {}) =>
   createClaim(
     {
       spaceId: SPACE_A,
-      statement: "початковий факт",
+      statement: "the initial fact",
       origin: { type: "chat" },
       reviewStatus: "unverified",
       ...over,
@@ -109,9 +111,10 @@ const seed = (over: Partial<Parameters<typeof createClaim>[0]> = {}) =>
     ACTOR,
   );
 
-/** tx, який кидає рівно на вставці аудит-події — тобто ПІСЛЯ вставки наступника
- *  й переносу прив'язок. Проксі, а не spyOn на хендлі: drizzle тримає внутрішні
- *  поля під символами, тож підміняється лише один метод, решта йде до оригіналу. */
+/** A tx that throws exactly on the audit-event insert — that is, AFTER the
+ *  successor row and the attachment move. A proxy rather than a spyOn on the
+ *  handle: drizzle keeps internal fields under symbols, so only one method is
+ *  swapped and everything else reaches the original. */
 const failOnAuditInsert = <T extends object>(tx: T, boom: Error): T =>
   new Proxy(tx, {
     get(target, prop) {
@@ -140,9 +143,9 @@ run("vault claims", () => {
     await fixtures();
   });
 
-  it("createClaim пише клейм, прив'язку до теми і подію claim.create", async () => {
+  it("createClaim writes the claim, the topic attachment and a claim.create event", async () => {
     const { id, revision } = await seed({
-      statement: "Улюблена кава — фільтр",
+      statement: "Favourite coffee — filter",
       slotKey: "coffee",
       value: { drink: "filter" },
       reviewStatus: "confirmed",
@@ -152,7 +155,7 @@ run("vault claims", () => {
 
     expect(revision).toBe(1);
     const row = await claimRow(id);
-    expect(row.statement).toBe("Улюблена кава — фільтр");
+    expect(row.statement).toBe("Favourite coffee — filter");
     expect(row.slot_key).toBe("coffee");
     expect(row.value).toEqual({ drink: "filter" });
     expect(row.origin).toEqual({ type: "chat" });
@@ -164,14 +167,14 @@ run("vault claims", () => {
 
     expect(await count("note_claims", "note_id = $1 AND claim_id = $2", [NOTE_A, id])).toBe(1);
     expect(await count("audit_events", "space_id = $1 AND action = 'claim.create' AND subject_id = $2", [SPACE_A, id])).toBe(1);
-    // Текст чутливого клейма не має жити ще й в аудиті.
+    // A sensitive claim's text must not also live in the audit log.
     const { rows } = await pool.query<{ payload: unknown }>(`SELECT payload FROM audit_events WHERE subject_id = $1`, [id]);
-    expect(JSON.stringify(rows[0].payload)).not.toContain("фільтр");
+    expect(JSON.stringify(rows[0].payload)).not.toContain("filter");
   });
 
-  it("supersede: старий рядок лишається з текстом, новий несе supersedes і +1 ревізію", async () => {
+  it("supersede: the old row keeps its text, the new one carries supersedes and +1 revision", async () => {
     const { id: oldId } = await seed({
-      statement: "Працює в Києві",
+      statement: "Works in Kyiv",
       slotKey: "city",
       value: { city: "Kyiv" },
       reviewStatus: "confirmed",
@@ -182,7 +185,7 @@ run("vault claims", () => {
     const res = await updateClaim({
       claimId: oldId,
       expectedRevision: 1,
-      patch: { statement: "Працює у Львові", value: { city: "Lviv" } },
+      patch: { statement: "Works in Lviv", value: { city: "Lviv" } },
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -190,26 +193,27 @@ run("vault claims", () => {
     if (!res.ok) throw new Error("unreachable");
     expect(res.revision).toBe(2);
 
-    // Текст попередника НІКОЛИ не UPDATE-иться — історія читається дослівно.
+    // The predecessor's text is NEVER UPDATEd — history reads verbatim.
     const prev = await claimRow(oldId);
-    expect(prev.statement).toBe("Працює в Києві");
+    expect(prev.statement).toBe("Works in Kyiv");
     expect(prev.superseded_at).not.toBeNull();
     expect(prev.revision).toBe(1);
 
     const next = await claimRow(res.id);
-    expect(next.statement).toBe("Працює у Львові");
+    expect(next.statement).toBe("Works in Lviv");
     expect(next.value).toEqual({ city: "Lviv" });
     expect(next.supersedes).toBe(oldId);
     expect(next.revision).toBe(2);
     expect(next.superseded_at).toBeNull();
-    // origin/sensitive/reviewStatus копіюються з попередника, а не скидаються.
+    // origin/sensitive/reviewStatus are copied from the predecessor, not reset.
     expect(next.origin).toEqual({ type: "chat" });
     expect(next.sensitive).toBe(true);
     expect(next.review_status).toBe("confirmed");
-    // Слот не патчили — успадкований, і активна голова слоту тепер наступник.
+    // The slot was not patched — it is inherited, and the slot's active head is now
+    // the successor.
     expect(next.slot_key).toBe("city");
 
-    // Прив'язку до теми перенесено: стара її не тримає, нова тримає.
+    // The topic attachment moved: the old row no longer holds it, the new one does.
     expect(await count("note_claims", "claim_id = $1", [oldId])).toBe(0);
     expect(await count("note_claims", "note_id = $1 AND claim_id = $2", [NOTE_A, res.id])).toBe(1);
 
@@ -218,33 +222,33 @@ run("vault claims", () => {
     ).toBe(1);
   });
 
-  it("mismatch ревізії: нуль слідів — ні наступника, ні події, ні дотику до рядка", async () => {
+  it("revision mismatch: zero trace — no successor, no event, no touch to the row", async () => {
     const { id } = await seed({ slotKey: "mismatch", topicNoteId: NOTE_A });
 
     const res = await updateClaim({
       claimId: id,
       expectedRevision: 7,
-      patch: { statement: "не має статись" },
+      patch: { statement: "must not happen" },
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
 
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error("unreachable");
-    // Ланцюг живий і незайманий, тож програвший бачить актуальну голову.
+    // The chain is alive and untouched, so the loser sees the current head.
     expect(res.current?.id).toBe(id);
     expect(res.current?.revision).toBe(1);
 
     const row = await claimRow(id);
     expect(row.superseded_at).toBeNull();
-    expect(row.statement).toBe("початковий факт");
+    expect(row.statement).toBe("the initial fact");
     expect(await count("vault_claims", "supersedes = $1", [id])).toBe(0);
     expect(await count("audit_events", "space_id = $1 AND action = 'claim.supersede'", [SPACE_A])).toBe(0);
     expect(await count("note_claims", "claim_id = $1", [id])).toBe(1);
   });
 
-  it("ГОНКА update/update: рівно один ok і РІВНО одна активна голова", async () => {
-    const { id } = await seed({ statement: "початок", slotKey: "race" });
+  it("RACE update/update: exactly one ok and EXACTLY one active head", async () => {
+    const { id } = await seed({ statement: "the start", slotKey: "race" });
     const attempt = (statement: string) =>
       updateClaim({
         claimId: id,
@@ -254,35 +258,35 @@ run("vault claims", () => {
         actor: ACTOR,
       });
 
-    // Жодної черги: обидві транзакції стартують одночасно й серіалізуються
-    // виключно на блокуванні рядка в CAS-кроці.
-    const settled = await Promise.allSettled([attempt("гілка A"), attempt("гілка B")]);
+    // No queueing: both transactions start at once and are serialized solely by the
+    // row lock in the CAS step.
+    const settled = await Promise.allSettled([attempt("branch A"), attempt("branch B")]);
     expect(settled.map((s) => s.status)).toEqual(["fulfilled", "fulfilled"]);
     const results = settled.flatMap((s) => (s.status === "fulfilled" ? [s.value] : []));
 
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     const loser = results.find((r) => !r.ok);
-    // Програвший не мовчить: він бачить голову, яку щойно поставив переможець.
+    // The loser is not left silent: it sees the head the winner just installed.
     expect(loser && !loser.ok && loser.current?.revision).toBe(2);
 
-    // Голову рахуємо з БАЗИ, а не з повернених значень.
+    // The head is counted from the DATABASE, not from the returned values.
     expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(1);
     expect(await count("vault_claims", "supersedes = $1", [id])).toBe(1);
     expect(await branchedChains(SPACE_A)).toBe(0);
   });
 
-  it("ГОНКА update/forget: переможець один, розгалуження немає", async () => {
-    const { id } = await seed({ statement: "спірне", slotKey: "race2" });
+  it("RACE update/forget: one winner, no fork", async () => {
+    const { id } = await seed({ statement: "contested", slotKey: "race2" });
 
     const settled = await Promise.allSettled([
       updateClaim({
         claimId: id,
         expectedRevision: 1,
-        patch: { statement: "оновлене" },
+        patch: { statement: "updated" },
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       }),
-      forgetClaim({ claimId: id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR, reason: "застаріле" }),
+      forgetClaim({ claimId: id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR, reason: "stale" }),
     ]);
     expect(settled.map((s) => s.status)).toEqual(["fulfilled", "fulfilled"]);
     const [upd, forget] = settled.map((s) => (s.status === "fulfilled" ? s.value : null));
@@ -290,19 +294,19 @@ run("vault claims", () => {
     expect([upd?.ok, forget?.ok].filter(Boolean)).toHaveLength(1);
     const updateWon = upd?.ok === true;
 
-    // Переміг update — лишилась одна голова; переміг forget — жодної.
+    // update won → one head remains; forget won → none does.
     expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(updateWon ? 1 : 0);
     expect(await count("vault_claims", "supersedes = $1", [id])).toBe(updateWon ? 1 : 0);
     expect(await branchedChains(SPACE_A)).toBe(0);
-    // Рівно одна подія на ланцюг: програвший нічого не пише.
+    // Exactly one event per chain: the loser writes nothing.
     expect(await count("audit_events", "space_id = $1 AND action IN ('claim.supersede','claim.forget')", [SPACE_A])).toBe(1);
-    // Єдиний нескопований прочит у файлі, і `undefined` тут написано явно —
-    // саме тому аргумент обов'язковий: пропустити його вже не можна.
+    // The only unscoped read in this file, and `undefined` is written out here on
+    // purpose — which is why the argument is required: it can no longer be omitted.
     expect(await findCurrentHead(id, undefined)).toEqual(updateWon ? expect.objectContaining({ revision: 2 }) : null);
   });
 
-  it("authz: чужий простір дає {ok:false, current:null} без витоку тексту", async () => {
-    const secret = "таємниця чужого простору";
+  it("authz: another space yields {ok:false, current:null} with no text leak", async () => {
+    const secret = "a secret from another space";
     const foreign = await createClaim(
       { spaceId: SPACE_B, statement: secret, slotKey: "secret", origin: {}, reviewStatus: "confirmed" },
       ACTOR,
@@ -311,7 +315,7 @@ run("vault claims", () => {
     const upd = await updateClaim({
       claimId: foreign.id,
       expectedRevision: 1,
-      patch: { statement: "спроба" },
+      patch: { statement: "an attempt" },
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -322,36 +326,36 @@ run("vault claims", () => {
       actor: ACTOR,
     });
 
-    // Рівно та сама відповідь, що й на «ланцюг закінчено forget-ом»: із неї не
-    // видно навіть того, що клейм існує.
+    // Exactly the same answer as "the chain was ended by a forget": it does not even
+    // reveal that the claim exists.
     expect(upd).toEqual({ ok: false, current: null });
     expect(forget).toEqual({ ok: false, current: null });
     expect(JSON.stringify([upd, forget])).not.toContain(secret);
-    // Прямий запит з чужим фільтром теж мовчить.
+    // A direct lookup under the other filter is silent too.
     expect(await findCurrentHead(foreign.id, [SPACE_A])).toBeNull();
-    // ...а зі своїм — ні, інакше тест був би зелений на зламаному лукапі.
+    // ...but not under its own, or the test would be green on a broken lookup.
     expect((await findCurrentHead(foreign.id, [SPACE_B]))?.statement).toBe(secret);
 
-    // Порожній список просторів — теж «нічого», а не «усе».
+    // An empty space list also means "nothing", never "everything".
     expect(await findCurrentHead(foreign.id, [])).toBeNull();
 
-    // І нічого не зачеплено.
+    // And nothing was touched.
     const row = await claimRow(foreign.id);
     expect(row.superseded_at).toBeNull();
     expect(await count("audit_events", "space_id = $1 AND action <> 'claim.create'", [SPACE_B])).toBe(0);
   });
 
-  // Дві форми виклику, один результат: `Ex` дозволяє передати модульний `db`
-  // ЯВНО, і це пул, а не транзакція. Якби сервіс відкривав власну транзакцію
-  // лише на відсутність аргументу, колер, який передав `db` «щоб було», тихо
-  // писав би чотири окремі стейтменти замість ходу.
+  // Two call shapes, one result: `Ex` permits passing the module-level `db`
+  // EXPLICITLY, and that is a pool, not a transaction. If the service opened its own
+  // transaction only on a missing argument, a caller who passed `db` "for tidiness"
+  // would quietly write four separate statements instead of one move.
   it.each([
-    ["ex не передано", undefined],
-    ["ex === db, тобто пул", db],
-  ] as const)("атомарність (%s): збій після вставки наступника відкочує ВЕСЬ хід", async (_label, passed) => {
-    const { id } = await seed({ statement: "до збою", slotKey: "atomic", topicNoteId: NOTE_A });
+    ["ex omitted", undefined],
+    ["ex === db, i.e. the pool", db],
+  ] as const)("atomicity (%s): a failure after the successor insert rolls back the WHOLE move", async (_label, passed) => {
+    const { id } = await seed({ statement: "before the failure", slotKey: "atomic", topicNoteId: NOTE_A });
 
-    const boom = new Error("збій після наступника");
+    const boom = new Error("failure after the successor");
     const realTransaction = db.transaction.bind(db);
     const spy = vi.spyOn(db, "transaction").mockImplementation((async (cb: (tx: Ex) => Promise<unknown>) =>
       realTransaction((tx) => cb(failOnAuditInsert(tx, boom)))) as unknown as typeof db.transaction);
@@ -362,7 +366,7 @@ run("vault claims", () => {
           {
             claimId: id,
             expectedRevision: 1,
-            patch: { statement: "після збою" },
+            patch: { statement: "after the failure" },
             allowedSpaceIds: [SPACE_A],
             actor: ACTOR,
           },
@@ -373,37 +377,37 @@ run("vault claims", () => {
       spy.mockRestore();
     }
 
-    // Відкотилось УСЕ: і CAS, і наступник, і перенос прив'язки.
+    // EVERYTHING rolled back: the CAS, the successor and the attachment move.
     const row = await claimRow(id);
     expect(row.superseded_at).toBeNull();
-    expect(row.statement).toBe("до збою");
+    expect(row.statement).toBe("before the failure");
     expect(await count("vault_claims", "supersedes = $1", [id])).toBe(0);
     expect(await count("note_claims", "claim_id = $1", [id])).toBe(1);
     expect(await count("audit_events", "space_id = $1 AND action = 'claim.supersede'", [SPACE_A])).toBe(0);
-    // Сервіс лишився робочим — спай знято, а не «зафіксовано» назавжди.
+    // The service still works — the spy was removed, not left latched forever.
     const retry = await updateClaim({
       claimId: id,
       expectedRevision: 1,
-      patch: { statement: "після відкату" },
+      patch: { statement: "after the rollback" },
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
     expect(retry.ok).toBe(true);
   });
 
-  it("ланцюг із 5 версій: findCurrentHead знаходить голову з будь-якої ланки", async () => {
-    const first = await seed({ statement: "версія 1", slotKey: "chain" });
+  it("a 5-version chain: findCurrentHead finds the head from any link", async () => {
+    const first = await seed({ statement: "version 1", slotKey: "chain" });
     const chain = [first.id];
     let cur = first;
     for (let i = 2; i <= 5; i++) {
       const res = await updateClaim({
         claimId: cur.id,
         expectedRevision: cur.revision,
-        patch: { statement: `версія ${i}` },
+        patch: { statement: `version ${i}` },
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       });
-      if (!res.ok) throw new Error(`ланка ${i} не пройшла`);
+      if (!res.ok) throw new Error(`link ${i} did not go through`);
       cur = { id: res.id, revision: res.revision };
       chain.push(res.id);
     }
@@ -413,30 +417,30 @@ run("vault claims", () => {
       const head = await findCurrentHead(link, [SPACE_A]);
       expect(head?.id).toBe(cur.id);
       expect(head?.revision).toBe(5);
-      expect(head?.statement).toBe("версія 5");
+      expect(head?.statement).toBe("version 5");
     }
     expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(1);
     expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(5);
   });
 
-  it("forget: наступника немає, докази й прив'язки лишаються, голови немає", async () => {
-    const { id } = await seed({ statement: "забудь мене", slotKey: "forget", topicNoteId: NOTE_A });
-    await attachEvidence(id, { relation: "supports", messageId: `${P}msg`, quoteSnapshot: "цитата" });
+  it("forget: no successor, evidence and attachments stay, no head remains", async () => {
+    const { id } = await seed({ statement: "forget me", slotKey: "forget", topicNoteId: NOTE_A });
+    await attachEvidence(id, { relation: "supports", messageId: `${P}msg`, quoteSnapshot: "a quote" });
 
     const res = await forgetClaim({
       claimId: id,
       expectedRevision: 1,
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
-      reason: "користувач попросив",
+      reason: "the user asked",
     });
     expect(res).toEqual({ ok: true });
 
     const row = await claimRow(id);
     expect(row.superseded_at).not.toBeNull();
-    expect(row.statement).toBe("забудь мене");
+    expect(row.statement).toBe("forget me");
     expect(await count("vault_claims", "supersedes = $1", [id])).toBe(0);
-    // Історія ціла: докази й прив'язки лишаються на неактивному рядку.
+    // History is intact: evidence and attachments stay on the inactive row.
     expect(await count("claim_evidence", "claim_id = $1 AND relation = 'supports'", [id])).toBe(1);
     expect(await count("note_claims", "claim_id = $1", [id])).toBe(1);
 
@@ -449,11 +453,11 @@ run("vault claims", () => {
       [id],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].payload.reason).toBe("користувач попросив");
+    expect(rows[0].payload.reason).toBe("the user asked");
   });
 
-  it("update ПІСЛЯ forget: {ok:false, current:null} і жодного нового рядка", async () => {
-    const { id } = await seed({ statement: "уже забуте", slotKey: "gone" });
+  it("update AFTER forget: {ok:false, current:null} and not one new row", async () => {
+    const { id } = await seed({ statement: "already forgotten", slotKey: "gone" });
     expect(await forgetClaim({ claimId: id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR })).toEqual({
       ok: true,
     });
@@ -461,7 +465,7 @@ run("vault claims", () => {
     const res = await updateClaim({
       claimId: id,
       expectedRevision: 1,
-      patch: { statement: "воскресіння" },
+      patch: { statement: "resurrection" },
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -470,32 +474,32 @@ run("vault claims", () => {
     expect(await count("audit_events", "space_id = $1 AND action = 'claim.supersede'", [SPACE_A])).toBe(0);
   });
 
-  it("listHeadClaims: лише голови, ORDER BY recorded_at DESC, id — і фільтри", async () => {
-    const c1 = await seed({ statement: "перший", slotKey: "s1", reviewStatus: "confirmed", topicNoteId: NOTE_A });
-    const c2 = await seed({ statement: "другий", slotKey: "s2", topicNoteId: NOTE_A });
-    const c3 = await seed({ statement: "третій", reviewStatus: "confirmed" });
+  it("listHeadClaims: heads only, ORDER BY recorded_at DESC, id — plus the filters", async () => {
+    const c1 = await seed({ statement: "first", slotKey: "s1", reviewStatus: "confirmed", topicNoteId: NOTE_A });
+    const c2 = await seed({ statement: "second", slotKey: "s2", topicNoteId: NOTE_A });
+    const c3 = await seed({ statement: "third", reviewStatus: "confirmed" });
     const upd = await updateClaim({
       claimId: c2.id,
       expectedRevision: 1,
-      patch: { statement: "другий, версія 2" },
+      patch: { statement: "second, version 2" },
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
     if (!upd.ok) throw new Error("unreachable");
     const sorted = (ids: string[]) => [...ids].sort();
 
-    // Різні recorded_at: перший ключ — спадний, тож наступник (наймолодший) іде
-    // першим, а найстаріший клейм — останнім.
+    // Distinct recorded_at values: the first key is descending, so the successor (the
+    // youngest) comes first and the oldest claim last.
     await q(`UPDATE vault_claims SET recorded_at = '2026-01-01 00:00:00' WHERE id = $1`, [c1.id]);
     await q(`UPDATE vault_claims SET recorded_at = '2026-01-02 00:00:00' WHERE id = $1`, [c3.id]);
     await q(`UPDATE vault_claims SET recorded_at = '2026-01-03 00:00:00' WHERE id = $1`, [upd.id]);
     expect((await listHeadClaims(SPACE_A)).map((h) => h.id)).toEqual([upd.id, c3.id, c1.id]);
 
-    // Рівний recorded_at — звичайна ситуація, коли міграція пише пачку клеймів
-    // однією транзакцією. Тоді порядок тримає ЛИШЕ другий ключ, і без нього
-    // маніфест плану A не був би байт-у-байт стабільним. Контроль рахує сам
-    // Postgres: сортування text залежить від колації бази, тож JS-ний .sort()
-    // тут був би іншим порядком, а не тим самим.
+    // Equal recorded_at is the ordinary case when a migration writes a batch of
+    // claims in one transaction. Then ONLY the second key holds the order, and
+    // without it plan A's manifest would not be byte-stable. The control is computed
+    // by Postgres itself: text sorting depends on the database collation, so a JS
+    // `.sort()` here would be a different order, not the same one.
     await q(`UPDATE vault_claims SET recorded_at = '2026-01-01 00:00:00' WHERE space_id = $1`, [SPACE_A]);
     const { rows: byId } = await pool.query<{ id: string }>(
       `SELECT id FROM vault_claims WHERE space_id = $1 AND superseded_at IS NULL ORDER BY id`,
@@ -504,30 +508,30 @@ run("vault claims", () => {
     const heads = await listHeadClaims(SPACE_A);
     expect(heads.map((h) => h.id)).toEqual(byId.map((r) => r.id));
     expect(sorted(heads.map((h) => h.id))).toEqual(sorted([c1.id, c3.id, upd.id]));
-    expect(heads.map((h) => h.statement)).toContain("другий, версія 2");
+    expect(heads.map((h) => h.statement)).toContain("second, version 2");
 
     expect((await listHeadClaims(SPACE_A, { slotKey: "s1" })).map((h) => h.id)).toEqual([c1.id]);
     const confirmed = await listHeadClaims(SPACE_A, { onlyConfirmed: true });
     expect(sorted(confirmed.map((h) => h.id))).toEqual(sorted([c1.id, c3.id]));
-    // Прив'язка переїхала на наступника, тож фільтр по темі бачить саме його.
+    // The attachment moved to the successor, so the topic filter sees exactly that.
     const byTopic = await listHeadClaims(SPACE_A, { topicNoteId: NOTE_A });
     expect(sorted(byTopic.map((h) => h.id))).toEqual(sorted([c1.id, upd.id]));
-    // Чужий простір порожній — фільтр по простору не «протікає».
+    // The other space is empty — the space filter does not leak.
     expect(await listHeadClaims(SPACE_B)).toEqual([]);
 
     const bySlot = await headBySlot(SPACE_A, "s2");
     expect(bySlot?.id).toBe(upd.id);
     expect(bySlot?.revision).toBe(2);
-    expect(await headBySlot(SPACE_A, "немає такого слоту")).toBeNull();
+    expect(await headBySlot(SPACE_A, "no such slot")).toBeNull();
   });
 
-  it("усі функції читають і пишуть ЧЕРЕЗ переданий ex", async () => {
-    // Стан ДО транзакції: три закомічені клейми, один із них прив'язаний до
-    // теми. Кожен запис усередині транзакції має закомічений рядок, який він міг
-    // би зачепити, — інакше «нічого не лишилось» нічого й не доводить.
-    const upd = await seed({ statement: "для оновлення", slotKey: "ex-upd", topicNoteId: NOTE_A });
-    const forget = await seed({ statement: "для забуття", slotKey: "ex-forget" });
-    const evidence = await seed({ statement: "для доказу", slotKey: "ex-evidence" });
+  it("every function reads and writes THROUGH the ex it was given", async () => {
+    // State BEFORE the transaction: three committed claims, one of them attached to a
+    // topic. Every write inside the transaction has a committed row it could touch —
+    // otherwise "nothing remained" proves nothing.
+    const upd = await seed({ statement: "to be updated", slotKey: "ex-upd", topicNoteId: NOTE_A });
+    const forget = await seed({ statement: "to be forgotten", slotKey: "ex-forget" });
+    const evidence = await seed({ statement: "to carry evidence", slotKey: "ex-evidence" });
 
     const boom = new Error("rollback");
     const seen: Record<string, unknown> = {};
@@ -536,7 +540,7 @@ run("vault claims", () => {
         const created = await createClaim(
           {
             spaceId: SPACE_A,
-            statement: "створено в транзакції",
+            statement: "created inside the transaction",
             slotKey: "ex-created",
             origin: {},
             reviewStatus: "unverified",
@@ -545,26 +549,26 @@ run("vault claims", () => {
           ACTOR,
           tx,
         );
-        // Читання теж мусить іти через ex: повз нього незакомічений рядок не
-        // видно, і це впало б тут, а не тихо роз'їхалось у Task 5.
+        // Reads must go through ex as well: around it the uncommitted row is invisible,
+        // and that would fail here rather than drift silently into Task 5.
         seen.bySlot = (await headBySlot(SPACE_A, "ex-created", tx))?.id;
 
         const superseded = await updateClaim(
           {
             claimId: upd.id,
             expectedRevision: 1,
-            patch: { statement: "оновлено в транзакції" },
+            patch: { statement: "updated inside the transaction" },
             allowedSpaceIds: [SPACE_A],
             actor: ACTOR,
           },
           tx,
         );
-        if (!superseded.ok) throw new Error("CAS не мав програти");
+        if (!superseded.ok) throw new Error("the CAS should not have lost");
         seen.head = (await findCurrentHead(upd.id, [SPACE_A], tx))?.id;
         seen.expectedHead = superseded.id;
 
         await forgetClaim({ claimId: forget.id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR }, tx);
-        await attachEvidence(evidence.id, { messageId: `${P}msg`, quoteSnapshot: "доказ" }, tx);
+        await attachEvidence(evidence.id, { messageId: `${P}msg`, quoteSnapshot: "evidence" }, tx);
 
         seen.listed = (await listHeadClaims(SPACE_A, {}, tx)).map((h) => h.id).includes(forget.id);
         seen.createdId = created.id;
@@ -577,8 +581,9 @@ run("vault claims", () => {
     expect(seen.head).toBe(seen.expectedHead);
     expect(seen.listed).toBe(false);
 
-    // Жоден стейтмент не втік на модульний `db`: такий закомітився б сам по собі
-    // й пережив би відкат. Це єдина перевірка, яка ловить підміну ex → db.
+    // No statement escaped to the module-level `db`: one that did would commit on its
+    // own and survive the rollback. This is the only check that catches an ex → db
+    // substitution.
     expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(3);
     expect(await count("vault_claims", "space_id = $1 AND supersedes IS NOT NULL", [SPACE_A])).toBe(0);
     expect(await count("vault_claims", "id = $1 AND superseded_at IS NULL", [upd.id])).toBe(1);
@@ -586,8 +591,8 @@ run("vault claims", () => {
     expect(await count("note_claims", "note_id = $1", [NOTE_A])).toBe(1);
     expect(await count("note_claims", "claim_id = $1", [upd.id])).toBe(1);
     expect(await count("claim_evidence", "claim_id = $1", [evidence.id])).toBe(0);
-    // Три create-події від фікстур закомічені до транзакції; усередині не мало
-    // додатись жодної.
+    // The fixtures' three create events were committed before the transaction; not one
+    // more should have been added inside it.
     expect(await count("audit_events", "space_id = $1", [SPACE_A])).toBe(3);
   });
 });

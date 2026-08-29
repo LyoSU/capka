@@ -43,6 +43,18 @@ export async function getOrCreateSpace(
   return row.id;
 }
 
+/** The topic a fact lands in when nothing else chose one. A claim with NO topic
+ *  never reaches the note projection, so for the UI it does not exist — every
+ *  path into memory has to attach one, and they must all attach the SAME one.
+ *  Lives here, beside the resolver, because topics are looked up by TITLE: two
+ *  modules each holding their own copy of this string is two topics the moment
+ *  one of them is edited.
+ *
+ *  Stable English, not localized: translating it at write time would give a user
+ *  who switched language a second, empty topic. Showing it in the reader's
+ *  language is a render-time concern, for the topic UI in plan D. */
+export const DEFAULT_TOPIC = "General";
+
 /** A memory topic is a note of kind `memory_topic`; the partial unique on
  *  (space, title) is scoped to that kind, so it is the same race and the same
  *  resolution as above. */

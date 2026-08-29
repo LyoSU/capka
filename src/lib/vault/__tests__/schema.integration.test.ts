@@ -115,7 +115,7 @@ run("vault schema", () => {
     );
   });
 
-  it("11 таблиць vault існують", async () => {
+  it("all 11 vault tables exist", async () => {
     const { rows } = await pool.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = ANY($1)`,
@@ -124,7 +124,7 @@ run("vault schema", () => {
     expect(rows.map((r) => r.table_name).sort()).toEqual([...VAULT_TABLES].sort());
   });
 
-  it("дві активні голови одного слота неможливі (unique violation)", async () => {
+  it("two active heads for one slot are impossible (unique violation)", async () => {
     const space = `${P}slot`;
     await mkSpace(space);
     await mkClaim(`${space}-a`, space, { slotKey: "employer" });
@@ -141,7 +141,7 @@ run("vault schema", () => {
     expect(await count("vault_claims", "space_id = $1", [space])).toBe(4);
   });
 
-  it("два наступники одного клейма неможливі", async () => {
+  it("two successors of one claim are impossible", async () => {
     const space = `${P}succ`;
     await mkSpace(space);
     await mkClaim(`${space}-base`, space);
@@ -153,7 +153,7 @@ run("vault schema", () => {
     expect(await count("vault_claims", "space_id = $1 AND supersedes IS NULL", [space])).toBe(1);
   });
 
-  it("каскад простору зносить sources→versions→fragments БЕЗ цитат", async () => {
+  it("the space cascade removes sources→versions→fragments when nothing cites them", async () => {
     const space = `${P}cascade`;
     await mkSpace(space);
     const { source, version, fragment } = await mkChain(space);
@@ -165,7 +165,7 @@ run("vault schema", () => {
     expect(await count("knowledge_fragments", "id = $1", [fragment])).toBe(0);
   });
 
-  it("каскад простору БЛОКУЄТЬСЯ (FK restrict), коли версія цитується", async () => {
+  it("the space cascade is BLOCKED (FK restrict) while a version is cited", async () => {
     const space = `${P}pinned`;
     await mkSpace(space);
     const { source, version, fragment } = await mkChain(space);
@@ -192,11 +192,11 @@ run("vault schema", () => {
     expect(await count("knowledge_fragments", "id = $1", [fragment])).toBe(0);
   });
 
-  it("дві теми з одною назвою в просторі неможливі; дві звичайні ноти — можливі", async () => {
+  it("two topics with one title in a space are impossible; two plain notes are not", async () => {
     const space = `${P}notes`;
     await mkSpace(space);
     const note = (id: string, kind: string) =>
-      q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Робота', $3)`, [id, space, kind]);
+      q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Work', $3)`, [id, space, kind]);
 
     await note(`${space}-t1`, "memory_topic");
     await expect(note(`${space}-t2`, "memory_topic")).rejects.toMatchObject({ code: UNIQUE_VIOLATION });
@@ -205,7 +205,7 @@ run("vault schema", () => {
     expect(await count("vault_notes", "space_id = $1", [space])).toBe(3);
   });
 
-  it("два фрагменти з одним (version, ordinal) неможливі", async () => {
+  it("two fragments sharing a (version, ordinal) are impossible", async () => {
     const space = `${P}frag`;
     await mkSpace(space);
     const { version } = await mkChain(space); // already holds ordinal 0

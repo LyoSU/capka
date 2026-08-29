@@ -3,46 +3,45 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
 import { attachToTopic, createClaim, listHeadClaims } from "./claims";
-import { getOrCreateSpace, getOrCreateTopicNote } from "./spaces";
+import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote } from "./spaces";
 
-/** Та сама тема, у яку кладе факти реєстр кандидатів: клейм без теми не
- *  потрапляє в проєкцію нот, тобто для UI просто не існує. */
-const DEFAULT_TOPIC = "Загальне";
-
-/** Та сама нормалізація, що й у `candidates.ts`. Інші правила тут означали б,
- *  що той самий факт то зливається, то роздвоюється — залежно від того, яким
- *  шляхом він у пам'ять потрапив. */
+/** The same normalization as in `candidates.ts`. Different rules here would mean
+ *  the same fact merges or splits depending on which path carried it into
+ *  memory. */
 const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
 
 /**
- * Переносить legacy-документи пам'яті в клейми: рядок → булет → підтверджений
- * клейм із походженням `legacy_memory_doc`. Актор — `system`, а не реєстр
- * кандидатів: те, що вже лежало в пам'яті користувача, — не пропозиція на
- * розгляд, і просити підтвердити власні ж давні факти було б регресією.
+ * Moves legacy memory documents into claims: line → bullet → confirmed claim with
+ * origin `legacy_memory_doc`. The actor is `system`, not the candidate ledger:
+ * what was already in the user's memory is not a proposal awaiting review, and
+ * asking them to re-confirm their own long-standing facts would be a regression.
  *
- * СЕЛЕКТОР — `migrated_at IS NULL`, і крапка. НЕ «або migrated_at < updated_at»:
- * ре-міграція «пізніх правок» дублювала б відредаговані булети (додавання без
- * supersede), а закриває те вікно не селектор, а cutover — див. нижче.
+ * THE SELECTOR is `migrated_at IS NULL`, full stop. NOT "or migrated_at <
+ * updated_at": re-migrating "late edits" would duplicate edited bullets (an insert
+ * with no supersede), and what closes that window is the cutover, not the
+ * selector — see below.
  *
- * ВІКНО ДО CUTOVER (Task 10) — реальне, і тримати його відкритим довго не можна.
- * `memory_docs` пише не лише legacy-PUT: у `src/lib/memory/store.ts` через
- * `optimisticUpdate` живуть ЧОТИРИ письменники — `maintainMemoryDoc` (ранер, після
- * КОЖНОГО ходу), `rememberFact`, `forgetFact` і `setMemoryDoc` (єдиний, куди
- * дістає PUT). Поки Task 10 не закрив усі чотири, кожен бут штампує `migrated_at`,
- * а три турн-письменники далі дописують `content` — і цих дописів уже не перенесе
- * ніхто: селектор дивиться на `IS NULL`, і fallback Task 10 читає той самий
- * стовпець, тож на cutover такі булети зникнуть з екрана. Звідси правило:
- * РЕЛІЗ МІЖ ЦИМ КОМІТОМ І CUTOVER-ОМ НЕ РІЗАТИ.
+ * THE WINDOW BEFORE THE CUTOVER (Task 10) is real, and must not stay open long.
+ * `memory_docs` is not written by the legacy PUT alone: `src/lib/memory/store.ts`
+ * has FOUR writers going through `optimisticUpdate` — `maintainMemoryDoc` (the
+ * runner, after EVERY turn), `rememberFact`, `forgetFact` and `setMemoryDoc` (the
+ * only one the PUT reaches). Until Task 10 closes all four, every boot stamps
+ * `migrated_at` while the three turn-writers keep appending to `content` — and
+ * nothing will ever migrate those appends: the selector looks at `IS NULL`, and
+ * the Task 10 fallback reads the same column, so at cutover those bullets vanish
+ * from the screen. Hence the rule: DO NOT CUT A RELEASE BETWEEN THIS COMMIT AND
+ * THE CUTOVER.
  *
- * ПРИПУЩЕННЯ ОДНОГО ПИСЬМЕННИКА (після cutover): «одна коробка, PUT уже 409».
- * Helm-чарт з `ee/` із rolling-реплікою його порушує — там дві версії застосунку
- * живуть одночасно, стара ще приймає запис, — і тоді потрібен fence (прапорець
- * «legacy-запис закрито» ПЕРЕД переносом), а не цей селектор. Записано явно, щоб
- * план B/EE не наступив на це мовчки.
+ * THE SINGLE-WRITER ASSUMPTION (after the cutover) is "one box, and the PUT already
+ * 409s". The `ee/` Helm chart with a rolling replica breaks it — two versions of
+ * the app are live at once and the old one still accepts writes — and that needs a
+ * fence (a "legacy writes are closed" flag set BEFORE the move), not this selector.
+ * Written down explicitly so plan B/EE does not walk into it silently.
  *
- * `docIds` звужує вибірку і потрібен ЛИШЕ тестам: без нього виклик за побудовою
- * бере всі непереноcені документи бази, тобто в спільній тестовій базі змітав би
- * і чужі, справжні. Бут аргументу не передає — його поведінка та сама.
+ * `docIds` narrows the selection and exists ONLY for tests: without it the call by
+ * construction takes every unmigrated document in the database, which in a shared
+ * test database would sweep up real ones too. Boot passes no argument, and its
+ * behaviour is unchanged.
  */
 export async function migrateMemoryDocs(opts: { docIds?: string[] } = {}): Promise<{ migrated: number }> {
   const pending = await db
@@ -57,35 +56,36 @@ export async function migrateMemoryDocs(opts: { docIds?: string[] } = {}): Promi
     try {
       if (await migrateOne(doc.id)) migrated++;
     } catch (e) {
-      // Ізоляція ПО ДОКУМЕНТУ. Без неї один документ, що падає детерміновано
-      // (скажімо, NUL у legacy-контенті, записаному до того, як `stripNul`
-      // затулив цей шлях), ховав би від переносу ВСІ документи після себе — на
-      // кожному буті, назавжди, — а `SELECT` вище не впорядкований, тож навіть
-      // «які саме» щоразу інші.
+      // Isolation PER DOCUMENT. Without it a single document that fails
+      // deterministically (a NUL in legacy content written before `stripNul` closed
+      // that path, say) would hide EVERY document after it from the migration — on
+      // every boot, forever — and the `SELECT` above is unordered, so even "which
+      // ones" would differ each time.
       failed.push(doc.id);
       firstError ??= e;
       console.error(`[vault] memory doc ${doc.id} did not migrate:`, e);
     }
   }
-  // Кидаємо ОДИН раз і в кінці: решта документів на цей момент уже перенесена, а
-  // retry в `migrate.ts` мусить лишитись озброєним — тихий успіх із
-  // непереносеними документами був би гіршим за галасливий повтор.
+  // Thrown ONCE, at the end: by then the remaining documents are migrated, and the
+  // retry in `migrate.ts` has to stay armed — a quiet success with unmigrated
+  // documents left behind would be worse than a noisy repeat.
   if (failed.length) {
     throw new Error(`${failed.length} memory doc(s) did not migrate: ${failed.join(", ")}`, { cause: firstError });
   }
   return { migrated };
 }
 
-/** Один документ — одна транзакція. Падіння посеред документа відкочує і
- *  клейми, і `migrated_at`, тож наступний бут добере його цілим; половини
- *  документа в пам'яті не буває. */
+/** One document, one transaction. A failure mid-document rolls back both the
+ *  claims and `migrated_at`, so the next boot picks it up whole; half a document
+ *  never lands in memory. */
 async function migrateOne(docId: string): Promise<boolean> {
   return db.transaction(async (tx) => {
-    // CAS-крок ПЕРШИЙ: він і бере блокування рядка, і перевіряє «ще не
-    // перенесено» — між перевіркою й записом немає вікна. Нуль рядків = документ
-    // узяв інший інстанс (або попередній прогін), і це не помилка, а пропуск.
-    // Час — годинник БАЗИ (`now()`), як і `created_at` усіх сусідніх таблиць:
-    // штамп із годинника контейнера не можна було б чесно порівняти з ними.
+    // The CAS step comes FIRST: it takes the row lock and checks "not yet migrated"
+    // in one statement, leaving no window between the check and the write. Zero rows
+    // means another instance (or an earlier run) claimed the document — a skip, not
+    // an error. The timestamp is the DATABASE clock (`now()`), like `created_at` on
+    // every neighbouring table: a stamp from the container's clock could not honestly
+    // be compared against them.
     const [doc] = await tx
       .update(memoryDocs)
       .set({ migratedAt: sql`now()` })
@@ -95,25 +95,26 @@ async function migrateOne(docId: string): Promise<boolean> {
 
     const spaceId = await getOrCreateSpace(
       doc.projectId
-        ? // Власника проєктного простору беремо з САМОГО документа: чати проєкту
-          // ділять один простір, а рядок проєкту тут читати нічим і нащо.
+        ? // The project space's owner comes from the DOCUMENT itself: a project's
+          // chats share one space, and reading the project row here would buy nothing.
           { type: "project", refId: doc.projectId, ownerUserId: doc.userId }
         : { type: "user", refId: doc.userId },
       tx,
     );
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC, tx);
 
-    // Дедуп проти вже наявних голів простору — рятує повтор після часткового
-    // падіння і збіг із фактом, який користувач уже сказав сам.
+    // Dedup against the space's existing heads — this covers both a repeat after a
+    // partial failure and a match with a fact the user already stated themselves.
     const seen = new Map((await listHeadClaims(spaceId, {}, tx)).map((h) => [norm(h.statement), h.id]));
     for (const line of doc.content.split("\n")) {
       const statement = line.trim().replace(/^[-*]\s*/, "").trim();
       if (!statement) continue;
       const known = seen.get(norm(statement));
       if (known !== undefined) {
-        // Факт уже є — але, можливо, поза темами (його міг створити не реєстр
-        // кандидатів). Просто пропустити булет означало б лишити рядок у базі й
-        // прибрати його з екрана: GET читає «Загальне».
+        // The fact exists — but possibly outside every topic (something other than
+        // the candidate ledger may have created it). Simply skipping the bullet would
+        // leave the row in the database and remove it from the screen: the GET reads
+        // the default topic.
         await attachToTopic(known, noteId, tx);
         continue;
       }
@@ -122,8 +123,8 @@ async function migrateOne(docId: string): Promise<boolean> {
           spaceId,
           statement,
           origin: { kind: "legacy_memory_doc" },
-          // НЕ "unverified": маніфест підтверджених фактів інакше не покаже
-          // нічого з того, що користувач бачив у пам'яті вчора.
+          // NOT "unverified": a manifest of confirmed facts would otherwise show
+          // nothing of what the user saw in their memory yesterday.
           reviewStatus: "confirmed",
           topicNoteId: noteId,
         },
@@ -133,8 +134,8 @@ async function migrateOne(docId: string): Promise<boolean> {
       seen.set(norm(statement), claim.id);
     }
 
-    // Єдина копія оригінального markdown, що переживає перенос: булети —
-    // похідне від нього, а заголовки, порядок і форматування є лише тут.
+    // The only copy of the original markdown that survives the move: the bullets are
+    // derived from it, while headings, order and formatting exist only here.
     await tx.insert(auditEvents).values({
       id: nanoid(),
       spaceId,

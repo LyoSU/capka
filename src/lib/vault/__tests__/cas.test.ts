@@ -24,15 +24,15 @@ afterAll(async () => {
 });
 
 describe("vault CAS", () => {
-  it("put/read round-trip з кирилицею", async () => {
-    const bytes = Buffer.from("Привіт, світ! Це вміст файлу.", "utf8");
+  it("put/read round-trip with multi-byte content", async () => {
+    const bytes = Buffer.from("Γεια σου κόσμε! This is the file's content.", "utf8");
     const sha = await putBlob(bytes);
     expect(sha).toBe(createHash("sha256").update(bytes).digest("hex"));
     const read = await readBlob(sha);
     expect(read.equals(bytes)).toBe(true);
   });
 
-  it("повторний put повертає той самий ключ", async () => {
+  it("a repeated put returns the same key", async () => {
     const bytes = Buffer.from("idempotent content");
     const sha1 = await putBlob(bytes);
     const sha2 = await putBlob(bytes);
@@ -41,7 +41,7 @@ describe("vault CAS", () => {
     expect(read.equals(bytes)).toBe(true);
   });
 
-  it("8 конкурентних put одних байтів → один ключ, без помилок", async () => {
+  it("8 concurrent puts of the same bytes → one key, no errors", async () => {
     const bytes = Buffer.from("concurrent-write-race-content");
     const results = await Promise.all(Array.from({ length: 8 }, () => putBlob(bytes)));
     const expected = createHash("sha256").update(bytes).digest("hex");
@@ -54,19 +54,19 @@ describe("vault CAS", () => {
     expect(entries).toEqual([expected]);
   });
 
-  it("шлях шардований ab/cd/<sha>", () => {
+  it("shards the path as ab/cd/<sha>", () => {
     const bytes = Buffer.from("shard-path-check");
     const sha = createHash("sha256").update(bytes).digest("hex");
     const expected = path.join(dir, sha.slice(0, 2), sha.slice(2, 4), sha);
     expect(blobPath(sha)).toBe(expected);
   });
 
-  it("blobPath з невалідним ключем кидає синхронно", () => {
+  it("blobPath throws synchronously on an invalid key", () => {
     expect(() => blobPath("../etc/passwd")).toThrow();
     expect(() => blobPath("ABC")).toThrow();
   });
 
-  it("readBlob для добре сформованого, але відсутнього ключа — reject", async () => {
+  it("readBlob rejects for a well-formed but absent key", async () => {
     await expect(readBlob("0".repeat(64))).rejects.toThrow();
   });
 });

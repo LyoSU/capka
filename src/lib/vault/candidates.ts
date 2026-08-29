@@ -13,7 +13,7 @@ import {
   type ClaimHead,
   type EvidenceInput,
 } from "./claims";
-import { getOrCreateTopicNote, type Ex } from "./spaces";
+import { DEFAULT_TOPIC, getOrCreateTopicNote, type Ex } from "./spaces";
 
 export type Provenance = {
   kind: "user_direct" | "derived" | "tool" | "file" | "web" | "legacy_memory_doc";
@@ -23,25 +23,21 @@ export type Provenance = {
 
 export type CandidateRow = typeof memoryCandidates.$inferSelect;
 
-/** Тема за замовчуванням. Клейм БЕЗ теми не потрапляє в проєкцію нот, тобто
- *  для UI він просто не існує, — тож активація прив'язує тему ЗАВЖДИ. */
-const DEFAULT_TOPIC = "Загальне";
-
-/** Єдина нормалізація для порівняння текстів — і в слот-гілці, і в дедупі без
- *  слота. Різні правила в цих двох місцях означали б, що той самий факт то
- *  зливається, то роздвоюється залежно від наявності слоту. */
+/** One normalization for comparing statements, shared by the slot branch and the
+ *  slotless dedup. Different rules in those two places would mean the same fact
+ *  merges or splits depending on whether a slot happens to be set. */
 const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
 
 /**
- * Чи це «слот уже зайняв конкурент» — і НІЩО інше.
+ * Whether this is "a competitor already took the slot" — and NOTHING else.
  *
- * Drizzle ≥0.36 обгортає помилку драйвера, лишаючи pg-помилку в `cause`; старіші
- * версії кидають її напряму. Обидва варіанти читаються з ОДНОГО об'єкта: узяти
- * `code` з `e`, а `constraint` з `e.cause` означало б звірку двох різних помилок.
+ * Drizzle >=0.36 wraps the driver error, leaving the pg error in `cause`; older
+ * versions throw it directly. Both shapes are read off ONE object: taking `code`
+ * from `e` and `constraint` from `e.cause` would be checking two different errors.
  *
- * Звірка йде по обох полях. По самому лише `23505` сюди потрапив би конфлікт
- * будь-якого іншого унікального індексу — і тихо поїхав би шляхом «конкурент
- * виграв», де нікого немає, а справжня несправність не залишила б сліду.
+ * Both fields are checked. On `23505` alone, a violation of any other unique
+ * index would land here and quietly take the "a competitor won" path where there
+ * is no competitor — and the real fault would leave no trace.
  */
 function isSlotTaken(e: unknown): boolean {
   const pg = ((e as { code?: unknown })?.code ? e : (e as { cause?: unknown })?.cause) as
@@ -50,21 +46,22 @@ function isSlotTaken(e: unknown): boolean {
   return pg?.code === "23505" && pg?.constraint === "uniq_vclaims_active_slot";
 }
 
-/** Два програші CAS поспіль. Кидається, щоб відкотити УСЮ транзакцію confirm —
- *  разом із `resolved_at`, який поставив крок 1. Кандидат лишається відкритим:
- *  «повернись пізніше» чесніше за тихо загублений факт. */
+/** Two CAS losses in a row. Thrown to roll back the WHOLE confirm transaction,
+ *  including the `resolved_at` that step 1 set. The candidate stays open: "come
+ *  back in a moment" is more honest than a quietly dropped fact. */
 class TryAgain extends Error {}
 
 /**
- * Реєстр кандидатів — ЄДИНИЙ вхід у пам'ять: агент не пише клейм, він пропонує,
- * а політика вирішує. Уся політика — одна зовнішня транзакція; кроки, що
- * вставляють клейми, — у вкладеному `tx.transaction()`, який drizzle емітить як
- * SAVEPOINT. Без нього unique violation абортила б усю транзакцію Postgres, і
- * «перечитати й вирішити» було б неможливим за побудовою, а не через недогляд.
+ * The candidate ledger is the ONLY way into memory: the agent does not write a
+ * claim, it proposes one and policy decides. The whole policy runs in one outer
+ * transaction; the steps that insert claims sit in a nested `tx.transaction()`,
+ * which drizzle emits as a SAVEPOINT. Without it a unique violation would abort
+ * the entire Postgres transaction, making "re-read and decide" impossible by
+ * construction rather than by oversight.
  *
- * Актор тут завжди `agent`: пропозицію робить хід агента. Рішення людини
- * приходять окремими викликами (`confirmCandidate`/`rejectCandidate`) зі своїм
- * актором — саме цю різницю й видно в аудиті.
+ * The actor here is always `agent`: a proposal is made by the agent's turn. Human
+ * decisions arrive as separate calls (`confirmCandidate`/`rejectCandidate`) with
+ * their own actor — and that difference is exactly what the audit log shows.
  */
 export async function proposeCandidate(input: {
   idempotencyKey: string;
@@ -77,42 +74,42 @@ export async function proposeCandidate(input: {
   sensitive?: boolean;
   evidence?: EvidenceInput[];
   forceState?: "conflict";
-  /** Поважається ЛИШЕ на шляху негайної активації. Кандидат, який пішов у
-   *  pending, теми не запам'ятовує — у `memory_candidates` немає такого стовпця,
-   *  тож `confirmCandidate` завжди кладе факт у «Загальне». У плані A це не
-   *  спостережувано (GET Task 10 читає лише «Загальне», Task 7 сюди нічого не
-   *  передає); справжнім знобом це стане в плані D разом із UI тем і міграцією
-   *  під стовпець. */
+  /** Honoured ONLY on the immediate-activation path. A candidate that went to
+   *  pending does not remember a topic — `memory_candidates` has no such column —
+   *  so `confirmCandidate` always files the fact under the default topic. In plan A
+   *  that is unobservable (the GET in Task 10 reads only the default topic, and
+   *  Task 7 passes nothing here); it becomes a real knob in plan D, along with the
+   *  topic UI and a migration for the column. */
   topicNoteId?: string;
 }): Promise<
   | { state: "auto_active"; claimId: string; revision: number }
   | { state: "merged"; claimId: string }
-  // `denied` тут недосяжний: жодне правило цієї політики його не породжує, а
-  // `rejectCandidate` `policy_state` не переписує. Лишається в контракті під
-  // governance наступних планів.
+  // `denied` is unreachable here: no rule in this policy produces it, and
+  // `rejectCandidate` does not rewrite `policy_state`. It stays in the contract for
+  // the governance work in later plans.
   | { state: "pending" | "denied" | "conflict"; candidateId: string }
   | { state: "duplicate" }
 > {
   const actor: Actor = { kind: "agent" };
   const evidence = input.evidence ?? [];
-  // Порожній слот — це ВІДСУТНІЙ слот, а не слот з іменем "". Модель під тулом
-  // Task 7 віддає `slot_key: ""` як звичайну відповідь, а `""` — не-NULL, тобто
-  // повноцінний учасник `uniq_vclaims_active_slot`. Без цієї нормалізації рядок
-  // зберігав би `""`, вся логіка нижче йшла б гілкою «без слота» (бо `""`
-  // хибний) — і вставка клейма опинилась би ПОЗА savepoint-ом, де 23505 абортує
-  // всю транзакцію й летить у колера. Нормалізуємо ОДИН раз, тут, і далі
-  // вживаємо лише `slotKey`.
+  // An empty slot is an ABSENT slot, not a slot named "". The model behind the
+  // Task 7 tool returns `slot_key: ""` as an ordinary answer, and `""` is non-NULL,
+  // i.e. a full participant in `uniq_vclaims_active_slot`. Without this the row
+  // would store `""`, every branch below would take the slotless path (because
+  // `""` is falsy) — and the claim insert would land OUTSIDE the savepoint, where
+  // a 23505 aborts the whole transaction and escapes to the caller. Normalize
+  // ONCE, here, and use only `slotKey` from then on.
   const slotKey = input.slotKey?.trim() || undefined;
 
-  // Гейт рахується ДО вставки: `policy_state` — NOT NULL, і провізорний стан із
-  // подальшим UPDATE лише додав би стан, якого ніхто ніколи не бачить.
+  // The gate is evaluated BEFORE the insert: `policy_state` is NOT NULL, and a
+  // provisional value plus a later UPDATE would only add a state nobody ever sees.
   const gate: "conflict" | "pending" | null =
     input.forceState === "conflict"
       ? "conflict"
       : input.sensitive
         ? "pending"
-        : // Чого користувач не писав сам — не активується автоматично. Це і є
-          // бар'єр проти ін'єкції через тул, файл чи сторінку.
+        : // What the user did not write themselves is never auto-activated. This is
+          // the barrier against injection via a tool result, a file or a page.
           input.provenance.kind !== "user_direct"
           ? "pending"
           : null;
@@ -130,8 +127,8 @@ export async function proposeCandidate(input: {
         slotKey: slotKey ?? null,
         value: input.value ?? null,
         provenance: input.provenance,
-        // Клейма для pending ще немає — докази чекають тут і застосовуються
-        // тим, хто підтвердить.
+        // A pending candidate has no claim yet — the evidence waits here and is
+        // applied by whoever confirms.
         evidence,
         sensitive: input.sensitive ?? false,
         policyState: gate ?? "auto_active",
@@ -139,8 +136,8 @@ export async function proposeCandidate(input: {
       .onConflictDoNothing({ target: memoryCandidates.idempotencyKey })
       .returning({ id: memoryCandidates.id });
 
-    // Цю саму пропозицію вже обробили. ПОВНИЙ no-op: жодного рядка, жодної
-    // події — інакше повтор ходу дублював би аудит і докази.
+    // This exact proposal was already handled. A COMPLETE no-op: no row, no event
+    // — otherwise a replayed turn would duplicate the audit trail and the evidence.
     if (!row) return { state: "duplicate" } as const;
 
     const audit = (state: string, payload: Record<string, unknown>) =>
@@ -151,7 +148,7 @@ export async function proposeCandidate(input: {
         action: "candidate.propose",
         subjectType: "candidate",
         subjectId: id,
-        // Без тексту пропозиції: аудит читають ширше, ніж сам простір знань.
+        // No proposal text: the audit log is read more widely than the space itself.
         payload: { state, slotKey: slotKey ?? null, provenance: input.provenance.kind, ...payload },
       });
 
@@ -160,21 +157,22 @@ export async function proposeCandidate(input: {
       return { state: gate, candidateId: id } as const;
     }
 
-    /** Факт уже відомий: доливаємо доказ і ЗАКРИВАЄМО кандидата. Відкритий
-     *  merged-кандидат вічно просив би підтвердити те, що вже в пам'яті.
+    /** The fact is already known: top up the evidence and CLOSE the candidate. An
+     *  open merged candidate would ask forever for confirmation of something that is
+     *  already in memory.
      *
-     *  ПРИЙНЯТО: доказ, долитий до голови, яку паралельно supersede-нули, лишається
-     *  на тій — тепер неактивній — версії. Це історично чесно (доказ стосується
-     *  саме того формулювання), а агрегацію ланцюга покаже план D. */
+     *  ACCEPTED: evidence added to a head that is superseded concurrently stays on
+     *  that — now inactive — version. This is historically honest (the evidence is
+     *  about that exact wording), and aggregating the chain is plan D's job. */
     const merged = async (head: ClaimHead) => {
       const claimId = head.id;
       for (const ev of evidence) await attachEvidence(claimId, ev, tx);
-      // Голова, у яку злилось ВЛАСНЕ твердження користувача, — підтверджений
-      // факт. Без цього збіг із головою, яку хтось створив `unverified`
-      // (наприклад, майбутня міграція legacy memory doc), лишав би її поза
-      // маніфестом Task 8: користувач щойно сказав це прямо, а пам'ять мовчить.
-      // Гейт вище гарантує, що сюди не доходить чутлива пропозиція, тож
-      // чутливість голови просто зберігається.
+      // A head the user's OWN statement merged into is a confirmed fact. Without
+      // this, matching a head somebody created as `unverified` (a future migration
+      // of the legacy memory doc, say) would leave it out of the Task 8 manifest:
+      // the user just said it outright and memory stays silent about it. The gate
+      // above guarantees no sensitive proposal reaches here, so the head's own
+      // sensitivity is simply preserved.
       await confirmClaim(claimId, head.sensitive, tx);
       await tx
         .update(memoryCandidates)
@@ -184,7 +182,8 @@ export async function proposeCandidate(input: {
       return { state: "merged", claimId } as const;
     };
 
-    /** Слот зайнятий іншим твердженням — голову не чіпаємо, вибір за людиною. */
+    /** The slot holds a different statement — leave the head alone, the choice is
+     *  the human's. */
     const conflict = async (conflictsWith: string | null) => {
       await tx
         .update(memoryCandidates)
@@ -203,12 +202,12 @@ export async function proposeCandidate(input: {
           slotKey,
           value: input.value,
           origin: { ...input.provenance },
-          // НЕ "unverified": маніфест Task 8 перелічує лише confirmed, тож
-          // щойно збережений користувачем факт інакше був би невидимий.
+          // NOT "unverified": the Task 8 manifest lists only confirmed claims, so a
+          // fact the user just saved would otherwise be invisible.
           reviewStatus: "confirmed",
-          // `sensitive` не передається НЕ через недогляд: гейт вище відводить
-          // кожну чутливу пропозицію в pending, тож сюди доходить лише
-          // нечутлива. Якщо гейт колись зміниться — це місце треба міняти разом.
+          // `sensitive` is omitted deliberately, not by oversight: the gate above
+          // routes every sensitive proposal to pending, so only non-sensitive ones
+          // reach here. If that gate ever changes, this site must change with it.
           topicNoteId: noteId,
         },
         actor,
@@ -236,23 +235,23 @@ export async function proposeCandidate(input: {
         claim = await tx.transaction(activate);
       } catch (e) {
         if (!isSlotTaken(e)) throw e;
-        // Конкурент устиг закомітити голову в цей слот, поки ми вставляли свою.
-        // 23505 приходить лише ПІСЛЯ його коміту (до того INSERT просто чекає на
-        // блокуванні індексу), тож read-committed перечитування його вже бачить.
+        // A competitor committed a head into this slot while we were inserting ours.
+        // The 23505 arrives only AFTER their commit (until then the INSERT simply
+        // waits on the index lock), so a read-committed re-read already sees them.
         const winner = await headBySlot(input.spaceId, slotKey, tx);
-        // Голови немає — між його комітом і нашим прочитом хтось третій її
-        // забув/перекрив. Не вигадуємо переможця й не віддаємо назовні pg-помилку:
-        // слот спірний, кандидат лишається відкритим для людини.
+        // No head — between their commit and our read a third party forgot or
+        // superseded it. We neither invent a winner nor surface a pg error: the slot
+        // is contested, so the candidate stays open for a human.
         if (!winner) return conflict(null);
         return norm(winner.statement) === norm(input.statement) ? merged(winner) : conflict(winner.id);
       }
       return activated(claim);
     }
 
-    // Без слота унікального індексу немає (`uniq_vclaims_active_slot` партіальний
-    // на `slot_key IS NOT NULL`), тож і 23505 неможливий — SAVEPOINT тут був би
-    // порожньою обгорткою. Гонка двох РІЗНИХ тверджень дасть два клейми; це
-    // прийнято, курує людина.
+    // With no slot there is no unique index (`uniq_vclaims_active_slot` is partial
+    // on `slot_key IS NOT NULL`), so a 23505 is impossible and a SAVEPOINT here
+    // would be an empty wrapper. A race between two DIFFERENT statements yields two
+    // claims; that is accepted, and a human curates it.
     const heads = await listHeadClaims(input.spaceId, {}, tx);
     const dup = heads.find((h) => norm(h.statement) === norm(input.statement));
     if (dup) return merged(dup);
@@ -261,9 +260,9 @@ export async function proposeCandidate(input: {
 }
 
 /**
- * Рішення людини «так». Одна транзакція; політика перечитується ЗАНОВО — між
- * пропозицією і підтвердженням світ міг змінитись, і підтверджують саме зміст
- * кандидата, а не той стан слоту, який був колись.
+ * The human's "yes". One transaction, and the policy is re-evaluated FROM SCRATCH:
+ * the world may have moved between proposal and confirmation, and what is being
+ * confirmed is the candidate's content, not whatever state the slot was in once.
  */
 export async function confirmCandidate(args: {
   candidateId: string;
@@ -273,8 +272,9 @@ export async function confirmCandidate(args: {
   const { candidateId, allowedSpaceIds, actor } = args;
   try {
     return await db.transaction(async (tx) => {
-      // CAS-крок ПЕРШИЙ: він і арбітрує confirm/confirm та confirm/reject, і бере
-      // блокування рядка — між перевіркою «ще відкритий» і записом немає вікна.
+      // The CAS step comes FIRST: it both arbitrates confirm/confirm and
+      // confirm/reject and takes the row lock — leaving no window between checking
+      // "still open" and writing.
       const [cand] = await tx
         .update(memoryCandidates)
         .set({ resolvedAt: new Date() })
@@ -288,8 +288,9 @@ export async function confirmCandidate(args: {
         .returning();
 
       if (!cand) {
-        // Розрізняємо «вже вирішено» і «немає» тим самим space-фільтром: чужий
-        // кандидат читається як не-існуючий, а не як «є, але не твій».
+        // "Already resolved" and "does not exist" are told apart under the same
+        // space filter: someone else's candidate reads as non-existent, never as
+        // "exists, but not yours".
         const [seen] = await tx
           .select({ id: memoryCandidates.id })
           .from(memoryCandidates)
@@ -299,16 +300,15 @@ export async function confirmCandidate(args: {
       }
 
       const evidence = (cand.evidence ?? []) as EvidenceInput[];
-      // Та сама нормалізація, що й у propose, і з тієї ж причини — але тут вона
-      // ще й рятує рядки, записані ДО цього виправлення: кандидат зі
-      // `slot_key = ''` інакше ніколи не прочитав би голову, щоразу ловив би
-      // 23505 на вставці й повертав `try_again` НАЗАВЖДИ, без жодного способу
-      // його підтвердити.
+      // The same normalization as in propose, for the same reason — and here it
+      // also rescues rows written BEFORE that fix: a candidate carrying
+      // `slot_key = ''` would otherwise never read the head, would hit 23505 on
+      // every insert and would return `try_again` FOREVER, with no way to confirm it.
       const slotKey = cand.slotKey?.trim() || null;
       const origin = cand.provenance as Record<string, unknown>;
       const finish = async (claimId: string) => {
-        // `policy_state` лишається як був: перехід pending→підтверджено фіксує
-        // подія, а не переписаний стан пропозиції.
+        // `policy_state` is left as it was: the pending→confirmed transition is
+        // recorded by the event, not by rewriting the proposal's state.
         await tx.update(memoryCandidates).set({ claimId }).where(eq(memoryCandidates.id, cand.id));
         await tx.insert(auditEvents).values({
           id: nanoid(),
@@ -322,18 +322,18 @@ export async function confirmCandidate(args: {
         return { ok: true, claimId } as const;
       };
 
-      // Дві спроби: програш CAS — не помилка, а «голову щойно змінили», і
-      // правильна відповідь на неї — перечитати. Другий програш поспіль означає
-      // живу конкуренцію за цей слот, і тоді чесніше сказати «пізніше».
+      // Two attempts: losing the CAS is not an error but "the head just changed",
+      // and the correct response to that is to re-read. A second loss in a row means
+      // live contention for this slot, and then "come back later" is more honest.
       for (let attempt = 0; attempt < 2; attempt++) {
         const claimId = await tx
           .transaction(async (sp): Promise<string | null> => {
-            // Зі слотом «наявна голова» — це голова СЛОТУ; без слота — голова з
-            // тим самим нормалізованим текстом. Дедуп тут обов'язковий: propose
-            // (крок 7) його робить, і якби confirm не робив, чутливий факт,
-            // запропонований без слота, а потім активований іншою пропозицією,
-            // на підтвердженні дав би ДРУГУ байт-у-байт голову — і сховище
-            // назавжди повторювало б людині те саме двічі.
+            // With a slot, "the existing head" means the head of the SLOT; without
+            // one, the head carrying the same normalized text. The dedup is required
+            // here: propose (step 7) performs it, and if confirm did not, a sensitive
+            // fact proposed without a slot and then activated by another proposal
+            // would produce a SECOND byte-identical head on confirmation — and the
+            // store would repeat the same thing back to the human forever.
             const head = slotKey
               ? await headBySlot(cand.spaceId, slotKey, sp)
               : ((await listHeadClaims(cand.spaceId, {}, sp)).find(
@@ -342,14 +342,15 @@ export async function confirmCandidate(args: {
 
             if (head && norm(head.statement) === norm(cand.statement)) {
               for (const ev of evidence) await attachEvidence(head.id, ev, sp);
-              // Це рішення ЛЮДИНИ, тож голова стає підтвердженою — інакше
-              // `{ok:true}` повертався б для факту, якого маніфест не покаже.
+              // This is the HUMAN's decision, so the head becomes confirmed —
+              // otherwise `{ok:true}` would be returned for a fact the manifest will
+              // never show.
               await confirmClaim(head.id, head.sensitive || cand.sensitive, sp);
               return head.id;
             }
 
-            // Сюди можна дійти лише зі слотом: без слота `head` за побудовою вже
-            // збіг, а розходитись із чим не збіглося — нічого.
+            // Only reachable with a slot: without one, `head` is by construction
+            // already a match, so there is nothing for it to differ from.
             if (head) {
               const upd = await updateClaim(
                 {
@@ -358,18 +359,19 @@ export async function confirmCandidate(args: {
                   patch: {
                     statement: cand.statement,
                     value: cand.value,
-                    // Успадкування від попередника тут — саме те, чого не можна:
-                    // текст прийшов від ЦЬОГО кандидата, тож і походження його
-                    // (інакше наступник ніс би, скажімо, `legacy_memory_doc` на
-                    // тому, що користувач щойно сказав сам), і review/sensitive —
-                    // рішення про НЬОГО, а не про попередника. Чутливість тільки
-                    // піднімається: зняти її означало б розкрити вже закрите.
+                    // Inheriting from the predecessor is exactly what must not happen
+                    // here: the text came from THIS candidate, so the provenance is
+                    // its own (otherwise the successor would carry, say,
+                    // `legacy_memory_doc` on something the user just said themselves),
+                    // and review/sensitive are decisions about IT, not about the
+                    // predecessor. Sensitivity only rises: clearing it would expose
+                    // something already closed.
                     origin,
                     reviewStatus: "confirmed",
                     sensitive: head.sensitive || cand.sensitive,
-                    // Попередник міг не бути в жодній темі (наприклад, його
-                    // створили не через цей реєстр) — тоді підтверджена голова
-                    // опинилась би поза проєкцією нот, тобто невидимою для GET.
+                    // The predecessor may have been in no topic at all (created
+                    // outside this ledger, for instance) — the confirmed head would
+                    // then land outside the note projection, invisible to the GET.
                     topicNoteId: await getOrCreateTopicNote(cand.spaceId, DEFAULT_TOPIC, sp),
                   },
                   allowedSpaceIds,
@@ -377,7 +379,7 @@ export async function confirmCandidate(args: {
                 },
                 sp,
               );
-              if (!upd.ok) return null; // програли CAS — перечитати
+              if (!upd.ok) return null; // lost the CAS — re-read
               for (const ev of evidence) await attachEvidence(upd.id, ev, sp);
               return upd.id;
             }
@@ -400,8 +402,8 @@ export async function confirmCandidate(args: {
             for (const ev of evidence) await attachEvidence(claim.id, ev, sp);
             return claim.id;
           })
-          // Слот забрали між нашим прочитом і вставкою — та сама відповідь, що й
-          // на програш CAS: перечитати. Чужий constraint летить далі.
+          // The slot was taken between our read and our insert — the same response
+          // as a lost CAS: re-read. Any other constraint is rethrown.
           .catch((e: unknown) => {
             if (isSlotTaken(e)) return null;
             throw e;
@@ -418,9 +420,9 @@ export async function confirmCandidate(args: {
   }
 }
 
-/** Рішення людини «ні»: той самий CAS-резолв, що арбітрує гонку з confirm.
- *  `policy_state` не переписується — відмову фіксує подія, і початковий стан
- *  пропозиції лишається читабельним. */
+/** The human's "no": the same CAS resolve that arbitrates the race with confirm.
+ *  `policy_state` is not rewritten — the rejection is recorded by the event, and
+ *  the proposal's original state stays readable. */
 export async function rejectCandidate(args: {
   candidateId: string;
   allowedSpaceIds: string[];
@@ -458,8 +460,8 @@ export async function rejectCandidate(args: {
   });
 }
 
-/** Черга перегляду простору: найстаріші першими — людина розбирає її з початку,
- *  а не з кінця. Читається по `idx_mcand_unresolved`. */
+/** A space's review queue, oldest first: a human works through it from the start,
+ *  not from the end. Served by `idx_mcand_unresolved`. */
 export async function listOpenCandidates(spaceId: string): Promise<CandidateRow[]> {
   return db
     .select()
@@ -469,15 +471,16 @@ export async function listOpenCandidates(spaceId: string): Promise<CandidateRow[
 }
 
 /**
- * Чи справді користувач це писав: ≥60% слів твердження довжиною >3 присутні в
- * тексті його ходу. Грубий фільтр проти ін'єкції — щоб результат тула чи
- * сторінка не могли стверджувати, ніби це сказав користувач.
+ * Whether the user really wrote this: at least 60% of the statement's words longer
+ * than three characters appear in the text of their own turn. A blunt filter
+ * against injection — so a tool result or a web page cannot claim the user said it.
  *
- * Слабкості (заперечення, лапки, переказ чужих слів) відомі й прийняті: ціна
- * помилки — одне зайве підтвердження, а не втрачений факт, тож розумнішим цей
- * фільтр робити не треба. Коротких слів це не стосується — вони є в будь-якому
- * тексті й нічого не підтверджують; якщо довгих слів немає взагалі, підтвердити
- * авторство нічим, і відповідь `false` (тобто pending) — єдина чесна.
+ * Its weaknesses (negation, quotation, reporting someone else's words) are known
+ * and accepted: the cost of being wrong is one extra confirmation prompt, not a
+ * lost fact, so making this filter cleverer is not worth it. Short words are
+ * excluded because they appear in any text and confirm nothing; if there are no
+ * long words at all there is nothing to establish authorship with, and `false`
+ * (that is, pending) is the only honest answer.
  */
 export function verifyDirectProvenance(statement: string, userTurnText: string): boolean {
   const words = statement
