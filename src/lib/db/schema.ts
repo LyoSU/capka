@@ -489,6 +489,9 @@ export const memoryDocs = pgTable("memory_docs", {
   prevContent: text("prev_content"),
   version: integer("version").notNull().default(0),
   turnsSinceConsolidation: integer("turns_since_consolidation").notNull().default(0),
+  // Stamped once this doc's content has been carried into the vault's claims.
+  // Null = the doc is still the only home of that memory.
+  migratedAt: timestamp("migrated_at"),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   // One doc per scope. NULL projectId is "distinct" under a plain UNIQUE, so the
@@ -753,3 +756,174 @@ export const pendingElicitations = pgTable("pending_elicitation", {
 }, (table) => [
   index("idx_pending_elicitation_message").on(table.messageId),
 ]);
+
+// ── Vault «Знання»: канон знань і пам'яті (спека 2026-08-29) ────────────────
+//
+// One cascade chain, one stopper: spaces → knowledge_sources → versions →
+// fragments all CASCADE, and the ONLY thing that can hold any of it back is a
+// `message_citations` row (RESTRICT on both the version and the fragment). So a
+// space DELETE either goes all the way through or aborts whole — a citation is
+// the single pin. `claim_evidence.fragment_id` is deliberately SET NULL: an
+// evidence row keeps its own quote snapshot, so it is a record, not a pin.
+
+export const spaces = pgTable("spaces", {
+  id: text("id").primaryKey(),
+  type: text("type", { enum: ["user", "project"] }).notNull(),
+  refId: text("ref_id").notNull(), // users.id | projects.id — поліморфний, без FK
+  // Денормалізований власник: purge при видаленні користувача знаходить і простори
+  // ДАВНО видалених проєктів (рядок projects на той час уже не існує).
+  ownerUserId: text("owner_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [
+  uniqueIndex("uniq_spaces_type_ref").on(t.type, t.refId),
+  index("idx_spaces_owner").on(t.ownerUserId),
+]);
+
+export const knowledgeSources = pgTable("knowledge_sources", {
+  id: text("id").primaryKey(),
+  spaceId: text("space_id").notNull().references(() => spaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  origin: jsonb("origin").notNull(),          // рецепт: {type:"upload"|"url"|"mcp"|"chat", ...}
+  labels: jsonb("labels").notNull().default([]), // string[]
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  deletedAt: timestamp("deleted_at"),         // SOFT delete: цитовані версії мусять жити
+}, (t) => [index("idx_ksources_space").on(t.spaceId)]);
+
+export const knowledgeSourceVersions = pgTable("knowledge_source_versions", {
+  id: text("id").primaryKey(),
+  sourceId: text("source_id").notNull().references(() => knowledgeSources.id, { onDelete: "cascade" }),
+  sha256: text("sha256").notNull(),           // CAS-ключ оригіналу
+  observedAt: timestamp("observed_at").notNull().defaultNow(),
+  parser: jsonb("parser").notNull().default({}), // {name, version, profile}
+  // Контракт: { [kind: string]: { sha256: string, bytes: number, producedAt: string } }
+  representations: jsonb("representations").notNull().default({}),
+  status: text("status", { enum: ["ingesting", "ready", "error"] }).notNull().default("ingesting"),
+  error: text("error"),
+  supersededAt: timestamp("superseded_at"),   // нова версія ставить це старій; рядки immutable
+}, (t) => [
+  index("idx_ksv_source").on(t.sourceId),
+  // НЕ unique: спека дозволяє новий парс ТИХ САМИХ байтів (fast→deep автопідняття,
+  // новий парсер) як НОВУ версію з новими фрагментами — immutability і citation-пінінг
+  // тримаються саме на цьому. Ідемпотентність ре-fetch вирішує логіка інжесту (план B).
+  index("idx_ksv_source_sha").on(t.sourceId, t.sha256),
+]);
+
+export const knowledgeFragments = pgTable("knowledge_fragments", {
+  id: text("id").primaryKey(),                // стабільний UUID — на нього посилаються цитати
+  versionId: text("version_id").notNull().references(() => knowledgeSourceVersions.id, { onDelete: "cascade" }),
+  ordinal: integer("ordinal").notNull(),
+  text: text("text").notNull(),
+  language: text("language"),                 // КОНТРАКТ: lowercase ISO 639-1/2 ("uk","en"); валідує інжест (план B)
+  locator: jsonb("locator").notNull(),        // {scheme, version, anchor, display, fallback}
+}, (t) => [uniqueIndex("uniq_kfrag_version_ordinal").on(t.versionId, t.ordinal)]);
+
+export const vaultNotes = pgTable("vault_notes", {
+  id: text("id").primaryKey(),
+  spaceId: text("space_id").notNull().references(() => spaces.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),   // md; списки фактів — проєкція note_claims, body їх НЕ дублює
+  kind: text("kind", { enum: ["note", "memory_topic", "index"] }).notNull().default("note"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [
+  index("idx_vnotes_space").on(t.spaceId),
+  // Унікальність назв ЛИШЕ для тем пам'яті; звичайні ноти вільні.
+  uniqueIndex("uniq_vnotes_memory_topic").on(t.spaceId, t.title).where(sql`${t.kind} = 'memory_topic'`),
+]);
+
+export const vaultClaims = pgTable("vault_claims", {
+  id: text("id").primaryKey(),
+  spaceId: text("space_id").notNull().references(() => spaces.id, { onDelete: "cascade" }),
+  statement: text("statement").notNull(),
+  slotKey: text("slot_key"),                  // рекомендаційний; канонізує aux-нормалізатор (план C)
+  value: jsonb("value"),                      // структуроване значення (з JSON-рядка тула)
+  kind: text("kind").notNull().default("fact"),
+  origin: jsonb("origin").notNull(),          // Provenance (Task 5)
+  reviewStatus: text("review_status", { enum: ["unverified", "confirmed"] }).notNull().default("unverified"),
+  sensitive: boolean("sensitive").notNull().default(false),
+  validFrom: timestamp("valid_from"),
+  validTo: timestamp("valid_to"),
+  recordedAt: timestamp("recorded_at").notNull().defaultNow(),
+  revision: integer("revision").notNull().default(1),
+  supersedes: text("supersedes"),             // vault_claims.id попередника (без FK: ланцюг переживає forget)
+  supersededAt: timestamp("superseded_at"),   // не-NULL = не «голова»; текст НІКОЛИ не UPDATE-иться
+}, (t) => [
+  index("idx_vclaims_space_head").on(t.spaceId, t.supersededAt),
+  index("idx_vclaims_supersedes").on(t.supersedes),
+  // Одна активна голова на слот:
+  uniqueIndex("uniq_vclaims_active_slot").on(t.spaceId, t.slotKey)
+    .where(sql`${t.supersededAt} IS NULL AND ${t.slotKey} IS NOT NULL`),
+  // Один наступник на клейм (гонка supersede програє на insert, не тихо):
+  uniqueIndex("uniq_vclaims_one_successor").on(t.supersedes).where(sql`${t.supersedes} IS NOT NULL`),
+]);
+
+export const noteClaims = pgTable("note_claims", {
+  noteId: text("note_id").notNull().references(() => vaultNotes.id, { onDelete: "cascade" }),
+  claimId: text("claim_id").notNull().references(() => vaultClaims.id, { onDelete: "cascade" }),
+  position: integer("position").notNull().default(0),
+}, (t) => [
+  uniqueIndex("uniq_note_claims").on(t.noteId, t.claimId),
+  index("idx_note_claims_claim").on(t.claimId),
+]);
+
+export const claimEvidence = pgTable("claim_evidence", {
+  id: text("id").primaryKey(),
+  claimId: text("claim_id").notNull().references(() => vaultClaims.id, { onDelete: "cascade" }),
+  relation: text("relation", { enum: ["supports", "refutes", "derived_from"] }).notNull().default("supports"),
+  fragmentId: text("fragment_id").references(() => knowledgeFragments.id, { onDelete: "set null" }),
+  messageId: text("message_id"),
+  quoteSnapshot: text("quote_snapshot"),
+  locatorSnapshot: jsonb("locator_snapshot"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("idx_cev_claim").on(t.claimId)]);
+
+export const memoryCandidates = pgTable("memory_candidates", {
+  id: text("id").primaryKey(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  spaceId: text("space_id").notNull().references(() => spaces.id, { onDelete: "cascade" }),
+  originMessageId: text("origin_message_id"),
+  statement: text("statement").notNull(),
+  slotKey: text("slot_key"),
+  value: jsonb("value"),
+  provenance: jsonb("provenance").notNull(),
+  evidence: jsonb("evidence").notNull().default([]), // EvidenceInput[]: клейма для pending ще немає — докази чекають тут
+  sensitive: boolean("sensitive").notNull().default(false),
+  policyState: text("policy_state", { enum: ["auto_active", "pending", "denied", "conflict"] }).notNull(),
+  claimId: text("claim_id"),
+  conflictsWith: text("conflicts_with"),
+  createdAt: timestamp("created_at").defaultNow(),
+  resolvedAt: timestamp("resolved_at"),
+}, (t) => [
+  uniqueIndex("uniq_mcand_idem").on(t.idempotencyKey),
+  index("idx_mcand_unresolved").on(t.spaceId).where(sql`${t.resolvedAt} IS NULL`),
+]);
+
+export const messageCitations = pgTable("message_citations", {
+  id: text("id").primaryKey(),                // UUID — це і є /citations/<uuid> (план C)
+  messageId: text("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  ordinal: integer("ordinal").notNull(),
+  // ІНВАРІАНТ (тримає сервіс минтингу, план C): sourceVersionId ЗАВЖДИ виводиться з
+  // fragment.versionId у момент запису — ніколи не приймається окремо, інакше пара може
+  // розійтись між версіями. Крос-табличний CHECK у PG неможливий; план C додає тест.
+  sourceVersionId: text("source_version_id").notNull().references(() => knowledgeSourceVersions.id, { onDelete: "restrict" }),
+  fragmentId: text("fragment_id").notNull().references(() => knowledgeFragments.id, { onDelete: "restrict" }),
+  quoteSnapshot: text("quote_snapshot").notNull(),
+  locatorSnapshot: jsonb("locator_snapshot").notNull(),
+  titleSnapshot: text("title_snapshot").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [
+  uniqueIndex("uniq_mcit_msg_ordinal").on(t.messageId, t.ordinal),
+  index("idx_mcit_fragment").on(t.fragmentId),
+]);
+
+export const auditEvents = pgTable("audit_events", {
+  id: text("id").primaryKey(),
+  spaceId: text("space_id").notNull().references(() => spaces.id, { onDelete: "cascade" }),
+  actor: jsonb("actor").notNull(),            // {kind:"user"|"agent"|"system", id?}
+  action: text("action").notNull(),           // claim.create | claim.supersede | claim.forget | candidate.propose | ...
+  subjectType: text("subject_type").notNull(),
+  subjectId: text("subject_id").notNull(),
+  payload: jsonb("payload"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("idx_audit_space_created").on(t.spaceId, t.createdAt)]);
