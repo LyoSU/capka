@@ -12,7 +12,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { getOrCreateSpace, getOrCreateTopicNote, retireProjectSpace, purgeUserSpaces } from "../spaces";
+import { getOrCreateSpace, getOrCreateTopicNote, retireProjectSpace, purgeUserSpaces, type Ex } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -84,6 +84,30 @@ const mkClaim = (id: string, spaceId: string) =>
 
 const retireEvents = (spaceId: string) => count("audit_events", "space_id = $1 AND action = 'space.retire'", [spaceId]);
 
+/** A handle whose FIRST `select` resolves empty without touching the database, and
+ *  whose every other call reaches the real one. That is exactly what the LOSER of the
+ *  get-or-create race sees: it reads nothing, its `ON CONFLICT DO NOTHING` insert
+ *  writes nothing, and the row it finally reads back is the WINNER's. Reproducing
+ *  that with two live callers is a coin flip — whichever finishes first returns from
+ *  the first read and never exercises the second one — so the window is made
+ *  deterministic here instead. A proxy rather than a spy: drizzle keeps internal
+ *  fields under symbols, so exactly one method is swapped and the rest is untouched. */
+const blindFirstRead = (): Ex => {
+  let first = true;
+  return new Proxy(db, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop) as unknown;
+      if (prop !== "select" || !first) return typeof value === "function" ? value.bind(target) : value;
+      first = false;
+      const chain: Record<string, unknown> = {};
+      for (const step of ["from", "where", "limit"]) chain[step] = () => chain;
+      chain.then = (onOk: (rows: unknown[]) => unknown, onErr?: (e: unknown) => unknown) =>
+        Promise.resolve([]).then(onOk, onErr);
+      return () => chain;
+    },
+  }) as Ex;
+};
+
 const cleanup = async () => {
   // Citations pin the cascade, so they go first — the same order the product has
   // to hold.
@@ -150,6 +174,31 @@ run("vault spaces", () => {
     // The matching owner still resolves to the same space, so the guard costs nothing
     // on the hot path it sits on.
     expect(await getOrCreateSpace({ type: "project", refId: PROJ, ownerUserId: OWNER })).toBe(id);
+  });
+
+  it("the race LOSER's re-read is checked too, so the winner's owner is not adopted", async () => {
+    // The second read is a separate return path, and the ONLY one a concurrent caller
+    // takes. Left unchecked it reopens the whole hole under exactly the conditions
+    // this function exists for: the loser reads back a row it never wrote and hands
+    // its caller a space owned by someone else.
+    const stranger = `${P}race-stranger`;
+    await mkUser(stranger);
+    const raceProj = `${P}race-proj`;
+    // The "winner" is already committed; the stubbed first read is what makes our
+    // caller take the insert-then-re-read path anyway.
+    await q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1, 'project', $2, $3)`, [
+      `${P}race-space`,
+      raceProj,
+      stranger,
+    ]);
+
+    await expect(
+      getOrCreateSpace({ type: "project", refId: raceProj, ownerUserId: OWNER }, blindFirstRead()),
+    ).rejects.toThrow(/owned by/);
+
+    // The insert really did run and really did no-op: one row, still the winner's.
+    expect(await count("spaces", "type = 'project' AND ref_id = $1", [raceProj])).toBe(1);
+    expect(await count("spaces", "ref_id = $1 AND owner_user_id = $2", [raceProj, stranger])).toBe(1);
   });
 
   it("concurrent getOrCreateTopicNote yields EXACTLY one topic", async () => {

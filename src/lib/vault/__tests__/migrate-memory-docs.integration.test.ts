@@ -279,30 +279,56 @@ run("vault: memory_docs migration", () => {
     expect(await count("note_claims", "claim_id = $1", [`${P}claim`])).toBe(1);
   });
 
-  it("a bullet matching an UNVERIFIED head confirms it, instead of hiding the legacy fact", async () => {
+  it("a bullet matching an UNVERIFIED head confirms it, carrying each head's own sensitivity", async () => {
     // The legacy document is memory the user has been looking at and silently
     // accepting; it is no less confirmed than whatever is already in the vault.
     // Attaching without confirming stamps the document migrated while the manifest —
     // which reads confirmed claims only — still shows nothing, so the fact exists in
     // the database and is gone from the screen.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    // TWO heads, differing only in `sensitive`. Confirming rewrites that column, so a
+    // single fixture cannot tell "carried the head's own flag" from "hard-coded" —
+    // whichever constant were written would match it. Neither flag may move: one
+    // direction declassifies a fact somebody closed, the other hides a plain one.
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, sensitive)
-       VALUES ($1, $2, 'Likes tea', '{"kind":"derived"}'::jsonb, 'unverified', true)`,
-      [`${P}unverified`, spaceId],
+       VALUES ($1, $2, 'Likes tea', '{"kind":"derived"}'::jsonb, 'unverified', true),
+              ($3, $2, 'Works in Kyiv', '{"kind":"derived"}'::jsonb, 'unverified', false)`,
+      [`${P}sensitive`, spaceId, `${P}plain`],
     );
-    await mkDoc(`${P}d9`, "- likes tea");
+    await mkDoc(`${P}d9`, "- likes tea\n- works   in kyiv");
 
     await migrate(`${P}d9`);
 
-    expect(
-      await count("vault_claims", "id = $1 AND review_status = 'confirmed'", [`${P}unverified`]),
-    ).toBe(1);
-    // Confirming is not licence to declassify: sensitivity only ever rises.
-    expect(await count("vault_claims", "id = $1 AND sensitive = true", [`${P}unverified`])).toBe(1);
-    // A confirmation is not a new version — the statement did not change.
-    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(1);
-    expect(await inTopic(spaceId)).toEqual(["Likes tea"]);
+    expect(await count("vault_claims", "space_id = $1 AND review_status = 'confirmed'", [spaceId])).toBe(2);
+    expect(await count("vault_claims", "id = $1 AND sensitive = true", [`${P}sensitive`])).toBe(1);
+    expect(await count("vault_claims", "id = $1 AND sensitive = false", [`${P}plain`])).toBe(1);
+    // A confirmation is not a new version — neither statement changed.
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(2);
+    expect(new Set(await inTopic(spaceId))).toEqual(new Set(["Likes tea", "Works in Kyiv"]));
+  });
+
+  it("the dedup branch's confirmation goes through the document's TRANSACTION", async () => {
+    // A confirmation written through the module-level `db` instead of `tx` would
+    // commit on its own and survive the rollback — atomicity lost in a way no
+    // after-the-fact assertion can see, because every other check here reads the
+    // database once the transaction is already gone.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await q(
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status)
+       VALUES ($1, $2, 'Likes tea', '{"kind":"derived"}'::jsonb, 'unverified')`,
+      [`${P}rollback`, spaceId],
+    );
+    // The bullet order matters: the known one is confirmed BEFORE the failing one is
+    // created, so the confirmation is already written when the document blows up.
+    await mkDoc(`${P}d10`, "- likes tea\n- poisonous");
+    hook.failOn = "poisonous";
+
+    await expect(migrate(`${P}d10`)).rejects.toThrow(`did not migrate: ${P}d10`);
+
+    expect(await count("vault_claims", "id = $1 AND review_status = 'unverified'", [`${P}rollback`])).toBe(1);
+    expect(await count("note_claims", "claim_id = $1", [`${P}rollback`])).toBe(0);
+    expect(await migratedAt(`${P}d10`)).toBeNull();
   });
 
   it("a project's document lands in the project space, owned by the document's owner", async () => {

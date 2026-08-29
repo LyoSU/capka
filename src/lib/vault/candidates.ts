@@ -35,16 +35,25 @@ const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
  * on the statement alone answered "already known" and dropped the new value on the
  * floor — and a slot exists precisely for facts whose value changes over time.
  *
+ * An ABSENT candidate value is "no opinion", NOT "the value is now empty". The
+ * defect was a candidate carrying a DIFFERENT value overwriting nothing; a candidate
+ * carrying no value asserts nothing to lose. Reading absence as a divergence is worse
+ * than the bug it would be guarding: on the propose side it manufactures conflicts
+ * out of a plain restatement, and on the confirm side it supersedes the head to
+ * `value = null` — silently destroying the very number this comparison exists to
+ * protect. Clearing a value on purpose is `memory_update`'s job, with an explicit
+ * value; extraction never gets to do it by omission.
+ *
  * `isDeepStrictEqual` rather than serialized text: jsonb does not preserve key order,
  * so `{days,tier}` and `{tier,days}` come back from the same row in either shape, and
  * comparing strings would split one fact in two by accident of the model's phrasing.
  *
- * `?? null` on both sides because that is what the column stores: a candidate that
- * carries no value is compared as the `null` it will be written as, not as a claim
- * that says nothing about the value. So "same words, but this time WITHOUT the
- * number" is a divergence a human sees, rather than a silent overwrite of one.
+ * A candidate value of literal `null` is indistinguishable from an absent one once it
+ * is in the column, so it reads as "no opinion" too — the honest reading of a shape
+ * the storage cannot tell apart.
  */
-const sameValue = (a: unknown, b: unknown) => isDeepStrictEqual(a ?? null, b ?? null);
+const valueAgrees = (headValue: unknown, candidateValue: unknown) =>
+  candidateValue === undefined || candidateValue === null || isDeepStrictEqual(headValue ?? null, candidateValue);
 
 /**
  * Whether this is "a competitor already took the slot" — and NOTHING else.
@@ -244,10 +253,12 @@ export async function proposeCandidate(input: {
       return { state: "auto_active", claimId: claim.id, revision: claim.revision } as const;
     };
 
-    /** "Already known" means the words AND the value. Either one differing is a
-     *  decision for a human, not something to absorb into an existing row. */
+    /** "Already known" means the words, and a value that does not contradict the
+     *  head's. A candidate asserting a DIFFERENT value is a decision for a human, not
+     *  something to absorb into an existing row; a candidate asserting none merges
+     *  exactly as it always did. */
     const same = (head: ClaimHead) =>
-      norm(head.statement) === norm(input.statement) && sameValue(head.value, input.value);
+      norm(head.statement) === norm(input.statement) && valueAgrees(head.value, input.value);
 
     if (slotKey) {
       const head = await headBySlot(input.spaceId, slotKey, tx);
@@ -372,11 +383,13 @@ export async function confirmCandidate(args: {
                   (h) => norm(h.statement) === norm(cand.statement),
                 ) ?? null);
 
-            // The value has to match too, for the same reason as in propose — but the
+            // The value is compared too, for the same reason as in propose — but the
             // outcome differs: the human has already said yes to THIS candidate, so a
             // divergent value is a correction to apply, not a conflict to hand back.
-            // It therefore falls through to the supersede below.
-            if (head && norm(head.statement) === norm(cand.statement) && sameValue(head.value, cand.value)) {
+            // It therefore falls through to the supersede below. A candidate with NO
+            // value stays here, in the merge, and the head keeps the number it had:
+            // superseding on absence would clear it under a `{ok:true}`.
+            if (head && norm(head.statement) === norm(cand.statement) && valueAgrees(head.value, cand.value)) {
               for (const ev of evidence) await attachEvidence(head.id, ev, sp);
               // This is the HUMAN's decision, so the head becomes confirmed —
               // otherwise `{ok:true}` would be returned for a fact the manifest will
@@ -396,7 +409,12 @@ export async function confirmCandidate(args: {
                   expectedRevision: head.revision,
                   patch: {
                     statement: cand.statement,
-                    value: cand.value,
+                    // `undefined` makes `updateClaim` INHERIT the predecessor's value;
+                    // passing the candidate's `null` straight through would write it,
+                    // because a NULL jsonb arrives as `null` and the patch tests
+                    // `!== undefined`. Same rule as the merge above: a candidate that
+                    // asserts no value must not empty one.
+                    value: cand.value ?? undefined,
                     // Inheriting from the predecessor is exactly what must not happen
                     // here: the text came from THIS candidate, so the provenance is
                     // its own (otherwise the successor would carry, say,

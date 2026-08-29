@@ -4,29 +4,34 @@ import { proposeCandidate, verifyDirectProvenance } from "./candidates";
 import { findCurrentHead, forgetClaim, listHeadClaims, updateClaim, type ClaimHead } from "./claims";
 import { getOrCreateSpace } from "./spaces";
 
-/** Скільки рядків пам'яті віддаємо за один пошук. Пам'ять їде в контекст ходу,
- *  тож стеля тут — це стеля не «скільки цікаво», а «скільки не шкода». */
+/** How many memory lines one search hands back. Memory rides in the turn's own
+ *  context, so this ceiling is not "how much is interesting" but "how much we can
+ *  afford to spend". */
 const SEARCH_LIMIT = 20;
 
-/** Рядок для моделі: `[id@revision]` — це те, чим вона потім адресує клейм в
- *  update/forget, тож формат ідентичний у пошуку й у відповіді про успіх. */
+/** One line for the model: `[id@revision]` is how it addresses a claim in
+ *  update/forget afterwards, so search and the success reply print it identically. */
 const line = (c: ClaimHead) => `[${c.id}@${c.revision}] ${c.statement}${c.slotKey ? ` (slot: ${c.slotKey})` : ""}`;
 
-/** Мова програшу CAS — одна на update і forget: розказати, як світ виглядає
- *  ЗАРАЗ, і чим переслати. `current: null` навмисно не розрізняє «ланцюг забуто»
- *  і «клейм не з твоїх просторів» — так вирішено в `claims.ts`, і тул не має
- *  права робити цю різницю спостережуваною. */
+/** The language of a lost CAS, shared by update and forget: say how the world looks
+ *  NOW and what to re-send with. `current: null` deliberately does not separate "the
+ *  chain was forgotten" from "that claim is not in your spaces" — decided in
+ *  `claims.ts`, and a tool has no business making the difference observable.
+ *
+ *  It says "no longer there", not "forgotten": the head may equally have been
+ *  superseded, or have been in a space this caller cannot see, and naming one cause
+ *  out of three would be a guess printed as a fact. */
 const mismatch = (current: ClaimHead | null) =>
   current
     ? `Claim ${current.id} is now at revision ${current.revision}: "${current.statement}". Re-issue with expected_revision=${current.revision} if the change still applies.`
-    : "That claim no longer exists (it was forgotten).";
+    : "That claim is no longer there (forgotten or replaced). Run memory_search to see what is.";
 
-/** Довільне значення їде РЯДКОМ JSON, а не об'єктом: `asSchema` схлопує відкритий
- *  `z.record`/`z.unknown` у `additionalProperties: false`, і провайдер отримує
- *  схему, яку модель не може задовольнити.
+/** An arbitrary value travels as a JSON STRING, not an object: `asSchema` collapses
+ *  an open `z.record`/`z.unknown` into `additionalProperties: false`, and the provider
+ *  receives a schema the model cannot satisfy.
  *
- *  Зламаний JSON — це РЕЗУЛЬТАТ тула, а не throw: throw обриває крок, а результат
- *  лишає моделі наступний крок, щоб переслати виправлене. */
+ *  Broken JSON is a tool RESULT, not a throw: a throw ends the step, while a result
+ *  leaves the model a next step in which to re-send the corrected value. */
 function parseValueJson(raw: string | undefined): { ok: true; value: unknown } | { ok: false; message: string } {
   if (raw === undefined) return { ok: true, value: undefined };
   try {
@@ -39,10 +44,10 @@ function parseValueJson(raw: string | undefined): { ok: true; value: unknown } |
   }
 }
 
-/** Що модель бачить замість `policy_state`. `denied` цією політикою не
- *  породжується (див. `proposeCandidate`), але таблиця лишається повною — інакше
- *  майбутнє правило governance тихо віддавало б `undefined`. `duplicate` — це
- *  переграний тул-колл (ретрай ходу), а не другий факт. */
+/** What the model sees instead of `policy_state`. `denied` is not produced by this
+ *  policy (see `proposeCandidate`), but the table stays complete — otherwise a future
+ *  governance rule would quietly hand back `undefined`. `duplicate` is a replayed tool
+ *  call (a turn retry), not a second fact. */
 const PROPOSE_SAID = {
   auto_active: "Saved.",
   merged: "Already known — added this conversation as evidence.",
@@ -53,14 +58,14 @@ const PROPOSE_SAID = {
 } as const;
 
 /**
- * Чотири тули пам'яті одного ходу. Фабрика асинхронна, бо простори резолвляться
- * один раз тут, а не в кожному `execute`: усі чотири тули розмежовані одним і
- * тим самим списком просторів, і резолвити його заново на кожен виклик означало
- * б чотири різні відповіді на одне питання «що мені видно».
+ * One turn's four memory tools. The factory is async because the spaces are resolved
+ * ONCE here rather than inside every `execute`: all four tools are bounded by the same
+ * list of spaces, and resolving it afresh per call would mean four different answers
+ * to the one question "what can I see".
  *
- * `userTurnText` — текст останнього user-повідомлення ходу. Порожній рядок —
- * це не помилка, а fail-safe: `verifyDirectProvenance` тоді поверне false, і
- * пропозиція ляже в pending замість активації.
+ * `userTurnText` is the text of the turn's last user message. An empty string is not
+ * an error but a fail-safe: `verifyDirectProvenance` then returns false and the
+ * proposal lands in pending instead of activating.
  */
 export async function makeVaultMemoryTools(ctx: {
   userId: string;
@@ -69,9 +74,9 @@ export async function makeVaultMemoryTools(ctx: {
   messageId: string;
   userTurnText: string;
 }) {
-  // Власника project-простору знає колер (рядок проєкту вже в нього в руках).
-  // Його відсутність — баг колера, а не привід вигадати власника чи мовчки
-  // звалитись у user-простір: обидва варіанти записали б факт не туди.
+  // The caller knows the project space's owner (it already holds the project row).
+  // Its absence is a bug in the caller, not licence to invent an owner or quietly fall
+  // back to the user space: either would file the fact in the wrong place.
   if (ctx.projectId && !ctx.projectOwnerUserId) {
     throw new Error("makeVaultMemoryTools: projectId requires projectOwnerUserId");
   }
@@ -92,8 +97,11 @@ export async function makeVaultMemoryTools(ctx: {
    *  the CAS, be told the new revision, lose again, and file a conflict — making no
    *  progress on the edit it wanted. Exotic (it needs a competitor superseding the
    *  same claim between two tool calls of one turn), and the cost is bounded: the
-   *  agent burns its tool budget for the turn, the database blocks on nothing, and
-   *  the second loss leaves a conflict a human resolves. */
+   *  agent burns its tool budget for the turn and the database blocks on nothing.
+   *  What the second loss leaves depends on what it found: a conflict for a human when
+   *  the claim's space resolves, and nothing at all when the head has gone — that
+   *  branch declines rather than guessing a space. Neither outcome is progress on the
+   *  edit the model wanted, which is the accepted part. */
   const mismatched = new Set<string>();
 
   /** Which space a claim lives in. `ClaimHead` carries no `spaceId` (a claim's text
@@ -121,8 +129,9 @@ export async function makeVaultMemoryTools(ctx: {
         scope: z.enum(["user", "project", "all"]).optional().describe("Default: all"),
       }),
       execute: async ({ query, scope }) => {
-        // Поза проєктом `scope: "project"` дає порожній список просторів — і це
-        // чесніше, ніж тихо підмінити його user-простором: модель просила не те.
+        // Outside a project, `scope: "project"` yields an empty list of spaces — more
+        // honest than quietly substituting the user space: the model asked for
+        // something else.
         const spaceIds =
           scope === "user"
             ? [userSpaceId]
@@ -130,27 +139,27 @@ export async function makeVaultMemoryTools(ctx: {
               ? projectSpaceId
                 ? [projectSpaceId]
                 : []
-              : // Проєктний простір першим: у чаті проєкту він ближчий до справи, а
-                // зшити два впорядкованих списки в один по-справжньому нічим —
-                // `ClaimHead` не несе `recorded_at`.
+              : // The project space first: inside a project chat it is closer to the
+                // matter at hand, and there is nothing to truly merge two ordered lists
+                // by — `ClaimHead` does not carry `recorded_at`.
                 (projectSpaceId ? [projectSpaceId, userSpaceId] : [userSpaceId]);
         const needle = query.toLowerCase();
         const buckets: ClaimHead[][] = [];
         for (const spaceId of spaceIds) {
-          // Еквівалент `ILIKE '%query%'` по statement АБО slot_key. Свідомо
-          // примітивно: лексичний пошук — план C, і робити його тут наполовину
-          // означало б два різні пошуки в одній системі.
+          // The equivalent of `ILIKE '%query%'` over statement OR slot_key.
+          // Deliberately primitive: lexical search is plan C, and doing half of it here
+          // would mean two different searches inside one system.
           buckets.push(
             (await listHeadClaims(spaceId)).filter(
               (c) => c.statement.toLowerCase().includes(needle) || c.slotKey?.toLowerCase().includes(needle),
             ),
           );
         }
-        // Стеля ділиться між просторами, а не з'їдається першим. Пошук — ЄДИНИЙ
-        // спосіб дістати `[id@revision]`, тож двадцять збігів у проєкті інакше
-        // робили б user-простір не лише невидимим, а й невиправним: ні update, ні
-        // forget нема чим адресувати. Недобір одного простору доливає інший, тож
-        // стеля використовується повністю.
+        // The ceiling is SHARED between spaces, not eaten by the first. Search is the
+        // ONLY way to obtain an `[id@revision]`, so twenty project matches would
+        // otherwise leave the user space not merely invisible but uncorrectable: there
+        // would be nothing to address update or forget with. One space's shortfall is
+        // topped up by the other, so the ceiling is used in full.
         const quota = Math.ceil(SEARCH_LIMIT / Math.max(buckets.length, 1));
         const hits = buckets.flatMap((b) => b.slice(0, quota));
         for (const b of buckets) for (const c of b.slice(quota)) if (hits.length < SEARCH_LIMIT) hits.push(c);
@@ -173,7 +182,7 @@ export async function makeVaultMemoryTools(ctx: {
           .string()
           .max(120)
           .optional()
-          .describe("Optional stable key like 'постачальник/акме/відстрочка' for facts that change over time"),
+          .describe("Optional stable key like 'supplier/acme/payment-terms' for facts that change over time"),
         value_json: z.string().max(2000).optional().describe("Optional structured value as a JSON string"),
         sensitive: z.boolean().optional().describe("Set true for health/politics/religion/private-life facts"),
       }),
@@ -200,16 +209,18 @@ export async function makeVaultMemoryTools(ctx: {
           statement,
           slotKey: slot_key,
           value: parsed.value,
-          // Бар'єр проти ін'єкції: «користувач сказав це сам» — не слова тула, а
-          // перевірка проти тексту його ходу. Не збіглося — `derived`, і політика
-          // відправить факт на підтвердження замість автоактивації.
+          // The barrier against injection: "the user said this themselves" is not the
+          // tool's word for it but a check against the text of their own turn. No match
+          // means `derived`, and the policy sends the fact for confirmation instead of
+          // activating it.
           provenance: {
             kind: verifyDirectProvenance(statement, ctx.userTurnText) ? "user_direct" : "derived",
             messageId: ctx.messageId,
           },
           sensitive,
-          // Без цього відповідь «додав цю розмову як доказ» була б неправдою:
-          // саме ці докази `proposeCandidate` доливає до голови на merge.
+          // Without this the reply "added this conversation as evidence" would be
+          // untrue: these are exactly the pieces `proposeCandidate` tops a head up with
+          // on a merge.
           evidence: [{ messageId: ctx.messageId }],
         });
         return PROPOSE_SAID[res.state];
@@ -226,8 +237,9 @@ export async function makeVaultMemoryTools(ctx: {
           statement: z.string().min(3).max(500).optional(),
           value_json: z.string().max(2000).optional(),
         })
-        // Валідує на сервері, але в JSON Schema НЕ потрапляє — саме тому та сама
-        // вимога дослівно стоїть у `description`, інакше модель про неї не дізнається.
+        // Validated on the server but NOT carried into the JSON Schema — which is why
+        // the same requirement is spelled out verbatim in `description`, or the model
+        // would never learn of it.
         .refine((v) => v.statement !== undefined || v.value_json !== undefined, {
           message: "provide statement or value_json",
         }),
@@ -245,23 +257,23 @@ export async function makeVaultMemoryTools(ctx: {
           allowedSpaceIds,
           actor,
         });
-        // Supersede створює НОВИЙ рядок, тож id клейма змінився: без нього
-        // наступний update моделі йшов би за мертвою адресою.
+        // A supersede creates a NEW row, so the claim's id changed: without it the
+        // model's next update would go to a dead address.
         if (res.ok) return `Updated. The claim is now [${res.id}@${res.revision}].`;
 
-        // Клейма немає (ланцюг забуто АБО він не з наших просторів) — і другий
-        // програш цього не змінює. Конфлікт тут був би суперечкою з порожнечею:
-        // людині показали б «розв'яжіть» проти факту, якого нема, а текст моделі
-        // заїхав би у сховище за неіснуючим id.
+        // There is no claim (the chain was ended OR it is not in our spaces) — and a
+        // second loss does not change that. A conflict here would be an argument with
+        // nothing: the human would be shown "resolve this" against a fact that does not
+        // exist, and the model's text would enter the store under a nonexistent id.
         if (!res.current) return mismatch(null);
         if (!mismatched.has(claim_id)) {
           mismatched.add(claim_id);
           return mismatch(res.current);
         }
-        // Другий програш поспіль по тому ж клейму — це вже не «перечитай», а
-        // розбіжність, яку розв'язує людина. Але фіксувати нема чого, якщо нового
-        // ТЕКСТУ немає: кандидат — це твердження, яке хтось читатиме, і підставити
-        // туди старе формулювання означало б записати конфлікт сам із собою.
+        // A second loss in a row on the same claim is no longer "re-read" but a
+        // divergence a human resolves. There is nothing to record without new TEXT,
+        // though: a candidate is a statement somebody will read, and putting the old
+        // wording there would record a conflict with itself.
         if (statement === undefined) return mismatch(res.current);
         // The claim's space does not resolve — the head vanished between the CAS loss
         // and the probe. The same sentence as for `current: null`: there is no space
@@ -274,13 +286,12 @@ export async function makeVaultMemoryTools(ctx: {
           spaceId: conflictSpaceId,
           originMessageId: ctx.messageId,
           statement,
-          // Не `user_direct` навіть за дослівного збігу: активувати текст, який
-          // ЩОЙНО програв CAS, означало б обійти голову замість розв'язати конфлікт.
+          // Not `user_direct` even on a verbatim match: activating text that JUST lost
+          // the CAS would mean going around the head instead of resolving the conflict.
           provenance: { kind: "derived", messageId: ctx.messageId },
-          // Чутливість — властивість ФАКТУ, а не рішення політики: `forceState`
-          // однаково веде в conflict, тож не передати її означало б просто
-          // загубити прапорець на рядку, який читатиме людина (і все, що по ньому
-          // ховає текст).
+          // Sensitivity is a property of the FACT, not a policy decision: `forceState`
+          // leads to conflict either way, so not passing it would simply lose the flag
+          // on a row a human will read (along with everything that hides text by it).
           sensitive: res.current.sensitive,
           evidence: [{ messageId: ctx.messageId }],
           forceState: "conflict",

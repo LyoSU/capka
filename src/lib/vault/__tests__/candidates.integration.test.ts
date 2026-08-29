@@ -440,6 +440,21 @@ run("vault candidates", () => {
     expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(1);
   });
 
+  it("a candidate asserting NO value merges and leaves the head's value alone", async () => {
+    // Absence is "no opinion", not "the value is now empty". Reading it as a
+    // divergence would manufacture a conflict card out of a plain restatement — and,
+    // on the confirm side, would clear the number outright.
+    const first = await propose({ statement: "Keep backups", slotKey: "retention-silent", value: { days: 30 } });
+    if (first.state !== "auto_active") throw new Error("expected auto_active");
+
+    expect(await propose({ statement: "keep backups", slotKey: "retention-silent" })).toEqual({
+      state: "merged",
+      claimId: first.claimId,
+    });
+    expect((await claimRow(first.claimId)).value).toEqual({ days: 30 });
+    expect((await claimRow(first.claimId)).revision).toBe(1);
+  });
+
   it("WITHOUT a slot: the same text with a different value is a conflict, not a merge", async () => {
     // The slotless dedup drops the value just as silently; the rule cannot depend on
     // whether a slot happens to be set, or the same fact merges or conflicts by
@@ -661,6 +676,68 @@ run("vault candidates", () => {
     expect(successor.sensitive).toBe(true);
     expect((await claimRow(head.id)).superseded_at).not.toBeNull();
     expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(1);
+  });
+
+  it("confirming a candidate with NO value never supersedes the head's value to null", async () => {
+    // The dangerous shape, and the one extraction produces most often: same words,
+    // same slot, no value_json. Provenance is `derived`, so the gate sends it to
+    // pending and a human confirms it. Treating the absent value as a divergence
+    // supersedes the head with `patch.value = null` — a NULL jsonb arrives as `null`,
+    // which is NOT `undefined`, so `updateClaim` writes it instead of inheriting, and
+    // revision 2 lands empty under a cheerful `{ok:true}`.
+    const first = await propose({ statement: "Keep backups", slotKey: "retention-keep", value: { days: 30 } });
+    if (first.state !== "auto_active") throw new Error("expected auto_active");
+
+    const pending = await propose({
+      statement: "keep   backups",
+      slotKey: "retention-keep",
+      provenance: { kind: "derived", messageId: `${P}msg` },
+      evidence: [{ messageId: `${P}msg-keep` }],
+    });
+    if (pending.state !== "pending") throw new Error("expected pending");
+
+    const res = await confirmCandidate({ candidateId: pending.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    // A merge into the SAME row, not a new version: nothing about the fact changed.
+    expect(res).toEqual({ ok: true, claimId: first.claimId });
+    const row = await claimRow(first.claimId);
+    expect(row.value).toEqual({ days: 30 });
+    expect(row.revision).toBe(1);
+    expect(row.superseded_at).toBeNull();
+    expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(1);
+  });
+
+  it("a supersede driven by NEW text carries the head's value forward when the candidate has none", async () => {
+    // The same rule one branch down: the words changed, so this IS a supersede — but
+    // the candidate still said nothing about the value, and the successor must not be
+    // the place where it quietly disappears.
+    const head = await createClaim(
+      {
+        spaceId: SPACE_A,
+        statement: "Keep backups for a month",
+        slotKey: "retention-carry",
+        value: { days: 30 },
+        origin: { kind: "legacy_memory_doc" },
+        reviewStatus: "unverified",
+      },
+      ACTOR,
+    );
+
+    const pending = await propose({
+      statement: "Keep backups for a while",
+      slotKey: "retention-carry",
+      sensitive: true,
+    });
+    if (pending.state !== "pending") throw new Error("expected pending");
+
+    const res = await confirmCandidate({ candidateId: pending.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("unreachable");
+
+    const successor = await claimRow(res.claimId);
+    expect(successor.statement).toBe("Keep backups for a while");
+    expect(successor.revision).toBe(2);
+    expect(successor.supersedes).toBe(head.id);
+    expect(successor.value).toEqual({ days: 30 });
   });
 
   it("confirm WITHOUT a slot dedups by text instead of breeding a second head", async () => {

@@ -170,15 +170,14 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
  *  it also finds the spaces of LONG-deleted projects, whose rows are gone.
  *  A surviving citation (an anomaly) raises RESTRICT and rolls back the WHOLE
  *  transaction: the user stays, an admin sees the error and retries — atomic by
- *  construction, so no separate retry path is needed. */
+ *  construction, so no separate retry path is needed.
+ *
+ *  ACCEPTED for plan A, and a PRIVACY BLOCKER for plan B (GPT audit #4): this removes
+ *  the ROWS, not the content-addressed blobs a version points at. Plan A writes no
+ *  blobs at all — the ingest in plan B is their only producer — so nothing is left
+ *  behind today. The moment ingest lands, this function must reach the blob store
+ *  too, or a deleted user's bytes stay on disk under a known SHA and the deletion is
+ *  a lie. Recorded on the function that will be wrong, not in a plan document. */
 export async function purgeUserSpaces(userId: string, ex: Ex = db): Promise<void> {
   await ex.delete(spaces).where(eq(spaces.ownerUserId, userId));
 }
-
-/** ACCEPTED for plan A, and a PRIVACY BLOCKER for plan B (GPT audit #4): this
- *  removes the rows, not the content-addressed blobs a version points at. Plan A
- *  writes no blobs at all — the ingest in plan B is their only producer — so today
- *  there is nothing left behind. The moment ingest lands, this function must reach
- *  the blob store too, or a deleted user's bytes stay on disk under a known SHA and
- *  the delete is a lie. Written here rather than in a plan document because this is
- *  the function that will be wrong. */
