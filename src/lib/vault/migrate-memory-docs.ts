@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
-import { attachToTopic, createClaim, listHeadClaims } from "./claims";
+import { attachToTopic, confirmClaim, createClaim, listHeadClaims } from "./claims";
 import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote } from "./spaces";
 
 /** The same normalization as in `candidates.ts`. Different rules here would mean
@@ -105,7 +105,12 @@ async function migrateOne(docId: string): Promise<boolean> {
 
     // Dedup against the space's existing heads — this covers both a repeat after a
     // partial failure and a match with a fact the user already stated themselves.
-    const seen = new Map((await listHeadClaims(spaceId, {}, tx)).map((h) => [norm(h.statement), h.id]));
+    // The head's `sensitive` is carried along, not just its id: confirming below
+    // rewrites that column, and passing anything else would declassify a fact
+    // somebody had closed.
+    const seen = new Map(
+      (await listHeadClaims(spaceId, {}, tx)).map((h) => [norm(h.statement), { id: h.id, sensitive: h.sensitive }]),
+    );
     for (const line of doc.content.split("\n")) {
       const statement = line.trim().replace(/^[-*]\s*/, "").trim();
       if (!statement) continue;
@@ -115,7 +120,13 @@ async function migrateOne(docId: string): Promise<boolean> {
         // the candidate ledger may have created it). Simply skipping the bullet would
         // leave the row in the database and remove it from the screen: the GET reads
         // the default topic.
-        await attachToTopic(known, noteId, tx);
+        await attachToTopic(known.id, noteId, tx);
+        // And possibly UNVERIFIED, which the Task 8 manifest does not list either —
+        // so attaching alone would stamp the document migrated while the fact stayed
+        // invisible, this time one layer down. A legacy document is memory the user
+        // has been looking at and silently accepting; it is no less confirmed than
+        // whatever already sits in the vault under the same words.
+        await confirmClaim(known.id, known.sensitive, tx);
         continue;
       }
       const claim = await createClaim(
@@ -131,7 +142,9 @@ async function migrateOne(docId: string): Promise<boolean> {
         { kind: "system" },
         tx,
       );
-      seen.set(norm(statement), claim.id);
+      // Created confirmed and non-sensitive, so a repeated bullet inside the SAME
+      // document takes the branch above and changes nothing.
+      seen.set(norm(statement), { id: claim.id, sensitive: false });
     }
 
     // The only copy of the original markdown that survives the move: the bullets are

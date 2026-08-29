@@ -116,13 +116,16 @@ describe("memory_propose", () => {
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
   });
 
-  it("поза проєктом scope:'project' падає в user-простір, а не втрачає факт", async () => {
-    // Асиметрія з memory_search свідома: факт уже сказаний, і покласти його
-    // рівнем вище дешевше, ніж загубити; пошук же нічого не втрачає, мовчки
-    // підмінивши простір, тому там — порожньо.
+  it("outside a project an explicit scope:'project' saves NOTHING and says so", async () => {
+    // Falling back to the user space gives the fact a WIDER audience than was asked
+    // for and then answers "Saved." — a tool result that is not true. Same rule as
+    // memory_search: the model asked for a space that does not exist here, so say so
+    // instead of substituting one.
     const tools = await make({ projectId: null, projectOwnerUserId: undefined });
-    await run(tools.memory_propose, { statement: "Дедлайн у п'ятницю", scope: "project" });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
+    const out = await run(tools.memory_propose, { statement: "Deadline on Friday", scope: "project" });
+    expect(out).toContain("not inside a project");
+    expect(out).toContain("Nothing was saved");
+    expect(proposeCandidate).not.toHaveBeenCalled();
   });
 
   it("зламаний value_json — це РЕЗУЛЬТАТ тула, не throw, і пропозиції не було", async () => {
@@ -224,15 +227,36 @@ describe("memory_update", () => {
     );
   });
 
-  it("клейм не з project-простору → конфлікт лягає в user-простір", async () => {
+  it("a claim found only in the user space records the conflict THERE", async () => {
     updateClaim.mockResolvedValue({ ok: false, current: head({ id: "c5", revision: 4 }) });
-    findCurrentHead.mockResolvedValue(null);
+    // Not in the project space; present in the user space — so the space is known,
+    // and it is the user's.
+    findCurrentHead.mockImplementation(async (_id: string, spaces: string[]) =>
+      spaces[0] === USER_SPACE ? head({ id: "c5", revision: 4 }) : null,
+    );
     proposeCandidate.mockResolvedValue({ state: "conflict", candidateId: "cand4" });
     const tools = await make();
 
     await run(tools.memory_update, { claim_id: "cX", expected_revision: 1, statement: "У доларах" }, "call-1");
     await run(tools.memory_update, { claim_id: "cX", expected_revision: 1, statement: "У доларах" }, "call-2");
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
+  });
+
+  it("a claim in NO reachable space records no conflict at all, and says the claim is gone", async () => {
+    // The head vanished (forgotten or superseded) between the CAS loss and the probe.
+    // Defaulting to the user space would file a PROJECT-specific fact as global
+    // knowledge about the person, and answer "Recorded…" for a space nobody chose.
+    // Guessing is strictly worse than declining: an untrue tool result plus a fact in
+    // the wrong scope.
+    updateClaim.mockResolvedValue({ ok: false, current: head({ id: "c5", revision: 4 }) });
+    findCurrentHead.mockResolvedValue(null);
+    const tools = await make();
+
+    await run(tools.memory_update, { claim_id: "cX", expected_revision: 1, statement: "Now in dollars" }, "call-1");
+    const out = await run(tools.memory_update, { claim_id: "cX", expected_revision: 1, statement: "Now in dollars" }, "call-2");
+
+    expect(out).toBe("That claim no longer exists (it was forgotten).");
+    expect(proposeCandidate).not.toHaveBeenCalled();
   });
 
   it("другий mismatch по НЕІСНУЮЧОМУ клеймі не вигадує конфлікт ні з чим", async () => {

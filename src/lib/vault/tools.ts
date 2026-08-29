@@ -83,18 +83,34 @@ export async function makeVaultMemoryTools(ctx: {
   const allowedSpaceIds = projectSpaceId ? [userSpaceId, projectSpaceId] : [userSpaceId];
   const actor = { kind: "agent" } as const;
 
-  /** Клейми, які вже програли CAS у ЦЬОМУ ході. Живе в замиканні фабрики, а
-   *  фабрику кличуть раз на хід — тож стан гасне разом із ходом за побудовою,
-   *  без жодного прибирання. Тримає лише id: простір потрібен рівно там, де
-   *  пишеться конфлікт, і зонд за ним живе там само. */
+  /** Claims that have already lost the CAS in THIS turn. Lives in the factory's
+   *  closure, and the factory is called once per turn — so the state dies with the
+   *  turn by construction, with nothing to clean up. Holds ids only: the space is
+   *  needed exactly where the conflict is written, and the probe for it lives there.
+   *
+   *  ACCEPTED (GPT audit #11): under CONSTANT churn on one claim the model can lose
+   *  the CAS, be told the new revision, lose again, and file a conflict — making no
+   *  progress on the edit it wanted. Exotic (it needs a competitor superseding the
+   *  same claim between two tool calls of one turn), and the cost is bounded: the
+   *  agent burns its tool budget for the turn, the database blocks on nothing, and
+   *  the second loss leaves a conflict a human resolves. */
   const mismatched = new Set<string>();
 
-  /** У якому просторі лежить клейм. `ClaimHead` не несе `spaceId` (текст клейма
-   *  віддається лише тим, хто пройшов space-фільтр), тож єдиний спосіб — спитати
-   *  вужчим скоупом. Викликається лише з конфліктної гілки: більшість програшів
-   *  CAS другого не має, і платити за них SELECT-ом наперед нема за що. */
-  const claimSpaceId = async (claimId: string) =>
-    projectSpaceId && (await findCurrentHead(claimId, [projectSpaceId])) ? projectSpaceId : userSpaceId;
+  /** Which space a claim lives in. `ClaimHead` carries no `spaceId` (a claim's text
+   *  goes only to callers who cleared the space filter), so the only way to ask is
+   *  with a narrower scope. Called from the conflict branch alone: most CAS losses
+   *  never see a second one, and there is nothing to buy by paying for the SELECT up
+   *  front.
+   *
+   *  `null` means the head is in NEITHER space — forgotten or superseded between the
+   *  CAS loss and this probe. Both spaces are asked explicitly, neither is a fallback:
+   *  defaulting to the user space filed a PROJECT-specific conflict as global
+   *  knowledge about the person, under a tool result claiming it had been recorded.
+   *  Not writing is strictly better than guessing the scope. */
+  const claimSpaceId = async (claimId: string): Promise<string | null> => {
+    if (projectSpaceId && (await findCurrentHead(claimId, [projectSpaceId]))) return projectSpaceId;
+    return (await findCurrentHead(claimId, [userSpaceId])) ? userSpaceId : null;
+  };
 
   return {
     memory_search: tool({
@@ -164,8 +180,17 @@ export async function makeVaultMemoryTools(ctx: {
       execute: async ({ statement, scope, slot_key, value_json, sensitive }, { toolCallId }) => {
         const parsed = parseValueJson(value_json);
         if (!parsed.ok) return parsed.message;
-        // `scope: "project"` поза проєктом падає в user-простір: факт уже
-        // сказаний, і втратити його гірше, ніж покласти на рівень вище.
+        // An EXPLICIT `scope: "project"` outside a project is refused, not absorbed
+        // into the user space: that fallback gave the fact a wider audience than was
+        // asked for — project-scoped memory follows one project, user-scoped memory
+        // follows the person everywhere — and then answered "Saved.", which was not
+        // true of what the model requested. The same rule memory_search already holds.
+        // An instruction, not an error: the model still has a step to re-send.
+        if (scope === "project" && !projectSpaceId) {
+          return "This chat is not inside a project, so there is no project memory to save to. Nothing was saved — re-send without scope, or with scope:'user' if the fact is about the person.";
+        }
+        // After the guard, "wants project" implies there IS one; the condition is
+        // kept for the type, not for a case that can still happen.
         const wantsProject = (scope ?? (projectSpaceId ? "project" : "user")) === "project";
         const spaceId = wantsProject && projectSpaceId ? projectSpaceId : userSpaceId;
         const res = await proposeCandidate({
@@ -238,9 +263,15 @@ export async function makeVaultMemoryTools(ctx: {
         // ТЕКСТУ немає: кандидат — це твердження, яке хтось читатиме, і підставити
         // туди старе формулювання означало б записати конфлікт сам із собою.
         if (statement === undefined) return mismatch(res.current);
+        // The claim's space does not resolve — the head vanished between the CAS loss
+        // and the probe. The same sentence as for `current: null`: there is no space
+        // to write the conflict into, and inventing one would put the fact in the
+        // wrong scope and then lie about it in the tool result.
+        const conflictSpaceId = await claimSpaceId(claim_id);
+        if (!conflictSpaceId) return mismatch(null);
         await proposeCandidate({
           idempotencyKey: `${ctx.messageId}:${toolCallId}:conflict`,
-          spaceId: await claimSpaceId(claim_id),
+          spaceId: conflictSpaceId,
           originMessageId: ctx.messageId,
           statement,
           // Не `user_direct` навіть за дослівного збігу: активувати текст, який

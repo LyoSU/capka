@@ -401,6 +401,59 @@ run("vault candidates", () => {
     expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(1);
   });
 
+  it("taken slot + the same text but a DIFFERENT value → conflict, and the head keeps its value", async () => {
+    // The defect this pins: a merge decided on the statement ALONE answers "already
+    // known" and drops the structured value on the floor. The slot exists precisely
+    // for facts whose value changes over time, so the value is the part that matters.
+    const first = await propose({ statement: "Keep backups", slotKey: "retention", value: { days: 30 } });
+    if (first.state !== "auto_active") throw new Error("expected auto_active");
+
+    const res = await propose({ statement: "keep   backups", slotKey: "retention", value: { days: 60 } });
+    expect(res.state).toBe("conflict");
+    if (res.state !== "conflict") throw new Error("unreachable");
+
+    const cand = await candRow(res.candidateId);
+    expect(cand.conflicts_with).toBe(first.claimId);
+    expect(cand.resolved_at).toBeNull();
+    // The head is untouched — including its value, which a merge would have left
+    // stale while reporting success.
+    expect((await claimRow(first.claimId)).value).toEqual({ days: 30 });
+    expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(1);
+  });
+
+  it("the same text and the same value merge, whatever order the keys arrive in", async () => {
+    const first = await propose({
+      statement: "Keep backups",
+      slotKey: "retention-same",
+      value: { days: 30, tier: "cold" },
+    });
+    if (first.state !== "auto_active") throw new Error("expected auto_active");
+
+    // jsonb does not preserve key order, so a comparison by serialized text would
+    // split this fact in two the moment the model listed the keys the other way.
+    const res = await propose({
+      statement: "Keep backups",
+      slotKey: "retention-same",
+      value: { tier: "cold", days: 30 },
+    });
+    expect(res).toEqual({ state: "merged", claimId: first.claimId });
+    expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(1);
+  });
+
+  it("WITHOUT a slot: the same text with a different value is a conflict, not a merge", async () => {
+    // The slotless dedup drops the value just as silently; the rule cannot depend on
+    // whether a slot happens to be set, or the same fact merges or conflicts by
+    // accident of the model's phrasing.
+    const first = await propose({ statement: "Backups are kept", value: { days: 30 } });
+    if (first.state !== "auto_active") throw new Error("expected auto_active");
+
+    const res = await propose({ statement: "backups are kept", value: { days: 60 } });
+    expect(res.state).toBe("conflict");
+    if (res.state !== "conflict") throw new Error("unreachable");
+    expect((await candRow(res.candidateId)).conflicts_with).toBe(first.claimId);
+    expect((await claimRow(first.claimId)).value).toEqual({ days: 30 });
+  });
+
   it("WITHOUT a slot: dedup by normalized text across the space's heads", async () => {
     const first = await propose({ statement: "Has a cat named Murchyk" });
     if (first.state !== "auto_active") throw new Error("expected auto_active");
@@ -568,6 +621,46 @@ run("vault candidates", () => {
     // The candidate's sensitivity raises the head's; a merge may never clear it.
     expect(row.sensitive).toBe(true);
     expect(row.revision).toBe(1); // a merge is not a new version
+  });
+
+  it("confirm on a taken slot with the same text but a different value SUPERSEDES the head", async () => {
+    // The human already said yes to THIS candidate, so the divergent value is a
+    // correction, not a conflict to hand back to them — but it still has to reach the
+    // head, which a value-blind merge would never do.
+    const head = await createClaim(
+      {
+        spaceId: SPACE_A,
+        statement: "Keep backups",
+        slotKey: "retention-confirm",
+        value: { days: 30 },
+        origin: { kind: "legacy_memory_doc" },
+        reviewStatus: "unverified",
+      },
+      ACTOR,
+    );
+
+    const pending = await propose({
+      statement: "keep backups",
+      slotKey: "retention-confirm",
+      value: { days: 60 },
+      sensitive: true,
+      evidence: [{ messageId: `${P}msg-val` }],
+    });
+    if (pending.state !== "pending") throw new Error("expected pending");
+
+    const res = await confirmCandidate({ candidateId: pending.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("unreachable");
+    expect(res.claimId).not.toBe(head.id);
+
+    const successor = await claimRow(res.claimId);
+    expect(successor.value).toEqual({ days: 60 });
+    expect(successor.revision).toBe(2);
+    expect(successor.supersedes).toBe(head.id);
+    expect(successor.review_status).toBe("confirmed");
+    expect(successor.sensitive).toBe(true);
+    expect((await claimRow(head.id)).superseded_at).not.toBeNull();
+    expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(1);
   });
 
   it("confirm WITHOUT a slot dedups by text instead of breeding a second head", async () => {

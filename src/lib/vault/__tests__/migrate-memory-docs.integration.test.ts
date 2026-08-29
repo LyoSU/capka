@@ -279,6 +279,32 @@ run("vault: memory_docs migration", () => {
     expect(await count("note_claims", "claim_id = $1", [`${P}claim`])).toBe(1);
   });
 
+  it("a bullet matching an UNVERIFIED head confirms it, instead of hiding the legacy fact", async () => {
+    // The legacy document is memory the user has been looking at and silently
+    // accepting; it is no less confirmed than whatever is already in the vault.
+    // Attaching without confirming stamps the document migrated while the manifest —
+    // which reads confirmed claims only — still shows nothing, so the fact exists in
+    // the database and is gone from the screen.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await q(
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, sensitive)
+       VALUES ($1, $2, 'Likes tea', '{"kind":"derived"}'::jsonb, 'unverified', true)`,
+      [`${P}unverified`, spaceId],
+    );
+    await mkDoc(`${P}d9`, "- likes tea");
+
+    await migrate(`${P}d9`);
+
+    expect(
+      await count("vault_claims", "id = $1 AND review_status = 'confirmed'", [`${P}unverified`]),
+    ).toBe(1);
+    // Confirming is not licence to declassify: sensitivity only ever rises.
+    expect(await count("vault_claims", "id = $1 AND sensitive = true", [`${P}unverified`])).toBe(1);
+    // A confirmation is not a new version — the statement did not change.
+    expect(await count("vault_claims", "space_id = $1", [spaceId])).toBe(1);
+    expect(await inTopic(spaceId)).toEqual(["Likes tea"]);
+  });
+
   it("a project's document lands in the project space, owned by the document's owner", async () => {
     await mkDoc(`${P}d7`, "- a project fact", PROJ);
 

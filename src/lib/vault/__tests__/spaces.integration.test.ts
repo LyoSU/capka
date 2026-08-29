@@ -133,6 +133,25 @@ run("vault spaces", () => {
     expect(await count("spaces", "id = $1 AND type = 'project' AND ref_id = $2 AND owner_user_id = $3", [id, PROJ, OWNER])).toBe(1);
   });
 
+  it("an existing project space with a DIFFERENT owner is refused, never quietly reused", async () => {
+    // Whoever calls first pins `owner_user_id`, and every later lookup goes by
+    // (type, ref_id). Without this check a single wrong first call would leave the
+    // project's knowledge outside its real owner's `purgeUserSpaces` FOREVER, with
+    // nothing anywhere saying so.
+    const stranger = `${P}stranger`;
+    await mkUser(stranger);
+    const id = await getOrCreateSpace({ type: "project", refId: PROJ, ownerUserId: OWNER });
+
+    await expect(getOrCreateSpace({ type: "project", refId: PROJ, ownerUserId: stranger })).rejects.toThrow(/owner/i);
+
+    // Refusing leaves the row exactly as it was: the mismatch is a caller bug, and
+    // rewriting the owner on its say-so would hand a whole space to the wrong user.
+    expect(await count("spaces", "id = $1 AND owner_user_id = $2", [id, OWNER])).toBe(1);
+    // The matching owner still resolves to the same space, so the guard costs nothing
+    // on the hot path it sits on.
+    expect(await getOrCreateSpace({ type: "project", refId: PROJ, ownerUserId: OWNER })).toBe(id);
+  });
+
   it("concurrent getOrCreateTopicNote yields EXACTLY one topic", async () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const notes = await Promise.all([

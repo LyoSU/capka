@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -27,6 +28,23 @@ export type CandidateRow = typeof memoryCandidates.$inferSelect;
  *  slotless dedup. Different rules in those two places would mean the same fact
  *  merges or splits depending on whether a slot happens to be set. */
 const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
+
+/**
+ * The other half of "the same fact": a matching statement whose structured `value`
+ * DIFFERS is not a duplicate, it is a new reading of the same slot. Deciding a merge
+ * on the statement alone answered "already known" and dropped the new value on the
+ * floor — and a slot exists precisely for facts whose value changes over time.
+ *
+ * `isDeepStrictEqual` rather than serialized text: jsonb does not preserve key order,
+ * so `{days,tier}` and `{tier,days}` come back from the same row in either shape, and
+ * comparing strings would split one fact in two by accident of the model's phrasing.
+ *
+ * `?? null` on both sides because that is what the column stores: a candidate that
+ * carries no value is compared as the `null` it will be written as, not as a claim
+ * that says nothing about the value. So "same words, but this time WITHOUT the
+ * number" is a divergence a human sees, rather than a silent overwrite of one.
+ */
+const sameValue = (a: unknown, b: unknown) => isDeepStrictEqual(a ?? null, b ?? null);
 
 /**
  * Whether this is "a competitor already took the slot" — and NOTHING else.
@@ -226,9 +244,14 @@ export async function proposeCandidate(input: {
       return { state: "auto_active", claimId: claim.id, revision: claim.revision } as const;
     };
 
+    /** "Already known" means the words AND the value. Either one differing is a
+     *  decision for a human, not something to absorb into an existing row. */
+    const same = (head: ClaimHead) =>
+      norm(head.statement) === norm(input.statement) && sameValue(head.value, input.value);
+
     if (slotKey) {
       const head = await headBySlot(input.spaceId, slotKey, tx);
-      if (head) return norm(head.statement) === norm(input.statement) ? merged(head) : conflict(head.id);
+      if (head) return same(head) ? merged(head) : conflict(head.id);
 
       let claim: { id: string; revision: number };
       try {
@@ -243,18 +266,27 @@ export async function proposeCandidate(input: {
         // superseded it. We neither invent a winner nor surface a pg error: the slot
         // is contested, so the candidate stays open for a human.
         if (!winner) return conflict(null);
-        return norm(winner.statement) === norm(input.statement) ? merged(winner) : conflict(winner.id);
+        return same(winner) ? merged(winner) : conflict(winner.id);
       }
       return activated(claim);
     }
 
     // With no slot there is no unique index (`uniq_vclaims_active_slot` is partial
     // on `slot_key IS NOT NULL`), so a 23505 is impossible and a SAVEPOINT here
-    // would be an empty wrapper. A race between two DIFFERENT statements yields two
-    // claims; that is accepted, and a human curates it.
+    // would be an empty wrapper.
+    //
+    // ACCEPTED (GPT audit #6): this dedup READS the heads and then writes, with no
+    // index to arbitrate the gap, so two concurrent proposals of the same slotless
+    // statement produce two heads. Closing it means a unique index on the NORMALIZED
+    // statement — a schema change with its own cost (it would also forbid two
+    // deliberately identical facts under different topics), and the outcome here is a
+    // duplicate a human curates away, not a lost or mis-scoped fact. Same for a race
+    // between two DIFFERENT statements, which is not a defect at all.
     const heads = await listHeadClaims(input.spaceId, {}, tx);
+    // The value is compared here too: the rule cannot depend on whether a slot
+    // happens to be set, or the same pair of facts merges or conflicts by accident.
     const dup = heads.find((h) => norm(h.statement) === norm(input.statement));
-    if (dup) return merged(dup);
+    if (dup) return same(dup) ? merged(dup) : conflict(dup.id);
     return activated(await activate(tx));
   });
 }
@@ -340,7 +372,11 @@ export async function confirmCandidate(args: {
                   (h) => norm(h.statement) === norm(cand.statement),
                 ) ?? null);
 
-            if (head && norm(head.statement) === norm(cand.statement)) {
+            // The value has to match too, for the same reason as in propose — but the
+            // outcome differs: the human has already said yes to THIS candidate, so a
+            // divergent value is a correction to apply, not a conflict to hand back.
+            // It therefore falls through to the supersede below.
+            if (head && norm(head.statement) === norm(cand.statement) && sameValue(head.value, cand.value)) {
               for (const ev of evidence) await attachEvidence(head.id, ev, sp);
               // This is the HUMAN's decision, so the head becomes confirmed —
               // otherwise `{ok:true}` would be returned for a fact the manifest will
@@ -349,8 +385,10 @@ export async function confirmCandidate(args: {
               return head.id;
             }
 
-            // Only reachable with a slot: without one, `head` is by construction
-            // already a match, so there is nothing for it to differ from.
+            // Reached with a slot whose head says something else, and — since the
+            // value joined the comparison above — also without one, when the words
+            // match and the structured value does not. Both are a correction the human
+            // approved, so both supersede.
             if (head) {
               const upd = await updateClaim(
                 {

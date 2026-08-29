@@ -17,6 +17,7 @@ import {
   updateClaim,
   forgetClaim,
   attachEvidence,
+  attachToTopic,
   listHeadClaims,
   headBySlot,
   findCurrentHead,
@@ -33,6 +34,7 @@ const OWNER = `${P}owner`;
 const SPACE_A = `${P}space-a`; // "my" space
 const SPACE_B = `${P}space-b`; // someone else's: exercises authz
 const NOTE_A = `${P}note-a`;
+const NOTE_B = `${P}note-b`; // a topic in SPACE_B: exercises the space invariant
 const ACTOR: Actor = { kind: "user", id: OWNER };
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
@@ -94,6 +96,10 @@ const fixtures = async () => {
   await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Topic', 'memory_topic')`, [
     NOTE_A,
     SPACE_A,
+  ]);
+  await q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Topic', 'memory_topic')`, [
+    NOTE_B,
+    SPACE_B,
   ]);
 };
 
@@ -170,6 +176,39 @@ run("vault claims", () => {
     // A sensitive claim's text must not also live in the audit log.
     const { rows } = await pool.query<{ payload: unknown }>(`SELECT payload FROM audit_events WHERE subject_id = $1`, [id]);
     expect(JSON.stringify(rows[0].payload)).not.toContain("filter");
+  });
+
+  it("a topic from ANOTHER space is refused by all three write paths, not silently attached", async () => {
+    // Both foreign keys are valid on their own, so `note_claims` happily accepts the
+    // row and SPACE_B's topic starts counting a claim it may not even show. Neither
+    // the schema nor a foreign key can express "same space", so the module that owns
+    // the table has to.
+    await expect(seed({ statement: "a foreign topic", topicNoteId: NOTE_B })).rejects.toThrow(NOTE_B);
+    // createClaim runs in its own transaction, so the refusal takes the claim with it.
+    expect(await count("vault_claims", "space_id = $1 AND statement = 'a foreign topic'", [SPACE_A])).toBe(0);
+
+    const { id } = await seed();
+    await expect(attachToTopic(id, NOTE_B)).rejects.toThrow(NOTE_B);
+    expect(await count("note_claims", "note_id = $1", [NOTE_B])).toBe(0);
+
+    // The successor's fallback topic is a caller-supplied note id too, and an
+    // unguarded third write site means the invariant does not hold.
+    await expect(
+      updateClaim({
+        claimId: id,
+        expectedRevision: 1,
+        patch: { statement: "still ours", topicNoteId: NOTE_B },
+        allowedSpaceIds: [SPACE_A],
+        actor: ACTOR,
+      }),
+    ).rejects.toThrow(NOTE_B);
+    expect(await count("note_claims", "note_id = $1", [NOTE_B])).toBe(0);
+    // The whole supersede rolled back: the original is still the head at revision 1.
+    expect((await claimRow(id)).superseded_at).toBeNull();
+
+    // And the same-space topic still works, so the guard is a filter, not a wall.
+    await attachToTopic(id, NOTE_A);
+    expect(await count("note_claims", "note_id = $1 AND claim_id = $2", [NOTE_A, id])).toBe(1);
   });
 
   it("supersede: the old row keeps its text, the new one carries supersedes and +1 revision", async () => {

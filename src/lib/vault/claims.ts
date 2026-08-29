@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { auditEvents, claimEvidence, noteClaims, vaultClaims } from "@/lib/db/schema";
+import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
 import type { Ex } from "./spaces";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
@@ -52,6 +52,31 @@ const HEAD = {
  *  data is how a service hangs, so the bound is explicit. */
 const MAX_CHAIN = 1000;
 
+/**
+ * "A topic and the claim filed under it live in the same space." Both foreign keys
+ * on `note_claims` are satisfied by a cross-space pair, so the row is accepted and
+ * the other space's topic starts counting a claim it may not even be allowed to
+ * show — and plan D's topic projection turns that count into leaked content.
+ * Neither the schema nor a foreign key can express the invariant, so the module that
+ * owns the table enforces it.
+ *
+ * Called from ALL THREE sites that write `note_claims` (create, the successor's
+ * fallback topic, and `attachToTopic`): an unguarded fourth would mean the invariant
+ * simply does not hold. Throwing rather than skipping — a caller reaching across
+ * spaces is a bug, and a silently dropped attachment is a fact missing from the
+ * screen with nothing to explain why.
+ */
+async function assertTopicInSpace(noteId: string, spaceId: string, ex: Ex): Promise<void> {
+  const [note] = await ex
+    .select({ spaceId: vaultNotes.spaceId })
+    .from(vaultNotes)
+    .where(eq(vaultNotes.id, noteId))
+    .limit(1);
+  if (note?.spaceId !== spaceId) {
+    throw new Error(`topic ${noteId} does not belong to space ${spaceId}`);
+  }
+}
+
 /** All three writing moves (`createClaim`, `updateClaim`, `forgetClaim`) touch
  *  several rows, so without a transaction they are not a move but a handful of
  *  separate statements. The `!ex || ex === db` condition is not a slip: `Ex`
@@ -80,7 +105,10 @@ export async function createClaim(
     reviewStatus: input.reviewStatus,
     sensitive: input.sensitive ?? false,
   });
-  if (input.topicNoteId) await ex.insert(noteClaims).values({ noteId: input.topicNoteId, claimId: id });
+  if (input.topicNoteId) {
+    await assertTopicInSpace(input.topicNoteId, input.spaceId, ex);
+    await ex.insert(noteClaims).values({ noteId: input.topicNoteId, claimId: id });
+  }
   await ex.insert(auditEvents).values({
     id: nanoid(),
     spaceId: input.spaceId,
@@ -130,6 +158,14 @@ export async function updateClaim(
   // revision and checks the space, so there is no window between checking and
   // writing. A second concurrent supersede queues on this UPDATE and re-reads the
   // row after the winner commits: `superseded_at IS NULL` is false by then.
+  //
+  // ACCEPTED (GPT audit #12): two callers swapping each other's `patch.slotKey`
+  // inside one transaction take these row locks in opposite orders and Postgres kills
+  // one of them with a deadlock. Unreachable from the memory tools — none of them
+  // passes `slotKey` — but this is a public service function, so it is reachable from
+  // future callers. Not defended here: the fix is an ordering rule the caller has to
+  // hold (touch slots in a stable order), and a lock-ordering helper in a function
+  // that supersedes ONE claim would be enforcing a discipline it cannot see.
   const [prev] = await ex
     .update(vaultClaims)
     .set({ supersededAt: new Date() })
@@ -186,6 +222,7 @@ export async function updateClaim(
   // The predecessor was in no topic at all — inheriting "none" would make the
   // successor invisible to the note projection, so the fallback topic applies.
   if (!moved.length && patch.topicNoteId) {
+    await assertTopicInSpace(patch.topicNoteId, prev.spaceId, ex);
     await ex.insert(noteClaims).values({ noteId: patch.topicNoteId, claimId: id });
   }
   await ex.insert(auditEvents).values({
@@ -271,6 +308,15 @@ export async function confirmClaim(claimId: string, sensitive: boolean, ex: Ex =
  *  attachment survived at all). Lives in this module for the same reason as
  *  `confirmClaim`: `note_claims` is written only by whoever owns it. */
 export async function attachToTopic(claimId: string, noteId: string, ex: Ex = db): Promise<void> {
+  // The claim's space has to be read: unlike the other two sites, this signature
+  // carries only the two ids, and the invariant is about the pair.
+  const [claim] = await ex
+    .select({ spaceId: vaultClaims.spaceId })
+    .from(vaultClaims)
+    .where(eq(vaultClaims.id, claimId))
+    .limit(1);
+  if (!claim) throw new Error(`claim ${claimId} does not exist`);
+  await assertTopicInSpace(noteId, claim.spaceId, ex);
   await ex.insert(noteClaims).values({ noteId, claimId }).onConflictDoNothing();
 }
 

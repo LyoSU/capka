@@ -25,8 +25,37 @@ export async function getOrCreateSpace(
   ex: Ex = db,
 ): Promise<string> {
   const where = and(eq(spaces.type, scope.type), eq(spaces.refId, scope.refId));
-  const found = await ex.select({ id: spaces.id }).from(spaces).where(where).limit(1);
-  if (found[0]) return found[0].id;
+  const read = () => ex.select({ id: spaces.id, ownerUserId: spaces.ownerUserId }).from(spaces).where(where).limit(1);
+
+  /**
+   * The lookup is by (type, ref_id), so whoever called FIRST pins `owner_user_id`
+   * and every later caller used to be handed the row without a word. One wrong first
+   * call therefore left a project's knowledge outside its real owner's
+   * `purgeUserSpaces` forever — a deleted user's facts living on, and nothing
+   * anywhere recording the divergence. Both read paths go through here: the race
+   * loser reads back the WINNER's row, which is the same situation.
+   *
+   * THROW rather than update-and-audit, and the choice matters. The owner decides
+   * whose deletion takes this space with it, so rewriting it on a caller's say-so
+   * lets a bug hand a whole space to someone else — a privacy-relevant write, and
+   * "last caller wins" is no more truthful than "first caller wins". Refusing keeps
+   * the recorded owner and makes the disagreement loud instead of durable. Projects
+   * are single-owner (`projects.user_id`, no membership table), so a legitimate
+   * mismatch does not exist today; if ownership transfer is ever built it belongs in
+   * a function that says so, not in a get-or-create on the hot path of a turn.
+   *
+   * Only project spaces can diverge: for a user space the owner IS the refId, written
+   * from the very value the lookup matched on.
+   */
+  const owned = (row: { id: string; ownerUserId: string }) => {
+    if (scope.type === "project" && row.ownerUserId !== scope.ownerUserId) {
+      throw new Error(`space project:${scope.refId} is owned by ${row.ownerUserId}, not ${scope.ownerUserId}`);
+    }
+    return row.id;
+  };
+
+  const found = await read();
+  if (found[0]) return owned(found[0]);
   // Concurrent first writers race on uniq_spaces_type_ref; the loser writes
   // nothing and reads back the winner's row.
   await ex
@@ -38,9 +67,9 @@ export async function getOrCreateSpace(
       ownerUserId: scope.type === "user" ? scope.refId : scope.ownerUserId,
     })
     .onConflictDoNothing();
-  const [row] = await ex.select({ id: spaces.id }).from(spaces).where(where).limit(1);
+  const [row] = await read();
   if (!row) throw new Error(`space ${scope.type}:${scope.refId} vanished after insert`);
-  return row.id;
+  return owned(row);
 }
 
 /** The topic a fact lands in when nothing else chose one. A claim with NO topic
@@ -145,3 +174,11 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
 export async function purgeUserSpaces(userId: string, ex: Ex = db): Promise<void> {
   await ex.delete(spaces).where(eq(spaces.ownerUserId, userId));
 }
+
+/** ACCEPTED for plan A, and a PRIVACY BLOCKER for plan B (GPT audit #4): this
+ *  removes the rows, not the content-addressed blobs a version points at. Plan A
+ *  writes no blobs at all — the ingest in plan B is their only producer — so today
+ *  there is nothing left behind. The moment ingest lands, this function must reach
+ *  the blob store too, or a deleted user's bytes stay on disk under a known SHA and
+ *  the delete is a lie. Written here rather than in a plan document because this is
+ *  the function that will be wrong. */
