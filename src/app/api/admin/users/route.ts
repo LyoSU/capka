@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { sessions, users, usage, tiers, chats, messages, capabilityPolicies, telegramLinks } from "@/lib/db/schema";
 import { audit } from "@/lib/governance/audit";
 import { getLimitStatus } from "@/lib/billing/limits";
+import { purgeUserSpaces } from "@/lib/vault/spaces";
 
 const since30d = () => new Date(Date.now() - 30 * 86_400_000);
 
@@ -227,7 +228,17 @@ export const DELETE = apiHandler(async (req: Request) => {
   const userId = new URL(req.url).searchParams.get("userId");
   if (!userId) return Response.json({ error: "Missing userId" }, { status: 400 });
   if (userId === adminId) return Response.json({ error: "Cannot delete own account" }, { status: 400 });
-  const [deleted] = await db.delete(users).where(eq(users.id, userId)).returning({ id: users.id, name: users.name, email: users.email });
+  // The row delete and the vault purge are ONE transaction, purge second: by then
+  // the users cascade has taken the chats → messages → citations, so nothing pins
+  // the knowledge any more. If something still does (an anomaly), the RESTRICT
+  // aborts the whole transaction — the user is NOT deleted, the admin sees an
+  // error and retries. Atomic by construction, so no separate retry is needed.
+  const deleted = await db.transaction(async (tx) => {
+    const [row] = await tx.delete(users).where(eq(users.id, userId)).returning({ id: users.id, name: users.name, email: users.email });
+    if (!row) return null;
+    await purgeUserSpaces(userId, tx);
+    return row;
+  });
   if (!deleted) return Response.json({ error: "User not found" }, { status: 404 });
   await audit({ actorId: adminId, action: "user.remove", targetType: "user", targetKey: userId, detail: { name: deleted.name ?? deleted.email } });
   return Response.json({ ok: true });

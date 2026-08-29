@@ -2,6 +2,7 @@ import { and, eq, lt, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, attachedFolders } from "@/lib/db/schema";
 import { destroySession } from "@/lib/sandbox/client";
+import { retireProjectSpace } from "@/lib/vault/spaces";
 import { log } from "@/lib/log";
 
 /** Finish deleting a tombstoned project: tear down its sandbox + workspace, detach
@@ -18,6 +19,12 @@ export async function teardownProject(project: { id: string; userId: string }): 
   // host / the user's PC are never touched. No FK links these to the project (the
   // key is the string sessionKey), so they must be deleted explicitly.
   await db.delete(attachedFolders).where(eq(attachedFolders.sessionKey, project.id));
+  // The project's vault memory dies with it; its knowledge does not — chats
+  // outlive the project (projectId is SET NULL) and their citations still pin
+  // those source versions, so sources are only soft-deleted. No FK links a space
+  // to the project (ref_id is polymorphic), so this is an explicit step, and it
+  // is a no-op on a re-drive.
+  await retireProjectSpace(project.id);
   // Physical delete — FK cascades (skills, connectors, policies, memory) and the
   // set-null on chats/automations fire here. Guarded on deletedAt so a project that
   // was somehow un-tombstoned in the meantime isn't destroyed.
