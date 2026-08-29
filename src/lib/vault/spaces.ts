@@ -10,15 +10,16 @@ import {
   vaultNotes,
 } from "@/lib/db/schema";
 
-/** Хендл БД: пул або транзакція колера. Кожна функція тут ВСІ свої стейтменти
- *  шле через нього — тихий відкат на модульний `db` усередині чужої транзакції
- *  зламав би атомарність так, що жоден тест цього не побачив би. */
+/** A DB handle: the pool, or the caller's transaction. Every function here sends
+ *  ALL of its statements through it — quietly falling back to the module-level
+ *  `db` inside someone else's transaction would break atomicity in a way no test
+ *  would ever see. */
 export type Ex = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** Простір знань для власника: user-простір на користувача, project-простір на
- *  проєкт (чати проєкту ділять один). `ownerUserId` для user-простору = refId;
- *  для проєкту його передає колер — у нього рядок проєкту вже в руках, а зайвий
- *  SELECT тут сидів би на гарячому шляху ходу. */
+/** The knowledge space for an owner: one per user, one per project (a project's
+ *  chats share it). For a user space `ownerUserId` IS the refId; for a project the
+ *  caller passes it, since it already holds the project row and an extra SELECT
+ *  here would sit on the hot path of a turn. */
 export async function getOrCreateSpace(
   scope: { type: "user"; refId: string } | { type: "project"; refId: string; ownerUserId: string },
   ex: Ex = db,
@@ -26,8 +27,8 @@ export async function getOrCreateSpace(
   const where = and(eq(spaces.type, scope.type), eq(spaces.refId, scope.refId));
   const found = await ex.select({ id: spaces.id }).from(spaces).where(where).limit(1);
   if (found[0]) return found[0].id;
-  // Перші паралельні записи змагаються за uniq_spaces_type_ref; хто програв —
-  // мовчки нічого не пише і дочитує рядок переможця.
+  // Concurrent first writers race on uniq_spaces_type_ref; the loser writes
+  // nothing and reads back the winner's row.
   await ex
     .insert(spaces)
     .values({
@@ -42,8 +43,9 @@ export async function getOrCreateSpace(
   return row.id;
 }
 
-/** Тема пам'яті — нота виду `memory_topic`; саме на цьому виді висить
- *  партіальний unique (space, title), тож та сама гонка й та сама розв'язка. */
+/** A memory topic is a note of kind `memory_topic`; the partial unique on
+ *  (space, title) is scoped to that kind, so it is the same race and the same
+ *  resolution as above. */
 export async function getOrCreateTopicNote(spaceId: string, title: string, ex: Ex = db): Promise<string> {
   const where = and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.title, title), eq(vaultNotes.kind, "memory_topic"));
   const found = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
@@ -54,14 +56,14 @@ export async function getOrCreateTopicNote(spaceId: string, title: string, ex: E
   return row.id;
 }
 
-/** Проєкт видаляють — його ПАМ'ЯТЬ вмирає з ним (клейми, теми, кандидати), а
- *  ЗНАННЯ лишаються: `chats.projectId` — SET NULL, тож чати переживають проєкт і
- *  їхні цитати й далі пінять версії. Тому джерела гасяться soft-delete, а
- *  версії/фрагменти/цитати не чіпаються. Рядок простору теж лишається — його
- *  знесе purge за owner_user_id (повний GC — план D).
+/** Deleting a project kills its MEMORY (claims, topics, candidates) but keeps its
+ *  KNOWLEDGE: `chats.projectId` is SET NULL, so chats outlive the project and
+ *  their citations still pin versions. Hence sources are soft-deleted and
+ *  versions/fragments/citations are left alone. The space row also stays; purge
+ *  by owner_user_id collects it (full GC is plan D).
  *
- *  Ідемпотентний, бо teardown передрайвлюється з worker-тіка: подія `space.retire`
- *  пишеться рівно раз на простір. */
+ *  Idempotent, because teardown is re-driven from the worker tick: exactly one
+ *  `space.retire` event is written per space. */
 export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<void> {
   if (!ex) return db.transaction((tx) => retireProjectSpace(projectId, tx));
 
@@ -70,16 +72,16 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
     .from(spaces)
     .where(and(eq(spaces.type, "project"), eq(spaces.refId, projectId)))
     .limit(1)
-    // Блокуємо рядок простору на час транзакції: «події ще немає» — це
-    // read-modify-write, і без цього два одночасні retire (запит і worker-тік,
-    // якщо перший переповз 30-секундний grace) обидва прочитали б «немає» і
-    // записали б по події. Стара умова «було що зносити» була race-safe
-    // випадково — одна з транзакцій нічого б не видалила.
+    // Lock the space row for the transaction: "no event yet" is a read-modify-write,
+    // and without this two concurrent retires (the request and the worker tick, if
+    // the first overran the 30-second grace) would both read "none" and each write
+    // an event. The old "was there anything to remove" condition was race-safe only
+    // by accident — one of the two transactions would have deleted nothing.
     .for("update");
   if (!space) return;
   const spaceId = space.id;
 
-  // note_claims і claim_evidence йдуть каскадом за нотами/клеймами.
+  // note_claims and claim_evidence cascade from the notes/claims below.
   const claims = await ex.delete(vaultClaims).where(eq(vaultClaims.spaceId, spaceId)).returning({ id: vaultClaims.id });
   const notes = await ex.delete(vaultNotes).where(eq(vaultNotes.spaceId, spaceId)).returning({ id: vaultNotes.id });
   const candidates = await ex
@@ -92,11 +94,11 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
     .where(and(eq(knowledgeSources.spaceId, spaceId), isNull(knowledgeSources.deletedAt)))
     .returning({ id: knowledgeSources.id });
 
-  // Рівно одна подія на видалення проєкту — умова саме «події ще немає», а НЕ
-  // «було що зносити»: простір, який користувач почистив руками, теж мусить
-  // лишити слід, інакше «події немає» читається однаково як «простір був
-  // порожній» і як «teardown не доїхав», а з retryPendingProjectTeardowns це
-  // жива операційна різниця. Лукап іде по idx_audit_space_created.
+  // Exactly one event per project deletion, and the condition is "no event yet",
+  // NOT "there was something to remove": a space the user emptied by hand must
+  // still leave a trace, or "no event" reads the same for "the space was empty"
+  // and "teardown never ran" — and with retryPendingProjectTeardowns that is a
+  // live operational difference. The lookup rides idx_audit_space_created.
   const [priorEvent] = await ex
     .select({ id: auditEvents.id })
     .from(auditEvents)
@@ -120,14 +122,14 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
   });
 }
 
-/** Знання видаленого користувача не переживають його. Викликається В ОДНІЙ
- *  транзакції з `db.delete(users)` і ПІСЛЯ нього: каскад users на той момент уже
- *  зніс чати → повідомлення → цитати, тож пінів не лишилось і каскад просторів
- *  проходить наскрізь. `owner_user_id` денормалізований саме заради цього — він
- *  знаходить і простори ДАВНО видалених проєктів, чиїх рядків уже немає.
- *  Жива цитата (аномалія) кине RESTRICT і відкотить УСЮ транзакцію: користувач
- *  лишиться на місці, адмін побачить помилку й повторить — атомарно за
- *  побудовою, окремий retry не потрібен. */
+/** A deleted user's knowledge does not outlive them. Called INSIDE the same
+ *  transaction as `db.delete(users)` and AFTER it: the users cascade has by then
+ *  removed chats → messages → citations, so no pins remain and the space cascade
+ *  runs all the way through. `owner_user_id` is denormalized precisely for this —
+ *  it also finds the spaces of LONG-deleted projects, whose rows are gone.
+ *  A surviving citation (an anomaly) raises RESTRICT and rolls back the WHOLE
+ *  transaction: the user stays, an admin sees the error and retries — atomic by
+ *  construction, so no separate retry path is needed. */
 export async function purgeUserSpaces(userId: string, ex: Ex = db): Promise<void> {
   await ex.delete(spaces).where(eq(spaces.ownerUserId, userId));
 }

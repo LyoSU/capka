@@ -35,8 +35,8 @@ export type EvidenceInput = {
   locatorSnapshot?: unknown;
 };
 
-/** Рівно поля `ClaimHead` — текст клейма віддається лише тим, хто пройшов
- *  space-фільтр, тож жодного «зайвого» стовпця тут бути не може. */
+/** Exactly the `ClaimHead` fields — a claim's text only reaches callers who
+ *  cleared the space filter, so there is no room for an "extra" column here. */
 const HEAD = {
   id: vaultClaims.id,
   revision: vaultClaims.revision,
@@ -47,18 +47,18 @@ const HEAD = {
   sensitive: vaultClaims.sensitive,
 };
 
-/** Ланцюг версій не має циклів — `uniq_vclaims_one_successor` дає щонайбільше
- *  одного наступника, а наступник завжди новіший. Але `while` по даних без межі
- *  — це те, як сервіс зависає, тож межа явна. */
+/** The version chain cannot cycle: `uniq_vclaims_one_successor` allows at most
+ *  one successor and a successor is always newer. But an unbounded `while` over
+ *  data is how a service hangs, so the bound is explicit. */
 const MAX_CHAIN = 1000;
 
-/** Усі три записувальні ходи (`createClaim`, `updateClaim`, `forgetClaim`)
- *  пишуть по кілька рядків, тож без транзакції це не хід, а кілька окремих
- *  стейтментів. Умова `!ex || ex === db` — не описка: `Ex` дозволяє передати
- *  модульний пул ЯВНО, і тоді «омісія» й «явний db» означали б різне, а
- *  мовчазна втрата атомарності на другому — рівно той дефект, якого не видно
- *  зі звичайного тесту. Передана транзакція, навпаки, лишається чужою: її
- *  межі визначає колер. */
+/** All three writing moves (`createClaim`, `updateClaim`, `forgetClaim`) touch
+ *  several rows, so without a transaction they are not a move but a handful of
+ *  separate statements. The `!ex || ex === db` condition is not a slip: `Ex`
+ *  permits passing the module pool EXPLICITLY, and then "omitted" and "explicit
+ *  db" would mean different things — silently losing atomicity on the second is
+ *  exactly the defect an ordinary test cannot see. A transaction that was passed
+ *  in stays the caller's: they own its boundaries. */
 export async function createClaim(
   input: ClaimInput,
   actor: Actor,
@@ -67,8 +67,9 @@ export async function createClaim(
   if (!ex || ex === db) return db.transaction((tx) => createClaim(input, actor, tx));
 
   const id = nanoid();
-  // Конфлікт слоту (`uniq_vclaims_active_slot`) НЕ ловиться тут: рішення
-  // «злити чи розвести» належить реєстру кандидатів, який і тримає SAVEPOINT.
+  // A slot conflict (`uniq_vclaims_active_slot`) is deliberately NOT caught here:
+  // the merge-or-branch decision belongs to the candidate ledger, which is also
+  // the thing holding the SAVEPOINT.
   await ex.insert(vaultClaims).values({
     id,
     spaceId: input.spaceId,
@@ -87,7 +88,7 @@ export async function createClaim(
     action: "claim.create",
     subjectType: "claim",
     subjectId: id,
-    // Без тексту клейма: аудит читають ширше, ніж сам простір знань.
+    // No claim text: the audit log is read more widely than the space itself.
     payload: { slotKey: input.slotKey ?? null, reviewStatus: input.reviewStatus, sensitive: input.sensitive ?? false },
   });
   return { id, revision: 1 };
@@ -97,13 +98,13 @@ export async function updateClaim(
   args: {
     claimId: string;
     expectedRevision: number;
-    /** Неперелічені поля успадковуються від попередника — це дефолт, бо supersede
-     *  сам по собі нічого не стверджує про факт. Але тоді, коли новий зміст
-     *  приходить З ІНШОГО джерела (реєстр кандидатів), успадкувати `origin`
-     *  означало б підписати текст користувача чужим походженням, а
-     *  `reviewStatus` — лишити щойно підтверджений факт `unverified`. Тому вони
-     *  перелічувані явно, а не читаються колером із рядка й не дописуються
-     *  окремим UPDATE повз цей модуль. */
+    /** Fields not listed are inherited from the predecessor — the default, since a
+     *  supersede on its own asserts nothing about the fact. But when the new content
+     *  arrives from a DIFFERENT source (the candidate ledger), inheriting `origin`
+     *  would sign the user's text with someone else's provenance, and inheriting
+     *  `reviewStatus` would leave a just-confirmed fact `unverified`. So both are
+     *  settable here, rather than read off the row by the caller or patched in by a
+     *  separate UPDATE that goes around this module. */
     patch: {
       statement?: string;
       value?: unknown;
@@ -111,10 +112,10 @@ export async function updateClaim(
       reviewStatus?: "unverified" | "confirmed";
       sensitive?: boolean;
       origin?: Record<string, unknown>;
-      /** Запасна тема: застосовується ЛИШЕ якщо з попередника не переїхала
-       *  жодна прив'язка. Наступник поза всіма темами невидимий для проєкції
-       *  нот, а мовчки перекладати курований людиною розділ у «Загальне» —
-       *  гірше за це. */
+      /** A fallback topic, applied ONLY when no attachment carried over from the
+       *  predecessor. A successor outside every topic is invisible to the note
+       *  projection — but silently moving a human-curated section into the default
+       *  topic would be worse than that. */
       topicNoteId?: string;
     },
     allowedSpaceIds: string[];
@@ -125,10 +126,10 @@ export async function updateClaim(
   if (!ex || ex === db) return db.transaction((tx) => updateClaim(args, tx));
   const { claimId, expectedRevision, patch, allowedSpaceIds, actor } = args;
 
-  // CAS-крок ПЕРШИЙ: він і бере блокування рядка, і перевіряє ревізію, і
-  // перевіряє простір — одним стейтментом, тож між перевіркою й записом немає
-  // вікна. Другий одночасний supersede стає в чергу на цьому UPDATE і після
-  // коміту переможця перечитує рядок: `superseded_at IS NULL` уже хибне.
+  // The CAS step comes FIRST: one statement takes the row lock, checks the
+  // revision and checks the space, so there is no window between checking and
+  // writing. A second concurrent supersede queues on this UPDATE and re-reads the
+  // row after the winner commits: `superseded_at IS NULL` is false by then.
   const [prev] = await ex
     .update(vaultClaims)
     .set({ supersededAt: new Date() })
@@ -142,22 +143,23 @@ export async function updateClaim(
     )
     .returning();
 
-  // Нуль рядків — це «не та ревізія» АБО «уже не голова» АБО «не твій простір»,
-  // і розрізнити їх ззовні неможливо навмисне: відповідь іде з ТИМ САМИМ
-  // space-фільтром, тож `current: null` однаково означає і «ланцюг забуто», і
-  // «такого клейма для тебе не існує».
+  // Zero rows means "wrong revision" OR "no longer the head" OR "not your space",
+  // and telling those apart from outside is deliberately impossible: the reply is
+  // built with the SAME space filter, so `current: null` reads identically for
+  // "the chain was forgotten" and "no such claim exists for you".
   if (!prev) return { ok: false, current: await findCurrentHead(claimId, allowedSpaceIds, ex) };
 
   const id = nanoid();
   const revision = prev.revision + 1;
-  // Наступник — свіжий рядок, а не UPDATE тексту: попередник лишається дослівно
-  // таким, яким його записали. Копіюється весь клейм, а не лише три поля з
-  // патча, — інакше `kind`/термін дії тихо скидались би на дефолти схеми.
+  // The successor is a fresh row, not an UPDATE of the text: the predecessor
+  // stays verbatim as it was recorded. The whole claim is copied, not just the
+  // three fields in the patch — otherwise `kind` and the validity window would
+  // quietly reset to the schema defaults.
   //
-  // Як і в `createClaim`, конфлікт слоту (`uniq_vclaims_active_slot`) НЕ ловиться
-  // тут: `patch.slotKey`, що вказує на зайнятий слот, кине 23505 і відкотить
-  // транзакцію колера так само. Реєстр кандидатів мусить тримати SAVEPOINT
-  // навколо ОБОХ ходів, а не лише навколо створення.
+  // As in `createClaim`, a slot conflict (`uniq_vclaims_active_slot`) is NOT caught
+  // here: a `patch.slotKey` pointing at a taken slot raises 23505 and rolls back
+  // the caller's transaction just the same. The candidate ledger has to hold its
+  // SAVEPOINT around BOTH moves, not only around creation.
   await ex.insert(vaultClaims).values({
     id,
     spaceId: prev.spaceId,
@@ -173,16 +175,16 @@ export async function updateClaim(
     revision,
     supersedes: claimId,
   });
-  // Перенос прив'язок одним UPDATE: наступник опиняється в тих самих темах,
-  // попередник їх не тримає. Пара insert...select + delete дала б той самий
-  // стан двома стейтментами й порядком, який можна переплутати.
+  // Attachments move in a single UPDATE: the successor lands in the same topics
+  // and the predecessor holds none. An insert...select plus delete would reach the
+  // same state in two statements, with an order that can be got wrong.
   const moved = await ex
     .update(noteClaims)
     .set({ claimId: id })
     .where(eq(noteClaims.claimId, claimId))
     .returning({ noteId: noteClaims.noteId });
-  // Попередник не був у жодній темі — успадкувати «жодної» означає зробити
-  // наступника невидимим для проєкції нот, тож тут спрацьовує запасна тема.
+  // The predecessor was in no topic at all — inheriting "none" would make the
+  // successor invisible to the note projection, so the fallback topic applies.
   if (!moved.length && patch.topicNoteId) {
     await ex.insert(noteClaims).values({ noteId: patch.topicNoteId, claimId: id });
   }
@@ -193,8 +195,8 @@ export async function updateClaim(
     action: "claim.supersede",
     subjectType: "claim",
     subjectId: claimId,
-    // Стан НАСТУПНИКА, а не патча: інакше подія стверджувала б зміну там, де
-    // поле просто успадкувалось. Тексту немає — аудит читають ширше.
+    // The SUCCESSOR's state, not the patch: otherwise the event would assert a
+    // change where a field was merely inherited. No text — the audit is read wider.
     payload: {
       successor: id,
       revision,
@@ -226,9 +228,9 @@ export async function forgetClaim(
     .returning({ spaceId: vaultClaims.spaceId, revision: vaultClaims.revision });
   if (!prev) return { ok: false, current: await findCurrentHead(claimId, allowedSpaceIds, ex) };
 
-  // Наступника немає — «забутий» це ланцюг без активної голови. `note_claims` і
-  // `claim_evidence` лишаються на неактивному рядку: забути факт не означає
-  // переписати те, звідки він узявся.
+  // No successor — "forgotten" IS a chain with no active head. `note_claims` and
+  // `claim_evidence` stay on the inactive row: forgetting a fact does not mean
+  // rewriting where it came from.
   await ex.insert(auditEvents).values({
     id: nanoid(),
     spaceId: prev.spaceId,
@@ -241,32 +243,33 @@ export async function forgetClaim(
   return { ok: true };
 }
 
-/** Позначити НАЯВНУ голову підтвердженою, без supersede: коли твердження
- *  користувача збіглося з тим, що вже записано, зміст не змінився — змінилось
- *  лише те, що факт тепер підтверджений, і нова версія була б порожньою.
+/** Mark an EXISTING head confirmed, without a supersede: when the user's
+ *  statement matched what is already recorded, the content did not change — only
+ *  the fact that it is now confirmed did, and a new version would be empty.
  *
- *  Чутливість тільки піднімається (колер передає `head.sensitive || ...`): зняти
- *  її тут означало б розкрити те, що вже позначили закритим.
+ *  Sensitivity only ever goes up (the caller passes `head.sensitive || ...`):
+ *  clearing it here would expose something already marked closed.
  *
- *  Живе в цьому модулі, а не в реєстрі кандидатів, з тієї ж причини, що й решта:
- *  `vault_claims` пише лише той, хто ним володіє. Space-фільтра немає свідомо —
- *  як і `attachEvidence`, ця функція приймає id, ЩОЙНО прочитаний
- *  space-скопованим запитом; окремий фільтр тут удавав би перевірку, якої в
- *  сигнатурі немає чим зробити. Події не пише: підтвердження фіксує
- *  `candidate.confirm`/`candidate.propose` на боці реєстру. */
+ *  Lives in this module rather than the candidate ledger for the same reason as
+ *  the rest: `vault_claims` is written only by whoever owns it. There is
+ *  deliberately no space filter — like `attachEvidence`, this takes an id JUST
+ *  read by a space-scoped query, and a filter here would mimic a check the
+ *  signature has nothing to perform it with. It writes no event: the confirmation
+ *  is recorded by `candidate.confirm`/`candidate.propose` on the ledger side. */
 export async function confirmClaim(claimId: string, sensitive: boolean, ex: Ex = db): Promise<void> {
   await ex.update(vaultClaims).set({ reviewStatus: "confirmed", sensitive }).where(eq(vaultClaims.id, claimId));
 }
 
-/** Прив'язати НАЯВНУ голову до теми, без нової версії: коли твердження, яке
- *  приносить колер, збіглося з уже записаним фактом, змісту міняти нема чого — а
- *  от факт, що лежить поза всіма темами, невидимий для проєкції нот, тобто для
- *  UI не існує. Ідемпотентно за `uniq_note_claims`.
+/** Attach an EXISTING head to a topic, without a new version: when the statement
+ *  the caller brings matched a fact already recorded there is no content to
+ *  change — but a fact sitting outside every topic is invisible to the note
+ *  projection, which means it does not exist for the UI. Idempotent via
+ *  `uniq_note_claims`.
  *
- *  Це ДОДАВАННЯ теми, а не перенос: курований людиною розділ лишається на місці
- *  (на відміну від запасної теми в `updateClaim`, яка застосовується лише коли
- *  прив'язок не лишилось узагалі). Живе в цьому модулі з тієї ж причини, що й
- *  `confirmClaim`: `note_claims` пише лише той, хто ним володіє. */
+ *  This ADDS a topic, it does not move one: a human-curated section stays where
+ *  it is (unlike the fallback topic in `updateClaim`, which applies only when no
+ *  attachment survived at all). Lives in this module for the same reason as
+ *  `confirmClaim`: `note_claims` is written only by whoever owns it. */
 export async function attachToTopic(claimId: string, noteId: string, ex: Ex = db): Promise<void> {
   await ex.insert(noteClaims).values({ noteId, claimId }).onConflictDoNothing();
 }
@@ -297,8 +300,8 @@ export async function listHeadClaims(
         isNull(vaultClaims.supersededAt),
         opts.slotKey ? eq(vaultClaims.slotKey, opts.slotKey) : undefined,
         opts.onlyConfirmed ? eq(vaultClaims.reviewStatus, "confirmed") : undefined,
-        // Підзапит не виконується окремо — drizzle вбудовує його SQL у цей самий
-        // стейтмент, тож він їде тим самим `ex`, що й зовнішній SELECT.
+        // The subquery is not run separately — drizzle inlines its SQL into this
+        // same statement, so it rides the same `ex` as the outer SELECT.
         opts.topicNoteId
           ? inArray(
               vaultClaims.id,
@@ -307,8 +310,8 @@ export async function listHeadClaims(
           : undefined,
       ),
     )
-    // Другий ключ не декоративний: `recorded_at` збігається в усіх клеймів, які
-    // записала одна транзакція, і без `id` їхній порядок був би довільним.
+    // The second key is not decorative: `recorded_at` is identical across every
+    // claim one transaction wrote, and without `id` their order would be arbitrary.
     .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id));
 }
 
@@ -323,25 +326,24 @@ export async function headBySlot(spaceId: string, slotKey: string, ex: Ex = db):
   return row ?? null;
 }
 
-/** Йде ВПЕРЕД по ланцюгу: від заданого клейма за `supersedes` до останнього
- *  рядка. Якщо на ньому стоїть `superseded_at` — ланцюг закінчили forget-ом, і
- *  голови немає. `allowedSpaceIds` фільтрує кожен крок, тож із чужого простору
- *  не видно навіть довжини ланцюга; протокол mismatch в update/forget передає
- *  сюди рівно той список, що й у CAS-кроці.
+/** Walks FORWARD along the chain: from the given claim, following `supersedes`,
+ *  to the last row. If that row carries `superseded_at` the chain was ended by a
+ *  forget and there is no head. `allowedSpaceIds` filters every step, so another
+ *  space does not even leak the chain's length; the mismatch protocol in
+ *  update/forget passes exactly the list the CAS step used.
  *
- *  Аргумент ОБОВ'ЯЗКОВИЙ, хоч і допускає `undefined`: у модулі, весь сенс якого
- *  — розмежування просторів, коротшим викликом мусить бути безпечний. З
- *  необов'язковим параметром пропуск аргументу віддавав би голову з БУДЬ-ЯКОГО
- *  простору разом із текстом — без помилки типів і без червоного тесту. Тепер
- *  нескопований прочит — видиме рішення на місці виклику (`undefined`), а не
- *  забутий аргумент. */
+ *  The argument is REQUIRED even though it accepts `undefined`: in a module whose
+ *  entire point is keeping spaces apart, the shorter call has to be the safe one.
+ *  Made optional, a forgotten argument would hand back the head from ANY space,
+ *  text included — with no type error and no red test. As it stands, an unscoped
+ *  read is a visible decision at the call site (`undefined`), not an omission. */
 export async function findCurrentHead(
   claimId: string,
   allowedSpaceIds: string[] | undefined,
   ex: Ex = db,
 ): Promise<ClaimHead | null> {
-  // `inArray` з порожнім списком дає `false` — «жодного простору» читається як
-  // «нічого не видно», а не як «усе».
+  // `inArray` with an empty list yields `false` — "no spaces" reads as "nothing is
+  // visible", never as "everything".
   const scope = allowedSpaceIds ? inArray(vaultClaims.spaceId, allowedSpaceIds) : undefined;
   const select = (where: ReturnType<typeof eq>) =>
     ex
