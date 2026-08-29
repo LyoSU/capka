@@ -6,6 +6,8 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-08-29
+
 ### Added
 
 - The Telegram marker next to a message's timestamp now explains itself on hover ("Sent via Telegram"), like the other icon-only controls.
