@@ -16,15 +16,11 @@ const { getOrCreateSpace, listHeadClaims, updateClaim, forgetClaim, findCurrentH
   }));
 vi.mock("../spaces", () => ({ getOrCreateSpace }));
 vi.mock("../claims", () => ({ listHeadClaims, updateClaim, forgetClaim, findCurrentHead }));
-// `looksLikeSecret` is NOT mocked: it is a pure predicate with no service behind it,
-// and a stubbed one would let this file assert that a secret raises sensitivity while
-// the real screen no longer recognises the shape.
+// `spaceForScope` is NOT stubbed: it exists to give this module and extraction ONE
+// answer to "where does an unqualified fact go", which a per-file stub would undo.
 vi.mock("../candidates", async (importOriginal) => ({
   proposeCandidate,
   verifyDirectProvenance,
-  looksLikeSecret: (await importOriginal<typeof import("../candidates")>()).looksLikeSecret,
-  // Likewise `spaceForScope`: it exists to give this module and extraction ONE answer
-  // to "where does an unqualified fact go", which a per-file stub would undo.
   spaceForScope: (await importOriginal<typeof import("../candidates")>()).spaceForScope,
 }));
 
@@ -197,22 +193,6 @@ describe("memory_update", () => {
       allowedSpaceIds: [USER_SPACE, PROJECT_SPACE],
       actor: { kind: "agent" },
     });
-  });
-
-  it("a rewrite that introduces a credential raises sensitivity on the successor", async () => {
-    // `updateClaim` inherits `sensitive` from the predecessor, so a plain claim
-    // rewritten into a secret would otherwise stay manifest-eligible — the screen the
-    // ledger applies on the way in, gone around by the edit path.
-    updateClaim.mockResolvedValue({ ok: true, id: "c2", revision: 2 });
-    const tools = await make();
-    await run(tools.memory_update, {
-      claim_id: "c1",
-      expected_revision: 1,
-      statement: "the deploy key is sk-proj-AbCdEf0123456789ghijkl",
-    });
-    expect(updateClaim).toHaveBeenCalledWith(
-      expect.objectContaining({ patch: expect.objectContaining({ sensitive: true }) }),
-    );
   });
 
   it("the first mismatch is instructive text with the current revision, and no candidate", async () => {

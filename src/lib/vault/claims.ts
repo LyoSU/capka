@@ -53,6 +53,61 @@ const HEAD = {
 const MAX_CHAIN = 1000;
 
 /**
+ * Screens a statement for secret-shaped content. It lives in THIS module because
+ * `createClaim` and `updateClaim` are the only two statements that put a row in
+ * `vault_claims`, so a screen applied by both covers every writer by construction —
+ * the ledger, the boot migration, and whatever a later plan adds without reading any
+ * of this.
+ *
+ * It has been at the wrong altitude twice. First on the extraction path, where
+ * `memory_propose` walked past it: the user pastes a key and says "remember it", so
+ * the statement is verbatim in their own turn, provenance verifies, and the fact went
+ * in `auto_active`. Then at the candidate ledger, under a docstring calling the ledger
+ * "the only way into memory" — which `migrate-memory-docs.ts` disproved by calling
+ * `createClaim` directly, carrying a legacy bullet reading `my openai key is sk-…`
+ * into a confirmed, non-sensitive claim at boot, unattended, on data that predates
+ * every protection here. The rule now sits on the table's own boundary, which is the
+ * one place a fifth writer cannot appear behind.
+ *
+ * The ledger still runs it separately, and that is not a duplicate guard: it needs the
+ * answer BEFORE any row exists, to route the proposal to `pending` instead of
+ * activating it. This screen decides the COLUMN; that one decides the ROUTE.
+ *
+ * Tuned toward catching, not toward precision: a false positive costs one fact that a
+ * human must handle; a false negative costs a durably re-injected credential.
+ */
+const SECRET_PATTERNS: RegExp[] = [
+  // Provider-prefixed tokens: OpenAI (sk-), GitHub (ghp_/gho_), Slack (xoxb-/xoxp-/xoxa-/xoxs-), AWS access key id.
+  // Widened to `[A-Za-z0-9_-]` (not just alphanumeric) with a 20-char floor:
+  // modern OpenAI project keys are internally hyphenated (`sk-proj-AbCdEf...`), and
+  // a narrower class would miss that shape entirely while the older `sk-...` form
+  // still clears the same floor.
+  /\bsk-[A-Za-z0-9_-]{20,}\b/,
+  /\bgh[po]_[A-Za-z0-9]{10,}\b/,
+  /\bxox[bpas]-[A-Za-z0-9-]{10,}\b/,
+  /\bAKIA[A-Z0-9]{12,}\b/,
+  // A PEM private-key block header.
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  // A URI with inline credentials: scheme://user:pass@host.
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/i,
+  // An assignment whose key names a secret and whose value is non-trivial.
+  /\b(password|passwd|secret|token|api[-_]?key|authorization)\s*[:=]\s*['"]?[^\s'"]{4,}['"]?/i,
+  // Catch-all: a long unbroken base64/hex-ish run — deliberately EXCLUDING `-`
+  // from the class. Including it (an earlier version of this pattern did) also
+  // matched ordinary hyphenated things an office user states as plain fact — a URL
+  // slug, a preview-deploy hostname, a UUID — which this screen must not swallow
+  // (a screened item goes `sensitive`, which hides it from the manifest AND from
+  // search, so a false positive is a fact the user can no longer reach through the
+  // agent at all). A 40-char hex commit sha, a bare base64 token, and a
+  // `github_pat_...` fine-grained PAT all still clear the floor without a hyphen.
+  /\b[A-Za-z0-9+/_]{28,}={0,2}\b/,
+];
+
+export function looksLikeSecret(statement: string): boolean {
+  return SECRET_PATTERNS.some((re) => re.test(statement));
+}
+
+/**
  * "A topic and the claim filed under it live in the same space." Both foreign keys
  * on `note_claims` are satisfied by a cross-space pair, so the row is accepted and
  * the other space's topic starts counting a claim it may not even be allowed to
@@ -121,7 +176,7 @@ export async function createClaim(
   input: ClaimInput,
   actor: Actor,
   ex?: Ex,
-): Promise<{ id: string; revision: number }> {
+): Promise<{ id: string; revision: number; sensitive: boolean }> {
   if (!ex || ex === db) return db.transaction((tx) => createClaim(input, actor, tx));
 
   // FIRST statement in the transaction, so the space row is the first lock this move
@@ -130,6 +185,16 @@ export async function createClaim(
   await assertSpaceLive(input.spaceId, ex);
 
   const id = nanoid();
+  // Secret-shaped text is sensitive whatever the caller said. Applied HERE rather
+  // than at each writer — see `looksLikeSecret`. What it means differs by caller and
+  // both outcomes are wanted: a ledger proposal never reaches this line sensitive
+  // (its own screen sent it to pending first), while the boot migration creates
+  // `confirmed` claims directly, so a legacy bullet holding a credential lands
+  // confirmed AND sensitive. That combination is deliberate: it stays out of the
+  // manifest and out of `memory_search`, which is exactly where a credential the user
+  // pasted into a memory document years ago should be — carried across so nothing is
+  // lost, and reachable only by the user, never re-injected by us.
+  const sensitive = input.sensitive || looksLikeSecret(input.statement);
   // A slot conflict (`uniq_vclaims_active_slot`) is deliberately NOT caught here:
   // the merge-or-branch decision belongs to the candidate ledger, which is also
   // the thing holding the SAVEPOINT.
@@ -141,7 +206,7 @@ export async function createClaim(
     value: input.value ?? null,
     origin: input.origin,
     reviewStatus: input.reviewStatus,
-    sensitive: input.sensitive ?? false,
+    sensitive,
   });
   if (input.topicNoteId) {
     await assertTopicInSpace(input.topicNoteId, input.spaceId, ex);
@@ -155,9 +220,12 @@ export async function createClaim(
     subjectType: "claim",
     subjectId: id,
     // No claim text: the audit log is read more widely than the space itself.
-    payload: { slotKey: input.slotKey ?? null, reviewStatus: input.reviewStatus, sensitive: input.sensitive ?? false },
+    payload: { slotKey: input.slotKey ?? null, reviewStatus: input.reviewStatus, sensitive },
   });
-  return { id, revision: 1 };
+  // `sensitive` travels back because the screen may have RAISED it: a caller that
+  // tracks the flag it asked for would otherwise be tracking a value the row does not
+  // hold.
+  return { id, revision: 1, sensitive };
 }
 
 export async function updateClaim(
@@ -242,7 +310,14 @@ export async function updateClaim(
   // can hand back a stale `false`, and here it would be written onto the successor as
   // a plain inheritance. `prev` comes out of the CAS statement's own RETURNING, under
   // its row lock, so it is the freshest value there is.
-  const sensitive = prev.sensitive || (patch.sensitive ?? false);
+  //
+  // The successor's own text is screened too, the other half of the boundary
+  // `createClaim` holds: a supersede is how NEW text enters the table, so without this
+  // an ordinary claim could be rewritten into one carrying a credential and stay
+  // manifest-eligible. Screening the inherited statement as well is deliberate — it
+  // upgrades a row created before this screen existed.
+  const statement = patch.statement ?? prev.statement;
+  const sensitive = prev.sensitive || (patch.sensitive ?? false) || looksLikeSecret(statement);
   // The successor is a fresh row, not an UPDATE of the text: the predecessor
   // stays verbatim as it was recorded. The whole claim is copied, not just the
   // three fields in the patch — otherwise `kind` and the validity window would
@@ -255,7 +330,7 @@ export async function updateClaim(
   await ex.insert(vaultClaims).values({
     id,
     spaceId: prev.spaceId,
-    statement: patch.statement ?? prev.statement,
+    statement,
     slotKey: patch.slotKey ?? prev.slotKey,
     value: patch.value !== undefined ? patch.value : prev.value,
     kind: prev.kind,

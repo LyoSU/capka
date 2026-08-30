@@ -10,6 +10,7 @@ import {
   createClaim,
   headBySlot,
   listHeadClaims,
+  looksLikeSecret,
   updateClaim,
   type Actor,
   type ClaimHead,
@@ -75,53 +76,6 @@ function isSlotTaken(e: unknown): boolean {
 }
 
 /**
- * Screens for secret-shaped content in a proposed statement. It stands HERE, at the
- * ledger, because the ledger is the only way into memory — an earlier version stood
- * on the extraction path alone, and `memory_propose` walked straight past it: the
- * user pastes a key and says "remember it", so the statement is verbatim in their own
- * turn (`verifyDirectProvenance` → true, the most permissive case there is), the model
- * leaves `sensitive` unset, and the fact went in `auto_active` — a credential stored
- * durably and re-injected into every later prompt by the manifest.
- *
- * Tuned toward catching, not toward precision: a false positive costs one item that
- * now waits for a human (`sensitive` forces the pending gate below); a false negative
- * costs a durably re-injected credential. Same asymmetry `verifyDirectProvenance`
- * already accepts — "My password manager is 1Password" being screened is a cost, not
- * a bug to chase.
- */
-const SECRET_PATTERNS: RegExp[] = [
-  // Provider-prefixed tokens: OpenAI (sk-), GitHub (ghp_/gho_), Slack (xoxb-/xoxp-/xoxa-/xoxs-), AWS access key id.
-  // Widened to `[A-Za-z0-9_-]` (not just alphanumeric) with a 20-char floor:
-  // modern OpenAI project keys are internally hyphenated (`sk-proj-AbCdEf...`), and
-  // a narrower class would miss that shape entirely while the older `sk-...` form
-  // still clears the same floor.
-  /\bsk-[A-Za-z0-9_-]{20,}\b/,
-  /\bgh[po]_[A-Za-z0-9]{10,}\b/,
-  /\bxox[bpas]-[A-Za-z0-9-]{10,}\b/,
-  /\bAKIA[A-Z0-9]{12,}\b/,
-  // A PEM private-key block header.
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  // A URI with inline credentials: scheme://user:pass@host.
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/i,
-  // An assignment whose key names a secret and whose value is non-trivial.
-  /\b(password|passwd|secret|token|api[-_]?key|authorization)\s*[:=]\s*['"]?[^\s'"]{4,}['"]?/i,
-  // Catch-all: a long unbroken base64/hex-ish run — deliberately EXCLUDING `-`
-  // from the class. Including it (an earlier version of this pattern did) also
-  // matched ordinary hyphenated things an office user states as plain fact — a URL
-  // slug, a preview-deploy hostname, a UUID — which this screen must not swallow
-  // (a screened item goes `sensitive` → pending, and plan A ships no confirmation
-  // UI, so it would sit invisible for the whole intervening period: a real quiet
-  // degradation, not the "one extra confirmation" cost this module accepts
-  // elsewhere). A 40-char hex commit sha, a bare base64 token, and a
-  // `github_pat_...` fine-grained PAT all still clear the floor without a hyphen.
-  /\b[A-Za-z0-9+/_]{28,}={0,2}\b/,
-];
-
-export function looksLikeSecret(statement: string): boolean {
-  return SECRET_PATTERNS.some((re) => re.test(statement));
-}
-
-/**
  * Which space an unqualified fact belongs to. Both writers into the ledger take it
  * from here, because they disagreed: extraction read an absent `scope` as the USER
  * space while the tools read it as the PROJECT one — the same field name, the
@@ -163,8 +117,16 @@ export function spaceForScope(
 class TryAgain extends Error {}
 
 /**
- * The candidate ledger is the ONLY way into memory: the agent does not write a
- * claim, it proposes one and policy decides. The whole policy runs in one outer
+ * The candidate ledger is the only way the AGENT reaches memory: it does not write a
+ * claim, it proposes one and policy decides. That is a statement about this feature's
+ * agent paths and nothing more — `vault_claims` has other writers (the boot migration
+ * writes to it directly, and later plans will add their own), which is why the rules
+ * that must hold for EVERY writer — the secret screen, the retired-space fence — live
+ * on the table's own two insert statements in `claims.ts` and not here. This docstring
+ * used to claim the stronger thing, and a reader who believed it would have stopped
+ * exactly where the hole was.
+ *
+ * The whole policy runs in one outer
  * transaction; the steps that insert claims sit in a nested `tx.transaction()`,
  * which drizzle emits as a SAVEPOINT. Without it a unique violation would abort
  * the entire Postgres transaction, making "re-read and decide" impossible by
@@ -215,10 +177,11 @@ export async function proposeCandidate(input: {
   // ONCE, here, and use only `slotKey` from then on.
   const slotKey = input.slotKey?.trim() || undefined;
 
-  // Secret-shaped text is sensitive whatever the caller said — a code-side backstop,
-  // not the model's honesty. It is read once, here, and used for both the gate and
-  // the stored row: a candidate written non-sensitive would hand the secret to
-  // whoever confirms it later.
+  // Secret-shaped text is sensitive whatever the caller said. The claim table screens
+  // itself (see `looksLikeSecret`, which lives with the writers); this call is about
+  // something that has no row yet — the ROUTE. A screened proposal must go to pending
+  // rather than activate, and the candidate row must carry the flag too, or whoever
+  // confirms it later would be handed the secret as ordinary text.
   const sensitive = input.sensitive || looksLikeSecret(input.statement);
 
   // The gate is evaluated BEFORE the insert: `policy_state` is NOT NULL, and a

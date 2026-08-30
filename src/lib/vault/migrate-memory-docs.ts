@@ -242,9 +242,12 @@ async function migrateOne(docId: string): Promise<boolean> {
         { kind: "system" },
         tx,
       );
-      // Created confirmed and non-sensitive, so a repeated bullet inside the SAME
-      // document takes the branch above and changes nothing.
-      seen.set(norm(statement), { id: claim.id, sensitive: false });
+      // The flag the ROW has, not the one asked for: `createClaim` screens the
+      // statement and a legacy bullet holding a credential comes back sensitive. A
+      // hardcoded `false` here would send a repeat of that bullet into `confirmClaim`
+      // arguing for declassification — which that function refuses, but a caller whose
+      // bookkeeping contradicts the database is a bug waiting for the next reader.
+      seen.set(norm(statement), { id: claim.id, sensitive: claim.sensitive });
     }
 
     // An audit event ATTESTS that something happened; it is not a second copy of the

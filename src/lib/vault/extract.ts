@@ -140,12 +140,13 @@ function toExtractedItem(entry: unknown): ExtractedItem | null {
  * `assistantText` can itself quote or summarise a tool result, so the prompt also
  * wraps both texts in `<user_turn>`/`<assistant_turn>` tags and tells the model
  * that content is data to analyse, never instructions to follow — a second layer,
- * not a proof. The remaining layers are NOT here: they live in `proposeCandidate`,
- * which is the only way into memory. It screens every statement for secret shapes
- * (`looksLikeSecret`) whatever the caller said, and gates the result — anything not
- * `user_direct`, and anything sensitive, lands `pending`, never auto-activated. That
- * is deliberate placement, not an omission: this module used to hold the screen, and
- * `memory_propose` walked straight past it into an active claim.
+ * not a proof. The remaining layers are NOT here, and this module is not the place to
+ * read them off either: `proposeCandidate` gates what this path proposes — anything
+ * not `user_direct`, and anything sensitive, lands `pending` rather than active — and
+ * the secret screen sits lower still, on `vault_claims`' own two writers, where no
+ * caller can get behind it. Extraction is one writer among several, which is exactly
+ * why it holds neither rule: it used to hold the screen, and `memory_propose` walked
+ * straight past it into an active claim.
  */
 export async function extractCandidates(args: {
   userSpaceId: string;

@@ -19,6 +19,8 @@ import { createHash } from "node:crypto";
 import { pool } from "@/lib/db";
 import { getOrCreateSpace } from "../spaces";
 import { migrateMemoryDocs } from "../migrate-memory-docs";
+import { buildMemoryManifest } from "../manifest";
+import { makeVaultMemoryTools } from "../tools";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -174,6 +176,54 @@ run("vault: memory_docs migration", () => {
     hook.failOn = null;
     logged.errors.length = 0;
     await cleanup();
+  });
+
+  it("a credential in a LEGACY document migrates sensitive: out of the manifest and out of search", async () => {
+    // The case that makes this Critical rather than theoretical. The old memory system
+    // screened nothing, so an existing deployment's documents may already hold a pasted
+    // key — and this migration runs unattended, at boot, on exactly that data. It
+    // writes `confirmed` claims through `createClaim` directly, so a screen sitting on
+    // the candidate ledger never saw them: the bullet landed confirmed and
+    // non-sensitive, in `recentFacts`, i.e. in the system prompt of every later turn.
+    const secret = "sk-proj-AbCdEf0123456789ghijkl";
+    await mkDoc(`${P}dsec`, `- my openai key is ${secret}\n- likes tea\n`);
+
+    expect(await migrate(`${P}dsec`)).toEqual({ migrated: 1 });
+    const spaceId = (await spaceOf("user", OWNER))!;
+
+    // Carried across, not dropped: the fact stays the user's, and only they can reach it.
+    const { rows } = await pool.query<{ statement: string; sensitive: boolean; review_status: string }>(
+      `SELECT statement, sensitive, review_status FROM vault_claims WHERE space_id = $1 AND superseded_at IS NULL`,
+      [spaceId],
+    );
+    const key = rows.find((r) => r.statement.includes(secret));
+    expect(key).toBeDefined();
+    expect(key!.sensitive).toBe(true);
+    // Confirmed AND sensitive is the deliberate combination — see `createClaim`.
+    expect(key!.review_status).toBe("confirmed");
+    // The ordinary bullet in the same document is untouched, so this is a screen and
+    // not a blanket.
+    expect(rows.find((r) => r.statement === "likes tea")!.sensitive).toBe(false);
+
+    // The two surfaces that would have carried it. Both are driven for real: the claim
+    // being made is about what the system does with a migrated row, not about a flag.
+    const manifest = await buildMemoryManifest({ userId: OWNER, userSpaceId: spaceId });
+    expect(manifest).not.toContain(secret);
+    expect(manifest).toContain("likes tea");
+
+    const tools = await makeVaultMemoryTools({
+      userId: OWNER,
+      projectId: null,
+      messageId: `${P}msg`,
+      userTurnText: "what do you remember",
+    });
+    const found = (await tools.memory_search.execute!({ query: "openai" } as never, {
+      toolCallId: "c1",
+      messages: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)) as string;
+    expect(found).not.toContain(secret);
+    expect(found).toContain("marked sensitive");
   });
 
   it("a document's bullets become confirmed legacy claims in the default topic, plus a snapshot", async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { looksLikeSecret } from "@/lib/vault/candidates";
+import { looksLikeSecret } from "@/lib/vault/claims";
 
 /**
  * The pattern list on its own. What the screen GUARANTEES — that a secret-shaped

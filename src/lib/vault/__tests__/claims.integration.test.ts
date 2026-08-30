@@ -448,7 +448,7 @@ run("vault claims", () => {
         actor: ACTOR,
       });
       if (!res.ok) throw new Error(`link ${i} did not go through`);
-      cur = { id: res.id, revision: res.revision };
+      cur = { id: res.id, revision: res.revision, sensitive: false };
       chain.push(res.id);
     }
     expect(cur.revision).toBe(5);

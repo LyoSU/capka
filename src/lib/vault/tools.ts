@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { looksLikeSecret, proposeCandidate, spaceForScope, verifyDirectProvenance } from "./candidates";
+import { proposeCandidate, spaceForScope, verifyDirectProvenance } from "./candidates";
 import { findCurrentHead, forgetClaim, listHeadClaims, updateClaim, type ClaimHead } from "./claims";
 import { getOrCreateSpace } from "./spaces";
 
@@ -358,12 +358,6 @@ export async function makeVaultMemoryTools(ctx: {
         };
         if (statement !== undefined) patch.statement = statement;
         if (value_json !== undefined) patch.value = parsed.value;
-        // The successor is screened too. `updateClaim` INHERITS `sensitive` from the
-        // predecessor, so without this an ordinary claim rewritten into one that
-        // carries a credential would stay non-sensitive — and the manifest would put
-        // it in every later prompt, going around the screen the ledger applies on the
-        // way in. Only ever raised: sensitivity is never cleared by a rewrite.
-        if (statement !== undefined && looksLikeSecret(statement)) patch.sensitive = true;
 
         const res = await updateClaim({
           claimId: claim_id,
