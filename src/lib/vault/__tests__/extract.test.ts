@@ -286,8 +286,9 @@ describe("extractCandidates — what is actually sent to the aux model", () => {
 
   // Documentation-only pin: this only proves the WORDING is still there, not that
   // anything enforces it — the aux model can ignore prompt-level guidance. The
-  // actual guarantee against a durably-stored secret is `looksLikeSecret`, tested
-  // behaviourally below in "secret-shaped statements are never auto-activated".
+  // actual guarantee against a durably-stored secret is the ledger's own screen,
+  // tested in `secret-screen.test.ts` (the patterns) and in
+  // `candidates.integration.test.ts` (that a screened statement never activates).
   it("the system prompt ALSO asks the model not to extract credentials, and extends sensitive to cover them", async () => {
     const generate = generateReturning("[]");
     await extractCandidates({ ...baseArgs, generate });
@@ -308,95 +309,6 @@ describe("extractCandidates — what is actually sent to the aux model", () => {
     const [[calledWith]] = generate.mock.calls;
     expect(calledWith.system).toMatch(/same language/i);
     expect(calledWith.system).toMatch(/reusing the user's own words/i);
-  });
-});
-
-describe("extractCandidates — secret-shaped statements are never auto-activated", () => {
-  // Driven end-to-end through extractCandidates to the resulting proposeCandidate
-  // call, per the review: asserting on the OUTCOME (sensitive forced true), not on
-  // words present in the prompt string. The model is made to say `sensitive:false`
-  // on purpose in each case, to prove the code — not the model's own honesty —
-  // is what forces the gate.
-  it("a Postgres connection string with an inline password is forced sensitive", async () => {
-    const generate = generateReturning(
-      JSON.stringify([
-        {
-          statement: "our db is postgresql://svcuser:Sup3rSecretPW9!@db.internal:5432/prod",
-          from: "user",
-          sensitive: false,
-        },
-      ]),
-    );
-    await extractCandidates({ ...baseArgs, generate });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
-  });
-
-  it("an sk--prefixed API token is forced sensitive", async () => {
-    const generate = generateReturning(
-      JSON.stringify([{ statement: "here is my API key sk-ABC123XYZ7890DEF456GHI", from: "user", sensitive: false }]),
-    );
-    await extractCandidates({ ...baseArgs, generate });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
-  });
-
-  it("a PEM private-key block is forced sensitive", async () => {
-    const generate = generateReturning(
-      JSON.stringify([
-        {
-          statement: "-----BEGIN RSA PRIVATE KEY-----\nMIIExampleNotARealKey==\n-----END RSA PRIVATE KEY-----",
-          from: "user",
-          sensitive: false,
-        },
-      ]),
-    );
-    await extractCandidates({ ...baseArgs, generate });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
-  });
-
-  it("an sk-proj- (internally hyphenated) OpenAI project key is forced sensitive", async () => {
-    // The catch-all deliberately excludes `-` (see round-3 note on SECRET_PATTERNS),
-    // so this shape is caught ONLY by the widened sk- pattern itself — this test is
-    // what would fail if that pattern were narrowed back down.
-    const generate = generateReturning(
-      '[{"statement":"sk-proj-AbCdEf0123456789ghijkl","from":"user","sensitive":false}]',
-    );
-    await extractCandidates({ ...baseArgs, generate });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: true }));
-  });
-
-  it("does not flag an ordinary fact — the screen is not so broad it eats normal usage", async () => {
-    const generate = generateReturning('[{"statement":"pays suppliers in EUR","from":"user","sensitive":false}]');
-    await extractCandidates({ ...baseArgs, generate });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
-  });
-
-  // Negative controls for the specific false-positive class round 3 found: ordinary
-  // hyphenated things (a URL slug, a preview-deploy hostname, a UUID) are common
-  // facts for an office user to state and must not be screened as secret-shaped.
-  // Without these, the next re-tightening of the catch-all could silently
-  // reintroduce the same hole with nothing here failing.
-  it("does not flag a URL containing a long hyphenated slug", async () => {
-    const generate = generateReturning(
-      '[{"statement":"The user prefers the article at https://example.com/how-to-configure-the-thing-properly","from":"user","sensitive":false}]',
-    );
-    await extractCandidates({ ...baseArgs, generate });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
-  });
-
-  it("does not flag a hyphenated preview-deploy hostname", async () => {
-    const generate = generateReturning(
-      '[{"statement":"Staging lives at deploy-preview-1234-my-app-name.netlify.app","from":"user","sensitive":false}]',
-    );
-    await extractCandidates({ ...baseArgs, generate });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
-  });
-
-  it("does not flag a UUID", async () => {
-    const generate = generateReturning(
-      '[{"statement":"Project id is 3f2504e0-4f89-11d3-9a0c-0305e82c3301","from":"user","sensitive":false}]',
-    );
-    await extractCandidates({ ...baseArgs, generate });
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ sensitive: false }));
   });
 });
 

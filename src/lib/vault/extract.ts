@@ -50,55 +50,6 @@ const EXTRACT_INSTRUCTION =
 // would remove the one example that shows the model NOT to translate. A future
 // de-Cyrillic sweep must not touch it.
 
-/**
- * Screens for secret-shaped content in a candidate statement, checked BEFORE the
- * provenance/ledger decision. `EXTRACT_INSTRUCTION` already asks the aux model not
- * to extract credentials, but that is prompt-level guidance the model can simply
- * fail to honour — and a pasted credential is exactly the case where this module's
- * OWN policy is at its most permissive: it appears verbatim in `userText`
- * (`verifyDirectProvenance` → true), the model may leave `sensitive` unset, and the
- * ledger would write `auto_active` — a secret stored durably and re-injected into
- * every later prompt via the manifest. This is the code-side backstop for that.
- *
- * Tuned toward catching, not toward precision: a false positive costs one item
- * that now needs a human's confirmation (`sensitive: true` forces the ledger's
- * existing pending-gate — see the call site); a false negative costs a durably
- * re-injected credential. Same asymmetry `verifyDirectProvenance`'s own docstring
- * already accepts for ITS false positives — "My password manager is 1Password"
- * being screened is an acceptable cost, not a bug to chase.
- */
-const SECRET_PATTERNS: RegExp[] = [
-  // Provider-prefixed tokens: OpenAI (sk-), GitHub (ghp_/gho_), Slack (xoxb-/xoxp-/xoxa-/xoxs-), AWS access key id.
-  // Widened to `[A-Za-z0-9_-]` (not just alphanumeric) with a 20-char floor:
-  // modern OpenAI project keys are internally hyphenated (`sk-proj-AbCdEf...`), and
-  // a narrower class would miss that shape entirely while the older `sk-...` form
-  // still clears the same floor.
-  /\bsk-[A-Za-z0-9_-]{20,}\b/,
-  /\bgh[po]_[A-Za-z0-9]{10,}\b/,
-  /\bxox[bpas]-[A-Za-z0-9-]{10,}\b/,
-  /\bAKIA[A-Z0-9]{12,}\b/,
-  // A PEM private-key block header.
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  // A URI with inline credentials: scheme://user:pass@host.
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/i,
-  // An assignment whose key names a secret and whose value is non-trivial.
-  /\b(password|passwd|secret|token|api[-_]?key|authorization)\s*[:=]\s*['"]?[^\s'"]{4,}['"]?/i,
-  // Catch-all: a long unbroken base64/hex-ish run — deliberately EXCLUDING `-`
-  // from the class. Including it (an earlier version of this pattern did) also
-  // matched ordinary hyphenated things an office user states as plain fact — a URL
-  // slug, a preview-deploy hostname, a UUID — which this screen must not swallow
-  // (a screened item goes `sensitive` → pending, and plan A ships no confirmation
-  // UI, so it would sit invisible for the whole intervening period: a real quiet
-  // degradation, not the "one extra confirmation" cost this module accepts
-  // elsewhere). A 40-char hex commit sha, a bare base64 token, and a
-  // `github_pat_...` fine-grained PAT all still clear the floor without a hyphen.
-  /\b[A-Za-z0-9+/_]{28,}={0,2}\b/,
-];
-
-function looksLikeSecret(statement: string): boolean {
-  return SECRET_PATTERNS.some((re) => re.test(statement));
-}
-
 type ExtractedItem = {
   statement: string;
   slotKey?: string;
@@ -169,11 +120,12 @@ function toExtractedItem(entry: unknown): ExtractedItem | null {
  * `assistantText` can itself quote or summarise a tool result, so the prompt also
  * wraps both texts in `<user_turn>`/`<assistant_turn>` tags and tells the model
  * that content is data to analyse, never instructions to follow — a second layer,
- * not a proof. The THIRD layer is `looksLikeSecret` below: a code-side (not
- * prompt-level) screen that forces `sensitive` on anything secret-shaped,
- * regardless of what the model said. The FOURTH is `proposeCandidate`'s own gate:
- * anything not `user_direct` — and anything `sensitive` — lands `pending`, never
- * auto-activated.
+ * not a proof. The remaining layers are NOT here: they live in `proposeCandidate`,
+ * which is the only way into memory. It screens every statement for secret shapes
+ * (`looksLikeSecret`) whatever the caller said, and gates the result — anything not
+ * `user_direct`, and anything sensitive, lands `pending`, never auto-activated. That
+ * is deliberate placement, not an omission: this module used to hold the screen, and
+ * `memory_propose` walked straight past it into an active claim.
  */
 export async function extractCandidates(args: {
   userSpaceId: string;
@@ -234,14 +186,6 @@ export async function extractCandidates(args: {
     // the SAME turn can land in different spaces. Falls back to the user space
     // whenever there is no project space to file into, even if the item asked for one.
     const spaceId = item.scope === "project" && args.projectSpaceId ? args.projectSpaceId : args.userSpaceId;
-    // A code-side backstop, not just prompt-level guidance: forcing `sensitive`
-    // routes this straight into the ledger's existing pending gate (see
-    // `proposeCandidate`'s policy) regardless of what the model said or how
-    // `provenance` came out — the guarantee this line makes is "never auto_active",
-    // not "never stored". Storing it (rather than dropping) keeps a curation trail
-    // a human can reject; it is never re-injected in the meantime because the
-    // manifest already excludes sensitive claims. Never logs the matched text.
-    const secretShaped = looksLikeSecret(item.statement);
 
     try {
       await proposeCandidate({
@@ -255,7 +199,7 @@ export async function extractCandidates(args: {
         statement: item.statement,
         slotKey: item.slotKey,
         provenance,
-        sensitive: item.sensitive || secretShaped,
+        sensitive: item.sensitive,
         evidence: [{ messageId: args.messageId }],
       });
     } catch (e) {

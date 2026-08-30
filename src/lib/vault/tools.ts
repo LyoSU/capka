@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { proposeCandidate, verifyDirectProvenance } from "./candidates";
+import { looksLikeSecret, proposeCandidate, verifyDirectProvenance } from "./candidates";
 import { findCurrentHead, forgetClaim, listHeadClaims, updateClaim, type ClaimHead } from "./claims";
 import { getOrCreateSpace } from "./spaces";
 
@@ -10,8 +10,17 @@ import { getOrCreateSpace } from "./spaces";
 const SEARCH_LIMIT = 20;
 
 /** One line for the model: `[id@revision]` is how it addresses a claim in
- *  update/forget afterwards, so search and the success reply print it identically. */
-const line = (c: ClaimHead) => `[${c.id}@${c.revision}] ${c.statement}${c.slotKey ? ` (slot: ${c.slotKey})` : ""}`;
+ *  update/forget afterwards, so search and the success reply print it identically.
+ *
+ *  A sensitive claim travels as its ADDRESS only. The caller of these tools is the
+ *  agent, not the human: printing the statement here would put it in the model's
+ *  context — precisely where the manifest already refuses to put it — and from there
+ *  into the reply. The id and slot still travel, so the agent can tell the user such
+ *  a record exists and can forget it by id. */
+const line = (c: ClaimHead) =>
+  `[${c.id}@${c.revision}] ${c.sensitive ? "(saved as sensitive — contents withheld)" : c.statement}${
+    c.slotKey ? ` (slot: ${c.slotKey})` : ""
+  }`;
 
 /** The language of a lost CAS, shared by update and forget: say how the world looks
  *  NOW and what to re-send with. `current: null` deliberately does not separate "the
@@ -23,7 +32,9 @@ const line = (c: ClaimHead) => `[${c.id}@${c.revision}] ${c.statement}${c.slotKe
  *  out of three would be a guess printed as a fact. */
 const mismatch = (current: ClaimHead | null) =>
   current
-    ? `Claim ${current.id} is now at revision ${current.revision}: "${current.statement}". Re-issue with expected_revision=${current.revision} if the change still applies.`
+    ? // The text is withheld for a sensitive head, for the same reason `line` withholds
+      // it: otherwise a lost CAS would be a second way to read out what the manifest hides.
+      `Claim ${current.id} is now at revision ${current.revision}${current.sensitive ? "" : `: "${current.statement}"`}. Re-issue with expected_revision=${current.revision} if the change still applies.`
     : "That claim is no longer there (forgotten or replaced). Run memory_search to see what is.";
 
 /** An arbitrary value travels as a JSON STRING, not an object: `asSchema` collapses
@@ -246,9 +257,15 @@ export async function makeVaultMemoryTools(ctx: {
       execute: async ({ claim_id, expected_revision, statement, value_json }, { toolCallId }) => {
         const parsed = parseValueJson(value_json);
         if (!parsed.ok) return parsed.message;
-        const patch: { statement?: string; value?: unknown } = {};
+        const patch: { statement?: string; value?: unknown; sensitive?: true } = {};
         if (statement !== undefined) patch.statement = statement;
         if (value_json !== undefined) patch.value = parsed.value;
+        // The successor is screened too. `updateClaim` INHERITS `sensitive` from the
+        // predecessor, so without this an ordinary claim rewritten into one that
+        // carries a credential would stay non-sensitive — and the manifest would put
+        // it in every later prompt, going around the screen the ledger applies on the
+        // way in. Only ever raised: sensitivity is never cleared by a rewrite.
+        if (statement !== undefined && looksLikeSecret(statement)) patch.sensitive = true;
 
         const res = await updateClaim({
           claimId: claim_id,

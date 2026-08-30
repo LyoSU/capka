@@ -73,6 +73,53 @@ function isSlotTaken(e: unknown): boolean {
   return pg?.code === "23505" && pg?.constraint === "uniq_vclaims_active_slot";
 }
 
+/**
+ * Screens for secret-shaped content in a proposed statement. It stands HERE, at the
+ * ledger, because the ledger is the only way into memory — an earlier version stood
+ * on the extraction path alone, and `memory_propose` walked straight past it: the
+ * user pastes a key and says "remember it", so the statement is verbatim in their own
+ * turn (`verifyDirectProvenance` → true, the most permissive case there is), the model
+ * leaves `sensitive` unset, and the fact went in `auto_active` — a credential stored
+ * durably and re-injected into every later prompt by the manifest.
+ *
+ * Tuned toward catching, not toward precision: a false positive costs one item that
+ * now waits for a human (`sensitive` forces the pending gate below); a false negative
+ * costs a durably re-injected credential. Same asymmetry `verifyDirectProvenance`
+ * already accepts — "My password manager is 1Password" being screened is a cost, not
+ * a bug to chase.
+ */
+const SECRET_PATTERNS: RegExp[] = [
+  // Provider-prefixed tokens: OpenAI (sk-), GitHub (ghp_/gho_), Slack (xoxb-/xoxp-/xoxa-/xoxs-), AWS access key id.
+  // Widened to `[A-Za-z0-9_-]` (not just alphanumeric) with a 20-char floor:
+  // modern OpenAI project keys are internally hyphenated (`sk-proj-AbCdEf...`), and
+  // a narrower class would miss that shape entirely while the older `sk-...` form
+  // still clears the same floor.
+  /\bsk-[A-Za-z0-9_-]{20,}\b/,
+  /\bgh[po]_[A-Za-z0-9]{10,}\b/,
+  /\bxox[bpas]-[A-Za-z0-9-]{10,}\b/,
+  /\bAKIA[A-Z0-9]{12,}\b/,
+  // A PEM private-key block header.
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  // A URI with inline credentials: scheme://user:pass@host.
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/i,
+  // An assignment whose key names a secret and whose value is non-trivial.
+  /\b(password|passwd|secret|token|api[-_]?key|authorization)\s*[:=]\s*['"]?[^\s'"]{4,}['"]?/i,
+  // Catch-all: a long unbroken base64/hex-ish run — deliberately EXCLUDING `-`
+  // from the class. Including it (an earlier version of this pattern did) also
+  // matched ordinary hyphenated things an office user states as plain fact — a URL
+  // slug, a preview-deploy hostname, a UUID — which this screen must not swallow
+  // (a screened item goes `sensitive` → pending, and plan A ships no confirmation
+  // UI, so it would sit invisible for the whole intervening period: a real quiet
+  // degradation, not the "one extra confirmation" cost this module accepts
+  // elsewhere). A 40-char hex commit sha, a bare base64 token, and a
+  // `github_pat_...` fine-grained PAT all still clear the floor without a hyphen.
+  /\b[A-Za-z0-9+/_]{28,}={0,2}\b/,
+];
+
+export function looksLikeSecret(statement: string): boolean {
+  return SECRET_PATTERNS.some((re) => re.test(statement));
+}
+
 /** Two CAS losses in a row. Thrown to roll back the WHOLE confirm transaction,
  *  including the `resolved_at` that step 1 set. The candidate stays open: "come
  *  back in a moment" is more honest than a quietly dropped fact. */
@@ -128,12 +175,18 @@ export async function proposeCandidate(input: {
   // ONCE, here, and use only `slotKey` from then on.
   const slotKey = input.slotKey?.trim() || undefined;
 
+  // Secret-shaped text is sensitive whatever the caller said — a code-side backstop,
+  // not the model's honesty. It is read once, here, and used for both the gate and
+  // the stored row: a candidate written non-sensitive would hand the secret to
+  // whoever confirms it later.
+  const sensitive = input.sensitive || looksLikeSecret(input.statement);
+
   // The gate is evaluated BEFORE the insert: `policy_state` is NOT NULL, and a
   // provisional value plus a later UPDATE would only add a state nobody ever sees.
   const gate: "conflict" | "pending" | null =
     input.forceState === "conflict"
       ? "conflict"
-      : input.sensitive
+      : sensitive
         ? "pending"
         : // What the user did not write themselves is never auto-activated. This is
           // the barrier against injection via a tool result, a file or a page.
@@ -157,7 +210,7 @@ export async function proposeCandidate(input: {
         // A pending candidate has no claim yet — the evidence waits here and is
         // applied by whoever confirms.
         evidence,
-        sensitive: input.sensitive ?? false,
+        sensitive,
         policyState: gate ?? "auto_active",
       })
       .onConflictDoNothing({ target: memoryCandidates.idempotencyKey })

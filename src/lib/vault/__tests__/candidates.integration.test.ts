@@ -952,6 +952,26 @@ run("vault candidates", () => {
     expect((await listOpenCandidates(SPACE_B)).map((r) => r.statement)).toEqual(["in another space"]);
   });
 
+  it("a credential the user pasted THEMSELVES never auto-activates", async () => {
+    // The attack the extraction-path-only screen missed: the user pastes the key and
+    // says "remember it", so the statement is verbatim in their own turn — the MOST
+    // permissive case the provenance filter has — and the caller (memory_propose)
+    // sets no `sensitive`. With the screen standing only on the extraction path this
+    // wrote a confirmed, non-sensitive head, which the manifest then carried into the
+    // system prompt of every later turn.
+    const res = await propose({
+      statement: "my OpenAI key is sk-proj-AbCdEf0123456789ghijkl",
+      provenance: DIRECT,
+    });
+    expect(res.state).toBe("pending");
+    if (res.state !== "pending") throw new Error("unreachable");
+    // Stored as sensitive, not dropped: a human keeps a curation trail, and nothing
+    // re-injects it in the meantime because the manifest excludes sensitive claims.
+    expect((await candRow(res.candidateId)).sensitive).toBe(true);
+    // The point of the whole exercise: no head exists, so there is nothing to inject.
+    expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(0);
+  });
+
   it("verifyDirectProvenance: a quote yes, an invention no, a 60% paraphrase yes", async () => {
     const turn = "The project deadline moves to next Monday, please warn the team";
 

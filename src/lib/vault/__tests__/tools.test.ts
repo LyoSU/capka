@@ -16,7 +16,14 @@ const { getOrCreateSpace, listHeadClaims, updateClaim, forgetClaim, findCurrentH
   }));
 vi.mock("../spaces", () => ({ getOrCreateSpace }));
 vi.mock("../claims", () => ({ listHeadClaims, updateClaim, forgetClaim, findCurrentHead }));
-vi.mock("../candidates", () => ({ proposeCandidate, verifyDirectProvenance }));
+// `looksLikeSecret` is NOT mocked: it is a pure predicate with no service behind it,
+// and a stubbed one would let this file assert that a secret raises sensitivity while
+// the real screen no longer recognises the shape.
+vi.mock("../candidates", async (importOriginal) => ({
+  proposeCandidate,
+  verifyDirectProvenance,
+  looksLikeSecret: (await importOriginal<typeof import("../candidates")>()).looksLikeSecret,
+}));
 
 import { makeVaultMemoryTools } from "../tools";
 
@@ -187,6 +194,22 @@ describe("memory_update", () => {
     });
   });
 
+  it("a rewrite that introduces a credential raises sensitivity on the successor", async () => {
+    // `updateClaim` inherits `sensitive` from the predecessor, so a plain claim
+    // rewritten into a secret would otherwise stay manifest-eligible — the screen the
+    // ledger applies on the way in, gone around by the edit path.
+    updateClaim.mockResolvedValue({ ok: true, id: "c2", revision: 2 });
+    const tools = await make();
+    await run(tools.memory_update, {
+      claim_id: "c1",
+      expected_revision: 1,
+      statement: "the deploy key is sk-proj-AbCdEf0123456789ghijkl",
+    });
+    expect(updateClaim).toHaveBeenCalledWith(
+      expect.objectContaining({ patch: expect.objectContaining({ sensitive: true }) }),
+    );
+  });
+
   it("the first mismatch is instructive text with the current revision, and no candidate", async () => {
     updateClaim.mockResolvedValue({ ok: false, current: head({ id: "c5", revision: 4, statement: "In euro" }) });
     findCurrentHead.mockResolvedValue(null);
@@ -198,6 +221,21 @@ describe("memory_update", () => {
     expect(proposeCandidate).not.toHaveBeenCalled();
     // The space is needed only by a conflict, and most CAS losses never see a second.
     expect(findCurrentHead).not.toHaveBeenCalled();
+  });
+
+  it("a mismatch on a SENSITIVE head names the revision without repeating the text", async () => {
+    // Same rule as memory_search: the model is the reader here, and the mismatch
+    // sentence would otherwise be a second way to read out a claim the manifest hides.
+    updateClaim.mockResolvedValue({
+      ok: false,
+      current: head({ id: "c5", revision: 4, statement: "card number 4242424242424242", sensitive: true }),
+    });
+    const tools = await make();
+    const out = await run(tools.memory_update, { claim_id: "c1", expected_revision: 1, statement: "In dollars" });
+
+    expect(out).toContain("revision 4");
+    expect(out).toContain("expected_revision=4");
+    expect(out).not.toContain("4242");
   });
 
   it("a forgotten claim leaks nothing beyond \"it is not there\"", async () => {
@@ -395,6 +433,25 @@ describe("memory_search", () => {
     expect(lines).toHaveLength(20);
     expect(lines.filter((l) => l.startsWith("[p"))).toHaveLength(10);
     expect(lines.filter((l) => l.startsWith("[u"))).toHaveLength(10);
+  });
+
+  it("a sensitive claim is listed by id but its text is withheld", async () => {
+    // The caller of this tool is the agent, not the human: handing back the text of a
+    // sensitive claim puts it straight into the model's context — the same place the
+    // manifest already refuses to put it. The id and the slot still travel, so the
+    // agent can tell the user such a record exists.
+    listHeadClaims.mockImplementation(async (spaceId: string) =>
+      spaceId === PROJECT_SPACE
+        ? [head({ id: "c1", revision: 2, statement: "card number 4242424242424242", slotKey: "payment/card", sensitive: true })]
+        : [],
+    );
+    const tools = await make();
+    const out = await run(tools.memory_search, { query: "card" });
+
+    expect(out).toContain("[c1@2]");
+    expect(out).toContain("(slot: payment/card)");
+    expect(out).not.toContain("4242");
+    expect(out).toMatch(/sensitive/i);
   });
 
   it("outside a project scope:'project' substitutes no space and returns empty", async () => {
