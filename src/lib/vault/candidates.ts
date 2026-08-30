@@ -120,6 +120,26 @@ export function looksLikeSecret(statement: string): boolean {
   return SECRET_PATTERNS.some((re) => re.test(statement));
 }
 
+/**
+ * Which space an unqualified fact belongs to. Both writers into the ledger take it
+ * from here, because they disagreed: extraction read an absent `scope` as the USER
+ * space while the tools read it as the PROJECT one — the same field name, the
+ * opposite meaning for its absence — so a merger codename stated inside one project
+ * was filed as a fact about the person and injected into every other project and
+ * chat.
+ *
+ * Least privilege decides which one wins: a project fact is visible inside that
+ * project, a user fact follows the person everywhere, so inside a project the
+ * narrower audience is the safe reading of silence. Anything that is not exactly
+ * "user" — absent, or a value neither module recognises — takes it.
+ */
+export function spaceForScope(
+  scope: "user" | "project" | undefined,
+  spaces: { userSpaceId: string; projectSpaceId?: string | null },
+): string {
+  return scope !== "user" && spaces.projectSpaceId ? spaces.projectSpaceId : spaces.userSpaceId;
+}
+
 /** Two CAS losses in a row. Thrown to roll back the WHOLE confirm transaction,
  *  including the `resolved_at` that step 1 set. The candidate stays open: "come
  *  back in a moment" is more honest than a quietly dropped fact. */

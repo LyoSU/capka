@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { looksLikeSecret, proposeCandidate, verifyDirectProvenance } from "./candidates";
+import { looksLikeSecret, proposeCandidate, spaceForScope, verifyDirectProvenance } from "./candidates";
 import { findCurrentHead, forgetClaim, listHeadClaims, updateClaim, type ClaimHead } from "./claims";
 import { getOrCreateSpace } from "./spaces";
 
@@ -243,10 +243,9 @@ export async function makeVaultMemoryTools(ctx: {
         if (scope === "project" && !projectSpaceId) {
           return "This chat is not inside a project, so there is no project memory to save to. Nothing was saved — re-send without scope, or with scope:'user' if the fact is about the person.";
         }
-        // After the guard, "wants project" implies there IS one; the condition is
-        // kept for the type, not for a case that can still happen.
-        const wantsProject = (scope ?? (projectSpaceId ? "project" : "user")) === "project";
-        const spaceId = wantsProject && projectSpaceId ? projectSpaceId : userSpaceId;
+        // Past that guard, what an absent scope means is decided in one place for
+        // this path and for extraction alike — they used to answer it oppositely.
+        const spaceId = spaceForScope(scope, { userSpaceId, projectSpaceId });
         const res = await proposeCandidate({
           idempotencyKey: `${ctx.messageId}:${toolCallId}`,
           spaceId,

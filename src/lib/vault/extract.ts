@@ -1,5 +1,5 @@
 import { log } from "@/lib/log";
-import { proposeCandidate, verifyDirectProvenance, type Provenance } from "./candidates";
+import { proposeCandidate, spaceForScope, verifyDirectProvenance, type Provenance } from "./candidates";
 
 /** What the caller's aux-model wrapper looks like from here. The runner builds it on
  *  the same `auxGenerate` path the old memory-doc reconcile used (in the since-deleted
@@ -34,8 +34,9 @@ const EXTRACT_INSTRUCTION =
   `their own fact — e.g. the user writes 'мій постачальник каже: "знижка діє до березня"' → statement ` +
   `"знижка діє до березня", quoted:true. If the user instead writes "знижка діє до березня" directly, that is ` +
   `quoted:false.\n` +
-  `- "scope" (optional, default "user"): "user" for facts about the person themselves (follows them everywhere); ` +
-  `"project" for facts about this project's work.\n` +
+  `- "scope" (optional): "user" for facts about the person themselves (follows them everywhere); "project" for ` +
+  `facts about this project's work. Omitted inside a project it means "project", so say "user" explicitly for a ` +
+  `fact about the person.\n` +
   `- "slot_key" (optional): a short stable path like "payment/currency" for a fact that changes over time and ` +
   `should replace its previous value rather than duplicate it — omit it for one-off facts.\n` +
   `- "sensitive" (optional, default false): true for health, politics, religion, private-life facts, OR any ` +
@@ -101,10 +102,11 @@ function toExtractedItem(entry: unknown): ExtractedItem | null {
     // or omitted, same spirit as `verifyDirectProvenance` erring toward pending.
     from: typeof o.from === "string" ? o.from : "assistant",
     quoted: o.quoted === true,
-    // Anything other than exactly "project" defaults to "user" — the safer default
-    // for the fact class ("stated as true of themselves") this prompt hunts, and
-    // the one that keeps a fact visible outside whichever project the chat sat in.
-    scope: o.scope === "project" ? "project" : "user",
+    // An unusable value stays UNDEFINED rather than being resolved to a side here:
+    // what an absent scope means is one decision, and it is made in `spaceForScope`
+    // for both writers at once. Resolving it here is how the two paths came to
+    // disagree in the first place.
+    scope: o.scope === "project" ? "project" : o.scope === "user" ? "user" : undefined,
   };
 }
 
@@ -185,7 +187,10 @@ export async function extractCandidates(args: {
     // so "pays suppliers in EUR" (project) and "works in procurement" (user) from
     // the SAME turn can land in different spaces. Falls back to the user space
     // whenever there is no project space to file into, even if the item asked for one.
-    const spaceId = item.scope === "project" && args.projectSpaceId ? args.projectSpaceId : args.userSpaceId;
+    const spaceId = spaceForScope(item.scope, {
+      userSpaceId: args.userSpaceId,
+      projectSpaceId: args.projectSpaceId,
+    });
 
     try {
       await proposeCandidate({

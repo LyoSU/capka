@@ -6,7 +6,14 @@ const { proposeCandidate, verifyDirectProvenance } = vi.hoisted(() => ({
   proposeCandidate: vi.fn(),
   verifyDirectProvenance: vi.fn(),
 }));
-vi.mock("../candidates", () => ({ proposeCandidate, verifyDirectProvenance }));
+// `spaceForScope` is NOT stubbed: it exists so that this module and the memory tools
+// give ONE answer to "where does an unqualified fact go", and a per-file stub is
+// exactly how the two came to answer it oppositely.
+vi.mock("../candidates", async (importOriginal) => ({
+  proposeCandidate,
+  verifyDirectProvenance,
+  spaceForScope: (await importOriginal<typeof import("../candidates")>()).spaceForScope,
+}));
 
 // So the two silent-total-loss branches (finishReason=length, unparseable output)
 // can be asserted on directly, and told apart from the legitimate "nothing to
@@ -201,9 +208,25 @@ describe("extractCandidates — per-item space selection", () => {
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
   });
 
-  it("defaults an item with no scope field to the user space, even inside a project", async () => {
-    const generate = generateReturning('[{"statement":"works in procurement","from":"user"}]');
+  it("defaults an item with no scope field to the PROJECT space, the same as the tool path", async () => {
+    // The two writers disagreed about what an absent `scope` means — this module read
+    // it as the user space, `memory_propose` as the project one — so the same omitted
+    // field filed a fact about one project as a fact about the person, injected into
+    // every other project and chat. Least privilege settles it: the narrower audience.
+    const generate = generateReturning('[{"statement":"the merger codename is Redwood","from":"user"}]');
     await extractCandidates({ ...baseArgs, projectSpaceId: PROJECT_SPACE, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: PROJECT_SPACE }));
+  });
+
+  it("an unusable scope value is treated as absent, not as 'user'", async () => {
+    const generate = generateReturning('[{"statement":"the merger codename is Redwood","from":"user","scope":"team"}]');
+    await extractCandidates({ ...baseArgs, projectSpaceId: PROJECT_SPACE, generate });
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: PROJECT_SPACE }));
+  });
+
+  it("outside a project everything lands in the user space, scope or no scope", async () => {
+    const generate = generateReturning('[{"statement":"works in procurement","from":"user"}]');
+    await extractCandidates({ ...baseArgs, generate });
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
   });
 
