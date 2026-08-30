@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { memoryDocs, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
-import { listHeadClaims } from "./claims";
+import { fitStatement, listHeadClaims } from "./claims";
 import { notCarried } from "./migrate-memory-docs";
 
 /** The brief's "cap 4KB" is an approximate figure for temporary (pre-Task 10
@@ -36,7 +36,11 @@ async function recentFacts(spaceId: string): Promise<string[]> {
   return heads
     .filter((h) => !h.sensitive)
     .slice(0, 10)
-    .map((h) => h.statement);
+    // The SAME rule the writers hold, not a second one — applied here because a row
+    // written before `fitStatement` existed still renders into this prompt, and the
+    // fence below is built for one line of bounded length. `updateClaim` re-screens
+    // an inherited statement for the same reason.
+    .map((h) => fitStatement(h.statement));
 }
 
 /** Topic counters — confirmed, non-sensitive heads ONLY. The manifest is what
@@ -79,14 +83,22 @@ async function topicCounts(spaceId: string): Promise<{ title: string; count: num
 }
 
 /** Every line the model reads here is prompt content, not markup the model
- *  can trust structurally — a fact statement is short, single-line in
- *  practice (Task 7's tool caps it at 500 chars), and comes only from
- *  claims this module already filtered to confirmed/non-sensitive, but it's
- *  still free text an agent or a user wrote. Wrapping it in guillemets is a
- *  cheap way to mark it as a quoted value rather than an instruction, in the
- *  same spirit as the heavier fencing `legacyBlock` needs below — a
- *  statement is shorter and less dangerous than a whole legacy document, but
- *  it's the same class of risk.
+ *  can trust structurally — a fact statement is short and single-line, and
+ *  comes only from claims this module already filtered to
+ *  confirmed/non-sensitive, but it's still free text an agent or a user
+ *  wrote. Wrapping it in guillemets is a cheap way to mark it as a quoted
+ *  value rather than an instruction, in the same spirit as the heavier
+ *  fencing `legacyBlock` needs below — a statement is shorter and less
+ *  dangerous than a whole legacy document, but it's the same class of risk.
+ *
+ *  "Short and single-line" is a GUARANTEE, and this comment used to credit it
+ *  to `memory_propose`'s zod schema — a rule held by one of three entrances,
+ *  while extraction and confirm-supersede wrote whatever they were handed. A
+ *  multi-KB statement went into this tier verbatim on every turn, and a
+ *  statement carrying `\n## …` put its own lines OUTSIDE these guillemets,
+ *  indistinguishable from the manifest's structure. It is now `fitStatement`,
+ *  on the writers themselves, and `recentFacts` re-applies it above for rows
+ *  that predate it — so this fence may keep assuming one bounded line.
  */
 function spaceBlock(header: string, topics: { title: string; count: number }[], facts: string[]): string | null {
   // `null`, not a bare header, when the space holds nothing worth saying. The

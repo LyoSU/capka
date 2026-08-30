@@ -155,7 +155,14 @@ export async function migrateMemoryDocs(opts: { docIds?: string[] } = {}): Promi
   // retry in `migrate.ts` has to stay armed — a quiet success with unmigrated
   // documents left behind would be worse than a noisy repeat.
   if (failed.length) {
-    throw new Error(`${failed.length} memory doc(s) did not migrate: ${failed.join(", ")}`, { cause: firstError });
+    // `cause` is SCRUBBED, for the same reason the log line above is. A raw drizzle
+    // error attached here walks straight past `pgFault`: the only caller does
+    // `console.error("…", e)`, and Node's inspector prints the `[cause]` chain with
+    // the wrapped message — every bound parameter included — once per retry pass. The
+    // hygiene has to hold on everything that LEAVES this module, not only on the line
+    // this module logs itself; a scrubber the exception chain can carry the payload
+    // around is the same defect as a guard on one entrance of two.
+    throw new Error(`${failed.length} memory doc(s) did not migrate: ${failed.join(", ")}`, { cause: pgFault(firstError) });
   }
   return { migrated };
 }

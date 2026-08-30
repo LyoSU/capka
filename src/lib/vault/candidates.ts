@@ -8,6 +8,8 @@ import {
   attachEvidence,
   confirmClaim,
   createClaim,
+  fitSlotKey,
+  fitStatement,
   headBySlot,
   listHeadClaims,
   looksLikeSecret,
@@ -175,14 +177,21 @@ export async function proposeCandidate(input: {
   // `""` is falsy) — and the claim insert would land OUTSIDE the savepoint, where
   // a 23505 aborts the whole transaction and escapes to the caller. Normalize
   // ONCE, here, and use only `slotKey` from then on.
-  const slotKey = input.slotKey?.trim() || undefined;
+  const slotKey = fitSlotKey(input.slotKey);
+
+  // Clamped and single-lined at the ledger too, not only on the claim writers: a
+  // candidate row carries the statement verbatim into the review queue, and
+  // `confirmCandidate` supersedes a head with exactly this text. Trimming it at the
+  // moment of confirmation instead would show the reviewer one string and store
+  // another. `fitStatement` lives with the writers — see it for why the shape matters.
+  const statement = fitStatement(input.statement);
 
   // Secret-shaped text is sensitive whatever the caller said. The claim table screens
   // itself (see `looksLikeSecret`, which lives with the writers); this call is about
   // something that has no row yet — the ROUTE. A screened proposal must go to pending
   // rather than activate, and the candidate row must carry the flag too, or whoever
   // confirms it later would be handed the secret as ordinary text.
-  const sensitive = input.sensitive || looksLikeSecret(input.statement);
+  const sensitive = input.sensitive || looksLikeSecret(statement);
 
   // The gate is evaluated BEFORE the insert: `policy_state` is NOT NULL, and a
   // provisional value plus a later UPDATE would only add a state nobody ever sees.
@@ -222,7 +231,7 @@ export async function proposeCandidate(input: {
         idempotencyKey: input.idempotencyKey,
         spaceId: input.spaceId,
         originMessageId: input.originMessageId ?? null,
-        statement: input.statement,
+        statement,
         slotKey: slotKey ?? null,
         value: input.value ?? null,
         provenance: input.provenance,
@@ -297,7 +306,7 @@ export async function proposeCandidate(input: {
       const claim = await createClaim(
         {
           spaceId: input.spaceId,
-          statement: input.statement,
+          statement,
           slotKey,
           value: input.value,
           origin: { ...input.provenance },
@@ -328,9 +337,34 @@ export async function proposeCandidate(input: {
     /** "Already known" means the words, and a value that does not contradict the
      *  head's. A candidate asserting a DIFFERENT value is a decision for a human, not
      *  something to absorb into an existing row; a candidate asserting none merges
-     *  exactly as it always did. */
+     *  exactly as it always did.
+     *
+     *  KNOWN, DOCUMENTED, NOT FIXED — and the trigger sits here, on the answer that
+     *  would leak, rather than in a plan document nobody re-reads (Fable audit F5,
+     *  the same shape as M-5).
+     *
+     *  These two replies are an ORACLE over the heads `memory_search` deliberately
+     *  withholds. That withholding is query-independent on purpose — a sensitive head
+     *  never matches, so only an aggregate count leaks — but a non-sensitive proposal
+     *  whose text normalizes equal to a SENSITIVE head answers `merged` ("Already
+     *  known"), and one whose `slot_key` a sensitive head occupies answers `conflict`.
+     *  Both are distinguishable from "Saved.", so an agent can confirm whether a
+     *  specific sensitive statement or slot is recorded by proposing it — exactly the
+     *  category confirmation `withheldNotice` is written to rule out.
+     *
+     *  Unreachable in plan A, by two accidents rather than by design: the probe must
+     *  clear `verifyDirectProvenance` (the words have to be in the user's own turn),
+     *  and the only sensitive heads plan A can produce come from the boot migration,
+     *  which sets no slots.
+     *
+     *  IT GOES LIVE WITH PLAN D'S CONFIRM BUTTON, WITH NO CODE CHANGE HERE — which is
+     *  why this is a comment on the branches and not a backlog line. Whoever ships a
+     *  human confirmation surface (or any other producer of sensitive heads with
+     *  slots) must fix it first: treat a sensitive head as NO head for a
+     *  non-sensitive proposal's dedup — a second head, or pending — never as
+     *  `merged`/`conflict`. */
     const same = (head: ClaimHead) =>
-      norm(head.statement) === norm(input.statement) && valueAgrees(head.value, input.value);
+      norm(head.statement) === norm(statement) && valueAgrees(head.value, input.value);
 
     if (slotKey) {
       const head = await headBySlot(input.spaceId, slotKey, tx);
@@ -368,7 +402,7 @@ export async function proposeCandidate(input: {
     const heads = await listHeadClaims(input.spaceId, {}, tx);
     // The value is compared here too: the rule cannot depend on whether a slot
     // happens to be set, or the same pair of facts merges or conflicts by accident.
-    const dup = heads.find((h) => norm(h.statement) === norm(input.statement));
+    const dup = heads.find((h) => norm(h.statement) === norm(statement));
     if (dup) return same(dup) ? merged(dup) : conflict(dup.id);
     return activated(await activate(tx));
   });

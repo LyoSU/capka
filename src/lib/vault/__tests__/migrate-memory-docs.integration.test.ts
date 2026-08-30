@@ -16,8 +16,9 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from "vites
  * next door.
  */
 import { createHash } from "node:crypto";
+import { inspect } from "node:util";
 import { pool } from "@/lib/db";
-import { getOrCreateSpace } from "../spaces";
+import { getOrCreateSpace, retireProjectSpace } from "../spaces";
 import { migrateMemoryDocs } from "../migrate-memory-docs";
 import { buildMemoryManifest } from "../manifest";
 import { makeVaultMemoryTools } from "../tools";
@@ -168,7 +169,7 @@ run("vault: memory_docs migration", () => {
 
   afterAll(async () => {
     await cleanup();
-    await q(`DELETE FROM projects WHERE id = $1`, [PROJ]);
+    await q(`DELETE FROM projects WHERE id LIKE $1`, [`${P}%`]);
     await q(`DELETE FROM "user" WHERE id = $1`, [OWNER]);
   });
 
@@ -468,6 +469,35 @@ run("vault: memory_docs migration", () => {
     expect(await statements(spaceId!)).toEqual(["a project fact"]);
   });
 
+  it("a document whose project was deleted first cannot CREATE a live space to land in", async () => {
+    // The entrance the lifecycle fence does not cover. `retireProjectSpace` used to be
+    // a no-op when the space row did not exist yet — a project that predates the vault,
+    // or one whose memory was off — so teardown left nothing behind for anyone to read.
+    // This migration then ran at boot, CREATED the space itself (live, by definition),
+    // passed its own fence against the row it had just written, and committed a deleted
+    // project's memory into a space no re-drive can find: no project row is left to
+    // teardown again, so it survives until the account is deleted.
+    const gone = `${P}gone-proj`;
+    await q(
+      `INSERT INTO projects (id, user_id, name, deleted_at) VALUES ($1, $2, 'deleted mid-boot', now())`,
+      [gone, OWNER],
+    );
+    await mkDoc(`${P}d14`, "- the deleted project pays in dollars", gone);
+    // Teardown's half of the interleaving: it runs while no space exists yet.
+    await retireProjectSpace(gone);
+    expect(await spaceOf("project", gone)).not.toBeNull(); // a tombstone, not silence
+
+    await expect(migrate(`${P}d14`)).resolves.toEqual({ migrated: 0 });
+
+    const spaceId = (await spaceOf("project", gone))!;
+    expect(await count("spaces", "id = $1 AND retired_at IS NOT NULL", [spaceId])).toBe(1);
+    expect(await statements(spaceId)).toEqual([]);
+    expect(await count("vault_notes", "space_id = $1", [spaceId])).toBe(0);
+    // Stamped rather than retried: a deleted project's document is nothing to carry,
+    // not a failure to re-drive on every boot.
+    expect(await migratedAt(`${P}d14`)).not.toBeNull();
+  });
+
   it("a failure logs a discriminated shape and NEVER the statement text", async () => {
     // Drizzle embeds every bound parameter in the error message, so logging the error
     // whole would write a screened credential verbatim into the application log and
@@ -494,6 +524,29 @@ run("vault: memory_docs migration", () => {
     expect(JSON.stringify(logged.errors)).not.toContain("Failed query");
     expect(entry!.ctx).not.toHaveProperty("message");
     expect(entry!.ctx).not.toHaveProperty("err");
+  });
+
+  it("the batch rethrow carries nothing raw either — the cause chain is scrubbed too", async () => {
+    // The other half of the rule above, and the one it was missing: the scrubber sat on
+    // the log CALL while the batch rethrow attached the raw first error as `cause`. The
+    // only caller does `console.error(…, e)`, and Node's inspector prints the whole
+    // cause chain — so the credential the line above kept out of the log went to stdout
+    // anyway, once per retry pass. `inspect` is used here precisely because it is what
+    // `console.error` does to an Error; asserting on `.message` alone would pass on the
+    // defect.
+    const secret = "sk-live-def456CAUSECHAIN";
+    await mkDoc(`${P}d13`, `- ${secret}`);
+    hook.failOn = secret;
+
+    const err = await migrate(`${P}d13`).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe(`1 memory doc(s) did not migrate: ${P}d13`);
+    const printed = inspect(err, { depth: null });
+    expect(printed).not.toContain(secret);
+    expect(printed).not.toContain("Failed query");
+    // Still discriminated enough for an operator to act on — the fault, not the data.
+    expect((err as { cause?: unknown }).cause).toMatchObject({ code: "23503", constraint: "vclaims_space_fk" });
   });
 
   it("a deterministically failing document is retried a bounded number of times, then left alone", async () => {

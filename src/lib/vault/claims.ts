@@ -107,6 +107,41 @@ export function looksLikeSecret(statement: string): boolean {
   return SECRET_PATTERNS.some((re) => re.test(statement));
 }
 
+/** What a fact may take up in a prompt, and what shape it may take there.
+ *
+ *  A confirmed head is injected verbatim into the volatile prompt tier on EVERY later
+ *  turn of its scope, so its size and its line structure are prompt properties, not
+ *  cosmetics. Both used to be enforced in exactly one place — `memory_propose`'s zod
+ *  schema — and both other writers walked past it: extraction accepts whatever the aux
+ *  model returns (bounded only by 2048 output tokens, roughly 8KB), and a confirm
+ *  supersedes a head with the candidate's text verbatim. `manifest.ts` then budgeted
+ *  the prompt on the strength of the tool's cap, i.e. on a rule that held at one of
+ *  three entrances.
+ *
+ *  So it sits here, beside the secret screen, on the writers themselves — a fourth
+ *  writer cannot appear behind it.
+ *
+ *  Newlines collapse rather than being rejected. The manifest fences a fact as
+ *  `- «…»`, a fence built for one line: a statement containing `\n## Rules\n…` renders
+ *  its tail OUTSIDE the guillemets, indistinguishable from the manifest's own
+ *  structure, on every turn. Truncation likewise beats refusal — the alternative to a
+ *  clamped fact is a silently dropped one, and the over-long shapes this actually
+ *  meets are pasted slabs, not carefully worded 501-character facts. */
+export const STATEMENT_MAX_CHARS = 500;
+export const SLOT_KEY_MAX_CHARS = 120;
+
+export function fitStatement(statement: string): string {
+  return statement.replace(/\s*[\r\n]+\s*/g, " ").trim().slice(0, STATEMENT_MAX_CHARS);
+}
+
+/** A slot is an identity, not prose: it is the key of `uniq_vclaims_active_slot`, and
+ *  an unbounded one from extraction fails the btree insert outright. Empty is ABSENT,
+ *  which is `proposeCandidate`'s rule for it (`""` is non-NULL, so it would be a full
+ *  participant in that unique index) — held here so both claim writers share it. */
+export function fitSlotKey(slotKey: string | null | undefined): string | undefined {
+  return slotKey?.replace(/\s+/g, " ").trim().slice(0, SLOT_KEY_MAX_CHARS) || undefined;
+}
+
 /**
  * "A topic and the claim filed under it live in the same space." Both foreign keys
  * on `note_claims` are satisfied by a cross-space pair, so the row is accepted and
@@ -194,15 +229,19 @@ export async function createClaim(
   // manifest and out of `memory_search`, which is exactly where a credential the user
   // pasted into a memory document years ago should be — carried across so nothing is
   // lost, and reachable only by the user, never re-injected by us.
-  const sensitive = input.sensitive || looksLikeSecret(input.statement);
+  // Clamped and single-lined before it is screened, so the screen reads exactly the
+  // text the row will hold — see `fitStatement`.
+  const statement = fitStatement(input.statement);
+  const slotKey = fitSlotKey(input.slotKey);
+  const sensitive = input.sensitive || looksLikeSecret(statement);
   // A slot conflict (`uniq_vclaims_active_slot`) is deliberately NOT caught here:
   // the merge-or-branch decision belongs to the candidate ledger, which is also
   // the thing holding the SAVEPOINT.
   await ex.insert(vaultClaims).values({
     id,
     spaceId: input.spaceId,
-    statement: input.statement,
-    slotKey: input.slotKey ?? null,
+    statement,
+    slotKey: slotKey ?? null,
     value: input.value ?? null,
     origin: input.origin,
     reviewStatus: input.reviewStatus,
@@ -220,7 +259,7 @@ export async function createClaim(
     subjectType: "claim",
     subjectId: id,
     // No claim text: the audit log is read more widely than the space itself.
-    payload: { slotKey: input.slotKey ?? null, reviewStatus: input.reviewStatus, sensitive },
+    payload: { slotKey: slotKey ?? null, reviewStatus: input.reviewStatus, sensitive },
   });
   // `sensitive` travels back because the screen may have RAISED it: a caller that
   // tracks the flag it asked for would otherwise be tracking a value the row does not
@@ -316,7 +355,11 @@ export async function updateClaim(
   // an ordinary claim could be rewritten into one carrying a credential and stay
   // manifest-eligible. Screening the inherited statement as well is deliberate — it
   // upgrades a row created before this screen existed.
-  const statement = patch.statement ?? prev.statement;
+  // Clamped and single-lined here too, and the INHERITED text is put through it as
+  // well — the same reasoning as the screen below it: this upgrades a row written
+  // before the rule existed, and a supersede is the one moment a legacy head's text is
+  // rewritten at all.
+  const statement = fitStatement(patch.statement ?? prev.statement);
   const sensitive = prev.sensitive || (patch.sensitive ?? false) || looksLikeSecret(statement);
   // The successor is a fresh row, not an UPDATE of the text: the predecessor
   // stays verbatim as it was recorded. The whole claim is copied, not just the
@@ -331,7 +374,7 @@ export async function updateClaim(
     id,
     spaceId: prev.spaceId,
     statement,
-    slotKey: patch.slotKey ?? prev.slotKey,
+    slotKey: fitSlotKey(patch.slotKey ?? prev.slotKey) ?? null,
     value: patch.value !== undefined ? patch.value : prev.value,
     kind: prev.kind,
     origin: patch.origin ?? prev.origin,

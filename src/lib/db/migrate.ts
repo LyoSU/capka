@@ -45,7 +45,12 @@ async function carryMemoryDocsIntoVault(): Promise<void> {
       if (migrated > 0) console.log(`[db] carried ${migrated} legacy memory doc(s) into the vault`);
       return;
     } catch (e) {
-      console.error("[db] memory-doc migration failed (retrying in the background):", e);
+      // The MESSAGE only — never the error object, whose `cause` chain Node's
+      // inspector prints in full. The thrown message names document ids and nothing
+      // else, and `migrateMemoryDocs` now scrubs what it attaches as `cause`; printing
+      // the message keeps that true here even if some future thrower forgets. Matches
+      // the retry log at the bottom of this file.
+      console.error("[db] memory-doc migration failed (retrying in the background):", e instanceof Error ? e.message : e);
     }
     await sleep(RETRY_SECONDS[Math.min(attempt, RETRY_SECONDS.length - 1)] * 1000);
   }

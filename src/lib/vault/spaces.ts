@@ -1,10 +1,11 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
   auditEvents,
   knowledgeSources,
   memoryCandidates,
+  projects,
   spaces,
   vaultClaims,
   vaultNotes,
@@ -19,7 +20,13 @@ export type Ex = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0]
 /** The knowledge space for an owner: one per user, one per project (a project's
  *  chats share it). For a user space `ownerUserId` IS the refId; for a project the
  *  caller passes it, since it already holds the project row and an extra SELECT
- *  here would sit on the hot path of a turn. */
+ *  here would sit on the hot path of a turn.
+ *
+ *  Returns a RETIRED space as readily as a live one, and that is deliberate: whether a
+ *  write may happen is `spaceAcceptsWrites`' decision, taken inside the writer's own
+ *  transaction, and answering it here would answer it about a moment instead. What
+ *  this guarantees is only that a project whose teardown has run comes back as the
+ *  tombstone that teardown left, never as a fresh live row. */
 export async function getOrCreateSpace(
   scope: { type: "user"; refId: string } | { type: "project"; refId: string; ownerUserId: string },
   ex: Ex = db,
@@ -159,22 +166,72 @@ export async function getOrCreateTopicNote(spaceId: string, title: string, ex: E
  *  by owner_user_id collects it (full GC is plan D).
  *
  *  Idempotent, because teardown is re-driven from the worker tick: exactly one
- *  `space.retire` event is written per space. */
+ *  `space.retire` event is written per space.
+ *
+ *  Leaves a row BEHIND IT EITHER WAY — see the tombstone below. "Retired" has to be
+ *  something a later caller can read, and `ref_id` is polymorphic with no foreign key,
+ *  so the absence of a row says nothing at all. */
 export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<void> {
   if (!ex) return db.transaction((tx) => retireProjectSpace(projectId, tx));
 
-  const [space] = await ex
-    .select({ id: spaces.id })
-    .from(spaces)
-    .where(and(eq(spaces.type, "project"), eq(spaces.refId, projectId)))
-    .limit(1)
-    // Lock the space row for the transaction: "no event yet" is a read-modify-write,
-    // and without this two concurrent retires (the request and the worker tick, if
-    // the first overran the 30-second grace) would both read "none" and each write
-    // an event. The old "was there anything to remove" condition was race-safe only
-    // by accident — one of the two transactions would have deleted nothing.
-    .for("update");
-  if (!space) return;
+  const find = () =>
+    ex
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(and(eq(spaces.type, "project"), eq(spaces.refId, projectId)))
+      .limit(1)
+      // Lock the space row for the transaction: "no event yet" is a read-modify-write,
+      // and without this two concurrent retires (the request and the worker tick, if
+      // the first overran the 30-second grace) would both read "none" and each write
+      // an event. The old "was there anything to remove" condition was race-safe only
+      // by accident — one of the two transactions would have deleted nothing.
+      .for("update");
+
+  let [space] = await find();
+  if (!space) {
+    // "There is no space" is NOT a terminal state, and treating it as one left this
+    // whole mechanism open at the entrance that CREATES rather than writes. The fence
+    // every writer takes (`spaceAcceptsWrites`) can only see a retirement that already
+    // has a row to sit on, so a space created AFTER this ran — the boot migration
+    // carrying a legacy `memory_docs` row for a project deleted a moment earlier, a
+    // turn that resolved the project just before the delete committed — is born live,
+    // passes every fence, and holds a deleted project's memory until the account
+    // itself is deleted. So retirement writes the row it did not find: a tombstone the
+    // polymorphic `ref_id` can always be looked up by, which the get-or-create then
+    // hands back to those callers already closed.
+    //
+    // Both interleavings converge, because the unique index is what arbitrates: a
+    // creator that got in first blocks this INSERT until it commits, and the re-read
+    // below then finds its LIVE row and retires it (deleting whatever it wrote); a
+    // creator that arrives after reads the tombstone and refuses.
+    //
+    // The owner comes from the project row — this is the one caller that knows the
+    // polymorphic ref is a project id, and `owner_user_id` is what `purgeUserSpaces`
+    // collects by, so a tombstone written under the wrong owner would outlive its
+    // user. Guarded on the project actually being tombstoned: this function destroys
+    // memory, and creating a retired space for a LIVE project would destroy it
+    // permanently on a stray call. No project row at all means no tombstone is needed
+    // — nothing can create a space for it any more (a memory doc cascades away with
+    // the row, and a turn cannot resolve a deleted project).
+    const [owner] = await ex
+      .select({ userId: projects.userId })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), isNotNull(projects.deletedAt)))
+      .limit(1);
+    if (!owner) return;
+    await ex
+      .insert(spaces)
+      .values({
+        id: nanoid(),
+        type: "project",
+        refId: projectId,
+        ownerUserId: owner.userId,
+        retiredAt: new Date(),
+      })
+      .onConflictDoNothing();
+    [space] = await find();
+    if (!space) return;
+  }
   const spaceId = space.id;
 
   // The terminal state, set BEFORE anything is removed and under the lock taken above:
