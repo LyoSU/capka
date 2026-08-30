@@ -17,7 +17,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { previewKind } from "@/lib/file-kinds";
 import { extractWorkspacePaths, splitTouchedByMention } from "@/lib/chat/artifacts";
-import { cleanReasoning } from "@/lib/chat/reasoning";
+import { cleanReasoning, hasVisibleReasoning } from "@/lib/chat/reasoning";
 import { useDisclosureAnchor } from "@/components/chat/use-chat-scroll";
 import { formatShortDuration } from "@/lib/chat/duration";
 import { LLM_ERROR_CATEGORIES, type LLMErrorCategory } from "@/lib/errors/friendly";
@@ -2212,13 +2212,19 @@ function ChatMessageImpl({ message, isStreaming, sandboxPending, chatId, isAdmin
       const text = (part as { text: string }).text;
       if (!text) continue;
       const last = groups[groups.length - 1];
-      if (last?.kind === "activity") {
-        const lastItem = last.items[last.items.length - 1];
-        if (lastItem?.kind === "reasoning") lastItem.text += text;
-        else last.items.push({ kind: "reasoning", text });
-      } else {
-        groups.push({ kind: "activity", items: [{ kind: "reasoning", text }] });
-      }
+      const lastItem = last?.kind === "activity" ? last.items[last.items.length - 1] : undefined;
+      // Continuing a thought that is already on the rail: append the text as-is.
+      // A bare "\n\n" part here is the paragraph break between two halves of one
+      // thought, and dropping it would run the halves together.
+      if (lastItem?.kind === "reasoning") { lastItem.text += text; continue; }
+      // OPENING a new one is the asymmetric case: models emit a bare "\n"/"\n\n"
+      // reasoning part between tool calls, and a row built for it renders as an
+      // empty lightbulb node — a gap in the rail with nothing to read. Ask what
+      // will actually be displayed (`cleanReasoning`), not whether the raw
+      // string is truthy.
+      if (!hasVisibleReasoning(text)) continue;
+      if (last?.kind === "activity") last.items.push({ kind: "reasoning", text });
+      else groups.push({ kind: "activity", items: [{ kind: "reasoning", text }] });
     } else if (isToolPart(part)) {
       const last = groups[groups.length - 1];
       if (last?.kind === "activity") last.items.push({ kind: "tool", part: part as ToolPart });

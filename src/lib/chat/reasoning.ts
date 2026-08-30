@@ -16,3 +16,12 @@ export function cleanReasoning(raw: string): string {
     .replace(/^\s+/, "")
     .replace(/\s+$/, "");
 }
+
+/** Whether a reasoning part has anything left to SHOW once display cleaning has
+ *  run. Reasoning-capable models emit a bare `"\n"` / `"\n\n"` part between two
+ *  tool calls; it is truthy, so a plain `if (text)` lets it through, and the row
+ *  built for it renders as a lightbulb node with no thought beside it. Ask this
+ *  instead wherever the answer decides whether a row exists at all. */
+export function hasVisibleReasoning(raw: string | undefined | null): boolean {
+  return !!raw && cleanReasoning(raw) !== "";
+}

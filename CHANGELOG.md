@@ -25,6 +25,7 @@ All notable changes to Capka are documented here. Format follows
 - Inline citation pills actually render in the web chat — the markdown sanitizer strips the attribute the previous CSS styling targeted, so markers showed as plain blue numbers and a `[1, 9]` group read as "19".
 - A reply's [N] markers no longer resolve against a different message's sources (markdown processor cache collision on anonymous plugins).
 - A chat whose first turn goes through an approval or "Ask" prompt is now auto-titled instead of keeping the placeholder name for good.
+- The step timeline no longer opens an empty thought row for a reasoning part carrying only a line break, which some models emit between tool calls.
 
 ### Security
 

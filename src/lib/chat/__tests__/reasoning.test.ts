@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cleanReasoning } from "../reasoning";
+import { cleanReasoning, hasVisibleReasoning } from "../reasoning";
 
 describe("cleanReasoning", () => {
   it("drops a leading wrapper tag and the blank lines after it", () => {
@@ -28,5 +28,40 @@ describe("cleanReasoning", () => {
 
   it("is a no-op on empty input", () => {
     expect(cleanReasoning("")).toBe("");
+  });
+});
+
+/** The guard that decides whether a thought gets a row on the step rail. It has
+ *  to agree with what `ReasoningRow` will actually paint, because the two used
+ *  to disagree: the rail asked `if (text)` on the RAW string while the row ran
+ *  `cleanReasoning` first, so a part carrying nothing but a line break opened a
+ *  lightbulb node with no text beside it. Both `"\n"` and `"\n\n"` are shapes
+ *  taken verbatim from stored turns. */
+describe("hasReasoning", () => {
+  it("rejects the bare line breaks models emit between tool calls", () => {
+    expect(hasVisibleReasoning("\n")).toBe(false);
+    expect(hasVisibleReasoning("\n\n")).toBe(false);
+  });
+
+  it("rejects a part that is only a chain-of-thought wrapper", () => {
+    expect(hasVisibleReasoning("<think></think>")).toBe(false);
+    expect(hasVisibleReasoning("<thinking>\n\n</thinking>")).toBe(false);
+  });
+
+  it("rejects nothing at all", () => {
+    expect(hasVisibleReasoning("")).toBe(false);
+    expect(hasVisibleReasoning(undefined)).toBe(false);
+    expect(hasVisibleReasoning(null)).toBe(false);
+  });
+
+  it("accepts a real thought, however short", () => {
+    expect(hasVisibleReasoning("Ok.")).toBe(true);
+    expect(hasVisibleReasoning("\n  Let me check.  \n")).toBe(true);
+  });
+
+  it("answers false exactly when the row would render empty", () => {
+    for (const raw of ["\n", "\n\n", "   ", "<think>\n</think>", "Ok.", "a\n\nb"]) {
+      expect(hasVisibleReasoning(raw)).toBe(cleanReasoning(raw) !== "");
+    }
   });
 });
