@@ -171,8 +171,8 @@ run("vault: the subtype -> node composite FKs", () => {
   it("refuses a claim with no node row", async () => {
     await expect(
       q(
-        `INSERT INTO vault_claims (id, space_id, statement, origin)
-         VALUES ($1,$2,'a claim with no node','{}'::jsonb)`,
+        `INSERT INTO vault_claims (id, space_id, statement, origin, source_class)
+         VALUES ($1,$2,'a claim with no node','{}'::jsonb,'agent_inferred')`,
         [`${P}orphan-claim`, SPACE_A],
       ),
     ).rejects.toMatchObject({ code: FK_VIOLATION, constraint: "vault_claim_node_fk" });
@@ -205,8 +205,8 @@ run("vault: the subtype -> node composite FKs", () => {
     await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'claim')`, [`${P}cross`, SPACE_B]);
     await expect(
       q(
-        `INSERT INTO vault_claims (id, space_id, statement, origin)
-         VALUES ($1,$2,'wrong space','{}'::jsonb)`,
+        `INSERT INTO vault_claims (id, space_id, statement, origin, source_class)
+         VALUES ($1,$2,'wrong space','{}'::jsonb,'agent_inferred')`,
         [`${P}cross`, SPACE_A],
       ),
     ).rejects.toMatchObject({ code: FK_VIOLATION, constraint: "vault_claim_node_fk" });

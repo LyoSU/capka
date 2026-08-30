@@ -95,10 +95,11 @@ const mkCitation = async (tag: string, versionId: string, fragmentId: string) =>
 
 const mkClaim = async (id: string, spaceId: string) => {
   await seedNode(id, spaceId, "claim");
-  await q(`INSERT INTO vault_claims (id, space_id, statement, origin) VALUES ($1, $2, 'a fact', '{}'::jsonb)`, [
-    id,
-    spaceId,
-  ]);
+  await q(
+    `INSERT INTO vault_claims (id, space_id, statement, origin, source_class)
+     VALUES ($1, $2, 'a fact', '{}'::jsonb, 'agent_inferred')`,
+    [id, spaceId],
+  );
 };
 
 const retireEvents = (spaceId: string) => count("audit_events", "space_id = $1 AND action = 'space.retire'", [spaceId]);

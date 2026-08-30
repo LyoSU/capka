@@ -320,10 +320,11 @@ run("vault: writes into a retired space", () => {
     await retireProjectSpace(PROJ);
     const claimId = `${P}survivor`;
     await seedNode(claimId, projectSpaceId, "claim");
-    await q(`INSERT INTO vault_claims (id, space_id, statement, origin) VALUES ($1, $2, 'a fact', '{}'::jsonb)`, [
-      claimId,
-      projectSpaceId,
-    ]);
+    await q(
+      `INSERT INTO vault_claims (id, space_id, statement, origin, source_class)
+       VALUES ($1, $2, 'a fact', '{}'::jsonb, 'agent_inferred')`,
+      [claimId, projectSpaceId],
+    );
 
     await expect(
       updateClaim({
@@ -360,8 +361,8 @@ run("vault: writes into a retired space", () => {
     const claimId = `${P}retired-head`;
     await seedNode(claimId, projectSpaceId, "claim");
     await q(
-      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status)
-       VALUES ($1, $2, 'the office moves in March', '{}'::jsonb, 'unverified')`,
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, source_class)
+       VALUES ($1, $2, 'the office moves in March', '{}'::jsonb, 'unverified', 'agent_inferred')`,
       [claimId, projectSpaceId],
     );
     await q(

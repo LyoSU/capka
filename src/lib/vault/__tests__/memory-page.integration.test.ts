@@ -403,10 +403,10 @@ run("vault: memory page projection", () => {
     await seedNode(`${P}c-mid`, spaceId, "claim");
     await seedNode(`${P}c-new`, spaceId, "claim");
     await q(
-      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at)
-       VALUES ($1, $4, 'Oldest', '{"kind":"user_direct"}'::jsonb, 'confirmed', now() - interval '2 days'),
-              ($2, $4, 'Middle', '{"kind":"user_direct"}'::jsonb, 'confirmed', now() - interval '1 day'),
-              ($3, $4, 'Newest', '{"kind":"user_direct"}'::jsonb, 'confirmed', now())`,
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at, source_class)
+       VALUES ($1, $4, 'Oldest', '{"kind":"user_direct"}'::jsonb, 'confirmed', now() - interval '2 days', 'legacy_confirmed'),
+              ($2, $4, 'Middle', '{"kind":"user_direct"}'::jsonb, 'confirmed', now() - interval '1 day', 'legacy_confirmed'),
+              ($3, $4, 'Newest', '{"kind":"user_direct"}'::jsonb, 'confirmed', now(), 'legacy_confirmed')`,
       [`${P}c-old`, `${P}c-mid`, `${P}c-new`, spaceId],
     );
     expect(await factTexts()).toEqual(["Newest", "Middle", "Oldest"]);
@@ -477,9 +477,9 @@ run("vault: memory page projection", () => {
       [`${P}bulk-`, spaceId, over],
     );
     await q(
-      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at)
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, recorded_at, source_class)
        SELECT $1 || i, $2, 'Bulk fact ' || i, '{"kind":"user_direct"}'::jsonb, 'confirmed',
-              now() - (i || ' seconds')::interval
+              now() - (i || ' seconds')::interval, 'legacy_confirmed'
          FROM generate_series(1, $3) AS i`,
       [`${P}bulk-`, spaceId, over],
     );

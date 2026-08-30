@@ -442,8 +442,8 @@ run("vault: memory_docs migration", () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedNode(`${P}unverified`, spaceId, "claim");
     await q(
-      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, sensitive)
-       VALUES ($1, $2, 'Likes tea', '{"kind":"derived"}'::jsonb, 'unverified', false)`,
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status, sensitive, source_class)
+       VALUES ($1, $2, 'Likes tea', '{"kind":"derived"}'::jsonb, 'unverified', false, 'agent_inferred')`,
       [`${P}unverified`, spaceId],
     );
     await mkDoc(`${P}d9b`, "- likes tea");

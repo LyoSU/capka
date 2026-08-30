@@ -10,6 +10,7 @@ All notable changes to Capka are documented here. Format follows
 
 - New `vault_nodes` / `vault_edges` tables; applied automatically at boot, no operator action.
 - Every vault claim, note and document now has a `vault_nodes` row; the backfill runs in the boot migration.
+- Vault claims carry a server-assigned trust class and a generated `prompt_access` channel; existing claims are mapped from `review_status` by the boot migration.
 - Vault data foundation (content-addressed blob store; sources/versions/fragments/citations schema) — groundwork for project knowledge.
 - Facts can now be deleted from the memory page, including sensitive ones the assistant is not allowed to read.
 - The memory page now says how a fact gets saved — by telling the assistant in a chat — and why the set-aside list is waiting.

@@ -823,7 +823,10 @@ export const vaultNodes = pgTable("vault_nodes", {
  *
  * THE INVERSE: an edge is soft-deleted, never hard-deleted, so the graph can still explain
  * a tombstone. The `on delete cascade` above it fires only when a NODE row is hard-deleted,
- * which happens only on a space cascade.
+ * and TWO sites in the whole system do that: the `spaces` cascade fired by
+ * `purgeUserSpaces`, and `getOrCreateTopicNote`'s race-loser rollback in `spaces.ts`. Read
+ * those two as the closed enumeration — `nodes.ts`'s `deleteNode` docstring carries the
+ * reasoning; a third would be a defect.
  */
 export const vaultEdges = pgTable("vault_edges", {
   id: text("id").primaryKey(),
@@ -965,6 +968,66 @@ export const vaultClaims = pgTable("vault_claims", {
   revision: integer("revision").notNull().default(1),
   supersedes: text("supersedes"),             // the predecessor's vault_claims.id (no FK: the chain outlives a forget)
   supersededAt: timestamp("superseded_at"),   // non-NULL = not the head; the text is NEVER UPDATEd
+  /**
+   * WHICH TRUST TIER this row came from, assigned by the server and by nothing else.
+   *
+   * NOT NULL with NO DEFAULT, and the absence of the default is the rule: a column
+   * default is a writer, this feature has already been bitten by an unlisted one, and
+   * the strongest class is what an omission would inherit. Both `createClaim` and
+   * `updateClaim` take it as a required parameter — `updateClaim` too, because it is the
+   * SECOND insert into this table and a supersede that inherited the predecessor's class
+   * would carry `legacy_confirmed` across text the agent wrote. A superseding row is
+   * stored at the REPLACEMENT's class, never the predecessor's. (The same docstring
+   * already refuses to inherit `review_status`, for exactly this reason.)
+   *
+   * It is a TIER, not a medium: `untrusted_derived` covers a file, a fetched page, an MCP
+   * connector's output, a skill's stdout and a transport nobody has built yet. The medium
+   * is recorded in `origin` and drives the display tag. Classifying by an enumerated list
+   * of media is precisely the failure the universality rule forbids.
+   */
+  sourceClass: text("source_class", {
+    enum: ["legacy_confirmed", "owner_authored", "user_direct", "agent_inferred", "untrusted_derived"],
+  }).notNull(),
+  /**
+   * WHICH CHANNEL may ever show this row to a model. Generated, so there is no write path
+   * at all — not for the model, not for a future service, not for a migration, not for raw
+   * SQL. A writable column with a CHECK would still be an entrance.
+   *
+   * Retention is deliberately NOT folded in here: a generated column cannot call `now()`,
+   * so `expires_at`/`retired_at` are ANDed into the model-facing predicate in
+   * `model-view.ts` instead.
+   */
+  promptAccess: text("prompt_access")
+    .notNull()
+    .generatedAlwaysAs(
+      sql`case when sensitive then 'owner_only'
+               when source_class in ('legacy_confirmed','owner_authored','user_direct') then 'manifest'
+               when source_class = 'agent_inferred' then 'memory_search'
+               else 'knowledge_search' end`,
+    ),
+  /** The head this claim contests. A COMPOSITE FK to `vault_nodes(space_id, id)`, not a
+   *  bare text column: the conflict has to be stored and displayed, so a cross-space or
+   *  dangling pointer must be unrepresentable rather than something a reader has to
+   *  notice. Its reader (`readConflicts`) arrives in slice 2. */
+  conflictsWith: text("conflicts_with"),
+  /** norm(statement) + canonical JSON of value, sha256 hex — the exact-dedup key.
+   *  Written forward by both writers; pre-existing rows stay NULL and the slice-2 reader
+   *  treats NULL as "no exact match". Never backfilled: it lives under an index and must
+   *  not change once chosen, which is the opposite requirement from `text.ts::norm`'s
+   *  live callers. */
+  normalizedHash: text("normalized_hash"),
+  /** The task that wrote it — `memory_forget`'s DB-level same-task bound in slice 2. */
+  createdTaskId: text("created_task_id"),
+  /** Retention horizon, armed at insert by the writer; null = no horizon. NOTHING arms it
+   *  in slice 1: the daily retire job and the "Older" group with its Restore control ship
+   *  together in slice 4, and a horizon armed without them would drop rows out of the
+   *  model at day 90 with no surface that explains it. */
+  expiresAt: timestamp("expires_at"),
+  /** Horizon passed, or the owner hid it. The row and its provenance survive. */
+  retiredAt: timestamp("retired_at"),
+  /** Written INSIDE the mints, never by their callers — "one place, because two would
+   *  drift" is only true if the place is the mint. */
+  lastUsedAt: timestamp("last_used_at"),
 }, (t) => [
   index("idx_vclaims_space_head").on(t.spaceId, t.supersededAt),
   index("idx_vclaims_supersedes").on(t.supersedes),
@@ -983,6 +1046,25 @@ export const vaultClaims = pgTable("vault_claims", {
     columns: [t.spaceId, t.id],
     foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
   }),
+  check(
+    "ck_vault_claims_source_class",
+    sql`${t.sourceClass} in ('legacy_confirmed','owner_authored','user_direct','agent_inferred','untrusted_derived')`,
+  ),
+  // A composite FK on a NULLABLE column pair is satisfied by any row whose
+  // `conflicts_with` is NULL (MATCH SIMPLE, Postgres's default), which is what makes
+  // "usually no conflict" legal without a second nullable-friendly constraint.
+  foreignKey({
+    name: "vault_claims_conflicts_with_fk",
+    columns: [t.spaceId, t.conflictsWith],
+    foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
+  }),
+  index("idx_vclaims_prompt_access")
+    .on(t.spaceId, t.promptAccess)
+    .where(sql`${t.supersededAt} IS NULL AND ${t.retiredAt} IS NULL`),
+  index("idx_vclaims_norm_hash")
+    .on(t.spaceId, t.normalizedHash)
+    .where(sql`${t.supersededAt} IS NULL`),
+  index("idx_vclaims_conflicts_with").on(t.conflictsWith).where(sql`${t.conflictsWith} IS NOT NULL`),
 ]);
 
 export const noteClaims = pgTable("note_claims", {

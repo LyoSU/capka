@@ -47,6 +47,13 @@ const UNIQUE_VIOLATION = "23505";
 const FK_VIOLATION = "23503";
 /** Check violation, per the SQLSTATE table. */
 const CHECK_VIOLATION = "23514";
+/** "Cannot insert a non-DEFAULT value into a generated column" — ERRCODE_GENERATED_ALWAYS.
+ *  NOT 42601 (that is syntax_error), and NOT matchable on the message: Postgres puts the
+ *  primary line at `error.message` ("cannot insert a non-DEFAULT value into column ...")
+ *  and the words "generated column" in `error.detail`, which `toThrow(regex)` never reads. */
+const GENERATED_ALWAYS = "428C9";
+/** not_null_violation. `node-postgres` surfaces the offending column at `error.column`. */
+const NOT_NULL_VIOLATION = "23502";
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
@@ -62,8 +69,8 @@ const seedNode = (id: string, spaceId: string, kind: "claim" | "note" | "source"
 const mkClaim = async (id: string, spaceId: string, extra: { slotKey?: string; supersedes?: string } = {}) => {
   await seedNode(id, spaceId, "claim");
   await q(
-    `INSERT INTO vault_claims (id, space_id, statement, slot_key, origin, supersedes)
-     VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)`,
+    `INSERT INTO vault_claims (id, space_id, statement, slot_key, origin, supersedes, source_class)
+     VALUES ($1, $2, $3, $4, '{}'::jsonb, $5, 'agent_inferred')`,
     [id, spaceId, `statement ${id}`, extra.slotKey ?? null, extra.supersedes ?? null],
   );
 };
@@ -348,6 +355,119 @@ run("vault schema", () => {
       await q(`DELETE FROM vault_nodes WHERE id = $1`, [`${P}n-c1`]);
       const left = await q(`SELECT count(*)::int AS n FROM vault_edges WHERE id = $1`, [`${P}e-c`]);
       expect(left.rows[0].n).toBe(0);
+    });
+  });
+
+  run("vault_claims trust columns: the shapes no writer can talk its way past", () => {
+    it("source_class is NOT NULL with NO default", async () => {
+      // Both halves, from information_schema, because they fail differently: a default
+      // would let an unlisted writer inherit the strongest class by omission, and
+      // nullability would let it store nothing at all.
+      const r = await q(
+        `SELECT is_nullable, column_default FROM information_schema.columns
+         WHERE table_name = 'vault_claims' AND column_name = 'source_class'`,
+      );
+      expect(r.rows[0]).toMatchObject({ is_nullable: "NO", column_default: null });
+    });
+
+    it("refuses an insert that states no class", async () => {
+      await seedNode(`${P}tc-1`, SPACE_A, "claim");
+      await expect(
+        q(`INSERT INTO vault_claims (id, space_id, statement, origin) VALUES ($1,$2,'no class','{}'::jsonb)`, [
+          `${P}tc-1`,
+          SPACE_A,
+        ]),
+      ).rejects.toMatchObject({ code: NOT_NULL_VIOLATION, column: "source_class" });
+    });
+
+    it("refuses a class outside the five", async () => {
+      await seedNode(`${P}tc-2`, SPACE_A, "claim");
+      await expect(
+        q(
+          `INSERT INTO vault_claims (id, space_id, statement, origin, source_class)
+           VALUES ($1,$2,'bad class','{}'::jsonb,'trusted')`,
+          [`${P}tc-2`, SPACE_A],
+        ),
+      ).rejects.toMatchObject({ code: CHECK_VIOLATION, constraint: "ck_vault_claims_source_class" });
+    });
+
+    it("computes prompt_access from source_class and sensitive, and refuses to be written", async () => {
+      const cases: [string, boolean, string][] = [
+        ["legacy_confirmed", false, "manifest"],
+        ["owner_authored", false, "manifest"],
+        ["user_direct", false, "manifest"],
+        ["agent_inferred", false, "memory_search"],
+        ["untrusted_derived", false, "knowledge_search"],
+        ["user_direct", true, "owner_only"],
+        ["untrusted_derived", true, "owner_only"],
+      ];
+      for (const [cls, sensitive, expected] of cases) {
+        const id = `${P}pa-${cls}-${sensitive}`;
+        await seedNode(id, SPACE_A, "claim");
+        await q(
+          `INSERT INTO vault_claims (id, space_id, statement, origin, source_class, sensitive)
+           VALUES ($1,$2,'x','{}'::jsonb,$3,$4)`,
+          [id, SPACE_A, cls, sensitive],
+        );
+        const r = await q(`SELECT prompt_access FROM vault_claims WHERE id = $1`, [id]);
+        expect(r.rows[0].prompt_access).toBe(expected);
+      }
+      // There is no write path to generate around - not for a service, not for a migration,
+      // not for raw SQL. 428C9 is ERRCODE_GENERATED_ALWAYS.
+      await seedNode(`${P}pa-write`, SPACE_A, "claim");
+      await expect(
+        q(
+          `INSERT INTO vault_claims (id, space_id, statement, origin, source_class, prompt_access)
+           VALUES ($1,$2,'x','{}'::jsonb,'agent_inferred','manifest')`,
+          [`${P}pa-write`, SPACE_A],
+        ),
+      ).rejects.toMatchObject({ code: GENERATED_ALWAYS });
+    });
+
+    it("recomputes prompt_access when the owner raises sensitivity", async () => {
+      // The reason it is STORED-generated rather than denormalized by a writer: an owner's
+      // sensitivity change reaches the channel with no path remembering to re-project.
+      const id = `${P}pa-raise`;
+      await seedNode(id, SPACE_A, "claim");
+      await q(
+        `INSERT INTO vault_claims (id, space_id, statement, origin, source_class)
+         VALUES ($1,$2,'x','{}'::jsonb,'owner_authored')`,
+        [id, SPACE_A],
+      );
+      await q(`UPDATE vault_claims SET sensitive = true WHERE id = $1`, [id]);
+      const r = await q(`SELECT prompt_access FROM vault_claims WHERE id = $1`, [id]);
+      expect(r.rows[0].prompt_access).toBe("owner_only");
+    });
+
+    it("refuses a cross-space conflicts_with pointer", async () => {
+      // The composite FK makes a cross-space or dangling conflict unrepresentable
+      // rather than something readConflicts has to notice.
+      await seedNode(`${P}cw-a`, SPACE_A, "claim");
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'claim')`, [`${P}cw-b`, SPACE_B]);
+      await expect(
+        q(
+          `INSERT INTO vault_claims (id, space_id, statement, origin, source_class, conflicts_with)
+           VALUES ($1,$2,'x','{}'::jsonb,'agent_inferred',$3)`,
+          [`${P}cw-a`, SPACE_A, `${P}cw-b`],
+        ),
+      ).rejects.toMatchObject({ code: FK_VIOLATION, constraint: "vault_claims_conflicts_with_fk" });
+    });
+
+    it("mapped every pre-existing head by review_status, and promoted no unverified one", async () => {
+      // Asserted against the real table rather than a fixture: quarantine's successor is a
+      // WEAKER channel, not a promotion, and this is the only place that can go wrong
+      // exactly once. It writes nothing, so it is left un-prefixed on purpose.
+      const bad = await q(
+        `SELECT count(*)::int AS n FROM vault_claims
+         WHERE (review_status = 'unverified' AND source_class <> 'agent_inferred')
+            OR (review_status = 'confirmed'  AND source_class <> 'legacy_confirmed')`,
+      );
+      expect(bad.rows[0].n).toBe(0);
+      const promoted = await q(
+        `SELECT count(*)::int AS n FROM vault_claims
+         WHERE review_status = 'unverified' AND prompt_access = 'manifest'`,
+      );
+      expect(promoted.rows[0].n).toBe(0);
     });
   });
 });
