@@ -636,6 +636,41 @@ run("vault claims", () => {
     expect(await count("audit_events", "space_id = $1", [SPACE_A])).toBe(3);
   });
 
+  it("both writers screen the statement, so no caller can put a credential in unscreened", async () => {
+    // `createClaim` and `updateClaim` are the only two statements that insert into
+    // this table. The screen sat above them, at the candidate ledger, and the boot
+    // migration walked past it by calling `createClaim` directly — the fourth time in
+    // this feature that a rule placed at one entrance missed another. Placed here, a
+    // writer that has not read any of this is covered anyway.
+    const secret = "sk-proj-AbCdEf0123456789ghijkl";
+
+    // Create: the flag comes back raised, not merely stored raised — a caller that
+    // tracks what it asked for must not be tracking a value the row does not hold.
+    const made = await seed({ statement: `the deploy key is ${secret}` });
+    expect(made.sensitive).toBe(true);
+    expect((await claimRow(made.id)).sensitive).toBe(true);
+
+    // Supersede: a NEW row, and the only other way new text enters the table. Without
+    // the screen here an ordinary claim could be rewritten into one carrying a
+    // credential and stay manifest-eligible, since `sensitive` is otherwise inherited.
+    const plain = await seed({ statement: "the deploy key is rotated every quarter" });
+    expect(plain.sensitive).toBe(false);
+    const upd = await updateClaim({
+      claimId: plain.id,
+      expectedRevision: plain.revision,
+      patch: { statement: `the deploy key is now ${secret}` },
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    if (!upd.ok) throw new Error("expected the supersede to win the CAS");
+    expect((await claimRow(upd.id)).sensitive).toBe(true);
+
+    // An ordinary fact is untouched by either writer: this is a screen, not a blanket.
+    const ordinary = await seed({ statement: "the client pays in hryvnia" });
+    expect(ordinary.sensitive).toBe(false);
+    expect((await claimRow(ordinary.id)).sensitive).toBe(false);
+  });
+
   it("sensitivity only ever rises: a stale caller cannot clear it", async () => {
     // Both writers take the flag from an argument, and a caller computes that
     // argument from a head it read EARLIER. Two of them reading the same
