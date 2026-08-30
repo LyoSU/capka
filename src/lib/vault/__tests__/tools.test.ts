@@ -274,6 +274,27 @@ describe("memory_update", () => {
     );
   });
 
+  it("the escalation follows the chain: the retry the tool ASKED for, lost again, is the second loss", async () => {
+    // A supersede changes the claim's id, so the model comes back with a DIFFERENT id
+    // than the one it lost on — the id it was handed. Keyed on the id of the request
+    // alone, the set could never match, every loss was experienced as the first, and
+    // the conflict this branch promises was unreachable rather than merely rare.
+    updateClaim
+      .mockResolvedValueOnce({ ok: false, current: head({ id: "cB", revision: 2 }) })
+      .mockResolvedValueOnce({ ok: false, current: head({ id: "cC", revision: 3 }) });
+    findCurrentHead.mockResolvedValue(head({ id: "cC", revision: 3 }));
+    proposeCandidate.mockResolvedValue({ state: "conflict", candidateId: "cand5" });
+    const tools = await make();
+
+    const first = await run(tools.memory_update, { claim_id: "cA", expected_revision: 1, statement: "In dollars" }, "call-1");
+    expect(first).toContain("Claim cB is now at revision 2");
+    // The model does exactly what it was told: re-issue against cB@2.
+    const second = await run(tools.memory_update, { claim_id: "cB", expected_revision: 2, statement: "In dollars" }, "call-2");
+
+    expect(second).toBe("Recorded as a conflict for the user to resolve.");
+    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ forceState: "conflict" }));
+  });
+
   it("a claim found only in the user space records the conflict THERE", async () => {
     updateClaim.mockResolvedValue({ ok: false, current: head({ id: "c5", revision: 4 }) });
     // Not in the project space; present in the user space — so the space is known,

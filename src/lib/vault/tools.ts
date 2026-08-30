@@ -122,20 +122,25 @@ export async function makeVaultMemoryTools(ctx: {
   const allowedSpaceIds = projectSpaceId ? [userSpaceId, projectSpaceId] : [userSpaceId];
   const actor = { kind: "agent" } as const;
 
-  /** Claims that have already lost the CAS in THIS turn. Lives in the factory's
-   *  closure, and the factory is called once per turn — so the state dies with the
-   *  turn by construction, with nothing to clean up. Holds ids only: the space is
-   *  needed exactly where the conflict is written, and the probe for it lives there.
+  /** Every claim id involved in a CAS loss this turn — BOTH the id the model
+   *  addressed and the id it was sent back to. A supersede changes the id, so the
+   *  model's retry never carries the id it lost on: keyed on the request alone, this
+   *  set could not match by construction, every loss was experienced as the first,
+   *  and the conflict the second-loss branch promises was unreachable rather than
+   *  merely rare. Holding both sides of the hop tracks the chain instead of the row,
+   *  and still catches the model that re-sends the same stale id.
    *
-   *  ACCEPTED (GPT audit #11): under CONSTANT churn on one claim the model can lose
-   *  the CAS, be told the new revision, lose again, and file a conflict — making no
-   *  progress on the edit it wanted. Exotic (it needs a competitor superseding the
-   *  same claim between two tool calls of one turn), and the cost is bounded: the
-   *  agent burns its tool budget for the turn and the database blocks on nothing.
-   *  What the second loss leaves depends on what it found: a conflict for a human when
-   *  the claim's space resolves, and nothing at all when the head has gone — that
-   *  branch declines rather than guessing a space. Neither outcome is progress on the
-   *  edit the model wanted, which is the accepted part. */
+   *  Lives in the factory's closure, and the factory is called once per turn — so the
+   *  state dies with the turn by construction, with nothing to clean up. Ids only: the
+   *  space is needed exactly where the conflict is written, and the probe for it lives
+   *  there.
+   *
+   *  ACCEPTED: under CONSTANT churn the second loss ends the edit the model wanted —
+   *  what it leaves depends on what it found: a conflict for a human when the claim's
+   *  space resolves, and nothing at all when the head has gone, that branch declining
+   *  rather than guessing a space. Neither is progress on the edit, which is the
+   *  accepted part; going round again is not progress either, and it costs the turn's
+   *  whole tool budget. */
   const mismatched = new Set<string>();
 
   /** Which space a claim lives in. `ClaimHead` carries no `spaceId` (a claim's text
@@ -331,10 +336,11 @@ export async function makeVaultMemoryTools(ctx: {
         // nothing: the human would be shown "resolve this" against a fact that does not
         // exist, and the model's text would enter the store under a nonexistent id.
         if (!res.current) return mismatch(null);
-        if (!mismatched.has(claim_id)) {
-          mismatched.add(claim_id);
-          return mismatch(res.current);
-        }
+        // Either end of the hop having been seen means this chain has already been
+        // handed back once this turn.
+        const seenBefore = mismatched.has(claim_id) || mismatched.has(res.current.id);
+        mismatched.add(claim_id).add(res.current.id);
+        if (!seenBefore) return mismatch(res.current);
         // A second loss in a row on the same claim is no longer "re-read" but a
         // divergence a human resolves. There is nothing to record without new TEXT,
         // though: a candidate is a statement somebody will read, and putting the old
