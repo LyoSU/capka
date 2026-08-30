@@ -11,16 +11,25 @@ const SEARCH_LIMIT = 20;
 
 /** One line for the model: `[id@revision]` is how it addresses a claim in
  *  update/forget afterwards, so search and the success reply print it identically.
+ *  Only non-sensitive claims ever reach it — see the search filter. */
+const line = (c: ClaimHead) => `[${c.id}@${c.revision}] ${c.statement}${c.slotKey ? ` (slot: ${c.slotKey})` : ""}`;
+
+/** What search says about sensitive claims: that they exist, and nothing else.
  *
- *  A sensitive claim travels as its ADDRESS only. The caller of these tools is the
- *  agent, not the human: printing the statement here would put it in the model's
- *  context — precisely where the manifest already refuses to put it — and from there
- *  into the reply. The id and slot still travel, so the agent can tell the user such
- *  a record exists and can forget it by id. */
-const line = (c: ClaimHead) =>
-  `[${c.id}@${c.revision}] ${c.sensitive ? "(saved as sensitive — contents withheld)" : c.statement}${
-    c.slotKey ? ` (slot: ${c.slotKey})` : ""
-  }`;
+ *  Query-independent BY CONSTRUCTION, which is the whole point. Withholding a
+ *  statement while still matching on it is not withholding — `memory_search("
+ *  diagnosis")` returning a hit confirms the category the withholding exists to
+ *  protect, and a slot key like `health/hiv-status` names it outright. So the query
+ *  sees none of these claims, and this sentence is appended to every answer in a
+ *  space that holds one, whatever was asked.
+ *
+ *  No address either, deliberately: an id would be useless. `memory_forget` requires
+ *  the user to name the fact, and the fact's text is exactly what is withheld — so
+ *  there is no operation the agent can perform on one of these claims, and offering a
+ *  handle would only invite it to try. Telling the user the record exists is the one
+ *  thing it CAN do, and a count is enough for that. */
+const withheldNotice = (n: number) =>
+  `${n} saved item${n === 1 ? " is" : "s are"} marked sensitive: not searchable, and the contents are not shown here. Tell the user such a record exists if it matters; only they can act on it.`;
 
 /** The language of a lost CAS, shared by update and forget: say how the world looks
  *  NOW and what to re-send with. `current: null` deliberately does not separate "the
@@ -195,13 +204,19 @@ export async function makeVaultMemoryTools(ctx: {
                 (projectSpaceId ? [projectSpaceId, userSpaceId] : [userSpaceId]);
         const needle = query.toLowerCase();
         const buckets: ClaimHead[][] = [];
+        let withheld = 0;
         for (const spaceId of spaceIds) {
+          const heads = await listHeadClaims(spaceId);
+          // Counted BEFORE the match and never matched against — see `withheldNotice`.
+          withheld += heads.filter((c) => c.sensitive).length;
           // The equivalent of `ILIKE '%query%'` over statement OR slot_key.
           // Deliberately primitive: lexical search is plan C, and doing half of it here
           // would mean two different searches inside one system.
           buckets.push(
-            (await listHeadClaims(spaceId)).filter(
-              (c) => c.statement.toLowerCase().includes(needle) || c.slotKey?.toLowerCase().includes(needle),
+            heads.filter(
+              (c) =>
+                !c.sensitive &&
+                (c.statement.toLowerCase().includes(needle) || c.slotKey?.toLowerCase().includes(needle)),
             ),
           );
         }
@@ -213,7 +228,8 @@ export async function makeVaultMemoryTools(ctx: {
         const quota = Math.ceil(SEARCH_LIMIT / Math.max(buckets.length, 1));
         const hits = buckets.flatMap((b) => b.slice(0, quota));
         for (const b of buckets) for (const c of b.slice(quota)) if (hits.length < SEARCH_LIMIT) hits.push(c);
-        return hits.length ? hits.slice(0, SEARCH_LIMIT).map(line).join("\n") : "No saved memory matches.";
+        const body = hits.length ? hits.slice(0, SEARCH_LIMIT).map(line).join("\n") : "No saved memory matches.";
+        return withheld ? `${body}\n${withheldNotice(withheld)}` : body;
       },
     }),
 
@@ -251,12 +267,14 @@ export async function makeVaultMemoryTools(ctx: {
         // follows the person everywhere — and then answered "Saved.", which was not
         // true of what the model requested. The same rule memory_search already holds.
         // An instruction, not an error: the model still has a step to re-send.
-        if (scope === "project" && !projectSpaceId) {
+        // What an absent scope means, and what an impossible one means, are decided in
+        // ONE place for this path and for extraction alike — they used to answer both
+        // oppositely. `null` is the impossible one; this entrance has a model to ask,
+        // so it says so and lets it re-send.
+        const spaceId = spaceForScope(scope, { userSpaceId, projectSpaceId });
+        if (!spaceId) {
           return "This chat is not inside a project, so there is no project memory to save to. Nothing was saved — re-send without scope, or with scope:'user' if the fact is about the person.";
         }
-        // Past that guard, what an absent scope means is decided in one place for
-        // this path and for extraction alike — they used to answer it oppositely.
-        const spaceId = spaceForScope(scope, { userSpaceId, projectSpaceId });
         const res = await proposeCandidate({
           // KNOWN LIMIT, not a claim of uniqueness: an approval continuation is a
           // SECOND task writing the SAME message row, so both halves of such a turn
@@ -306,6 +324,12 @@ export async function makeVaultMemoryTools(ctx: {
           expected_revision: z.number().int().min(1),
           statement: z.string().min(3).max(500).optional(),
           value_json: z.string().max(2000).optional(),
+          quoted: z
+            .boolean()
+            .optional()
+            .describe(
+              "Set true when the correction comes from text the user pasted or relayed (an email, a document, someone else's words) rather than something the user stated as their own",
+            ),
         })
         // Validated on the server but NOT carried into the JSON Schema — which is why
         // the same requirement is spelled out verbatim in `description`, or the model
@@ -313,15 +337,17 @@ export async function makeVaultMemoryTools(ctx: {
         .refine((v) => v.statement !== undefined || v.value_json !== undefined, {
           message: "provide statement or value_json",
         }),
-      execute: async ({ claim_id, expected_revision, statement, value_json }, { toolCallId }) => {
+      execute: async ({ claim_id, expected_revision, statement, value_json, quoted }, { toolCallId }) => {
         const parsed = parseValueJson(value_json);
         if (!parsed.ok) return parsed.message;
-        // The same barrier propose stands behind, and for the same reason — see
-        // NOT_THE_USERS_WORDS. A value-only change has no text of its own, so the
-        // predicate finds nothing to establish authorship with and refuses: that is
-        // the fail-safe answer, and the model still has a step in which to re-send
-        // the statement the user actually said.
-        if (!verifyDirectProvenance(statement ?? "", ctx.userTurnText)) return NOT_THE_USERS_WORDS.update;
+        // The same barrier propose stands behind, in the same shape and for the same
+        // reason — see NOT_THE_USERS_WORDS. `quoted` is here too: the rewrite entrance
+        // was the weaker one against an unmarked paste while only propose could be
+        // told the words were relayed. A value-only change has no text of its own, so
+        // the predicate finds nothing to establish authorship with and refuses: the
+        // fail-safe answer, and the model still has a step in which to re-send the
+        // statement the user actually said.
+        if (quoted || !verifyDirectProvenance(statement ?? "", ctx.userTurnText)) return NOT_THE_USERS_WORDS.update;
 
         const patch: { statement?: string; value?: unknown; sensitive?: true; origin?: Record<string, unknown> } = {
           // The successor carries its OWN provenance. Inheriting the predecessor's

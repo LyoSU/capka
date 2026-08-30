@@ -158,6 +158,11 @@ describe("extractCandidates — the prompt's guidance against the real verifier"
     // 4, well under the 60% bar); on shared prefixes three of four match.
     const userTurnText = "Ми платимо постачальнику Акме щомісяця";
     expect(real.verifyDirectProvenance("Оплата постачальника Акме щомісячна", userTurnText)).toBe(true);
+
+    // And the other direction, which is the one that costs: at five characters
+    // "переказ" and "переклад" share a prefix and the filter would confirm a
+    // statement the user did not make. Only "підтверджено" matches here, 1 of 2.
+    expect(real.verifyDirectProvenance("Переказ підтверджено", "Переклад підтверджено")).toBe(false);
   });
 
   it("a paraphrase into different wording — what the old prompt's example modelled — fails the real verifier", async () => {
@@ -207,10 +212,15 @@ describe("extractCandidates — per-item space selection", () => {
     expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: PROJECT_SPACE }));
   });
 
-  it("files an item with scope:project to the user space when there is no project space", async () => {
+  it("DROPS an item asking for scope:project when there is no project space", async () => {
+    // The tool path REFUSES this input rather than absorbing it, on the reasoning that
+    // the user space is a wider audience than was asked for — a work fact stated in a
+    // bare chat would become a permanent fact about the person. The unattended path
+    // has nobody to ask, so it drops the item instead; what it must not do is give the
+    // same input a different answer, which is the very divergence being closed.
     const generate = generateReturning('[{"statement":"pays in EUR","from":"user","scope":"project"}]');
-    await extractCandidates({ ...baseArgs, generate }); // no projectSpaceId
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ spaceId: USER_SPACE }));
+    await extractCandidates({ ...baseArgs, generate });
+    expect(proposeCandidate).not.toHaveBeenCalled();
   });
 
   it("files an item with scope:user to the user space even when a project space exists", async () => {

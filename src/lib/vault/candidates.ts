@@ -133,12 +133,28 @@ export function looksLikeSecret(statement: string): boolean {
  * project, a user fact follows the person everywhere, so inside a project the
  * narrower audience is the safe reading of silence. Anything that is not exactly
  * "user" — absent, or a value neither module recognises — takes it.
+ *
+ * `null` is "there is no space this may go to": an EXPLICIT project scope with no
+ * project to file into. Not a fallback to the user space, which is a wider audience
+ * than was asked for — and not a decision this function can make either, because
+ * what to do about it depends on whether the caller has someone to ask. It answers
+ * the question; the caller answers "and now what".
+ *
+ * The cost of "project wins", written down because it surprises people: a project
+ * space is retired with its project (`retireProjectSpace`), so a fact about the
+ * PERSON that they happened to state while sitting in a project chat dies when that
+ * project is deleted. That is the right trade for confidentiality — the alternative
+ * leaks a project's business into every other chat forever — but it is a real loss,
+ * which is why both writers are told to set `scope:"user"` explicitly for facts about
+ * the person rather than leaning on the default.
  */
 export function spaceForScope(
   scope: "user" | "project" | undefined,
   spaces: { userSpaceId: string; projectSpaceId?: string | null },
-): string {
-  return scope !== "user" && spaces.projectSpaceId ? spaces.projectSpaceId : spaces.userSpaceId;
+): string | null {
+  if (scope === "user") return spaces.userSpaceId;
+  if (scope === "project") return spaces.projectSpaceId ?? null;
+  return spaces.projectSpaceId ?? spaces.userSpaceId;
 }
 
 /** Two CAS losses in a row. Thrown to roll back the WHOLE confirm transaction,
@@ -647,6 +663,17 @@ export async function listOpenCandidates(spaceId: string): Promise<CandidateRow[
  *  swallow ordinary text between any two of them. */
 const QUOTED = /"[^"]*"|«[^»]*»|“[^”]*”|„[^“”]*[“”]|^\s*>.*$/gmu;
 
+/** Two words are the same word, give or take an ending. Below the prefix length there
+ *  is no stem to compare, so one must be the other plus at most a single character —
+ *  an English plural, a one-letter case ending. Anything longer is a different word,
+ *  which is how `cost` came to verify `costume`. */
+const PREFIX = 6;
+const alike = (a: string, b: string) => {
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (short.length < PREFIX) return long.startsWith(short) && long.length - short.length <= 1;
+  return short.slice(0, PREFIX) === long.slice(0, PREFIX);
+};
+
 const longWords = (s: string) =>
   s
     .toLowerCase()
@@ -663,10 +690,15 @@ const longWords = (s: string) =>
  * asymmetric — `постачальник` was found inside `постачальника` but never the other
  * way round — so the same Ukrainian fact verified or not depending on which case
  * form the model happened to write, and the loser fell into pending, which plan A
- * has no surface to clear. Five characters: Ukrainian endings are one to three
- * characters on a longer stem, so five is short enough for `постачальник` and
- * `постачальника` to agree and long enough that unrelated words rarely collide.
- * Whichever side is shorter is the one truncated, which makes the test symmetric.
+ * has no surface to clear.
+ *
+ * Six characters, and below that only a single trailing character may differ (see
+ * `alike`). Both halves guard the direction that costs — a false POSITIVE puts text
+ * the user never wrote into memory as theirs. Truncating to five made `переказ` agree
+ * with `переклад`, two ordinary words; letting a short word match as a bare prefix
+ * made `cost` verify `costume` and `план` verify `планета`, where there is no stem to
+ * speak of. Real inflection still agrees at both sizes: `постачальник`/`постачальника`
+ * and `invoice`/`invoices` on the stem, `work`/`works` on the one-character rule.
  *
  * Its remaining weaknesses (negation, an UNMARKED paste, reporting someone else's
  * words without quotation marks) are known and accepted: the cost of being wrong is
@@ -679,6 +711,6 @@ export function verifyDirectProvenance(statement: string, userTurnText: string):
   const words = longWords(statement);
   if (words.length === 0) return false;
   const said = longWords(userTurnText.replace(QUOTED, " "));
-  const matched = words.filter((w) => said.some((t) => t.startsWith(w.slice(0, 5)) || w.startsWith(t.slice(0, 5))));
+  const matched = words.filter((w) => said.some((t) => alike(w, t)));
   return matched.length / words.length >= 0.6;
 }

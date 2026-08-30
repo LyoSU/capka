@@ -209,6 +209,20 @@ export async function extractCandidates(args: {
       userSpaceId: args.userSpaceId,
       projectSpaceId: args.projectSpaceId,
     });
+    // An explicit project scope with no project to file into. `memory_propose` REFUSES
+    // this and tells the model to re-send; nothing here has anyone to ask, so the item
+    // is dropped instead. What it must not do is take the third option and widen it
+    // into the user space: that answers the same input differently from the tool path
+    // — the exact divergence `spaceForScope` exists to end — and it turns a fact about
+    // one project's work into a permanent fact about the person, carried into every
+    // other chat. Logged without the statement, so an operator can see the drops.
+    if (!spaceId) {
+      log.warn("vault candidate extraction: dropped a project-scoped item outside a project", {
+        messageId: args.messageId,
+        ordinal,
+      });
+      continue;
+    }
 
     try {
       await proposeCandidate({

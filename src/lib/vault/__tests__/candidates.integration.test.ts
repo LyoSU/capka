@@ -988,6 +988,14 @@ run("vault candidates", () => {
     // Nothing to check — no long words, so authorship cannot be established.
     expect(verifyDirectProvenance("me too", turn)).toBe(false);
 
+    // A word shorter than the prefix is matched only by an identical word. As a bare
+    // prefix, "cost" would verify "costume" and "plan" would verify "planet" — a
+    // false positive, which here means text the user never wrote going in as theirs.
+    expect(verifyDirectProvenance("costume planet", "cost plan")).toBe(false);
+    // Six characters, not five: five is short enough for two ordinary words to share
+    // a stem by accident. Real inflection still agrees.
+    expect(verifyDirectProvenance("invoices approved", "invoice approvals")).toBe(true);
+
     // Words present ONLY inside a quotation are not the user's own. A pasted email
     // puts its every word in the turn verbatim, which is what made textual overlap
     // alone unsafe: an instruction inside it would otherwise verify as user_direct.
