@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- Memory search is now full-text plus trigram. The boot migration runs `CREATE EXTENSION pg_trgm`; the database role must be allowed to create extensions or the migration fails.
 - New `vault_nodes` / `vault_edges` tables; applied automatically at boot, no operator action.
 - Every vault claim, note and document now has a `vault_nodes` row; the backfill runs in the boot migration.
 - Vault claims carry a server-assigned trust class and a generated `prompt_access` channel; existing claims are mapped from `review_status` by the boot migration.

@@ -40,6 +40,7 @@ const VAULT_TABLES = [
   "audit_events",
   "vault_nodes",
   "vault_edges",
+  "vault_search_documents",
 ];
 
 /** Unique violation / foreign-key violation, per the SQLSTATE table. */
@@ -147,7 +148,7 @@ run("vault schema", () => {
     ]);
   });
 
-  it("all 13 vault tables exist", async () => {
+  it("all 14 vault tables exist", async () => {
     const { rows } = await pool.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = ANY($1)`,
@@ -522,15 +523,20 @@ run("vault schema", () => {
     // Retention is a property of THE NOTE, not of a revision: a new revision must not
     // silently reset or inherit a horizon, and `last_used_at` on a version would fragment
     // "when was this note last read" across its history.
+    //
+    // Nullability and default are asserted, not only the names: all three are horizons that
+    // mean "not set yet", so a `NOT NULL DEFAULT now()` variant would carry the same three
+    // names, pass a name-only check, and give every note that has never been read a
+    // `last_used_at` and every note an expiry it never earned.
     const cols = await q(
-      `SELECT column_name FROM information_schema.columns
+      `SELECT column_name, is_nullable, column_default FROM information_schema.columns
        WHERE table_name = 'vault_notes' AND column_name IN ('expires_at','retired_at','last_used_at')
        ORDER BY column_name`,
     );
-    expect(cols.rows.map((r: { column_name: string }) => r.column_name)).toEqual([
-      "expires_at",
-      "last_used_at",
-      "retired_at",
+    expect(cols.rows).toEqual([
+      { column_name: "expires_at", is_nullable: "YES", column_default: null },
+      { column_name: "last_used_at", is_nullable: "YES", column_default: null },
+      { column_name: "retired_at", is_nullable: "YES", column_default: null },
     ]);
   });
 });

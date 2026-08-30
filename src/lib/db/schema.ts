@@ -1,8 +1,31 @@
 import {
   pgTable, text, boolean, timestamp, integer, jsonb, index, uniqueIndex, bigint, numeric,
-  primaryKey, check, foreignKey, type AnyPgColumn,
+  primaryKey, check, foreignKey, customType, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+/** Postgres `tsvector`. Drizzle has no built-in for it, and every column of this type here
+ *  is generated, so nothing in TypeScript ever constructs a value of it — it exists so the
+ *  index declarations can name the column. */
+const tsvector = customType<{ data: string; driverData: string }>({ dataType: () => "tsvector" });
+
+/**
+ * The whitespace class `vault_search_documents`' `norm_*` columns collapse, written out
+ * codepoint by codepoint because the obvious `\s` does NOT mean the same thing on the two
+ * sides of this feature. `text.ts::norm` runs JS `\s` on the QUERY side; Postgres's ARE
+ * `\s` is `[[:space:]]`, and this database was measured: it collapses TAB and U+2003 but
+ * leaves U+00A0 and U+FEFF alone. One pasted non-breaking space would then normalize one
+ * way in the stored column and the other way in the query, and the trigram lane would
+ * silently stop matching. This set is exactly what JS `\s` matches and `[[:space:]]` may
+ * not — U+200B is absent because JS does not match it either.
+ *
+ * The fix belongs HERE and never in `norm`: see that function's docstring.
+ */
+const NORM_WHITESPACE = "[[:space:]\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]+";
+
+/** `lower(trim(collapse(expr)))` — one copy, three generated columns. */
+const normalized = (expr: string) =>
+  sql.raw(`lower(btrim(regexp_replace(${expr}, '${NORM_WHITESPACE}', ' ', 'g')))`);
 
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
@@ -858,6 +881,85 @@ export const vaultEdges = pgTable("vault_edges", {
     .where(sql`${t.deletedAt} IS NULL`),
   index("idx_vault_edges_from").on(t.spaceId, t.fromNodeId).where(sql`${t.deletedAt} IS NULL`),
   index("idx_vault_edges_to").on(t.spaceId, t.toNodeId).where(sql`${t.deletedAt} IS NULL`),
+]);
+
+/**
+ * ONE ROW PER SEARCHABLE UNIT: a claim head, a note's current version, a source, a
+ * fragment.
+ *
+ * TEXT AND IDS ONLY, and the absence of everything else is the design (H7). The round-0
+ * draft denormalized `prompt_access` here and said "the channel filter runs here", which
+ * made this table a second entrance carrying none of the lifecycle state the first one
+ * filters on — no `superseded_at`, no `retired_at`, no `expires_at`, no `deleted_at`. The
+ * mints in `model-view.ts` select candidate ids here by relevance and then JOIN the
+ * authoritative subtype row, applying the full liveness predicate there: the authoritative
+ * row is where every lifecycle write already lands, so no re-projection path can be
+ * forgotten, and the projection stays rebuildable from the subtype tables — which is what
+ * makes `rebuildSearchDocuments` honest.
+ *
+ * `owner_text` is the full text and never leaves an owner surface. `model_text` is the
+ * redacted projection; NULL means this unit has no model-facing text at all.
+ *
+ * The `norm_*` columns are GENERATED rather than written by `search-documents.ts`: the JS
+ * normalizer runs on the query side and this expression on the stored side, and making the
+ * projection writer responsible for a third copy would be one more place for them to
+ * diverge. `search-documents.integration.test.ts` pins the two that remain to the same
+ * answers, including on non-breaking space, where they actually differ.
+ *
+ * `fragment_id` and the `'source'` / `'fragment'` kinds have no slice-1 writer, and that is
+ * a deliberate exception to the "no dead schema" rule this slice applies elsewhere: the
+ * unit key is `(space_id, node_id, fragment_id)` and a nullable fourth column added later
+ * would mean rebuilding a unique index over a populated table. One column with a `''`
+ * default and two enum members is the whole cost; a table with no reader at all is not the
+ * same trade, which is why `vault_note_versions` still waits for slice 2.
+ */
+export const vaultSearchDocuments = pgTable("vault_search_documents", {
+  id: text("id").primaryKey(),
+  spaceId: text("space_id").notNull().references(() => spaces.id, { onDelete: "cascade" }),
+  nodeId: text("node_id").notNull(),
+  /** `''`, never NULL, and never nullable. The unit key includes it, and a NULL in a
+   *  unique index means "distinct from every other NULL" — two claim rows for one node
+   *  would both be legal. It is also what lets `onConflictDoUpdate` name a plain column
+   *  list: drizzle-orm 0.45.2 types the conflict target as `IndexColumn = PgColumn`
+   *  (`pg-core/indexes.d.ts:34`), so an `SQL` chunk like `coalesce(fragment_id,'')` is not
+   *  assignable AND would render as the wrong ON CONFLICT list even if it were cast. */
+  fragmentId: text("fragment_id").notNull().default(""),   // non-empty only for kind='fragment' (slice 3)
+  kind: text("kind", { enum: ["claim", "note", "source", "fragment"] }).notNull(),
+  title: text("title").notNull().default(""),
+  ownerText: text("owner_text").notNull(),
+  modelText: text("model_text"),
+  normTitle: text("norm_title").notNull().generatedAlwaysAs(normalized("coalesce(title, '')")),
+  normOwnerText: text("norm_owner_text").notNull().generatedAlwaysAs(normalized("coalesce(owner_text, '')")),
+  normModelText: text("norm_model_text").generatedAlwaysAs(normalized("model_text")),
+  // `'simple'` is deliberate: Postgres ships no Ukrainian FTS configuration, and `'english'`
+  // would stem the Latin half of a bilingual corpus while leaving the Cyrillic half alone —
+  // an asymmetry worse than treating both halves as raw tokens.
+  ownerTsv: tsvector("owner_tsv")
+    .generatedAlwaysAs(sql`to_tsvector('simple', title || ' ' || owner_text)`),
+  modelTsv: tsvector("model_tsv")
+    .generatedAlwaysAs(sql`to_tsvector('simple', title || ' ' || coalesce(model_text, ''))`),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  check("ck_vsearch_kind", sql`${t.kind} in ('claim','note','source','fragment')`),
+  // A plain three-column unique index, not an expression one: `fragment_id` is NOT NULL
+  // with a `''` default, so `coalesce` has nothing to do and the conflict target below is
+  // a column list drizzle can actually type.
+  uniqueIndex("uniq_vsearch_unit").on(t.spaceId, t.nodeId, t.fragmentId),
+  // The same composite FK the edges and the subtypes use, so a projection row naming
+  // another space's node is unrepresentable. `onDelete: "cascade"` covers the one hard
+  // node delete in the system (the `spaces` cascade from `purgeUserSpaces`); it is NOT the
+  // inverse for a SOFT delete, which fires nothing here — `deleteNode` and
+  // `deleteSpaceNodes` call the projection's own inverse for that (Task 9).
+  foreignKey({
+    name: "vault_search_doc_node_fk",
+    columns: [t.spaceId, t.nodeId],
+    foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
+  }).onDelete("cascade"),
+  index("vault_search_owner_fts").using("gin", t.ownerTsv),
+  index("vault_search_model_fts").using("gin", t.modelTsv),
+  index("vault_search_owner_trgm").using("gin", t.normOwnerText.op("gin_trgm_ops")),
+  index("vault_search_model_trgm").using("gin", t.normModelText.op("gin_trgm_ops")),
+  index("vault_search_scope").on(t.spaceId, t.kind),
 ]);
 
 export const knowledgeSources = pgTable("knowledge_sources", {

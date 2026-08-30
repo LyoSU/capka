@@ -442,6 +442,13 @@
       "when": 1788133158929,
       "tag": "0062_adorable_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1788133703193,
+      "tag": "0063_daffy_pride",
+      "breakpoints": true
     }
   ]
 }
