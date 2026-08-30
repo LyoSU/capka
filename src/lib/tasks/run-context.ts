@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { chats, projects, users, attachedFolders } from "@/lib/db/schema";
+import { chats, messages, projects, users, attachedFolders } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { resolveUserModelInfo } from "@/lib/providers/resolve";
 import { providerNativeTools } from "@/lib/providers";
@@ -15,6 +15,7 @@ import { makeSkillTool } from "@/lib/skills/tool";
 import { makeManageTool } from "@/lib/manage/tool";
 import { hostFolderEnabled, sessionMounts } from "@/lib/manage/controls/folders";
 import { makeAskTool } from "@/lib/ask/tool";
+import { askAnswerSchema, askFormSchema } from "@/lib/ask/types";
 import { makeVaultMemoryTools } from "@/lib/vault/tools";
 import { buildMemoryManifest } from "@/lib/vault/manifest";
 import { getOrCreateSpace } from "@/lib/vault/spaces";
@@ -27,6 +28,42 @@ import { contextBudget } from "@/lib/chat/context/budget";
 import { buildSystemPrompt } from "@/lib/chat/prompt";
 import { publishTaskEvent } from "./events";
 import type { TaskPayload } from "./runner";
+
+/**
+ * The user's own words inside an answered `ask`, and nothing else.
+ *
+ * An approval/`ask` continuation carries `uiMessages: []` — the user's answer rides
+ * `resumeMessages` and is not a chat message at all — so `userTurnText` read "" and a
+ * fact the user stated while approving ("yes, and remember we pay in EUR") landed
+ * `derived`. This is the fold the F7 trigger comment asked for: ONE more source for the
+ * ONE value, here, rather than a second consumer deriving its own.
+ *
+ * Only free-text fields count, and that exclusion is the whole security content of this
+ * function. The FORM is model-authored: a `choice` field's option labels are the model's
+ * own text, so counting a selected option as the user's words would let a model put the
+ * fact it wants remembered into an option, have the person click it, and activate it on
+ * their authority. `submit` only — a skip states nothing.
+ *
+ * Manage approvals contribute nothing: `ApprovalDecision.reason` is typed but no caller
+ * supplies it. A caller that starts to must fold it in HERE, beside this.
+ */
+export function userWordsFromAnswer(metadata: unknown): string {
+  const parts = (metadata as { parts?: unknown[] } | null)?.parts;
+  if (!Array.isArray(parts)) return "";
+  const out: string[] = [];
+  for (const part of parts) {
+    const answer = (part as { answer?: { form?: unknown; value?: unknown } })?.answer;
+    const form = askFormSchema.safeParse(answer?.form);
+    const value = askAnswerSchema.safeParse(answer?.value);
+    if (!form.success || !value.success || value.data.action !== "submit") continue;
+    for (const field of form.data.fields) {
+      if (field.kind !== "text" && field.kind !== "number") continue;
+      const v = value.data.values[field.id];
+      if (typeof v === "string" && v.trim()) out.push(v.trim());
+    }
+  }
+  return out.join("\n");
+}
 
 /**
  * Re-resolve everything needed to run a task from its persisted payload — the
@@ -106,35 +143,38 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // tool names and clamped tool arguments. `payload.uiMessages` is the only source
   // that holds what a person actually typed.
   //
-  // KNOWN, DOCUMENTED, NOT FIXED (Fable audit F7), and the trigger is here because
-  // this is the definition that would have to change. An approval/`ask` continuation
-  // arrives with `uiMessages: []` (see `src/lib/ask/authed.ts`, `src/lib/manage/authed.ts`)
-  // — the user's ANSWER rides `resumeMessages` and is not a chat message at all — so
-  // this reads "" on that half of the turn, and a fact the user states in the answer
-  // ("yes, and remember we pay in EUR") is `derived`: pending, invisible until plan D
-  // ships a review queue. Fail-safe, and now uniform (both consumers read the same
-  // empty string rather than one of them mining the wrong text), but it silently
-  // degrades the one case the design promises to auto-activate.
-  //
-  // Whoever makes the answer part of the turn's transcript — plan D's review surface,
-  // or any change that puts `resumeMessages` into `uiMessages` — must fold it in HERE,
-  // as one more source for this single value, and never by giving a second consumer
-  // its own derivation. That is precisely what F1 was.
-  const userTurnText = (() => {
-    const messages = payload.uiMessages ?? [];
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m?.role !== "user") continue;
-      if (typeof m.content === "string") return m.content;
-      const parts: unknown[] = Array.isArray(m.parts) ? m.parts : [];
-      return parts
-        .filter((p): p is { type: string; text: string } =>
-          typeof (p as { text?: unknown })?.text === "string" && (p as { type?: unknown })?.type === "text")
-        .map((p) => p.text)
-        .join("\n");
-    }
-    return "";
-  })();
+  // KNOWN AND NOW CLOSED (Fable audit F7). An approval/`ask` continuation arrives with
+  // `uiMessages: []` — the user's ANSWER rides `resumeMessages` and is not a chat message
+  // at all — so this read "" on that half of the turn and a fact the user stated while
+  // approving was `derived`: pending, and invisible until a review queue existed. The
+  // answer is durable on the message row, so it is folded in HERE, as one more source for
+  // this SINGLE value. Anything else that ever makes the answer part of the transcript
+  // folds in here too; a second consumer with its own derivation is precisely what F1 was.
+  const answeredAsk = payload.resumeMessageId
+    ? await db
+        .select({ metadata: messages.metadata })
+        .from(messages)
+        .where(eq(messages.id, payload.resumeMessageId))
+        .limit(1)
+        .then((r) => userWordsFromAnswer(r[0]?.metadata))
+    : "";
+
+  const userTurnText =
+    (() => {
+      const uiMessages = payload.uiMessages ?? [];
+      for (let i = uiMessages.length - 1; i >= 0; i--) {
+        const m = uiMessages[i];
+        if (m?.role !== "user") continue;
+        if (typeof m.content === "string") return m.content;
+        const parts: unknown[] = Array.isArray(m.parts) ? m.parts : [];
+        return parts
+          .filter((p): p is { type: string; text: string } =>
+            typeof (p as { text?: unknown })?.text === "string" && (p as { type?: unknown })?.type === "text")
+          .map((p) => p.text)
+          .join("\n");
+      }
+      return "";
+    })() || answeredAsk;
 
   // Sandbox tools (execute_bash, read_file, …) + MCP connector tools (sub-project
   // B, namespaced mcp__<server>__<tool>) + the skill tool. Each piece has a stable
