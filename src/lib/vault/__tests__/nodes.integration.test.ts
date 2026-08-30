@@ -9,7 +9,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
  * which is what makes a rolled-back claim leave no orphan node behind.
  */
 import { pool } from "@/lib/db";
-import { createClaim, updateClaim, type Actor } from "../claims";
+import { createClaim, forgetAllClaims, forgetClaim, updateClaim, type Actor } from "../claims";
 import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -191,5 +191,59 @@ run("vault: the subtype -> node composite FKs", () => {
         [`${P}cross`, SPACE_A],
       ),
     ).rejects.toMatchObject({ code: FK_VIOLATION, constraint: "vault_claim_node_fk" });
+  });
+});
+
+run("vault: the node inverses", () => {
+  beforeEach(async () => {
+    await cleanup();
+    await q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1,'user',$2,$2)`, [SPACE_A, OWNER]);
+  });
+  afterAll(cleanup);
+
+  it("forgetClaim soft-deletes the claim's node and its live edges", async () => {
+    // Round-2 N10: "forget this fact" and "forget everything" are the same user-facing act
+    // and must not have two terminal states. One row and all rows do not deliberately differ.
+    const topic = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
+    const c = await createClaim(
+      { spaceId: SPACE_A, statement: "reports go out on fridays", origin: { kind: "test" }, topicNoteId: topic },
+      ACTOR,
+    );
+    await q(
+      `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+       VALUES ($1,$2,$3,$4,'contains','{"kind":"system"}'::jsonb)`,
+      [`${P}e-f`, SPACE_A, topic, c.id],
+    );
+    const res = await forgetClaim({
+      claimId: c.id, expectedRevision: c.revision, allowedSpaceIds: [SPACE_A], actor: ACTOR,
+    });
+    expect(res.ok).toBe(true);
+    expect((await nodeOf(c.id))?.deleted_at).not.toBeNull();
+    const edge = await q(`SELECT deleted_at FROM vault_edges WHERE id = $1`, [`${P}e-f`]);
+    expect(edge.rows[0].deleted_at).not.toBeNull();
+    // The TOPIC survives: forgetting a fact is not forgetting where it was filed.
+    expect((await nodeOf(topic))?.deleted_at).toBeNull();
+  });
+
+  it("forgetAllClaims soft-deletes every head's node", async () => {
+    const a = await createClaim({ spaceId: SPACE_A, statement: "one", origin: { kind: "test" } }, ACTOR);
+    const b = await createClaim({ spaceId: SPACE_A, statement: "two", origin: { kind: "test" } }, ACTOR);
+    const { forgotten } = await forgetAllClaims(SPACE_A, ACTOR);
+    expect(forgotten).toBe(2);
+    expect((await nodeOf(a.id))?.deleted_at).not.toBeNull();
+    expect((await nodeOf(b.id))?.deleted_at).not.toBeNull();
+  });
+
+  it("leaves a SUPERSEDED predecessor's node alive", async () => {
+    // The control that makes the two above mean something: `superseded_at` and
+    // `vault_nodes.deleted_at` are different flags with different readers, and a
+    // deleteNode on every supersede would erase history the page still renders.
+    const c = await createClaim({ spaceId: SPACE_A, statement: "before", origin: { kind: "test" } }, ACTOR);
+    const upd = await updateClaim({
+      claimId: c.id, expectedRevision: c.revision, patch: { statement: "after" },
+      allowedSpaceIds: [SPACE_A], actor: ACTOR,
+    });
+    expect(upd.ok).toBe(true);
+    expect((await nodeOf(c.id))?.deleted_at).toBeNull();
   });
 });

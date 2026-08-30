@@ -11,7 +11,7 @@ import {
   vaultNodes,
   vaultNotes,
 } from "@/lib/db/schema";
-import { insertNode } from "./nodes";
+import { deleteSpaceNodes, insertNode } from "./nodes";
 
 /** A DB handle: the pool, or the caller's transaction. Every function here sends
  *  ALL of its statements through it — quietly falling back to the module-level
@@ -297,6 +297,20 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
     .where(and(eq(knowledgeSources.spaceId, spaceId), isNull(knowledgeSources.deletedAt)))
     .returning({ id: knowledgeSources.id });
 
+  // Migration step 11.10, under Ruling 10. SOFT, and the softness is the whole finding:
+  // this function hard-DELETEs claims and notes but SOFT-deletes sources, so a hard
+  // `DELETE FROM vault_nodes WHERE space_id = ...` raises 23503 on
+  // knowledge_source_node_fk against the source rows that deliberately survive — and
+  // because `retired_at` is written at the top of this function and teardown is re-driven
+  // from the worker tick, that abort would repeat forever with the space already closed to
+  // writers and its memory never removed.
+  //
+  // It runs LAST of the removals so the node rows outlive the subtype rows within this
+  // transaction, which the child -> parent FK requires; the source node ends up in the
+  // same state as its source row, which is the property that made this correct rather than
+  // merely working.
+  const { nodes } = await deleteSpaceNodes(spaceId, ex);
+
   // Exactly one event per project deletion, and the condition is "no event yet",
   // NOT "there was something to remove": a space the user emptied by hand must
   // still leave a trace, or "no event" reads the same for "the space was empty"
@@ -321,6 +335,7 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
       notes: notes.length,
       candidates: candidates.length,
       sources: sources.length,
+      nodes,
     },
   });
 }

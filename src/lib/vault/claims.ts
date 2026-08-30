@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
-import { insertNode } from "./nodes";
+import { deleteNode, insertNode } from "./nodes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
@@ -593,6 +593,13 @@ export async function forgetClaim(
     .returning({ spaceId: vaultClaims.spaceId, revision: vaultClaims.revision });
   if (!prev) return { ok: false, current: await findCurrentHead(claimId, allowedSpaceIds, ex) };
 
+  // N10: the SAME terminal state as `forgetAllClaims`. Round 1 gave this obligation to
+  // the bulk path only, so "forget this fact" left its edges live and its projection row
+  // in place while "forget everything" removed both — one user-facing act with two
+  // terminal states. Through the node module, never a bare `db.update`: the edge cascade
+  // lives with it.
+  await deleteNode(claimId, prev.spaceId, ex);
+
   // No successor — "forgotten" IS a chain with no active head. `note_claims` and
   // `claim_evidence` stay on the inactive row: forgetting a fact does not mean
   // rewriting where it came from.
@@ -642,6 +649,11 @@ export async function forgetAllClaims(spaceId: string, actor: Actor, ex?: Ex): P
   // Drizzle rejects an empty VALUES list outright, and a space with nothing in it is the
   // ordinary case for every scope the person never used.
   if (!heads.length) return { forgotten: 0 };
+
+  // A loop rather than one statement: `deleteNode` owns the pair of writes, and
+  // open-coding the bulk form here would be a second implementation of the inverse —
+  // the exact split N10 records.
+  for (const head of heads) await deleteNode(head.id, spaceId, ex);
 
   // One multi-row INSERT rather than a statement per head: this is a sweep over a whole
   // space, and a round trip per fact would scale with exactly the thing that makes

@@ -464,4 +464,43 @@ run("vault: writes into a retired space", () => {
     expect(await count("vault_claims", "space_id = $1", [userSpaceId])).toBe(0);
     expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
   });
+
+  it("leaves zero LIVE nodes and zero live edges for a retired space", async () => {
+    // Migration step 11.10, under Ruling 10. Claims and notes are hard-DELETEd by this
+    // function while SOURCES are soft-deleted, so the node rows are soft-deleted too: a
+    // hard node delete would raise 23503 on knowledge_source_node_fk against the source
+    // rows that deliberately survive, and abort a teardown that is re-driven forever.
+    //
+    // The source fixture is the point of this test. Without it the FK path is never
+    // exercised and the same hole reopens in slice 3 the moment a source writer appears.
+    const { projectSpaceId } = await spaces();
+    const topic = await getOrCreateTopicNote(projectSpaceId, DEFAULT_TOPIC_KEY);
+    const c = await createClaim(
+      { spaceId: projectSpaceId, statement: "project fact", origin: { kind: "test" }, topicNoteId: topic },
+      actor,
+    );
+    const src = `${P}retire-src`;
+    await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1, $2, 'source')`, [src, projectSpaceId]);
+    await q(
+      `INSERT INTO knowledge_sources (id, space_id, title, origin, created_by)
+       VALUES ($1, $2, 'a document', '{"type":"upload"}'::jsonb, $3)`,
+      [src, projectSpaceId, OWNER],
+    );
+    await q(
+      `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+       VALUES ($1,$2,$3,$4,'contains','{"kind":"system"}'::jsonb)`,
+      [`${P}e-retire`, projectSpaceId, topic, c.id],
+    );
+
+    await retireProjectSpace(PROJ);
+
+    // LIVE, not surviving: the node rows stay as tombstones (their source row does too),
+    // and what must be zero is what any reader can still reach.
+    expect(await count("vault_nodes", "space_id = $1 AND deleted_at IS NULL", [projectSpaceId])).toBe(0);
+    expect(await count("vault_edges", "space_id = $1 AND deleted_at IS NULL", [projectSpaceId])).toBe(0);
+    // The source's node is soft-deleted BESIDE its soft-deleted source row, so the two
+    // halves of one entity are in the same state.
+    const srcNode = await q(`SELECT deleted_at FROM vault_nodes WHERE id = $1`, [src]);
+    expect(srcNode.rows[0].deleted_at).not.toBeNull();
+  });
 });
