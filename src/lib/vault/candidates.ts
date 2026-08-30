@@ -10,6 +10,7 @@ import {
   createClaim,
   fitSlotKey,
   fitStatement,
+  forgetClaim,
   headBySlot,
   listHeadClaims,
   secretShaped,
@@ -132,11 +133,46 @@ type ConfirmIntent =
   | { kind: "replace"; contested: string };
 
 /**
- * The head this confirmation acts on, or `null` for "none of them — write a new one".
+ * What a confirmation acts on: the head its text LANDS on (`head` — merged into, or
+ * superseded; `null` means "none of them, write a new one"), and a live head it ENDS
+ * outright (`retire`).
+ *
+ * Two fields rather than one, because a correction can meet a space that already holds
+ * its own words. The replacement the person authorised has then, in substance, already
+ * happened — the text is where it should be — and the contested claim is the only thing
+ * left to remove. Superseding it instead writes a SECOND row carrying text the space
+ * already has, which is exactly the outcome the `record` arm's dedup exists to prevent,
+ * arriving through the arm that did not run it.
+ */
+type Target = { head: ClaimHead | null; retire: ClaimHead | null };
+
+/**
+ * The head this confirmation acts on, and the head it retires.
  *
  * The `switch` is the other half of the union's job: a variant added without a branch
  * here fails `tsc` on the missing return, so the next state cannot arrive the way
  * `replace` did — written on one side, walked past on the other.
+ *
+ * AND THAT IS NOT ENOUGH ON ITS OWN, which is this round's correction and the reason the
+ * paragraph below exists. The union forces the new arm to EXIST and to be handled; it
+ * says nothing about what the arm must DO once control is inside it. `replace` shipped
+ * without the text dedup `record` runs — the one the comment two branches down calls
+ * required — so a correction whose words were already a live head superseded the
+ * contested one into a byte-identical twin. Adding a branch is itself an entrance event:
+ * the obligations of the arm beside it have to be carried across by hand, because no
+ * type can see them.
+ *
+ * WHAT THE TWO ARMS OWE, side by side, so the third one has a list to check against:
+ *  - the text dedup — BOTH. `record` uses its answer as the target; `replace` uses it to
+ *    discover that its target's replacement is already recorded.
+ *  - which head the text lands on — `record` DISCOVERS it (the slot's head, or the head
+ *    carrying the same words); `replace` is TOLD it by the producer. Differ by design:
+ *    that is what the union is for.
+ *  - retiring a second head — `replace` only, and only when the text landed elsewhere.
+ *    Nothing is contested on the `record` side, so there is nothing to retire. By design.
+ *  - not walking the chain forward, re-verifying the space through the read itself, and
+ *    counting a sensitive head as usable — identical on both arms, and none of the three
+ *    is a per-arm decision. A future arm inherits all three.
  *
  * `replace` reads the CONTESTED head by id, and does NOT walk the chain forward from it.
  * Not walking is the deliberate part: if somebody else superseded that claim in the
@@ -158,19 +194,35 @@ async function targetHead(
   slotKey: string | null,
   statement: string,
   ex: Ex,
-): Promise<ClaimHead | null> {
+): Promise<Target> {
+  // ONE read of the space's live heads, and the text dedup written ONCE over it. Both
+  // arms owe that dedup, and a second copy of the rule beside the first is precisely how
+  // the first came to be walked past.
+  //
+  // The dedup is required: propose performs it, and if confirm did not, a fact proposed
+  // without a slot and then activated by another proposal would produce a SECOND
+  // byte-identical head on confirmation — and the store would repeat the same thing back
+  // to the human forever.
+  const heads = await listHeadClaims(spaceId, {}, ex);
+  const sameText = heads.find((h) => norm(h.statement) === norm(statement)) ?? null;
+
   switch (intent.kind) {
-    case "replace":
-      return (await listHeadClaims(spaceId, {}, ex)).find((h) => h.id === intent.contested) ?? null;
     // With a slot, "the existing head" means the head of the SLOT; without one, the head
-    // carrying the same normalized text. The dedup is required: propose performs it, and
-    // if confirm did not, a fact proposed without a slot and then activated by another
-    // proposal would produce a SECOND byte-identical head on confirmation — and the store
-    // would repeat the same thing back to the human forever.
+    // carrying the same normalized text.
     case "record":
-      return slotKey
-        ? await headBySlot(spaceId, slotKey, ex)
-        : ((await listHeadClaims(spaceId, {}, ex)).find((h) => norm(h.statement) === norm(statement)) ?? null);
+      return { head: slotKey ? await headBySlot(spaceId, slotKey, ex) : sameText, retire: null };
+    case "replace": {
+      const contested = heads.find((h) => h.id === intent.contested) ?? null;
+      // The correction's own words are already a live head, and not the contested one:
+      // confirm THAT head and end the contested claim, rather than growing the chain a
+      // twin of a fact the space already asserts. This covers both orders one turn
+      // produces — the plain candidate confirmed before the correction, and a contested
+      // head an earlier correction already replaced (`contested` is then `null`, and the
+      // dedup is what stops the fallback below from creating the duplicate instead).
+      return sameText && sameText.id !== contested?.id
+        ? { head: sameText, retire: contested }
+        : { head: contested, retire: null };
+    }
   }
 }
 
@@ -509,7 +561,21 @@ export async function confirmCandidate(args: {
             // for a plain fact. The choice is made in ONE function over the intent union
             // rather than inline here, so a state whose confirmation means something new
             // has to be answered there rather than silently falling through to the dedup.
-            const head = await targetHead(intent, cand.spaceId, slotKey, statement, sp);
+            const { head, retire } = await targetHead(intent, cand.spaceId, slotKey, statement, sp);
+
+            // The contested head, in the one case where this confirmation's words turned
+            // out to be a live head already. `forgetClaim`, not `updateClaim`: there is
+            // no new version to write — the successor exists as its own chain — and a
+            // supersede here would mint exactly the twin the dedup just avoided. Same
+            // savepoint as the confirmation below, so the two facts are never both live
+            // and never both gone.
+            if (retire) {
+              const ended = await forgetClaim(
+                { claimId: retire.id, expectedRevision: retire.revision, allowedSpaceIds, actor },
+                sp,
+              );
+              if (!ended.ok) throw new Retry(); // lost the CAS — re-read
+            }
 
             // Every head is usable here, sensitive ones included, and that is NOT the rule
             // propose holds — deliberately. `sensitive` withholds from the MODEL; the
@@ -598,6 +664,12 @@ export async function confirmCandidate(args: {
                     // approved. The successor is born `unverified` and `confirmClaim`
                     // below is what approves it — one write grants authority, and it
                     // records who granted it.
+                    //
+                    // `updateClaim` carries approval across when a supersede rewrites no
+                    // text, and this branch never is that case: it is reached only when
+                    // the normalized statement or the value disagreed, and either of
+                    // those is a rewrite. So the successor here is always born
+                    // `unverified`, by argument rather than by luck.
                     origin,
                     sensitive: usable.sensitive || cand.sensitive,
                     // The predecessor may have been in no topic at all (created
@@ -621,8 +693,9 @@ export async function confirmCandidate(args: {
             }
 
             // No head to act on. For a `record` that is the ordinary case; for a
-            // `replace` it means the contested claim is no longer live — somebody else
-            // superseded or forgot it between the proposal and this click — and then the
+            // `replace` it means the contested claim is no longer live AND the correction's
+            // own words are not already recorded either — somebody else superseded or
+            // forgot it between the proposal and this click — and then the
             // fact is recorded BESIDE whatever replaced it and nothing is superseded. The
             // person authorised replacing a specific claim, not its successor, which they
             // have never seen. What they see afterwards is the new fact on their memory

@@ -33,6 +33,7 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Keeping a correction on the memory page now actually replaces the fact it names, instead of leaving both facts live and asserting each to the assistant; if that fact was already replaced by something else in the meantime, the correction is saved beside it and nothing is superseded.
+- Keeping a correction whose wording the memory already holds no longer records that wording a second time: the fact it contests is removed and the existing one is kept.
 - Memory topics are identified by a stable key instead of their displayed title, so renaming one no longer forks it into two the assistant counts twice.
 - Deleting a project now closes its memory for good: a post-turn fact extraction still running when the project is deleted no longer writes into the deleted project's memory (`spaces.retired_at`, migration 0056).
 - Memory tool calls read as memory in the chat timeline instead of "Searched the web" with a globe — `memory_search` was matching the web-search name heuristic.

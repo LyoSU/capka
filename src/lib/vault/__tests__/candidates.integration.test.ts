@@ -511,6 +511,70 @@ run("vault candidates", () => {
     ]);
   });
 
+  /**
+   * M1 — the dedup the `replace` arm did not run. The union that fixed F1 forces the new
+   * arm to exist and to be handled; it says nothing about what the arm does inside, and
+   * what `replace` did not do was the text dedup `record` still runs. One turn produces
+   * both rows in the ordinary way, so the order below is roughly a coin flip.
+   */
+  it("keeping the plain fact first, then the correction, leaves ONE head and no twin", async () => {
+    const contested = await confirmedHead({ statement: "Works in Kyiv" });
+    // One turn, two queue rows: extraction proposes the plain fact, and `memory_update`
+    // raises the correction naming the head it contests.
+    const plain = await propose({ statement: "Works in Lviv" });
+    if (plain.state !== "pending") throw new Error("expected pending");
+    const correction = await propose({
+      statement: "Works in Lviv",
+      forceConflict: { conflictsWith: contested.id },
+    });
+    if (correction.state !== "conflict") throw new Error("expected conflict");
+
+    // The person keeps both, plain one first — which is what nothing tested, and why the
+    // second confirmation used to supersede Kyiv into a byte-identical copy of the head
+    // the first one had just written.
+    const first = await confirmCandidate({ candidateId: plain.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    if (!first.ok) throw new Error("unreachable");
+    const second = await confirmCandidate({
+      candidateId: correction.candidateId,
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw new Error("unreachable");
+
+    // The correction landed on the head that already carried its words, rather than
+    // writing a second one.
+    expect(second.claimId).toBe(first.claimId);
+    // The contested claim is still gone — the replacement the person authorised happened
+    // — but it ENDED rather than growing a successor, because the successor was already
+    // there under its own id.
+    expect((await claimRow(contested.id)).superseded_at).not.toBeNull();
+    expect(await count("vault_claims", "supersedes = $1", [contested.id])).toBe(0);
+    expect(await count("audit_events", "action = 'claim.forget' AND subject_id = $1", [contested.id])).toBe(1);
+
+    // The assertion the finding was about, read through the projection that decides what
+    // the model may see: one fact, not the same sentence twice in every later manifest.
+    expect((await listModelClaims(SPACE_A)).map((c) => c.statement)).toEqual(["Works in Lviv"]);
+  });
+
+  it("a second correction carrying the same words as the first records nothing new", async () => {
+    // No plain candidate at all: two `memory_update` calls across two turns, both read
+    // from the same head. The first supersedes it; the second finds the contested claim
+    // gone and used to fall through to `createClaim` with text the space already held.
+    const contested = await confirmedHead({ statement: "Works in Kyiv" });
+    const a = await propose({ statement: "Works in Lviv", forceConflict: { conflictsWith: contested.id } });
+    const b = await propose({ statement: "Works in Lviv", forceConflict: { conflictsWith: contested.id } });
+    if (a.state !== "conflict" || b.state !== "conflict") throw new Error("expected two conflicts");
+
+    const first = await confirmCandidate({ candidateId: a.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    if (!first.ok) throw new Error("unreachable");
+    const second = await confirmCandidate({ candidateId: b.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    if (!second.ok) throw new Error("unreachable");
+
+    expect(second.claimId).toBe(first.claimId);
+    expect((await listModelClaims(SPACE_A)).map((c) => c.statement)).toEqual(["Works in Lviv"]);
+  });
+
   it("a conflict row written with no contested id confirms as an ordinary fact", async () => {
     // Rows predating the mandatory id carry `policy_state = 'conflict'` pointing at
     // nothing. The intent is read off the EVIDENCE, not off the state string, so these
