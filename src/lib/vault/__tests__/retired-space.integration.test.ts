@@ -67,6 +67,33 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+/**
+ * Run `body` while a transaction is held open, and release it whatever happens.
+ *
+ * The `finally` is the whole point. Every test below holds a transaction that owns the
+ * space row, so an assertion thrown INSIDE that window would leave the transaction open
+ * forever — and then `beforeEach`'s `DELETE FROM spaces` blocks on the lock for every
+ * remaining test in the file. One real failure reported itself as nine, eight of them
+ * an unreadable timeout in `beforeEach`, which is precisely the shape that sends an
+ * hour somewhere useless. Assertions therefore go AFTER this returns, never inside it.
+ */
+const whileHolding = async <T>(
+  hold: (ready: () => void, release: Promise<void>) => Promise<void>,
+  body: () => Promise<T>,
+): Promise<T> => {
+  const ready = deferred();
+  const release = deferred();
+  const held = hold(ready.resolve, release.promise);
+  // Racing `held` too: a hold that fails before it signals would otherwise hang here.
+  await Promise.race([ready.promise, held]);
+  try {
+    return await body();
+  } finally {
+    release.resolve();
+    await held;
+  }
+};
+
 const cleanup = () => q(`DELETE FROM spaces WHERE owner_user_id = $1`, [OWNER]);
 
 run("vault: writes into a retired space", () => {
@@ -124,29 +151,31 @@ run("vault: writes into a retired space", () => {
     // statement, on a fresh READ COMMITTED snapshot, notices and throws, which reaches
     // extraction as a logged error instead of a turn that simply arrived late.
     const { projectSpaceId } = await spaces();
-    const retired = deferred();
-    const holding = deferred();
-    const retire = db.transaction(async (tx) => {
-      await retireProjectSpace(PROJ, tx);
-      retired.resolve();
-      await holding.promise;
-    });
-    await retired.promise;
-
-    const propose = proposeCandidate({
-      idempotencyKey: `${P}inflight`,
-      spaceId: projectSpaceId,
-      statement: "invoices are approved by the head of finance",
-      provenance: { kind: "user_direct", messageId: MSG },
-    });
-    const outcome = await Promise.race([
-      propose.then(() => "done" as const),
-      new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
-    ]);
+    const { outcome, propose } = await whileHolding(
+      async (ready, release) => {
+        await db.transaction(async (tx) => {
+          await retireProjectSpace(PROJ, tx);
+          ready();
+          await release;
+        });
+      },
+      async () => {
+        const propose = proposeCandidate({
+          idempotencyKey: `${P}inflight`,
+          spaceId: projectSpaceId,
+          statement: "invoices are approved by the head of finance",
+          provenance: { kind: "user_direct", messageId: MSG },
+        });
+        return {
+          propose,
+          outcome: await Promise.race([
+            propose.then(() => "done" as const),
+            new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
+          ]),
+        };
+      },
+    );
     expect(outcome).toBe("blocked");
-
-    holding.resolve();
-    await retire;
     expect(await propose).toEqual({ state: "retired" });
     expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
   });
@@ -161,31 +190,31 @@ run("vault: writes into a retired space", () => {
     // user deleted — the original defect, restored in full, with every other test in
     // this file still green.
     const { projectSpaceId } = await spaces();
-    const wrote = deferred();
-    const holding = deferred();
-    const writer = db.transaction(async (tx) => {
-      await createClaim(
-        { spaceId: projectSpaceId, statement: "the deposit is 30 percent", origin: {}, reviewStatus: "confirmed" },
-        actor,
-        tx,
-      );
-      wrote.resolve();
-      await holding.promise;
-    });
-    await wrote.promise;
-
-    const retire = retireProjectSpace(PROJ);
-    const outcome = await Promise.race([
-      retire.then(() => "done" as const),
-      new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
-    ]);
+    let retire!: Promise<void>;
+    const outcome = await whileHolding(
+      async (ready, release) => {
+        await db.transaction(async (tx) => {
+          await createClaim(
+            { spaceId: projectSpaceId, statement: "the deposit is 30 percent", origin: {}, reviewStatus: "confirmed" },
+            actor,
+            tx,
+          );
+          ready();
+          await release;
+        });
+      },
+      async () => {
+        retire = retireProjectSpace(PROJ);
+        return Promise.race([
+          retire.then(() => "done" as const),
+          new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
+        ]);
+      },
+    );
+    await retire;
     // Lock first: the retire cannot get past the writer at all. Lock last: the deletes
     // sail through the writer's invisible row and this reads "done".
     expect(outcome).toBe("blocked");
-
-    holding.resolve();
-    await writer;
-    await retire;
     expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
   });
 
@@ -197,31 +226,33 @@ run("vault: writes into a retired space", () => {
     // is the only thing standing between a deleted project and a durable row, and it is
     // the one the mutation has to be run against.
     const { projectSpaceId } = await spaces();
-    const retired = deferred();
-    const holding = deferred();
-    const retire = db.transaction(async (tx) => {
-      await retireProjectSpace(PROJ, tx);
-      retired.resolve();
-      await holding.promise;
-    });
-    await retired.promise;
-
-    const propose = proposeCandidate({
-      idempotencyKey: `${P}inflight-pending`,
-      spaceId: projectSpaceId,
-      // Not the user's own words, so the ledger gates it to `pending` and no claim is
-      // ever attempted.
-      statement: "the supplier raised prices in March",
-      provenance: { kind: "derived", messageId: MSG },
-    });
-    const outcome = await Promise.race([
-      propose.then(() => "done" as const),
-      new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
-    ]);
+    const { outcome, propose } = await whileHolding(
+      async (ready, release) => {
+        await db.transaction(async (tx) => {
+          await retireProjectSpace(PROJ, tx);
+          ready();
+          await release;
+        });
+      },
+      async () => {
+        const propose = proposeCandidate({
+          idempotencyKey: `${P}inflight-pending`,
+          spaceId: projectSpaceId,
+          // Not the user's own words, so the ledger gates it to `pending` and no claim
+          // is ever attempted.
+          statement: "the supplier raised prices in March",
+          provenance: { kind: "derived", messageId: MSG },
+        });
+        return {
+          propose,
+          outcome: await Promise.race([
+            propose.then(() => "done" as const),
+            new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 500)),
+          ]),
+        };
+      },
+    );
     expect(outcome).toBe("blocked");
-
-    holding.resolve();
-    await retire;
     expect(await propose).toEqual({ state: "retired" });
     expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
   });
