@@ -12,7 +12,14 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { getOrCreateSpace, getOrCreateTopicNote, retireProjectSpace, purgeUserSpaces, type Ex } from "../spaces";
+import {
+  DEFAULT_TOPIC_KEY,
+  getOrCreateSpace,
+  getOrCreateTopicNote,
+  retireProjectSpace,
+  purgeUserSpaces,
+  type Ex,
+} from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -404,5 +411,24 @@ run("vault spaces", () => {
     expect(await count("spaces", "id = $1", [space])).toBe(1);
     expect(await count("knowledge_sources", "id = $1", [source])).toBe(1);
     expect(await count("knowledge_fragments", "id = $1", [fragment])).toBe(1);
+  });
+
+  it("keys a topic by its key, not by the text shown to the user", async () => {
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const first = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+
+    // The rename that forked every topic in the live database: the DISPLAY changed and
+    // the identity was the display. Simulated here by writing a different title onto the
+    // note and asking for the same key again — which is what a rename control would do,
+    // and what the en/uk switch would do if the title were localized.
+    await q(`UPDATE vault_notes SET title = 'Something else entirely' WHERE id = $1`, [first]);
+    const second = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+
+    expect(second).toBe(first);
+    const notes = await q(
+      `SELECT count(*)::int AS n FROM vault_notes WHERE space_id = $1 AND kind = 'memory_topic'`,
+      [spaceId],
+    );
+    expect(notes.rows[0].n).toBe(1);
   });
 });

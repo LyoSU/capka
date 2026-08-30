@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { memoryDocs, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
 import { fitStatement, listHeadClaims } from "./claims";
 import { notCarried } from "./migrate-memory-docs";
+import { TOPIC_LABELS } from "./spaces";
 
 /** The brief's "cap 4KB" is an approximate figure for temporary (pre-Task 10
  *  cutover) raw text, not a contract on an exact byte count. A byte-precise
@@ -51,13 +52,14 @@ async function recentFacts(spaceId: string): Promise<string[]> {
  *  — a topic note with zero qualifying heads (all sensitive, all
  *  unverified, or genuinely empty) stays in the list showing `0` rather than
  *  disappearing outright. That's a deliberate choice: Plan A always writes
- *  into the DEFAULT_TOPIC (`spaces.ts`), so this case is rare in production, but a
+ *  into `DEFAULT_TOPIC_KEY` (`spaces.ts`), so this case is rare in production, but a
  *  topic vanishing from the manifest the moment its one fact turns sensitive
  *  would be a much stranger surprise than seeing it at `0`.
  */
 async function topicCounts(spaceId: string): Promise<{ title: string; count: number }[]> {
   const rows = await db
     .select({
+      topicKey: vaultNotes.topicKey,
       title: vaultNotes.title,
       count: sql<number>`count(${vaultClaims.id})::int`,
     })
@@ -73,13 +75,17 @@ async function topicCounts(spaceId: string): Promise<{ title: string; count: num
       ),
     )
     .where(and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.kind, "memory_topic")))
-    .groupBy(vaultNotes.id, vaultNotes.title)
+    .groupBy(vaultNotes.id, vaultNotes.topicKey, vaultNotes.title)
     // Order must be deterministic (the byte-identity requirement depends on
     // it): `id` (nanoid) is the only stable key available here — `createdAt`
     // isn't guaranteed to differ at millisecond resolution between topics
     // inserted inside the same transaction.
     .orderBy(asc(vaultNotes.id));
-  return rows;
+  // The name the MODEL reads, resolved from the key rather than from the stored title.
+  // The title is a display seed a rename control (plan D2) may overwrite, and the
+  // manifest has to be byte-identical across turns — so it renders the label table,
+  // falling back to the stored title for a user-named topic that has no label.
+  return rows.map((r) => ({ title: TOPIC_LABELS[r.topicKey ?? ""] ?? r.title, count: r.count }));
 }
 
 /** Every line the model reads here is prompt content, not markup the model

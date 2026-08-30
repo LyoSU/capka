@@ -5,7 +5,7 @@ import { memoryDocs, projects, spaces, vaultNotes } from "@/lib/db/schema";
 import { projectNotDeleted } from "@/lib/projects/live";
 import { listHeadClaims } from "@/lib/vault/claims";
 import { notCarried } from "@/lib/vault/migrate-memory-docs";
-import { DEFAULT_TOPIC } from "@/lib/vault/spaces";
+import { DEFAULT_TOPIC_KEY } from "@/lib/vault/spaces";
 
 /**
  * The read side of the old memory editor, kept alive across the cutover on the
@@ -62,7 +62,15 @@ async function project(spaceId: string | undefined): Promise<string> {
     .select({ id: vaultNotes.id })
     .from(vaultNotes)
     .where(
-      and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.title, DEFAULT_TOPIC), eq(vaultNotes.kind, "memory_topic")),
+      // By KEY, not by title. This route dies with `/api/memory-docs` (plan D1, Task 12);
+      // it is corrected here because until then it is a live reader of the title-as-key
+      // defect, and leaving one caller on the old rule is how that defect survived nine
+      // reviews.
+      and(
+        eq(vaultNotes.spaceId, spaceId),
+        eq(vaultNotes.topicKey, DEFAULT_TOPIC_KEY),
+        eq(vaultNotes.kind, "memory_topic"),
+      ),
     )
     .limit(1);
   if (!topic) return "";

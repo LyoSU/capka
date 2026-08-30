@@ -14,7 +14,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
  */
 import { pool } from "@/lib/db";
 import { createClaim } from "../claims";
-import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -69,7 +69,7 @@ const mkClaim = async (
   statement: string,
   reviewStatus: "confirmed" | "unverified" = "confirmed",
 ) => {
-  const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC);
+  const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
   await createClaim(
     { spaceId, statement, origin: { kind: "user_direct" }, reviewStatus, topicNoteId: noteId },
     { kind: "system" },
@@ -80,7 +80,7 @@ const mkClaim = async (
  *  the model and this page was printing in full. Confirmed on purpose: an unverified
  *  one would be filtered by `onlyConfirmed` and prove nothing about sensitivity. */
 const mkSensitiveClaim = async (spaceId: string, statement: string) => {
-  const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC);
+  const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
   await createClaim(
     {
       spaceId,

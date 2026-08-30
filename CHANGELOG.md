@@ -13,12 +13,14 @@ All notable changes to Capka are documented here. Format follows
 ### Changed
 
 - Agent memory is now a structured vault: facts with provenance, quarantine for web/tool-derived facts, full audit trail; existing memory documents migrate automatically at boot. The old memory editor is read-only until the new memory page ships.
+- The memory page now shows topics, each fact's source conversation and what it replaced, and the facts set aside awaiting the user's confirmation (migration 0057).
 - Settings search keywords moved into the message catalogs (`settings.search.*`), so each locale ships its own synonym list instead of one hardcoded bilingual string.
 - Files carried into a project when a chat is moved land in an English subdir (`From chat "…"`), which stays stable across an interface-language change so a retry replaces rather than duplicates the copy.
 - Web citations redesigned: [N] markers render as raised number pills with a hover card (title, domain, date), and the "Sources" footer is a grid of source tiles with domain monograms, one tile per URL, collapsing beyond six.
 
 ### Fixed
 
+- Memory topics are identified by a stable key instead of their displayed title, so renaming one no longer forks it into two the assistant counts twice.
 - Deleting a project now closes its memory for good: a post-turn fact extraction still running when the project is deleted no longer writes into the deleted project's memory (`spaces.retired_at`, migration 0056).
 - Memory tool calls read as memory in the chat timeline instead of "Searched the web" with a globe — `memory_search` was matching the web-search name heuristic.
 - A forked or cloned chat is named in the interface language — the "(copy)" suffix was hardcoded Ukrainian for everyone.

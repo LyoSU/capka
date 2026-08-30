@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { log } from "@/lib/log";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
 import { attachToTopic, confirmClaim, createClaim, fitStatement, listHeadClaims } from "./claims";
-import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote, spaceAcceptsWrites } from "./spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote, spaceAcceptsWrites } from "./spaces";
 
 /** The same normalization as in `candidates.ts`. Different rules here would mean
  *  the same fact merges or splits depending on which path carried it into
@@ -206,7 +206,7 @@ async function migrateOne(docId: string): Promise<boolean> {
       log.info("vault: skipping a memory doc whose space was retired", { docId, spaceId });
       return false;
     }
-    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC, tx);
+    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY, tx);
 
     // Dedup against the space's existing heads — this covers both a repeat after a
     // partial failure and a match with a fact the user already stated themselves.

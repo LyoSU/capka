@@ -14,7 +14,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
  */
 import { pool } from "@/lib/db";
 import { createClaim } from "../claims";
-import { getOrCreateTopicNote, DEFAULT_TOPIC } from "../spaces";
+import { getOrCreateTopicNote, DEFAULT_TOPIC_KEY, TOPIC_LABELS } from "../spaces";
 import { proposeCandidate } from "../candidates";
 import { buildMemoryManifest } from "../manifest";
 
@@ -50,19 +50,20 @@ const cleanup = async () => {
  *  already covered by `candidates.integration.test.ts`) but the manifest's
  *  render over an already-settled state.
  *
- *  The default topic title comes from the real production constant
- *  (`DEFAULT_TOPIC`, exported by `spaces.ts` and imported by both
- *  `candidates.ts` and `migrate-memory-docs.ts`), not a re-typed literal —
- *  topics are looked up by title, so a copy of this string here would be a
- *  second key the moment the real one changes. It's asserted against
- *  verbatim below because that's what the real system would actually write.
+ *  The default topic comes from the real production constants (`DEFAULT_TOPIC_KEY`
+ *  for the identity and `TOPIC_LABELS` for what the model reads), exported by
+ *  `spaces.ts` and used by both `candidates.ts` and `migrate-memory-docs.ts`, not
+ *  re-typed literals — the key is what topics are looked up by, and a copy of it here
+ *  would be a second key the moment the real one changes. `opts.topic` is likewise a
+ *  KEY: an unlabelled one falls back to itself as the displayed title, which is what
+ *  a user-named topic (plan D2) will do.
  */
 const addFact = (
   spaceId: string,
   statement: string,
   opts: { sensitive?: boolean; reviewStatus?: "confirmed" | "unverified"; topic?: string } = {},
 ) =>
-  getOrCreateTopicNote(spaceId, opts.topic ?? DEFAULT_TOPIC).then((noteId) =>
+  getOrCreateTopicNote(spaceId, opts.topic ?? DEFAULT_TOPIC_KEY).then((noteId) =>
     createClaim(
       {
         spaceId,
@@ -119,7 +120,7 @@ run("vault: memory manifest", () => {
     await addFact(SPACE_A, "Likes coffee");
     await addFact(SPACE_A, "Lives in Odesa");
     await addFact(SPACE_A, "Works as a manager", { topic: "Work" });
-    // Must NOT count toward DEFAULT_TOPIC:
+    // Must NOT count toward the default topic:
     await addFact(SPACE_A, "Sensitive fact in the default topic", { sensitive: true });
     await addFact(SPACE_A, "Not yet confirmed", { reviewStatus: "unverified" });
 
@@ -128,7 +129,7 @@ run("vault: memory manifest", () => {
     // The count is rendered as a bare parenthesised number rather than
     // "N facts": the manifest is prompt scaffolding read by the model, and a
     // number needs no plural agreement in any language.
-    expect(manifest).toContain(`- ${DEFAULT_TOPIC} (2)`);
+    expect(manifest).toContain(`- ${TOPIC_LABELS[DEFAULT_TOPIC_KEY]} (2)`);
     expect(manifest).toContain("- Work (1)");
   });
 
@@ -169,7 +170,7 @@ run("vault: memory manifest", () => {
     // built for one line — a stored `\n## Rules\n…` would put its tail outside the
     // guillemets, on its own line, indistinguishable from the manifest's own structure
     // and injected on every turn of this scope.
-    const noteId = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC);
+    const noteId = await getOrCreateTopicNote(SPACE_A, DEFAULT_TOPIC_KEY);
     await q(
       `INSERT INTO vault_claims (id, space_id, statement, origin, review_status)
        VALUES ($1, $2, $3, '{"kind":"legacy_memory_doc"}'::jsonb, 'confirmed')`,

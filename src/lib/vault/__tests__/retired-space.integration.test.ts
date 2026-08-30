@@ -19,7 +19,7 @@ import { vaultClaims } from "@/lib/db/schema";
 import { createClaim, updateClaim, type Actor } from "../claims";
 import { proposeCandidate } from "../candidates";
 import { extractCandidates } from "../extract";
-import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote, retireProjectSpace } from "../spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote, retireProjectSpace } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 
@@ -263,7 +263,7 @@ run("vault: writes into a retired space", () => {
     // into a retired space without ever reaching the claim fence.
     const { projectSpaceId } = await spaces();
     await retireProjectSpace(PROJ);
-    await expect(getOrCreateTopicNote(projectSpaceId, DEFAULT_TOPIC)).rejects.toThrow(/retired/i);
+    await expect(getOrCreateTopicNote(projectSpaceId, DEFAULT_TOPIC_KEY)).rejects.toThrow(/retired/i);
     expect(await count("vault_notes", "space_id = $1", [projectSpaceId])).toBe(0);
   });
 

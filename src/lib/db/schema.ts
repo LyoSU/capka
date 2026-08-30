@@ -832,12 +832,23 @@ export const vaultNotes = pgTable("vault_notes", {
   title: text("title").notNull(),
   body: text("body").notNull().default(""),   // md; fact lists are a projection of note_claims, body does NOT duplicate them
   kind: text("kind", { enum: ["note", "memory_topic", "index"] }).notNull().default("note"),
+  // The topic's IDENTITY, and the reason it is not `title`. `getOrCreateTopicNote`
+  // used to resolve on the title, so the title was simultaneously a database key and a
+  // user-visible string — and renaming the default topic from one language to another
+  // FORKED every topic that existed, leaving two notes holding the same claims and the
+  // prompt manifest counting both. A value a translator may touch is never a key.
+  // Nullable because plain notes (`kind: "note"`, plan D2) have no key; the partial
+  // unique index below is what makes it required in practice for a memory topic, and
+  // `getOrCreateTopicNote` is the only writer of one.
+  topicKey: text("topic_key"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (t) => [
   index("idx_vnotes_space").on(t.spaceId),
-  // Title uniqueness applies ONLY to memory topics; plain notes are unconstrained.
-  uniqueIndex("uniq_vnotes_memory_topic").on(t.spaceId, t.title).where(sql`${t.kind} = 'memory_topic'`),
+  // Identity uniqueness applies ONLY to memory topics, and to the KEY. Two topics may
+  // legitimately end up showing the same title (a user-named one colliding with a
+  // built-in label); they may not share a key.
+  uniqueIndex("uniq_vnotes_memory_topic").on(t.spaceId, t.topicKey).where(sql`${t.kind} = 'memory_topic'`),
 ]);
 
 export const vaultClaims = pgTable("vault_claims", {

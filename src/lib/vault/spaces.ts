@@ -123,22 +123,37 @@ export async function spaceAcceptsWrites(spaceId: string, ex: Ex): Promise<boole
   return !!row;
 }
 
-/** The topic a fact lands in when nothing else chose one. A claim with NO topic
- *  never reaches the note projection, so for the UI it does not exist — every
- *  path into memory has to attach one, and they must all attach the SAME one.
- *  Lives here, beside the resolver, because topics are looked up by TITLE: two
- *  modules each holding their own copy of this string is two topics the moment
- *  one of them is edited.
+/** The topic a fact lands in when nothing else chose one — as a KEY, which is what
+ *  `vault_notes.topic_key` holds and what `getOrCreateTopicNote` resolves on.
  *
- *  Stable English, not localized: translating it at write time would give a user
- *  who switched language a second, empty topic. Showing it in the reader's
- *  language is a render-time concern, for the topic UI in plan D. */
-export const DEFAULT_TOPIC = "General";
+ *  This used to be `DEFAULT_TOPIC = "General"`, a string that was simultaneously the
+ *  database key and the text on screen. Renaming it from one language to the other
+ *  therefore forked every topic that already existed: the claims were re-attached under
+ *  a second note, both notes stayed, and `topicCounts` printed both to the model on
+ *  every turn — four facts asserted where two existed. Nine reviews read the constant
+ *  and saw nothing, because it looks correct in each of its two roles separately.
+ *
+ *  Lowercase, ASCII, and never shown to anyone: a key that could pass for a label is
+ *  how this comes back. */
+export const DEFAULT_TOPIC_KEY = "general";
 
-/** A memory topic is a note of kind `memory_topic`; the partial unique on
- *  (space, title) is scoped to that kind, so it is the same race and the same
- *  resolution as above. */
-export async function getOrCreateTopicNote(spaceId: string, title: string, ex: Ex = db): Promise<string> {
+/** What the AGENT sees a topic called, by key. English on purpose and separate from
+ *  `messages/*.json`: the manifest is prompt structure, not UI, and it must be
+ *  byte-identical across turns regardless of the reader's locale — a manifest that
+ *  changed language with a setting would break the prompt cache on every switch.
+ *  A key with no entry falls back to the stored title, which is what a user-named
+ *  topic (plan D2) will have. */
+export const TOPIC_LABELS: Record<string, string> = { [DEFAULT_TOPIC_KEY]: "General" };
+
+/** A memory topic is a note of kind `memory_topic`, identified by `topic_key`; the
+ *  partial unique index on (space, key) is scoped to that kind, so it is the same race
+ *  and the same resolution as `getOrCreateSpace`.
+ *
+ *  The stored `title` is a SEED for display, not the identity: it is written once, at
+ *  creation, from the label table, and nothing reads it to find a row. That is what
+ *  makes a rename control safe to build in plan D2 — it will write `title` and leave
+ *  `topic_key` alone. */
+export async function getOrCreateTopicNote(spaceId: string, topicKey: string, ex: Ex = db): Promise<string> {
   // The FOURTH entrance into a space, and it is reachable: `migrateMemoryDocs` opens
   // the topic note BEFORE its first claim, so a bullet-less legacy document migrating
   // during the window between teardown's two transactions would commit an empty topic
@@ -150,12 +165,19 @@ export async function getOrCreateTopicNote(spaceId: string, title: string, ex: E
   if (!(await spaceAcceptsWrites(spaceId, ex))) {
     throw new Error(`space ${spaceId} is retired; refusing to open a topic in it`);
   }
-  const where = and(eq(vaultNotes.spaceId, spaceId), eq(vaultNotes.title, title), eq(vaultNotes.kind, "memory_topic"));
+  const where = and(
+    eq(vaultNotes.spaceId, spaceId),
+    eq(vaultNotes.topicKey, topicKey),
+    eq(vaultNotes.kind, "memory_topic"),
+  );
   const found = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
   if (found[0]) return found[0].id;
-  await ex.insert(vaultNotes).values({ id: nanoid(), spaceId, title, kind: "memory_topic" }).onConflictDoNothing();
+  await ex
+    .insert(vaultNotes)
+    .values({ id: nanoid(), spaceId, topicKey, title: TOPIC_LABELS[topicKey] ?? topicKey, kind: "memory_topic" })
+    .onConflictDoNothing();
   const [row] = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
-  if (!row) throw new Error(`memory topic "${title}" vanished after insert`);
+  if (!row) throw new Error(`memory topic "${topicKey}" vanished after insert`);
   return row.id;
 }
 

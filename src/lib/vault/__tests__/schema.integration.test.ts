@@ -192,17 +192,27 @@ run("vault schema", () => {
     expect(await count("knowledge_fragments", "id = $1", [fragment])).toBe(0);
   });
 
-  it("two topics with one title in a space are impossible; two plain notes are not", async () => {
+  it("two topics with one KEY in a space are impossible; one title twice is not", async () => {
     const space = `${P}notes`;
     await mkSpace(space);
-    const note = (id: string, kind: string) =>
-      q(`INSERT INTO vault_notes (id, space_id, title, kind) VALUES ($1, $2, 'Work', $3)`, [id, space, kind]);
+    const note = (id: string, kind: string, topicKey: string | null, title = "Work") =>
+      q(`INSERT INTO vault_notes (id, space_id, title, kind, topic_key) VALUES ($1, $2, $3, $4, $5)`, [
+        id,
+        space,
+        title,
+        kind,
+        topicKey,
+      ]);
 
-    await note(`${space}-t1`, "memory_topic");
-    await expect(note(`${space}-t2`, "memory_topic")).rejects.toMatchObject({ code: UNIQUE_VIOLATION });
-    await note(`${space}-n1`, "note");
-    await note(`${space}-n2`, "note");
-    expect(await count("vault_notes", "space_id = $1", [space])).toBe(3);
+    await note(`${space}-t1`, "memory_topic", "work");
+    await expect(note(`${space}-t2`, "memory_topic", "work")).rejects.toMatchObject({ code: UNIQUE_VIOLATION });
+    // The point of moving the index off the title: two topics may legitimately end up
+    // SHOWING the same words (a user-named one colliding with a built-in label). What
+    // they may not share is the key. Under the old index this insert was the violation.
+    await note(`${space}-t3`, "memory_topic", "suppliers");
+    await note(`${space}-n1`, "note", null);
+    await note(`${space}-n2`, "note", null);
+    expect(await count("vault_notes", "space_id = $1", [space])).toBe(4);
   });
 
   it("two fragments sharing a (version, ordinal) are impossible", async () => {

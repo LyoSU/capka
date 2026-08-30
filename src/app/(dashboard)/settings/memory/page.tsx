@@ -1,59 +1,64 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow, SettingsSkeleton } from "@/components/settings/shell";
-import { parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
+import { MemoryReview } from "@/components/settings/memory-review";
+import { MemoryTopics } from "@/components/settings/memory-topics";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
+  SettingsEmpty,
+  SettingsError,
+  SettingsGroup,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+  SettingsSkeleton,
+} from "@/components/settings/shell";
+import { parseAgentProfile, type AgentProfile } from "@/lib/agents/profile";
+import type { ScopeView } from "@/lib/vault/memory-page";
 
-interface ProjectDoc {
-  id: string;
-  name: string;
-  content: string;
-}
+/**
+ * What the assistant remembers, as facts rather than as a document.
+ *
+ * This replaces a disabled monospace textarea holding one markdown string. That shape
+ * could not carry the three relations the vault already records — which topic a fact is
+ * filed under, which conversation it came from, and what it replaced — so the page threw
+ * all three away, and had nowhere at all to put the facts still waiting for the reader's
+ * decision. `readMemoryPage` assembles them server-side; this file is a renderer.
+ *
+ * Still absent, and by task rather than by oversight: the per-fact Delete (Task 2), the
+ * Keep/Discard control on a waiting fact (Task 8), the topic summary (Task 9), the
+ * sensitive-consent switch (Task 4) and "forget everything" (Task 13).
+ */
 
-/** What one scope remembers, read-only. Memory is now a set of facts with
- *  provenance rather than a document, so there is nothing here a textarea could
- *  honestly write back — the editor for it (topics, confirmations, conflicts) is a
- *  later change. The text stays visible and legible: hiding it while the new page is
- *  built would read as memory having been lost. */
-function DocView({ value }: { value: string }) {
-  const t = useTranslations("settings.memory");
+/** One scope's contents. The user's own memory is unheaded — it is what the page is
+ *  about — while a project's is a titled section, because "which project" is the thing
+ *  the reader needs to know before reading a single fact under it. */
+function Scope({ scope }: { scope: ScopeView }) {
+  const body = (
+    <>
+      <MemoryTopics topics={scope.topics} />
+      <MemoryReview pending={scope.pending} />
+    </>
+  );
+  if (scope.scope === "user") return <div className="space-y-10">{body}</div>;
   return (
-    <div className="space-y-2">
-      <Textarea
-        value={value}
-        readOnly
-        disabled
-        placeholder={t("placeholder")}
-        className="min-h-40 font-mono text-sm"
-      />
-      <p className="text-xs text-muted-foreground">{t("memoryMovedNotice")}</p>
-    </div>
+    <SettingsSection title={scope.projectName ?? ""}>
+      <div className="space-y-10">{body}</div>
+    </SettingsSection>
   );
 }
 
 export default function MemoryPage() {
   const t = useTranslations("settings.memory");
-  const [userDoc, setUserDoc] = useState("");
-  const [projectDocs, setProjectDocs] = useState<ProjectDoc[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [scopes, setScopes] = useState<ScopeView[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   // The user's own memory switch, plus the org ceiling that can override it. What is
-  // recorded below stays VISIBLE either way (it is read-only for everyone since the
-  // vault cutover): turning memory off leaves saved facts alone, merely unused, so
-  // hiding them would suggest they were lost.
+  // recorded below stays VISIBLE either way: turning memory off leaves saved facts
+  // alone, merely unused, so hiding them would suggest they were lost.
   // Held as a whole profile because that's what GET returns, but only the memory
   // bit is ever POSTed: the endpoint merges the patch over the stored row, so it —
   // not every caller — is what keeps the other fields from being reset by schema
@@ -98,12 +103,12 @@ export default function MemoryPage() {
   const load = useCallback(async () => {
     try {
       setError("");
-      const res = await fetch("/api/memory-docs");
+      const res = await fetch("/api/memory");
       if (!res.ok) throw new Error();
-      const data = await res.json();
-      setUserDoc(data.user ?? "");
-      setProjectDocs(data.projects ?? []);
+      const data: { scopes: ScopeView[] } = await res.json();
+      setScopes(data.scopes ?? []);
     } catch {
+      // A panel, not a toast: a page that failed to load has to keep saying so.
       setError(t("loadError"));
     } finally {
       setLoading(false);
@@ -114,20 +119,12 @@ export default function MemoryPage() {
     load();
   }, [load]);
 
-  const selected = projectDocs.find((p) => p.id === selectedProject) ?? null;
+  if (loading) return <SettingsSkeleton rows={1} />;
 
-  if (loading) {
-    return <SettingsSkeleton rows={1} />;
-  }
+  const nothingYet = !!scopes && scopes.every((s) => !s.topics.length && !s.pending.length);
 
   return (
     <SettingsPage title={t("title")} description={t("subtitle")}>
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-
       <SettingsGroup>
         <SettingsRow
           id="memory-enabled"
@@ -145,30 +142,12 @@ export default function MemoryPage() {
         />
       </SettingsGroup>
 
-      <SettingsSection title={t("userTitle")} description={t("userDesc")}>
-        <DocView value={userDoc} />
-      </SettingsSection>
-
-      {projectDocs.length > 0 && (
-        <SettingsSection title={t("projectTitle")} description={t("projectDesc")}>
-          <Select
-            value={selectedProject ?? ""}
-            onValueChange={(v) => setSelectedProject(v || null)}
-            items={projectDocs.map((p) => ({ value: p.id, label: p.name }))}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder={t("selectProject")} />
-            </SelectTrigger>
-            <SelectContent>
-              {projectDocs.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selected && <DocView key={selected.id} value={selected.content} />}
-        </SettingsSection>
+      {error ? (
+        <SettingsError message={error} />
+      ) : nothingYet ? (
+        <SettingsEmpty title={t("emptyTitle")} hint={t("emptyHint")} />
+      ) : (
+        scopes?.map((scope) => <Scope key={scope.projectId ?? "user"} scope={scope} />)
       )}
     </SettingsPage>
   );

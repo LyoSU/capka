@@ -18,7 +18,7 @@ import {
   type ClaimHead,
   type EvidenceInput,
 } from "./claims";
-import { DEFAULT_TOPIC, getOrCreateTopicNote, spaceAcceptsWrites, type Ex } from "./spaces";
+import { DEFAULT_TOPIC_KEY, getOrCreateTopicNote, spaceAcceptsWrites, type Ex } from "./spaces";
 
 export type Provenance = {
   kind: "user_direct" | "derived" | "tool" | "file" | "web" | "legacy_memory_doc";
@@ -313,7 +313,7 @@ export async function proposeCandidate(input: {
     };
 
     const activate = async (sp: Ex) => {
-      const noteId = input.topicNoteId ?? (await getOrCreateTopicNote(input.spaceId, DEFAULT_TOPIC, sp));
+      const noteId = input.topicNoteId ?? (await getOrCreateTopicNote(input.spaceId, DEFAULT_TOPIC_KEY, sp));
       const claim = await createClaim(
         {
           spaceId: input.spaceId,
@@ -569,7 +569,7 @@ export async function confirmCandidate(args: {
                     // The predecessor may have been in no topic at all (created
                     // outside this ledger, for instance) — the confirmed head would
                     // then land outside the note projection, invisible to the GET.
-                    topicNoteId: await getOrCreateTopicNote(cand.spaceId, DEFAULT_TOPIC, sp),
+                    topicNoteId: await getOrCreateTopicNote(cand.spaceId, DEFAULT_TOPIC_KEY, sp),
                   },
                   allowedSpaceIds,
                   actor,
@@ -581,7 +581,7 @@ export async function confirmCandidate(args: {
               return upd.id;
             }
 
-            const noteId = await getOrCreateTopicNote(cand.spaceId, DEFAULT_TOPIC, sp);
+            const noteId = await getOrCreateTopicNote(cand.spaceId, DEFAULT_TOPIC_KEY, sp);
             const claim = await createClaim(
               {
                 spaceId: cand.spaceId,
