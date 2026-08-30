@@ -16,7 +16,8 @@ export type StepCategory = "file" | "exec" | "search" | "browse" | "mcp" | "skil
 /** Symbolic icon name; the web maps it to a concrete lucide component. */
 export type StepIconKey =
   | "file-plus" | "file-pen" | "file-text" | "folder" | "search"
-  | "terminal" | "code" | "globe" | "wrench" | "sparkles" | "plug" | "sliders";
+  | "terminal" | "code" | "globe" | "wrench" | "sparkles" | "plug" | "sliders"
+  | "bookmark";
 
 /** A connected app behind an MCP tool — shown by brand, not a wrench. */
 export interface StepBrand {
@@ -264,6 +265,28 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
       return { iconKey: "code", label: t("ranPython"), activeLabel: t("runningPython"), category: "exec" };
     case "execute_node":
       return { iconKey: "code", label: t("ranJavaScript"), activeLabel: t("runningJavaScript"), category: "exec" };
+  }
+
+  // Before the heuristics below, because `memory_search` contains "search" and was
+  // being rendered as a web search, globe and all — the one step where the user's
+  // trust depends on knowing WHERE the agent looked. The memory tools are
+  // first-class now; they get their own name and their own icon.
+  switch (name) {
+    case "memory_search": {
+      const query = clip(args.query, 40);
+      return {
+        iconKey: "bookmark",
+        label: query ? t("searchedMemoryFor", { query }) : t("searchedMemory"),
+        activeLabel: t("searchingMemory"),
+        category: "search",
+      };
+    }
+    case "memory_propose":
+      return { iconKey: "bookmark", label: t("savedToMemory"), activeLabel: t("savingToMemory"), category: "other" };
+    case "memory_update":
+      return { iconKey: "bookmark", label: t("updatedMemory"), activeLabel: t("updatingMemory"), category: "other" };
+    case "memory_forget":
+      return { iconKey: "bookmark", label: t("removedFromMemory"), activeLabel: t("removingFromMemory"), category: "other" };
   }
 
   // The one object that stays INSIDE the sentence. Every other step puts the

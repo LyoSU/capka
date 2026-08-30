@@ -20,6 +20,7 @@ All notable changes to Capka are documented here. Format follows
 ### Fixed
 
 - Deleting a project now closes its memory for good: a post-turn fact extraction still running when the project is deleted no longer writes into the deleted project's memory (`spaces.retired_at`, migration 0056).
+- Memory tool calls read as memory in the chat timeline instead of "Searched the web" with a globe — `memory_search` was matching the web-search name heuristic.
 - A forked or cloned chat is named in the interface language — the "(copy)" suffix was hardcoded Ukrainian for everyone.
 - Inline citation pills actually render in the web chat — the markdown sanitizer strips the attribute the previous CSS styling targeted, so markers showed as plain blue numbers and a `[1, 9]` group read as "19".
 - A reply's [N] markers no longer resolve against a different message's sources (markdown processor cache collision on anonymous plugins).

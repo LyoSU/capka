@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import {
   FilePlus, FilePen, FileText, Folder, Search, Terminal, Code, Globe, Wrench,
-  Sparkles, Plug, SlidersHorizontal,
+  Sparkles, Plug, SlidersHorizontal, BookMarked,
 } from "lucide-react";
 import {
   describeStep as describeStepCore,
@@ -39,6 +39,7 @@ const ICONS: Record<StepIconKey, StepIcon> = {
   sparkles: Sparkles,
   plug: Plug,
   sliders: SlidersHorizontal,
+  bookmark: BookMarked,
 };
 
 /**
