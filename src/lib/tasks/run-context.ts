@@ -97,6 +97,29 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
   // a proposed fact against before it can activate without the user's confirmation.
   // An empty string is a fail-safe, not an error: provenance then reads `derived`
   // and the fact waits for confirmation instead of going in on the model's word.
+  //
+  // Computed ONCE, here, and handed to every consumer on the bundle — the memory
+  // tools and the runner's post-turn extraction both. The runner used to re-derive
+  // it from `modelMessages`, which is not the transcript: it carries the runner's
+  // OWN synthetic `role:"user"` messages (the effect-ledger recovery note), so on
+  // any continued turn the security predicate was verifying facts against a list of
+  // tool names and clamped tool arguments. `payload.uiMessages` is the only source
+  // that holds what a person actually typed.
+  //
+  // KNOWN, DOCUMENTED, NOT FIXED (Fable audit F7), and the trigger is here because
+  // this is the definition that would have to change. An approval/`ask` continuation
+  // arrives with `uiMessages: []` (see `src/lib/ask/authed.ts`, `src/lib/manage/authed.ts`)
+  // — the user's ANSWER rides `resumeMessages` and is not a chat message at all — so
+  // this reads "" on that half of the turn, and a fact the user states in the answer
+  // ("yes, and remember we pay in EUR") is `derived`: pending, invisible until plan D
+  // ships a review queue. Fail-safe, and now uniform (both consumers read the same
+  // empty string rather than one of them mining the wrong text), but it silently
+  // degrades the one case the design promises to auto-activate.
+  //
+  // Whoever makes the answer part of the turn's transcript — plan D's review surface,
+  // or any change that puts `resumeMessages` into `uiMessages` — must fold it in HERE,
+  // as one more source for this single value, and never by giving a second consumer
+  // its own derivation. That is precisely what F1 was.
   const userTurnText = (() => {
     const messages = payload.uiMessages ?? [];
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -386,8 +409,12 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
 
     // `userSpaceId`/`projectSpaceId` ride the bundle so the post-turn extraction in
     // the runner writes into the same spaces this prompt was built from, without
-    // resolving them a second time.
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId };
+    // resolving them a second time. `userTurnText` rides it for the stronger version
+    // of the same reason: it is the anchor `verifyDirectProvenance` checks a fact
+    // against, so a second derivation of it downstream is not a duplicate value but a
+    // second definition of who "the user" is — and the runner's own `modelMessages`
+    // has synthetic `role:"user"` entries in it that this text must never be.
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText };
   } catch (e) {
     await closeAll();
     throw e;

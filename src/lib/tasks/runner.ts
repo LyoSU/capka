@@ -1,5 +1,5 @@
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
-import type { ModelMessage, UserModelMessage, TextPart } from "ai";
+import type { ModelMessage, UserModelMessage } from "ai";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -362,7 +362,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
-    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId, userTurnText } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
     // Every locally-executed tool goes behind the write-ahead boundary, keyed by the
     // reply this turn is writing. Wrapped HERE and not in prepareRun because `msgId` is
@@ -2027,20 +2027,25 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // for the user — the agent's memory_propose tool is the deliberate path to the
     // same place. Gated on a clean completion (like the title): a cancelled/failed
     // turn shouldn't quietly spend tokens mining facts the user may have aborted.
-    const lastUserText = (() => {
-      const u = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
-      if (!u) return "";
-      if (typeof u.content === "string") return u.content;
-      return u.content
-        .filter((p): p is TextPart => p.type === "text")
-        .map((p) => p.text)
-        .join("\n");
-    })();
+    //
+    // What the user said this turn is `userTurnText`, taken off the bundle — the SAME
+    // value `memory_propose` is checked against, and deliberately not re-derived here.
+    // The old derivation read `modelMessages.findLast(role === "user")`, which is not
+    // the transcript: `carryEffectsIntoRestart` pushes the recovery note onto it as a
+    // user message and nothing takes it off again, so every turn that continued after a
+    // part-way failure asked "did the user write these words" about a list of tool names
+    // and clamped tool ARGUMENTS — text a fetched page can reach. Two derivations of one
+    // concept was the defect; one value with one source is the fix, so nothing here may
+    // reconstruct it a third time.
+    //
+    // Its emptiness has consequences beyond this call and they are all fail-safe: an
+    // approval/`ask` continuation carries `uiMessages: []`, so nothing is mined from
+    // that half of the turn rather than something being mined from the wrong text.
     // `userSpaceId` is absent exactly when memory is off, so it carries the same
     // gate the capability check does — but both are stated, because the space is
     // what the write actually needs and a widened capability must not silently
     // start writing into a space nobody resolved.
-    if (profile.capabilities.memory && userSpaceId && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && lastUserText.trim()) {
+    if (profile.capabilities.memory && userSpaceId && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && userTurnText.trim()) {
       // trackAux: keep the worker's shutdown drain waiting on this fire-and-forget
       // call so a deploy doesn't kill it mid-flight (lost spend / dropped facts).
       void trackAux(extractCandidates({
@@ -2049,7 +2054,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // The assistant row this turn is writing — the same id the snapshots use, so
         // every candidate's provenance points at the message it came from.
         messageId: msgId,
-        userText: lastUserText,
+        userText: userTurnText,
         assistantText: getFullText(),
         // The module knows nothing about providers or usage accounting; binding
         // model/provider and billing the spend to this turn's key is the call site's
@@ -2069,8 +2074,8 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // The slice-of-first-message placeholder set by /api/chat stays visible until
     // this lands, so the sidebar always shows *something* in the meantime.
     const isFirstTurn = !modelMessages.some((m) => m.role === "assistant");
-    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && isFirstTurn && lastUserText.trim()) {
-      void trackAux(generateChatTitle(model, provider, lastUserText, getFullText(), recordAuxUsage)
+    if (finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && isFirstTurn && userTurnText.trim()) {
+      void trackAux(generateChatTitle(model, provider, userTurnText, getFullText(), recordAuxUsage)
         .then(async (title) => {
           if (!title) return;
           await db.update(chats).set({ title: stripNul(title) }).where(eq(chats.id, chatId));
