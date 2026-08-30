@@ -61,6 +61,23 @@ describe("vault CAS", () => {
     expect(blobPath(sha)).toBe(expected);
   });
 
+  it("an EMPTY VAULT_CAS_DIR gives the same root as an unset one", () => {
+    // docker-compose sets `${VAULT_CAS_DIR:-}` — the empty string, not an absent
+    // variable — and `??` does not catch it. The root became "", so every blob path
+    // came out relative to the process cwd (`/app/ab/cd/<sha>`), outside the mounted
+    // `./data` that both the compose comment and .env.example promise. Latent in plan
+    // A, where nothing writes a blob; it would land silently on plan B's first one.
+    const sha = createHash("sha256").update(Buffer.from("root-resolution")).digest("hex");
+    delete process.env.VAULT_CAS_DIR;
+    const unset = blobPath(sha);
+    process.env.VAULT_CAS_DIR = "";
+    const empty = blobPath(sha);
+    process.env.VAULT_CAS_DIR = dir; // the other tests share this file's temp root
+
+    expect(empty).toBe(unset);
+    expect(path.isAbsolute(empty)).toBe(true);
+  });
+
   it("blobPath throws synchronously on an invalid key", () => {
     expect(() => blobPath("../etc/passwd")).toThrow();
     expect(() => blobPath("ABC")).toThrow();
