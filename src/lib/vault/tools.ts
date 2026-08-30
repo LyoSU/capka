@@ -458,15 +458,16 @@ export async function makeVaultMemoryTools(ctx: {
         // `memory_search` and the manifest withhold a sensitive claim's TEXT and hand
         // back only its `[id@revision]` address; and this gate requires the claim's own
         // words in the user's turn. So the user cannot learn the words, cannot say them,
-        // and the agent cannot forget the claim. Write-once, unreadable, undeletable.
+        // and the agent cannot forget the claim. Write-once, unreadable, and — until the
+        // memory page carried a delete of its own — undeletable.
         //
-        // Do NOT resolve this by loosening the gate. Accepting an address alone would
-        // reopen exactly the injection path H-1 closed — a fetched page naming an id and
-        // erasing memory on somebody else's word, with no undo. The dead end's cost is
-        // bounded (the claim is invisible, so it never reaches a prompt); the loosening's
-        // is not. The fix belongs to whichever interface FIRST shows sensitive claims to
-        // a human (plan D): that same screen must carry its own delete, where the human
-        // is the actor and no provenance check is needed to establish it.
+        // CLOSED, and not by loosening this gate. `DELETE /api/memory/claims/<id>`
+        // removes such a claim on a human's click: the actor is the person, established
+        // by their session rather than by their words, so there is nothing for a
+        // provenance check to verify and nothing for an injected page to imitate. The
+        // agent still cannot forget a sensitive claim, which is the property this gate
+        // exists to hold. Do NOT accept an address alone here: that would reopen exactly
+        // the injection path H-1 closed.
         const head = await findCurrentHead(claim_id, allowedSpaceIds);
         if (!head) return mismatch(null);
         if (!verifyDirectProvenance(head.statement, ctx.userTurnText)) return NOT_THE_USERS_WORDS.forget;

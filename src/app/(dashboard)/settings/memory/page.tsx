@@ -27,18 +27,26 @@ import type { ScopeView } from "@/lib/vault/memory-page";
  * all three away, and had nowhere at all to put the facts still waiting for the reader's
  * decision. `readMemoryPage` assembles them server-side; this file is a renderer.
  *
- * Still absent, and by task rather than by oversight: the per-fact Delete (Task 2), the
- * Keep/Discard control on a waiting fact (Task 8), the topic summary (Task 9), the
- * sensitive-consent switch (Task 4) and "forget everything" (Task 13).
+ * Still absent, and by task rather than by oversight: the Keep/Discard control on a
+ * waiting fact (Task 8), the topic summary (Task 9), the sensitive-consent switch
+ * (Task 4) and "forget everything" (Task 13).
+ *
+ * HOW A FACT GETS SAVED is stated on the page, and there is deliberately no "add fact"
+ * control to state it with. A hand-typed fact has no honest provenance, and provenance
+ * is the whole reason the vault exists — so the sentence IS the affordance. The live
+ * data is what made this worth a line: of 31 candidates, 30 arrived from the post-turn
+ * extraction (which files them as waiting, by design) and exactly one from a person
+ * saying "remember that…" out loud. The mechanism works; nothing on either surface said
+ * so, and the maintainer read that silence as a broken page.
  */
 
 /** One scope's contents. The user's own memory is unheaded — it is what the page is
  *  about — while a project's is a titled section, because "which project" is the thing
  *  the reader needs to know before reading a single fact under it. */
-function Scope({ scope }: { scope: ScopeView }) {
+function Scope({ scope, onChanged }: { scope: ScopeView; onChanged: () => void }) {
   const body = (
     <>
-      <MemoryTopics topics={scope.topics} />
+      <MemoryTopics topics={scope.topics} onChanged={onChanged} />
       <MemoryReview pending={scope.pending} />
     </>
   );
@@ -147,7 +155,14 @@ export default function MemoryPage() {
       ) : nothingYet ? (
         <SettingsEmpty title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
-        scopes?.map((scope) => <Scope key={scope.projectId ?? "user"} scope={scope} />)
+        <>
+          {/* Said once, above everything, rather than per section: it is the answer to
+              "what do I do here", and the reader asks that before they read a fact. */}
+          <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">{t("howToSave")}</p>
+          {scopes?.map((scope) => (
+            <Scope key={scope.projectId ?? "user"} scope={scope} onChanged={load} />
+          ))}
+        </>
       )}
     </SettingsPage>
   );

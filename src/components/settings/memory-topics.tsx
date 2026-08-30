@@ -2,7 +2,12 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import type { FactSource, FactView, TopicView } from "@/lib/vault/memory-page";
 
@@ -122,12 +127,94 @@ export function SensitiveStatement() {
 }
 
 /** One row. Tight on purpose: these are single sentences, and the difference between a
- *  fact and where it came from is carried by the type scale, not by padding. */
+ *  fact and where it came from is carried by the type scale, not by padding.
+ *
+ *  `group/fact` is named rather than anonymous because `MemoryReview` draws its rows with
+ *  this same component: an unnamed group would make a waiting row's hover reveal the
+ *  delete control of whichever fact row happened to nest above it. */
 export function FactRow({ children }: { children: React.ReactNode }) {
-  return <div className="px-4 py-2">{children}</div>;
+  return <div className="group/fact px-4 py-2">{children}</div>;
 }
 
-function Fact({ fact }: { fact: FactView }) {
+/**
+ * Delete one fact — the ONLY thing a person can do to a sensitive one.
+ *
+ * Sensitive claims are the reason this exists at all. Their text is withheld from the
+ * manifest, from `memory_search` and from the agent, so `memory_forget` cannot act on
+ * one: forgetting through the agent means naming the claim's own words, and the words
+ * are precisely what is hidden. A click sends an id and no text, so the same control
+ * serves both kinds without a branch.
+ *
+ * CONFIRMED, and the dialog is the smaller of two mistakes. These rows are one line tall
+ * and stacked on a hairline, so a bare one-click destroy sits a few pixels from the row
+ * above it with no undo behind it — and there is no undo to build, since `forgetClaim`
+ * ends a claim's chain. The dialog names nothing about the fact (not even a
+ * non-sensitive statement): one confirmation reads the same for every row, and quoting
+ * the text would give a sensitive row a second, emptier dialog of its own.
+ *
+ * VISIBILITY, deliberately not hover-only: hover-only is unreachable by keyboard and
+ * simply absent on touch. The control is always in the tab order, appears on focus, and
+ * is permanently visible where there is no hover to have (`pointer-coarse`).
+ */
+function DeleteFact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
+  const t = useTranslations("settings.memory");
+  const tc = useTranslations("common");
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const remove = async () => {
+    setConfirming(false);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/memory/claims/${encodeURIComponent(fact.id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      // Re-read rather than splice locally: deleting the last fact in a topic empties the
+      // topic, and the server is what decides whether the topic is still on the page.
+      onChanged();
+    } catch {
+      toast.error(t("deleteFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AlertDialog open={confirming} onOpenChange={setConfirming}>
+      <AlertDialogTrigger
+        render={
+          <button
+            type="button"
+            disabled={busy}
+            aria-label={t("deleteFact")}
+            className={cn(
+              "relative mt-0.5 -mr-1 flex size-7 shrink-0 items-center justify-center rounded-md",
+              // A 28px icon inside a 40px touch target — the row is denser than a finger.
+              "before:absolute before:-inset-1.5 before:content-['']",
+              "text-muted-foreground hover:bg-hover hover:text-destructive",
+              "opacity-0 transition-opacity motion-reduce:transition-none",
+              "focus:opacity-100 group-hover/fact:opacity-100 pointer-coarse:opacity-100 data-[popup-open]:opacity-100",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+          >
+            <Trash2 aria-hidden className="size-3.5" />
+          </button>
+        }
+      />
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("deleteFactConfirm")}</AlertDialogTitle>
+          <AlertDialogDescription>{t("deleteFactConfirmBody")}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{tc("cancel")}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={remove}>{t("deleteFact")}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
   const t = useTranslations("settings.memory");
   const locale = useLocale();
   const [open, setOpen] = useState(false);
@@ -135,31 +222,36 @@ function Fact({ fact }: { fact: FactView }) {
 
   return (
     <FactRow>
-      {fact.sensitive ? <SensitiveStatement /> : <p className="text-sm leading-snug">{fact.statement}</p>}
-      {/* No disclosure for a sensitive fact: its previous version is the same withheld
-          words one revision earlier, and the projection does not send them. */}
-      {!fact.sensitive && fact.previous && (
-        <>
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen((v) => !v)}
-            className="-mx-1 mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronRight
-              aria-hidden
-              className={cn("size-3 transition-transform motion-reduce:transition-none", open && "rotate-90")}
-            />
-            {t("showHistory")}
-          </button>
-          {open && (
-            <p id={panelId} className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-              {t("replaced", { statement: fact.previous.statement, date: formatDay(fact.previous.at, locale) })}
-            </p>
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          {fact.sensitive ? <SensitiveStatement /> : <p className="text-sm leading-snug">{fact.statement}</p>}
+          {/* No disclosure for a sensitive fact: its previous version is the same withheld
+              words one revision earlier, and the projection does not send them. */}
+          {!fact.sensitive && fact.previous && (
+            <>
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={panelId}
+                onClick={() => setOpen((v) => !v)}
+                className="-mx-1 mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronRight
+                  aria-hidden
+                  className={cn("size-3 transition-transform motion-reduce:transition-none", open && "rotate-90")}
+                />
+                {t("showHistory")}
+              </button>
+              {open && (
+                <p id={panelId} className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                  {t("replaced", { statement: fact.previous.statement, date: formatDay(fact.previous.at, locale) })}
+                </p>
+              )}
+            </>
           )}
-        </>
-      )}
+        </div>
+        <DeleteFact fact={fact} onChanged={onChanged} />
+      </div>
     </FactRow>
   );
 }
@@ -174,7 +266,7 @@ function Fact({ fact }: { fact: FactView }) {
  * amendment settled on a one-line summary (plan D1 Task 9) plus the date this task
  * renders.
  */
-export function MemoryTopics({ topics }: { topics: TopicView[] }) {
+export function MemoryTopics({ topics, onChanged }: { topics: TopicView[]; onChanged: () => void }) {
   const t = useTranslations("settings.memory");
   const locale = useLocale();
   const sourceText = useSourceText();
@@ -242,7 +334,7 @@ export function MemoryTopics({ topics }: { topics: TopicView[] }) {
               <div key={`${run.source}:${run.items[0].id}`} className="pb-1.5">
                 <SourceCaption>{run.source}</SourceCaption>
                 {run.items.map((fact) => (
-                  <Fact key={fact.id} fact={fact} />
+                  <Fact key={fact.id} fact={fact} onChanged={onChanged} />
                 ))}
               </div>
             ))}
