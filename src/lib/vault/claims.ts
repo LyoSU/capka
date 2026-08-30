@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
@@ -187,6 +187,12 @@ export async function updateClaim(
 
   const id = nanoid();
   const revision = prev.revision + 1;
+  // Sensitivity rises, never falls — the same rule `confirmClaim` enforces, for the
+  // same reason: a caller computing `head.sensitive || x` from a head it read earlier
+  // can hand back a stale `false`, and here it would be written onto the successor as
+  // a plain inheritance. `prev` comes out of the CAS statement's own RETURNING, under
+  // its row lock, so it is the freshest value there is.
+  const sensitive = prev.sensitive || (patch.sensitive ?? false);
   // The successor is a fresh row, not an UPDATE of the text: the predecessor
   // stays verbatim as it was recorded. The whole claim is copied, not just the
   // three fields in the patch — otherwise `kind` and the validity window would
@@ -205,7 +211,7 @@ export async function updateClaim(
     kind: prev.kind,
     origin: patch.origin ?? prev.origin,
     reviewStatus: patch.reviewStatus ?? prev.reviewStatus,
-    sensitive: patch.sensitive ?? prev.sensitive,
+    sensitive,
     validFrom: prev.validFrom,
     validTo: prev.validTo,
     revision,
@@ -238,7 +244,7 @@ export async function updateClaim(
       successor: id,
       revision,
       reviewStatus: patch.reviewStatus ?? prev.reviewStatus,
-      sensitive: patch.sensitive ?? prev.sensitive,
+      sensitive,
     },
   });
   return { ok: true, id, revision };
@@ -284,8 +290,13 @@ export async function forgetClaim(
  *  statement matched what is already recorded, the content did not change — only
  *  the fact that it is now confirmed did, and a new version would be empty.
  *
- *  Sensitivity only ever goes up (the caller passes `head.sensitive || ...`):
- *  clearing it here would expose something already marked closed.
+ *  Sensitivity only ever goes up, and the OR is done in SQL rather than left to the
+ *  caller's `head.sensitive || ...`: that expression is computed from a head read
+ *  earlier, so two confirmations of the same head — one sensitive, one not — let the
+ *  stale `false` land second and put a claim a human closed back into the manifest.
+ *  A blind update has no CAS to notice, so the rule has to be a property of the
+ *  write. Clearing sensitivity is deliberate work; it needs its own operation, and
+ *  there is no site for one today.
  *
  *  Lives in this module rather than the candidate ledger for the same reason as
  *  the rest: `vault_claims` is written only by whoever owns it. There is
@@ -294,7 +305,10 @@ export async function forgetClaim(
  *  signature has nothing to perform it with. It writes no event: the confirmation
  *  is recorded by `candidate.confirm`/`candidate.propose` on the ledger side. */
 export async function confirmClaim(claimId: string, sensitive: boolean, ex: Ex = db): Promise<void> {
-  await ex.update(vaultClaims).set({ reviewStatus: "confirmed", sensitive }).where(eq(vaultClaims.id, claimId));
+  await ex
+    .update(vaultClaims)
+    .set({ reviewStatus: "confirmed", sensitive: sql`${vaultClaims.sensitive} OR ${sensitive}` })
+    .where(eq(vaultClaims.id, claimId));
 }
 
 /** Attach an EXISTING head to a topic, without a new version: when the statement

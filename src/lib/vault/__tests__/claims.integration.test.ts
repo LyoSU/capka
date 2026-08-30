@@ -18,6 +18,7 @@ import {
   forgetClaim,
   attachEvidence,
   attachToTopic,
+  confirmClaim,
   listHeadClaims,
   headBySlot,
   findCurrentHead,
@@ -633,5 +634,41 @@ run("vault claims", () => {
     // The fixtures' three create events were committed before the transaction; not one
     // more should have been added inside it.
     expect(await count("audit_events", "space_id = $1", [SPACE_A])).toBe(3);
+  });
+
+  it("sensitivity only ever rises: a stale caller cannot clear it", async () => {
+    // Both writers take the flag from an argument, and a caller computes that
+    // argument from a head it read EARLIER. Two of them reading the same
+    // `sensitive=false` head, one confirming it sensitive and the other arriving
+    // second with its stale `false`, put a claim a human closed back into the
+    // manifest. The rule belongs to the write, not to every caller's memory of it.
+    const claim = await seed({ statement: "a fact that turns out to be sensitive" });
+    expect((await claimRow(claim.id)).sensitive).toBe(false);
+
+    await confirmClaim(claim.id, true);
+    expect((await claimRow(claim.id)).sensitive).toBe(true);
+
+    // The stale duplicate, arriving second with everything it read before.
+    await confirmClaim(claim.id, false);
+    expect((await claimRow(claim.id)).sensitive).toBe(true);
+    expect((await claimRow(claim.id)).review_status).toBe("confirmed");
+
+    // And the same through a supersede, where `sensitive` is otherwise inherited
+    // from the predecessor and a patch could simply overwrite it.
+    const upd = await updateClaim({
+      claimId: claim.id,
+      expectedRevision: 1,
+      patch: { statement: "reworded, and quietly no longer sensitive", sensitive: false },
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    if (!upd.ok) throw new Error("expected the supersede to win the CAS");
+    expect((await claimRow(upd.id)).sensitive).toBe(true);
+    // The event describes the successor, so it has to agree with the row.
+    const { rows } = await pool.query<{ payload: { sensitive: boolean } }>(
+      `SELECT payload FROM audit_events WHERE subject_id = $1 AND action = 'claim.supersede'`,
+      [claim.id],
+    );
+    expect(rows[0].payload.sensitive).toBe(true);
   });
 });
