@@ -345,41 +345,44 @@ export async function proposeCandidate(input: {
       return { state: "auto_active", claimId: claim.id, revision: claim.revision } as const;
     };
 
+    /** A head this proposal is not allowed to learn anything about.
+     *
+     *  FIXED (was Fable audit F5, and it would have gone live the moment plan D shipped a
+     *  confirm button). `merged` and `conflict` were an ORACLE over the heads
+     *  `memory_search` withholds: the withholding is query-independent on purpose, but a
+     *  non-sensitive proposal whose text normalized equal to a SENSITIVE head answered
+     *  "Already known", and one whose slot a sensitive head occupied answered "conflict" —
+     *  both distinguishable from "Saved.", so an agent could confirm a specific sensitive
+     *  statement or slot by proposing guesses.
+     *
+     *  So a sensitive head is NO head here: neither branch may name it. The proposal goes
+     *  to `pending` instead — not `auto_active`, because with a slot that insert raises
+     *  23505 against `uniq_vclaims_active_slot` and leaks the same bit through the error
+     *  path.
+     *
+     *  A SENSITIVE proposal is unaffected: it never reaches this code (the gate above
+     *  routes every sensitive proposal to pending already), so this predicate can read
+     *  `sensitive` off the head alone. */
+    const withheld = (head: ClaimHead) => head.sensitive;
+
     /** "Already known" means the words, and a value that does not contradict the
      *  head's. A candidate asserting a DIFFERENT value is a decision for a human, not
      *  something to absorb into an existing row; a candidate asserting none merges
-     *  exactly as it always did.
-     *
-     *  KNOWN, DOCUMENTED, NOT FIXED — and the trigger sits here, on the answer that
-     *  would leak, rather than in a plan document nobody re-reads (Fable audit F5,
-     *  the same shape as M-5).
-     *
-     *  These two replies are an ORACLE over the heads `memory_search` deliberately
-     *  withholds. That withholding is query-independent on purpose — a sensitive head
-     *  never matches, so only an aggregate count leaks — but a non-sensitive proposal
-     *  whose text normalizes equal to a SENSITIVE head answers `merged` ("Already
-     *  known"), and one whose `slot_key` a sensitive head occupies answers `conflict`.
-     *  Both are distinguishable from "Saved.", so an agent can confirm whether a
-     *  specific sensitive statement or slot is recorded by proposing it — exactly the
-     *  category confirmation `withheldNotice` is written to rule out.
-     *
-     *  Unreachable in plan A, by two accidents rather than by design: the probe must
-     *  clear `verifyDirectProvenance` (the words have to be in the user's own turn),
-     *  and the only sensitive heads plan A can produce come from the boot migration,
-     *  which sets no slots.
-     *
-     *  IT GOES LIVE WITH PLAN D'S CONFIRM BUTTON, WITH NO CODE CHANGE HERE — which is
-     *  why this is a comment on the branches and not a backlog line. Whoever ships a
-     *  human confirmation surface (or any other producer of sensitive heads with
-     *  slots) must fix it first: treat a sensitive head as NO head for a
-     *  non-sensitive proposal's dedup — a second head, or pending — never as
-     *  `merged`/`conflict`. */
+     *  exactly as it always did. */
     const same = (head: ClaimHead) =>
       norm(head.statement) === norm(statement) && valueAgrees(head.value, input.value);
 
+    /** The head this proposal met may not be named. Recorded for a human, who is the only
+     *  party allowed to see both sides. */
+    const withheldPending = async () => {
+      await tx.update(memoryCandidates).set({ policyState: "pending" }).where(eq(memoryCandidates.id, id));
+      await audit("pending", {});
+      return { state: "pending", candidateId: id } as const;
+    };
+
     if (slotKey) {
       const head = await headBySlot(input.spaceId, slotKey, tx);
-      if (head) return same(head) ? merged(head) : conflict(head.id);
+      if (head) return withheld(head) ? withheldPending() : same(head) ? merged(head) : conflict(head.id);
 
       let claim: { id: string; revision: number };
       try {
@@ -394,7 +397,7 @@ export async function proposeCandidate(input: {
         // superseded it. We neither invent a winner nor surface a pg error: the slot
         // is contested, so the candidate stays open for a human.
         if (!winner) return conflict(null);
-        return same(winner) ? merged(winner) : conflict(winner.id);
+        return withheld(winner) ? withheldPending() : same(winner) ? merged(winner) : conflict(winner.id);
       }
       return activated(claim);
     }
@@ -414,7 +417,7 @@ export async function proposeCandidate(input: {
     // The value is compared here too: the rule cannot depend on whether a slot
     // happens to be set, or the same pair of facts merges or conflicts by accident.
     const dup = heads.find((h) => norm(h.statement) === norm(statement));
-    if (dup) return same(dup) ? merged(dup) : conflict(dup.id);
+    if (dup) return withheld(dup) ? withheldPending() : same(dup) ? merged(dup) : conflict(dup.id);
     return activated(await activate(tx));
   });
 }
@@ -515,30 +518,40 @@ export async function confirmCandidate(args: {
                   (h) => norm(h.statement) === norm(cand.statement),
                 ) ?? null);
 
+            // The same rule propose holds, at the other entrance. Reached when a human
+            // confirms a non-sensitive candidate that happens to match a sensitive head:
+            // merging would confirm the sensitive head's contents to whoever wrote the
+            // candidate, and superseding it would replace a fact the human was never
+            // shown with one they were. Neither is theirs to do from this screen, so the
+            // candidate creates its OWN head and the sensitive one is left alone. With a
+            // slot that raises 23505 and re-reads, which is the honest outcome: the slot
+            // is genuinely contested.
+            const usable = head && !(head.sensitive && !cand.sensitive) ? head : null;
+
             // The value is compared too, for the same reason as in propose — but the
             // outcome differs: the human has already said yes to THIS candidate, so a
             // divergent value is a correction to apply, not a conflict to hand back.
             // It therefore falls through to the supersede below. A candidate with NO
             // value stays here, in the merge, and the head keeps the number it had:
             // superseding on absence would clear it under a `{ok:true}`.
-            if (head && norm(head.statement) === norm(cand.statement) && valueAgrees(head.value, cand.value)) {
-              for (const ev of evidence) await attachEvidence(head.id, ev, sp);
+            if (usable && norm(usable.statement) === norm(cand.statement) && valueAgrees(usable.value, cand.value)) {
+              for (const ev of evidence) await attachEvidence(usable.id, ev, sp);
               // This is the HUMAN's decision, so the head becomes confirmed —
               // otherwise `{ok:true}` would be returned for a fact the manifest will
               // never show.
-              await confirmClaim(head.id, head.sensitive || cand.sensitive, sp);
-              return head.id;
+              await confirmClaim(usable.id, usable.sensitive || cand.sensitive, sp);
+              return usable.id;
             }
 
             // Reached with a slot whose head says something else, and — since the
             // value joined the comparison above — also without one, when the words
             // match and the structured value does not. Both are a correction the human
             // approved, so both supersede.
-            if (head) {
+            if (usable) {
               const upd = await updateClaim(
                 {
-                  claimId: head.id,
-                  expectedRevision: head.revision,
+                  claimId: usable.id,
+                  expectedRevision: usable.revision,
                   patch: {
                     statement: cand.statement,
                     // `undefined` makes `updateClaim` INHERIT the predecessor's value;
@@ -565,7 +578,7 @@ export async function confirmCandidate(args: {
                     // something already closed.
                     origin,
                     reviewStatus: "confirmed",
-                    sensitive: head.sensitive || cand.sensitive,
+                    sensitive: usable.sensitive || cand.sensitive,
                     // The predecessor may have been in no topic at all (created
                     // outside this ledger, for instance) — the confirmed head would
                     // then land outside the note projection, invisible to the GET.
