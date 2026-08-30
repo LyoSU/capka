@@ -303,4 +303,24 @@ file with exit 0, which then read as evidence. The same night another session
 survived the mirror image of it only because stderr was *not* suppressed — it had
 `cd`'d out of the repo, and "not a git repository" is what stopped five silent
 zeros from becoming findings.
+
+One more mechanism, and it is neither a wrong number nor a short one: **the proxy
+can hand back a DIFFERENT ARTIFACT than the one you asked for.** It silently
+swapped vitest to a JSON reporter for a single 11-file invocation and returned a
+well-formed 97-byte `PASS (0) FAIL (0)`. Nothing about that is malformed — it is
+simply a summary of a reporter that emitted no summary, and zero-and-zero is the
+reading you get from a green run and from a run that never started. The control
+that caught it was cross-checking the total against per-file counts. Truncation
+announces itself in a tail marker; a substituted reporter does not, so the
+question to ask of bulk tooling output is not only "is this complete" but "is
+this the KIND of thing I asked for".
+
+And one environment fact that arrives disguised as a test result: **`.env`'s
+`POSTGRES_PASSWORD` no longer authenticates** against the running Postgres
+(volume drift — the role's password lives in the volume, not in `.env`). Read the
+live `DATABASE_URL` out of `unclaw-platform-1`'s own environment. The reason it
+belongs in this section rather than a setup note is the symptom: a wrong password
+surfaces as *"7 skipped tests in a failed suite"*, which reads exactly like an
+unset `RUN_INTEGRATION` gate. Two different causes, one reading — so a skip count
+tells you a precondition collapsed, never WHICH one.
 <!-- END:shared-worktree-rules -->
