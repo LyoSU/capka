@@ -926,6 +926,16 @@ export const vaultNotes = pgTable("vault_notes", {
   topicKey: text("topic_key"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  /** Retention horizon, armed at insert by the note writer; null = no horizon. Nothing arms
+   *  it in slice 1 — see `vaultClaims.expiresAt` for why the arming and the retire job have
+   *  to ship together. */
+  expiresAt: timestamp("expires_at"),
+  /** Horizon passed, or the owner hid it. `liveNoteForModel` reads it; the note survives. */
+  retiredAt: timestamp("retired_at"),
+  /** Written INSIDE the mints, never by a caller — the same rule as `vaultClaims.lastUsedAt`.
+   *  It sits on the note identity rather than a revision: fragmenting "when was this read"
+   *  across a note's history answers a different question than the one retention asks. */
+  lastUsedAt: timestamp("last_used_at"),
 }, (t) => [
   index("idx_vnotes_space").on(t.spaceId),
   // Identity uniqueness applies ONLY to memory topics, and to the KEY. Two topics may

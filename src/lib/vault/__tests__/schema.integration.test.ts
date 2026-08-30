@@ -517,4 +517,20 @@ run("vault schema", () => {
       // disagrees with itself would redden this control rather than its own test.
     });
   });
+
+  it("vault_notes carries the three retention columns, on the identity not the version", async () => {
+    // Retention is a property of THE NOTE, not of a revision: a new revision must not
+    // silently reset or inherit a horizon, and `last_used_at` on a version would fragment
+    // "when was this note last read" across its history.
+    const cols = await q(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'vault_notes' AND column_name IN ('expires_at','retired_at','last_used_at')
+       ORDER BY column_name`,
+    );
+    expect(cols.rows.map((r: { column_name: string }) => r.column_name)).toEqual([
+      "expires_at",
+      "last_used_at",
+      "retired_at",
+    ]);
+  });
 });
