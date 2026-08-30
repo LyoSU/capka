@@ -71,17 +71,23 @@ const addFact = (
   opts: { sensitive?: boolean; reviewStatus?: "confirmed" | "unverified"; topic?: string } = {},
 ) =>
   getOrCreateTopicNote(spaceId, opts.topic ?? DEFAULT_TOPIC_KEY).then((noteId) => {
+    const confirmed = (opts.reviewStatus ?? "confirmed") === "confirmed";
     const input = {
       spaceId,
       statement,
       origin: { kind: "legacy_memory_doc" },
       sensitive: opts.sensitive ?? false,
       topicNoteId: noteId,
+      // The class FOLLOWS the review status, so one fixture row cannot assert two
+      // contradictory things: a confirmed legacy head has to stay manifest-visible or
+      // the clamp tests stop testing the clamp, and an unverified one is exactly what
+      // the boot migration maps to `agent_inferred`.
+      sourceClass: confirmed ? ("legacy_confirmed" as const) : ("agent_inferred" as const),
     };
     // Confirming is a SECOND write now, and the fixture makes it one: `createClaim`
     // cannot declare its own output approved, so an unverified fact is simply a claim
     // nobody confirmed. See `fixtures.ts`.
-    return (opts.reviewStatus ?? "confirmed") === "confirmed"
+    return confirmed
       ? seedConfirmedClaim(input, { kind: "user", id: OWNER })
       : createClaim(input, { kind: "system" });
   });

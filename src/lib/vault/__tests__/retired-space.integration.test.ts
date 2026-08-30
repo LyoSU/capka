@@ -203,7 +203,7 @@ run("vault: writes into a retired space", () => {
       async (ready, release) => {
         await db.transaction(async (tx) => {
           await createClaim(
-            { spaceId: projectSpaceId, statement: "the deposit is 30 percent", origin: {} },
+            { spaceId: projectSpaceId, statement: "the deposit is 30 percent", origin: {}, sourceClass: "owner_authored" },
             actor,
             tx,
           );
@@ -305,6 +305,7 @@ run("vault: writes into a retired space", () => {
           spaceId: projectSpaceId,
           statement: "the office moves in March",
           origin: { kind: "user_direct" },
+          sourceClass: "owner_authored",
         },
         actor,
       ),
@@ -331,6 +332,7 @@ run("vault: writes into a retired space", () => {
         claimId,
         expectedRevision: 1,
         patch: { statement: "a corrected fact" },
+        sourceClass: "owner_authored",
         allowedSpaceIds: [projectSpaceId],
         actor,
       }),
@@ -418,13 +420,14 @@ run("vault: writes into a retired space", () => {
     expect(proposed.state).toBe("pending");
 
     const created = await createClaim(
-      { spaceId: userSpaceId, statement: "works in procurement", origin: {} },
+      { spaceId: userSpaceId, statement: "works in procurement", origin: {}, sourceClass: "owner_authored" },
       actor,
     );
     const updated = await updateClaim({
       claimId: created.id,
       expectedRevision: created.revision,
       patch: { statement: "works in procurement, Kyiv office" },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [userSpaceId],
       actor,
     });
@@ -477,7 +480,7 @@ run("vault: writes into a retired space", () => {
     const { projectSpaceId } = await spaces();
     const topic = await getOrCreateTopicNote(projectSpaceId, DEFAULT_TOPIC_KEY);
     const c = await createClaim(
-      { spaceId: projectSpaceId, statement: "project fact", origin: { kind: "test" }, topicNoteId: topic },
+      { spaceId: projectSpaceId, statement: "project fact", origin: { kind: "test" }, topicNoteId: topic, sourceClass: "owner_authored" },
       actor,
     );
     const src = `${P}retire-src`;
@@ -518,7 +521,7 @@ run("vault: writes into a retired space", () => {
     const { projectSpaceId } = await spaces();
     const topic = await getOrCreateTopicNote(projectSpaceId, DEFAULT_TOPIC_KEY);
     const c = await createClaim(
-      { spaceId: projectSpaceId, statement: "the lease renews in April", origin: { kind: "test" }, topicNoteId: topic },
+      { spaceId: projectSpaceId, statement: "the lease renews in April", origin: { kind: "test" }, topicNoteId: topic, sourceClass: "owner_authored" },
       actor,
     );
     await q(

@@ -69,15 +69,15 @@ run("vault: the model-facing projection", () => {
   it("excludes an unverified claim, and that is the whole authority cutover", async () => {
     // `createClaim` cannot produce anything else now, so this is what every new claim
     // looks like until a person confirms it.
-    await createClaim({ spaceId: SPACE_A, statement: "read off a web page", origin: { kind: "web" } }, ACTOR);
-    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "the control fact", origin: {} }, ACTOR);
+    await createClaim({ spaceId: SPACE_A, statement: "read off a web page", origin: { kind: "web" }, sourceClass: "agent_inferred" }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "the control fact", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
 
     expect(await texts(SPACE_A)).toEqual(["the control fact"]);
   });
 
   it("excludes a sensitive claim, and counts it separately", async () => {
-    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "attends a support group", sensitive: true, origin: {} }, ACTOR);
-    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "the control fact", origin: {} }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "attends a support group", sensitive: true, origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "the control fact", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
 
     expect(await texts(SPACE_A)).toEqual(["the control fact"]);
     // An aggregate, computed independently of any query — see `countWithheld`.
@@ -87,16 +87,17 @@ run("vault: the model-facing projection", () => {
   it("does not count an UNVERIFIED sensitive claim as withheld", async () => {
     // Announcing a quarantined record tells the model something exists that the
     // quarantine says it may not know about. The count is over confirmed rows only.
-    await createClaim({ spaceId: SPACE_A, statement: "ships under an embargo", sensitive: true, origin: {} }, ACTOR);
+    await createClaim({ spaceId: SPACE_A, statement: "ships under an embargo", sensitive: true, origin: {}, sourceClass: "agent_inferred" }, ACTOR);
     expect(await countWithheld(SPACE_A)).toBe(0);
   });
 
   it("a supersede carries NO approval across: the predecessor leaves, the successor waits", async () => {
-    const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "works in Kyiv", origin: {} }, ACTOR);
+    const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "works in Kyiv", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
     const upd = await updateClaim({
       claimId: head.id,
       expectedRevision: 1,
       patch: { statement: "works in Lviv" },
+      sourceClass: "legacy_confirmed",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -117,13 +118,13 @@ run("vault: the model-facing projection", () => {
   });
 
   it("excludes a forgotten chain entirely", async () => {
-    const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "an old fact", origin: {} }, ACTOR);
+    const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "an old fact", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
     await forgetClaim({ claimId: head.id, expectedRevision: 1, allowedSpaceIds: [SPACE_A], actor: ACTOR });
     expect(await texts(SPACE_A)).toEqual([]);
   });
 
   it("never crosses a space boundary", async () => {
-    await seedConfirmedClaim({ spaceId: SPACE_B, statement: "another space's business", origin: {} }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_B, statement: "another space's business", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
     expect(await texts(SPACE_A)).toEqual([]);
     expect(await countWithheld(SPACE_A)).toBe(0);
   });
@@ -156,7 +157,7 @@ run("vault: the model-facing projection", () => {
               ($2, $3, 'a same instant', '{}'::jsonb, 'confirmed', '2020-01-01', 'legacy_confirmed')`,
       [`${P}claim-b`, `${P}claim-a`, SPACE_A],
     );
-    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "newest", origin: {} }, ACTOR);
+    await seedConfirmedClaim({ spaceId: SPACE_A, statement: "newest", origin: {}, sourceClass: "legacy_confirmed" }, ACTOR);
 
     expect(await texts(SPACE_A)).toEqual(["newest", "a same instant", "b same instant"]);
     expect(await texts(SPACE_A)).toEqual(await texts(SPACE_A));

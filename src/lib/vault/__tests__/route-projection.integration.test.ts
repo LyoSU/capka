@@ -71,11 +71,21 @@ const mkClaim = async (
   reviewStatus: "confirmed" | "unverified" = "confirmed",
 ) => {
   const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-  const input = { spaceId, statement, origin: { kind: "user_direct" }, topicNoteId: noteId };
+  const confirmed = reviewStatus === "confirmed";
+  const input = {
+    spaceId,
+    statement,
+    origin: { kind: "user_direct" },
+    topicNoteId: noteId,
+    // Follows the review status for the same reason the parameter exists: the
+    // quarantine is what this file observes, so an unverified fixture must not also
+    // claim a manifest-grade class.
+    sourceClass: confirmed ? ("owner_authored" as const) : ("agent_inferred" as const),
+  };
   // Confirming is a separate write since the cutover: `createClaim` produces an
   // unverified claim and nothing else can. An "unverified" fixture is therefore simply
   // one nobody confirmed.
-  if (reviewStatus === "confirmed") await seedConfirmedClaim(input, { kind: "user", id: OWNER });
+  if (confirmed) await seedConfirmedClaim(input, { kind: "user", id: OWNER });
   else await createClaim(input, { kind: "system" });
 };
 
@@ -85,7 +95,8 @@ const mkClaim = async (
 const mkSensitiveClaim = async (spaceId: string, statement: string) => {
   const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
   await seedConfirmedClaim(
-    { spaceId, statement, origin: { kind: "user_direct" }, sensitive: true, topicNoteId: noteId },
+    { spaceId, statement, origin: { kind: "user_direct" }, sensitive: true, topicNoteId: noteId,
+      sourceClass: "owner_authored" },
     { kind: "user", id: OWNER },
   );
 };

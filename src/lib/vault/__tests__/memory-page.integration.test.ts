@@ -51,7 +51,7 @@ const seedFact = async (
   const spaceId = await getOrCreateSpace({ type: "user", refId: owner });
   const noteId = await getOrCreateTopicNote(spaceId, opts.topicKey ?? DEFAULT_TOPIC_KEY);
   const claim = await seedConfirmedClaim(
-    { spaceId, statement, origin: { kind: "user_direct" }, sensitive: opts.sensitive, topicNoteId: noteId },
+    { spaceId, statement, origin: { kind: "user_direct" }, sensitive: opts.sensitive, topicNoteId: noteId, sourceClass: "owner_authored" },
     { kind: "user", id: owner },
   );
   return { spaceId, noteId, claim };
@@ -68,7 +68,7 @@ const seedSupersede = async (
   patch: { statement: string; sensitive?: boolean },
 ) => {
   const actor = { kind: "user", id: OWNER } as const;
-  const upd = await updateClaim({ claimId, expectedRevision: 1, patch, allowedSpaceIds: [spaceId], actor });
+  const upd = await updateClaim({ claimId, expectedRevision: 1, patch, sourceClass: "owner_authored", allowedSpaceIds: [spaceId], actor });
   if (!upd.ok) throw new Error("fixture: the supersede lost its CAS");
   if (!(await confirmClaim(upd.id, patch.sensitive ?? false, actor))) {
     throw new Error(`fixture: successor ${upd.id} was not confirmable`);
@@ -108,7 +108,7 @@ run("vault: memory page projection", () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
     await seedConfirmedClaim(
-      { spaceId, statement: "Carried across", origin: { kind: "legacy_memory_doc" }, topicNoteId: noteId },
+      { spaceId, statement: "Carried across", origin: { kind: "legacy_memory_doc" }, topicNoteId: noteId, sourceClass: "legacy_confirmed" },
       { kind: "system" },
     );
     expect((await readMemoryPage(OWNER)).scopes[0].facts[0].source).toEqual({ kind: "legacy" });
@@ -192,7 +192,7 @@ run("vault: memory page projection", () => {
     // there is no field that could ask for anything else, and `confirmClaim` is not
     // called. That is the quarantine this assertion is about.
     await createClaim(
-      { spaceId, statement: "Read off a web page", origin: { kind: "web" }, topicNoteId: noteId },
+      { spaceId, statement: "Read off a web page", origin: { kind: "web" }, topicNoteId: noteId, sourceClass: "agent_inferred" },
       { kind: "agent" },
     );
     expect((await readMemoryPage(OWNER)).scopes[0].facts).toHaveLength(0);
@@ -228,7 +228,7 @@ run("vault: memory page projection", () => {
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
     await seedConfirmedClaim(
       { spaceId, statement: "Works as a technical lead", slotKey: "person/role",
-        origin: { kind: "user_direct" }, topicNoteId: noteId },
+        origin: { kind: "user_direct" }, topicNoteId: noteId, sourceClass: "owner_authored" },
       { kind: "user", id: OWNER },
     );
     const head = (await readMemoryPage(OWNER)).scopes[0].facts[0];
@@ -261,7 +261,7 @@ run("vault: memory page projection", () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
     const head = await seedConfirmedClaim(
-      { spaceId, statement: "The client pays in hryvnia", origin: { kind: "user_direct" }, topicNoteId: noteId },
+      { spaceId, statement: "The client pays in hryvnia", origin: { kind: "user_direct" }, topicNoteId: noteId, sourceClass: "owner_authored" },
       { kind: "user", id: OWNER },
     );
     const res = await proposeCandidate({
@@ -286,7 +286,7 @@ run("vault: memory page projection", () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
     const quarantined = await createClaim(
-      { spaceId, statement: "Read off a web page and never verified", origin: { kind: "web" }, topicNoteId: noteId },
+      { spaceId, statement: "Read off a web page and never verified", origin: { kind: "web" }, topicNoteId: noteId, sourceClass: "agent_inferred" },
       { kind: "agent" },
     );
     await proposeCandidate({
@@ -332,7 +332,7 @@ run("vault: memory page projection", () => {
     ]);
     const noteId = await getOrCreateTopicNote(`${P}space-drift`, DEFAULT_TOPIC_KEY);
     await seedConfirmedClaim(
-      { spaceId: `${P}space-drift`, statement: "Belongs to the other account", origin: { kind: "user_direct" },
+      { spaceId: `${P}space-drift`, statement: "Belongs to the other account", origin: { kind: "user_direct" }, sourceClass: "owner_authored",
         topicNoteId: noteId },
       { kind: "user", id: STRANGER },
     );
@@ -388,7 +388,7 @@ run("vault: memory page projection", () => {
     // click at all.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedConfirmedClaim(
-      { spaceId, statement: "Filed under nothing", origin: { kind: "user_direct" } },
+      { spaceId, statement: "Filed under nothing", origin: { kind: "user_direct" }, sourceClass: "owner_authored" },
       { kind: "user", id: OWNER },
     );
     expect(await factTexts()).toEqual(["Filed under nothing"]);

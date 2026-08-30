@@ -677,6 +677,12 @@ export async function confirmCandidate(args: {
                     // then land outside the note projection, invisible to the GET.
                     topicNoteId: await getOrCreateTopicNote(cand.spaceId, DEFAULT_TOPIC_KEY, sp),
                   },
+                  // The person clicked Keep on their own memory page — `confirmCandidate`'s
+                  // only caller is that route — so the words are the owner's, whether they
+                  // came from the candidate or from their own edit of it. Not
+                  // `agent_inferred`: the class is what the SERVER can prove about the
+                  // writer, and here it can prove an authenticated owner acted.
+                  sourceClass: "owner_authored" as const,
                   allowedSpaceIds,
                   actor,
                 },
@@ -710,6 +716,7 @@ export async function confirmCandidate(args: {
                 origin,
                 sensitive: cand.sensitive,
                 topicNoteId: noteId,
+                sourceClass: "owner_authored" as const,
               },
               actor,
               sp,

@@ -417,7 +417,7 @@ run("vault: memory_docs migration", () => {
     // already kept must not come back as a question.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await seedConfirmedClaim(
-      { spaceId, statement: "Likes   tea", origin: { kind: "legacy_memory_doc" } },
+      { spaceId, statement: "Likes   tea", origin: { kind: "legacy_memory_doc" }, sourceClass: "agent_inferred" },
       { kind: "user", id: OWNER },
     );
     await mkDoc(`${P}d6`, "- likes tea\n- something new");

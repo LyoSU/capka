@@ -122,6 +122,8 @@ const seed = (over: Partial<Parameters<typeof createClaim>[0]> = {}) =>
       spaceId: SPACE_A,
       statement: "the initial fact",
       origin: { type: "chat" },
+      // Before the spread, so a test that is ABOUT the class can still override it.
+      sourceClass: "owner_authored" as const,
       ...over,
     },
     ACTOR,
@@ -210,6 +212,7 @@ run("vault claims", () => {
         claimId: id,
         expectedRevision: 1,
         patch: { statement: "still ours", topicNoteId: NOTE_B },
+        sourceClass: "owner_authored",
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       }),
@@ -242,6 +245,7 @@ run("vault claims", () => {
       claimId: oldId,
       expectedRevision: 1,
       patch: { statement: "Works in Lviv", value: { city: "Lviv" } },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -299,6 +303,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 1,
       patch: { origin: { type: "correction" } },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -332,6 +337,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 1,
       patch: { value: { days: 60 } },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -346,6 +352,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 7,
       patch: { statement: "must not happen" },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -371,6 +378,7 @@ run("vault claims", () => {
         claimId: id,
         expectedRevision: 1,
         patch: { statement },
+        sourceClass: "owner_authored",
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       });
@@ -400,6 +408,7 @@ run("vault claims", () => {
         claimId: id,
         expectedRevision: 1,
         patch: { statement: "updated" },
+        sourceClass: "owner_authored",
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       }),
@@ -425,7 +434,7 @@ run("vault claims", () => {
   it("authz: another space yields {ok:false, current:null} with no text leak", async () => {
     const secret = "a secret from another space";
     const foreign = await createClaim(
-      { spaceId: SPACE_B, statement: secret, slotKey: "secret", origin: {} },
+      { spaceId: SPACE_B, statement: secret, slotKey: "secret", origin: {}, sourceClass: "owner_authored" },
       ACTOR,
     );
 
@@ -433,6 +442,7 @@ run("vault claims", () => {
       claimId: foreign.id,
       expectedRevision: 1,
       patch: { statement: "an attempt" },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -484,6 +494,7 @@ run("vault claims", () => {
             claimId: id,
             expectedRevision: 1,
             patch: { statement: "after the failure" },
+            sourceClass: "owner_authored",
             allowedSpaceIds: [SPACE_A],
             actor: ACTOR,
           },
@@ -506,6 +517,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 1,
       patch: { statement: "after the rollback" },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -521,6 +533,7 @@ run("vault claims", () => {
         claimId: cur.id,
         expectedRevision: cur.revision,
         patch: { statement: `version ${i}` },
+        sourceClass: "owner_authored",
         allowedSpaceIds: [SPACE_A],
         actor: ACTOR,
       });
@@ -586,6 +599,7 @@ run("vault claims", () => {
       claimId: id,
       expectedRevision: 1,
       patch: { statement: "resurrection" },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -604,6 +618,7 @@ run("vault claims", () => {
       claimId: c2.id,
       expectedRevision: 1,
       patch: { statement: "second, version 2" },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -666,6 +681,7 @@ run("vault claims", () => {
             slotKey: "ex-created",
             origin: {},
             topicNoteId: NOTE_A,
+            sourceClass: "owner_authored",
           },
           ACTOR,
           tx,
@@ -679,6 +695,7 @@ run("vault claims", () => {
             claimId: upd.id,
             expectedRevision: 1,
             patch: { statement: "updated inside the transaction" },
+            sourceClass: "owner_authored",
             allowedSpaceIds: [SPACE_A],
             actor: ACTOR,
           },
@@ -740,6 +757,7 @@ run("vault claims", () => {
       claimId: plain.id,
       expectedRevision: plain.revision,
       patch: { statement: `the deploy key is now ${secret}` },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -797,6 +815,7 @@ run("vault claims", () => {
       claimId: plain.id,
       expectedRevision: plain.revision,
       patch,
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -818,6 +837,7 @@ run("vault claims", () => {
       claimId: plain.id,
       expectedRevision: plain.revision,
       patch: { statement: "the deploy key is rotated twice a year" },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -857,6 +877,7 @@ run("vault claims", () => {
       claimId: claim.id,
       expectedRevision: 1,
       patch: { statement: "reworded, and quietly no longer sensitive", sensitive: false },
+      sourceClass: "owner_authored",
       allowedSpaceIds: [SPACE_A],
       actor: ACTOR,
     });
@@ -868,5 +889,80 @@ run("vault claims", () => {
       [claim.id],
     );
     expect(rows[0].payload.sensitive).toBe(true);
+  });
+
+  it("stores the class the caller stated, on a create", async () => {
+    const c = await createClaim(
+      { spaceId: SPACE_A, statement: "stated class", origin: { kind: "test" }, sourceClass: "agent_inferred" },
+      ACTOR,
+    );
+    const r = await q(`SELECT source_class, prompt_access FROM vault_claims WHERE id = $1`, [c.id]);
+    expect(r.rows[0]).toMatchObject({ source_class: "agent_inferred", prompt_access: "memory_search" });
+  });
+
+  it("stores the REPLACEMENT's class on a supersede, never the predecessor's", async () => {
+    // The docstring says fields not listed are inherited from the predecessor, so with
+    // NOT NULL and no default the likely implementer choice is inheritance — and an
+    // agent-driven supersede would then carry legacy_confirmed/manifest across text the
+    // agent wrote. That is the authority-laundering bound defeated by a default nobody
+    // chose, which is why sourceClass sits OUTSIDE `patch`.
+    const c = await createClaim(
+      { spaceId: SPACE_A, statement: "before", origin: { kind: "test" }, sourceClass: "owner_authored" },
+      ACTOR,
+    );
+    const upd = await updateClaim({
+      claimId: c.id,
+      expectedRevision: c.revision,
+      patch: { statement: "after" },
+      sourceClass: "agent_inferred",
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    expect(upd.ok).toBe(true);
+    if (!upd.ok) return;
+    const rows = await q(`SELECT id, source_class, prompt_access FROM vault_claims WHERE id = ANY($1)`, [
+      [c.id, upd.id],
+    ]);
+    const by = Object.fromEntries(rows.rows.map((r: { id: string }) => [r.id, r]));
+    expect(by[c.id]).toMatchObject({ source_class: "owner_authored" });
+    expect(by[upd.id]).toMatchObject({ source_class: "agent_inferred", prompt_access: "memory_search" });
+  });
+
+  it("writes a normalized_hash on both inserts, folded the way norm folds", async () => {
+    const a = await createClaim(
+      { spaceId: SPACE_A, statement: "  Reports  go OUT on Fridays ", value: { day: "fri" },
+        origin: { kind: "test" }, sourceClass: "user_direct" },
+      ACTOR,
+    );
+    const b = await createClaim(
+      { spaceId: SPACE_A, statement: "reports go out on fridays", value: { day: "fri" },
+        origin: { kind: "test" }, sourceClass: "user_direct" },
+      ACTOR,
+    );
+    const r = await q(`SELECT id, normalized_hash FROM vault_claims WHERE id = ANY($1)`, [[a.id, b.id]]);
+    const hashes = r.rows.map((x: { normalized_hash: string }) => x.normalized_hash);
+    expect(hashes[0]).toMatch(/^[0-9a-f]{64}$/);
+    // Same normalized words and the same value collapse to one key — that IS the dedup
+    // key, and a key that varied with whitespace would answer "known" almost never.
+    expect(hashes[0]).toBe(hashes[1]);
+  });
+
+  it("gives two objects with the same members but different key order one hash", async () => {
+    // JSON.stringify is insertion-ordered, so without a sorted canonicalizer two writers
+    // that built the same value differently would produce two keys for one fact — and the
+    // hash goes under an index, so it must not change once chosen.
+    const a = await createClaim(
+      { spaceId: SPACE_A, statement: "same fact", value: { a: 1, b: 2 },
+        origin: { kind: "test" }, sourceClass: "user_direct" },
+      ACTOR,
+    );
+    const b = await createClaim(
+      { spaceId: SPACE_A, statement: "same fact", value: { b: 2, a: 1 },
+        origin: { kind: "test" }, sourceClass: "user_direct" },
+      ACTOR,
+    );
+    const r = await q(`SELECT id, normalized_hash FROM vault_claims WHERE id = ANY($1)`, [[a.id, b.id]]);
+    const [h1, h2] = r.rows.map((x: { normalized_hash: string }) => x.normalized_hash);
+    expect(h1).toBe(h2);
   });
 });

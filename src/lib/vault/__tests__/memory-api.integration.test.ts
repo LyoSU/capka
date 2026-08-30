@@ -70,7 +70,8 @@ const mkUser = (id: string) =>
 const mkClaim = async (spaceId: string, statement: string, sensitive = false) => {
   const topicNoteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
   const { id } = await seedConfirmedClaim(
-    { spaceId, statement, origin: { kind: "user_direct" }, sensitive, topicNoteId },
+    { spaceId, statement, origin: { kind: "user_direct" }, sensitive, topicNoteId,
+      sourceClass: "owner_authored" },
     { kind: "system" },
   );
   return id;

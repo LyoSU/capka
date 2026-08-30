@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -5,6 +6,7 @@ import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
 import { deleteNode, insertNode } from "./nodes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
+import { norm } from "./text";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
 
@@ -44,6 +46,13 @@ export type ClaimInput = {
   origin: Record<string, unknown>;
   sensitive?: boolean;
   topicNoteId?: string;
+  /** REQUIRED, and the requirement is the fix. `source_class` is NOT NULL with no default,
+   *  so an unlisted writer cannot inherit the strongest class by omission — the compiler
+   *  asks every caller instead of a column answering for them. */
+  sourceClass: SourceClass;
+  /** The task that wrote it; `memory_forget`'s same-task bound reads it in slice 2. An
+   *  owner action has no task and passes nothing. */
+  createdTaskId?: string;
 };
 
 export type EvidenceInput = {
@@ -222,6 +231,30 @@ export function fitStatement(statement: string): string {
   return statement.replace(/\s*[\r\n]+\s*/g, " ").trim().slice(0, STATEMENT_MAX_CHARS);
 }
 
+export type SourceClass =
+  | "legacy_confirmed" | "owner_authored" | "user_direct" | "agent_inferred" | "untrusted_derived";
+
+/** The exact-dedup key's canonical rendering of a structured value. Key order is sorted
+ *  recursively because `JSON.stringify` is insertion-ordered, and two writers that built
+ *  the same object differently would otherwise produce two keys for one fact. This is a
+ *  FROZEN expression, like `migrate-memory-docs.ts`'s `legacyIdemKeyNorm`: it feeds a
+ *  persisted column under an index, so it must not change once chosen — which is the
+ *  opposite requirement from `text.ts::norm`'s live callers. */
+const canonicalValue = (v: unknown): string => {
+  if (v === null || v === undefined || typeof v !== "object") return JSON.stringify(v ?? null);
+  if (Array.isArray(v)) return `[${v.map(canonicalValue).join(",")}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canonicalValue(o[k])}`).join(",")}}`;
+};
+
+/** norm(statement) + canonical value, sha256 hex. The separator is a NEWLINE and that is
+ *  not arbitrary: `norm` collapses every whitespace run to a single space, so its output
+ *  can never contain one — the two halves cannot be re-cut at a different boundary, which
+ *  a space or a colon would allow. */
+function normalizedHashOf(statement: string, value: unknown): string {
+  return createHash("sha256").update(`${norm(statement)}\n${canonicalValue(value)}`).digest("hex");
+}
+
 /** A slot is a GROUPING HINT, not an identity, and the difference is this round's
  *  correction — see the column comment in `schema.ts`. It is still clamped, because an
  *  unbounded key from extraction is a display and search problem of its own, and empty
@@ -328,6 +361,9 @@ export async function createClaim(
     // `review_status` is NOT passed: it takes the column's `unverified` default, and
     // `confirmClaim` is the only thing that moves it. See `ClaimInput`.
     sensitive,
+    sourceClass: input.sourceClass,
+    createdTaskId: input.createdTaskId ?? null,
+    normalizedHash: normalizedHashOf(statement, input.value ?? null),
   });
   if (input.topicNoteId) {
     await assertTopicInSpace(input.topicNoteId, input.spaceId, ex);
@@ -385,13 +421,19 @@ export async function updateClaim(
        *  topic would be worse than that. */
       topicNoteId?: string;
     },
+    /** The REPLACEMENT's own class, and it sits outside `patch` on purpose: `patch`'s
+     *  contract is "fields not listed are inherited from the predecessor", and inheriting
+     *  here would carry `legacy_confirmed`/`manifest` across text the agent wrote. A
+     *  superseding row is stored at the replacement's class, never the predecessor's —
+     *  the same rule, and the same reason, as `reviewStatus` not being settable. */
+    sourceClass: SourceClass;
     allowedSpaceIds: string[];
     actor: Actor;
   },
   ex?: Ex,
 ): Promise<{ ok: true; id: string; revision: number } | { ok: false; current: ClaimHead | null }> {
   if (!ex || ex === db) return db.transaction((tx) => updateClaim(args, tx));
-  const { claimId, expectedRevision, patch, allowedSpaceIds, actor } = args;
+  const { claimId, expectedRevision, patch, sourceClass, allowedSpaceIds, actor } = args;
 
   // The space is read UNLOCKED and ahead of the CAS purely to fix the lock ORDER:
   // `retireProjectSpace` takes the space row and then the claim rows, so a fence read
@@ -525,6 +567,14 @@ export async function updateClaim(
     validTo: prev.validTo,
     revision,
     supersedes: claimId,
+    sourceClass,
+    // `createdTaskId` IS inherited, and that is not the same decision as the class above:
+    // it records which task authored the chain, not what authority the words carry, and
+    // `memory_forget`'s bound asks "did I write this" — which a supersede inside the same
+    // task should keep answering yes to. The CAS `.returning()` above takes no argument,
+    // so `prev` is the whole row and this column comes back with it.
+    createdTaskId: prev.createdTaskId,
+    normalizedHash: normalizedHashOf(statement, value ?? null),
   });
   // Attachments move in a single UPDATE: the successor lands in the same topics
   // and the predecessor holds none. An insert...select plus delete would reach the
