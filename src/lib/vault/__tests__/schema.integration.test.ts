@@ -19,6 +19,13 @@ const USER = `${P}user`;
 const CHAT = `${P}chat`;
 const MSG = `${P}msg`;
 
+/** Two stable spaces for the node/edge/trust blocks below. The older tests mint their
+ *  own space per `it` through `mkSpace`; these blocks assert about pairs of spaces
+ *  (a cross-space edge, a cross-space conflict pointer), which needs both to exist at
+ *  once and to be named. */
+const SPACE_A = `${P}space-a`;
+const SPACE_B = `${P}space-b`;
+
 const VAULT_TABLES = [
   "spaces",
   "knowledge_sources",
@@ -31,11 +38,15 @@ const VAULT_TABLES = [
   "memory_candidates",
   "message_citations",
   "audit_events",
+  "vault_nodes",
+  "vault_edges",
 ];
 
 /** Unique violation / foreign-key violation, per the SQLSTATE table. */
 const UNIQUE_VIOLATION = "23505";
 const FK_VIOLATION = "23503";
+/** Check violation, per the SQLSTATE table. */
+const CHECK_VIOLATION = "23514";
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
 
@@ -113,9 +124,14 @@ run("vault schema", () => {
          ON CONFLICT (id) DO NOTHING`,
       [MSG, CHAT],
     );
+    await mkSpace(SPACE_A);
+    await q(`INSERT INTO spaces (id, type, ref_id, owner_user_id) VALUES ($1, 'project', $1, $2)`, [
+      SPACE_B,
+      USER,
+    ]);
   });
 
-  it("all 11 vault tables exist", async () => {
+  it("all 13 vault tables exist", async () => {
     const { rows } = await pool.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = ANY($1)`,
@@ -237,5 +253,84 @@ run("vault schema", () => {
     await expect(frag(`${space}-dup`, 0)).rejects.toMatchObject({ code: UNIQUE_VIOLATION });
     await frag(`${space}-next`, 1);
     expect(await count("knowledge_fragments", "version_id = $1", [version])).toBe(2);
+  });
+
+  run("vault_nodes and vault_edges: the shapes that make a bad edge unrepresentable", () => {
+    it("refuses an edge whose endpoints live in different spaces", async () => {
+      // The whole point of UNIQUE (space_id, id): the FK carries the space, so the
+      // pair (space_id, to_node_id) simply does not exist in the parent.
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'claim')`, [`${P}n-a`, SPACE_A]);
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'claim')`, [`${P}n-b`, SPACE_B]);
+      await expect(
+        q(
+          `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+           VALUES ($1,$2,$3,$4,'references','{"kind":"system"}'::jsonb)`,
+          [`${P}e-x`, SPACE_A, `${P}n-a`, `${P}n-b`],
+        ),
+      ).rejects.toMatchObject({ code: FK_VIOLATION });
+    });
+
+    it("refuses a self-edge", async () => {
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [`${P}n-s`, SPACE_A]);
+      await expect(
+        q(
+          `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+           VALUES ($1,$2,$3,$3,'contains','{"kind":"system"}'::jsonb)`,
+          [`${P}e-s`, SPACE_A, `${P}n-s`],
+        ),
+        // 23514 is check_violation. Assert on the SQLSTATE and on the constraint NAME, not
+        // on the message: `error.message` is the primary line only, and this file's other
+        // negative tests already read `code` for exactly that reason.
+      ).rejects.toMatchObject({ code: CHECK_VIOLATION, constraint: "ck_vault_edges_not_self" });
+    });
+
+    it("refuses a relation outside the three", async () => {
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [`${P}n-r1`, SPACE_A]);
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'claim')`, [`${P}n-r2`, SPACE_A]);
+      await expect(
+        q(
+          `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+           VALUES ($1,$2,$3,$4,'works_for','{"kind":"system"}'::jsonb)`,
+          [`${P}e-r`, SPACE_A, `${P}n-r1`, `${P}n-r2`],
+        ),
+      ).rejects.toMatchObject({ code: CHECK_VIOLATION, constraint: "ck_vault_edges_relation" });
+    });
+
+    it("allows one live edge per (from, to, relation) and a re-link after a soft delete", async () => {
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [`${P}n-u1`, SPACE_A]);
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'claim')`, [`${P}n-u2`, SPACE_A]);
+      const edge = (id: string) =>
+        q(
+          `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+           VALUES ($1,$2,$3,$4,'contains','{"kind":"system"}'::jsonb)`,
+          [id, SPACE_A, `${P}n-u1`, `${P}n-u2`],
+        );
+      await edge(`${P}e-u1`);
+      await expect(edge(`${P}e-u2`)).rejects.toMatchObject({
+        code: UNIQUE_VIOLATION,
+        constraint: "uniq_live_vault_edge",
+      });
+      // Soft-deleting the first frees the slot — a re-link must not fork into two live edges.
+      await q(`UPDATE vault_edges SET deleted_at = now() WHERE id = $1`, [`${P}e-u1`]);
+      await edge(`${P}e-u3`);
+      const live = await q(
+        `SELECT count(*)::int AS n FROM vault_edges WHERE space_id = $1 AND deleted_at IS NULL`,
+        [SPACE_A],
+      );
+      expect(live.rows[0].n).toBe(1);
+    });
+
+    it("cascades edges when a node row is hard-deleted", async () => {
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [`${P}n-c1`, SPACE_A]);
+      await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'claim')`, [`${P}n-c2`, SPACE_A]);
+      await q(
+        `INSERT INTO vault_edges (id, space_id, from_node_id, to_node_id, relation, created_by)
+         VALUES ($1,$2,$3,$4,'contains','{"kind":"system"}'::jsonb)`,
+        [`${P}e-c`, SPACE_A, `${P}n-c1`, `${P}n-c2`],
+      );
+      await q(`DELETE FROM vault_nodes WHERE id = $1`, [`${P}n-c1`]);
+      const left = await q(`SELECT count(*)::int AS n FROM vault_edges WHERE id = $1`, [`${P}e-c`]);
+      expect(left.rows[0].n).toBe(0);
+    });
   });
 });

@@ -414,6 +414,13 @@
       "when": 1788106907284,
       "tag": "0058_green_firebird",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788125449770,
+      "tag": "0059_watery_living_tribunal",
+      "breakpoints": true
     }
   ]
 }

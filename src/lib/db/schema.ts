@@ -1,6 +1,6 @@
 import {
   pgTable, text, boolean, timestamp, integer, jsonb, index, uniqueIndex, bigint, numeric,
-  primaryKey, check, type AnyPgColumn,
+  primaryKey, check, foreignKey, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -784,6 +784,77 @@ export const spaces = pgTable("spaces", {
 }, (t) => [
   uniqueIndex("uniq_spaces_type_ref").on(t.type, t.refId),
   index("idx_spaces_owner").on(t.ownerUserId),
+]);
+
+/**
+ * THE node registry. `id` IS the subtype row's id — no second id space, no translation
+ * layer, so a handle, an edge and a claim all name the same string.
+ *
+ * `unique (space_id, id)` looks redundant beside the primary key and is not: it is the
+ * composite target every edge FK points at, and it is what makes a cross-space edge
+ * UNREPRESENTABLE rather than merely forbidden — including from raw SQL and from a future
+ * importer that never reads this file. Postgres accepts a unique INDEX as an FK target;
+ * a partial one it would not, which is why this one carries no `where`.
+ *
+ * `deleted_at` is THE soft-delete flag for every node kind. Nothing writes it except the
+ * node-owning services (`nodes.ts`'s `deleteNode`, reached from `claims.ts` and
+ * `spaces.ts`) — a bare `db.update` from a caller would skip the edge cascade that lives
+ * beside it.
+ */
+export const vaultNodes = pgTable("vault_nodes", {
+  id: text("id").primaryKey(),
+  spaceId: text("space_id").notNull().references(() => spaces.id, { onDelete: "cascade" }),
+  kind: text("kind", { enum: ["note", "claim", "source"] }).notNull(),
+  pinned: boolean("pinned").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+}, (t) => [
+  check("ck_vault_nodes_kind", sql`${t.kind} in ('note','claim','source')`),
+  uniqueIndex("uniq_vault_nodes_space_id").on(t.spaceId, t.id),
+  index("idx_vault_nodes_space_kind").on(t.spaceId, t.kind).where(sql`${t.deletedAt} IS NULL`),
+]);
+
+/**
+ * The three relations are operational primitives, not an ontology. Model-invented
+ * predicates are refused at the schema: they fragment across languages on first contact
+ * with a bilingual user, and there is no repair that scales.
+ *
+ * Both direction indexes exist because the neighborhood walk is undirected.
+ *
+ * THE INVERSE: an edge is soft-deleted, never hard-deleted, so the graph can still explain
+ * a tombstone. The `on delete cascade` above it fires only when a NODE row is hard-deleted,
+ * which happens only on a space cascade.
+ */
+export const vaultEdges = pgTable("vault_edges", {
+  id: text("id").primaryKey(),
+  spaceId: text("space_id").notNull(),
+  fromNodeId: text("from_node_id").notNull(),
+  toNodeId: text("to_node_id").notNull(),
+  relation: text("relation", { enum: ["contains", "references", "derived_from"] }).notNull(),
+  position: integer("position").notNull().default(0),
+  createdBy: jsonb("created_by").notNull(),          // Actor: {kind:"user"|"agent"|"system", id?}
+  originMessageId: text("origin_message_id"),
+  originFragmentId: text("origin_fragment_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+}, (t) => [
+  check("ck_vault_edges_not_self", sql`${t.fromNodeId} <> ${t.toNodeId}`),
+  check("ck_vault_edges_relation", sql`${t.relation} in ('contains','references','derived_from')`),
+  foreignKey({
+    name: "vault_edges_from_node_fk",
+    columns: [t.spaceId, t.fromNodeId],
+    foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
+  }).onDelete("cascade"),
+  foreignKey({
+    name: "vault_edges_to_node_fk",
+    columns: [t.spaceId, t.toNodeId],
+    foreignColumns: [vaultNodes.spaceId, vaultNodes.id],
+  }).onDelete("cascade"),
+  uniqueIndex("uniq_live_vault_edge")
+    .on(t.spaceId, t.fromNodeId, t.toNodeId, t.relation)
+    .where(sql`${t.deletedAt} IS NULL`),
+  index("idx_vault_edges_from").on(t.spaceId, t.fromNodeId).where(sql`${t.deletedAt} IS NULL`),
+  index("idx_vault_edges_to").on(t.spaceId, t.toNodeId).where(sql`${t.deletedAt} IS NULL`),
 ]);
 
 export const knowledgeSources = pgTable("knowledge_sources", {

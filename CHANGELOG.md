@@ -8,6 +8,7 @@ All notable changes to Capka are documented here. Format follows
 
 ### Added
 
+- New `vault_nodes` / `vault_edges` tables; applied automatically at boot, no operator action.
 - Vault data foundation (content-addressed blob store; sources/versions/fragments/citations schema) — groundwork for project knowledge.
 - Facts can now be deleted from the memory page, including sensitive ones the assistant is not allowed to read.
 - The memory page now says how a fact gets saved — by telling the assistant in a chat — and why the set-aside list is waiting.
