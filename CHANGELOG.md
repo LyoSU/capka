@@ -24,6 +24,10 @@ All notable changes to Capka are documented here. Format follows
 - The memory page shows a sensitive fact's text to its owner, blurred behind a per-row reveal control, instead of withholding it; the manifest and `memory_search` still withhold it from the model.
 - A memory row's source line links to the conversation it came from, and a conflicting one names the fact it would replace.
 - Conflicts raised by the assistant's own `memory_update` now name the fact they contest, like extraction-raised ones already did.
+- The assistant can no longer save, correct or delete a memory fact on its own: every fact it records waits on the memory page until the user keeps it, and `memory_forget` refuses outright.
+- Memory documents from the old system now migrate into the review queue instead of straight into memory, so the user keeps their carried-over facts once (migration 0058).
+- A memory step in the chat timeline is labelled by what was attempted ("Memory proposal") rather than by a success that may not have happened.
+- Facts no longer merge automatically: two facts about the same thing accumulate as duplicates and the user resolves them on the memory page (`vault_claims.slot_key` is a display hint; `uniq_vclaims_active_slot` dropped in migration 0058).
 
 ### Fixed
 
@@ -45,6 +49,12 @@ All notable changes to Capka are documented here. Format follows
 - A memory fact that looks like a credential is stored sensitive whatever wrote it, so it is never re-injected into a prompt and never returned by memory search.
 - The boot-time memory migration logs only the error message on failure, so a failing statement's bound parameters no longer reach the log.
 - Memory audit events (`audit_events`) no longer carry a fact's slot key or a forget reason, so no memory text survives a project delete; `memory_forget` accordingly no longer takes a `reason`.
+- An unmigrated memory document is no longer sent to the model: the prompt's raw legacy fallback is removed, so an old document holding a credential cannot be disclosed on every turn while its migration fails.
+- Lexical overlap with the user's own message no longer authorizes a memory write, so a fetched web page cannot rewrite or erase a fact the user merely mentioned.
+- A credential straddling the 500/120-character truncation boundary is now flagged: the screen classifies the text as given as well as the text as stored.
+- The boot migration's audit event no longer carries a document hash or character count, which together allowed a deleted document's text to be recovered by dictionary attack.
+- The credential screen is now shape-based only (a long opaque run) and is documented as an advisory flag rather than a boundary; its English-only word list is removed, since it flagged `password: …` and missed the same sentence in every other language.
+- A memory confirmation can no longer land on a fact that was superseded while the user was deciding; `vault_claims.approved_at`/`approved_by_user_id` record who approved each fact (migration 0058).
 
 ## [0.37.0] - 2026-08-29
 

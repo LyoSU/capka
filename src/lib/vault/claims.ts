@@ -16,13 +16,25 @@ export type ClaimHead = {
   sensitive: boolean;
 };
 
+/**
+ * `reviewStatus` is deliberately ABSENT, and its absence is the authority cutover.
+ *
+ * It used to be caller data, and the boot migration used that to mint `confirmed`
+ * claims directly — a writer declaring its own output approved. Every new claim now
+ * lands at the column's `unverified` default and only `confirmClaim` can move it, so
+ * "the model sees only what a person approved" is enforced by there being one write
+ * that grants approval, not by every writer remembering to ask for the right value.
+ *
+ * Recall why this matters more than it reads: a column DEFAULT was already an unlisted
+ * writer in this feature's history. A caller-supplied authorization field is the same
+ * hazard with a name on it.
+ */
 export type ClaimInput = {
   spaceId: string;
   statement: string;
   slotKey?: string;
   value?: unknown;
   origin: Record<string, unknown>;
-  reviewStatus: "unverified" | "confirmed";
   sensitive?: boolean;
   topicNoteId?: string;
 };
@@ -53,75 +65,57 @@ const HEAD = {
 const MAX_CHAIN = 1000;
 
 /**
- * Screens a statement for secret-shaped content. It lives in THIS module because
+ * Screens a row's text for secret-shaped content. It lives in THIS module because
  * `createClaim` and `updateClaim` are the only two statements that put a row in
- * `vault_claims`, so a screen applied by both covers every writer by construction —
- * the ledger, the boot migration, and whatever a later plan adds without reading any
- * of this.
+ * `vault_claims`, so a screen applied by both covers every writer by construction.
  *
- * It has been at the wrong altitude twice. First on the extraction path, where
- * `memory_propose` walked past it: the user pastes a key and says "remember it", so
- * the statement is verbatim in their own turn, provenance verifies, and the fact went
- * in `auto_active`. Then at the candidate ledger, under a docstring calling the ledger
- * "the only way into memory" — which `migrate-memory-docs.ts` disproved by calling
- * `createClaim` directly, carrying a legacy bullet reading `my openai key is sk-…`
- * into a confirmed, non-sensitive claim at boot, unattended, on data that predates
- * every protection here. The rule now sits on the table's own boundary, which is the
- * one place a fifth writer cannot appear behind.
+ * WHAT THIS IS, since the authority cutover: an ADVISORY FLAG, not a security
+ * boundary. Nothing reaches the model's prompt that a person has not confirmed on the
+ * memory page, so the person sees a statement before the model ever can — which makes
+ * the HUMAN the classifier, and makes that classification universal by construction:
+ * it holds for Ukrainian, for Polish, and for a language nobody has thought about. A
+ * miss here no longer breaches anything; it means a row was not highlighted for the
+ * person deciding on it. A heuristic in that position is allowed to be incomplete, and
+ * this comment is where that incompleteness is admitted rather than implied away.
  *
- * The ledger still runs it separately, and that is not a duplicate guard: it needs the
- * answer BEFORE any row exists, to route the proposal to `pending` instead of
- * activating it. This screen decides the COLUMN; that one decides the ROUTE.
+ * WHAT WAS DELETED, and why it is not coming back. There used to be a list of named
+ * patterns: `password|secret|token|api_key|authorization` assignments, plus `sk-`,
+ * `ghp_`, `xox[bpas]-`, `AKIA`, PEM headers and inline-credential URIs. The lexical
+ * half only ever spoke English: it caught `password: hunter2secret` and missed the
+ * same sentence written with the Ukrainian, German or Turkish word for "password" — in
+ * a product whose first-class locale is Ukrainian. The obvious repair is to add the
+ * Ukrainian nouns, and that is the trap: it fixes one language, misses the next, and
+ * every new locale needs a new list, so the result LOOKS like coverage while being
+ * absent exactly where nobody enumerated. The provider prefixes are the same hardcode
+ * with better manners — an enumeration of the vendors somebody happened to think of.
+ * A mechanism that cannot be universal is better not built.
  *
- * Tuned toward catching, not toward precision: a false positive costs one fact that a
- * human must handle; a false negative costs a durably re-injected credential.
+ * WHAT REMAINS is the half that generalises: a long unbroken opaque run is anomalous
+ * by SHAPE, not by vocabulary, so it works in every language and for every vendor. A
+ * real `sk-proj-…` key still clears it on its own body (the hyphenated prefix splits
+ * off and the remainder is far over the floor); `password: hunter2` does not, and that
+ * is the accepted cost, paid by a person reading their own review queue.
  *
- * It has also been at the wrong COLUMN. Both writers ran it on `statement` alone,
- * while `slot_key` is printed verbatim to the model by `memory_search` (`tools.ts`)
- * and matched against its query — so a credential in the key with a clean sentence
- * produced a non-sensitive claim that hands the key back on every later search. Both
- * writers now screen all three text-bearing columns of the row they are about to
- * write: `statement`, `slot_key` and `value`. `value` has no reader today, and "no
- * reader today" is exactly the reasoning that left the quarantine filter off
- * `memory_search` for a whole plan. The other two columns are paths, not prose, and
- * are screened accordingly — see `pathishSecret`.
+ * It has been at the wrong COLUMN, which is why it reads three. Both writers once ran
+ * it on `statement` alone while `slot_key` was printed verbatim to the model by
+ * `memory_search`, so a credential in the key with a clean sentence produced a
+ * non-sensitive claim that handed the key back on every later search. All three
+ * text-bearing columns are screened: `statement`, `slot_key` and `value`. The latter
+ * two are paths, not prose, and are screened accordingly — see `pathishSecret`.
  */
-/** Patterns that recognize a credential by its OWN prefix or structure, so they say
- *  the same thing about any text they are pointed at. */
-const NAMED_SECRET_PATTERNS: RegExp[] = [
-  // Provider-prefixed tokens: OpenAI (sk-), GitHub (ghp_/gho_), Slack (xoxb-/xoxp-/xoxa-/xoxs-), AWS access key id.
-  // Widened to `[A-Za-z0-9_-]` (not just alphanumeric) with a 20-char floor:
-  // modern OpenAI project keys are internally hyphenated (`sk-proj-AbCdEf...`), and
-  // a narrower class would miss that shape entirely while the older `sk-...` form
-  // still clears the same floor.
-  /\bsk-[A-Za-z0-9_-]{20,}\b/,
-  /\bgh[po]_[A-Za-z0-9]{10,}\b/,
-  /\bxox[bpas]-[A-Za-z0-9-]{10,}\b/,
-  /\bAKIA[A-Z0-9]{12,}\b/,
-  // A PEM private-key block header.
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  // A URI with inline credentials: scheme://user:pass@host.
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/i,
-  // An assignment whose key names a secret and whose value is non-trivial.
-  /\b(password|passwd|secret|token|api[-_]?key|authorization)\s*[:=]\s*['"]?[^\s'"]{4,}['"]?/i,
-];
-
-/** Catch-all: a long unbroken base64/hex-ish run — deliberately EXCLUDING `-` from
- *  the class. Including it (an earlier version of this pattern did) also matched
- *  ordinary hyphenated things an office user states as plain fact — a URL slug, a
- *  preview-deploy hostname, a UUID — which this screen must not swallow (a screened
- *  item goes `sensitive`, which hides it from the manifest AND from search, so a false
- *  positive is a fact the user can no longer reach through the agent at all). A 40-char
- *  hex commit sha, a bare base64 token, and a `github_pat_...` fine-grained PAT all
- *  still clear the floor without a hyphen.
+/** A long unbroken base64/hex-ish run — deliberately EXCLUDING `-` from the class.
+ *  Including it (an earlier version did) also matched ordinary hyphenated things an
+ *  office user states as plain fact — a URL slug, a preview-deploy hostname, a UUID —
+ *  which this screen must not swallow. A 40-char hex commit sha, a bare base64 token and
+ *  a `github_pat_…` fine-grained PAT all still clear the floor without a hyphen.
  *
- *  Unlike the named patterns above, this one is an ENTROPY guess, and what makes the
- *  guess safe is that a statement is prose: an unbroken 28-character run of that class
- *  is anomalous in a sentence. It is not anomalous in a path — see `pathishSecret`. */
+ *  It is an ENTROPY guess, and what makes the guess safe is that a statement is prose:
+ *  an unbroken 28-character run of that class is anomalous in a sentence. It is not
+ *  anomalous in a path — see `pathishSecret`. */
 const OPAQUE_RUN = /\b[A-Za-z0-9+/_]{28,}={0,2}\b/;
 
 export function looksLikeSecret(statement: string): boolean {
-  return NAMED_SECRET_PATTERNS.some((re) => re.test(statement)) || OPAQUE_RUN.test(statement);
+  return OPAQUE_RUN.test(statement);
 }
 
 /**
@@ -129,25 +123,17 @@ export function looksLikeSecret(statement: string): boolean {
  * of a structured value.
  *
  * `looksLikeSecret` unchanged is the wrong tool for those, and the repo's own fixture
- * proved it: `/` and `_` are in the catch-all's character class, which is exactly what
- * a slot key is made of, so `suppliers/acme_corp/payment_terms` is 33 characters of
- * pure match and the screen fires on the DESIGN. That is not the rare false positive
- * the statement screen accepts — it is systematic for any key of that length without a
- * hyphen, and each one costs a fact hidden from the manifest, hidden from search, and
- * (see `memory_forget`) impossible for the agent to remove afterwards.
- *
- * So the named patterns still read the whole text — `postgresql://u:p@h` and
- * `ghp_…` must not be split apart to be recognized — and the entropy guess is made per
- * path SEGMENT, where a long opaque run means what it meant in prose. Depth stops
- * being evidence of anything.
+ * proved it: `/` and `_` are in the run's character class, which is exactly what a slot
+ * key is made of, so `suppliers/acme_corp/payment_terms` is 33 characters of pure match
+ * and the screen fires on the DESIGN. So the guess is made per path SEGMENT, where a
+ * long opaque run means what it meant in prose. Depth stops being evidence of anything.
  *
  * ACCEPTED: a single segment of 28+ unbroken characters is still screened, so a slot
- * key like `annual_supplier_payment_schedule` goes sensitive. Narrower than what it
- * replaces, and left in place deliberately — that shape is also what a bare,
- * unprefixed token looks like, and this screen is tuned toward catching.
+ * key like `annual_supplier_payment_schedule` is flagged. Left in place deliberately —
+ * that shape is also what a bare, unprefixed token looks like.
  */
 function pathishSecret(text: string): boolean {
-  return NAMED_SECRET_PATTERNS.some((re) => re.test(text)) || text.split("/").some((seg) => OPAQUE_RUN.test(seg));
+  return text.split("/").some((seg) => OPAQUE_RUN.test(seg));
 }
 
 /** The row's `value` as the text the screen reads: JSON, because that is what the
@@ -169,14 +155,37 @@ function valueText(value: unknown): string {
   }
 }
 
-/** The screen over a whole row, in ONE definition. Three call sites — both claim
- *  writers and the candidate ledger — and they must not drift: the writers decide the
- *  COLUMN and the ledger decides the ROUTE, so a column screened by one and not the
- *  other gives two answers to the same text. That is how a credential in a slot key
- *  used to route `auto_active` and then be written sensitive: stored-but-invisible,
- *  where a credential in the statement is never stored at all. */
-export function secretShaped(statement: string, slotKey: string | null | undefined, value: unknown): boolean {
+/** The screen over one FORM of a row's text. Not called directly by the writers — see
+ *  `secretShaped`, which is the rule they hold. */
+function screenOnce(statement: string, slotKey: string | null | undefined, value: unknown): boolean {
   return looksLikeSecret(statement) || pathishSecret(slotKey ?? "") || pathishSecret(valueText(value));
+}
+
+/**
+ * The screen over a whole row, in ONE definition, taking the text AS GIVEN and
+ * answering for both the raw form and the form the row will actually hold.
+ *
+ * Both forms, because either alone is wrong in a way somebody has already exploited on
+ * paper. Screening only the STORED form turns the size cap into an evasion gadget: a
+ * 501-character statement ending in a 28-character opaque token matches raw,
+ * `fitStatement` drops one character, and the stored 500 no longer matches — so it is
+ * written non-sensitive with the missing character recoverable in about 65 guesses.
+ * Screening only the RAW form hides the wrong string, because what a later reader
+ * prints is the stored one. So: the OR, for statements, for slot keys and for the JSON
+ * of a structured value alike.
+ *
+ * Callers pass RAW text. `fitStatement`/`fitSlotKey` are applied in here rather than at
+ * the call sites, so a writer cannot accidentally hand this the already-clamped string
+ * and get back the one-sided answer — which is exactly what the boot migration used to
+ * do.
+ *
+ * Two call sites — both claim writers — plus the candidate ledger, which needs the same
+ * answer before any row exists in order to mark the proposal for the person reviewing
+ * it. They must not drift: two copies of one rule reading different columns is how a
+ * credential in a slot key once routed one way and was written the other.
+ */
+export function secretShaped(statement: string, slotKey: string | null | undefined, value: unknown): boolean {
+  return screenOnce(statement, slotKey, value) || screenOnce(fitStatement(statement), fitSlotKey(slotKey), value);
 }
 
 /** What a fact may take up in a prompt, and what shape it may take there.
@@ -206,10 +215,10 @@ export function fitStatement(statement: string): string {
   return statement.replace(/\s*[\r\n]+\s*/g, " ").trim().slice(0, STATEMENT_MAX_CHARS);
 }
 
-/** A slot is an identity, not prose: it is the key of `uniq_vclaims_active_slot`, and
- *  an unbounded one from extraction fails the btree insert outright. Empty is ABSENT,
- *  which is `proposeCandidate`'s rule for it (`""` is non-NULL, so it would be a full
- *  participant in that unique index) — held here so both claim writers share it. */
+/** A slot is a GROUPING HINT, not an identity, and the difference is this round's
+ *  correction — see the column comment in `schema.ts`. It is still clamped, because an
+ *  unbounded key from extraction is a display and search problem of its own, and empty
+ *  still means ABSENT rather than a slot named `""`. */
 export function fitSlotKey(slotKey: string | null | undefined): string | undefined {
   return slotKey?.replace(/\s+/g, " ").trim().slice(0, SLOT_KEY_MAX_CHARS) || undefined;
 }
@@ -290,23 +299,13 @@ export async function createClaim(
   await assertSpaceLive(input.spaceId, ex);
 
   const id = nanoid();
-  // Secret-shaped text is sensitive whatever the caller said. Applied HERE rather
-  // than at each writer — see `looksLikeSecret`. What it means differs by caller and
-  // both outcomes are wanted: a ledger proposal never reaches this line sensitive
-  // (its own screen sent it to pending first), while the boot migration creates
-  // `confirmed` claims directly, so a legacy bullet holding a credential lands
-  // confirmed AND sensitive. That combination is deliberate: it stays out of the
-  // manifest and out of `memory_search`, which is exactly where a credential the user
-  // pasted into a memory document years ago should be — carried across so nothing is
-  // lost, and reachable only by the user, never re-injected by us.
-  // Clamped and single-lined before it is screened, so the screen reads exactly the
-  // text the row will hold — see `fitStatement`.
+  // Secret-shaped text is flagged whatever the caller said. Applied HERE rather than at
+  // each writer — see `secretShaped`, and note it is handed the RAW text: it screens
+  // both that and the clamped form, because truncation can remove a match as easily as
+  // change one.
   const statement = fitStatement(input.statement);
   const slotKey = fitSlotKey(input.slotKey);
-  const sensitive = input.sensitive || secretShaped(statement, slotKey, input.value);
-  // A slot conflict (`uniq_vclaims_active_slot`) is deliberately NOT caught here:
-  // the merge-or-branch decision belongs to the candidate ledger, which is also
-  // the thing holding the SAVEPOINT.
+  const sensitive = input.sensitive || secretShaped(input.statement, input.slotKey, input.value);
   await ex.insert(vaultClaims).values({
     id,
     spaceId: input.spaceId,
@@ -314,7 +313,8 @@ export async function createClaim(
     slotKey: slotKey ?? null,
     value: input.value ?? null,
     origin: input.origin,
-    reviewStatus: input.reviewStatus,
+    // `review_status` is NOT passed: it takes the column's `unverified` default, and
+    // `confirmClaim` is the only thing that moves it. See `ClaimInput`.
     sensitive,
   });
   if (input.topicNoteId) {
@@ -336,7 +336,7 @@ export async function createClaim(
     // addresses the row, and while that row exists it holds the slot key itself. After
     // the retire the row is gone and there is nothing left to address — only content
     // that outlived its space, which is the one thing this line exists to prevent.
-    payload: { reviewStatus: input.reviewStatus, sensitive },
+    payload: { reviewStatus: "unverified", sensitive },
   });
   // `sensitive` travels back because the screen may have RAISED it: a caller that
   // tracks the flag it asked for would otherwise be tracking a value the row does not
@@ -349,17 +349,18 @@ export async function updateClaim(
     claimId: string;
     expectedRevision: number;
     /** Fields not listed are inherited from the predecessor — the default, since a
-     *  supersede on its own asserts nothing about the fact. But when the new content
-     *  arrives from a DIFFERENT source (the candidate ledger), inheriting `origin`
-     *  would sign the user's text with someone else's provenance, and inheriting
-     *  `reviewStatus` would leave a just-confirmed fact `unverified`. So both are
-     *  settable here, rather than read off the row by the caller or patched in by a
-     *  separate UPDATE that goes around this module. */
+     *  supersede on its own asserts nothing about the fact. `origin` is settable
+     *  because when the new content arrives from a DIFFERENT source (the candidate
+     *  ledger) inheriting it would sign the user's text with someone else's provenance.
+     *
+     *  `reviewStatus` is NOT settable, for the same reason `ClaimInput` no longer
+     *  carries it: a writer must not declare its own output approved. The successor
+     *  inherits the predecessor's status and the confirm path calls `confirmClaim` on
+     *  it — one write grants approval, and it is the one a person triggers. */
     patch: {
       statement?: string;
       value?: unknown;
       slotKey?: string;
-      reviewStatus?: "unverified" | "confirmed";
       sensitive?: boolean;
       origin?: Record<string, unknown>;
       /** A fallback topic, applied ONLY when no attachment carried over from the
@@ -442,19 +443,17 @@ export async function updateClaim(
   // the same reason the statement is clamped before it is screened. Both inherit from
   // the predecessor when the patch is silent, and the inherited text is screened too,
   // which is what upgrades a row written before this covered three columns.
-  const statement = fitStatement(patch.statement ?? prev.statement);
-  const slotKey = fitSlotKey(patch.slotKey ?? prev.slotKey) ?? null;
+  const rawStatement = patch.statement ?? prev.statement;
+  const rawSlotKey = patch.slotKey ?? prev.slotKey;
+  const statement = fitStatement(rawStatement);
+  const slotKey = fitSlotKey(rawSlotKey) ?? null;
   const value = patch.value !== undefined ? patch.value : prev.value;
-  const sensitive = prev.sensitive || (patch.sensitive ?? false) || secretShaped(statement, slotKey, value);
+  // The RAW text goes to the screen, which answers for both forms — see `secretShaped`.
+  const sensitive = prev.sensitive || (patch.sensitive ?? false) || secretShaped(rawStatement, rawSlotKey, value);
   // The successor is a fresh row, not an UPDATE of the text: the predecessor
   // stays verbatim as it was recorded. The whole claim is copied, not just the
   // three fields in the patch — otherwise `kind` and the validity window would
   // quietly reset to the schema defaults.
-  //
-  // As in `createClaim`, a slot conflict (`uniq_vclaims_active_slot`) is NOT caught
-  // here: a `patch.slotKey` pointing at a taken slot raises 23505 and rolls back
-  // the caller's transaction just the same. The candidate ledger has to hold its
-  // SAVEPOINT around BOTH moves, not only around creation.
   await ex.insert(vaultClaims).values({
     id,
     spaceId: prev.spaceId,
@@ -463,7 +462,7 @@ export async function updateClaim(
     value,
     kind: prev.kind,
     origin: patch.origin ?? prev.origin,
-    reviewStatus: patch.reviewStatus ?? prev.reviewStatus,
+    reviewStatus: prev.reviewStatus,
     sensitive,
     validFrom: prev.validFrom,
     validTo: prev.validTo,
@@ -496,7 +495,7 @@ export async function updateClaim(
     payload: {
       successor: id,
       revision,
-      reviewStatus: patch.reviewStatus ?? prev.reviewStatus,
+      reviewStatus: prev.reviewStatus,
       sensitive,
     },
   });
@@ -605,29 +604,64 @@ export async function forgetAllClaims(spaceId: string, actor: Actor, ex?: Ex): P
   return { forgotten: heads.length };
 }
 
-/** Mark an EXISTING head confirmed, without a supersede: when the user's
- *  statement matched what is already recorded, the content did not change — only
- *  the fact that it is now confirmed did, and a new version would be empty.
+/**
+ * THE write that grants authority. Since the cutover this is the only statement in the
+ * codebase that can set `review_status = 'confirmed'`, and its only caller is the
+ * human's decision on the memory page — so "the model reads only what a person
+ * approved" is a property of there being one such write, not of every writer choosing
+ * the right value.
  *
- *  Sensitivity only ever goes up, and the OR is done in SQL rather than left to the
- *  caller's `head.sensitive || ...`: that expression is computed from a head read
- *  earlier, so two confirmations of the same head — one sensitive, one not — let the
- *  stale `false` land second and put a claim a human closed back into the manifest.
- *  A blind update has no CAS to notice, so the rule has to be a property of the
- *  write. Clearing sensitivity is deliberate work; it needs its own operation, and
- *  there is no site for one today.
+ * `approved_at` / `approved_by_user_id` are written here for the same reason.
+ * `review_status = 'confirmed'` records THAT something was approved and cannot say by
+ * whom, which is the whole claim being made. The actor is the one this move is
+ * performed as; an agent or system actor leaves `approved_by_user_id` NULL rather than
+ * inventing an approver.
  *
- *  Lives in this module rather than the candidate ledger for the same reason as
- *  the rest: `vault_claims` is written only by whoever owns it. There is
- *  deliberately no space filter — like `attachEvidence`, this takes an id JUST
- *  read by a space-scoped query, and a filter here would mimic a check the
- *  signature has nothing to perform it with. It writes no event: the confirmation
- *  is recorded by `candidate.confirm`/`candidate.propose` on the ledger side. */
-export async function confirmClaim(claimId: string, sensitive: boolean, ex: Ex = db): Promise<void> {
-  await ex
+ * `superseded_at IS NULL` is in the predicate, and that is N1. This used to update
+ * `WHERE id = $1` alone: its own comment argued carefully that sensitivity must be
+ * OR-ed in SQL because a head read earlier goes stale, and then omitted the other half
+ * of exactly that argument — the ROW may have stopped being a head between the read and
+ * this write. When a supersede commits inside that window the confirmation and the
+ * raised `sensitive` land on a dead version while the live head carries neither, and
+ * `memory_candidates.claim_id` is left pointing at a claim that is no longer current,
+ * so the page's own link from a decision to its fact goes to the wrong version.
+ *
+ * It RETURNS whether the update hit, and the miss must not be discarded. A `void`
+ * return is what let the defect through: the write silently affected zero rows and the
+ * caller carried on as though it had worked. `tsc` cannot force a caller to read a
+ * boolean — there is no must-use in TypeScript — so this is a single-call-site
+ * discipline rather than a compile-time one, and that is recorded here rather than
+ * implied.
+ *
+ * Sensitivity only ever goes up, and the OR is done in SQL rather than left to the
+ * caller's `head.sensitive || …`: that expression is computed from a head read earlier,
+ * so two confirmations of the same head — one sensitive, one not — would let the stale
+ * `false` land second. Clearing sensitivity is deliberate work; it needs its own
+ * operation, and there is no site for one today.
+ *
+ * Lives in this module rather than the candidate ledger for the same reason as the
+ * rest: `vault_claims` is written only by whoever owns it. There is deliberately no
+ * space filter — like `attachEvidence`, this takes an id JUST read by a space-scoped
+ * query. It writes no event: the confirmation is recorded by `candidate.confirm` on the
+ * ledger side.
+ */
+export async function confirmClaim(
+  claimId: string,
+  sensitive: boolean,
+  actor: Actor,
+  ex: Ex = db,
+): Promise<boolean> {
+  const hit = await ex
     .update(vaultClaims)
-    .set({ reviewStatus: "confirmed", sensitive: sql`${vaultClaims.sensitive} OR ${sensitive}` })
-    .where(eq(vaultClaims.id, claimId));
+    .set({
+      reviewStatus: "confirmed",
+      sensitive: sql`${vaultClaims.sensitive} OR ${sensitive}`,
+      approvedAt: new Date(),
+      approvedByUserId: actor.kind === "user" ? (actor.id ?? null) : null,
+    })
+    .where(and(eq(vaultClaims.id, claimId), isNull(vaultClaims.supersededAt)))
+    .returning({ id: vaultClaims.id });
+  return hit.length > 0;
 }
 
 /** Attach an EXISTING head to a topic, without a new version: when the statement
@@ -694,6 +728,15 @@ export async function listHeadClaims(
     .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id));
 }
 
+/** The most recent live claim filed under one slot key.
+ *
+ *  "The" head is a convenience, not a guarantee, and that changed in this round.
+ *  `uniq_vclaims_active_slot` used to make the slot an identity; live data disproved
+ *  the premise — the model invents a fresh key per turn (`user/pet` one turn,
+ *  `user/pets/cat` the next), so the index constrained bytes while the thing it was
+ *  built to constrain was meaning. With it dropped, two live claims may share a key, so
+ *  the ORDER is explicit rather than whatever the planner returns: newest first, `id`
+ *  breaking a tie between rows one transaction wrote. */
 export async function headBySlot(spaceId: string, slotKey: string, ex: Ex = db): Promise<ClaimHead | null> {
   const [row] = await ex
     .select(HEAD)
@@ -701,6 +744,7 @@ export async function headBySlot(spaceId: string, slotKey: string, ex: Ex = db):
     .where(
       and(eq(vaultClaims.spaceId, spaceId), eq(vaultClaims.slotKey, slotKey), isNull(vaultClaims.supersededAt)),
     )
+    .orderBy(desc(vaultClaims.recordedAt), asc(vaultClaims.id))
     .limit(1);
   return row ?? null;
 }

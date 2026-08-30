@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
  *  crosses a user boundary. */
 import { pool } from "@/lib/db";
 import { attachEvidence, createClaim, updateClaim } from "../claims";
+import { seedConfirmedClaim } from "./fixtures";
 import { proposeCandidate } from "../candidates";
 import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
 import { readMemoryPage } from "../memory-page";
@@ -37,9 +38,8 @@ const seedFact = async (statement: string, opts: { sensitive?: boolean; owner?: 
   const owner = opts.owner ?? OWNER;
   const spaceId = await getOrCreateSpace({ type: "user", refId: owner });
   const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-  const claim = await createClaim(
-    { spaceId, statement, origin: { kind: "user_direct" }, reviewStatus: "confirmed",
-      sensitive: opts.sensitive, topicNoteId: noteId },
+  const claim = await seedConfirmedClaim(
+    { spaceId, statement, origin: { kind: "user_direct" }, sensitive: opts.sensitive, topicNoteId: noteId },
     { kind: "user", id: owner },
   );
   return { spaceId, noteId, claim };
@@ -73,9 +73,8 @@ run("vault: memory page projection", () => {
   it("says a fact with no evidence came from the old notes, not from a chat", async () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-    await createClaim(
-      { spaceId, statement: "Carried across", origin: { kind: "legacy_memory_doc" },
-        reviewStatus: "confirmed", topicNoteId: noteId },
+    await seedConfirmedClaim(
+      { spaceId, statement: "Carried across", origin: { kind: "legacy_memory_doc" }, topicNoteId: noteId },
       { kind: "system" },
     );
     expect((await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0].source).toEqual({ kind: "legacy" });
@@ -164,9 +163,11 @@ run("vault: memory page projection", () => {
   it("does not show an unverified claim among the facts", async () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    // Left UNCONFIRMED, which since the cutover is simply what `createClaim` produces:
+    // there is no field that could ask for anything else, and `confirmClaim` is not
+    // called. That is the quarantine this assertion is about.
     await createClaim(
-      { spaceId, statement: "Read off a web page", origin: { kind: "web" },
-        reviewStatus: "unverified", topicNoteId: noteId },
+      { spaceId, statement: "Read off a web page", origin: { kind: "web" }, topicNoteId: noteId },
       { kind: "agent" },
     );
     expect((await readMemoryPage(OWNER)).scopes[0].topics[0].facts).toHaveLength(0);
@@ -200,19 +201,22 @@ run("vault: memory page projection", () => {
     // the policy and a hand-set column would be testing the test's own assumption.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-    await createClaim(
+    await seedConfirmedClaim(
       { spaceId, statement: "Works as a technical lead", slotKey: "person/role",
-        origin: { kind: "user_direct" }, reviewStatus: "confirmed", topicNoteId: noteId },
+        origin: { kind: "user_direct" }, topicNoteId: noteId },
       { kind: "user", id: OWNER },
     );
+    const head = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
     const res = await proposeCandidate({
       idempotencyKey: `${P}conflict`, spaceId,
       statement: "Works as a lead cloud architect",
       slotKey: "person/role",
-      // `user_direct`, so the proposal reaches the slot branch at all: anything else is
-      // gated to `pending` before a head is ever read, which is what makes a
-      // `conflict` fixture look deceptively easy to write.
       provenance: { kind: "user_direct" },
+      // NAMED, because since the authority cutover the ledger has no branch that decides
+      // a conflict for itself: a slot no longer confers identity, so a proposal sharing
+      // one is not evidence of disagreement. A correction is a conflict because its
+      // PRODUCER (`memory_update`) says which head it contests, and this is that call.
+      forceConflict: { conflictsWith: head.id },
     });
     expect(res.state).toBe("conflict");
 
@@ -231,9 +235,8 @@ run("vault: memory page projection", () => {
     // id it lost to; this half proves the id survives to the screen.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-    const head = await createClaim(
-      { spaceId, statement: "The client pays in hryvnia", origin: { kind: "user_direct" },
-        reviewStatus: "confirmed", topicNoteId: noteId },
+    const head = await seedConfirmedClaim(
+      { spaceId, statement: "The client pays in hryvnia", origin: { kind: "user_direct" }, topicNoteId: noteId },
       { kind: "user", id: OWNER },
     );
     const res = await proposeCandidate({
@@ -258,8 +261,7 @@ run("vault: memory page projection", () => {
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
     const quarantined = await createClaim(
-      { spaceId, statement: "Read off a web page and never verified", origin: { kind: "web" },
-        reviewStatus: "unverified", topicNoteId: noteId },
+      { spaceId, statement: "Read off a web page and never verified", origin: { kind: "web" }, topicNoteId: noteId },
       { kind: "agent" },
     );
     await proposeCandidate({
@@ -304,9 +306,9 @@ run("vault: memory page projection", () => {
       STRANGER,
     ]);
     const noteId = await getOrCreateTopicNote(`${P}space-drift`, DEFAULT_TOPIC_KEY);
-    await createClaim(
+    await seedConfirmedClaim(
       { spaceId: `${P}space-drift`, statement: "Belongs to the other account", origin: { kind: "user_direct" },
-        reviewStatus: "confirmed", topicNoteId: noteId },
+        topicNoteId: noteId },
       { kind: "user", id: STRANGER },
     );
 

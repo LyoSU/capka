@@ -416,12 +416,11 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     const toolSearch = planToolSearch({ tools, effectiveLimit });
     if (toolSearch.defer) Object.assign(tools, toolSearch.extraTools);
 
-    // Topics, recent confirmed facts, and any legacy document still awaiting
-    // migration — assembled and fenced by the vault. Skipped entirely when memory is
-    // off (no space was resolved to build it from).
-    const memoryManifest = userSpaceId
-      ? await buildMemoryManifest({ userId, userSpaceId, projectId: project?.id, projectSpaceId })
-      : "";
+    // Topics and the facts the person has confirmed — assembled and fenced by the
+    // vault. Skipped entirely when memory is off (no space was resolved to build it
+    // from). Nothing unconfirmed reaches this string: the legacy free-text fallback
+    // that used to ride along here is deleted, and one projection decides the rest.
+    const memoryManifest = userSpaceId ? await buildMemoryManifest({ userSpaceId, projectSpaceId }) : "";
 
     const prompt = buildSystemPrompt({
       project,

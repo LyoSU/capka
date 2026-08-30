@@ -407,6 +407,13 @@
       "when": 1788091860559,
       "tag": "0057_fixed_bloodstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788106907284,
+      "tag": "0058_green_firebird",
+      "breakpoints": true
     }
   ]
 }

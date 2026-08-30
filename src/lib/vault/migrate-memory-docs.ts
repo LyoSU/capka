@@ -1,15 +1,15 @@
-import { createHash } from "node:crypto";
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { log } from "@/lib/log";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
-import { attachToTopic, confirmClaim, createClaim, fitStatement, listHeadClaims } from "./claims";
-import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote, spaceAcceptsWrites } from "./spaces";
+import { proposeCandidate } from "./candidates";
+import { fitStatement } from "./claims";
+import { getOrCreateSpace, spaceAcceptsWrites } from "./spaces";
 
-/** The same normalization as in `candidates.ts`. Different rules here would mean
- *  the same fact merges or splits depending on which path carried it into
- *  memory. */
+/** The same normalization as in `candidates.ts`. Used here only to build a stable
+ *  idempotency key, so that re-carrying a document appended to since its last pass is a
+ *  no-op for the bullets already carried. */
 const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
 
 /** "Never carried across, or appended to since it was." The selection below and the
@@ -66,10 +66,16 @@ function pgFault(e: unknown): { code: string; constraint: string; errorName: str
 }
 
 /**
- * Moves legacy memory documents into claims: line → bullet → confirmed claim with
- * origin `legacy_memory_doc`. The actor is `system`, not the candidate ledger:
- * what was already in the user's memory is not a proposal awaiting review, and
- * asking them to re-confirm their own long-standing facts would be a regression.
+ * Moves legacy memory documents into the review queue: line → bullet → PENDING
+ * candidate with origin `legacy_memory_doc`.
+ *
+ * It used to write confirmed claims, on the reasoning that what was already in the
+ * user's memory is not a proposal and asking them to re-confirm long-standing facts
+ * would be a regression. That reasoning is now refused, and the refusal is the point of
+ * this round: a legacy document is unreviewed free text that both the user and the agent
+ * wrote into, and the whole guarantee being made is that nothing reaches the model
+ * without a person keeping it. "It was already there" is exactly the argument that would
+ * have let it through. The person keeps their own facts, once, from the review queue.
  *
  * THE SELECTOR is "not stamped, OR appended to since the stamp"
  * (`migrated_at IS NULL OR migrated_at < updated_at`), and the second half is what
@@ -146,7 +152,11 @@ export async function migrateMemoryDocs(opts: { docIds?: string[] } = {}): Promi
         log.error("vault: giving up on a memory doc until restart", {
           docId: doc.id,
           attempts,
-          hint: "this document stays unmigrated; its legacy text still serves the prompt and the memory page",
+          // NOT "still serves the prompt" any more, and the correction matters to
+          // whoever reads this line: the manifest's legacy fallback is gone, so an
+          // uncarried document reaches the settings page and nothing else. The facts in
+          // it are invisible to the assistant until this migration succeeds.
+          hint: "this document stays unmigrated; its text serves the settings page only, and the assistant cannot see it",
         });
       }
     }
@@ -206,75 +216,67 @@ async function migrateOne(docId: string): Promise<boolean> {
       log.info("vault: skipping a memory doc whose space was retired", { docId, spaceId });
       return false;
     }
-    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY, tx);
-
-    // Dedup against the space's existing heads — this covers both a repeat after a
-    // partial failure and a match with a fact the user already stated themselves.
-    // The head's `sensitive` is carried along, not just its id: confirming below
-    // rewrites that column, and passing anything else would declassify a fact
-    // somebody had closed.
-    const seen = new Map(
-      (await listHeadClaims(spaceId, {}, tx)).map((h) => [norm(h.statement), { id: h.id, sensitive: h.sensitive }]),
-    );
+    // Every bullet becomes a PENDING CANDIDATE, not a confirmed claim, and that is the
+    // authority cutover reaching the oldest data in the system. This used to call
+    // `createClaim(reviewStatus: "confirmed")` directly — a writer declaring its own
+    // output approved, unattended, at boot, on text that predates every protection here.
+    // The document is a file the user could edit by hand and the agent appended to after
+    // every turn; nothing in it was ever reviewed, and a credential pasted into it years
+    // ago went straight into the prompt.
+    //
+    // The cost is real and is the honest one: memory carried over from the old system
+    // waits in the review queue until the person keeps it. Nothing is lost — the
+    // document itself still serves the settings page and the export for as long as it
+    // exists — and nothing is asserted on their behalf.
+    //
+    // Dedup lives in `proposeCandidate`, which answers `known` for a fact already in
+    // memory and writes nothing at all. There is deliberately no second copy of that
+    // rule here: the copy that used to live in this loop was the reason the migration
+    // needed `confirmClaim` and `attachToTopic` of its own, and both of those were
+    // writes this pass had no authority to make.
     let bullets = 0;
     for (const line of doc.content.split("\n")) {
-      // `fitStatement` HERE and not only inside `createClaim`, because this is also
-      // the dedup KEY: `seen` is built from statements that already went through it,
-      // so a legacy bullet over 500 characters would not match its own stored row and
-      // a second pass would create a duplicate instead of attaching to what is there.
       const statement = fitStatement(line.trim().replace(/^[-*]\s*/, "").trim());
       if (!statement) continue;
       bullets++;
-      const known = seen.get(norm(statement));
-      if (known !== undefined) {
-        // The fact exists — but possibly outside every topic (something other than
-        // the candidate ledger may have created it). Simply skipping the bullet would
-        // leave the row in the database and remove it from the screen: the GET reads
-        // the default topic.
-        await attachToTopic(known.id, noteId, tx);
-        // And possibly UNVERIFIED, which the Task 8 manifest does not list either —
-        // so attaching alone would stamp the document migrated while the fact stayed
-        // invisible, this time one layer down. A legacy document is memory the user
-        // has been looking at and silently accepting; it is no less confirmed than
-        // whatever already sits in the vault under the same words.
-        await confirmClaim(known.id, known.sensitive, tx);
-        continue;
-      }
-      const claim = await createClaim(
+      await proposeCandidate(
         {
+          // Keyed by the TEXT, not by the line's position. A document appended to since
+          // its last pass is re-selected (see the selector above), and a positional key
+          // would make an edited line collide with whatever used to be at that index and
+          // be silently dropped — while a text key re-proposes the edit and no-ops every
+          // bullet already carried. The statement sits in this row's own `statement`
+          // column anyway, so the key discloses nothing the row does not, and candidate
+          // rows are deleted with their space rather than outliving it.
+          idempotencyKey: `legacy:${docId}:${norm(statement)}`,
           spaceId,
           statement,
-          origin: { kind: "legacy_memory_doc" },
-          // NOT "unverified": a manifest of confirmed facts would otherwise show
-          // nothing of what the user saw in their memory yesterday.
-          reviewStatus: "confirmed",
-          topicNoteId: noteId,
+          provenance: { kind: "legacy_memory_doc" },
         },
-        { kind: "system" },
         tx,
       );
-      // The flag the ROW has, not the one asked for: `createClaim` screens the
-      // statement and a legacy bullet holding a credential comes back sensitive. A
-      // hardcoded `false` here would send a repeat of that bullet into `confirmClaim`
-      // arguing for declassification — which that function refuses, but a caller whose
-      // bookkeeping contradicts the database is a bug waiting for the next reader.
-      seen.set(norm(statement), { id: claim.id, sensitive: claim.sensitive });
     }
 
     // An audit event ATTESTS that something happened; it is not a second copy of the
     // data. The original markdown used to be stored here verbatim, which meant that
-    // deleting a project left a complete copy of its memory in `audit_events` until
-    // the whole account was deleted — the user's deletion was, for that text, a lie.
+    // deleting a project left a complete copy of its memory in `audit_events` until the
+    // whole account was deleted — the user's deletion was, for that text, a lie.
     // `retireProjectSpace` cannot help: it deletes claims and notes and deliberately
     // keeps the audit trail.
     //
-    // So: the id, how many bullets were carried, and a digest. The digest still
-    // answers the question an audit is for — "is this the document that was
-    // migrated?" — for anyone holding the original, without holding it here.
+    // So: the id, and how many bullets were carried. Nothing content-derived, and the
+    // removal of the digest that used to sit here is the point of this paragraph. It was
+    // an unsalted SHA-256 of the whole document, carried beside the exact character
+    // count and the bullet count — and memory text is low entropy. A reader of the audit
+    // log for a DELETED project could hash a small dictionary of likely one-line facts
+    // against it and recover the statement the deletion existed to remove, with the
+    // length and the count narrowing the guesses sharply. A salted hash would only be
+    // useful for comparing two documents we no longer keep, which nothing does, and a
+    // value nobody reads and everybody has to reason about is worse than none.
     //
-    // ACCEPTED COST: headings, ordering and formatting existed ONLY in that snapshot,
-    // so a migrated document can no longer be reconstructed. Reversibility was worth
-    // less than not retaining the text past the user's own deletion.
+    // ACCEPTED COST: headings, ordering and formatting existed only in the snapshot this
+    // replaced, so a migrated document cannot be reconstructed from the audit trail.
+    // Reversibility was worth less than not retaining the text past a user's own delete.
     await tx.insert(auditEvents).values({
       id: nanoid(),
       spaceId,
@@ -282,12 +284,7 @@ async function migrateOne(docId: string): Promise<boolean> {
       action: "system.memory_doc_migrated",
       subjectType: "memory_doc",
       subjectId: docId,
-      payload: {
-        docId,
-        bullets,
-        chars: doc.content.length,
-        sha256: createHash("sha256").update(doc.content, "utf8").digest("hex"),
-      },
+      payload: { docId, bullets },
     });
     return true;
   });

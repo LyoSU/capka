@@ -14,6 +14,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
  */
 import { pool } from "@/lib/db";
 import { createClaim } from "../claims";
+import { seedConfirmedClaim } from "./fixtures";
 import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -70,10 +71,12 @@ const mkClaim = async (
   reviewStatus: "confirmed" | "unverified" = "confirmed",
 ) => {
   const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-  await createClaim(
-    { spaceId, statement, origin: { kind: "user_direct" }, reviewStatus, topicNoteId: noteId },
-    { kind: "system" },
-  );
+  const input = { spaceId, statement, origin: { kind: "user_direct" }, topicNoteId: noteId };
+  // Confirming is a separate write since the cutover: `createClaim` produces an
+  // unverified claim and nothing else can. An "unverified" fixture is therefore simply
+  // one nobody confirmed.
+  if (reviewStatus === "confirmed") await seedConfirmedClaim(input, { kind: "user", id: OWNER });
+  else await createClaim(input, { kind: "system" });
 };
 
 /** A CONFIRMED head the user marked sensitive — the case the manifest withholds from
@@ -81,16 +84,9 @@ const mkClaim = async (
  *  one would be filtered by `onlyConfirmed` and prove nothing about sensitivity. */
 const mkSensitiveClaim = async (spaceId: string, statement: string) => {
   const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-  await createClaim(
-    {
-      spaceId,
-      statement,
-      origin: { kind: "user_direct" },
-      reviewStatus: "confirmed",
-      sensitive: true,
-      topicNoteId: noteId,
-    },
-    { kind: "system" },
+  await seedConfirmedClaim(
+    { spaceId, statement, origin: { kind: "user_direct" }, sensitive: true, topicNoteId: noteId },
+    { kind: "user", id: OWNER },
   );
 };
 

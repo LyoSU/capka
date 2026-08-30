@@ -21,7 +21,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
  * would erase the evidence of the very act.
  */
 import { pool } from "@/lib/db";
-import { createClaim } from "../claims";
+import { seedConfirmedClaim } from "./fixtures";
 import { readMemoryPage, type ScopeView } from "../memory-page";
 import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
 
@@ -69,8 +69,8 @@ const mkUser = (id: string) =>
  *  travel the same path. */
 const mkClaim = async (spaceId: string, statement: string, sensitive = false) => {
   const topicNoteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
-  const { id } = await createClaim(
-    { spaceId, statement, origin: { kind: "user_direct" }, reviewStatus: "confirmed", sensitive, topicNoteId },
+  const { id } = await seedConfirmedClaim(
+    { spaceId, statement, origin: { kind: "user_direct" }, sensitive, topicNoteId },
     { kind: "system" },
   );
   return id;

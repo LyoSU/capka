@@ -112,7 +112,6 @@ const seed = (over: Partial<Parameters<typeof createClaim>[0]> = {}) =>
       spaceId: SPACE_A,
       statement: "the initial fact",
       origin: { type: "chat" },
-      reviewStatus: "unverified",
       ...over,
     },
     ACTOR,
@@ -155,7 +154,6 @@ run("vault claims", () => {
       statement: "Favourite coffee — filter",
       slotKey: "coffee",
       value: { drink: "filter" },
-      reviewStatus: "confirmed",
       sensitive: true,
       topicNoteId: NOTE_A,
     });
@@ -166,7 +164,10 @@ run("vault claims", () => {
     expect(row.slot_key).toBe("coffee");
     expect(row.value).toEqual({ drink: "filter" });
     expect(row.origin).toEqual({ type: "chat" });
-    expect(row.review_status).toBe("confirmed");
+    // `unverified`, and there is no argument that could have asked for anything else:
+    // `createClaim` no longer accepts its own authorization. Only `confirmClaim` moves
+    // this column, and only the person's decision reaches it.
+    expect(row.review_status).toBe("unverified");
     expect(row.sensitive).toBe(true);
     expect(row.revision).toBe(1);
     expect(row.supersedes).toBeNull();
@@ -217,7 +218,6 @@ run("vault claims", () => {
       statement: "Works in Kyiv",
       slotKey: "city",
       value: { city: "Kyiv" },
-      reviewStatus: "confirmed",
       sensitive: true,
       topicNoteId: NOTE_A,
     });
@@ -245,10 +245,12 @@ run("vault claims", () => {
     expect(next.supersedes).toBe(oldId);
     expect(next.revision).toBe(2);
     expect(next.superseded_at).toBeNull();
-    // origin/sensitive/reviewStatus are copied from the predecessor, not reset.
+    // origin/sensitive/review_status are copied from the predecessor, not reset — and
+    // `review_status` can ONLY be inherited now: there is no patch field for it, so a
+    // supersede cannot promote its own successor.
     expect(next.origin).toEqual({ type: "chat" });
     expect(next.sensitive).toBe(true);
-    expect(next.review_status).toBe("confirmed");
+    expect(next.review_status).toBe("unverified");
     // The slot was not patched — it is inherited, and the slot's active head is now
     // the successor.
     expect(next.slot_key).toBe("city");
@@ -348,7 +350,7 @@ run("vault claims", () => {
   it("authz: another space yields {ok:false, current:null} with no text leak", async () => {
     const secret = "a secret from another space";
     const foreign = await createClaim(
-      { spaceId: SPACE_B, statement: secret, slotKey: "secret", origin: {}, reviewStatus: "confirmed" },
+      { spaceId: SPACE_B, statement: secret, slotKey: "secret", origin: {} },
       ACTOR,
     );
 
@@ -518,9 +520,11 @@ run("vault claims", () => {
   });
 
   it("listHeadClaims: heads only, ORDER BY recorded_at DESC, id — plus the filters", async () => {
-    const c1 = await seed({ statement: "first", slotKey: "s1", reviewStatus: "confirmed", topicNoteId: NOTE_A });
+    const c1 = await seed({ statement: "first", slotKey: "s1", topicNoteId: NOTE_A });
+    await confirmClaim(c1.id, false, ACTOR);
     const c2 = await seed({ statement: "second", slotKey: "s2", topicNoteId: NOTE_A });
-    const c3 = await seed({ statement: "third", reviewStatus: "confirmed" });
+    const c3 = await seed({ statement: "third" });
+    await confirmClaim(c3.id, false, ACTOR);
     const upd = await updateClaim({
       claimId: c2.id,
       expectedRevision: 1,
@@ -586,7 +590,6 @@ run("vault claims", () => {
             statement: "created inside the transaction",
             slotKey: "ex-created",
             origin: {},
-            reviewStatus: "unverified",
             topicNoteId: NOTE_A,
           },
           ACTOR,
@@ -645,7 +648,7 @@ run("vault claims", () => {
     // migration walked past it by calling `createClaim` directly — the fourth time in
     // this feature that a rule placed at one entrance missed another. Placed here, a
     // writer that has not read any of this is covered anyway.
-    const secret = "sk-proj-AbCdEf0123456789ghijkl";
+    const secret = "sk-proj-AbCdEf0123456789ghijklMnOpQrStUvWxYz";
 
     // Create: the flag comes back raised, not merely stored raised — a caller that
     // tracks what it asked for must not be tracking a value the row does not hold.
@@ -681,10 +684,10 @@ run("vault claims", () => {
     // `slot_key` is MODEL-FACING: memory_search prints it verbatim in every hit and
     // matches the query against it, so a credential in the key with an innocent
     // sentence was a non-sensitive claim handing the key back on every later search.
-    ["slot_key", { statement: "the deploy key for staging", slotKey: "creds/sk-proj-AbCdEf0123456789ghijkl" }],
+    ["slot_key", { statement: "the deploy key for staging", slotKey: "creds/sk-proj-AbCdEf0123456789ghijklMnOpQrStUvWxYz" }],
     // `value` is rendered nowhere today. That is exactly the reasoning that left the
     // quarantine filter off memory_search for a whole plan, so it is screened anyway.
-    ["value", { statement: "the deploy key for staging", value: { token: "sk-proj-AbCdEf0123456789ghijkl" } }],
+    ["value", { statement: "the deploy key for staging", value: { token: "sk-proj-AbCdEf0123456789ghijklMnOpQrStUvWxYz" } }],
   ])("createClaim screens %s, not only the statement", async (_column, over) => {
     const made = await seed(over);
     expect(made.sensitive).toBe(true);
@@ -707,8 +710,8 @@ run("vault claims", () => {
   });
 
   it.each([
-    ["slot_key", { slotKey: "creds/sk-proj-AbCdEf0123456789ghijkl" }],
-    ["value", { value: { token: "sk-proj-AbCdEf0123456789ghijkl" } }],
+    ["slot_key", { slotKey: "creds/sk-proj-AbCdEf0123456789ghijklMnOpQrStUvWxYz" }],
+    ["value", { value: { token: "sk-proj-AbCdEf0123456789ghijklMnOpQrStUvWxYz" } }],
   ])("updateClaim screens %s on the successor it is about to write", async (_column, patch) => {
     // The supersede is the other half of the boundary: without the screen here an
     // ordinary claim could be rewritten to carry a credential in one of these columns
@@ -734,7 +737,7 @@ run("vault claims", () => {
     const plain = await seed({ statement: "the deploy key is rotated every quarter", slotKey: "deploy/key" });
     await q(`UPDATE vault_claims SET slot_key = $2, sensitive = false WHERE id = $1`, [
       plain.id,
-      "creds/sk-proj-AbCdEf0123456789ghijkl",
+      "creds/sk-proj-AbCdEf0123456789ghijklMnOpQrStUvWxYz",
     ]);
     const upd = await updateClaim({
       claimId: plain.id,
@@ -765,11 +768,11 @@ run("vault claims", () => {
     const claim = await seed({ statement: "a fact that turns out to be sensitive" });
     expect((await claimRow(claim.id)).sensitive).toBe(false);
 
-    await confirmClaim(claim.id, true);
+    expect(await confirmClaim(claim.id, true, ACTOR)).toBe(true);
     expect((await claimRow(claim.id)).sensitive).toBe(true);
 
     // The stale duplicate, arriving second with everything it read before.
-    await confirmClaim(claim.id, false);
+    expect(await confirmClaim(claim.id, false, ACTOR)).toBe(true);
     expect((await claimRow(claim.id)).sensitive).toBe(true);
     expect((await claimRow(claim.id)).review_status).toBe("confirmed");
 

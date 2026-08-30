@@ -281,12 +281,20 @@ export function describeStep(t: StepTranslator, toolName: string, input?: unknow
         category: "search",
       };
     }
+    // NEUTRAL, attempted-action labels — never an outcome. The descriptor is chosen from
+    // the tool NAME alone and never sees the result, while these three calls settle as
+    // pending, conflict, retired, refused, or not-found far more often than they settle
+    // as done: since the authority cutover a proposal always waits for the person and
+    // `memory_forget` always refuses. "Saved to memory" over a refusal is not a cosmetic
+    // slip — it is the security gate's outcome misreported in the one place someone
+    // reviewing an incident would look. If an output-aware label is ever added here, it
+    // has to map every policy state, not only the happy one.
     case "memory_propose":
-      return { iconKey: "bookmark", label: t("savedToMemory"), activeLabel: t("savingToMemory"), category: "other" };
+      return { iconKey: "bookmark", label: t("memoryProposal"), activeLabel: t("savingToMemory"), category: "other" };
     case "memory_update":
-      return { iconKey: "bookmark", label: t("updatedMemory"), activeLabel: t("updatingMemory"), category: "other" };
+      return { iconKey: "bookmark", label: t("memoryCorrection"), activeLabel: t("updatingMemory"), category: "other" };
     case "memory_forget":
-      return { iconKey: "bookmark", label: t("removedFromMemory"), activeLabel: t("removingFromMemory"), category: "other" };
+      return { iconKey: "bookmark", label: t("memoryRemoval"), activeLabel: t("removingFromMemory"), category: "other" };
   }
 
   // The one object that stays INSIDE the sentence. Every other step puts the

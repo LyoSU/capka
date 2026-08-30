@@ -6,6 +6,43 @@ import { describeStep, describeInvocation } from "../steps";
 const t = (key: string, values?: Record<string, string | number>) =>
   values ? `${key}(${JSON.stringify(values)})` : key;
 
+/**
+ * L1 — the settled label of a memory step is an ATTEMPT, never an outcome.
+ *
+ * `describeStep` is chosen from the tool NAME alone and never sees the result, while
+ * these three calls settle as pending, conflict, retired, refused or not-found far more
+ * often than as done: since the authority cutover a proposal always waits for the
+ * person, and `memory_forget` always refuses. "Saved to memory" over a refusal is not a
+ * cosmetic slip — it is the security gate's outcome misreported in the one place
+ * someone reviewing an incident would look.
+ *
+ * These assertions are on the KEYS, not on English words, because the copy is
+ * translated and a key is what the two locale files agree on. If an output-aware label
+ * is ever added here, it has to map every policy state, not only the happy one.
+ */
+describe("describeStep — a memory step names the attempt, not the outcome", () => {
+  const SUCCESS_KEYS = ["savedToMemory", "updatedMemory", "removedFromMemory"];
+
+  it.each([
+    ["memory_propose", "memoryProposal"],
+    ["memory_update", "memoryCorrection"],
+    ["memory_forget", "memoryRemoval"],
+  ])("%s settles as %s", (tool, key) => {
+    const d = describeStep(t, tool, {});
+    expect(d.label).toBe(key);
+    expect(SUCCESS_KEYS).not.toContain(d.label);
+  });
+
+  it("keeps memory steps off the web-search branch", () => {
+    // `memory_search` contains "search", and the heuristic below it rendered a globe —
+    // the one step where a user's trust depends on knowing WHERE the agent looked.
+    expect(describeStep(t, "memory_search", { query: "acme" }).iconKey).toBe("bookmark");
+    for (const tool of ["memory_propose", "memory_update", "memory_forget"]) {
+      expect(describeStep(t, tool, {}).iconKey).toBe("bookmark");
+    }
+  });
+});
+
 describe("describeStep — categories", () => {
   it("classifies file tools", () => {
     expect(describeStep(t, "write_file", { path: "/workspace/a/logo.svg" }).category).toBe("file");

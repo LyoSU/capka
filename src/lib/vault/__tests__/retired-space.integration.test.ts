@@ -197,7 +197,7 @@ run("vault: writes into a retired space", () => {
       async (ready, release) => {
         await db.transaction(async (tx) => {
           await createClaim(
-            { spaceId: projectSpaceId, statement: "the deposit is 30 percent", origin: {}, reviewStatus: "confirmed" },
+            { spaceId: projectSpaceId, statement: "the deposit is 30 percent", origin: {} },
             actor,
             tx,
           );
@@ -299,7 +299,6 @@ run("vault: writes into a retired space", () => {
           spaceId: projectSpaceId,
           statement: "the office moves in March",
           origin: { kind: "user_direct" },
-          reviewStatus: "confirmed",
         },
         actor,
       ),
@@ -404,10 +403,13 @@ run("vault: writes into a retired space", () => {
       statement: "we pay our suppliers in euros",
       provenance: { kind: "user_direct", messageId: MSG },
     });
-    expect(proposed.state).toBe("auto_active");
+    // `pending`, not `auto_active`: nothing the model proposes enters memory without a
+    // person. The control this test provides is that the write HAPPENED at all — a
+    // fence that refused everything would answer `retired`.
+    expect(proposed.state).toBe("pending");
 
     const created = await createClaim(
-      { spaceId: userSpaceId, statement: "works in procurement", origin: {}, reviewStatus: "confirmed" },
+      { spaceId: userSpaceId, statement: "works in procurement", origin: {} },
       actor,
     );
     const updated = await updateClaim({
@@ -448,7 +450,10 @@ run("vault: writes into a retired space", () => {
     generating.resolve();
     await extraction;
 
-    expect(await count("vault_claims", "space_id = $1", [userSpaceId])).toBe(1);
+    // The user-scoped fact was recorded — as a candidate, which is what extraction
+    // produces now — while the retired project space took nothing at all.
+    expect(await count("memory_candidates", "space_id = $1", [userSpaceId])).toBe(1);
+    expect(await count("vault_claims", "space_id = $1", [userSpaceId])).toBe(0);
     expect(await contents(projectSpaceId)).toEqual({ claims: 0, candidates: 0, notes: 0 });
   });
 });
