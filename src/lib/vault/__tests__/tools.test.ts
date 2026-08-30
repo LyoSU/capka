@@ -64,6 +64,7 @@ const make = (over: Partial<Parameters<typeof makeVaultMemoryTools>[0]> = {}) =>
     projectId: "p1",
     projectOwnerUserId: "u1",
     messageId: "m1",
+    taskId: "t1",
     userTurnText: "The client pays in hryvnia, remember that",
     ...over,
   });
@@ -98,7 +99,7 @@ describe("makeVaultMemoryTools — the factory", () => {
 });
 
 describe("memory_propose", () => {
-  it("takes the project space inside a project, files user_direct and a messageId:toolCallId key", async () => {
+  it("takes the project space inside a project, files user_direct and a taskId:messageId:toolCallId key", async () => {
     const tools = await make();
     expect(await run(tools.memory_propose, { statement: "The client pays in hryvnia" }, "call-7")).toBe("Saved.");
 
@@ -108,7 +109,7 @@ describe("memory_propose", () => {
     );
     expect(proposeCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        idempotencyKey: "m1:call-7",
+        idempotencyKey: "t1:m1:call-7",
         spaceId: PROJECT_SPACE,
         originMessageId: "m1",
         statement: "The client pays in hryvnia",
@@ -183,6 +184,30 @@ describe("memory_propose", () => {
     expect(await run(tools.memory_propose, { statement: "The client pays in dollars" })).toBe(
       "Conflicts with an existing fact — recorded for the user to resolve.",
     );
+  });
+
+  it("keys a proposal by task, so two tasks on one message row cannot collide", async () => {
+    const keys: string[] = [];
+    proposeCandidate.mockImplementation(async (input: { idempotencyKey: string }) => {
+      keys.push(input.idempotencyKey);
+      return { state: "auto_active", claimId: "c1", revision: 1 };
+    });
+
+    // The two halves of one approval turn: same message row, same tool-call id (a provider
+    // that numbers them per request), different task.
+    for (const taskId of ["task-first", "task-continuation"]) {
+      const tools = await makeVaultMemoryTools({
+        // `allowSensitive` is Task 4's field and Task 4 has not landed; it is not part of
+        // this factory's contract yet, and nothing about this key depends on it.
+        userId: "u1", messageId: "m1", taskId,
+        userTurnText: "we pay our suppliers in euros",
+      });
+      await tools.memory_propose.execute!({ statement: "We pay our suppliers in euros" }, { toolCallId: "call_0" } as never);
+    }
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+    expect(keys[0]).toContain("task-first");
   });
 });
 
@@ -275,7 +300,7 @@ describe("memory_update", () => {
     expect(proposeCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
         forceState: "conflict",
-        idempotencyKey: "m1:call-2:conflict",
+        idempotencyKey: "t1:m1:call-2:conflict",
         spaceId: PROJECT_SPACE,
         statement: "In dollars",
         provenance: { kind: "derived", messageId: "m1" },

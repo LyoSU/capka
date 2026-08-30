@@ -2054,6 +2054,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         // The assistant row this turn is writing — the same id the snapshots use, so
         // every candidate's provenance points at the message it came from.
         messageId: msgId,
+        taskId,
         userText: userTurnText,
         assistantText: getFullText(),
         // The module knows nothing about providers or usage accounting; binding

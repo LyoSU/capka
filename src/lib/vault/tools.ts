@@ -136,6 +136,10 @@ export async function makeVaultMemoryTools(ctx: {
   projectId?: string | null;
   projectOwnerUserId?: string;
   messageId: string;
+  /** The TASK this turn-half runs as. Required, never optional: it is the only thing
+   *  that tells the two halves of an approval turn apart, and an optional parameter is
+   *  how a later caller reopens a hole by omission rather than by decision. */
+  taskId: string;
   userTurnText: string;
 }) {
   // The caller knows the project space's owner (it already holds the project row).
@@ -295,16 +299,15 @@ export async function makeVaultMemoryTools(ctx: {
           return "This chat is not inside a project, so there is no project memory to save to. Nothing was saved — re-send without scope, or with scope:'user' if the fact is about the person.";
         }
         const res = await proposeCandidate({
-          // KNOWN LIMIT, not a claim of uniqueness: an approval continuation is a
-          // SECOND task writing the SAME message row, so both halves of such a turn
-          // mint keys in one namespace. Nothing reachable from a tool tells the halves
-          // apart — `execute` sees a toolCallId and this factory a messageId, and
-          // neither carries the task — so the key cannot be made to. It holds as long
-          // as the provider's tool-call ids are unique per message rather than per
-          // request; one that numbers them from zero each request would collide, and
-          // the collision reads as `duplicate` (a silently dropped fact), not as an
-          // error. Closing it means threading the task id in from the runner.
-          idempotencyKey: `${ctx.messageId}:${toolCallId}`,
+          // Task-scoped, and that is what makes it a key rather than a hope. An approval
+          // continuation is a SECOND task writing the SAME message row, so
+          // `messageId:toolCallId` put both halves of one turn in one namespace: a
+          // provider numbering tool-call ids per request rather than per message made the
+          // halves collide, and the collision reads as `duplicate` — a silently dropped
+          // fact, not an error. `taskId` differs between the halves and is stable across
+          // a re-claim of the same task row, which is exactly the pair of properties
+          // idempotency needs.
+          idempotencyKey: `${ctx.taskId}:${ctx.messageId}:${toolCallId}`,
           spaceId,
           originMessageId: ctx.messageId,
           statement,
@@ -411,7 +414,7 @@ export async function makeVaultMemoryTools(ctx: {
         const conflictSpaceId = await claimSpaceId(claim_id);
         if (!conflictSpaceId) return mismatch(null);
         await proposeCandidate({
-          idempotencyKey: `${ctx.messageId}:${toolCallId}:conflict`,
+          idempotencyKey: `${ctx.taskId}:${ctx.messageId}:${toolCallId}:conflict`,
           spaceId: conflictSpaceId,
           originMessageId: ctx.messageId,
           statement,

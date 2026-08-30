@@ -310,6 +310,7 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
             projectId: project?.id ?? null,
             projectOwnerUserId: project?.userId,
             messageId,
+            taskId,
             userTurnText,
           })
         : {}),

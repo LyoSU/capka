@@ -152,6 +152,10 @@ export async function extractCandidates(args: {
   userSpaceId: string;
   projectSpaceId?: string;
   messageId: string;
+  /** The TASK this extraction runs for. Required for the same reason the tool factory
+   *  requires it: an approval continuation is a SECOND task writing the SAME message
+   *  row, so a key namespaced by the message alone can collide across the two halves. */
+  taskId: string;
   userText: string;
   assistantText: string;
   generate: GenerateFn;
@@ -238,7 +242,7 @@ export async function extractCandidates(args: {
         // stable across a re-run of the same finished extraction — which is what
         // makes a retry after a crash a no-op (via the ledger's unique index)
         // instead of a duplicate fact.
-        idempotencyKey: `${args.messageId}:extract:${ordinal}`,
+        idempotencyKey: `${args.taskId}:${args.messageId}:extract:${ordinal}`,
         spaceId,
         originMessageId: args.messageId,
         statement: item.statement,

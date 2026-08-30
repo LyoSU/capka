@@ -216,6 +216,7 @@ run("vault: memory_docs migration", () => {
       userId: OWNER,
       projectId: null,
       messageId: `${P}msg`,
+      taskId: `${P}task`,
       userTurnText: "what do you remember",
     });
     const found = (await tools.memory_search.execute!({ query: "openai" } as never, {

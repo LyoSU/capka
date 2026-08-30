@@ -28,6 +28,7 @@ const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
 const P = "retiredtest-";
 const OWNER = `${P}owner`;
 const MSG = `${P}msg`;
+const TASK = `${P}task`;
 const PROJ = `${P}proj`;
 
 const actor: Actor = { kind: "agent" };
@@ -119,6 +120,7 @@ run("vault: writes into a retired space", () => {
       userSpaceId,
       projectSpaceId,
       messageId: MSG,
+      taskId: TASK,
       userText: "we pay our suppliers in euros",
       assistantText: "noted",
       generate: async () => {
@@ -373,6 +375,7 @@ run("vault: writes into a retired space", () => {
       userSpaceId,
       projectSpaceId,
       messageId: MSG,
+      taskId: TASK,
       userText: "I work in procurement and we pay our suppliers in euros",
       assistantText: "noted",
       generate: async () => {

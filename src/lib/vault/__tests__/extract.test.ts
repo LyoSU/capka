@@ -26,10 +26,12 @@ import { extractCandidates, type GenerateFn } from "../extract";
 const USER_SPACE = "space-user";
 const PROJECT_SPACE = "space-project";
 const MESSAGE_ID = "msg-1";
+const TASK_ID = "task-1";
 
 const baseArgs = {
   userSpaceId: USER_SPACE,
   messageId: MESSAGE_ID,
+  taskId: TASK_ID,
   userText: "I work in procurement and pay suppliers in EUR",
   assistantText: "Got it, noted.",
 };
@@ -83,7 +85,7 @@ describe("extractCandidates — tolerant parsing", () => {
     await extractCandidates({ ...baseArgs, generate });
     expect(proposeCandidate).toHaveBeenCalledTimes(1);
     expect(proposeCandidate).toHaveBeenCalledWith(
-      expect.objectContaining({ statement: "pays in EUR", idempotencyKey: `${MESSAGE_ID}:extract:1` }),
+      expect.objectContaining({ statement: "pays in EUR", idempotencyKey: `${TASK_ID}:${MESSAGE_ID}:extract:1` }),
     );
   });
 
@@ -180,11 +182,11 @@ describe("extractCandidates — idempotency keys", () => {
     await extractCandidates({ ...baseArgs, generate: first });
     expect(proposeCandidate).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ idempotencyKey: `${MESSAGE_ID}:extract:0`, statement: "fact A" }),
+      expect.objectContaining({ idempotencyKey: `${TASK_ID}:${MESSAGE_ID}:extract:0`, statement: "fact A" }),
     );
     expect(proposeCandidate).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ idempotencyKey: `${MESSAGE_ID}:extract:1`, statement: "fact B" }),
+      expect.objectContaining({ idempotencyKey: `${TASK_ID}:${MESSAGE_ID}:extract:1`, statement: "fact B" }),
     );
 
     // A re-run after a crash: same message, same model output. The keys must be
@@ -196,11 +198,11 @@ describe("extractCandidates — idempotency keys", () => {
     await extractCandidates({ ...baseArgs, generate: second });
     expect(proposeCandidate).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ idempotencyKey: `${MESSAGE_ID}:extract:0` }),
+      expect.objectContaining({ idempotencyKey: `${TASK_ID}:${MESSAGE_ID}:extract:0` }),
     );
     expect(proposeCandidate).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ idempotencyKey: `${MESSAGE_ID}:extract:1` }),
+      expect.objectContaining({ idempotencyKey: `${TASK_ID}:${MESSAGE_ID}:extract:1` }),
     );
   });
 });
