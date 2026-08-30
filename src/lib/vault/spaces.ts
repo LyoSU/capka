@@ -8,8 +8,10 @@ import {
   projects,
   spaces,
   vaultClaims,
+  vaultNodes,
   vaultNotes,
 } from "@/lib/db/schema";
+import { insertNode } from "./nodes";
 
 /** A DB handle: the pool, or the caller's transaction. Every function here sends
  *  ALL of its statements through it — quietly falling back to the module-level
@@ -172,10 +174,18 @@ export async function getOrCreateTopicNote(spaceId: string, topicKey: string, ex
   );
   const found = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
   if (found[0]) return found[0].id;
-  await ex
+  const noteId = nanoid();
+  await insertNode({ id: noteId, spaceId, kind: "note" }, ex);
+  const inserted = await ex
     .insert(vaultNotes)
-    .values({ id: nanoid(), spaceId, topicKey, title: TOPIC_LABELS[topicKey] ?? topicKey, kind: "memory_topic" })
-    .onConflictDoNothing();
+    .values({ id: noteId, spaceId, topicKey, title: TOPIC_LABELS[topicKey] ?? topicKey, kind: "memory_topic" })
+    .onConflictDoNothing()
+    .returning({ id: vaultNotes.id });
+  // The insert can be a no-op (a concurrent creator won the partial unique index), and
+  // then the node row above belongs to a note that does not exist. Remove it rather than
+  // leaving an orphan the graph would walk into: the loser of the race owns the cleanup,
+  // because the winner cannot see what it displaced.
+  if (!inserted.length) await ex.delete(vaultNodes).where(eq(vaultNodes.id, noteId));
   const [row] = await ex.select({ id: vaultNotes.id }).from(vaultNotes).where(where).limit(1);
   if (!row) throw new Error(`memory topic "${topicKey}" vanished after insert`);
   return row.id;

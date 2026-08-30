@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
+import { insertNode } from "./nodes";
 import { spaceAcceptsWrites, type Ex } from "./spaces";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
@@ -312,6 +313,11 @@ export async function createClaim(
   const statement = fitStatement(input.statement);
   const slotKey = fitSlotKey(input.slotKey);
   const sensitive = input.sensitive || secretShaped(input.statement, input.slotKey, input.value);
+  // The node row and the claim row are one write. The composite FK below runs child →
+  // parent, so this has to come FIRST — and it is here rather than inside `insertNode`'s
+  // caller-of-a-caller because "every subtype row is created in one transaction with its
+  // node row" is a property of this statement pair, not of a convention.
+  await insertNode({ id, spaceId: input.spaceId, kind: "claim" }, ex);
   await ex.insert(vaultClaims).values({
     id,
     spaceId: input.spaceId,
@@ -478,6 +484,11 @@ export async function updateClaim(
   // stays verbatim as it was recorded. The whole claim is copied, not just the
   // three fields in the patch — otherwise `kind` and the validity window would
   // quietly reset to the schema defaults.
+  //
+  // The SUCCESSOR is a new row, so it is a new node. The predecessor's node is untouched:
+  // a superseded claim is history, and history is not deleted (§2.10 — `superseded_at`
+  // and `vault_nodes.deleted_at` are different flags with different readers).
+  await insertNode({ id, spaceId: prev.spaceId, kind: "claim" }, ex);
   await ex.insert(vaultClaims).values({
     id,
     spaceId: prev.spaceId,
