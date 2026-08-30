@@ -270,6 +270,12 @@ run("vault schema", () => {
       ).rejects.toMatchObject({ code: FK_VIOLATION });
     });
 
+    it("refuses a node kind outside the three", async () => {
+      await expect(
+        q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'person')`, [`${P}n-k`, SPACE_A]),
+      ).rejects.toMatchObject({ code: CHECK_VIOLATION, constraint: "ck_vault_nodes_kind" });
+    });
+
     it("refuses a self-edge", async () => {
       await q(`INSERT INTO vault_nodes (id, space_id, kind) VALUES ($1,$2,'note')`, [`${P}n-s`, SPACE_A]);
       await expect(
