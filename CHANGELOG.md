@@ -26,12 +26,13 @@ All notable changes to Capka are documented here. Format follows
 - A memory row's source line links to the conversation it came from, and a conflicting one names the fact it would replace.
 - Conflicts raised by the assistant's own `memory_update` now name the fact they contest, like extraction-raised ones already did.
 - The assistant can no longer save, correct or delete a memory fact on its own: every fact it records waits on the memory page until the user keeps it, and `memory_forget` refuses outright.
-- Memory documents from the old system now migrate into the review queue instead of straight into memory, so the user keeps their carried-over facts once (migration 0058).
+- Memory documents from the old system now migrate into the review queue instead of straight into memory, so the user keeps their carried-over facts once.
 - A memory step in the chat timeline is labelled by what was attempted ("Memory proposal") rather than by a success that may not have happened.
 - Facts no longer merge automatically: two facts about the same thing accumulate as duplicates and the user resolves them on the memory page (`vault_claims.slot_key` is a display hint; `uniq_vclaims_active_slot` dropped in migration 0058).
 
 ### Fixed
 
+- Keeping a correction on the memory page now actually replaces the fact it names, instead of leaving both facts live and asserting each to the assistant; if that fact was already replaced by something else in the meantime, the correction is saved beside it and nothing is superseded.
 - Memory topics are identified by a stable key instead of their displayed title, so renaming one no longer forks it into two the assistant counts twice.
 - Deleting a project now closes its memory for good: a post-turn fact extraction still running when the project is deleted no longer writes into the deleted project's memory (`spaces.retired_at`, migration 0056).
 - Memory tool calls read as memory in the chat timeline instead of "Searched the web" with a globe — `memory_search` was matching the web-search name heuristic.

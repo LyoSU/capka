@@ -15,6 +15,7 @@ import {
   secretShaped,
   updateClaim,
   type Actor,
+  type ClaimHead,
   type EvidenceInput,
 } from "./claims";
 import { listModelClaims } from "./model-view";
@@ -53,6 +54,18 @@ export type CandidateRow = typeof memoryCandidates.$inferSelect;
  * A candidate value of literal `null` is indistinguishable from an absent one once it
  * is in the column, so it reads as "no opinion" too — the honest reading of a shape
  * the storage cannot tell apart.
+ *
+ * ONE RESIDUE, recorded here because the paragraphs above reason about exactly this class
+ * for sensitive and unverified heads and did not name it. `known` and `pending` are
+ * distinguishable replies, and this comparison reads `value`, which is NOT model-facing:
+ * `ModelClaim.value` rides through the projection unbranded and no reader prints it. So
+ * an agent that already knows a head's statement — which it may read — can probe that
+ * head's stored `value` by proposing guesses, `known` on a deep-equal hit and `pending`
+ * on a miss. Narrow today: the statement must already be model-visible, `value` is almost
+ * always model-authored in the first place, absence short-circuits to agreement, and a
+ * miss leaves a visible row in the person's queue. It stops being narrow the moment
+ * something writes a `value` the model did not author, which is the same first reader of
+ * `vault_claims.value` the supersede branch below is already waiting on.
  */
 const valueAgrees = (headValue: unknown, candidateValue: unknown) =>
   candidateValue === undefined || candidateValue === null || isDeepStrictEqual(headValue ?? null, candidateValue);
@@ -91,6 +104,74 @@ export function spaceForScope(
   if (scope === "user") return spaces.userSpaceId;
   if (scope === "project") return spaces.projectSpaceId ?? null;
   return spaces.projectSpaceId ?? spaces.userSpaceId;
+}
+
+/**
+ * What a confirmation is being asked to DO, read off the candidate row ONCE.
+ *
+ * A UNION, not a record carrying an optional `conflictsWith` beside a `policy_state`
+ * string, and the difference is the whole of this fix. The optional field shipped: the
+ * producer side was made to carry its evidence — `forceConflict` cannot compile without
+ * the contested id — the memory page rendered "keeping this replaces «…»" from it, and
+ * the consumer here never read the column at all. So the person authorised a replacement
+ * and got a second head contradicting the first, in every later prompt, forever. That is
+ * this feature's recurring defect in its purest form: a rule at one entrance while a
+ * second walks past it. An optional field is ignorable in silence. A variant is not — its
+ * payload does not exist on the other arm, so `tsc` refuses to reach for it without
+ * narrowing, and narrowing is what makes the other branch visible to whoever writes the
+ * third consumer.
+ *
+ * Discriminated on the EVIDENCE (`conflicts_with`), never on `policy_state`. Rows written
+ * before the id became mandatory carry `policy_state = 'conflict'` pointing at nothing,
+ * and a replacement with no named target is not a replacement — it is a plain fact the
+ * page already renders as one. Reading the state string instead would send those rows
+ * looking for a head that was never recorded.
+ */
+type ConfirmIntent =
+  | { kind: "record" }
+  | { kind: "replace"; contested: string };
+
+/**
+ * The head this confirmation acts on, or `null` for "none of them — write a new one".
+ *
+ * The `switch` is the other half of the union's job: a variant added without a branch
+ * here fails `tsc` on the missing return, so the next state cannot arrive the way
+ * `replace` did — written on one side, walked past on the other.
+ *
+ * `replace` reads the CONTESTED head by id, and does NOT walk the chain forward from it.
+ * Not walking is the deliberate part: if somebody else superseded that claim in the
+ * meantime, the chain's current head is a fact this person never saw and never authorised
+ * replacing. So a contested head that is no longer live resolves to `null` and the
+ * confirmation creates a separate head, superseding nothing — the asymmetric fallback
+ * AMENDMENT 2 prescribes. A duplicate is one click for a person to repair; a wrong
+ * supersession is silent data loss wearing a tidy face.
+ *
+ * `listHeadClaims` is what re-verifies the space at confirm time, not a second predicate:
+ * it filters `space_id` and `superseded_at IS NULL` in the same statement, and the space
+ * it is given is the candidate's own — which the CAS above already proved is one of the
+ * caller's. A contested claim that has moved out of reach since propose simply is not in
+ * the list.
+ */
+async function targetHead(
+  intent: ConfirmIntent,
+  spaceId: string,
+  slotKey: string | null,
+  statement: string,
+  ex: Ex,
+): Promise<ClaimHead | null> {
+  switch (intent.kind) {
+    case "replace":
+      return (await listHeadClaims(spaceId, {}, ex)).find((h) => h.id === intent.contested) ?? null;
+    // With a slot, "the existing head" means the head of the SLOT; without one, the head
+    // carrying the same normalized text. The dedup is required: propose performs it, and
+    // if confirm did not, a fact proposed without a slot and then activated by another
+    // proposal would produce a SECOND byte-identical head on confirmation — and the store
+    // would repeat the same thing back to the human forever.
+    case "record":
+      return slotKey
+        ? await headBySlot(spaceId, slotKey, ex)
+        : ((await listHeadClaims(spaceId, {}, ex)).find((h) => norm(h.statement) === norm(statement)) ?? null);
+  }
 }
 
 /** Two CAS losses in a row. Thrown to roll back the WHOLE confirm transaction,
@@ -367,6 +448,10 @@ export async function confirmCandidate(args: {
       }
 
       const evidence = (cand.evidence ?? []) as EvidenceInput[];
+      // Read once, at the top, from the row the CAS just returned — see `ConfirmIntent`.
+      const intent: ConfirmIntent = cand.conflictsWith
+        ? { kind: "replace", contested: cand.conflictsWith }
+        : { kind: "record" };
       // `fitSlotKey`, the SAME function propose uses, not a second normalization that
       // happens to agree with it: these two only ever agreed because every candidate
       // row was written by propose first, and a future writer inserting a row directly
@@ -420,17 +505,11 @@ export async function confirmCandidate(args: {
       for (let attempt = 0; attempt < 2; attempt++) {
         const claimId = await tx
           .transaction(async (sp): Promise<string | null> => {
-            // With a slot, "the existing head" means the head of the SLOT; without
-            // one, the head carrying the same normalized text. The dedup is required
-            // here: propose (step 7) performs it, and if confirm did not, a sensitive
-            // fact proposed without a slot and then activated by another proposal
-            // would produce a SECOND byte-identical head on confirmation — and the
-            // store would repeat the same thing back to the human forever.
-            const head = slotKey
-              ? await headBySlot(cand.spaceId, slotKey, sp)
-              : ((await listHeadClaims(cand.spaceId, {}, sp)).find(
-                  (h) => norm(h.statement) === norm(statement),
-                ) ?? null);
+            // Which head this acts on — the contested one for a correction, the dedup's
+            // for a plain fact. The choice is made in ONE function over the intent union
+            // rather than inline here, so a state whose confirmation means something new
+            // has to be answered there rather than silently falling through to the dedup.
+            const head = await targetHead(intent, cand.spaceId, slotKey, statement, sp);
 
             // Every head is usable here, sensitive ones included, and that is NOT the rule
             // propose holds — deliberately. `sensitive` withholds from the MODEL; the
@@ -471,10 +550,18 @@ export async function confirmCandidate(args: {
               return usable.id;
             }
 
-            // Reached with a slot whose head says something else, and — since the
-            // value joined the comparison above — also without one, when the words
-            // match and the structured value does not. Both are a correction the human
-            // approved, so both supersede.
+            // Reached by a `replace` whose contested head is still live and says
+            // something else — the case the memory page promised as "keeping this
+            // replaces «…»" — and by a `record` with a slot whose head says something
+            // else, and, since the value joined the comparison above, also without one
+            // when the words match and the structured value does not. All of them are a
+            // correction the human approved, so all of them supersede.
+            //
+            // THE SUPERSEDE IS `updateClaim`, not a second CAS invented here: its
+            // predicate is already `id = $1 AND revision = $2 AND superseded_at IS NULL
+            // AND space_id IN (…)`, and the successor it writes is the confirmed head —
+            // so the replacement and the row it replaces are one statement apart inside
+            // this savepoint, and there is no window in which both are live.
             if (usable) {
               const upd = await updateClaim(
                 {
@@ -533,6 +620,13 @@ export async function confirmCandidate(args: {
               return upd.id;
             }
 
+            // No head to act on. For a `record` that is the ordinary case; for a
+            // `replace` it means the contested claim is no longer live — somebody else
+            // superseded or forgot it between the proposal and this click — and then the
+            // fact is recorded BESIDE whatever replaced it and nothing is superseded. The
+            // person authorised replacing a specific claim, not its successor, which they
+            // have never seen. What they see afterwards is the new fact on their memory
+            // page next to the other one, and two facts they can resolve in a click.
             const noteId = await getOrCreateTopicNote(cand.spaceId, DEFAULT_TOPIC_KEY, sp);
             const claim = await createClaim(
               {

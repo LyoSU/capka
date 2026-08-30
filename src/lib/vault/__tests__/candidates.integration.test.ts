@@ -56,7 +56,8 @@ vi.mock("../claims", async (importOriginal) => {
 });
 
 import { pool } from "@/lib/db";
-import { createClaim, type Actor } from "../claims";
+import { confirmClaim, createClaim, updateClaim, type Actor } from "../claims";
+import { listModelClaims } from "../model-view";
 import { seedConfirmedClaim } from "./fixtures";
 import {
   proposeCandidate,
@@ -431,6 +432,103 @@ run("vault candidates", () => {
     const head = await confirmedHead({ statement: "Works in Kyiv" });
     const res = await propose({ statement: "Works in Kyiv", forceConflict: { conflictsWith: head.id } });
     expect(res.state).toBe("conflict");
+  });
+
+  /**
+   * F1 — CONFIRMING a conflict, which nothing tested before and which is why the defect
+   * shipped. Every conflict card on the memory page is now a `memory_update` correction:
+   * the page renders "keeping this replaces «…»" and the person clicks Keep. Confirm
+   * never read `conflicts_with`, so the slotless dedup found nothing (a correction says
+   * something DIFFERENT by definition), a second head was created, and the contested one
+   * stayed live and confirmed — two contradictory facts asserted to the model in every
+   * later turn, and the replacement the person authorised never happened.
+   */
+  it("confirming a conflict SUPERSEDES the head it names, and one head is left answering", async () => {
+    const contested = await confirmedHead({ statement: "Works in Kyiv", slotKey: "person/city" });
+    // No slot key, exactly as `memory_update` proposes it — which is what made the
+    // slotless dedup the branch that ran.
+    const proposed = await propose({ statement: "Works in Lviv", forceConflict: { conflictsWith: contested.id } });
+    if (proposed.state !== "conflict") throw new Error("expected conflict");
+
+    const res = await confirmCandidate({ candidateId: proposed.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("unreachable");
+
+    // The contested head is history, and the kept fact is its SUCCESSOR — one version
+    // chain, not a second fact filed beside the first.
+    expect((await claimRow(contested.id)).superseded_at).not.toBeNull();
+    const kept = await claimRow(res.claimId);
+    expect(kept.statement).toBe("Works in Lviv");
+    expect(kept.supersedes).toBe(contested.id);
+    expect(kept.review_status).toBe("confirmed");
+    expect(kept.superseded_at).toBeNull();
+    // The slot rides across on the supersede although the candidate carried none: the
+    // correction inherits the grouping of the fact it replaces.
+    expect(kept.slot_key).toBe("person/city");
+
+    // The assertion the defect was about — read through the projection that decides what
+    // the model may see, not by counting rows, because "the model asserts both" was the
+    // damage.
+    expect((await listModelClaims(SPACE_A)).map((c) => c.statement)).toEqual(["Works in Lviv"]);
+  });
+
+  it("a contested head someone else replaced first: the correction is recorded, nothing is superseded", async () => {
+    const contested = await confirmedHead({ statement: "Works in Kyiv" });
+    const proposed = await propose({ statement: "Works in Lviv", forceConflict: { conflictsWith: contested.id } });
+    if (proposed.state !== "conflict") throw new Error("expected conflict");
+
+    // Somebody moves the fact on between the proposal and the click. The person
+    // authorised replacing the claim they were SHOWN, not whatever took its place — so
+    // this confirmation must not follow the chain forward and supersede a fact they have
+    // never seen. A duplicate is one click for a person to repair; a wrong supersession
+    // is silent data loss wearing a tidy face.
+    const other = await updateClaim({
+      claimId: contested.id,
+      expectedRevision: 1,
+      patch: { statement: "Works in Odesa" },
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+    });
+    if (!other.ok) throw new Error("expected the intervening supersede to win");
+    expect(await confirmClaim(other.id, false, ACTOR)).toBe(true);
+
+    const res = await confirmCandidate({ candidateId: proposed.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("unreachable");
+
+    const kept = await claimRow(res.claimId);
+    expect(kept.statement).toBe("Works in Lviv");
+    // Created, not chained onto anything: this confirmation superseded nothing at all.
+    expect(kept.supersedes).toBeNull();
+    expect(kept.review_status).toBe("confirmed");
+    expect((await claimRow(other.id)).superseded_at).toBeNull();
+
+    // Two facts, side by side, for the person to resolve — the accepted cost, asserted so
+    // it stays the accepted one rather than becoming a supersession by drift.
+    expect((await listModelClaims(SPACE_A)).map((c) => c.statement).sort()).toEqual([
+      "Works in Lviv",
+      "Works in Odesa",
+    ]);
+  });
+
+  it("a conflict row written with no contested id confirms as an ordinary fact", async () => {
+    // Rows predating the mandatory id carry `policy_state = 'conflict'` pointing at
+    // nothing. The intent is read off the EVIDENCE, not off the state string, so these
+    // take the plain path instead of hunting for a head that was never recorded.
+    const cand = `${P}bare-conflict`;
+    await q(
+      `INSERT INTO memory_candidates (id, idempotency_key, space_id, statement, provenance, policy_state)
+       VALUES ($1, $1, $2, 'A bare conflict', '{"kind":"derived"}'::jsonb, 'conflict')`,
+      [cand, SPACE_A],
+    );
+
+    const res = await confirmCandidate({ candidateId: cand, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("unreachable");
+    const kept = await claimRow(res.claimId);
+    expect(kept.statement).toBe("A bare conflict");
+    expect(kept.supersedes).toBeNull();
+    expect(kept.review_status).toBe("confirmed");
   });
 
   it("the same idempotencyKey is a COMPLETE no-op: no row, no event", async () => {
