@@ -8,11 +8,13 @@ import { Textarea } from "@/components/ui/textarea";
 import type { PendingView } from "@/lib/vault/memory-page";
 import {
   FactRow,
+  SensitiveEditNote,
   SourceCaption,
   Statement,
   chatHref,
   formatDay,
   groupBySource,
+  useReveal,
   useSourceText,
 } from "./memory-topics";
 import { SettingsSection } from "./shell";
@@ -53,12 +55,20 @@ import { SettingsSection } from "./shell";
  *  queue teaches the person to throw good facts away.
  *
  *  The server treats an edited statement as the PERSON's words, provenance included. That
- *  is what makes offering this safe rather than merely convenient. */
+ *  is what makes offering this safe rather than merely convenient.
+ *
+ *  ON A SENSITIVE ROW, EDIT WAITS FOR THE REVEAL. A textarea holding the raw text was a
+ *  second entrance to the very rule the blur exists for: one click on a button labelled
+ *  "Edit wording" put the words on screen, and "Edit wording" does not read as "show me
+ *  the secret". The reveal control is where exposure is asked for, so the row shares its
+ *  state (`useReveal`) rather than growing a second copy of the rule — this component
+ *  never reads `sensitive` and could not act on it if it wanted to. */
 function Waiting({ item, onChanged }: { item: PendingView; onChanged: () => void }) {
   const t = useTranslations("settings.memory");
   const locale = useLocale();
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
+  const reveal = useReveal(item.statement);
 
   const decide = async (decision: "confirm" | "reject", statement?: string) => {
     setBusy(true);
@@ -72,6 +82,15 @@ function Waiting({ item, onChanged }: { item: PendingView; onChanged: () => void
       // the row stays exactly where it is so the person can.
       if (res.status === 409) {
         toast.error(t("tryAgain"));
+        return;
+      }
+      // 404 is "this row is no longer open" — decided in another tab, or swept by a
+      // reset. Re-read as well as complain: without it the row stays on screen and every
+      // further click fails the same way, which is the button-that-does-nothing the whole
+      // amendment was written about.
+      if (res.status === 404) {
+        toast.error(t("decideFailed"));
+        onChanged();
         return;
       }
       if (!res.ok) throw new Error();
@@ -102,6 +121,7 @@ function Waiting({ item, onChanged }: { item: PendingView; onChanged: () => void
             autoFocus
             className="min-h-14"
           />
+          <SensitiveEditNote value={item.statement} />
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -117,20 +137,30 @@ function Waiting({ item, onChanged }: { item: PendingView; onChanged: () => void
         </div>
       ) : (
         <>
-          <Statement text={item.statement} sensitive={item.sensitive}>
+          <Statement value={item.statement} reveal={reveal}>
             {item.state === "conflict" && (
-              <p className="mt-1 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-warning-text">
+              <div className="mt-1 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-warning-text">
                 <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warning-text" />
                 {/* The other half, or the bare word when the ledger recorded a contested
                     slot with no head left to point at. Keeping this SUPERSEDES that, so
-                    the sentence says so rather than leaving the reader to guess. */}
-                {item.conflictsWith
-                  ? t("conflictReplaces", {
-                      statement: item.conflictsWith.statement,
-                      date: formatDay(item.conflictsWith.at, locale),
-                    })
-                  : t("reviewConflict")}
-              </p>
+                    the sentence says so rather than leaving the reader to guess.
+                    The head's TEXT goes through `Statement` on its own sensitivity: this
+                    is a different claim from the candidate, and `confirmClaim` can raise
+                    its flag in place at any time — printing it interpolated into the
+                    sentence rendered a sensitive head in full, two rows under the
+                    identical words rendered blurred. */}
+                {item.conflictsWith ? (
+                  <div className="min-w-0">
+                    <p>{t("conflictReplacesOn", { date: formatDay(item.conflictsWith.at, locale) })}</p>
+                    <Statement
+                      value={item.conflictsWith.statement}
+                      className="text-[11.5px] leading-relaxed"
+                    />
+                  </div>
+                ) : (
+                  <p>{t("reviewConflict")}</p>
+                )}
+              </div>
             )}
           </Statement>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -140,7 +170,16 @@ function Waiting({ item, onChanged }: { item: PendingView; onChanged: () => void
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => decide("reject")}>
               {t("reject")}
             </Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft(item.statement)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              // Not disabled-because-sensitive — disabled until the words are legible. The
+              // row never asks which; `useReveal` answers `shown: true` for every ordinary
+              // fact, so this reads as one rule and not as a special case.
+              disabled={busy || !reveal.shown}
+              title={reveal.shown ? undefined : t("editNeedsReveal")}
+              onClick={() => setDraft(item.statement.text)}
+            >
               {t("editStatement")}
             </Button>
           </div>

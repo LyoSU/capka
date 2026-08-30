@@ -381,7 +381,9 @@ run("vault: POST /api/memory/candidates/[candidateId]", () => {
     // have shipped a Keep button over a blank row.
     const page = await readMemoryPage(OWNER);
     const waiting = page.scopes.flatMap((s) => s.pending).find((p) => p.id === sensitiveId);
-    expect(waiting).toMatchObject({ sensitive: true, statement: SECRET });
+    // The text and the flag arrive as ONE value, which is what stops a new render site
+    // from picking up the words and forgetting the advisory — see `StatementView`.
+    expect(waiting?.statement).toEqual({ text: SECRET, sensitive: true });
   });
 
   it("saves the person's OWN wording when they correct the extraction", async () => {
@@ -403,6 +405,30 @@ run("vault: POST /api/memory/candidates/[candidateId]", () => {
     expect(res.status).toBe(400);
     const row = await q(`SELECT resolved_at FROM memory_candidates WHERE id = $1`, [pendingId]);
     expect((row.rows[0] as { resolved_at: Date | null }).resolved_at).toBeNull();
+  });
+
+  it("answers a malformed body as a client fault, not as its own failure", async () => {
+    // `req.json()` throws before zod runs, and `apiHandler` only special-cases `ZodError`,
+    // so this used to be a 500 plus a `console.error` line in the operator's log for
+    // something no operator can act on. Unreachable from the page; the API is a contract
+    // regardless of who is holding it.
+    const { POST } = await import("@/app/api/memory/candidates/[candidateId]/route");
+    const res = await POST(
+      new Request("http://t", { method: "POST", headers: { "content-type": "application/json" }, body: "{oops" }),
+      { params: Promise.resolve({ candidateId: pendingId }) },
+    );
+    expect(res.status).toBe(400);
+    const row = await q(`SELECT resolved_at FROM memory_candidates WHERE id = $1`, [pendingId]);
+    expect((row.rows[0] as { resolved_at: Date | null }).resolved_at).toBeNull();
+  });
+
+  it("measures an edited statement AFTER trimming it, not before", async () => {
+    // `fitStatement` trims downstream, so a `min(3)` on the raw string let three spaces
+    // and a letter through and stored a one-character fact. The browser guards this; the
+    // browser is not the only caller.
+    const res = await decide(pendingId, { decision: "confirm", statement: "   a   " });
+    expect(res.status).toBe(400);
+    expect(await count("vault_claims", "space_id = $1 AND statement = 'a'", [spaceId])).toBe(0);
   });
 
   it("answers a second decision on the same row as absent, not as a second save", async () => {

@@ -148,7 +148,22 @@ export async function proposeCandidate(input: {
   provenance: Provenance;
   sensitive?: boolean;
   evidence?: EvidenceInput[];
-  forceState?: "conflict";
+  /**
+   * Force this proposal into `conflict` regardless of what the policy would say, NAMING
+   * the head it contests. The claim id is required, and that requirement is the fix:
+   * this used to be `forceState?: "conflict"`, a flag, and the one caller that used it
+   * (`memory_update`'s second CAS loss) had the contested id two lines earlier and did
+   * not pass it — so half the conflicts on the memory page rendered a bare "this
+   * disagrees with something" where the whole point was to show the other half. A third
+   * producer that cannot name the head it contests now fails to compile rather than
+   * quietly shipping the same gap.
+   *
+   * It does NOT make `conflicts_with` non-null everywhere, and a database CHECK saying
+   * so would be wrong: the internal `conflict(null)` path records a genuinely contested
+   * slot whose head a third party removed between the 23505 and the re-read. There is no
+   * head to name there, and inventing one would be worse than the bare sentence.
+   */
+  forceConflict?: { conflictsWith: string };
   /** Honoured ONLY on the immediate-activation path. A candidate that went to
    *  pending does not remember a topic — `memory_candidates` has no such column —
    *  so `confirmCandidate` always files the fact under the default topic. In plan A
@@ -202,7 +217,7 @@ export async function proposeCandidate(input: {
   // The gate is evaluated BEFORE the insert: `policy_state` is NOT NULL, and a
   // provisional value plus a later UPDATE would only add a state nobody ever sees.
   const gate: "conflict" | "pending" | null =
-    input.forceState === "conflict"
+    input.forceConflict
       ? "conflict"
       : sensitive
         ? "pending"
@@ -246,6 +261,11 @@ export async function proposeCandidate(input: {
         evidence,
         sensitive,
         policyState: gate ?? "auto_active",
+        // Written with the row, not by a later UPDATE like the `conflict()` branch below:
+        // this state is decided BEFORE the insert (see `gate`), so the evidence for it
+        // has to be too, or `policy_state` and `conflicts_with` land in two statements
+        // and a reader between them sees a conflict with nothing to point at.
+        conflictsWith: input.forceConflict?.conflictsWith ?? null,
       })
       .onConflictDoNothing({ target: memoryCandidates.idempotencyKey })
       .returning({ id: memoryCandidates.id });
@@ -272,7 +292,7 @@ export async function proposeCandidate(input: {
       });
 
     if (gate) {
-      await audit(gate, {});
+      await audit(gate, input.forceConflict ? { conflictsWith: input.forceConflict.conflictsWith } : {});
       return { state: gate, candidateId: id } as const;
     }
 
@@ -517,8 +537,13 @@ export async function confirmCandidate(args: {
       // Provenance follows the words. See the docstring: the human typed these, so the
       // origin is theirs, not the `derived`/`web`/`tool` kind the candidate inherited
       // from wherever the extractor read them.
+      //
+      // SPREAD, not replaced. Overwriting the whole object dropped `provenance.messageId`
+      // — the pointer back to the turn this fact came out of — in a module whose entire
+      // subject is provenance. What the edit changes is WHO the words belong to; where
+      // they were first noticed is unaffected and still worth keeping.
       const origin: Record<string, unknown> = edited
-        ? { kind: "user_direct", detail: "edited on the memory page" }
+        ? { ...(cand.provenance as Record<string, unknown>), kind: "user_direct", detail: "edited on the memory page" }
         : (cand.provenance as Record<string, unknown>);
       const finish = async (claimId: string) => {
         // `policy_state` is left as it was: the pending→confirmed transition is

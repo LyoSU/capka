@@ -425,12 +425,15 @@ export async function makeVaultMemoryTools(ctx: {
           // Not `user_direct` even on a verbatim match: activating text that JUST lost
           // the CAS would mean going around the head instead of resolving the conflict.
           provenance: { kind: "derived", messageId: ctx.messageId },
-          // Sensitivity is a property of the FACT, not a policy decision: `forceState`
+          // Sensitivity is a property of the FACT, not a policy decision: this proposal
           // leads to conflict either way, so not passing it would simply lose the flag
           // on a row a human will read (along with everything that hides text by it).
           sensitive: res.current.sensitive,
           evidence: [{ messageId: ctx.messageId }],
-          forceState: "conflict",
+          // The head this update lost the CAS to — the same value `mismatch` was about to
+          // report. The memory page renders "keeping this replaces «…»" from it, which is
+          // the only thing that makes the conflict resolvable by a person.
+          forceConflict: { conflictsWith: res.current.id },
         });
         return "Recorded as a conflict for the user to resolve.";
       },

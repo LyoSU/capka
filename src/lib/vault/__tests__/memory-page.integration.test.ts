@@ -66,7 +66,7 @@ run("vault: memory page projection", () => {
     await attachEvidence(claim.id, { messageId: `${P}msg` });
 
     const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
-    expect(fact.statement).toBe("Prefers metric units");
+    expect(fact.statement.text).toBe("Prefers metric units");
     expect(fact.source).toMatchObject({ kind: "chat", chatTitle: "Q2 report" });
   });
 
@@ -89,8 +89,7 @@ run("vault: memory page projection", () => {
     // what the page blurs on; the withholding is not the server's to do here.
     await seedFact("Attends a support group", { sensitive: true });
     const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
-    expect(fact.sensitive).toBe(true);
-    expect(fact.statement).toBe("Attends a support group");
+    expect(fact.statement).toEqual({ text: "Attends a support group", sensitive: true });
   });
 
   it("shows the PREVIOUS version of a sensitive fact too", async () => {
@@ -104,9 +103,34 @@ run("vault: memory page projection", () => {
       allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
     });
     const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
-    expect(fact.sensitive).toBe(true);
-    expect(fact.statement).toBe("Attends a support group on Thursdays");
-    expect(fact.previous?.statement).toBe("Attends a support group on Tuesdays");
+    expect(fact.statement).toEqual({ text: "Attends a support group on Thursdays", sensitive: true });
+    // The predecessor carries its OWN flag, not the successor's — `confirmClaim` raises
+    // one in place with no supersede, so the two really can differ.
+    expect(fact.previous?.statement).toEqual({ text: "Attends a support group on Tuesdays", sensitive: true });
+  });
+
+  it("a predecessor carries its OWN sensitivity, not the successor's", async () => {
+    // The two are independent values and the projection reads both rows, rather than
+    // stamping the head's flag onto its history. Asserted in the direction that is
+    // actually reachable: `updateClaim` ORs the predecessor's flag into the successor, so
+    // a sensitive predecessor cannot have a plain successor — but a PLAIN predecessor
+    // acquiring a sensitive successor is ordinary (the correction is what introduced the
+    // sensitive material), and stamping would then blur a version that was never marked.
+    //
+    // The direction that would EXPOSE something is not reachable through this chain
+    // today; it is reachable for `conflictsWith`, which points at a different claim
+    // entirely. Both go through `Statement` for that reason: an invariant that lives in
+    // another module is the weaker kind of safe, and it is exactly the argument that made
+    // the conflict line look safe when it was not.
+    const { spaceId, claim } = await seedFact("Works from the Kyiv office");
+    await updateClaim({
+      claimId: claim.id, expectedRevision: 1,
+      patch: { statement: "Works from the Kyiv office, desk by the safe", sensitive: true },
+      allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
+    });
+    const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
+    expect(fact.statement.sensitive).toBe(true);
+    expect(fact.previous?.statement).toEqual({ text: "Works from the Kyiv office", sensitive: false });
   });
 
   it("carries the version a fact replaced", async () => {
@@ -117,8 +141,8 @@ run("vault: memory page projection", () => {
       allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
     });
     const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
-    expect(fact.statement).toBe("Works from the Lviv office");
-    expect(fact.previous?.statement).toBe("Works from the Kyiv office");
+    expect(fact.statement.text).toBe("Works from the Lviv office");
+    expect(fact.previous?.statement.text).toBe("Works from the Kyiv office");
   });
 
   it("lists a waiting fact apart from the facts in use", async () => {
@@ -133,7 +157,7 @@ run("vault: memory page projection", () => {
 
     const scope = (await readMemoryPage(OWNER)).scopes[0];
     expect(scope.topics.flatMap((t) => t.facts)).toHaveLength(0);
-    expect(scope.pending.map((p) => p.statement)).toEqual(["Uses Linux as their main operating system"]);
+    expect(scope.pending.map((p) => p.statement.text)).toEqual(["Uses Linux as their main operating system"]);
     expect(scope.pending[0].state).toBe("pending");
   });
 
@@ -163,8 +187,10 @@ run("vault: memory page projection", () => {
 
     const scope = (await readMemoryPage(OWNER)).scopes[0];
     expect(scope.pending).toHaveLength(1);
-    expect(scope.pending[0].sensitive).toBe(true);
-    expect(scope.pending[0].statement).toBe("Recovery code 447192 for the shared mailbox");
+    expect(scope.pending[0].statement).toEqual({
+      text: "Recovery code 447192 for the shared mailbox",
+      sensitive: true,
+    });
   });
 
   it("a conflict carries the head it is contested against", async () => {
@@ -192,7 +218,61 @@ run("vault: memory page projection", () => {
 
     const waiting = (await readMemoryPage(OWNER)).scopes[0].pending[0];
     expect(waiting.state).toBe("conflict");
-    expect(waiting.conflictsWith?.statement).toBe("Works as a technical lead");
+    expect(waiting.conflictsWith?.statement.text).toBe("Works as a technical lead");
+  });
+
+  it("a conflict FORCED by a tool update names its head too, not just an extraction's", async () => {
+    // The second producer of `conflict` state. `memory_update`'s double-CAS-loss path
+    // reaches it through `forceConflict`, which is evaluated into the gate BEFORE the
+    // insert and returns without ever running the `conflict()` branch that writes
+    // `conflicts_with` — so this row used to render the bare word while the extraction's
+    // conflict rendered the full sentence. Two producers, one rule, and only one of them
+    // held it. Paired with the `tools.test.ts` assertion that `memory_update` passes the
+    // id it lost to; this half proves the id survives to the screen.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    const head = await createClaim(
+      { spaceId, statement: "The client pays in hryvnia", origin: { kind: "user_direct" },
+        reviewStatus: "confirmed", topicNoteId: noteId },
+      { kind: "user", id: OWNER },
+    );
+    const res = await proposeCandidate({
+      idempotencyKey: `${P}forced`, spaceId,
+      statement: "The client pays in dollars",
+      provenance: { kind: "derived" },
+      forceConflict: { conflictsWith: head.id },
+    });
+    expect(res.state).toBe("conflict");
+
+    const waiting = (await readMemoryPage(OWNER)).scopes[0].pending[0];
+    expect(waiting.state).toBe("conflict");
+    expect(waiting.conflictsWith?.statement.text).toBe("The client pays in hryvnia");
+  });
+
+  it("a conflict never quotes a head the page itself refuses to list", async () => {
+    // `conflict(head.id)` takes its head from `headBySlot`/`listHeadClaims`, neither of
+    // which filters review status, while `topicsOf` lists only `confirmed`. Without the
+    // same filter here the page says "keeping this replaces «…»" about quarantined
+    // material it will not show anywhere else — the module's own quarantine rule, walked
+    // past at the entrance Amendment D created.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    const quarantined = await createClaim(
+      { spaceId, statement: "Read off a web page and never verified", origin: { kind: "web" },
+        reviewStatus: "unverified", topicNoteId: noteId },
+      { kind: "agent" },
+    );
+    await proposeCandidate({
+      idempotencyKey: `${P}quarantine`, spaceId,
+      statement: "Something the user actually said",
+      provenance: { kind: "derived" },
+      forceConflict: { conflictsWith: quarantined.id },
+    });
+
+    const page = await readMemoryPage(OWNER);
+    expect(page.scopes[0].pending[0].state).toBe("conflict");
+    expect(page.scopes[0].pending[0].conflictsWith).toBeNull();
+    expect(JSON.stringify(page)).not.toContain("never verified");
   });
 
   it("a plain waiting fact names nothing it conflicts with", async () => {
@@ -244,10 +324,10 @@ run("vault: memory page projection", () => {
     await seedFact("The owner's own fact");
 
     const mine = (await readMemoryPage(OWNER)).scopes.flatMap((s) => s.topics.flatMap((t) => t.facts));
-    expect(mine.map((f) => f.statement)).toEqual(["The owner's own fact"]);
+    expect(mine.map((f) => f.statement.text)).toEqual(["The owner's own fact"]);
     expect(JSON.stringify(await readMemoryPage(OWNER))).not.toContain("Nobody else may read this");
 
     const theirs = (await readMemoryPage(STRANGER)).scopes.flatMap((s) => s.topics.flatMap((t) => t.facts));
-    expect(theirs.map((f) => f.statement)).toEqual(["Nobody else may read this"]);
+    expect(theirs.map((f) => f.statement.text)).toEqual(["Nobody else may read this"]);
   });
 });

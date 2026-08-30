@@ -29,13 +29,23 @@ import { confirmCandidate, rejectCandidate } from "@/lib/vault/candidates";
  */
 const bodySchema = z.object({
   decision: z.enum(["confirm", "reject"]),
-  statement: z.string().min(3).max(STATEMENT_MAX_CHARS).optional(),
+  // TRIMMED before the length is checked, not after. `fitStatement` trims downstream, so
+  // validating the raw string let `"   a   "` past a `min(3)` and store a one-character
+  // claim — the browser guards it, the API did not, and the API is the contract.
+  statement: z.string().trim().min(3).max(STATEMENT_MAX_CHARS).optional(),
 });
 
 export const POST = apiHandler(async (req: Request, ctx: { params: Promise<{ candidateId: string }> }) => {
   const { userId } = await requireWriter();
   const { candidateId } = await ctx.params;
-  const { decision, statement } = bodySchema.parse(await req.json());
+  // `req.json()` throws a SyntaxError on a malformed body, and `apiHandler` only
+  // special-cases `ZodError` — so a client fault came back as a 500 with a stack trace in
+  // the operator's log. Turned into the same 400 an invalid `decision` already produced.
+  const raw = await req.json().catch(() => null);
+  if (raw === null || typeof raw !== "object") {
+    return Response.json({ error: "Invalid request" }, { status: 400 });
+  }
+  const { decision, statement } = bodySchema.parse(raw);
 
   const mine = await db
     .select({ id: spaces.id })

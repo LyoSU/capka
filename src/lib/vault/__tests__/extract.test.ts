@@ -155,9 +155,9 @@ describe("extractCandidates — the prompt's guidance against the real verifier"
     const real = await vi.importActual<typeof import("../candidates")>("../candidates");
     // `includes` was asymmetric: it found the short form inside the long one and never
     // the reverse, so the same Ukrainian fact verified or not depending on which case
-    // form the model happened to write — and the loser fell into pending, which plan A
-    // has no surface to clear. Only "акме" survives whole-word containment here (1 of
-    // 4, well under the 60% bar); on shared prefixes three of four match.
+    // form the model happened to write — and the loser fell into pending, which at the
+    // time had no surface to clear it from. Only "акме" survives whole-word containment
+    // here (1 of 4, well under the 60% bar); on shared prefixes three of four match.
     const userTurnText = "Ми платимо постачальнику Акме щомісяця";
     expect(real.verifyDirectProvenance("Оплата постачальника Акме щомісячна", userTurnText)).toBe(true);
 

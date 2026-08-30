@@ -23,6 +23,7 @@ All notable changes to Capka are documented here. Format follows
 - Web citations redesigned: [N] markers render as raised number pills with a hover card (title, domain, date), and the "Sources" footer is a grid of source tiles with domain monograms, one tile per URL, collapsing beyond six.
 - The memory page shows a sensitive fact's text to its owner, blurred behind a per-row reveal control, instead of withholding it; the manifest and `memory_search` still withhold it from the model.
 - A memory row's source line links to the conversation it came from, and a conflicting one names the fact it would replace.
+- Conflicts raised by the assistant's own `memory_update` now name the fact they contest, like extraction-raised ones already did.
 
 ### Fixed
 
@@ -36,6 +37,8 @@ All notable changes to Capka are documented here. Format follows
 - The step timeline no longer opens an empty thought row for a reasoning part carrying only a line break, which some models emit between tool calls.
 - A fact stated while answering an assistant question is now attributed to the user instead of waiting for confirmation.
 - Keeping a set-aside fact whose slot a sensitive fact holds now works instead of failing with "try again" on every attempt.
+- A sensitive fact quoted in a conflict line, or opened for editing, is blurred like every other sensitive statement on the memory page.
+- The memory page no longer quotes an unverified claim as the fact a conflict would replace.
 
 ### Security
 

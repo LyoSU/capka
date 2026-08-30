@@ -302,7 +302,12 @@ describe("memory_update", () => {
     expect(findCurrentHead).toHaveBeenCalledWith("c1", [PROJECT_SPACE]);
     expect(proposeCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
-        forceState: "conflict",
+        // NAMES the head it lost to. This was a bare `forceState: "conflict"` and the
+        // contested id — sitting in `res.current.id` two lines earlier — never reached the
+        // row, so the memory page rendered "this disagrees with something already
+        // remembered" and nothing else for every tool-raised conflict. The requirement is
+        // now in the parameter type, so a third producer cannot repeat it.
+        forceConflict: { conflictsWith: "c5" },
         idempotencyKey: "t1:m1:call-2:conflict",
         spaceId: PROJECT_SPACE,
         statement: "In dollars",
@@ -332,7 +337,12 @@ describe("memory_update", () => {
     const second = await run(tools.memory_update, { claim_id: "cB", expected_revision: 2, statement: "In dollars" }, "call-2");
 
     expect(second).toBe("Recorded as a conflict for the user to resolve.");
-    expect(proposeCandidate).toHaveBeenCalledWith(expect.objectContaining({ forceState: "conflict" }));
+    // Named against `cC`, the head of the SECOND loss — the row the person will be asked
+    // to weigh this against is the one that actually holds the slot now, not the one the
+    // first loss reported.
+    expect(proposeCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ forceConflict: { conflictsWith: "cC" } }),
+    );
   });
 
   it("a claim found only in the user space records the conflict THERE", async () => {

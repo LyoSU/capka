@@ -1023,9 +1023,7 @@
       "fromUnknown": "the conversation is no longer available",
       "untitledChat": "untitled",
       "updated": "updated {date}",
-      "replaced": "replaced \"{statement}\", {date}",
       "showHistory": "What this replaced",
-      "sensitiveHidden": "Saved as sensitive, so its contents are not shown here and the assistant cannot read them. You can delete it.",
       "deleteFact": "Delete",
       "deleteFactConfirm": "Delete this fact?",
       "deleteFactConfirmBody": "The assistant will stop using it. This can't be undone.",
@@ -1046,13 +1044,15 @@
       "editCancel": "Cancel",
       "editSave": "Keep with my wording",
       "editLabel": "Your wording for this fact",
-      "conflictReplaces": "Keeping this replaces \"{statement}\", saved {date}.",
       "tryAgain": "Something else is changing this fact right now. Please try again in a moment.",
       "decideFailed": "Could not save your decision. Please try again.",
       "reveal": "Show",
       "hide": "Hide",
       "sensitiveBlurred": "Marked sensitive, so it is hidden here until you show it, and the assistant never reads it.",
-      "openChat": "Open the conversation"
+      "replacedOn": "It replaced this, saved {date}:",
+      "conflictReplacesOn": "Keeping this replaces the fact saved {date}:",
+      "editNeedsReveal": "Show the fact first, then you can change its wording.",
+      "editStaysSensitive": "It stays marked sensitive after your change, so the assistant still cannot read it."
     },
     "integrations": {
       "title": "Integrations",

@@ -339,14 +339,32 @@ run("vault candidates", () => {
     expect(await count("memory_candidates", "space_id = $1 AND resolved_at IS NULL", [SPACE_A])).toBe(kinds.length);
   });
 
-  it("forceState:'conflict' overrides even user_direct", async () => {
-    const res = await propose({ statement: "contested", slotKey: "slot-x", forceState: "conflict" });
+  it("a forced conflict overrides even user_direct, and RECORDS what it conflicts with", async () => {
+    // The second half is the fix: this state used to be reachable through a bare
+    // `forceState: "conflict"` flag, and its one caller — `memory_update` after two CAS
+    // losses — had the contested claim id in hand and did not pass it. So every conflict
+    // raised by a tool update rendered the bare "this disagrees with something already
+    // remembered" on the memory page, which is the sentence the conflict view exists to
+    // replace. Naming the head is now a requirement of the input type.
+    const res = await propose({
+      statement: "contested",
+      slotKey: "slot-x",
+      forceConflict: { conflictsWith: `${P}rival-head` },
+    });
     expect(res.state).toBe("conflict");
     if (res.state !== "conflict") throw new Error("unreachable");
     const cand = await candRow(res.candidateId);
     expect(cand.policy_state).toBe("conflict");
+    expect(cand.conflicts_with).toBe(`${P}rival-head`);
     expect(cand.resolved_at).toBeNull();
     expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(0);
+    // The audit event carries it too, so the trail says what was contested even after
+    // the candidate row is gone.
+    const ev = await q(
+      `SELECT payload->>'conflictsWith' AS w FROM audit_events WHERE subject_id = $1 AND action = 'candidate.propose'`,
+      [res.candidateId],
+    );
+    expect(ev.rows[0]).toMatchObject({ w: `${P}rival-head` });
   });
 
   it("the same idempotencyKey is a COMPLETE no-op: no row, no event", async () => {

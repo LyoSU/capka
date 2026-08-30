@@ -56,18 +56,44 @@ export type FactSource =
   | { kind: "legacy" }
   | { kind: "unknown" };
 
-export type FactHistory = { statement: string; at: string };
+/**
+ * A stored statement and the flag that decides how legible it may be, as ONE value.
+ *
+ * The pairing is the point, and it is a correction. `sensitive` used to sit beside
+ * `statement` as a sibling field, so every new place that rendered a statement had to
+ * remember to pick the flag up — and within one commit two did not: the conflict line
+ * blurred on the CANDIDATE's flag while printing the contested HEAD's words, and the
+ * edit textarea read the raw text with no reveal at all. That is this feature's recurring
+ * defect, a rule at one entrance while a second walks past it, and enumerating entrances
+ * has now demonstrably failed to prevent it three times.
+ *
+ * So the text is not a `string` on this wire. A statement cannot be dropped into JSX, or
+ * interpolated into a translated sentence, without failing `tsc` — the only thing that
+ * consumes this shape is the `Statement` component, which is the single place in the
+ * codebase that reads `sensitive` to decide legibility. A future entrance does not have
+ * to remember the rule; it cannot compile without it.
+ *
+ * The guarantee is real but not absolute: `value.text` is still structurally reachable by
+ * someone who writes it deliberately. `memory-statement.test.ts` is what catches that.
+ */
+export type StatementView = {
+  /** Never render this directly — pass the whole object to `<Statement>`. */
+  text: string;
+  sensitive: boolean;
+};
+
+export type FactHistory = { statement: StatementView; at: string };
 
 export type FactView = {
   id: string;
   revision: number;
-  statement: string;
-  /** Advisory, and what the page renders the blur-and-reveal from. It is not a
-   *  withholding on this wire — see the module comment. */
-  sensitive: boolean;
+  statement: StatementView;
   recordedAt: string;
   source: FactSource;
-  /** The immediately previous version. */
+  /** The immediately previous version. Carries its OWN sensitivity, which is not
+   *  derivable from the successor's: `confirmClaim` raises a head's flag in place with no
+   *  supersede, so a non-sensitive fact really can hold a predecessor that has since
+   *  become sensitive. */
   previous: FactHistory | null;
 };
 
@@ -83,9 +109,7 @@ export type TopicView = {
 
 export type PendingView = {
   id: string;
-  statement: string;
-  /** Advisory, exactly as on a fact. */
-  sensitive: boolean;
+  statement: StatementView;
   createdAt: string;
   state: "pending" | "conflict";
   source: FactSource;
@@ -185,7 +209,17 @@ async function topicsOf(spaceId: string, userId: string): Promise<TopicView[]> {
   const predecessorIds = factRows.map((f) => f.supersedes).filter((v): v is string => !!v);
   const predecessors = predecessorIds.length
     ? await db
-        .select({ id: vaultClaims.id, statement: vaultClaims.statement, recordedAt: vaultClaims.recordedAt })
+        // `sensitive` is selected, and its own value rather than the successor's. It was
+        // once left out on the reasoning that sensitivity rises along a chain, so a
+        // non-sensitive head could not have a sensitive ancestor — which is false:
+        // `confirmClaim` raises the flag IN PLACE, with no supersede, so a predecessor
+        // can become sensitive long after it was replaced.
+        .select({
+          id: vaultClaims.id,
+          statement: vaultClaims.statement,
+          sensitive: vaultClaims.sensitive,
+          recordedAt: vaultClaims.recordedAt,
+        })
         .from(vaultClaims)
         .where(and(inArray(vaultClaims.id, predecessorIds), eq(vaultClaims.spaceId, spaceId)))
     : [];
@@ -198,14 +232,15 @@ async function topicsOf(spaceId: string, userId: string): Promise<TopicView[]> {
         return {
           id: f.id,
           revision: f.revision,
-          // The owner's own fact, in full. `sensitive` rides alongside as the advisory
-          // the page blurs on — see the module comment for why this is not the same
-          // question the manifest answers.
-          statement: f.statement,
-          sensitive: f.sensitive,
+          // The owner's own fact, in full, paired with the advisory the page blurs on —
+          // see `StatementView` for why the two travel together and the module comment
+          // for why this is not the same question the manifest answers.
+          statement: { text: f.statement, sensitive: f.sensitive },
           recordedAt: f.recordedAt.toISOString(),
           source: sourceOf(evidenceRows.filter((e) => e.claimId === f.id), f.origin),
-          previous: prev ? { statement: prev.statement, at: prev.recordedAt.toISOString() } : null,
+          previous: prev
+            ? { statement: { text: prev.statement, sensitive: prev.sensitive }, at: prev.recordedAt.toISOString() }
+            : null,
         };
       });
     return {
@@ -252,20 +287,31 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
     )
     .orderBy(asc(memoryCandidates.createdAt), asc(memoryCandidates.id));
 
-  // The other half of every conflict, in one statement. Scoped to THIS space and to a
-  // live head: `conflicts_with` carries no foreign key, so a head that has since been
-  // forgotten or superseded leaves an id pointing at nothing — and a stale predecessor
-  // shown as "this replaces that" would misdescribe the very choice being asked for.
+  // The other half of every conflict, in one statement. Three filters, and each one is a
+  // rule this surface already holds elsewhere:
+  //   - the space, because `conflicts_with` carries no foreign key;
+  //   - `superseded_at IS NULL`, because quoting a dead predecessor as the thing this
+  //     would replace misdescribes the choice being asked for;
+  //   - `review_status = 'confirmed'`, the same quarantine rule `topicsOf` holds. The
+  //     head is taken from `headBySlot`/`listHeadClaims`, neither of which filters review
+  //     status, so without this the page names a claim it refuses to list anywhere else.
+  // `sensitive` is selected because `StatementView` carries it; nothing here reads it.
   const contestedIds = rows.map((r) => r.conflictsWith).filter((v): v is string => !!v);
   const contested = contestedIds.length
     ? await db
-        .select({ id: vaultClaims.id, statement: vaultClaims.statement, recordedAt: vaultClaims.recordedAt })
+        .select({
+          id: vaultClaims.id,
+          statement: vaultClaims.statement,
+          sensitive: vaultClaims.sensitive,
+          recordedAt: vaultClaims.recordedAt,
+        })
         .from(vaultClaims)
         .where(
           and(
             inArray(vaultClaims.id, contestedIds),
             eq(vaultClaims.spaceId, spaceId),
             isNull(vaultClaims.supersededAt),
+            eq(vaultClaims.reviewStatus, "confirmed"),
           ),
         )
     : [];
@@ -277,12 +323,13 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
       // The owner's own words to decide on. A sensitive candidate is marked, not
       // withheld — see the module comment: confirming what the screen refuses to show
       // is not a decision anyone can make.
-      statement: r.statement,
-      sensitive: r.sensitive,
+      statement: { text: r.statement, sensitive: r.sensitive },
       createdAt: (r.createdAt ?? new Date(0)).toISOString(),
       state: r.policyState === "conflict" ? "conflict" : "pending",
       source: sourceOf([{ chatId: r.chatId, chatTitle: r.chatTitle, at: r.at }], null),
-      conflictsWith: other ? { statement: other.statement, at: other.recordedAt.toISOString() } : null,
+      conflictsWith: other
+        ? { statement: { text: other.statement, sensitive: other.sensitive }, at: other.recordedAt.toISOString() }
+        : null,
     };
   });
 }

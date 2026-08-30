@@ -10,7 +10,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import type { FactSource, FactView, TopicView } from "@/lib/vault/memory-page";
+import type { FactSource, FactView, StatementView, TopicView } from "@/lib/vault/memory-page";
 
 /** One day, in the reader's language. Shared by the provenance line, the history
  *  disclosure and the topic's last-updated stamp so a page full of dates has ONE
@@ -143,6 +143,24 @@ export function useSourceText(): (source: FactSource) => string {
 }
 
 /**
+ * WHETHER A STORED STATEMENT IS LEGIBLE — the ONE place `sensitive` is read to decide it,
+ * and the reason `StatementView` pairs the flag with the text rather than sitting beside
+ * it.
+ *
+ * A row that needs the answer for something other than rendering the words — the memory
+ * queue disables "Edit wording" until the person has revealed the fact — takes this hook
+ * and reads `shown`. It never sees `sensitive`, so it cannot grow a second copy of the
+ * rule, which is precisely what happened at the conflict line and the edit textarea.
+ *
+ * A non-sensitive statement is `shown` from the start and has no control: `shown` answers
+ * "may this be read", not "did somebody click".
+ */
+export function useReveal(value: StatementView): { shown: boolean; toggle: () => void } {
+  const [revealed, setRevealed] = useState(false);
+  return { shown: !value.sensitive || revealed, toggle: () => setRevealed((v) => !v) };
+}
+
+/**
  * One record's text — blurred behind a reveal control when it is marked sensitive.
  *
  * This used to print a fixed apology in place of the words, because the projection sent
@@ -163,25 +181,40 @@ export function useSourceText(): (source: FactSource) => string {
  *
  * `children` — a row's version history, the other half of a conflict — hang off the SAME
  * reveal rather than getting one each. They are the same fact in different words, and two
- * controls over one secret is a way to leave half of it on screen.
+ * controls over one secret is a way to leave half of it on screen. A statement nested
+ * INSIDE those children (the contested head, the previous version) is a different fact and
+ * does get its own, because its sensitivity is its own.
+ *
+ * The toggle is deliberately a small trailing affordance on the statement's own line, not
+ * a block button above the row's actions: it changes what is legible, and rendered as a
+ * peer of Keep/Discard it read as a fourth decision.
  */
 export function Statement({
-  text,
-  sensitive,
+  value,
+  reveal,
+  className,
   children,
 }: {
-  text: string;
-  sensitive: boolean;
+  value: StatementView;
+  /** Share the row's own reveal state, when something outside the text depends on it.
+   *  Omit and the component keeps its own. */
+  reveal?: { shown: boolean; toggle: () => void };
+  /** Type scale for the surrounding context — a row's own sentence, a history panel, a
+   *  conflict line. Presentation only: there is deliberately no prop that changes whether
+   *  the text is legible, because that is the one decision this component owns. */
+  className?: string;
   children?: React.ReactNode;
 }) {
   const t = useTranslations("settings.memory");
-  const [shown, setShown] = useState(false);
+  const own = useReveal(value);
+  const { shown, toggle } = reveal ?? own;
   const textId = useId();
+  const scale = cn("text-sm leading-snug", className);
 
-  if (!sensitive) {
+  if (!value.sensitive) {
     return (
       <>
-        <p className="text-sm leading-snug">{text}</p>
+        <p className={scale}>{value.text}</p>
         {children}
       </>
     );
@@ -189,29 +222,44 @@ export function Statement({
 
   return (
     <>
-      <p
-        id={textId}
-        aria-hidden={!shown}
-        className={cn(
-          "text-sm leading-snug transition-[filter] motion-reduce:transition-none",
-          !shown && "select-none blur-[5px]",
-        )}
-      >
-        {text}
+      <p className={cn("flex flex-wrap items-baseline gap-x-2", scale)}>
+        <span
+          id={textId}
+          aria-hidden={!shown}
+          className={cn("transition-[filter] motion-reduce:transition-none", !shown && "select-none blur-[5px]")}
+        >
+          {value.text}
+        </span>
+        <button
+          type="button"
+          aria-expanded={shown}
+          aria-controls={textId}
+          onClick={toggle}
+          className="shrink-0 rounded-md text-[11.5px] font-normal text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {shown ? t("hide") : t("reveal")}
+          {!shown && <span className="sr-only"> — {t("sensitiveBlurred")}</span>}
+        </button>
       </p>
-      <button
-        type="button"
-        aria-expanded={shown}
-        aria-controls={textId}
-        onClick={() => setShown((v) => !v)}
-        className="-mx-1 mt-1 block rounded-md px-1 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {shown ? t("hide") : t("reveal")}
-        {!shown && <span className="sr-only"> — {t("sensitiveBlurred")}</span>}
-      </button>
       {shown && children}
     </>
   );
+}
+
+/** Why editing a sensitive fact will not make it visible to the assistant again.
+ *
+ *  Lives here, and takes the whole `StatementView`, for the reason the hook above does:
+ *  a caller that asked "is this sensitive?" to decide whether to print a sentence would be
+ *  the second reader of the rule. It renders nothing for an ordinary fact.
+ *
+ *  Sensitivity only ever rises (`confirmClaim` ORs it in SQL), so a person who opens Edit
+ *  precisely to strip a code out of a statement gets a fact that stays hidden from the
+ *  assistant. That is correct and it is also surprising, and until store-only visibility
+ *  has a column of its own the honest thing is to say so. */
+export function SensitiveEditNote({ value }: { value: StatementView }) {
+  const t = useTranslations("settings.memory");
+  if (!value.sensitive) return null;
+  return <p className="text-[11.5px] leading-relaxed text-muted-foreground">{t("editStaysSensitive")}</p>;
 }
 
 /** One row. Tight on purpose: these are single sentences, and the difference between a
@@ -219,9 +267,16 @@ export function Statement({
  *
  *  `group/fact` is named rather than anonymous because `MemoryReview` draws its rows with
  *  this same component: an unnamed group would make a waiting row's hover reveal the
- *  delete control of whichever fact row happened to nest above it. */
+ *  delete control of whichever fact row happened to nest above it.
+ *
+ *  The hairline is on the ROW, not only on the card. `divide-y` sits on the outer card
+ *  and separates SOURCE GROUPS, which was enough while a row was one sentence; a waiting
+ *  row now carries a three-button strip, and without a boundary a group of them renders as
+ *  a wall of alternating text and buttons instead of a list of decisions. A queue is
+ *  worked one row at a time, so "one row" has to be something the eye can hold. First in
+ *  a group takes no rule — the group's own caption is already the boundary above it. */
 export function FactRow({ children }: { children: React.ReactNode }) {
-  return <div className="group/fact px-4 py-2">{children}</div>;
+  return <div className="group/fact border-t px-4 py-2 first-of-type:border-t-0">{children}</div>;
 }
 
 /**
@@ -314,8 +369,12 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
         <div className="min-w-0 flex-1">
           {/* The history hangs off the reveal for a sensitive fact — see `Statement`:
               the previous version is the same words one revision earlier, so a
-              disclosure of its own would put half the secret back on screen. */}
-          <Statement text={fact.statement} sensitive={fact.sensitive}>
+              disclosure of its own would put half the secret back on screen. The
+              predecessor's TEXT then goes through `Statement` again, on its OWN
+              sensitivity: `confirmClaim` raises a claim's flag in place without a
+              supersede, so a plain fact really can have a predecessor that became
+              sensitive after it was replaced. */}
+          <Statement value={fact.statement}>
             {fact.previous && (
               <>
                 <button
@@ -332,9 +391,10 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
                   {t("showHistory")}
                 </button>
                 {open && (
-                  <p id={panelId} className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-                    {t("replaced", { statement: fact.previous.statement, date: formatDay(fact.previous.at, locale) })}
-                  </p>
+                  <div id={panelId} className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                    <p>{t("replacedOn", { date: formatDay(fact.previous.at, locale) })}</p>
+                    <Statement value={fact.previous.statement} className="text-[11.5px] leading-relaxed" />
+                  </div>
                 )}
               </>
             )}
