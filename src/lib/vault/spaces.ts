@@ -72,6 +72,50 @@ export async function getOrCreateSpace(
   return owned(row);
 }
 
+/**
+ * Whether this space still accepts writes — the lifecycle fence, and the ONLY thing
+ * standing between a deleted project and a fact written into it.
+ *
+ * Post-turn extraction outlives its task on purpose (it runs once the reply is already
+ * delivered), and project deletion reads task activity as "somebody is still working
+ * here". So the task goes `completed`, the delete is allowed, and an auxiliary model
+ * call that takes SECONDS returns into a space the user destroyed with a couple of
+ * clicks in that same time. The fact then lives until the account itself is deleted.
+ *
+ * Checking before extraction starts would answer a question about a MOMENT; the window
+ * opens right after it. So the check has to ride the write's own transaction, and it
+ * has to be a LOCKING read:
+ *
+ *   - `retireProjectSpace` takes `FOR UPDATE` on this row as its first move. A writer
+ *     that gets `FOR SHARE` first makes the retire wait, commits into a space that was
+ *     still live, and the retire then deletes what it wrote — correct either way.
+ *   - A writer that arrives second blocks here until the retire commits, and Postgres
+ *     re-evaluates the `retired_at IS NULL` qualification on the updated row under
+ *     READ COMMITTED. The row drops out of the result and the write refuses.
+ *
+ * A plain SELECT would take no lock, read `retired_at` from its own older snapshot and
+ * write anyway — the same window, one statement narrower.
+ *
+ * The USER side needs none of this: `purgeUserSpaces` DELETEs the space row inside the
+ * user's own delete transaction, so a late write either commits first and is taken by
+ * the cascade, or arrives after and fails the foreign key. A project cannot borrow that
+ * property — its space row has to survive deletion (a cited source version pins the
+ * cascade, and `purgeUserSpaces` finds it later by `owner_user_id`), which is exactly
+ * why the terminal state has to be a column somebody reads.
+ *
+ * Takes the caller's `ex` and nothing else: called outside the transaction that does
+ * the write, it locks a row, releases it, and answers about the past.
+ */
+export async function spaceAcceptsWrites(spaceId: string, ex: Ex): Promise<boolean> {
+  const [row] = await ex
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(and(eq(spaces.id, spaceId), isNull(spaces.retiredAt)))
+    .limit(1)
+    .for("share");
+  return !!row;
+}
+
 /** The topic a fact lands in when nothing else chose one. A claim with NO topic
  *  never reaches the note projection, so for the UI it does not exist — every
  *  path into memory has to attach one, and they must all attach the SAME one.
@@ -121,6 +165,16 @@ export async function retireProjectSpace(projectId: string, ex?: Ex): Promise<vo
     .for("update");
   if (!space) return;
   const spaceId = space.id;
+
+  // The terminal state, set BEFORE anything is removed and under the lock taken above:
+  // a writer blocked on `spaceAcceptsWrites` re-reads this row the moment we commit,
+  // and it must find the space already closed. Guarded on NULL so a re-drive from the
+  // worker tick keeps the first retirement's timestamp — this is when the user deleted
+  // the project, not when teardown last succeeded.
+  await ex
+    .update(spaces)
+    .set({ retiredAt: new Date() })
+    .where(and(eq(spaces.id, spaceId), isNull(spaces.retiredAt)));
 
   // note_claims and claim_evidence cascade from the notes/claims below.
   const claims = await ex.delete(vaultClaims).where(eq(vaultClaims.spaceId, spaceId)).returning({ id: vaultClaims.id });

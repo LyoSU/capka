@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, memoryCandidates } from "@/lib/db/schema";
+import { log } from "@/lib/log";
 import {
   attachEvidence,
   confirmClaim,
@@ -14,7 +15,7 @@ import {
   type ClaimHead,
   type EvidenceInput,
 } from "./claims";
-import { DEFAULT_TOPIC, getOrCreateTopicNote, type Ex } from "./spaces";
+import { DEFAULT_TOPIC, getOrCreateTopicNote, spaceAcceptsWrites, type Ex } from "./spaces";
 
 export type Provenance = {
   kind: "user_direct" | "derived" | "tool" | "file" | "web" | "legacy_memory_doc";
@@ -183,6 +184,9 @@ export async function proposeCandidate(input: {
   // the governance work in later plans.
   | { state: "pending" | "denied" | "conflict"; candidateId: string }
   | { state: "duplicate" }
+  // The space was retired while this proposal was on its way — see the fence at the
+  // top of the transaction. No row, no candidate id: nothing was written.
+  | { state: "retired" }
 > {
   const actor: Actor = { kind: "agent" };
   const evidence = input.evidence ?? [];
@@ -215,6 +219,22 @@ export async function proposeCandidate(input: {
           : null;
 
   return db.transaction(async (tx) => {
+    // The lifecycle fence, and the FIRST statement in the transaction — it locks the
+    // space row before any other, which is the order `retireProjectSpace` takes too.
+    // A candidate row is memory just as much as a claim is: it carries the statement
+    // verbatim and waits in the review queue, so "the claim was refused" would not be
+    // enough on its own.
+    //
+    // Silence is the honest answer. Nobody did anything wrong — the user deleted a
+    // project and a turn's extraction arrived a moment late — so this is neither a user
+    // error nor an agent error, and it is not something an operator must act on. Logged
+    // at `info`, with the space id and NOT the statement: the whole point is that this
+    // text does not get recorded anywhere in that space.
+    if (!(await spaceAcceptsWrites(input.spaceId, tx))) {
+      log.info("vault: proposal refused, space retired", { spaceId: input.spaceId });
+      return { state: "retired" } as const;
+    }
+
     const id = nanoid();
     const [row] = await tx
       .insert(memoryCandidates)

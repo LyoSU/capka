@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, claimEvidence, noteClaims, vaultClaims, vaultNotes } from "@/lib/db/schema";
-import type { Ex } from "./spaces";
+import { spaceAcceptsWrites, type Ex } from "./spaces";
 
 export type Actor = { kind: "user" | "agent" | "system"; id?: string };
 
@@ -66,6 +66,39 @@ const MAX_CHAIN = 1000;
  * spaces is a bug, and a silently dropped attachment is a fact missing from the
  * screen with nothing to explain why.
  */
+/**
+ * "A retired space gains no new claims." Stands on BOTH inserts into `vault_claims`
+ * rather than on the candidate ledger alone, because a rule placed on one entrance out
+ * of two is how this feature has already been wrong twice: the secret screen sat on the
+ * extraction path while `memory_propose` walked past it, and the provenance gate sat on
+ * propose while `memory_update` walked past it. `createClaim` and `updateClaim` are the
+ * only two statements that put a row in this table, so this is the whole boundary.
+ *
+ * `updateClaim` needs it as much as `createClaim` does, and less obviously: its
+ * successor is a NEW row, and a supersede committing just after `retireProjectSpace`
+ * took its DELETE snapshot leaves that successor behind — a claim alive in a space the
+ * user deleted, with its predecessor gone.
+ *
+ * Throws rather than returning a "no". A caller reaching into a retired space skipped
+ * the ledger's own check, and a silently dropped write here would be a fact the caller
+ * believes it stored. The whole transaction rolls back with it, so a refused supersede
+ * does not leave the predecessor superseded and unreplaced.
+ *
+ * ACCEPTED, and the same shape as the slot-swap deadlock recorded on `updateClaim`:
+ * `confirmCandidate` takes the candidate's row lock BEFORE it reaches either writer, so
+ * a confirmation racing a project delete can deadlock against the retire (which holds
+ * the space and wants the candidate). Postgres kills one of them: the confirm surfaces
+ * an error, or the retire rolls back and the worker tick re-drives it. Neither outcome
+ * writes anything, and plan A ships no confirmation surface for a human to hit this
+ * from — an extra locking read at the top of every confirm buys ordering for a path
+ * nobody can reach yet.
+ */
+async function assertSpaceLive(spaceId: string, ex: Ex): Promise<void> {
+  if (!(await spaceAcceptsWrites(spaceId, ex))) {
+    throw new Error(`space ${spaceId} is retired; refusing to write a claim into it`);
+  }
+}
+
 async function assertTopicInSpace(noteId: string, spaceId: string, ex: Ex): Promise<void> {
   const [note] = await ex
     .select({ spaceId: vaultNotes.spaceId })
@@ -90,6 +123,11 @@ export async function createClaim(
   ex?: Ex,
 ): Promise<{ id: string; revision: number }> {
   if (!ex || ex === db) return db.transaction((tx) => createClaim(input, actor, tx));
+
+  // FIRST statement in the transaction, so the space row is the first lock this move
+  // takes — `retireProjectSpace` takes it first too, and a shared order is what keeps
+  // the two from deadlocking on each other.
+  await assertSpaceLive(input.spaceId, ex);
 
   const id = nanoid();
   // A slot conflict (`uniq_vclaims_active_slot`) is deliberately NOT caught here:
@@ -153,6 +191,18 @@ export async function updateClaim(
 ): Promise<{ ok: true; id: string; revision: number } | { ok: false; current: ClaimHead | null }> {
   if (!ex || ex === db) return db.transaction((tx) => updateClaim(args, tx));
   const { claimId, expectedRevision, patch, allowedSpaceIds, actor } = args;
+
+  // The space is read UNLOCKED and ahead of the CAS purely to fix the lock ORDER:
+  // `retireProjectSpace` takes the space row and then the claim rows, so a fence read
+  // after the CAS would take them the other way round and the two would deadlock. A
+  // claim's `space_id` never changes, so this read cannot go stale; a claim that is not
+  // there (or not ours) needs no fence at all — the CAS below already answers "no".
+  const [target] = await ex
+    .select({ spaceId: vaultClaims.spaceId })
+    .from(vaultClaims)
+    .where(and(eq(vaultClaims.id, claimId), inArray(vaultClaims.spaceId, allowedSpaceIds)))
+    .limit(1);
+  if (target) await assertSpaceLive(target.spaceId, ex);
 
   // The CAS step comes FIRST: one statement takes the row lock, checks the
   // revision and checks the space, so there is no window between checking and

@@ -94,6 +94,12 @@ const PROPOSE_SAID = {
   conflict: "Conflicts with an existing fact — recorded for the user to resolve.",
   duplicate: "Already recorded from this same call.",
   denied: "Not saved — the memory policy declined this fact.",
+  // Unreachable from a tool today and stated anyway: a turn only runs against a LIVE
+  // project (prepareRun refuses a deleted one) and a project cannot be deleted while
+  // one of its tasks is queued or running. The state exists for the writer that CAN
+  // reach it — post-turn extraction, which outlives its task on purpose — and this
+  // mapping is what keeps the tool honest if that ever stops being true.
+  retired: "Not saved — this project's memory was deleted.",
 } as const;
 
 /**
@@ -404,6 +410,22 @@ export async function makeVaultMemoryTools(ctx: {
         // migration — the ledger sends every sensitive proposal to pending — so the
         // case is narrow, and the alternative (skipping the check for exactly the
         // claims that hide their contents) would be a hole in the guard.
+        //
+        // DEAD END, recorded here rather than in a plan document because the plan gets
+        // deleted and this gate does not. Three separately correct decisions close a
+        // circle around a sensitive claim: the secret screen forces `sensitive`;
+        // `memory_search` and the manifest withhold a sensitive claim's TEXT and hand
+        // back only its `[id@revision]` address; and this gate requires the claim's own
+        // words in the user's turn. So the user cannot learn the words, cannot say them,
+        // and the agent cannot forget the claim. Write-once, unreadable, undeletable.
+        //
+        // Do NOT resolve this by loosening the gate. Accepting an address alone would
+        // reopen exactly the injection path H-1 closed — a fetched page naming an id and
+        // erasing memory on somebody else's word, with no undo. The dead end's cost is
+        // bounded (the claim is invisible, so it never reaches a prompt); the loosening's
+        // is not. The fix belongs to whichever interface FIRST shows sensitive claims to
+        // a human (plan D): that same screen must carry its own delete, where the human
+        // is the actor and no provenance check is needed to establish it.
         const head = await findCurrentHead(claim_id, allowedSpaceIds);
         if (!head) return mismatch(null);
         if (!verifyDirectProvenance(head.statement, ctx.userTurnText)) return NOT_THE_USERS_WORDS.forget;

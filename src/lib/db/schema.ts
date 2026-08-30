@@ -774,6 +774,13 @@ export const spaces = pgTable("spaces", {
   // projects, whose projects row no longer exists by then.
   ownerUserId: text("owner_user_id").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
+  // The space's TERMINAL state. A project's space row outlives the project (ref_id is
+  // polymorphic, so no cascade reaches it, and a cited source version must survive),
+  // which means "this project is gone" cannot be read off the projects table — and a
+  // post-turn extraction that returns after the delete would otherwise write a fact
+  // into memory the user believes they destroyed. Set by `retireProjectSpace`, read
+  // under a row lock by every write into the space (`spaceAcceptsWrites`).
+  retiredAt: timestamp("retired_at"),
 }, (t) => [
   uniqueIndex("uniq_spaces_type_ref").on(t.type, t.refId),
   index("idx_spaces_owner").on(t.ownerUserId),
