@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { auditEvents, memoryDocs } from "@/lib/db/schema";
@@ -10,33 +10,47 @@ import { DEFAULT_TOPIC, getOrCreateSpace, getOrCreateTopicNote } from "./spaces"
  *  memory. */
 const norm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
 
+/** "Never carried across, or appended to since it was." The selection below and the
+ *  CAS in `migrateOne` MUST share this predicate: a widened selection over a
+ *  narrower CAS would pick documents up and then refuse every one of them, which
+ *  looks exactly like a migration that ran and found nothing.
+ *
+ *  A NULL `updated_at` (the column is nullable) makes the comparison NULL, i.e.
+ *  false — a stamped document with no update time is not re-selected, which is the
+ *  answer we want. */
+const notCarried = () => or(isNull(memoryDocs.migratedAt), lt(memoryDocs.migratedAt, memoryDocs.updatedAt));
+
 /**
  * Moves legacy memory documents into claims: line → bullet → confirmed claim with
  * origin `legacy_memory_doc`. The actor is `system`, not the candidate ledger:
  * what was already in the user's memory is not a proposal awaiting review, and
  * asking them to re-confirm their own long-standing facts would be a regression.
  *
- * THE SELECTOR is `migrated_at IS NULL`, full stop. NOT "or migrated_at <
- * updated_at": re-migrating "late edits" would duplicate edited bullets (an insert
- * with no supersede), and what closes that window is the cutover, not the
- * selector — see below.
+ * THE SELECTOR is "not stamped, OR appended to since the stamp"
+ * (`migrated_at IS NULL OR migrated_at < updated_at`), and the second half is what
+ * closes a window that would otherwise lose facts silently. Before the cutover,
+ * `memory_docs` had FOUR writers going through `optimisticUpdate` in the
+ * since-deleted `src/lib/memory/` — `maintainMemoryDoc` (the runner, after EVERY
+ * turn), `rememberFact`, `forgetFact` and `setMemoryDoc` — while boot stamped
+ * `migrated_at` underneath them. Anything appended AFTER a stamp was carried
+ * nowhere: an `IS NULL` selector skips it, and the manifest's legacy fallback reads
+ * that same column, so the bullet disappears from the screen with no error at all.
+ * The cutover deletes those writers and this pass sweeps up what they left.
  *
- * THE WINDOW BEFORE THE CUTOVER (Task 10) is real, and must not stay open long.
- * `memory_docs` is not written by the legacy PUT alone: `src/lib/memory/store.ts`
- * has FOUR writers going through `optimisticUpdate` — `maintainMemoryDoc` (the
- * runner, after EVERY turn), `rememberFact`, `forgetFact` and `setMemoryDoc` (the
- * only one the PUT reaches). Until Task 10 closes all four, every boot stamps
- * `migrated_at` while the three turn-writers keep appending to `content` — and
- * nothing will ever migrate those appends: the selector looks at `IS NULL`, and
- * the Task 10 fallback reads the same column, so at cutover those bullets vanish
- * from the screen. Hence the rule: DO NOT CUT A RELEASE BETWEEN THIS COMMIT AND
- * THE CUTOVER.
+ * The cost of the second half is bounded and was weighed: a bullet the user EDITED
+ * after the stamp migrates as a new claim beside the old one (an insert, not a
+ * supersede), because dedup is by normalized text. A duplicate fact the user can
+ * see and forget is strictly better than a fact that vanishes.
  *
- * THE SINGLE-WRITER ASSUMPTION (after the cutover) is "one box, and the PUT already
- * 409s". The `ee/` Helm chart with a rolling replica breaks it — two versions of
- * the app are live at once and the old one still accepts writes — and that needs a
- * fence (a "legacy writes are closed" flag set BEFORE the move), not this selector.
- * Written down explicitly so plan B/EE does not walk into it silently.
+ * It also converges rather than re-running forever. The stamp is set to `now()` and
+ * nothing touches `updated_at` any more — the writers are gone and the PUT 409s —
+ * so a document migrated once is past its `updated_at` and never re-selected.
+ *
+ * THE SINGLE-WRITER ASSUMPTION is "one box, and the PUT already 409s". The `ee/`
+ * Helm chart with a rolling replica breaks it — two versions of the app are live at
+ * once and the old one still accepts writes — and that needs a fence (a "legacy
+ * writes are closed" flag set BEFORE the move), not this selector. Written down
+ * explicitly so plan B/EE does not walk into it silently.
  *
  * `docIds` narrows the selection and exists ONLY for tests: without it the call by
  * construction takes every unmigrated document in the database, which in a shared
@@ -47,7 +61,7 @@ export async function migrateMemoryDocs(opts: { docIds?: string[] } = {}): Promi
   const pending = await db
     .select({ id: memoryDocs.id })
     .from(memoryDocs)
-    .where(and(isNull(memoryDocs.migratedAt), opts.docIds ? inArray(memoryDocs.id, opts.docIds) : undefined));
+    .where(and(notCarried(), opts.docIds ? inArray(memoryDocs.id, opts.docIds) : undefined));
 
   let migrated = 0;
   const failed: string[] = [];
@@ -80,16 +94,17 @@ export async function migrateMemoryDocs(opts: { docIds?: string[] } = {}): Promi
  *  never lands in memory. */
 async function migrateOne(docId: string): Promise<boolean> {
   return db.transaction(async (tx) => {
-    // The CAS step comes FIRST: it takes the row lock and checks "not yet migrated"
-    // in one statement, leaving no window between the check and the write. Zero rows
+    // The CAS step comes FIRST: it takes the row lock and re-checks `notCarried` in
+    // one statement, leaving no window between the check and the write. Zero rows
     // means another instance (or an earlier run) claimed the document — a skip, not
     // an error. The timestamp is the DATABASE clock (`now()`), like `created_at` on
     // every neighbouring table: a stamp from the container's clock could not honestly
-    // be compared against them.
+    // be compared against them — and `updated_at`, which this is now compared
+    // against, is exactly such a neighbour.
     const [doc] = await tx
       .update(memoryDocs)
       .set({ migratedAt: sql`now()` })
-      .where(and(eq(memoryDocs.id, docId), isNull(memoryDocs.migratedAt)))
+      .where(and(eq(memoryDocs.id, docId), notCarried()))
       .returning();
     if (!doc) return false;
 

@@ -42,10 +42,15 @@ vi.mock("@/lib/providers/resolve", () => ({
 vi.mock("@/lib/sandbox/tools", () => ({
   loadSandboxTools: async () => ({ tools: {}, close: async () => {} }),
 }));
-vi.mock("@/lib/memory/store", () => ({
-  readMemoryDocs: async () => ({ user: "", project: "" }),
-  maintainMemoryDoc: async () => {},
+// Memory stubbed out whole — see the note in runner.e2e.test.ts: the real vault
+// would leave spaces and claims in the shared database that teardown misses.
+vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/vault/spaces")>()),
+  getOrCreateSpace: async () => "e2e-space",
 }));
+vi.mock("@/lib/vault/manifest", () => ({ buildMemoryManifest: async () => "" }));
+vi.mock("@/lib/vault/tools", () => ({ makeVaultMemoryTools: async () => ({}) }));
+vi.mock("@/lib/vault/extract", () => ({ extractCandidates: async () => {} }));
 
 import { pool } from "../db";
 import { realtime } from "../realtime";

@@ -1,10 +1,11 @@
 import { log } from "@/lib/log";
 import { proposeCandidate, verifyDirectProvenance, type Provenance } from "./candidates";
 
-/** What the caller's aux-model wrapper looks like from here. Task 10 builds this on
- *  the same auxGenerate path the old memory-doc reconcile used (`src/lib/memory/doc.ts`),
- *  binding model/provider/label once at the call site — this module knows nothing
- *  about providers, usage accounting, or the AI SDK, only this one shape. */
+/** What the caller's aux-model wrapper looks like from here. The runner builds it on
+ *  the same `auxGenerate` path the old memory-doc reconcile used (in the since-deleted
+ *  `src/lib/memory/`), binding model/provider/label once at the call site — this
+ *  module knows nothing about providers, usage accounting, or the AI SDK, only this
+ *  one shape. */
 export type GenerateFn = (opts: {
   system: string;
   prompt: string;
@@ -108,9 +109,9 @@ type ExtractedItem = {
 };
 
 /**
- * Tolerant by design, the same convention as `parseMemoryOps` in the old
- * `src/lib/memory/doc.ts`: auxiliary models wrap JSON in prose or a code fence, so
- * this takes the first `[` … last `]` and parses that slice.
+ * Tolerant by design, the same convention the old `parseMemoryOps` followed (in the
+ * since-deleted `src/lib/memory/`): auxiliary models wrap JSON in prose or a code
+ * fence, so this takes the first `[` … last `]` and parses that slice.
  *
  * Distinguishes "parsed to a valid (possibly empty) array" from "could not be
  * parsed at all": the model legitimately saying "nothing to extract" (`[]`) is a

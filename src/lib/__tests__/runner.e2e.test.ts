@@ -39,10 +39,16 @@ vi.mock("@/lib/providers/resolve", () => ({
 vi.mock("@/lib/sandbox/tools", () => ({
   loadSandboxTools: async () => ({ tools: {}, close: async () => {} }),
 }));
-vi.mock("@/lib/memory/store", () => ({
-  readMemoryDocs: async () => ({ user: "", project: "" }),
-  maintainMemoryDoc: async () => {},
+// Memory is stubbed out whole — spaces included. This suite runs against the shared
+// database, and letting the real vault run would leave a space, a topic and claims
+// behind for `e2e-user` that this suite's prefix-scoped teardown does not remove.
+vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/vault/spaces")>()),
+  getOrCreateSpace: async () => "e2e-space",
 }));
+vi.mock("@/lib/vault/manifest", () => ({ buildMemoryManifest: async () => "" }));
+vi.mock("@/lib/vault/tools", () => ({ makeVaultMemoryTools: async () => ({}) }));
+vi.mock("@/lib/vault/extract", () => ({ extractCandidates: async () => {} }));
 
 import { pool } from "../db";
 import { realtime } from "../realtime";

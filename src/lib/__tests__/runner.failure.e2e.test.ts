@@ -12,7 +12,17 @@ vi.mock("@/lib/providers/resolve", () => ({
 vi.mock("@/lib/sandbox/tools", () => ({
   loadSandboxTools: async () => ({ tools: {}, close: async () => {} }),
 }));
-vi.mock("@/lib/memory/extract", () => ({ extractMemories: async () => [] }));
+// This replaces a mock of `@/lib/memory/extract`, a module that no longer exists —
+// and, having been a factory for a module nothing imported, was inert long before
+// that. The turn fails here so extraction never fires, but `prepareRun` still builds
+// the manifest and the tool set, and those DO reach the shared database.
+vi.mock("@/lib/vault/spaces", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/vault/spaces")>()),
+  getOrCreateSpace: async () => "e2e-space",
+}));
+vi.mock("@/lib/vault/manifest", () => ({ buildMemoryManifest: async () => "" }));
+vi.mock("@/lib/vault/tools", () => ({ makeVaultMemoryTools: async () => ({}) }));
+vi.mock("@/lib/vault/extract", () => ({ extractCandidates: async () => {} }));
 
 import { pool } from "../db";
 import { realtime } from "../realtime";

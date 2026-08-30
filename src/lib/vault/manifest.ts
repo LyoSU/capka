@@ -96,8 +96,8 @@ function spaceBlock(header: string, topics: { title: string; count: number }[], 
 
 /** Legacy doc (pre-Task 6/10 cutover) for the user scope (`projectId: null`)
  *  or a project scope. `memory_docs` is keyed by `(userId, projectId)`, NOT
- *  by space id — the same lookup the old `readMemoryDocs`
- *  (`src/lib/memory/store.ts`) used. Returns `null` when there's no row, it's
+ *  by space id — the same lookup the old `readMemoryDocs` used, in the
+ *  since-deleted `src/lib/memory/`. Returns `null` when there's no row, it's
  *  already migrated, or its content is blank — an empty fallback isn't worth
  *  a line in the prompt.
  */

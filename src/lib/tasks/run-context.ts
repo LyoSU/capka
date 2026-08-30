@@ -15,8 +15,9 @@ import { makeSkillTool } from "@/lib/skills/tool";
 import { makeManageTool } from "@/lib/manage/tool";
 import { hostFolderEnabled, sessionMounts } from "@/lib/manage/controls/folders";
 import { makeAskTool } from "@/lib/ask/tool";
-import { makeMemoryTools } from "@/lib/memory/tool";
-import { readMemoryDocs } from "@/lib/memory/store";
+import { makeVaultMemoryTools } from "@/lib/vault/tools";
+import { buildMemoryManifest } from "@/lib/vault/manifest";
+import { getOrCreateSpace } from "@/lib/vault/spaces";
 import { resolvePolicies, isOffered } from "@/lib/governance/policy";
 import { resolveAgentProfile, capProfile, parseAgentProfile } from "@/lib/agents/profile";
 import { getSandboxNetworkDefault, getMaxContextTokens, getOrgAgentProfile, getOrgInstructions, getSetting, setSetting } from "@/lib/settings";
@@ -30,22 +31,23 @@ import type { TaskPayload } from "./runner";
 /**
  * Re-resolve everything needed to run a task from its persisted payload — the
  * "run context builder". `sessionKey` is the project (shared folder) or the chat
- * itself (see workspaceSessionKey). Memory is scoped to the project plus
- * user-global facts. Split out of runner.ts so the turn loop there is control
+ * itself (see workspaceSessionKey). Memory is scoped to two vault spaces: the
+ * user's, plus the project's when the chat is in one. Split out of runner.ts so the turn loop there is control
  * flow, not setup: this composes the model, the tool set (sandbox + MCP + skill +
  * manage + ask + view_file + memory + provider-native), the system prompt, the
  * context-window budget inputs, and the lazy sandbox session — and returns a
  * ready-to-run bundle plus a `closeMcp` disposer.
  */
 export async function prepareRun(userId: string, sessionKey: string, payload: TaskPayload, chatId: string, messageId: string, taskId: string) {
-  // A project chat sees its project memory doc + the user-global doc. A
-  // standalone chat sees only the user-global doc, so projects don't leak.
-  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, memoryDocs, user, chat, orgProfile, orgInstructions] = await Promise.all([
+  // Memory is NOT resolved here. It needs the project row (for the space's owner)
+  // and the capability profile (which decides whether to touch memory at all), and
+  // a space is a WRITE — a `getOrCreateSpace` riding this wave would create one for
+  // a project that turns out to be deleted. It happens below, once both are known.
+  const [{ model, provider, modelId, modelInput, apiStyle, isShared, configId }, project, user, chat, orgProfile, orgInstructions] = await Promise.all([
     resolveUserModelInfo(userId, payload.requestModel),
     payload.projectId
       ? db.select().from(projects).where(and(eq(projects.id, payload.projectId), eq(projects.userId, userId), projectNotDeleted)).limit(1).then((r) => r[0])
       : Promise.resolve(undefined),
-    readMemoryDocs(userId, payload.projectId ?? null),
     db.select({ name: users.name, timezone: users.timezone, locale: users.locale, role: users.role, agentProfile: users.agentProfile })
       .from(users).where(eq(users.id, userId)).limit(1).then((r) => r[0]),
     db.select({ createdAt: chats.createdAt, thinkAmount: chats.thinkAmount }).from(chats).where(eq(chats.id, chatId)).limit(1).then((r) => r[0]),
@@ -74,6 +76,42 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     capProfile(parseAgentProfile(user?.agentProfile), orgProfile),
   );
   const caps = profile.capabilities;
+
+  // The vault spaces this turn can see. Resolved HERE and not in the opening wave
+  // for two reasons that both matter: `getOrCreateSpace` WRITES, so it must not run
+  // for a project the check above just rejected, and the project space's owner is
+  // `projects.userId` — the project's real owner, never the caller, since
+  // `purgeUserSpaces` keys on exactly that column and a collaborator's id there
+  // would outlive the owner's deletion.
+  //
+  // Gated on `caps.memory`: with memory off there is nothing to read and no reason
+  // to create a row. The old code read the doc unconditionally because a read is
+  // free; a space is not.
+  const userSpaceId = caps.memory ? await getOrCreateSpace({ type: "user", refId: userId }) : undefined;
+  const projectSpaceId =
+    caps.memory && project
+      ? await getOrCreateSpace({ type: "project", refId: project.id, ownerUserId: project.userId })
+      : undefined;
+
+  // The text of the turn's last user message, which is what `memory_propose` checks
+  // a proposed fact against before it can activate without the user's confirmation.
+  // An empty string is a fail-safe, not an error: provenance then reads `derived`
+  // and the fact waits for confirmation instead of going in on the model's word.
+  const userTurnText = (() => {
+    const messages = payload.uiMessages ?? [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m?.role !== "user") continue;
+      if (typeof m.content === "string") return m.content;
+      const parts: unknown[] = Array.isArray(m.parts) ? m.parts : [];
+      return parts
+        .filter((p): p is { type: string; text: string } =>
+          typeof (p as { text?: unknown })?.text === "string" && (p as { type?: unknown })?.type === "text")
+        .map((p) => p.text)
+        .join("\n");
+    }
+    return "";
+  })();
 
   // Sandbox tools (execute_bash, read_file, …) + MCP connector tools (sub-project
   // B, namespaced mcp__<server>__<tool>) + the skill tool. Each piece has a stable
@@ -238,7 +276,20 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
             ...makeAskTool(),
           }
         : {}),
-      ...(caps.memory ? makeMemoryTools({ userId, projectId: payload.projectId ?? null }) : {}),
+      // EXACTLY ONCE per turn, and that is load-bearing: the factory keeps this
+      // turn's lost-CAS claim ids in its closure, so a second call would give the
+      // turn a second empty set and a repeated conflict would never be recorded.
+      // `projectOwnerUserId` is mandatory whenever there is a project — the factory
+      // throws without it rather than filing the fact in the wrong space.
+      ...(caps.memory
+        ? await makeVaultMemoryTools({
+            userId,
+            projectId: project?.id ?? null,
+            projectOwnerUserId: project?.userId,
+            messageId,
+            userTurnText,
+          })
+        : {}),
       // Provider-executed tools (e.g. Gemini's Google Search grounding); empty for
       // providers without any. Grouped with connectors — from the model's side both
       // are "reach outside Capka for data".
@@ -301,12 +352,16 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
     const toolSearch = planToolSearch({ tools, effectiveLimit });
     if (toolSearch.defer) Object.assign(tools, toolSearch.extraTools);
 
+    // Topics, recent confirmed facts, and any legacy document still awaiting
+    // migration — assembled and fenced by the vault. Skipped entirely when memory is
+    // off (no space was resolved to build it from).
+    const memoryManifest = userSpaceId
+      ? await buildMemoryManifest({ userId, userSpaceId, projectId: project?.id, projectSpaceId })
+      : "";
+
     const prompt = buildSystemPrompt({
       project,
-      // Passed unconditionally; the profile decides whether the blocks are rendered.
-      // The read itself rode the opening parallel wave (one indexed select) — gating
-      // it there would have cost a serial round-trip on every turn to save nothing.
-      memoryDocs,
+      memoryManifest,
       skills: availableSkills.map((s) => ({ name: s.name, description: s.description, body: s.body })),
       workspaceSnapshot,
       user: user ? { name: user.name, timezone: user.timezone } : null,
@@ -329,7 +384,10 @@ export async function prepareRun(userId: string, sessionKey: string, payload: Ta
       availableAmounts(provider, modelEfforts),
     );
 
-    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter };
+    // `userSpaceId`/`projectSpaceId` ride the bundle so the post-turn extraction in
+    // the runner writes into the same spaces this prompt was built from, without
+    // resolving them a second time.
+    return { model, provider, modelId, modelInput, isShared, configId, tools, viewFileBridge, closeMcp: closeAll, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId };
   } catch (e) {
     await closeAll();
     throw e;

@@ -29,10 +29,11 @@ import { contextManagementOptions, mergeProviderOptions, shouldClearToolResults,
 import { stepSettings, foldReasoningIntoText, pruneTurnToolTraffic, armPruneBoundary, estimatePromptTokens,
   MAX_STEPS } from "@/lib/chat/context/step-control";
 import { compactConversation } from "@/lib/chat/context/compactor";
+import { auxGenerate } from "@/lib/chat/context/aux";
 import { recordUsage, reconcileUsage } from "@/lib/usage";
 import { releaseHold } from "@/lib/billing/limits";
-import { costUsd, type TokenUsage } from "@/lib/pricing";
-import { maintainMemoryDoc } from "@/lib/memory/store";
+import { costUsd, toTokenUsage, type TokenUsage } from "@/lib/pricing";
+import { extractCandidates } from "@/lib/vault/extract";
 import { generateChatTitle } from "@/lib/chat/title";
 import { classifyLLMError, isModalityUnsupportedError, isReasoningUnsupportedError, isReasoningEchoRejectedError, isStreamUsageRejectedError, parseAllowedEfforts, isContextOverflowError, isTransientError, timedOutError, providerUnresponsiveError, interruptedError, RESPONSE_TRUNCATED_ERROR } from "@/lib/errors/friendly";
 import { disableStreamUsage } from "@/lib/providers/stream-usage";
@@ -361,7 +362,7 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     void publishTaskEvent(userId, {
       type: "task:notice", taskId, chatId, messageId: msgId, notice: { kind: "phase", phase: "preparing" },
     }).catch(() => {});
-    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter } =
+    const { model, provider, modelId, modelInput, isShared, configId, tools: rawTools, viewFileBridge, closeMcp: close, prompt, contextLength, adminCap, toolSearch, profile, thinkAmount, modelEfforts, modelCannotReason, sourceCounter, userSpaceId, projectSpaceId } =
       await prepareRun(userId, sessionKey, payload, chatId, msgId, taskId);
     // Every locally-executed tool goes behind the write-ahead boundary, keyed by the
     // reply this turn is writing. Wrapped HERE and not in prepareRun because `msgId` is
@@ -1710,13 +1711,13 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
     // across every step: a multi-step tool-calling turn re-reads the same
     // growing prefix from cache on each call, so summing would count that
     // prefix once per step and wildly overstate how full the window really is.
-    // Computed once and reused: it drives both the long-chat aux path (memory
-    // rides the hot prefix) and the compaction trigger below. "Long" = at least
-    // half the effective window full.
+    // Drives the compaction trigger below. It used to feed a second consumer — the
+    // memory pass rode the hot prefix when the chat was long — but candidate
+    // extraction sees one turn, not the conversation, so it makes the same small
+    // standalone call either way.
     const budget = usageMeta
       ? contextBudget({ usedTokens: lastStepContextTokens, modelContextLength: contextLength, adminCap: adminCap || null })
       : undefined;
-    const longChat = (budget?.fraction ?? 0) >= 0.5;
 
     // The reasoning/tool phase = start → first answer token (or the whole run if
     // it never produced answer text). Persisted so a reloaded transcript shows
@@ -2021,10 +2022,10 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
       }
     }
 
-    // Fold the turn into long-term memory (fire-and-forget). One reconcile call
-    // maintains the doc for the current scope — the project doc in a project, else
-    // the user-global doc; the agent's remember() tool covers the other scope on
-    // demand. Gated on a clean completion (like the title): a cancelled/failed
+    // Mine the finished turn for durable facts (fire-and-forget). Each one lands in
+    // the candidate ledger, which decides on its own whether it activates or waits
+    // for the user — the agent's memory_propose tool is the deliberate path to the
+    // same place. Gated on a clean completion (like the title): a cancelled/failed
     // turn shouldn't quietly spend tokens mining facts the user may have aborted.
     const lastUserText = (() => {
       const u = modelMessages.findLast((m): m is UserModelMessage => m.role === "user");
@@ -2035,21 +2036,31 @@ export async function runAgentTask(task: ClaimedTask, workerId: string): Promise
         .map((p) => p.text)
         .join("\n");
     })();
-    if (profile.capabilities.memory && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && lastUserText.trim()) {
+    // `userSpaceId` is absent exactly when memory is off, so it carries the same
+    // gate the capability check does — but both are stated, because the space is
+    // what the write actually needs and a widened capability must not silently
+    // start writing into a space nobody resolved.
+    if (profile.capabilities.memory && userSpaceId && finalStatus === "completed" && !awaitingApproval && !awaitingAnswer && lastUserText.trim()) {
       // trackAux: keep the worker's shutdown drain waiting on this fire-and-forget
       // call so a deploy doesn't kill it mid-flight (lost spend / dropped facts).
-      void trackAux(maintainMemoryDoc({
-        model,
-        provider,
-        userId,
-        projectId: payload.projectId ?? null,
-        scope: payload.projectId ? "project" : "user",
-        turn: { userText: lastUserText, assistantText: getFullText() },
-        onUsage: recordAuxUsage,
-        // Long chat → ride the hot prefix for full-context, cache-priced
-        // reconcile; short chat → undefined keeps the cheap standalone call.
-        hotContext: longChat ? { systemMessages, modelMessages } : undefined,
-      }).catch((e) => tlog.error("memory maintenance failed", { err: String(e) })));
+      void trackAux(extractCandidates({
+        userSpaceId,
+        projectSpaceId,
+        // The assistant row this turn is writing — the same id the snapshots use, so
+        // every candidate's provenance points at the message it came from.
+        messageId: msgId,
+        userText: lastUserText,
+        assistantText: getFullText(),
+        // The module knows nothing about providers or usage accounting; binding
+        // model/provider and billing the spend to this turn's key is the call site's
+        // job. Labelled "memory" so the aux span says which pass it was.
+        generate: async (args) => {
+          const { text, finishReason, usage } = await auxGenerate(model, provider, args, "memory");
+          const billable = toTokenUsage(usage);
+          if (billable) recordAuxUsage(billable);
+          return { text, finishReason };
+        },
+      }).catch((e) => tlog.error("memory extraction failed", { err: String(e) })));
     }
 
     // Auto-title the chat on its FIRST completed turn. "First turn" = no prior

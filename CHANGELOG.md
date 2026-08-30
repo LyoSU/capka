@@ -6,10 +6,13 @@ All notable changes to Capka are documented here. Format follows
 
 ## [Unreleased]
 
-> **⚠ Do not cut a release from this state** — boot now stamps `memory_docs.migrated_at` while three turn-time writers still append to those docs, so anything written after the stamp is carried nowhere; this guard is temporary, and the cutover commit that closes those writers deletes it.
+### Added
+
+- Vault data foundation (content-addressed blob store; sources/versions/fragments/citations schema) — groundwork for project knowledge.
 
 ### Changed
 
+- Agent memory is now a structured vault: facts with provenance, quarantine for web/tool-derived facts, full audit trail; existing memory documents migrate automatically at boot. The old memory editor is read-only until the new memory page ships.
 - Settings search keywords moved into the message catalogs (`settings.search.*`), so each locale ships its own synonym list instead of one hardcoded bilingual string.
 - Files carried into a project when a chat is moved land in an English subdir (`From chat "…"`), which stays stable across an interface-language change so a retry replaces rather than duplicates the copy.
 - Web citations redesigned: [N] markers render as raised number pills with a hover card (title, domain, date), and the "Sources" footer is a grid of source tiles with domain monograms, one tile per URL, collapsing beyond six.

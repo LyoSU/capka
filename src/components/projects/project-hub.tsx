@@ -675,45 +675,23 @@ function SettingsTab({
   );
 }
 
-/** The project's memory doc — "what the assistant remembered" — inline, using the
- *  same /api/memory-docs mechanics as settings but scoped to this project. */
+/** What the assistant remembers about this project, inline and read-only. Memory is
+ *  a set of facts with provenance now, not a document — see the settings page for
+ *  why there is nothing here to save. The notice is shared with that page rather
+ *  than duplicated, so the two surfaces cannot drift apart. */
 function MemoryEditor({ projectId }: { projectId: string }) {
   const t = useTranslations("projects.hub");
-  const tc = useTranslations("common");
+  const tm = useTranslations("settings.memory");
   const [content, setContent] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/memory-docs")
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { projects?: { id: string; content: string }[] } | null) => {
-        const c = d?.projects?.find((p) => p.id === projectId)?.content ?? "";
-        setContent(c);
-        setDraft(c);
+        setContent(d?.projects?.find((p) => p.id === projectId)?.content ?? "");
       })
-      .catch(() => { setContent(""); setDraft(""); });
+      .catch(() => setContent(""));
   }, [projectId]);
-
-  const dirty = content !== null && draft !== content;
-
-  async function save() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/memory-docs", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: draft, projectId }),
-      });
-      if (!res.ok) throw new Error();
-      setContent(draft);
-      toast.success(t("memorySaved"));
-    } catch {
-      toast.error(t("memoryError"));
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <div>
@@ -722,18 +700,13 @@ function MemoryEditor({ projectId }: { projectId: string }) {
       ) : (
         <>
           <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            value={content}
+            readOnly
+            disabled
             placeholder={t("memoryPlaceholder")}
             className="max-h-64 min-h-20 text-sm"
           />
-          {dirty && (
-            <div className="mt-2 flex justify-end">
-              <Button size="sm" onClick={save} disabled={saving}>
-                {saving ? tc("saving") : tc("save")}
-              </Button>
-            </div>
-          )}
+          <p className="mt-2 text-xs text-muted-foreground">{tm("memoryMovedNotice")}</p>
         </>
       )}
     </div>

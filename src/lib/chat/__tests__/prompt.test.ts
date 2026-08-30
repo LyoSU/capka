@@ -15,7 +15,7 @@ const FULL: Parameters<typeof buildSystemPrompt>[0] = {
   project: { systemPrompt: "Be terse." },
   skills: [{ name: "pdf", description: "PDF things", body: "steps" }],
   connectorIndex: "## Available connectors\n- github",
-  memoryDocs: { user: "- likes tea", project: "- ships on Fridays" },
+  memoryManifest: "## User memory\n\nRecent facts:\n- «likes tea»\n\n## Project memory\n\nRecent facts:\n- «ships on Fridays»",
   workspaceSnapshot: "report.docx",
   user: { name: "Yura", timezone: "Europe/Kyiv" },
   attachedFolders: [{ name: "reports", readOnly: true }],
@@ -125,9 +125,12 @@ describe("buildSystemPrompt — capability gating", () => {
     expect(p.volatile).toContain("likes tea");
   });
 
-  it("removes both memory blocks together, and nothing else, when memory is off", () => {
+  it("removes the whole memory manifest, and nothing else, when memory is off", () => {
     const p = buildSystemPrompt({ ...FULL, profile: without("memory") });
-    expect(p.volatile).not.toContain("What you remember");
+    // Both scopes go together: they arrive as one manifest, so there is no longer a
+    // way for one to survive the gate without the other.
+    expect(p.volatile).not.toContain("User memory");
+    expect(p.volatile).not.toContain("Project memory");
     expect(p.volatile).not.toContain("likes tea");
     expect(p.volatile).not.toContain("ships on Fridays");
     expect(p.volatile).toContain("Current workspace files");

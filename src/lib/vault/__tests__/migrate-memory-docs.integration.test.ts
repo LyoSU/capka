@@ -195,6 +195,38 @@ run("vault: memory_docs migration", () => {
     expect(await migratedAt(`${P}d2`)).toEqual(stamp);
   });
 
+  it("catches a document appended to AFTER its stamp (migrated_at < updated_at), and converges", async () => {
+    // The window the cutover closes: boot stamped the document, then a legacy
+    // turn-time writer appended to it. Those bullets are carried nowhere by an
+    // `IS NULL` selector — the manifest's legacy fallback reads the same column, so
+    // they would vanish from the screen with no error at all.
+    await mkDoc(`${P}d9`, "- first fact");
+    expect(await migrate(`${P}d9`)).toEqual({ migrated: 1 });
+    const spaceId = (await spaceOf("user", OWNER))!;
+
+    // Both timestamps are dated into the PAST, stamp first and append after it. The
+    // obvious fixture — `updated_at = migrated_at + 1 second` — puts the append in
+    // the FUTURE, so the re-stamp lands inside that second and the document selects
+    // itself forever; the convergence assertion below is what caught that.
+    await q(
+      `UPDATE memory_docs
+          SET content = $2,
+              migrated_at = now() - interval '2 hours',
+              updated_at  = now() - interval '1 hour'
+        WHERE id = $1`,
+      [`${P}d9`, "- first fact\n- added after the stamp"],
+    );
+    const stamp = await migratedAt(`${P}d9`);
+
+    expect(await migrate(`${P}d9`)).toEqual({ migrated: 1 });
+    // The already-migrated bullet dedups instead of doubling; the late one lands.
+    expect(new Set(await inTopic(spaceId))).toEqual(new Set(["first fact", "added after the stamp"]));
+    expect(await migratedAt(`${P}d9`)).not.toEqual(stamp);
+    // Converges by construction: the fresh stamp is now past `updated_at`, and after
+    // the cutover nothing moves `updated_at` again.
+    expect(await migrate(`${P}d9`)).toEqual({ migrated: 0 });
+  });
+
   it("a race between two migrations duplicates no claim (CAS on the document row)", async () => {
     await mkDoc(`${P}d3`, "- fact A\n- fact B");
 

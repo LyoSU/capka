@@ -84,9 +84,11 @@ export function buildSessionContext(opts: {
 
 export function buildSystemPrompt(opts: {
   project?: { systemPrompt?: string | null } | null;
-  /** Self-maintaining memory docs (≈ ~/CLAUDE.md + project/CLAUDE.md), injected
-   *  verbatim. Empty strings are skipped. */
-  memoryDocs?: { user?: string; project?: string };
+  /** The vault's memory manifest for this turn — topics, recent facts, and any
+   *  not-yet-migrated legacy document, already assembled and fenced by
+   *  `buildMemoryManifest`. Injected verbatim (it brings its own `## ` headers); an
+   *  empty string is skipped. */
+  memoryManifest?: string;
   skills?: { name: string; description: string | null; body?: string | null }[];
   workspaceSnapshot?: string;
   user?: { name?: string | null; timezone?: string | null } | null;
@@ -167,8 +169,7 @@ export function buildSystemPrompt(opts: {
       ? projectPrompt.trim()
       : `--- Project Instructions ---\n${projectPrompt}`;
 
-  const userDoc = opts.memoryDocs?.user?.trim();
-  const projectDoc = opts.memoryDocs?.project?.trim();
+  const memoryManifest = opts.memoryManifest?.trim();
 
   // Each tier is its non-empty layers joined by a blank line — which is exactly
   // what the hand-rolled `+=` chain this replaced produced, byte for byte (a
@@ -214,8 +215,9 @@ export function buildSystemPrompt(opts: {
     // download can fail or an oversize file can't be delivered), so building it
     // from a capability prediction here would promise files the model never got.
     volatile: tier([
-      caps.memory && userDoc ? `## What you remember about the user:\n${userDoc}` : undefined,
-      caps.memory && projectDoc ? `## What you remember about this project:\n${projectDoc}` : undefined,
+      // One block, not two: the manifest already splits itself into user/project
+      // sections and knows which of them exist this turn.
+      caps.memory && memoryManifest ? memoryManifest : undefined,
       // Workspace snapshot changes every run — must stay out of the cached prefix.
       caps.sandbox && opts.workspaceSnapshot
         ? `## Current workspace files:\n\`\`\`\n${opts.workspaceSnapshot}\n\`\`\``

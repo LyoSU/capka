@@ -2,9 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { SettingsPage, SettingsSection, SettingsGroup, SettingsRow, SettingsSkeleton } from "@/components/settings/shell";
@@ -23,59 +21,23 @@ interface ProjectDoc {
   content: string;
 }
 
-/** One editable memory document (the user-global doc or a project's). Tracks its
- *  own dirty/saving state so saving one doesn't disturb another. */
-function DocEditor({
-  value,
-  projectId,
-  onSaved,
-}: {
-  value: string;
-  projectId: string | null;
-  onSaved: (content: string) => void;
-}) {
+/** What one scope remembers, read-only. Memory is now a set of facts with
+ *  provenance rather than a document, so there is nothing here a textarea could
+ *  honestly write back — the editor for it (topics, confirmations, conflicts) is a
+ *  later change. The text stays visible and legible: hiding it while the new page is
+ *  built would read as memory having been lost. */
+function DocView({ value }: { value: string }) {
   const t = useTranslations("settings.memory");
-  const tc = useTranslations("common");
-  const [draft, setDraft] = useState(value);
-  const [saving, setSaving] = useState(false);
-
-  // Reset when the underlying doc switches (e.g. picking another project).
-  useEffect(() => setDraft(value), [value]);
-
-  const dirty = draft !== value;
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/memory-docs", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: draft, projectId }),
-      });
-      if (!res.ok) throw new Error();
-      onSaved(draft);
-      toast.success(t("saved"));
-    } catch {
-      toast.error(t("saveFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div className="space-y-2">
       <Textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        value={value}
+        readOnly
+        disabled
         placeholder={t("placeholder")}
         className="min-h-40 font-mono text-sm"
       />
-      <div className="flex justify-end">
-        <Button size="sm" onClick={save} disabled={!dirty || saving}>
-          {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-          {tc("save")}
-        </Button>
-      </div>
+      <p className="text-xs text-muted-foreground">{t("memoryMovedNotice")}</p>
     </div>
   );
 }
@@ -183,7 +145,7 @@ export default function MemoryPage() {
       </SettingsGroup>
 
       <SettingsSection title={t("userTitle")} description={t("userDesc")}>
-        <DocEditor value={userDoc} projectId={null} onSaved={setUserDoc} />
+        <DocView value={userDoc} />
       </SettingsSection>
 
       {projectDocs.length > 0 && (
@@ -204,16 +166,7 @@ export default function MemoryPage() {
               ))}
             </SelectContent>
           </Select>
-          {selected && (
-            <DocEditor
-              key={selected.id}
-              value={selected.content}
-              projectId={selected.id}
-              onSaved={(content) =>
-                setProjectDocs((prev) => prev.map((p) => (p.id === selected.id ? { ...p, content } : p)))
-              }
-            />
-          )}
+          {selected && <DocView key={selected.id} value={selected.content} />}
         </SettingsSection>
       )}
     </SettingsPage>

@@ -1006,7 +1006,8 @@
       "loadError": "Could not load memory. Please refresh the page.",
       "enabled": "Remember things about me",
       "enabledHint": "Off, the assistant starts every chat fresh. Your notes below are kept.",
-      "enabledLocked": "Memory is turned off for everyone right now."
+      "enabledLocked": "Memory is turned off for everyone right now.",
+      "memoryMovedNotice": "Memory is now edited as individual facts — the full interface is coming in the next update."
     },
     "integrations": {
       "title": "Integrations",
