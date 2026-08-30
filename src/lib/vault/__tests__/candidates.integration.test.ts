@@ -645,6 +645,34 @@ run("vault candidates", () => {
     for (const e of events) expect(e.payload).not.toHaveProperty("slotKey");
   });
 
+  it("confirm normalizes a slot key the SAME way propose does, for a row propose did not write", async () => {
+    // The two normalizations agreed only because every candidate row had been written
+    // by propose first. `fitSlotKey` also collapses inner whitespace and clamps to 120;
+    // a bare `.trim()` does neither. So a candidate row inserted directly — the future
+    // writer this is about — carried a key that no longer addressed the head stored
+    // under the fitted one: `headBySlot` missed, the confirm inserted a SECOND active
+    // claim in the same slot, and `uniq_vclaims_active_slot` turned that into
+    // `try_again` on every attempt, forever.
+    const head = await createClaim(
+      { spaceId: SPACE_A, statement: "Deadline — Monday", slotKey: "supplier  acme", origin: {}, reviewStatus: "unverified" },
+      ACTOR,
+    );
+    expect((await claimRow(head.id)).slot_key).toBe("supplier acme");
+
+    await q(
+      `INSERT INTO memory_candidates (id, idempotency_key, space_id, statement, slot_key, provenance, evidence, policy_state)
+       VALUES ($1, $1, $2, $3, $4, $5::jsonb, '[]'::jsonb, 'pending')`,
+      [`${P}cand-raw`, SPACE_A, "Deadline — Monday", "supplier  acme", JSON.stringify(DIRECT)],
+    );
+
+    const res = await confirmCandidate({ candidateId: `${P}cand-raw`, allowedSpaceIds: [SPACE_A], actor: ACTOR });
+    expect(res).toEqual({ ok: true, claimId: head.id });
+    // The existing head was found and confirmed — not superseded, and above all not
+    // doubled: one active claim in that slot.
+    expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(1);
+    expect((await claimRow(head.id)).review_status).toBe("confirmed");
+  });
+
   it("confirm on a taken slot with the same text → merge into the head, and the head becomes confirmed", async () => {
     // The head is deliberately unverified and non-sensitive: the HUMAN's decision has
     // to raise both fields, or {ok:true} is returned for a fact nobody can see.

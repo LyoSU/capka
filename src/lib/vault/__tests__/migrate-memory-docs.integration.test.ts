@@ -320,6 +320,37 @@ run("vault: memory_docs migration", () => {
     expect(await migrate(`${P}d9`)).toEqual({ migrated: 0 });
   });
 
+  it("a bullet longer than the statement cap still matches itself on a second pass", async () => {
+    // `seen` is keyed on the bullet as WRITTEN and compared against the statement as
+    // STORED, and the stored one went through `fitStatement`. Above 500 characters the
+    // two strings differ, so the fact stops matching itself and a second pass creates a
+    // duplicate instead of attaching to what is already there. Reachable only through
+    // the append-after-stamp window above, which is why the fixture opens one.
+    //
+    // Deliberately NOT a long unbroken run of characters: that is secret-shaped, and a
+    // sensitive claim would make this test about the screen instead.
+    const long = "the supplier grants a thirty day payment deferral on the standing order. ".repeat(9);
+    expect(long.length).toBeGreaterThan(500);
+    await mkDoc(`${P}d10`, `- ${long}`);
+    expect(await migrate(`${P}d10`)).toEqual({ migrated: 1 });
+    const spaceId = (await spaceOf("user", OWNER))!;
+    expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [spaceId])).toBe(1);
+
+    await q(
+      `UPDATE memory_docs
+          SET content = $2,
+              migrated_at = now() - interval '2 hours',
+              updated_at  = now() - interval '1 hour'
+        WHERE id = $1`,
+      [`${P}d10`, `- ${long}\n- a short fact added later`],
+    );
+    expect(await migrate(`${P}d10`)).toEqual({ migrated: 1 });
+    // Two claims, not three: the long bullet attached to the topic it already had,
+    // and only the appended one is new.
+    expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [spaceId])).toBe(2);
+    expect((await inTopic(spaceId)).length).toBe(2);
+  });
+
   it("a race between two migrations duplicates no claim (CAS on the document row)", async () => {
     await mkDoc(`${P}d3`, "- fact A\n- fact B");
 
