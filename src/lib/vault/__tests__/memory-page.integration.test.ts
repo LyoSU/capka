@@ -81,19 +81,22 @@ run("vault: memory page projection", () => {
     expect((await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0].source).toEqual({ kind: "legacy" });
   });
 
-  it("shows a sensitive fact as existing and withholds its text", async () => {
+  it("shows the OWNER a sensitive fact in full, marked", async () => {
+    // `sensitive` withholds from the MODEL — the manifest and `memory_search` are the
+    // readers that enforce that, and they are untouched. This surface answers a
+    // different question: it is the owner of the space looking at their own memory, and
+    // a fact they cannot read is one they cannot delete, correct or judge. The mark is
+    // what the page blurs on; the withholding is not the server's to do here.
     await seedFact("Attends a support group", { sensitive: true });
     const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
     expect(fact.sensitive).toBe(true);
-    expect(fact.statement).toBeNull();
-    expect(fact.previous).toBeNull();
-    expect(JSON.stringify(fact)).not.toContain("support group");
+    expect(fact.statement).toBe("Attends a support group");
   });
 
-  it("withholds the PREVIOUS version of a sensitive fact too", async () => {
-    // The second half of the withholding rule, and the one a reader forgets: `previous`
-    // is the same words one revision earlier, so a history disclosure would read out
-    // exactly what `statement` refuses to.
+  it("shows the PREVIOUS version of a sensitive fact too", async () => {
+    // The second half of the same rule. `previous` is the same words one revision
+    // earlier: withholding it while sending `statement` would be an inconsistency, and
+    // withholding both would hide the person's own history from them.
     const { spaceId, claim } = await seedFact("Attends a support group on Tuesdays", { sensitive: true });
     await updateClaim({
       claimId: claim.id, expectedRevision: 1,
@@ -102,8 +105,8 @@ run("vault: memory page projection", () => {
     });
     const fact = (await readMemoryPage(OWNER)).scopes[0].topics[0].facts[0];
     expect(fact.sensitive).toBe(true);
-    expect(fact.previous).toBeNull();
-    expect(JSON.stringify(fact)).not.toContain("support group");
+    expect(fact.statement).toBe("Attends a support group on Thursdays");
+    expect(fact.previous?.statement).toBe("Attends a support group on Tuesdays");
   });
 
   it("carries the version a fact replaced", async () => {
@@ -145,10 +148,12 @@ run("vault: memory page projection", () => {
     expect((await readMemoryPage(OWNER)).scopes[0].topics[0].facts).toHaveLength(0);
   });
 
-  it("shows a waiting fact that is sensitive as existing, without its text", async () => {
-    // The candidate half of the withholding rule. Written straight into the table
-    // because the secret screen is what normally raises the flag, and this test is
-    // about the PROJECTION's obligation once it is raised, not about the screen.
+  it("shows a waiting fact that is sensitive in full, marked", async () => {
+    // The candidate half, and the one where withholding was not merely inconsistent but
+    // incoherent: this row carries Keep and Discard controls, so a blank statement asks
+    // the person to approve words the screen refuses to show them. Written straight into
+    // the table because the secret screen is what normally raises the flag, and this test
+    // is about the PROJECTION's obligation once it is raised, not about the screen.
     const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
     await q(
       `INSERT INTO memory_candidates (id, idempotency_key, space_id, statement, provenance, sensitive, policy_state)
@@ -159,8 +164,48 @@ run("vault: memory page projection", () => {
     const scope = (await readMemoryPage(OWNER)).scopes[0];
     expect(scope.pending).toHaveLength(1);
     expect(scope.pending[0].sensitive).toBe(true);
-    expect(scope.pending[0].statement).toBeNull();
-    expect(JSON.stringify(scope.pending)).not.toContain("447192");
+    expect(scope.pending[0].statement).toBe("Recovery code 447192 for the shared mailbox");
+  });
+
+  it("a conflict carries the head it is contested against", async () => {
+    // Amendment D. `conflict` on its own is a word, not a choice: keeping this candidate
+    // SUPERSEDES that head, and a person cannot weigh that against a fact the page never
+    // showed them. Seeded through the real ledger, because `conflicts_with` is written by
+    // the policy and a hand-set column would be testing the test's own assumption.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    const noteId = await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    await createClaim(
+      { spaceId, statement: "Works as a technical lead", slotKey: "person/role",
+        origin: { kind: "user_direct" }, reviewStatus: "confirmed", topicNoteId: noteId },
+      { kind: "user", id: OWNER },
+    );
+    const res = await proposeCandidate({
+      idempotencyKey: `${P}conflict`, spaceId,
+      statement: "Works as a lead cloud architect",
+      slotKey: "person/role",
+      // `user_direct`, so the proposal reaches the slot branch at all: anything else is
+      // gated to `pending` before a head is ever read, which is what makes a
+      // `conflict` fixture look deceptively easy to write.
+      provenance: { kind: "user_direct" },
+    });
+    expect(res.state).toBe("conflict");
+
+    const waiting = (await readMemoryPage(OWNER)).scopes[0].pending[0];
+    expect(waiting.state).toBe("conflict");
+    expect(waiting.conflictsWith?.statement).toBe("Works as a technical lead");
+  });
+
+  it("a plain waiting fact names nothing it conflicts with", async () => {
+    // The control: a projection that always joined something would satisfy the test
+    // above while telling every ordinary row it disagrees with a fact.
+    const spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    await proposeCandidate({
+      idempotencyKey: `${P}plain`, spaceId,
+      statement: "Uses Linux as their main operating system",
+      provenance: { kind: "derived" },
+    });
+    expect((await readMemoryPage(OWNER)).scopes[0].pending[0].conflictsWith).toBeNull();
   });
 
   it("never shows a space owned by someone else, even under this user's own project", async () => {

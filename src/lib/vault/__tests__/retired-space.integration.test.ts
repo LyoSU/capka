@@ -17,7 +17,7 @@ import { and, eq } from "drizzle-orm";
 import { db, pool } from "@/lib/db";
 import { vaultClaims } from "@/lib/db/schema";
 import { createClaim, updateClaim, type Actor } from "../claims";
-import { proposeCandidate } from "../candidates";
+import { confirmCandidate, proposeCandidate } from "../candidates";
 import { extractCandidates } from "../extract";
 import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote, retireProjectSpace } from "../spaces";
 
@@ -337,6 +337,62 @@ run("vault: writes into a retired space", () => {
       .where(and(eq(vaultClaims.id, claimId), eq(vaultClaims.spaceId, projectSpaceId)));
     expect(head?.supersededAt).toBeNull();
     expect(await count("vault_claims", "space_id = $1", [projectSpaceId])).toBe(1);
+  });
+
+  it("confirmCandidate refuses a candidate whose space was retired", async () => {
+    // The fence `confirmCandidate`'s own docstring promised its first caller. The MERGE
+    // branch is what needed it: `createClaim`/`updateClaim` fence themselves, so the
+    // supersede and create paths were always refused — but a merge writes
+    // `confirmClaim` and a `candidate.confirm` audit event, and the event SURVIVES the
+    // retire's teardown. A fact the user deleted with their project would leave a
+    // record of being confirmed afterwards, in a space that no longer exists.
+    //
+    // Both rows are inserted AFTER the retire, because the retire deletes them: the
+    // race this stands in for is a confirmation already in flight when the project goes.
+    const { projectSpaceId } = await spaces();
+    await retireProjectSpace(PROJ);
+    const claimId = `${P}retired-head`;
+    await q(
+      `INSERT INTO vault_claims (id, space_id, statement, origin, review_status)
+       VALUES ($1, $2, 'the office moves in March', '{}'::jsonb, 'unverified')`,
+      [claimId, projectSpaceId],
+    );
+    await q(
+      `INSERT INTO memory_candidates (id, idempotency_key, space_id, statement, provenance, policy_state)
+       VALUES ($1, $1, $2, 'the office moves in March', '{"kind":"derived"}'::jsonb, 'pending')`,
+      [`${P}retired-cand`, projectSpaceId],
+    );
+
+    const res = await confirmCandidate({
+      candidateId: `${P}retired-cand`,
+      allowedSpaceIds: [projectSpaceId],
+      actor: { kind: "user", id: OWNER },
+    });
+
+    expect(res).toEqual({ ok: false, reason: "not_found" });
+    // Nothing moved, in any of the three places a confirm would have touched.
+    expect(await count("memory_candidates", "id = $1 AND resolved_at IS NULL", [`${P}retired-cand`])).toBe(1);
+    expect(await count("vault_claims", "id = $1 AND review_status = 'unverified'", [claimId])).toBe(1);
+    expect(await count("audit_events", "space_id = $1 AND action = 'candidate.confirm'", [projectSpaceId])).toBe(0);
+  });
+
+  it("a LIVE space still takes a confirm", async () => {
+    // The control for the fence above: one that refused everything would pass it.
+    const { userSpaceId } = await spaces();
+    await getOrCreateTopicNote(userSpaceId, DEFAULT_TOPIC_KEY);
+    const proposed = await proposeCandidate({
+      idempotencyKey: `${P}live-confirm`,
+      spaceId: userSpaceId,
+      statement: "the office moves in March",
+      provenance: { kind: "derived" },
+    });
+    if (proposed.state !== "pending") throw new Error(`expected pending, got ${proposed.state}`);
+    const res = await confirmCandidate({
+      candidateId: proposed.candidateId,
+      allowedSpaceIds: [userSpaceId],
+      actor: { kind: "user", id: OWNER },
+    });
+    expect(res).toMatchObject({ ok: true });
   });
 
   it("a LIVE space still takes all three writes", async () => {

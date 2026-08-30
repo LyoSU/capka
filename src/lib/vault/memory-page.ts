@@ -14,10 +14,14 @@ import { projectNotDeleted } from "@/lib/projects/live";
  * conversation a fact came from, and `vault_claims.supersedes` records what it replaced.
  * None of it is new work; the page simply stopped discarding it.
  *
- * WHAT THIS SURFACE MAY SHOW, and why it differs from every other reader of a claim's
- * text. There are FOUR, enumerated by what reaches the DATA rather than by who calls
- * `listHeadClaims` — that accessor-shaped enumeration is what hid the fourth one from a
- * whole re-review, because `mismatch` reads through `findCurrentHead` instead:
+ * WHAT `sensitive` MEANS, because this surface is the one place it means something
+ * different. The rule, in one sentence:
+ *
+ *   > `sensitive` is an advisory classification and it withholds from the MODEL. It
+ *   > never withholds from the authenticated owner of the space. What the owner may see
+ *   > is decided by ownership; what the model may see is decided by the owner.
+ *
+ * The three MODEL-facing readers are unchanged and must stay that way:
  *
  *   - `manifest.ts` — non-sensitive statement; a sensitive one withheld entirely, not
  *     even counted in its topic's counter.
@@ -26,16 +30,24 @@ import { projectNotDeleted } from "@/lib/projects/live";
  *   - `mismatch` (`tools.ts`, the lost-CAS reply of memory_update/memory_forget) —
  *     statement, and withheld for a sensitive head, or a lost CAS would be a second way
  *     to read out what the manifest hides.
- *   - THIS ONE — a sensitive fact's EXISTENCE: its topic, its date, and (from Task 2)
- *     its delete control. Never its text.
  *
- * That last row is what closes the dead end recorded on `memory_forget`: the claim
- * becomes reachable by a HUMAN, by address, without anyone ever learning the words. It
- * does not weaken the provenance gate, because the person clicking is not the model.
+ * THIS reader sends the text, sensitive or not, and marks it so the page can render the
+ * advisory. It used to withhold, on a rule borrowed from those three, and that cost two
+ * things at once: the person was to be asked to approve words the screen would not show
+ * them, and — because the confirm path reasoned from the same premise — a candidate
+ * whose slot a sensitive head occupied could never be confirmed at all. A display
+ * decision had propagated into a concurrency outcome. The protection that genuinely
+ * applies at a screen is shoulder-surfing, which is a RENDERING concern: the page blurs
+ * a sensitive statement behind a reveal control, and the server does not refuse to send
+ * what the owner already owns.
+ *
+ * Store-only visibility — keep a fact but never give it to the model — is a real and
+ * separate want, and it needs a column of its own. Giving `sensitive` a third meaning
+ * here is exactly the mistake this comment exists to undo.
  *
  * `review_status` is filtered to `confirmed` for the FACTS. An unverified claim is
  * quarantined material and belongs in the waiting list below, not in the list of what
- * the assistant is using — the same rule the other three readers hold.
+ * the assistant is using — the same rule the model-facing readers hold.
  */
 
 export type FactSource =
@@ -49,13 +61,13 @@ export type FactHistory = { statement: string; at: string };
 export type FactView = {
   id: string;
   revision: number;
-  /** `null` for a sensitive fact: the page says one exists, never what it says. */
-  statement: string | null;
+  statement: string;
+  /** Advisory, and what the page renders the blur-and-reveal from. It is not a
+   *  withholding on this wire — see the module comment. */
   sensitive: boolean;
   recordedAt: string;
   source: FactSource;
-  /** The immediately previous version. Never populated for a sensitive fact — it is the
-   *  same withheld words, one revision earlier. */
+  /** The immediately previous version. */
   previous: FactHistory | null;
 };
 
@@ -71,11 +83,17 @@ export type TopicView = {
 
 export type PendingView = {
   id: string;
-  statement: string | null;
+  statement: string;
+  /** Advisory, exactly as on a fact. */
   sensitive: boolean;
   createdAt: string;
   state: "pending" | "conflict";
   source: FactSource;
+  /** For a row in `conflict`: the head it is contested against. Keeping this one
+   *  supersedes that one, and a person cannot make that choice against a fact they
+   *  cannot see. `null` on a plain pending row, and also on the conflict the ledger
+   *  records with no head to point at (the slot was contested and then vacated). */
+  conflictsWith: FactHistory | null;
 };
 
 export type ScopeView = {
@@ -180,14 +198,14 @@ async function topicsOf(spaceId: string, userId: string): Promise<TopicView[]> {
         return {
           id: f.id,
           revision: f.revision,
-          // The whole withholding rule for this surface, in one place. A sensitive
-          // fact's TEXT never leaves the server here — not in `statement`, and not in
-          // `previous`, which is the same words one revision earlier.
-          statement: f.sensitive ? null : f.statement,
+          // The owner's own fact, in full. `sensitive` rides alongside as the advisory
+          // the page blurs on — see the module comment for why this is not the same
+          // question the manifest answers.
+          statement: f.statement,
           sensitive: f.sensitive,
           recordedAt: f.recordedAt.toISOString(),
           source: sourceOf(evidenceRows.filter((e) => e.claimId === f.id), f.origin),
-          previous: !f.sensitive && prev ? { statement: prev.statement, at: prev.recordedAt.toISOString() } : null,
+          previous: prev ? { statement: prev.statement, at: prev.recordedAt.toISOString() } : null,
         };
       });
     return {
@@ -217,6 +235,7 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
       sensitive: memoryCandidates.sensitive,
       createdAt: memoryCandidates.createdAt,
       policyState: memoryCandidates.policyState,
+      conflictsWith: memoryCandidates.conflictsWith,
       chatId: chats.id,
       chatTitle: chats.title,
       at: messages.createdAt,
@@ -233,16 +252,39 @@ async function pendingOf(spaceId: string, userId: string): Promise<PendingView[]
     )
     .orderBy(asc(memoryCandidates.createdAt), asc(memoryCandidates.id));
 
-  return rows.map((r) => ({
-    id: r.id,
-    // A sensitive CANDIDATE withholds its text on the same rule as a sensitive head. It
-    // can still be confirmed or rejected by address once Task 8 ships those controls.
-    statement: r.sensitive ? null : r.statement,
-    sensitive: r.sensitive,
-    createdAt: (r.createdAt ?? new Date(0)).toISOString(),
-    state: r.policyState === "conflict" ? "conflict" : "pending",
-    source: sourceOf([{ chatId: r.chatId, chatTitle: r.chatTitle, at: r.at }], null),
-  }));
+  // The other half of every conflict, in one statement. Scoped to THIS space and to a
+  // live head: `conflicts_with` carries no foreign key, so a head that has since been
+  // forgotten or superseded leaves an id pointing at nothing — and a stale predecessor
+  // shown as "this replaces that" would misdescribe the very choice being asked for.
+  const contestedIds = rows.map((r) => r.conflictsWith).filter((v): v is string => !!v);
+  const contested = contestedIds.length
+    ? await db
+        .select({ id: vaultClaims.id, statement: vaultClaims.statement, recordedAt: vaultClaims.recordedAt })
+        .from(vaultClaims)
+        .where(
+          and(
+            inArray(vaultClaims.id, contestedIds),
+            eq(vaultClaims.spaceId, spaceId),
+            isNull(vaultClaims.supersededAt),
+          ),
+        )
+    : [];
+
+  return rows.map((r) => {
+    const other = r.conflictsWith ? contested.find((c) => c.id === r.conflictsWith) : undefined;
+    return {
+      id: r.id,
+      // The owner's own words to decide on. A sensitive candidate is marked, not
+      // withheld — see the module comment: confirming what the screen refuses to show
+      // is not a decision anyone can make.
+      statement: r.statement,
+      sensitive: r.sensitive,
+      createdAt: (r.createdAt ?? new Date(0)).toISOString(),
+      state: r.policyState === "conflict" ? "conflict" : "pending",
+      source: sourceOf([{ chatId: r.chatId, chatTitle: r.chatTitle, at: r.at }], null),
+      conflictsWith: other ? { statement: other.statement, at: other.recordedAt.toISOString() } : null,
+    };
+  });
 }
 
 export async function readMemoryPage(userId: string): Promise<{ scopes: ScopeView[] }> {

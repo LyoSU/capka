@@ -22,7 +22,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
  */
 import { pool } from "@/lib/db";
 import { createClaim } from "../claims";
-import type { ScopeView } from "../memory-page";
+import { readMemoryPage, type ScopeView } from "../memory-page";
 import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
 
 const run = process.env.RUN_INTEGRATION ? describe : describe.skip;
@@ -48,6 +48,11 @@ vi.mock("@/lib/auth", async (importOriginal) => {
 });
 
 const q = (text: string, params: unknown[] = []) => pool.query(text, params);
+
+const count = async (table: string, where: string, params: unknown[]) => {
+  const { rows } = await pool.query<{ n: string }>(`SELECT count(*) AS n FROM ${table} WHERE ${where}`, params);
+  return Number(rows[0].n);
+};
 
 /** users.email is unique too, so the conflict target must stay untargeted — a leftover
  *  row with this email would otherwise raise 23505 inside `beforeAll`, which surfaces as
@@ -253,5 +258,158 @@ run("vault: DELETE /api/memory — forget everything", () => {
     // The person, not the agent — and marked as part of a reset rather than as one of
     // the decisions the review queue asks them for.
     expect(rejected.rows[0]).toMatchObject({ kind: "user", id: OWNER, bulk: "true" });
+  });
+});
+
+/**
+ * `POST /api/memory/candidates/<id>` — the human's yes or no, and the surface the whole
+ * ledger was built for.
+ *
+ * The route itself is four lines of policy-free plumbing (`confirmCandidate` re-evaluates
+ * everything and holds its own CAS), so what is proved here is what the plumbing decides:
+ * WHO is deciding, and what the two decisions leave behind. Against the real database,
+ * because every assertion is an ownership filter or a write.
+ *
+ * The sensitive cases are the point of the amendment this task carries: an owner may read,
+ * edit and confirm their own sensitive fact. `sensitive` withholds from the MODEL — the
+ * manifest and `memory_search` are untouched by any of this — never from the person whose
+ * space it is.
+ */
+run("vault: POST /api/memory/candidates/[candidateId]", () => {
+  let spaceId = "";
+  let pendingId = "";
+  let rejectableId = "";
+  let sensitiveId = "";
+
+  const decide = async (candidateId: string, body: Record<string, unknown>) => {
+    const { POST } = await import("@/app/api/memory/candidates/[candidateId]/route");
+    return POST(
+      new Request("http://t", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ candidateId }) },
+    );
+  };
+
+  /** A waiting candidate, written straight into the table: these tests are about what the
+   *  DECISION does, not about how the policy filed the row. */
+  const mkCandidate = async (id: string, statement: string, opts: { sensitive?: boolean } = {}) => {
+    await q(
+      `INSERT INTO memory_candidates (id, idempotency_key, space_id, statement, provenance, sensitive, policy_state)
+       VALUES ($1, $1, $2, $3, '{"kind":"derived"}'::jsonb, $4, 'pending')`,
+      [id, spaceId, statement, !!opts.sensitive],
+    );
+    return id;
+  };
+
+  beforeAll(async () => {
+    await mkUser(OWNER);
+    await mkUser(STRANGER);
+  });
+
+  afterAll(async () => {
+    await cleanup();
+    await q(`DELETE FROM "user" WHERE id IN ($1, $2)`, [OWNER, STRANGER]);
+  });
+
+  beforeEach(async () => {
+    await cleanup();
+    requireWriter.mockResolvedValue({ userId: OWNER, role: "user", status: "active" });
+    spaceId = await getOrCreateSpace({ type: "user", refId: OWNER });
+    await getOrCreateTopicNote(spaceId, DEFAULT_TOPIC_KEY);
+    pendingId = await mkCandidate(`${P}cand-pending`, "Prefers meetings before noon");
+    rejectableId = await mkCandidate(`${P}cand-reject`, "Drinks coffee after four");
+    sensitiveId = await mkCandidate(`${P}cand-sensitive`, SECRET, { sensitive: true });
+  });
+
+  it("confirms a waiting fact into memory", async () => {
+    const res = await decide(pendingId, { decision: "confirm" });
+    expect(res.status).toBe(200);
+    const row = await q(
+      `SELECT c.review_status FROM memory_candidates m JOIN vault_claims c ON c.id = m.claim_id WHERE m.id = $1`,
+      [pendingId],
+    );
+    expect(row.rows[0]).toMatchObject({ review_status: "confirmed" });
+  });
+
+  it("discards one without recording it", async () => {
+    const res = await decide(rejectableId, { decision: "reject" });
+    expect(res.status).toBe(200);
+    const row = await q(`SELECT claim_id, resolved_at FROM memory_candidates WHERE id = $1`, [rejectableId]);
+    expect(row.rows[0]).toMatchObject({ claim_id: null });
+    expect((row.rows[0] as { resolved_at: Date | null }).resolved_at).not.toBeNull();
+  });
+
+  it("treats somebody else's candidate as absent", async () => {
+    requireWriter.mockResolvedValue({ userId: STRANGER, role: "user", status: "active" });
+    const res = await decide(pendingId, { decision: "confirm" });
+    expect(res.status).toBe(404);
+    // A 404 that resolved the row anyway would pass an assertion on the status alone.
+    const row = await q(`SELECT resolved_at FROM memory_candidates WHERE id = $1`, [pendingId]);
+    expect((row.rows[0] as { resolved_at: Date | null }).resolved_at).toBeNull();
+  });
+
+  it("records the decision as the PERSON's, not the agent's", async () => {
+    await decide(pendingId, { decision: "confirm" });
+    const ev = await q(
+      `SELECT actor->>'kind' AS kind, actor->>'id' AS id FROM audit_events
+        WHERE action = 'candidate.confirm' AND subject_id = $1`,
+      [pendingId],
+    );
+    expect(ev.rows).toHaveLength(1);
+    expect(ev.rows[0]).toMatchObject({ kind: "user", id: OWNER });
+  });
+
+  it("lets the owner confirm a SENSITIVE waiting fact, and the fact stays sensitive", async () => {
+    // The case the whole amendment exists for. The owner was shown the words on their own
+    // page (that is what `readMemoryPage` now sends), so they can act on them; the head
+    // that results is still withheld from the model.
+    const res = await decide(sensitiveId, { decision: "confirm" });
+    expect(res.status).toBe(200);
+    const row = await q(
+      `SELECT c.sensitive, c.statement, c.review_status FROM memory_candidates m
+         JOIN vault_claims c ON c.id = m.claim_id WHERE m.id = $1`,
+      [sensitiveId],
+    );
+    expect(row.rows[0]).toMatchObject({ sensitive: true, statement: SECRET, review_status: "confirmed" });
+  });
+
+  it("the owner's own page shows them the sensitive text they are being asked about", async () => {
+    // The half of the defect that a status code cannot see: as briefed, this task would
+    // have shipped a Keep button over a blank row.
+    const page = await readMemoryPage(OWNER);
+    const waiting = page.scopes.flatMap((s) => s.pending).find((p) => p.id === sensitiveId);
+    expect(waiting).toMatchObject({ sensitive: true, statement: SECRET });
+  });
+
+  it("saves the person's OWN wording when they correct the extraction", async () => {
+    const mine = "Prefers meetings before 11am";
+    const res = await decide(pendingId, { decision: "confirm", statement: mine });
+    expect(res.status).toBe(200);
+    const row = await q(
+      `SELECT c.statement, c.origin->>'kind' AS origin_kind FROM memory_candidates m
+         JOIN vault_claims c ON c.id = m.claim_id WHERE m.id = $1`,
+      [pendingId],
+    );
+    // The words are the person's, and so is the provenance: they wrote them, which is
+    // strictly stronger evidence than anything the extractor produced.
+    expect(row.rows[0]).toMatchObject({ statement: mine, origin_kind: "user_direct" });
+  });
+
+  it("refuses a decision it does not understand instead of guessing one", async () => {
+    const res = await decide(pendingId, { decision: "maybe" });
+    expect(res.status).toBe(400);
+    const row = await q(`SELECT resolved_at FROM memory_candidates WHERE id = $1`, [pendingId]);
+    expect((row.rows[0] as { resolved_at: Date | null }).resolved_at).toBeNull();
+  });
+
+  it("answers a second decision on the same row as absent, not as a second save", async () => {
+    expect((await decide(pendingId, { decision: "confirm" })).status).toBe(200);
+    const again = await decide(pendingId, { decision: "confirm" });
+    expect(again.status).toBe(404);
+    expect(await count("vault_claims", "space_id = $1 AND statement = $2", [spaceId, "Prefers meetings before noon"]))
+      .toBe(1);
   });
 });

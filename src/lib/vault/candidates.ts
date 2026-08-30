@@ -427,25 +427,48 @@ export async function proposeCandidate(input: {
  * the world may have moved between proposal and confirmation, and what is being
  * confirmed is the candidate's content, not whatever state the slot was in once.
  *
- * NOT fenced against a retired space, and the next person to give this function a
- * caller has to know why: it has none today (no confirmation surface ships in plan A),
- * and every branch that WRITES a claim goes through `createClaim`/`updateClaim`, which
- * are fenced. What is left unfenced is the MERGE branch — `attachEvidence`,
- * `confirmClaim` and the `candidate.confirm` audit event all touch rows that cannot
- * exist in a retired space, except the audit event, which would survive into one. The
- * fix when a caller appears is the same shape `updateClaim` uses: read the candidate's
- * `space_id` unlocked, fence on it, and only then take the CAS — which also removes the
- * deadlock recorded on `assertSpaceLive`.
+ * FENCED against a retired space, as of its first caller (`POST
+ * /api/memory/candidates/<id>`). Every branch that WRITES a claim already went through
+ * `createClaim`/`updateClaim`, which are fenced; what was left open was the MERGE
+ * branch — `attachEvidence`, `confirmClaim` and the `candidate.confirm` audit event —
+ * and specifically the audit event, the one row of the three that would SURVIVE into a
+ * retired space. The deadlock recorded on `assertSpaceLive` no longer applies either:
+ * the fence reads the space BEFORE the CAS, so this move now takes the space row first
+ * and the candidate row second, the same order `retireProjectSpace` takes them in.
+ *
+ * `statement` is the person's own wording, when they corrected the extraction before
+ * saying yes. It replaces the candidate's text for EVERYTHING downstream — the dedup
+ * read, the merge comparison, and the row that gets written — and it takes the
+ * provenance with it: words the person typed are the person's, which is strictly
+ * stronger evidence than whatever the extractor derived them from, so the origin
+ * becomes `user_direct` rather than the candidate's inherited kind. That is the reason
+ * editing is safe to offer at all; inheriting `derived` would file the human's own
+ * sentence under the model's authority.
  */
 export async function confirmCandidate(args: {
   candidateId: string;
   allowedSpaceIds: string[];
   actor: Actor;
+  statement?: string;
 }): Promise<{ ok: true; claimId: string } | { ok: false; reason: "already_resolved" | "not_found" | "try_again" }> {
   const { candidateId, allowedSpaceIds, actor } = args;
   try {
     return await db.transaction(async (tx) => {
-      // The CAS step comes FIRST: it both arbitrates confirm/confirm and
+      // The fence the docstring promised the first caller would need. Read UNLOCKED and
+      // ahead of the CAS purely to fix the lock ORDER: `retireProjectSpace` takes the
+      // space row and then the candidate rows, so fencing after the CAS would take them
+      // the other way round and the two would deadlock. A candidate's `space_id` never
+      // changes, so this read cannot go stale.
+      const [scope] = await tx
+        .select({ spaceId: memoryCandidates.spaceId })
+        .from(memoryCandidates)
+        .where(and(eq(memoryCandidates.id, candidateId), inArray(memoryCandidates.spaceId, allowedSpaceIds)))
+        .limit(1);
+      if (scope && !(await spaceAcceptsWrites(scope.spaceId, tx))) {
+        return { ok: false, reason: "not_found" } as const;
+      }
+
+      // The CAS step comes next: it both arbitrates confirm/confirm and
       // confirm/reject and takes the row lock — leaving no window between checking
       // "still open" and writing.
       const [cand] = await tx
@@ -481,7 +504,22 @@ export async function confirmCandidate(args: {
       // carrying `slot_key = ''` would otherwise never read the head, would hit 23505
       // on every insert and would return `try_again` FOREVER, with no way to confirm.
       const slotKey = fitSlotKey(cand.slotKey) ?? null;
-      const origin = cand.provenance as Record<string, unknown>;
+
+      // The person's correction, or the extractor's sentence when they did not make one.
+      // Clamped and single-lined HERE, by the same `fitStatement` the writers use, and
+      // not at the writer alone: the dedup read below compares normalized text, so an
+      // uncut edit could miss a head that the stored row then turns out to duplicate.
+      // `undefined` and an edit are told apart on the parameter, never on equality with
+      // the candidate's text — a person retyping the same sentence verbatim is still
+      // asserting it in their own words.
+      const edited = args.statement !== undefined;
+      const statement = edited ? fitStatement(args.statement as string) : cand.statement;
+      // Provenance follows the words. See the docstring: the human typed these, so the
+      // origin is theirs, not the `derived`/`web`/`tool` kind the candidate inherited
+      // from wherever the extractor read them.
+      const origin: Record<string, unknown> = edited
+        ? { kind: "user_direct", detail: "edited on the memory page" }
+        : (cand.provenance as Record<string, unknown>);
       const finish = async (claimId: string) => {
         // `policy_state` is left as it was: the pending→confirmed transition is
         // recorded by the event, not by rewriting the proposal's state.
@@ -515,18 +553,19 @@ export async function confirmCandidate(args: {
             const head = slotKey
               ? await headBySlot(cand.spaceId, slotKey, sp)
               : ((await listHeadClaims(cand.spaceId, {}, sp)).find(
-                  (h) => norm(h.statement) === norm(cand.statement),
+                  (h) => norm(h.statement) === norm(statement),
                 ) ?? null);
 
-            // The same rule propose holds, at the other entrance. Reached when a human
-            // confirms a non-sensitive candidate that happens to match a sensitive head:
-            // merging would confirm the sensitive head's contents to whoever wrote the
-            // candidate, and superseding it would replace a fact the human was never
-            // shown with one they were. Neither is theirs to do from this screen, so the
-            // candidate creates its OWN head and the sensitive one is left alone. With a
-            // slot that raises 23505 and re-reads, which is the honest outcome: the slot
-            // is genuinely contested.
-            const usable = head && !(head.sensitive && !cand.sensitive) ? head : null;
+            // Every head is usable here, sensitive ones included, and that is NOT the rule
+            // propose holds — deliberately. `sensitive` withholds from the MODEL; the
+            // actor at this entrance is the authenticated owner of the space, who is shown
+            // both texts on their own memory page. A guard that read the two entrances as
+            // one made a slotted candidate whose slot a sensitive head held answer
+            // `try_again` on every attempt, forever: from a screen, a button that never
+            // does anything. Sensitivity cannot fall through either branch below — the
+            // merge confirms with `usable.sensitive || cand.sensitive` and the supersede
+            // patches the same expression — so nothing is exposed by treating them alike.
+            const usable = head;
 
             // The value is compared too, for the same reason as in propose — but the
             // outcome differs: the human has already said yes to THIS candidate, so a
@@ -534,7 +573,7 @@ export async function confirmCandidate(args: {
             // It therefore falls through to the supersede below. A candidate with NO
             // value stays here, in the merge, and the head keeps the number it had:
             // superseding on absence would clear it under a `{ok:true}`.
-            if (usable && norm(usable.statement) === norm(cand.statement) && valueAgrees(usable.value, cand.value)) {
+            if (usable && norm(usable.statement) === norm(statement) && valueAgrees(usable.value, cand.value)) {
               for (const ev of evidence) await attachEvidence(usable.id, ev, sp);
               // This is the HUMAN's decision, so the head becomes confirmed —
               // otherwise `{ok:true}` would be returned for a fact the manifest will
@@ -553,7 +592,7 @@ export async function confirmCandidate(args: {
                   claimId: usable.id,
                   expectedRevision: usable.revision,
                   patch: {
-                    statement: cand.statement,
+                    statement,
                     // `undefined` makes `updateClaim` INHERIT the predecessor's value;
                     // passing the candidate's `null` straight through would write it,
                     // because a NULL jsonb arrives as `null` and the patch tests
@@ -570,8 +609,9 @@ export async function confirmCandidate(args: {
                     // contradiction is visible, and the trade stops being free.
                     value: cand.value ?? undefined,
                     // Inheriting from the predecessor is exactly what must not happen
-                    // here: the text came from THIS candidate, so the provenance is
-                    // its own (otherwise the successor would carry, say,
+                    // here: the text came from THIS candidate — or, when the person
+                    // rewrote it, from the person — so the provenance is whichever of
+                    // those wrote the words (otherwise the successor would carry, say,
                     // `legacy_memory_doc` on something the user just said themselves),
                     // and review/sensitive are decisions about IT, not about the
                     // predecessor. Sensitivity only rises: clearing it would expose
@@ -598,7 +638,7 @@ export async function confirmCandidate(args: {
             const claim = await createClaim(
               {
                 spaceId: cand.spaceId,
-                statement: cand.statement,
+                statement,
                 slotKey: slotKey ?? undefined,
                 value: cand.value,
                 origin,
@@ -763,8 +803,8 @@ const longWords = (s: string) =>
  * Matching is by shared PREFIX, not whole-word containment. `includes` was
  * asymmetric — `постачальник` was found inside `постачальника` but never the other
  * way round — so the same Ukrainian fact verified or not depending on which case
- * form the model happened to write, and the loser fell into pending, which plan A
- * has no surface to clear.
+ * form the model happened to write, and the loser fell into pending, which at the
+ * time had no surface to clear it from.
  *
  * Six characters, and below that only a single trailing character may differ (see
  * `alike`). Both halves guard the direction that costs — a false POSITIVE puts text
@@ -775,17 +815,17 @@ const longWords = (s: string) =>
  * and `invoice`/`invoices` on the stem, `work`/`works` on the one-character rule.
  *
  * Its remaining weaknesses (negation, an UNMARKED paste, reporting someone else's
- * words without quotation marks) are known and accepted, but NOT because the cost is
- * "one extra confirmation" — this said that until the sentence was checked against the
- * product it describes. Plan A ships no confirmation surface, and `PROPOSE_SAID.pending`
- * says as much to the model: a fact that fails here is recorded and then invisible until
- * plan D builds a review queue. So the accepted cost is a fact the user has to state
- * again in their own words, and the direction that must not fail stays the other one —
- * a false POSITIVE puts text the user never wrote into memory as theirs, silently and
- * with no queue to catch it either. Short words are excluded because they
- * appear in any text and confirm nothing; with no long words at all there is nothing
- * to establish authorship with, and `false` (that is, pending) is the only honest
- * answer.
+ * words without quotation marks) are known and accepted, and the cost of a false
+ * NEGATIVE is now genuinely "one extra confirmation" — which it was NOT when this
+ * sentence was first written, and the check against the product is what caught it: a
+ * failure here used to mean a fact recorded and then invisible forever, with nothing to
+ * clear it from. The memory page's review queue is what makes the mild reading true, so
+ * anything that removes that queue must bring this paragraph back with it. The direction
+ * that must not fail is still the other one — a false POSITIVE puts text the user never
+ * wrote into memory as theirs, silently, and never surfaces for review at all. Short
+ * words are excluded because they appear in any text and confirm nothing; with no long
+ * words at all there is nothing to establish authorship with, and `false` (that is,
+ * pending) is the only honest answer.
  */
 export function verifyDirectProvenance(statement: string, userTurnText: string): boolean {
   const words = longWords(statement);

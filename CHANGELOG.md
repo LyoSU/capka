@@ -12,6 +12,7 @@ All notable changes to Capka are documented here. Format follows
 - Facts can now be deleted from the memory page, including sensitive ones the assistant is not allowed to read.
 - The memory page now says how a fact gets saved — by telling the assistant in a chat — and why the set-aside list is waiting.
 - A "forget everything" control on the memory page removes every recorded fact and every set-aside candidate across the user's own memory and all their projects; the audit trail of the reset is kept.
+- Facts the assistant recorded but could not activate can now be kept or discarded on the memory page, with the wording editable first.
 
 ### Changed
 
@@ -20,6 +21,8 @@ All notable changes to Capka are documented here. Format follows
 - Settings search keywords moved into the message catalogs (`settings.search.*`), so each locale ships its own synonym list instead of one hardcoded bilingual string.
 - Files carried into a project when a chat is moved land in an English subdir (`From chat "…"`), which stays stable across an interface-language change so a retry replaces rather than duplicates the copy.
 - Web citations redesigned: [N] markers render as raised number pills with a hover card (title, domain, date), and the "Sources" footer is a grid of source tiles with domain monograms, one tile per URL, collapsing beyond six.
+- The memory page shows a sensitive fact's text to its owner, blurred behind a per-row reveal control, instead of withholding it; the manifest and `memory_search` still withhold it from the model.
+- A memory row's source line links to the conversation it came from, and a conflicting one names the fact it would replace.
 
 ### Fixed
 
@@ -32,6 +35,7 @@ All notable changes to Capka are documented here. Format follows
 - A chat whose first turn goes through an approval or "Ask" prompt is now auto-titled instead of keeping the placeholder name for good.
 - The step timeline no longer opens an empty thought row for a reasoning part carrying only a line break, which some models emit between tool calls.
 - A fact stated while answering an assistant question is now attributed to the user instead of waiting for confirmation.
+- Keeping a set-aside fact whose slot a sensitive fact holds now works instead of failing with "try again" on every attempt.
 
 ### Security
 

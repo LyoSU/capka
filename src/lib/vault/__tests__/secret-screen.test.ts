@@ -9,8 +9,9 @@ import { looksLikeSecret } from "@/lib/vault/claims";
  * exactly the kind of change someone makes without a database to hand.
  *
  * Every negative control below is an ordinary fact an office user states out loud.
- * A false positive is not free: a screened item goes `sensitive` → pending, and
- * plan A ships no confirmation surface, so it sits invisible until one exists.
+ * A false positive is not free: a screened item goes `sensitive` → pending, so an
+ * ordinary fact ends up on the memory page's review queue, blurred behind a reveal
+ * control, waiting for a decision it should never have needed.
  */
 describe("looksLikeSecret", () => {
   it.each([

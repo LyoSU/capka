@@ -1136,7 +1136,12 @@ run("vault candidates", () => {
     expect(await count("claim_evidence", "claim_id = $1", [rival])).toBe(0);
   });
 
-  it("a confirm does not merge into a sensitive head either", async () => {
+  it("a confirm DOES merge into a sensitive head, and the head stays sensitive", async () => {
+    // The other entrance, and the rule is not the same one. Propose refuses because the
+    // proposer is the MODEL and either answer would be an oracle over a withheld head.
+    // Confirm is the authenticated owner of the space, who has been shown both texts on
+    // their own page — so refusing here bought nothing and cost a duplicate head saying
+    // the same thing twice.
     const sensitive = await createClaim(
       { spaceId: SPACE_A, statement: "Sees a therapist on Fridays", origin: { kind: "user_direct" },
         reviewStatus: "confirmed", sensitive: true, topicNoteId: NOTE_A },
@@ -1153,6 +1158,97 @@ run("vault candidates", () => {
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.claimId).not.toBe(sensitive.id);
+    expect(res.claimId).toBe(sensitive.id);
+    // Sensitivity only ever rises. A merge that cleared it would hand the model a fact
+    // it was never allowed to read, which is the one thing this whole rule protects.
+    expect(await claimRow(sensitive.id)).toMatchObject({ sensitive: true, review_status: "confirmed" });
+  });
+
+  it("a SLOTTED candidate whose slot a sensitive head holds confirms once, and the successor stays sensitive", async () => {
+    // The defect this amendment exists to close, in one assertion. Under the old rule the
+    // head was refused as "not usable", so the insert hit `uniq_vclaims_active_slot`,
+    // read the same untouchable head back, and returned `try_again` — on every attempt,
+    // forever. From a screen: a Keep button that does nothing, permanently.
+    const sensitive = await createClaim(
+      { spaceId: SPACE_A, statement: "Sees a therapist on Fridays", slotKey: "health/therapy",
+        origin: { kind: "user_direct" }, reviewStatus: "confirmed", sensitive: true, topicNoteId: NOTE_A },
+      { kind: "system" },
+    );
+    const proposed = await propose({
+      idempotencyKey: `${P}b-slotted`,
+      statement: "Sees a therapist on Tuesdays",
+      slotKey: "health/therapy",
+      provenance: { kind: "derived", messageId: `${P}msg` },
+    });
+    if (proposed.state !== "pending") throw new Error(`expected pending, got ${proposed.state}`);
+
+    const res = await confirmCandidate({
+      candidateId: proposed.candidateId, allowedSpaceIds: [SPACE_A], actor: ACTOR,
+    });
+    expect(res).toMatchObject({ ok: true });
+    if (!res.ok) return;
+    // A supersede, not a second head: the slot holds exactly one fact.
+    expect(await claimRow(sensitive.id)).toMatchObject({ superseded_at: expect.anything() });
+    expect(await claimRow(res.claimId)).toMatchObject({
+      statement: "Sees a therapist on Tuesdays",
+      sensitive: true,
+      review_status: "confirmed",
+      supersedes: sensitive.id,
+    });
+    expect(await count("vault_claims", "space_id = $1 AND slot_key = $2 AND superseded_at IS NULL", [
+      SPACE_A, "health/therapy",
+    ])).toBe(1);
+  });
+
+  it("the person's own wording replaces the extractor's, and takes the provenance with it", async () => {
+    // Amendment C. A binary yes/no turns every nearly-right extraction into a discard,
+    // and "nearly right" is the common case while the extractor's quality is unmeasured.
+    // The provenance rule is what makes editing safe rather than merely convenient: the
+    // person wrote these words, so the row may not go on claiming a model derived them.
+    const proposed = await propose({
+      idempotencyKey: `${P}c-edit`,
+      statement: "Probably prefers meetings in the morning, before noon",
+      provenance: { kind: "derived", messageId: `${P}msg` },
+    });
+    if (proposed.state !== "pending") throw new Error(`expected pending, got ${proposed.state}`);
+
+    const res = await confirmCandidate({
+      candidateId: proposed.candidateId,
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+      statement: "Prefers meetings before 11am",
+    });
+    expect(res).toMatchObject({ ok: true });
+    if (!res.ok) return;
+    expect(await claimRow(res.claimId)).toMatchObject({
+      statement: "Prefers meetings before 11am",
+      origin: { kind: "user_direct", detail: "edited on the memory page" },
+    });
+  });
+
+  it("an edit is deduped on the person's words, not on the extractor's", async () => {
+    // The half a test on the stored row alone would miss: the correction has to reach the
+    // dedup READ. Editing a candidate into an existing head's exact wording must merge
+    // into that head, or the store repeats itself back to the person.
+    const head = await createClaim(
+      { spaceId: SPACE_A, statement: "Works from the Lviv office", origin: { kind: "user_direct" },
+        reviewStatus: "confirmed", topicNoteId: NOTE_A },
+      { kind: "system" },
+    );
+    const proposed = await propose({
+      idempotencyKey: `${P}c-edit-dedup`,
+      statement: "Might work out of the Lviv branch these days",
+      provenance: { kind: "derived", messageId: `${P}msg` },
+    });
+    if (proposed.state !== "pending") throw new Error(`expected pending, got ${proposed.state}`);
+
+    const res = await confirmCandidate({
+      candidateId: proposed.candidateId,
+      allowedSpaceIds: [SPACE_A],
+      actor: ACTOR,
+      statement: "Works from the Lviv office",
+    });
+    expect(res).toMatchObject({ ok: true, claimId: head.id });
+    expect(await count("vault_claims", "space_id = $1 AND superseded_at IS NULL", [SPACE_A])).toBe(1);
   });
 });

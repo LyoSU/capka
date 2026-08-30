@@ -86,9 +86,12 @@ function parseValueJson(raw: string | undefined): { ok: true; value: unknown } |
  * every later turn in every chat. `memory_forget` is the same class with destruction
  * in place of substitution.
  *
- * A refusal and an exit, not a pending candidate: plan A ships no confirmation
- * surface at all, so a pending write here would be a black hole rather than a gate.
- * The same shape as an explicit `scope:"project"` outside a project, below.
+ * A refusal and an exit, not a pending candidate — and it stays that way now that a
+ * review queue exists. A pending CORRECTION is not a fact the person can weigh: the
+ * queue shows a sentence and asks whether to remember it, while this asks whether to
+ * overwrite or destroy an existing head, which needs the other half on screen and a
+ * different question under it. Routing it here would put an unanswerable row in the
+ * queue. The same shape as an explicit `scope:"project"` outside a project, below.
  */
 const NOT_THE_USERS_WORDS = {
   update:
@@ -104,12 +107,13 @@ const NOT_THE_USERS_WORDS = {
 const PROPOSE_SAID = {
   auto_active: "Saved.",
   merged: "Already known — added this conversation as evidence.",
-  // Not "awaiting the user's confirmation": that promised a step that does not
-  // exist. Plan A ships no confirmation surface at all, so a pending candidate is
-  // recorded and then invisible until one does — and a tool result must not describe
-  // a queue the user cannot reach. What IS actionable is said instead.
+  // This said "there is no confirmation screen yet" for as long as that was true. It
+  // is not any more — the memory page carries Keep and Discard on every waiting fact —
+  // and a tool result describing a queue the user cannot reach is exactly as wrong as
+  // one denying a queue they can. Says where the fact is, and leaves the model to
+  // judge whether it matters this turn.
   pending:
-    "Recorded, but not in memory: a fact the user did not state directly stays inactive until they confirm it, and there is no confirmation screen yet. If it should be remembered now, ask the user to state it themselves.",
+    "Recorded, but not in memory yet: a fact the user did not state directly waits for them to confirm it on the memory page. Tell them it is waiting there if it matters now.",
   conflict: "Conflicts with an existing fact — recorded for the user to resolve.",
   duplicate: "Already recorded from this same call.",
   denied: "Not saved — the memory policy declined this fact.",

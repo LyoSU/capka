@@ -125,11 +125,14 @@ describe("memory_propose", () => {
     proposeCandidate.mockResolvedValue({ state: "pending", candidateId: "cand1" });
     const tools = await make({ projectId: null, projectOwnerUserId: undefined });
 
-    // The reply must not promise a confirmation step: plan A ships no surface for
-    // one, so "awaiting the user's confirmation" named a queue nobody can reach.
+    // The reply must describe the queue that EXISTS. It once promised a confirmation
+    // step nobody could reach, and was then corrected to deny one outright; the memory
+    // page's review section is what makes the third wording — "waiting there" — the
+    // true one. A tool result that denies a surface the user is looking at is exactly
+    // as wrong as one that invents a surface they cannot find.
     const out = await run(tools.memory_propose, { statement: "Favourite colour is blue" });
-    expect(out).toContain("not in memory");
-    expect(out).toContain("ask the user to state it themselves");
+    expect(out).toContain("not in memory yet");
+    expect(out).toContain("memory page");
     expect(proposeCandidate).toHaveBeenCalledWith(
       expect.objectContaining({ spaceId: USER_SPACE, provenance: { kind: "derived", messageId: "m1" } }),
     );

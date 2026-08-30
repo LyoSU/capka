@@ -246,14 +246,12 @@ export function fitSlotKey(slotKey: string | null | undefined): string | undefin
  * believes it stored. The whole transaction rolls back with it, so a refused supersede
  * does not leave the predecessor superseded and unreplaced.
  *
- * ACCEPTED, and the same shape as the slot-swap deadlock recorded on `updateClaim`:
- * `confirmCandidate` takes the candidate's row lock BEFORE it reaches either writer, so
- * a confirmation racing a project delete can deadlock against the retire (which holds
- * the space and wants the candidate). Postgres kills one of them: the confirm surfaces
- * an error, or the retire rolls back and the worker tick re-drives it. Neither outcome
- * writes anything, and plan A ships no confirmation surface for a human to hit this
- * from — an extra locking read at the top of every confirm buys ordering for a path
- * nobody can reach yet.
+ * CLOSED, where this used to record an accepted deadlock. `confirmCandidate` took the
+ * candidate's row lock before it reached either writer, so a confirmation racing a
+ * project delete could deadlock against the retire (which holds the space and wants the
+ * candidate) — accepted only because no human could reach a confirm at all. Its first
+ * caller changed that, and the fence it grew reads the space BEFORE the CAS, so both
+ * moves now take the space row first and the candidate second.
  */
 async function assertSpaceLive(spaceId: string, ex: Ex): Promise<void> {
   if (!(await spaceAcceptsWrites(spaceId, ex))) {

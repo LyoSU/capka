@@ -32,9 +32,8 @@ import type { ScopeView } from "@/lib/vault/memory-page";
  * all three away, and had nowhere at all to put the facts still waiting for the reader's
  * decision. `readMemoryPage` assembles them server-side; this file is a renderer.
  *
- * Still absent, and by task rather than by oversight: the Keep/Discard control on a
- * waiting fact (Task 8), the topic summary (Task 9) and the sensitive-consent switch
- * (Task 4).
+ * Still absent, and by task rather than by oversight: the topic summary (Task 9) and the
+ * sensitive-consent switch (Task 4).
  *
  * HOW A FACT GETS SAVED is stated on the page, and there is deliberately no "add fact"
  * control to state it with. A hand-typed fact has no honest provenance, and provenance
@@ -52,7 +51,7 @@ function Scope({ scope, onChanged }: { scope: ScopeView; onChanged: () => void }
   const body = (
     <>
       <MemoryTopics topics={scope.topics} onChanged={onChanged} />
-      <MemoryReview pending={scope.pending} />
+      <MemoryReview pending={scope.pending} onChanged={onChanged} />
     </>
   );
   if (scope.scope === "user") return <div className="space-y-10">{body}</div>;

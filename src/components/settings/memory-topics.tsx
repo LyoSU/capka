@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { ChevronRight, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -101,9 +102,36 @@ export function groupBySource<T>(items: T[], sourceText: (item: T) => string): {
   return runs;
 }
 
-/** The caption over a run of facts that all came from one place. */
-export function SourceCaption({ children }: { children: React.ReactNode }) {
-  return <p className="px-4 pt-2.5 text-[11.5px] leading-relaxed text-muted-foreground">{children}</p>;
+/** The chat a run of facts came out of, when there is one to open. `legacy` and
+ *  `unknown` name no conversation and get no link — a caption that looked clickable and
+ *  went nowhere would be worse than a plain sentence. */
+export function chatHref(source: FactSource): string | null {
+  if (source.kind === "chat") return `/chat/${source.chatId}`;
+  if (source.kind === "chats") return `/chat/${source.latest.chatId}`;
+  return null;
+}
+
+/** The caption over a run of facts that all came from one place.
+ *
+ *  A LINK when the conversation still exists, because the sentence alone answers "where
+ *  did this come from" and not "is that really what I said" — and the second question is
+ *  the one a person asks about a fact they do not recognise. The whole caption is the
+ *  link rather than the chat's title alone: the title is interpolated into a localized
+ *  sentence, and slicing a link out of the middle of one means `t.rich` and a second
+ *  shape for translators to keep in step, for a target a few pixels wider. */
+export function SourceCaption({ children, href }: { children: React.ReactNode; href?: string | null }) {
+  const className = "px-4 pt-2.5 text-[11.5px] leading-relaxed text-muted-foreground";
+  if (!href) return <p className={className}>{children}</p>;
+  return (
+    <p className={className}>
+      <Link
+        href={href}
+        className="rounded-sm underline decoration-border underline-offset-2 transition-colors hover:text-foreground hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {children}
+      </Link>
+    </p>
+  );
 }
 
 /** The source sentence for one entry, in the reader's language — the value
@@ -114,16 +142,76 @@ export function useSourceText(): (source: FactSource) => string {
   return (source) => formatSource(source, locale, t);
 }
 
-/** What a sensitive record says instead of its contents.
+/**
+ * One record's text — blurred behind a reveal control when it is marked sensitive.
  *
- *  Written for a reader who does not know why it is marked and cannot find out:
- *  `sensitive` is set by an automatic screen as well as by a person, so the marking may
- *  have a cause nobody would recognise — and the text is exactly what is withheld. It
- *  therefore states the situation and never attributes the decision to the user or to
- *  the assistant, because neither is reliably true. */
-export function SensitiveStatement() {
+ * This used to print a fixed apology in place of the words, because the projection sent
+ * `null` for them. That was the manifest's rule applied at the wrong entrance:
+ * `sensitive` withholds from the MODEL, and the person reading this page is the owner of
+ * the space. Withholding from them cost two things — a fact they could not judge, and (on
+ * the waiting list) a Keep button over a blank row.
+ *
+ * What genuinely applies at a screen is shoulder-surfing, so the defence is a RENDERING
+ * one: blurred by default, one click to read, per row and never sticky. Reachable by
+ * keyboard because it is an ordinary button, and it does not animate under
+ * `prefers-reduced-motion`.
+ *
+ * While blurred the text is `aria-hidden`: a screen reader that read it aloud anyway
+ * would defeat the point in the one room where somebody else can hear. The reason it is
+ * hidden is carried in a visually-hidden line, so a reader who cannot see the blur is
+ * still told what the control is for.
+ *
+ * `children` — a row's version history, the other half of a conflict — hang off the SAME
+ * reveal rather than getting one each. They are the same fact in different words, and two
+ * controls over one secret is a way to leave half of it on screen.
+ */
+export function Statement({
+  text,
+  sensitive,
+  children,
+}: {
+  text: string;
+  sensitive: boolean;
+  children?: React.ReactNode;
+}) {
   const t = useTranslations("settings.memory");
-  return <p className="text-sm italic leading-snug text-muted-foreground">{t("sensitiveHidden")}</p>;
+  const [shown, setShown] = useState(false);
+  const textId = useId();
+
+  if (!sensitive) {
+    return (
+      <>
+        <p className="text-sm leading-snug">{text}</p>
+        {children}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p
+        id={textId}
+        aria-hidden={!shown}
+        className={cn(
+          "text-sm leading-snug transition-[filter] motion-reduce:transition-none",
+          !shown && "select-none blur-[5px]",
+        )}
+      >
+        {text}
+      </p>
+      <button
+        type="button"
+        aria-expanded={shown}
+        aria-controls={textId}
+        onClick={() => setShown((v) => !v)}
+        className="-mx-1 mt-1 block rounded-md px-1 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {shown ? t("hide") : t("reveal")}
+        {!shown && <span className="sr-only"> — {t("sensitiveBlurred")}</span>}
+      </button>
+      {shown && children}
+    </>
+  );
 }
 
 /** One row. Tight on purpose: these are single sentences, and the difference between a
@@ -224,31 +312,33 @@ function Fact({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
     <FactRow>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          {fact.sensitive ? <SensitiveStatement /> : <p className="text-sm leading-snug">{fact.statement}</p>}
-          {/* No disclosure for a sensitive fact: its previous version is the same withheld
-              words one revision earlier, and the projection does not send them. */}
-          {!fact.sensitive && fact.previous && (
-            <>
-              <button
-                type="button"
-                aria-expanded={open}
-                aria-controls={panelId}
-                onClick={() => setOpen((v) => !v)}
-                className="-mx-1 mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <ChevronRight
-                  aria-hidden
-                  className={cn("size-3 transition-transform motion-reduce:transition-none", open && "rotate-90")}
-                />
-                {t("showHistory")}
-              </button>
-              {open && (
-                <p id={panelId} className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-                  {t("replaced", { statement: fact.previous.statement, date: formatDay(fact.previous.at, locale) })}
-                </p>
-              )}
-            </>
-          )}
+          {/* The history hangs off the reveal for a sensitive fact — see `Statement`:
+              the previous version is the same words one revision earlier, so a
+              disclosure of its own would put half the secret back on screen. */}
+          <Statement text={fact.statement} sensitive={fact.sensitive}>
+            {fact.previous && (
+              <>
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  aria-controls={panelId}
+                  onClick={() => setOpen((v) => !v)}
+                  className="-mx-1 mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <ChevronRight
+                    aria-hidden
+                    className={cn("size-3 transition-transform motion-reduce:transition-none", open && "rotate-90")}
+                  />
+                  {t("showHistory")}
+                </button>
+                {open && (
+                  <p id={panelId} className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                    {t("replaced", { statement: fact.previous.statement, date: formatDay(fact.previous.at, locale) })}
+                  </p>
+                )}
+              </>
+            )}
+          </Statement>
         </div>
         <DeleteFact fact={fact} onChanged={onChanged} />
       </div>
@@ -332,7 +422,9 @@ export function MemoryTopics({ topics, onChanged }: { topics: TopicView[]; onCha
           <FactList>
             {groupBySource(active.facts, (f) => sourceText(f.source)).map((run) => (
               <div key={`${run.source}:${run.items[0].id}`} className="pb-1.5">
-                <SourceCaption>{run.source}</SourceCaption>
+                {/* A run shares one source SENTENCE, so it shares the conversation the
+                    sentence names — the first item's is every item's. */}
+                <SourceCaption href={chatHref(run.items[0].source)}>{run.source}</SourceCaption>
                 {run.items.map((fact) => (
                   <Fact key={fact.id} fact={fact} onChanged={onChanged} />
                 ))}
