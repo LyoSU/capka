@@ -14,7 +14,7 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
  * is broken outright.
  */
 import { pool } from "@/lib/db";
-import { createClaim, forgetClaim, updateClaim, type Actor } from "../claims";
+import { confirmClaim, createClaim, forgetClaim, updateClaim, type Actor } from "../claims";
 import { seedConfirmedClaim } from "./fixtures";
 import { countWithheld, listModelClaims } from "../model-view";
 
@@ -85,7 +85,7 @@ run("vault: the model-facing projection", () => {
     expect(await countWithheld(SPACE_A)).toBe(0);
   });
 
-  it("excludes a superseded predecessor and keeps the successor", async () => {
+  it("a supersede carries NO approval across: the predecessor leaves, the successor waits", async () => {
     const head = await seedConfirmedClaim({ spaceId: SPACE_A, statement: "works in Kyiv", origin: {} }, ACTOR);
     const upd = await updateClaim({
       claimId: head.id,
@@ -96,8 +96,17 @@ run("vault: the model-facing projection", () => {
     });
     if (!upd.ok) throw new Error("expected the supersede to win");
 
-    // The successor inherits `confirmed` from its predecessor, so it is visible; the
-    // predecessor is not.
+    // The successor used to INHERIT `confirmed`, which made `updateClaim` a second writer
+    // of approval: a supersede is how new text enters the table, so any caller passing
+    // `patch.statement` against a confirmed head minted model-visible words nobody had
+    // approved. It is born `unverified` now, so between the supersede and the confirm
+    // the model sees NEITHER version — the predecessor has left and the successor has
+    // not arrived.
+    expect(await texts(SPACE_A)).toEqual([]);
+
+    // `confirmClaim` is what puts it back, which is the whole invariant: one write grants
+    // approval, and it is the one a person triggers.
+    expect(await confirmClaim(upd.id, false, ACTOR)).toBe(true);
     expect(await texts(SPACE_A)).toEqual(["works in Lviv"]);
   });
 

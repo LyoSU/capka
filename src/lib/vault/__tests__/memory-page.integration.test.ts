@@ -11,7 +11,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
  *  list holds the whole space, whichever topic note a fact hangs off, and the search over
  *  it finds a sensitive fact as readily as an ordinary one. */
 import { pool } from "@/lib/db";
-import { attachEvidence, createClaim, updateClaim } from "../claims";
+import { attachEvidence, confirmClaim, createClaim, updateClaim } from "../claims";
 import { seedConfirmedClaim } from "./fixtures";
 import { proposeCandidate } from "../candidates";
 import { DEFAULT_TOPIC_KEY, getOrCreateSpace, getOrCreateTopicNote } from "../spaces";
@@ -49,6 +49,25 @@ const seedFact = async (
     { kind: "user", id: owner },
   );
   return { spaceId, noteId, claim };
+};
+
+/** A supersede the way the PRODUCT performs one: `updateClaim` writes the successor and
+ *  `confirmClaim` approves it. Two calls, and that is the point — a supersede carries no
+ *  approval across, so the successor is born `unverified` and `confirmClaim` stays the
+ *  only write that grants authority. A fixture stopping at `updateClaim` would build a
+ *  head this page deliberately does not render, and then read as a projection bug. */
+const seedSupersede = async (
+  claimId: string,
+  spaceId: string,
+  patch: { statement: string; sensitive?: boolean },
+) => {
+  const actor = { kind: "user", id: OWNER } as const;
+  const upd = await updateClaim({ claimId, expectedRevision: 1, patch, allowedSpaceIds: [spaceId], actor });
+  if (!upd.ok) throw new Error("fixture: the supersede lost its CAS");
+  if (!(await confirmClaim(upd.id, patch.sensitive ?? false, actor))) {
+    throw new Error(`fixture: successor ${upd.id} was not confirmable`);
+  }
+  return upd;
 };
 
 const factTexts = async (query?: string) =>
@@ -105,11 +124,7 @@ run("vault: memory page projection", () => {
     // earlier: withholding it while sending `statement` would be an inconsistency, and
     // withholding both would hide the person's own history from them.
     const { spaceId, claim } = await seedFact("Attends a support group on Tuesdays", { sensitive: true });
-    await updateClaim({
-      claimId: claim.id, expectedRevision: 1,
-      patch: { statement: "Attends a support group on Thursdays", sensitive: true },
-      allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
-    });
+    await seedSupersede(claim.id, spaceId, { statement: "Attends a support group on Thursdays", sensitive: true });
     const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     expect(fact.statement).toEqual({ text: "Attends a support group on Thursdays", sensitive: true });
     // The predecessor carries its OWN flag, not the successor's — `confirmClaim` raises
@@ -131,10 +146,9 @@ run("vault: memory page projection", () => {
     // another module is the weaker kind of safe, and it is exactly the argument that made
     // the conflict line look safe when it was not.
     const { spaceId, claim } = await seedFact("Works from the Kyiv office");
-    await updateClaim({
-      claimId: claim.id, expectedRevision: 1,
-      patch: { statement: "Works from the Kyiv office, desk by the safe", sensitive: true },
-      allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
+    await seedSupersede(claim.id, spaceId, {
+      statement: "Works from the Kyiv office, desk by the safe",
+      sensitive: true,
     });
     const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     expect(fact.statement.sensitive).toBe(true);
@@ -143,11 +157,7 @@ run("vault: memory page projection", () => {
 
   it("carries the version a fact replaced", async () => {
     const { spaceId, claim } = await seedFact("Works from the Kyiv office");
-    await updateClaim({
-      claimId: claim.id, expectedRevision: 1,
-      patch: { statement: "Works from the Lviv office" },
-      allowedSpaceIds: [spaceId], actor: { kind: "user", id: OWNER },
-    });
+    await seedSupersede(claim.id, spaceId, { statement: "Works from the Lviv office" });
     const fact = (await readMemoryPage(OWNER)).scopes[0].facts[0];
     expect(fact.statement.text).toBe("Works from the Lviv office");
     expect(fact.previous?.statement.text).toBe("Works from the Kyiv office");

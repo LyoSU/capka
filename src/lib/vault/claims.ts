@@ -353,10 +353,12 @@ export async function updateClaim(
      *  because when the new content arrives from a DIFFERENT source (the candidate
      *  ledger) inheriting it would sign the user's text with someone else's provenance.
      *
-     *  `reviewStatus` is NOT settable, for the same reason `ClaimInput` no longer
-     *  carries it: a writer must not declare its own output approved. The successor
-     *  inherits the predecessor's status and the confirm path calls `confirmClaim` on
-     *  it — one write grants approval, and it is the one a person triggers. */
+     *  `reviewStatus` is NOT settable and is NOT inherited, for the same reason
+     *  `ClaimInput` no longer carries it: a writer must not declare its own output
+     *  approved, and a supersede carrying `confirmed` across to a row with new text is a
+     *  writer declaring exactly that. The successor is born `unverified` and the confirm
+     *  path calls `confirmClaim` on it — one write grants approval, and it is the one a
+     *  person triggers. */
     patch: {
       statement?: string;
       value?: unknown;
@@ -462,7 +464,22 @@ export async function updateClaim(
     value,
     kind: prev.kind,
     origin: patch.origin ?? prev.origin,
-    reviewStatus: prev.reviewStatus,
+    // `review_status` is NOT passed, and NOT inherited: it takes the column's
+    // `unverified` default, exactly as `createClaim`'s insert does.
+    //
+    // Inheriting was the loophole in "one write grants approval". A supersede is how NEW
+    // text enters this table — `patch.statement` is the common case — so inheriting
+    // `confirmed` from the predecessor minted model-visible words nobody had approved,
+    // without `confirmClaim` running at all. Latent rather than live, because the one
+    // caller today (`confirmCandidate`) is a human decision that calls `confirmClaim` on
+    // the successor two statements later; but "the only caller is safe" is an argument
+    // about today's callers, and this module's own comments refuse to lean on it
+    // everywhere else.
+    //
+    // The cost, stated: a supersede that changes nothing but, say, the topic attachment
+    // now demotes a confirmed head to the quarantine until somebody confirms it. There is
+    // no such caller, and if one appears it should be asking a person anyway — which is
+    // the property this line is for.
     sensitive,
     validFrom: prev.validFrom,
     validTo: prev.validTo,
@@ -495,7 +512,9 @@ export async function updateClaim(
     payload: {
       successor: id,
       revision,
-      reviewStatus: prev.reviewStatus,
+      // The successor's own status, which is now always the column default — a supersede
+      // does not carry approval across, so the event must not say it did.
+      reviewStatus: "unverified",
       sensitive,
     },
   });
