@@ -83,9 +83,12 @@ const MAX_CHAIN = 1000;
  * writers now screen all three text-bearing columns of the row they are about to
  * write: `statement`, `slot_key` and `value`. `value` has no reader today, and "no
  * reader today" is exactly the reasoning that left the quarantine filter off
- * `memory_search` for a whole plan.
+ * `memory_search` for a whole plan. The other two columns are paths, not prose, and
+ * are screened accordingly — see `pathishSecret`.
  */
-const SECRET_PATTERNS: RegExp[] = [
+/** Patterns that recognize a credential by its OWN prefix or structure, so they say
+ *  the same thing about any text they are pointed at. */
+const NAMED_SECRET_PATTERNS: RegExp[] = [
   // Provider-prefixed tokens: OpenAI (sk-), GitHub (ghp_/gho_), Slack (xoxb-/xoxp-/xoxa-/xoxs-), AWS access key id.
   // Widened to `[A-Za-z0-9_-]` (not just alphanumeric) with a 20-char floor:
   // modern OpenAI project keys are internally hyphenated (`sk-proj-AbCdEf...`), and
@@ -101,19 +104,50 @@ const SECRET_PATTERNS: RegExp[] = [
   /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/i,
   // An assignment whose key names a secret and whose value is non-trivial.
   /\b(password|passwd|secret|token|api[-_]?key|authorization)\s*[:=]\s*['"]?[^\s'"]{4,}['"]?/i,
-  // Catch-all: a long unbroken base64/hex-ish run — deliberately EXCLUDING `-`
-  // from the class. Including it (an earlier version of this pattern did) also
-  // matched ordinary hyphenated things an office user states as plain fact — a URL
-  // slug, a preview-deploy hostname, a UUID — which this screen must not swallow
-  // (a screened item goes `sensitive`, which hides it from the manifest AND from
-  // search, so a false positive is a fact the user can no longer reach through the
-  // agent at all). A 40-char hex commit sha, a bare base64 token, and a
-  // `github_pat_...` fine-grained PAT all still clear the floor without a hyphen.
-  /\b[A-Za-z0-9+/_]{28,}={0,2}\b/,
 ];
 
+/** Catch-all: a long unbroken base64/hex-ish run — deliberately EXCLUDING `-` from
+ *  the class. Including it (an earlier version of this pattern did) also matched
+ *  ordinary hyphenated things an office user states as plain fact — a URL slug, a
+ *  preview-deploy hostname, a UUID — which this screen must not swallow (a screened
+ *  item goes `sensitive`, which hides it from the manifest AND from search, so a false
+ *  positive is a fact the user can no longer reach through the agent at all). A 40-char
+ *  hex commit sha, a bare base64 token, and a `github_pat_...` fine-grained PAT all
+ *  still clear the floor without a hyphen.
+ *
+ *  Unlike the named patterns above, this one is an ENTROPY guess, and what makes the
+ *  guess safe is that a statement is prose: an unbroken 28-character run of that class
+ *  is anomalous in a sentence. It is not anomalous in a path — see `pathishSecret`. */
+const OPAQUE_RUN = /\b[A-Za-z0-9+/_]{28,}={0,2}\b/;
+
 export function looksLikeSecret(statement: string): boolean {
-  return SECRET_PATTERNS.some((re) => re.test(statement));
+  return NAMED_SECRET_PATTERNS.some((re) => re.test(statement)) || OPAQUE_RUN.test(statement);
+}
+
+/**
+ * The same screen for text that is a PATH rather than prose: a slot key, and the JSON
+ * of a structured value.
+ *
+ * `looksLikeSecret` unchanged is the wrong tool for those, and the repo's own fixture
+ * proved it: `/` and `_` are in the catch-all's character class, which is exactly what
+ * a slot key is made of, so `suppliers/acme_corp/payment_terms` is 33 characters of
+ * pure match and the screen fires on the DESIGN. That is not the rare false positive
+ * the statement screen accepts — it is systematic for any key of that length without a
+ * hyphen, and each one costs a fact hidden from the manifest, hidden from search, and
+ * (see `memory_forget`) impossible for the agent to remove afterwards.
+ *
+ * So the named patterns still read the whole text — `postgresql://u:p@h` and
+ * `ghp_…` must not be split apart to be recognized — and the entropy guess is made per
+ * path SEGMENT, where a long opaque run means what it meant in prose. Depth stops
+ * being evidence of anything.
+ *
+ * ACCEPTED: a single segment of 28+ unbroken characters is still screened, so a slot
+ * key like `annual_supplier_payment_schedule` goes sensitive. Narrower than what it
+ * replaces, and left in place deliberately — that shape is also what a bare,
+ * unprefixed token looks like, and this screen is tuned toward catching.
+ */
+function pathishSecret(text: string): boolean {
+  return NAMED_SECRET_PATTERNS.some((re) => re.test(text)) || text.split("/").some((seg) => OPAQUE_RUN.test(seg));
 }
 
 /** The row's `value` as the text the screen reads: JSON, because that is what the
@@ -133,6 +167,16 @@ function valueText(value: unknown): string {
   } catch {
     return "";
   }
+}
+
+/** The screen over a whole row, in ONE definition. Three call sites — both claim
+ *  writers and the candidate ledger — and they must not drift: the writers decide the
+ *  COLUMN and the ledger decides the ROUTE, so a column screened by one and not the
+ *  other gives two answers to the same text. That is how a credential in a slot key
+ *  used to route `auto_active` and then be written sensitive: stored-but-invisible,
+ *  where a credential in the statement is never stored at all. */
+export function secretShaped(statement: string, slotKey: string | null | undefined, value: unknown): boolean {
+  return looksLikeSecret(statement) || pathishSecret(slotKey ?? "") || pathishSecret(valueText(value));
 }
 
 /** What a fact may take up in a prompt, and what shape it may take there.
@@ -261,11 +305,7 @@ export async function createClaim(
   // text the row will hold — see `fitStatement`.
   const statement = fitStatement(input.statement);
   const slotKey = fitSlotKey(input.slotKey);
-  const sensitive =
-    input.sensitive ||
-    looksLikeSecret(statement) ||
-    looksLikeSecret(slotKey ?? "") ||
-    looksLikeSecret(valueText(input.value));
+  const sensitive = input.sensitive || secretShaped(statement, slotKey, input.value);
   // A slot conflict (`uniq_vclaims_active_slot`) is deliberately NOT caught here:
   // the merge-or-branch decision belongs to the candidate ledger, which is also
   // the thing holding the SAVEPOINT.
@@ -407,12 +447,7 @@ export async function updateClaim(
   const statement = fitStatement(patch.statement ?? prev.statement);
   const slotKey = fitSlotKey(patch.slotKey ?? prev.slotKey) ?? null;
   const value = patch.value !== undefined ? patch.value : prev.value;
-  const sensitive =
-    prev.sensitive ||
-    (patch.sensitive ?? false) ||
-    looksLikeSecret(statement) ||
-    looksLikeSecret(slotKey ?? "") ||
-    looksLikeSecret(valueText(value));
+  const sensitive = prev.sensitive || (patch.sensitive ?? false) || secretShaped(statement, slotKey, value);
   // The successor is a fresh row, not an UPDATE of the text: the predecessor
   // stays verbatim as it was recorded. The whole claim is copied, not just the
   // three fields in the patch — otherwise `kind` and the validity window would

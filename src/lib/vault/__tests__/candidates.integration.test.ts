@@ -310,6 +310,24 @@ run("vault candidates", () => {
     expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(0);
   });
 
+  it.each([
+    // `slot_key` is model-facing (memory_search prints it verbatim), `value` is not
+    // rendered anywhere today — and "no reader today" is the reasoning that left the
+    // quarantine filter off memory_search for a whole plan.
+    ["slot_key", { slotKey: "creds/sk-proj-AbCdEf0123456789ghijkl" }],
+    ["value", { value: { token: "sk-proj-AbCdEf0123456789ghijkl" } }],
+  ])("a credential in %s routes to pending, exactly as one in the statement does", async (_column, over) => {
+    // The route and the column have to be decided by the SAME expression. Screening
+    // only the statement here let a credential in one of these activate: the claim
+    // writer then marked the row sensitive, so the fact was stored-but-invisible where
+    // a credential in the statement is never stored at all — one rule, two answers.
+    const res = await propose({ statement: "the deploy key for staging", ...over });
+    expect(res.state).toBe("pending");
+    expect(await count("vault_claims", "space_id = $1", [SPACE_A])).toBe(0);
+    if (res.state !== "pending") throw new Error("unreachable");
+    expect((await candRow(res.candidateId)).sensitive).toBe(true);
+  });
+
   it("any kind other than user_direct → pending", async () => {
     const kinds: Provenance["kind"][] = ["derived", "tool", "file", "web", "legacy_memory_doc"];
     for (const kind of kinds) {

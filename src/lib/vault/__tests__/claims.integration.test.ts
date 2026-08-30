@@ -692,6 +692,21 @@ run("vault claims", () => {
   });
 
   it.each([
+    // The systematic false positive that screening a slot key as PROSE produces: `/`
+    // and `_` are in the catch-all's character class, so an ordinary deep key is 33
+    // characters of pure match. It costs a fact hidden from the manifest, hidden from
+    // search, and impossible for the agent to forget — so depth must not be evidence.
+    ["an ordinary deep slot key", { slotKey: "suppliers/acme_corp/payment_terms" }],
+    ["a deep slot key in a value", { value: { slot: "suppliers/acme_corp/payment_terms" } }],
+    // And the entropy guess still holds within one segment, which is where a bare
+    // unprefixed token would sit.
+    ["a path with a long opaque leaf", { slotKey: "creds/QUJDREVGR0hJSktMTU5PUFFSU1RVVldY" }],
+  ])("%s", async (label, over) => {
+    const made = await seed({ statement: "the supplier's terms", ...over });
+    expect(made.sensitive).toBe(label === "a path with a long opaque leaf");
+  });
+
+  it.each([
     ["slot_key", { slotKey: "creds/sk-proj-AbCdEf0123456789ghijkl" }],
     ["value", { value: { token: "sk-proj-AbCdEf0123456789ghijkl" } }],
   ])("updateClaim screens %s on the successor it is about to write", async (_column, patch) => {

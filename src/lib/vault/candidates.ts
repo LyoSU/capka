@@ -12,7 +12,7 @@ import {
   fitStatement,
   headBySlot,
   listHeadClaims,
-  looksLikeSecret,
+  secretShaped,
   updateClaim,
   type Actor,
   type ClaimHead,
@@ -187,11 +187,17 @@ export async function proposeCandidate(input: {
   const statement = fitStatement(input.statement);
 
   // Secret-shaped text is sensitive whatever the caller said. The claim table screens
-  // itself (see `looksLikeSecret`, which lives with the writers); this call is about
+  // itself (see `secretShaped`, which lives with the writers); this call is about
   // something that has no row yet — the ROUTE. A screened proposal must go to pending
   // rather than activate, and the candidate row must carry the flag too, or whoever
   // confirms it later would be handed the secret as ordinary text.
-  const sensitive = input.sensitive || looksLikeSecret(statement);
+  //
+  // The SAME expression the writers use (`secretShaped`), not a second one that reads
+  // the statement alone. With the statement alone a credential placed in the slot key
+  // routed `auto_active` and was then written sensitive by the claim writer — stored
+  // but invisible, where a credential in the statement is never stored at all. Same
+  // text, two answers, because two copies of one rule read different columns.
+  const sensitive = input.sensitive || secretShaped(statement, slotKey, input.value);
 
   // The gate is evaluated BEFORE the insert: `policy_state` is NOT NULL, and a
   // provisional value plus a later UPDATE would only add a state nobody ever sees.
