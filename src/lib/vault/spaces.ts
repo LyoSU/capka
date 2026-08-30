@@ -155,7 +155,15 @@ export const TOPIC_LABELS: Record<string, string> = { [DEFAULT_TOPIC_KEY]: "Gene
  *  creation, from the label table, and nothing reads it to find a row. That is what
  *  makes a rename control safe to build in plan D2 — it will write `title` and leave
  *  `topic_key` alone. */
-export async function getOrCreateTopicNote(spaceId: string, topicKey: string, ex: Ex = db): Promise<string> {
+export async function getOrCreateTopicNote(spaceId: string, topicKey: string, ex?: Ex): Promise<string> {
+  // Two rows are written now, not one — the note and its node — so without a transaction
+  // this stopped being a move and became a pair of autocommits: a crash between them
+  // leaves a PERMANENT orphan node, which is the state `insertNode`'s missing `ex` default
+  // exists to make unrepresentable. The `!ex || ex === db` shape is the one `createClaim`
+  // documents: `Ex` permits passing the pool explicitly, and "omitted" and "explicit db"
+  // must not mean different things.
+  if (!ex || ex === db) return db.transaction((tx) => getOrCreateTopicNote(spaceId, topicKey, tx));
+
   // The FOURTH entrance into a space, and it is reachable: `migrateMemoryDocs` opens
   // the topic note BEFORE its first claim, so a bullet-less legacy document migrating
   // during the window between teardown's two transactions would commit an empty topic

@@ -220,6 +220,14 @@ run("vault spaces", () => {
     // Title uniqueness is partial, scoped to kind='memory_topic', so a topic has to
     // be created with exactly that kind or the index does not see it.
     expect(await count("vault_notes", "id = $1 AND kind = 'memory_topic'", [notes[0]])).toBe(1);
+    // This is also the only place the node co-write's race LOSER is reached: two of the
+    // three calls mint a node and then lose the `onConflictDoNothing`, so the cleanup that
+    // removes their node is what keeps these two counts equal. Without it: 3 against 1.
+    // Sequential calls cannot witness this — the second one returns at the early read and
+    // never inserts anything.
+    expect(await count("vault_nodes", "space_id = $1 AND kind = 'note'", [spaceId])).toBe(
+      await count("vault_notes", "space_id = $1", [spaceId]),
+    );
   });
 
   it("retire: a project's memory dies, its sources/versions/fragments/citation live", async () => {
