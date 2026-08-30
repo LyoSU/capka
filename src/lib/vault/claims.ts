@@ -277,8 +277,13 @@ const dedupKeyNorm = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
  * was actually stored — but `fitStatement` is an ordinary live function with no freeze
  * contract of its own, so moving `STATEMENT_MAX_CHARS` off 500 re-keys every long claim.
  * That drift is at least visible (the stored statement changes too), unlike a
- * `dedupKeyNorm` drift, but the only thing that would actually CATCH either is the
- * literal-digest test. Exported for it, and for no other caller.
+ * `dedupKeyNorm` drift.
+ *
+ * Only the literal digests in `__tests__/normalized-hash.test.ts` catch either, and note
+ * WHICH pin catches which: this function never calls `fitStatement`, so the short-statement
+ * pins cannot see the clamp at all and a `STATEMENT_MAX_CHARS` change slips straight past
+ * them. The clamp is frozen by the one pin that hashes `fitStatement(...)` of an
+ * over-length literal. Exported for those tests, and for no other caller.
  */
 export function normalizedHashOf(statement: string, value: unknown): string {
   return createHash("sha256").update(`${dedupKeyNorm(statement)}\n${canonicalValue(value)}`).digest("hex");

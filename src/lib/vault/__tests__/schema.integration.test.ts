@@ -470,6 +470,15 @@ run("vault schema", () => {
       // base config. A control that reddens for reasons unrelated to what it measures is
       // the thing that teaches people to re-run instead of read.
       //
+      // TWO clauses bound it, because `recorded_at` alone is not enough: fixtures do not
+      // only write "now". `claims.integration.test.ts` back-dates claims to January to test
+      // the ordering keys, which lands `owner_authored` + `unverified` rows INSIDE any
+      // date window and reddened this control on 4 of 6 parallel runs. `normalized_hash`
+      // is the clause that actually separates the two populations: every post-0061 writer
+      // fills it (`createClaim` and `updateClaim` both hash unconditionally), and the rows
+      // the migration touched carry none — 0 of 52 on the live database, because the column
+      // is written forward only and deliberately never backfilled.
+      //
       // The boundary is read from drizzle's own bookkeeping rather than hardcoded as a date,
       // so this also ASSERTS its precondition instead of inferring it: if 0061 is not
       // applied, there is no row and the test fails loudly rather than passing vacuously.
@@ -483,7 +492,7 @@ run("vault schema", () => {
 
       const bad = await q(
         `SELECT count(*)::int AS n FROM vault_claims
-         WHERE recorded_at < $1
+         WHERE recorded_at < $1 AND normalized_hash IS NULL
            AND ((review_status = 'unverified' AND source_class <> 'agent_inferred')
              OR (review_status = 'confirmed'  AND source_class <> 'legacy_confirmed'))`,
         [boundary],
@@ -491,13 +500,21 @@ run("vault schema", () => {
       expect(bad.rows[0].n).toBe(0);
       const promoted = await q(
         `SELECT count(*)::int AS n FROM vault_claims
-         WHERE recorded_at < $1 AND review_status = 'unverified' AND prompt_access = 'manifest'`,
+         WHERE recorded_at < $1 AND normalized_hash IS NULL
+           AND review_status = 'unverified' AND prompt_access = 'manifest'`,
         [boundary],
       );
       expect(promoted.rows[0].n).toBe(0);
       // On a database that had claims before 0061 this covers all of them; on a fresh one
       // there are none and both counts are vacuously 0, which is the correct answer there.
       // Recorded so nobody later reads a green run as proof that rows were checked.
+      //
+      // The one population it cannot tell apart from a migrated row is a RAW-SQL fixture
+      // that both back-dates `recorded_at` and states a mismatched review_status/class pair,
+      // since raw inserts bypass the writers and so carry no hash either. Every raw claim
+      // fixture in this suite states a matching pair today (`model-view`'s 2020-dated rows
+      // are `confirmed` + `legacy_confirmed`), so none is in scope — but a future one that
+      // disagrees with itself would redden this control rather than its own test.
     });
   });
 });

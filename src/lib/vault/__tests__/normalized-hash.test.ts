@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizedHashOf } from "@/lib/vault/claims";
+import { fitStatement, normalizedHashOf } from "@/lib/vault/claims";
 
 /**
  * Pure unit test: no database, no writer. This pins `normalizedHashOf`'s output BYTE FOR
@@ -54,5 +54,29 @@ describe("normalizedHashOf pins the idx_vclaims_norm_hash key format", () => {
     const expected = "c8f5765cc79c6ad9e109aee2804de24c90533ad3987f0dc2c8cebad95a69adf6";
     expect(normalizedHashOf("same fact", { a: 1, b: 2 })).toBe(normalizedHashOf("same fact", { b: 2, a: 1 }));
     expect(normalizedHashOf("same fact", { a: 1, b: 2 })).toBe(expected);
+  });
+
+  it("freezes the CLAMP into the key format, for a statement past STATEMENT_MAX_CHARS", () => {
+    // The four pins above cannot see `fitStatement` at all: `normalizedHashOf` never calls
+    // it — the writers hand it an already-clamped statement — so every literal short enough
+    // to pass through the clamp untouched leaves `STATEMENT_MAX_CHARS` free to move without
+    // reddening anything. This pin closes that by hashing the COMPOSITION the writers
+    // actually perform, over an input long enough that the clamp is load-bearing.
+    //
+    // Composing a live function here is deliberate and is the opposite of the rule the
+    // other pins follow: there the normalizer must not compute its own expected input,
+    // whereas here `fitStatement` IS the thing being frozen, and the expected value is
+    // still a literal digest that a changed clamp cannot follow.
+    const long = "Pays in EUR and always emails invoices on the last Friday of the month. ".repeat(12);
+    expect(long.length).toBeGreaterThan(500); // the clamp must actually engage
+    expect(fitStatement(long)).toHaveLength(500);
+    expect(normalizedHashOf(fitStatement(long), null)).toBe(
+      "6691686965b805e3c06261dcd28362eb4424f7f6a32a470681e33349262af3c9",
+    );
+    // And the clamp is what makes that digest: the unclamped text hashes to something else,
+    // so a clamp that stopped firing could not quietly produce the same key.
+    expect(normalizedHashOf(long, null)).not.toBe(
+      "6691686965b805e3c06261dcd28362eb4424f7f6a32a470681e33349262af3c9",
+    );
   });
 });
